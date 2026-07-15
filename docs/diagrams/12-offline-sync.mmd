@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant Device
+  participant API as Sync API
+  participant DB as PostgreSQL
+
+  Device->>API: Command batch with device and local sequence
+  API->>DB: Validate device session and tenant
+  loop Ordered commands
+    DB->>DB: Deduplicate command ID
+    alt Base version and rule permit
+      DB->>DB: Apply command, audit, outbox
+      DB-->>API: Applied with server sequence
+    else Deterministic no-op
+      DB-->>API: Already satisfied
+    else Conflict
+      DB->>DB: Create sync conflict
+      DB-->>API: Conflict type and safe current state
+    end
+  end
+  API-->>Device: Results and new cursor
+  Device->>API: Retrieve delta after cursor
+  API-->>Device: Versioned changes and tombstones

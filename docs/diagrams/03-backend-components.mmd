@@ -1,0 +1,45 @@
+flowchart LR
+  API["HTTP and command layer"]
+  Identity["Identity and tenancy"]
+  Catalog["Catalog and pricing"]
+  Availability["Scheduling and availability"]
+  Booking["Booking and checkout"]
+  Payments["Orders and payments"]
+  Stored["Stored value"]
+  Customer["Customers and participants"]
+  Docs["Waivers and documents"]
+  Ops["Manifest and operations"]
+  Equipment["Equipment"]
+  Crew["Crew and compliance"]
+  Vessel["Vessel and maintenance"]
+  Disruption["Disruption and rebooking"]
+  Messaging["Messaging"]
+  Offline["Offline sync"]
+  Reporting["Reporting and reconciliation"]
+  Integrations["Integrations"]
+  Admin["Platform administration"]
+  Outbox["Transactional outbox"]
+
+  API --> Identity
+  API --> Catalog
+  API --> Availability
+  API --> Booking
+  Booking --> Availability
+  Booking --> Payments
+  Booking --> Stored
+  Booking --> Customer
+  Ops --> Docs
+  Ops --> Equipment
+  Ops --> Crew
+  Ops --> Vessel
+  Disruption --> Booking
+  Disruption --> Availability
+  Disruption --> Payments
+  Offline --> Ops
+  Payments --> Outbox
+  Booking --> Outbox
+  Ops --> Outbox
+  Outbox --> Messaging
+  Outbox --> Reporting
+  Outbox --> Integrations
+  Admin --> Identity

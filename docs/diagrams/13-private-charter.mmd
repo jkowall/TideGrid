@@ -1,0 +1,19 @@
+sequenceDiagram
+  actor Customer
+  actor Manager
+  participant API
+  participant DB as PostgreSQL
+  participant Stripe
+
+  Customer->>API: Submit inquiry and alternate dates
+  Manager->>API: Create itinerary, price, terms, option hold
+  API->>DB: Reserve vessel/resource option range
+  API-->>Customer: Versioned expiring proposal
+  Customer->>API: Accept proposal
+  API->>DB: Validate option and freeze order lines
+  API->>Stripe: Create full-payment intent
+  Stripe->>API: Verified success webhook
+  API->>DB: Convert option to confirmed reservations and booking
+  alt Option invalid at acceptance
+    API-->>Customer: Expired proposal, no charge
+  end

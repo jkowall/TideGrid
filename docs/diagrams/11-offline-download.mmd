@@ -1,0 +1,14 @@
+sequenceDiagram
+  actor Captain
+  participant App as Captain app
+  participant API as Sync API
+  participant DB as PostgreSQL
+  participant R2
+
+  Captain->>App: Download assigned trip
+  App->>API: Request bundle with device identity
+  API->>DB: Authorize assignment and build version manifest
+  API->>R2: Store or retrieve encrypted bundle parts
+  API-->>App: Manifest, signed parts, hashes, expiry
+  App->>App: Download, verify hashes, decrypt into SQLCipher
+  App-->>Captain: Offline ready only when every required part verifies

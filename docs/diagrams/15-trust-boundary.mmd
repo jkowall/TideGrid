@@ -1,0 +1,38 @@
+flowchart LR
+  subgraph Public["Public and partner boundary"]
+    Browser["Guest/operator browser"]
+    Partner["Partner client"]
+  end
+
+  subgraph DeviceBoundary["Managed device boundary"]
+    Mobile["Captain app"]
+    LocalDB[("Encrypted SQLCipher data")]
+    Mobile --> LocalDB
+  end
+
+  subgraph Cloudflare["Cloudflare data plane"]
+    Edge["WAF, API Shield, Turnstile"]
+    Worker["Authenticated Worker"]
+    R2["Private encrypted objects"]
+    Edge --> Worker
+    Worker --> R2
+  end
+
+  subgraph Azure["Neon and Azure data boundary"]
+    DB[("Neon encrypted PostgreSQL 17")]
+    KMS["Azure Key Vault"]
+  end
+
+  subgraph Providers["External processors"]
+    Stripe["Stripe hosted payment fields"]
+    Twilio["Twilio and email"]
+    Weather["Weather sources"]
+  end
+
+  Browser -->|"TLS, scoped session"| Edge
+  Partner -->|"TLS, OAuth/API token"| Edge
+  Mobile -->|"TLS, device session, command IDs"| Edge
+  Worker -->|"TLS through Hyperdrive"| DB
+  Worker -->|"Authenticated wrap and unwrap"| KMS
+  Browser -->|"Card data bypasses TideGrid"| Stripe
+  Worker -->|"Provider credentials and minimum data"| Providers

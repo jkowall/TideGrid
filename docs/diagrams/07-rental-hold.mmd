@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant API
+  participant DB as PostgreSQL
+  participant Pool as Equipment pool
+
+  API->>DB: Begin transaction
+  DB->>Pool: Lock bucket or serialized item
+  Pool->>Pool: Check occupied range and active quantity
+  alt Available
+    Pool-->>DB: Create hold and increment held quantity
+    DB-->>API: Commit
+  else Unavailable
+    DB-->>API: Roll back with inventory conflict
+  end
+  Note over DB,Pool: Expiration releases idempotently

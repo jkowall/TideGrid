@@ -1,0 +1,19 @@
+flowchart LR
+  Customer["Booker and participants"]
+  Operator["Operator staff and crew"]
+  Partner["Concierge, affiliate, and API partner"]
+  Support["TideGrid support and administration"]
+  TideGrid["TideGrid departure operations platform"]
+  Stripe["Stripe Connect, Billing, and Terminal"]
+  Messaging["Twilio and email provider"]
+  Weather["NOAA and weather providers"]
+  Accounting["Accounting and OTA systems"]
+
+  Customer -->|"book, pay, sign, self-service"| TideGrid
+  Operator -->|"configure, dispatch, operate, reconcile"| TideGrid
+  Partner -->|"search, book, import, receive events"| TideGrid
+  Support -->|"audited support and platform operations"| TideGrid
+  TideGrid <-->|"payments, refunds, fees, subscriptions"| Stripe
+  TideGrid <-->|"messages, replies, delivery callbacks"| Messaging
+  TideGrid -->|"decision-support data only"| Weather
+  TideGrid <-->|"imports, exports, webhooks"| Accounting

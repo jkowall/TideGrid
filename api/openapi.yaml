@@ -1,0 +1,1271 @@
+openapi: 3.0.3
+info:
+  title: TideGrid API
+  version: 1.0.0
+  description: |
+    US-first booking and departure-operations API. Commands require an
+    Idempotency-Key. Errors use RFC 9457 problem details. Financial, capacity,
+    identity, and stored-value state remains server authoritative.
+  contact:
+    name: TideGrid API Operations
+  license:
+    name: Proprietary
+    url: https://tidegrid.example/legal/api-license
+servers:
+  - url: https://api.tidegrid.example/v1
+    description: Production base URL to be configured before deployment
+tags:
+  - name: Availability
+    description: Sellable departure and requirement search.
+  - name: Holds
+    description: Atomic checkout inventory holds.
+  - name: Bookings
+    description: Booking, participant, package, and reschedule commands.
+  - name: Waivers
+    description: Immutable waiver evidence submission.
+  - name: Operations
+    description: Dockside check-in and boarding commands.
+  - name: Disruptions
+    description: Human-approved disruption decisions and execution.
+  - name: Refunds
+    description: Allocated, idempotent refund commands.
+  - name: Offline
+    description: Device command upload and authorized delta download.
+  - name: Provider webhooks
+    description: Signed provider callback intake.
+security:
+  - bearerAuth: []
+paths:
+  /availability:
+    get:
+      tags: [Availability]
+      operationId: searchAvailability
+      summary: Search sellable departures and every required availability dimension
+      security:
+        - bearerAuth: []
+        - widgetToken: []
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - name: product_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: location_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: starts_on
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: ends_on
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: party_size
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Availability snapshot
+          headers:
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailabilityPage'
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /holds:
+    post:
+      tags: [Holds]
+      operationId: createHold
+      summary: Atomically hold all requirements for a checkout
+      security:
+        - bearerAuth: []
+        - widgetToken: []
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateHoldRequest'
+      responses:
+        '201':
+          description: All dimensions held
+          headers:
+            Location:
+              schema:
+                type: string
+            X-Correlation-ID:
+              $ref: '#/components/headers/CorrelationId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Hold'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /bookings:
+    post:
+      tags: [Bookings]
+      operationId: createBooking
+      summary: Create a booking and order from an active checkout hold
+      security:
+        - bearerAuth: []
+        - widgetToken: []
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingRequest'
+      responses:
+        '201':
+          description: Booking created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /bookings/{bookingId}:
+    get:
+      tags: [Bookings]
+      operationId: getBooking
+      summary: Retrieve an authorized booking projection
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/BookingId'
+      responses:
+        '200':
+          description: Booking projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Problem'
+  /bookings/{bookingId}/participants:
+    post:
+      tags: [Bookings]
+      operationId: addBookingParticipant
+      summary: Add a participant and adjust requirements atomically
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddParticipantRequest'
+      responses:
+        '201':
+          description: Participant added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingParticipant'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /bookings/{bookingId}/package-redemptions:
+    post:
+      tags: [Bookings]
+      operationId: redeemPackage
+      summary: Hold or redeem package units against a booking
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PackageRedemptionRequest'
+      responses:
+        '201':
+          description: Package ledger entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LedgerEntry'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /bookings/{bookingId}/check-ins:
+    post:
+      tags: [Operations]
+      operationId: checkInParticipant
+      summary: Check in one participant
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParticipantStateCommand'
+      responses:
+        '200':
+          description: Check-in applied or returned from idempotency record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingParticipant'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /bookings/{bookingId}/boardings:
+    post:
+      tags: [Operations]
+      operationId: markParticipantBoarded
+      summary: Mark one checked-in participant boarded
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ParticipantStateCommand'
+      responses:
+        '200':
+          description: Boarding applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingParticipant'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /bookings/{bookingId}/reschedules:
+    post:
+      tags: [Bookings]
+      operationId: rescheduleBooking
+      summary: Move a full or partial party after acquiring target requirements
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/BookingId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RescheduleRequest'
+      responses:
+        '200':
+          description: Source and target booking projections
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source_booking, target_booking]
+                properties:
+                  source_booking:
+                    $ref: '#/components/schemas/Booking'
+                  target_booking:
+                    $ref: '#/components/schemas/Booking'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /waivers/submissions:
+    post:
+      tags: [Waivers]
+      operationId: submitWaiver
+      summary: Submit immutable signature evidence for a waiver version
+      security:
+        - bearerAuth: []
+        - participantToken: []
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WaiverSubmission'
+      responses:
+        '201':
+          description: Immutable signature evidence accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaiverEvidence'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /disruptions:
+    post:
+      tags: [Disruptions]
+      operationId: createDisruption
+      summary: Record evidence and affected departures without making an automatic safety decision
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDisruptionRequest'
+      responses:
+        '201':
+          description: Disruption case created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Disruption'
+        '422':
+          $ref: '#/components/responses/ValidationProblem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /disruptions/{disruptionId}/executions:
+    post:
+      tags: [Disruptions]
+      operationId: executeDisruptionPlan
+      summary: Execute an approved human-authored disruption plan
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/DisruptionId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_version, approval_id]
+              properties:
+                expected_version:
+                  type: integer
+                  minimum: 1
+                approval_id:
+                  type: string
+                  format: uuid
+      responses:
+        '202':
+          description: Idempotent execution tasks accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Disruption'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /refunds:
+    post:
+      tags: [Refunds]
+      operationId: requestRefund
+      summary: Request an allocated refund and fee reversal
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundRequest'
+      responses:
+        '202':
+          description: Refund approved for submission or queued for approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /offline/commands:
+    post:
+      tags: [Offline]
+      operationId: uploadOfflineCommands
+      summary: Upload an ordered device command batch
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfflineCommandBatch'
+      responses:
+        '200':
+          description: Per-command results in device sequence order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfflineCommandResults'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        default:
+          $ref: '#/components/responses/Problem'
+  /offline/deltas:
+    get:
+      tags: [Offline]
+      operationId: downloadOfflineDeltas
+      summary: Download authorized manifest and operational deltas after a cursor
+      parameters:
+        - $ref: '#/components/parameters/TenantContext'
+        - name: device_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: stream
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [assignment, manifest, operations]
+        - name: after
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Encrypted-client delta page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfflineDeltaPage'
+        '410':
+          description: Cursor outside retention, full resnapshot required
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /provider-webhooks/stripe:
+    post:
+      tags: [Provider webhooks]
+      operationId: receiveStripeWebhook
+      summary: Verify and durably record a Stripe event
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Signature verified and event durably recorded, including duplicates
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+  /provider-webhooks/twilio:
+    post:
+      tags: [Provider webhooks]
+      operationId: receiveTwilioCallback
+      summary: Verify and durably record a Twilio callback
+      security: []
+      parameters:
+        - name: X-Twilio-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: Signature verified and callback durably recorded
+        '400':
+          $ref: '#/components/responses/ValidationProblem'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    widgetToken:
+      type: apiKey
+      in: header
+      name: X-TideGrid-Widget-Token
+    participantToken:
+      type: apiKey
+      in: header
+      name: X-TideGrid-Participant-Token
+  parameters:
+    TenantContext:
+      name: X-TideGrid-Tenant
+      in: header
+      required: true
+      description: Tenant route context. The server verifies it against the authenticated principal.
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-generated UUID retained for at least 24 hours within command scope.
+      schema:
+        type: string
+        format: uuid
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DisruptionId:
+      name: disruptionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+        maxLength: 512
+    PageSize:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+  headers:
+    CorrelationId:
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Problem:
+      description: RFC 9457 problem
+      headers:
+        X-Correlation-ID:
+          $ref: '#/components/headers/CorrelationId'
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Resource not found in tenant scope
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: State, version, inventory, or idempotency conflict
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ValidationProblem:
+      description: Request validation failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        code:
+          type: string
+        correlation_id:
+          type: string
+          format: uuid
+        retryable:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: object
+            required: [path, code]
+            properties:
+              path:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+    AvailabilityPage:
+      type: object
+      required: [data, snapshot_at]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Availability'
+        next_cursor:
+          type: string
+          nullable: true
+        snapshot_at:
+          type: string
+          format: date-time
+    Availability:
+      type: object
+      required:
+        [departure_id, starts_at, expected_return_at, time_zone, sellable, dimensions, quote]
+      properties:
+        departure_id:
+          type: string
+          format: uuid
+        starts_at:
+          type: string
+          format: date-time
+        expected_return_at:
+          type: string
+          format: date-time
+        time_zone:
+          type: string
+        sellable:
+          type: boolean
+        dimensions:
+          type: array
+          items:
+            type: object
+            required: [code, available]
+            properties:
+              code:
+                type: string
+              available:
+                type: number
+                minimum: 0
+        quote:
+          $ref: '#/components/schemas/MoneyBreakdown'
+    MoneyBreakdown:
+      type: object
+      required: [currency, subtotal_minor, tax_minor, tip_minor, total_minor]
+      properties:
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        subtotal_minor:
+          type: integer
+          format: int64
+        discount_minor:
+          type: integer
+          format: int64
+          default: 0
+        tax_minor:
+          type: integer
+          format: int64
+        tip_minor:
+          type: integer
+          format: int64
+        total_minor:
+          type: integer
+          format: int64
+    CreateHoldRequest:
+      type: object
+      required: [departure_id, party, quote_version]
+      properties:
+        departure_id:
+          type: string
+          format: uuid
+        party:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [client_ref, category]
+            properties:
+              client_ref:
+                type: string
+                maxLength: 64
+              category:
+                type: string
+              equipment:
+                type: array
+                items:
+                  type: object
+                  required: [equipment_type, quantity]
+                  properties:
+                    equipment_type:
+                      type: string
+                    size_code:
+                      type: string
+                    quantity:
+                      type: number
+                      minimum: 0.001
+        quote_version:
+          type: string
+        package_account_id:
+          type: string
+          format: uuid
+          nullable: true
+    Hold:
+      type: object
+      required: [checkout_session_id, status, expires_at, requirements, version]
+      properties:
+        checkout_session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [holding, payment_pending, completed, expired, exception]
+        expires_at:
+          type: string
+          format: date-time
+        requirements:
+          type: array
+          items:
+            type: object
+            required: [type, id, status]
+            properties:
+              type:
+                type: string
+              id:
+                type: string
+                format: uuid
+              status:
+                type: string
+        version:
+          type: integer
+          minimum: 1
+    CreateBookingRequest:
+      type: object
+      required: [checkout_session_id, booker, participants, payment]
+      properties:
+        checkout_session_id:
+          type: string
+          format: uuid
+        booker:
+          type: object
+          required: [given_name, family_name, email]
+          properties:
+            customer_id:
+              type: string
+              format: uuid
+            given_name:
+              type: string
+            family_name:
+              type: string
+            email:
+              type: string
+              format: email
+            phone_e164:
+              type: string
+              pattern: '^\+[1-9][0-9]{6,14}$'
+        participants:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/AddParticipantRequest'
+        payment:
+          type: object
+          required: [method]
+          properties:
+            method:
+              type: string
+              enum: [stripe_online, stripe_terminal, package, gift_card, cash, external]
+            provider_method_id:
+              type: string
+            return_url:
+              type: string
+              format: uri
+    Booking:
+      type: object
+      required:
+        [id, code, departure_id, lifecycle_state, service_state, readiness_state,
+         financial_state, currency, total_minor, participants, version, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        departure_id:
+          type: string
+          format: uuid
+        lifecycle_state:
+          type: string
+        service_state:
+          type: string
+        readiness_state:
+          type: string
+        financial_state:
+          type: string
+        currency:
+          type: string
+        total_minor:
+          type: integer
+          format: int64
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingParticipant'
+        version:
+          type: integer
+          minimum: 1
+        created_at:
+          type: string
+          format: date-time
+    AddParticipantRequest:
+      type: object
+      required: [given_name, family_name, category]
+      properties:
+        participant_id:
+          type: string
+          format: uuid
+        given_name:
+          type: string
+        family_name:
+          type: string
+        category:
+          type: string
+        date_of_birth:
+          type: string
+          format: date
+        equipment:
+          type: array
+          items:
+            type: object
+            required: [equipment_type, quantity]
+            properties:
+              equipment_type:
+                type: string
+              size_code:
+                type: string
+              quantity:
+                type: number
+                minimum: 0.001
+    BookingParticipant:
+      type: object
+      required: [id, participant_id, state, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        participant_id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            [invited, profile_incomplete, requirements_incomplete, ready,
+             checked_in, boarded, no_show, disembarked, removed, replaced]
+        version:
+          type: integer
+          minimum: 1
+    PackageRedemptionRequest:
+      type: object
+      required: [account_id, units, mode]
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        units:
+          type: number
+          exclusiveMinimum: true
+          minimum: 0
+        mode:
+          type: string
+          enum: [hold, redeem]
+        original_entry_id:
+          type: string
+          format: uuid
+    LedgerEntry:
+      type: object
+      required: [id, account_id, entry_type, delta, balance_after, occurred_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        entry_type:
+          type: string
+        delta:
+          type: number
+        balance_after:
+          type: number
+          minimum: 0
+        occurred_at:
+          type: string
+          format: date-time
+    ParticipantStateCommand:
+      type: object
+      required: [booking_participant_id, base_version, occurred_at]
+      properties:
+        booking_participant_id:
+          type: string
+          format: uuid
+        base_version:
+          type: integer
+          minimum: 1
+        occurred_at:
+          type: string
+          format: date-time
+        override_reason_code:
+          type: string
+        note:
+          type: string
+    RescheduleRequest:
+      type: object
+      required: [target_departure_id, expected_booking_version]
+      properties:
+        target_departure_id:
+          type: string
+          format: uuid
+        booking_participant_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        expected_booking_version:
+          type: integer
+          minimum: 1
+        price_action:
+          type: string
+          enum: [collect_delta, refund_delta, issue_credit, manager_override]
+        reason_code:
+          type: string
+    WaiverSubmission:
+      type: object
+      required:
+        [waiver_version_id, participant_id, signer_name, signed_at, consent_evidence,
+         document_sha256]
+      properties:
+        waiver_version_id:
+          type: string
+          format: uuid
+        participant_id:
+          type: string
+          format: uuid
+        guardian_id:
+          type: string
+          format: uuid
+        signer_name:
+          type: string
+        signed_at:
+          type: string
+          format: date-time
+        consent_evidence:
+          type: object
+          additionalProperties: true
+        document_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+    WaiverEvidence:
+      type: object
+      required: [id, status, signed_at, content_hash]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [signed, under_review, accepted]
+        signed_at:
+          type: string
+          format: date-time
+        content_hash:
+          type: string
+    CreateDisruptionRequest:
+      type: object
+      required: [reason_code, summary, departure_ids, evidence]
+      properties:
+        reason_code:
+          type: string
+        summary:
+          type: string
+        departure_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uuid
+        evidence:
+          type: array
+          items:
+            type: object
+            required: [source, observed_at, data]
+            properties:
+              source:
+                type: string
+              observed_at:
+                type: string
+                format: date-time
+              data:
+                type: object
+                additionalProperties: true
+    Disruption:
+      type: object
+      required: [id, state, reason_code, departure_ids, version]
+      properties:
+        id:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum:
+            [draft, watching, decision_required, approved, executing,
+             partially_resolved, resolved, cancelled]
+        reason_code:
+          type: string
+        departure_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        version:
+          type: integer
+          minimum: 1
+    RefundRequest:
+      type: object
+      required: [order_id, amount_minor, currency, allocations, reason_code]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        payment_attempt_id:
+          type: string
+          format: uuid
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 1
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+        allocations:
+          type: object
+          required:
+            [service_minor, tax_minor, tip_minor, application_fee_minor,
+             package_units, credit_minor]
+          properties:
+            service_minor:
+              type: integer
+              format: int64
+            tax_minor:
+              type: integer
+              format: int64
+            tip_minor:
+              type: integer
+              format: int64
+            application_fee_minor:
+              type: integer
+              format: int64
+            package_units:
+              type: number
+            credit_minor:
+              type: integer
+              format: int64
+        reason_code:
+          type: string
+        note:
+          type: string
+    Refund:
+      type: object
+      required: [id, state, amount_minor, fee_reversal_minor, currency, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        state:
+          type: string
+        amount_minor:
+          type: integer
+          format: int64
+        fee_reversal_minor:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    OfflineCommandBatch:
+      type: object
+      required: [device_id, commands]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        commands:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/OfflineCommand'
+    OfflineCommand:
+      type: object
+      required:
+        [command_id, local_sequence, type, payload_version, aggregate_type,
+         aggregate_id, occurred_at_local, payload]
+      properties:
+        command_id:
+          type: string
+          format: uuid
+        local_sequence:
+          type: integer
+          format: int64
+          minimum: 1
+        type:
+          type: string
+          enum:
+            [participant.check_in, participant.board, participant.no_show,
+             participant.disembark, checklist.record, equipment.check_out,
+             equipment.return, incident.create, manifest.note]
+        payload_version:
+          type: integer
+          minimum: 1
+        aggregate_type:
+          type: string
+        aggregate_id:
+          type: string
+          format: uuid
+        base_version:
+          type: integer
+          minimum: 1
+        occurred_at_local:
+          type: string
+          format: date-time
+        payload:
+          type: object
+          additionalProperties: true
+    OfflineCommandResults:
+      type: object
+      required: [device_id, results, next_upload_sequence]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        results:
+          type: array
+          items:
+            type: object
+            required: [command_id, state, server_sequence]
+            properties:
+              command_id:
+                type: string
+                format: uuid
+              state:
+                type: string
+                enum: [applied, noop, conflict, rejected, failed]
+              server_sequence:
+                type: integer
+                format: int64
+              problem:
+                $ref: '#/components/schemas/Problem'
+        next_upload_sequence:
+          type: integer
+          format: int64
+    OfflineDeltaPage:
+      type: object
+      required: [stream, after, next, has_more, deltas]
+      properties:
+        stream:
+          type: string
+        after:
+          type: integer
+          format: int64
+        next:
+          type: integer
+          format: int64
+        has_more:
+          type: boolean
+        deltas:
+          type: array
+          items:
+            type: object
+            required: [sequence, type, aggregate_id, aggregate_version, data]
+            properties:
+              sequence:
+                type: integer
+                format: int64
+              type:
+                type: string
+              aggregate_id:
+                type: string
+                format: uuid
+              aggregate_version:
+                type: integer
+              tombstone:
+                type: boolean
+              data:
+                type: object
+                additionalProperties: true

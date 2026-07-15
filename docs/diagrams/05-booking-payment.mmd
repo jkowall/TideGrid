@@ -1,0 +1,25 @@
+sequenceDiagram
+  actor Booker
+  participant API as TideGrid API
+  participant DB as PostgreSQL
+  participant Stripe
+  participant Queue
+
+  Booker->>API: Create checkout with Idempotency-Key
+  API->>DB: Lock capacity, resources, equipment, package
+  DB-->>API: Commit holds, order, attempt, outbox
+  API->>Stripe: Create PaymentIntent on connected account
+  Stripe-->>Booker: Payment UI and action
+  Stripe->>API: Signed payment webhook
+  API->>DB: Insert webhook inbox
+  API-->>Stripe: 2xx
+  API->>Queue: Enqueue inbox ID
+  Queue->>API: Process payment event
+  API->>DB: Convert holds and confirm booking atomically
+  alt Holds expired
+    API->>DB: Attempt atomic reacquisition
+    alt Any requirement unavailable
+      API->>Stripe: Full refund and fee reversal
+      API->>DB: Record exception and refund reconciliation
+    end
+  end

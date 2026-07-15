@@ -1,0 +1,37 @@
+flowchart TB
+  subgraph Clients["Client applications"]
+    Guest["Guest React web"]
+    Admin["Operator React web"]
+    Mobile["React Native captain app"]
+    Widget["Booking web component"]
+    Partner["Partner API client"]
+  end
+
+  subgraph Cloudflare["Cloudflare"]
+    Edge["WAF, API Shield, Turnstile"]
+    API["Hono API Worker"]
+    Async["Queue consumer and scheduled Worker"]
+    Flow["Cloudflare Workflows"]
+    Queue["Cloudflare Queues and DLQ"]
+    R2["Private R2 documents"]
+    Hyperdrive["Hyperdrive and Smart Placement"]
+  end
+
+  DB[("Neon Scale PostgreSQL 17\nAzure East US 2")]
+  Providers["Stripe, Twilio, email, weather, accounting"]
+
+  Guest --> Edge
+  Admin --> Edge
+  Mobile --> Edge
+  Widget --> Edge
+  Partner --> Edge
+  Edge --> API
+  API --> Hyperdrive --> DB
+  API --> R2
+  API --> Queue
+  Queue --> Async
+  Async --> Hyperdrive
+  Async --> Providers
+  Async --> Flow
+  Flow --> Hyperdrive
+  API --> Providers

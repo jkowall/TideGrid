@@ -1,0 +1,17 @@
+sequenceDiagram
+  participant TideGrid
+  participant Twilio
+  participant Recipient
+  participant Inbox as Webhook inbox
+
+  TideGrid->>Twilio: Send with message idempotency metadata
+  Twilio->>Recipient: SMS
+  Twilio->>TideGrid: Delivery status callback
+  TideGrid->>Inbox: Verify and store callback
+  Recipient->>Twilio: Reply or STOP
+  Twilio->>TideGrid: Incoming webhook with OptOutType
+  TideGrid->>Inbox: Store inbound event
+  TideGrid->>TideGrid: Update delivery, conversation, and consent
+  alt Opted out
+    TideGrid->>TideGrid: Block later prohibited messages
+  end

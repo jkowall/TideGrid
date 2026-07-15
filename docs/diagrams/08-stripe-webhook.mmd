@@ -1,0 +1,21 @@
+sequenceDiagram
+  participant Stripe
+  participant Edge as Webhook Worker
+  participant DB as PostgreSQL inbox
+  participant Queue
+  participant Handler
+
+  Stripe->>Edge: Raw body, Stripe-Signature
+  Edge->>Edge: Verify signature and environment
+  alt Invalid
+    Edge-->>Stripe: 400
+  else Valid
+    Edge->>DB: Insert provider plus event ID
+    DB-->>Edge: New or duplicate receipt
+    Edge-->>Stripe: 200 quickly
+    Edge->>Queue: Enqueue inbox ID
+    Queue->>Handler: At-least-once delivery
+    Handler->>DB: Claim inbox and check consumer key
+    Handler->>Stripe: Retrieve current object if ordering is unsafe
+    Handler->>DB: Apply effect, audit, outbox, mark processed
+  end

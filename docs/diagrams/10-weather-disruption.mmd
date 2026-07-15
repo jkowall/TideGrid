@@ -1,0 +1,19 @@
+sequenceDiagram
+  actor Manager
+  participant Weather as Weather adapter
+  participant API
+  participant DB as PostgreSQL
+  participant Flow as Workflow
+  participant Message as Messaging
+
+  API->>Weather: Fetch observations, forecast, and alerts
+  Weather-->>API: Versioned evidence
+  API->>DB: Open disruption watch with evidence
+  Manager->>API: Approve human decision and remedies
+  API->>DB: Persist decision and per-target tasks
+  API->>Flow: Start resumable execution
+  loop Each affected booking
+    Flow->>DB: Apply reschedule, credit, refund, or exception idempotently
+    Flow->>Message: Queue approved communication
+  end
+  Flow->>DB: Resolve when every target has outcome

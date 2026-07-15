@@ -1,0 +1,21 @@
+erDiagram
+  TENANT ||--o{ LOCATION : owns
+  TENANT ||--o{ USER_ACCOUNT : authorizes
+  TENANT ||--o{ PRODUCT : offers
+  PRODUCT ||--o{ DEPARTURE : schedules
+  DEPARTURE ||--o{ RESOURCE_REQUIREMENT : requires
+  RESOURCE ||--o{ RESOURCE_RESERVATION : reserves
+  DEPARTURE ||--o{ RESOURCE_RESERVATION : consumes
+  DEPARTURE ||--o{ CAPACITY_BUCKET : limits
+  CAPACITY_BUCKET ||--o{ CAPACITY_HOLD : holds
+  DEPARTURE ||--o{ BOOKING : contains
+  BOOKING ||--o{ BOOKING_PARTICIPANT : includes
+  PARTICIPANT ||--o{ BOOKING_PARTICIPANT : joins
+  BOOKING ||--o{ ORDER_RECORD : funded_by
+  ORDER_RECORD ||--o{ PAYMENT_ATTEMPT : attempts
+  ORDER_RECORD ||--o{ REFUND : refunds
+  PACKAGE_ACCOUNT ||--o{ PACKAGE_LEDGER_ENTRY : records
+  BOOKING ||--o{ EQUIPMENT_ALLOCATION : allocates
+  DEPARTURE ||--o{ CREW_ASSIGNMENT : staffs
+  DEPARTURE ||--o| MANIFEST_SNAPSHOT : snapshots
+  DEPARTURE ||--o{ INCIDENT : reports

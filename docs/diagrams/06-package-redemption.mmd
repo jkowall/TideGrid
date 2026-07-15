@@ -1,0 +1,17 @@
+sequenceDiagram
+  participant API
+  participant DB as PostgreSQL
+  participant Ledger as Package ledger
+
+  API->>DB: Begin transaction and lock package account
+  DB->>Ledger: Validate eligibility and available units
+  Ledger-->>DB: Balance and rule snapshot
+  DB->>Ledger: Append redemption hold
+  DB->>DB: Update nonnegative balance projection
+  DB-->>API: Commit hold
+  API->>DB: Finalize paid booking
+  DB->>Ledger: Convert hold to redemption
+  Note over Ledger: No second decrement
+  alt Checkout expires
+    DB->>Ledger: Append hold release
+  end

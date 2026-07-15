@@ -1,0 +1,36 @@
+flowchart TB
+  Internet["Users and partner systems"]
+  Device["Encrypted captain device"]
+
+  subgraph CF["Cloudflare account"]
+    DNS["DNS, CDN, WAF, rate limits"]
+    Worker["API and async Workers"]
+    Queues["Queues, DLQ, Workflows"]
+    R2["Private document and backup R2 buckets"]
+    HD["Cache-disabled Hyperdrive"]
+    Obs["Workers logs and traces"]
+  end
+
+  subgraph Azure["Azure East US 2"]
+    subgraph Neon["Neon Scale project"]
+      Compute[("Always-active PostgreSQL 17 compute\n0.25 to 2 CU autoscaling")]
+      Storage[("Multi-AZ storage and\n30-day instant restore")]
+      Compute --> Storage
+    end
+    KeyVault["Azure Key Vault\nkey wrapping"]
+  end
+
+  Runner["Restricted migration and backup runner"]
+  Providers["Stripe, Twilio, email, NOAA"]
+  Telemetry["OTel destination and alerting"]
+
+  Internet --> DNS --> Worker
+  Device --> DNS
+  Worker --> Queues
+  Worker --> R2
+  Worker --> HD --> Compute
+  Worker --> KeyVault
+  Runner -->|"Direct unpooled TLS"| Compute
+  Runner -->|"Encrypted logical backup"| R2
+  Worker --> Providers
+  Worker --> Obs --> Telemetry
