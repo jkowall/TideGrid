@@ -1,9 +1,18 @@
 # Primary-source register
 
-**Research date:** July 15, 2026  
+**Research started:** July 15, 2026
+**Last updated:** July 24, 2026
 **Scope:** US-first MVP architecture and product positioning
 
 This register records the sources used to verify provider behavior, safety context, regulatory boundaries, and competitor claims. Competitor statements are self-reported marketing claims. Regulatory and safety entries identify design inputs, not legal, medical, or operational advice.
+
+## Operator discovery
+
+| Source | Evidence captured |
+|---|---|
+| [Oceans Eight Dive Company discovery interview](interviews/oceans-eight-dive-company-discovery-call.md) | A small dive-charter operator currently splits booking, payment, and waiver work across FareHarbor, Square, and Smartwaiver. The call provides strong evidence for connected commercial and readiness state, payment-independent waivers, returning-customer reuse, dive-specific data, low-risk migration, and post-onboarding support. Weather automation, WhatsApp, and AI support were prompted concepts and remain hypotheses. |
+
+**Research implication:** Lead small dive-charter discovery with the cost and operational consequences of fragmented booking, payment, refund, waiver, participant, equipment, and departure records. Do not treat one operator's positive reaction as feature priority or pricing validation. Quantify the workaround and switching conditions across additional operators.
 
 ## Competitive products
 
