@@ -1,5 +1,7 @@
 # Requirements traceability matrix
 
+**Status:** Historical V1 traceability. Its use of “canonical” applies only inside the preserved V1 package. Current scope and authority begin with the [V2 planning index](../v2/00-index.md).
+
 This matrix maps the supplied prompt to specification, delivery phase, executable surface, and validation. Functional ID ranges mean every individual requirement in that inclusive range inherits the mapping. Detailed wording is canonical in [section 5](05-functional-requirements.md).
 
 ## Product and functional requirements

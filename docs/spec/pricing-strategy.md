@@ -1,8 +1,10 @@
-# TideGrid pricing strategy
+# TideGrid V1 pricing strategy
 
-**Status:** Accepted commercial baseline for pilot validation  
+**Status:** Historical commercial proposal; superseded by the [V2 commercial model](../v2/03-commercial-model.md)
 **Effective date:** July 15, 2026  
 **Pricing schedule version:** `2026-07-15-us-pilot-v1`
+
+> Do not quote or implement this pricing. It is preserved to explain the V1 assumptions and how the current model changed.
 
 ## Decision
 

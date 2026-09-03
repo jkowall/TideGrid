@@ -1,9 +1,11 @@
-# TideGrid product and architecture specification
+# TideGrid V1 product and architecture specification
 
 **Version:** 1.0 design baseline  
 **Date:** July 15, 2026  
 **Market:** United States first  
-**Status:** Implementation-ready architecture package
+**Status:** Historical design package; superseded for current planning by [TideGrid V2](../v2/00-index.md)
+
+> This specification describes the broader July 2026 departure-operations concept. Preserve it as design evidence, but do not use it to define current product scope, pricing, or implementation commitments. The [V2 decision register](../v2/06-decision-register.md) records which decisions remain applicable.
 
 ## Required reading order
 
