@@ -1,17 +1,23 @@
 # TideGrid V2 build execution and agent plan
 
 **Status:** Proposed execution baseline; use only after the applicable roadmap gate passes
-**Date:** September 4, 2026
+**Date:** September 5, 2026
 
 ## Recommendation
 
-Do not use one goal run for the entire TideGrid build. Use one bounded goal per accepted vertical slice, with a clean integration point and recorded acceptance evidence between goals. A longer run is appropriate for one cohesive slice, such as booking concurrency or payment reconciliation. It is too broad for Stages 2 through 5 together.
+Use Astra as the hands-on lead for difficult TideGrid slices, with a fresh reviewer and optional specialists. Have the lead own the contract, critical implementation, and integration together. Routine slices can stay on Terra or Sol. This replaces the previous default of a Sol coordinator handing implementation to Terra.
+
+Use Astra for original UI design and implementation as well. Establishing the guest experience, operator console, design system, and native screens involves product and visual judgment even when the underlying API is simple. Keep design, code, browser or device inspection, and refinement with the same lead. Delegate repetition once the interaction and visual patterns have been accepted.
+
+Keep one bounded goal per accepted vertical slice, with a clean integration point and recorded acceptance evidence between goals. A longer run is appropriate for one cohesive slice, such as booking concurrency or payment reconciliation. It is too broad for Stages 2 through 5 together.
 
 This keeps product and architecture decisions reviewable, prevents a failed native or provider assumption from contaminating unrelated work, and makes token and delivery cost measurable. Continuity comes from the V2 documents, implementation contracts, ADRs, tests, and goal handoffs rather than one agent retaining a very long conversation.
 
 The model names and capabilities below reflect the models exposed in the current Codex environment. Availability, model behavior, concurrency limits, and pricing must be rechecked when a build goal starts. This plan makes no token-savings claim. It defines measurements for choosing the least expensive route that still passes acceptance.
 
-This follows [OpenAI's long-running-work guidance](https://learn.chatgpt.com/docs/long-running-work), which recommends one clear outcome, constraints, verification, and separate parallel work only when sources do not overlap. Current [OpenAI model guidance](https://developers.openai.com/api/docs/guides/latest-model) describes Sol as the flagship choice, Terra as the intelligence-and-cost balance, Luna as the cost-sensitive high-volume choice, deliberate reasoning-effort selection, and multi-agent use for workstreams that divide cleanly.
+Current [OpenAI model guidance](https://learn.chatgpt.com/docs/models) recommends Astra for the hardest end-to-end work, Sol for complex work, Terra for everyday work, and Luna for clear, repeatable tasks. Our inference is that Astra should reduce contract-to-implementation handoffs on TideGrid's coupled transaction paths. That is a routing hypothesis, not a measured TideGrid quality, speed, or savings claim.
+
+Astra changes who owns a slice, not the paid-validation gate, product scope, independent review, or human production authority. Do not enlarge the roadmap or shorten a delivery estimate solely because a stronger model is available.
 
 ## Sole-owner authority
 
@@ -74,20 +80,38 @@ These operational goals require explicit authority for provider changes, submiss
 
 ## Agent topology
 
-The default topology is one coordinating agent and no more than three active subagents. The current environment exposes four concurrent slots including the coordinator; recheck this limit at run time. Use fewer agents when tasks share contracts, migrations, or files.
+The default topology is one hands-on lead, followed by one fresh reviewer. The lead implements as well as coordinates. Add at most one implementation specialist initially, and only after its interface is accepted and it can progress independently. A separate architecture agent is an exception for a bounded investigation, not a standing role.
+
+The current environment exposes four concurrent slots including the lead. That is a ceiling, not a staffing target; recheck it at run time. Expand to three active subagents only when disjoint work and saved elapsed time justify the handoff and integration cost. Review can run after implementation, so the normal workflow needs only one or two active slots.
 
 | Role | Accountable for | Typical model | Writes |
 |---|---|---|---|
-| Goal coordinator | Scope, plan, ownership, decisions, integration, final review, and goal status | `gpt-5.6-sol`, medium; high for transactional or release-critical goals | Integration files and final conflict resolution |
-| Contract or architecture lead | Domain contract, migration/API seams, invariants, ADR proposal, and difficult diagnosis | `gpt-5.6-sol`, medium or high | Assigned contract and design paths only |
-| Feature implementer | A bounded domain or client vertical slice with narrow tests | `gpt-5.6-terra`, medium by default | One explicitly owned path set |
-| Test and evidence owner | Independent scenario review, fixtures, race/failure tests, and acceptance report | `gpt-5.6-terra`, medium; `gpt-5.6-luna`, low or medium for mechanical test expansion | Test and evidence paths only |
+| Hands-on goal lead | Scope, contract, invariants, critical code, narrow tests, integration, and goal status | `gpt-6-astra`, medium; high for transactional or release-critical slices | Core slice and integration paths; excludes delegated paths |
+| UI lead | Design and build original screens, shared components, responsive states, accessibility, and visual refinement | `gpt-6-astra`, medium; high for complex interaction design | Assigned UI slice and design-system paths |
+| Routine slice lead or specialist | Extend accepted UI patterns, implement an accepted non-UI contract, or build a provider adapter | `gpt-5.6-terra`, medium; `gpt-5.6-sol`, medium for complex but stable work | One explicitly owned path set |
+| Independent reviewer | Challenge contracts, inspect the diff, reproduce failures, and verify acceptance evidence | Fresh `gpt-6-astra`, high for high-risk slices; `gpt-5.6-sol`, medium for routine slices | Read-only first; explicitly assigned regression tests if needed |
+| Test and evidence specialist | Design independent race/failure scenarios and verify fixtures against the contract | `gpt-5.6-sol`, medium or high for transaction scenarios; `gpt-5.6-terra`, medium for ordinary acceptance coverage | Test and evidence paths only |
 | Mechanical worker | Generated fixtures, repetitive adapters, documentation synchronization, and low-risk cleanup from an accepted pattern | `gpt-5.6-luna`, low or medium | Narrow, enumerated files |
 | Defensive security reviewer | Threat model, authorization review, secret exposure review, abuse cases, and defensive findings or fixes | `gpt-daybreak-blue-latest`, high when explicitly authorized | Review artifact first; fixes only when authorized |
 
-`gpt-5.6-terra` is the default implementation model. Escalate to `gpt-5.6-sol` for ambiguous contracts, concurrency and money invariants, cross-cutting integration, or a failure that survived a focused investigation. Use `gpt-5.6-luna` only after the coordinator supplies an accepted pattern and tight acceptance criteria. Use `gpt-daybreak-blue-latest` only for authorized defensive security work, not general implementation.
+Do not route the hardest code to a cheaper model merely because Astra has written its plan. Keep contract design, transaction code, and diagnosis with Astra when they depend on the same invariants. A stable API alone does not make UI work routine: retain Astra until the interaction design and rendered result are accepted. Delegate extensions of accepted UI patterns, adapters, and mechanical work. Luna may expand an accepted fixture pattern; it must not decide which money, tenancy, or concurrency cases are sufficient. Daybreak remains an optional authorized defensive specialist, not a required general coding stage.
 
-Record the intended model and reasoning effort in every agent assignment. Set both explicitly when the fork supports an override. A full-history fork inherits the coordinator's model and effort, so use it only when that inherited route is intentional. Low effort is suitable for deterministic mechanical changes. Medium is the default for implementation and tests. High is reserved for architecture, transactions, provider failure modes, release security, and root-cause work. Do not use higher effort merely because a goal is large; split the goal first.
+Record the intended model and reasoning effort in every agent assignment. Set both explicitly when the fork supports an override. A full-history fork inherits the lead's model and effort, so use it only when that inherited route is intentional. Start at medium for substantive implementation and high for transaction or release risks. Use low for deterministic mechanical work. Escalate to extra high only for a named unresolved problem after a focused attempt. Max and Ultra are not defaults; explicit parallel assignments make ownership and usage easier to inspect.
+
+### Routing by TideGrid risk
+
+| Work | Initial route | Delegation boundary |
+|---|---|---|
+| Authorized feasibility spikes: G0.1 transaction seams, G0.2 native factory | Astra medium, high for an unresolved transaction or signing problem | Delegate an independent fixture or second-brand check after the hypothesis is explicit |
+| G2.2 tenancy, G2.3 delivery, G2.6 holds, G2.7 confirmation, G2.9 refunds, G2.10 reconciliation, G2.13 migration | Astra high owns the critical path; fresh Astra high reviews | Sol may develop adversarial scenarios; Terra may implement stable peripheral adapters |
+| G2.1 tooling and G2.4 catalog implementation against accepted contracts | Terra medium; Sol medium for complex integration | Route new UI design and authorization, schedule, or capacity invariants to Astra |
+| G2.11/G2.12 guest and operator UI, G2.14 brand presentation, and original UI across G3/G4 | Astra medium owns design, implementation, and visual refinement; high for complex interaction design | Terra may extend accepted components and screen patterns; API stability alone is insufficient for delegation |
+| G2.5 price/fee rules and G2.8 deposits; G3 waivers, consent/routing, equipment, remedies, tips, packages, and financial reports | Astra high for new invariants; Sol or Terra for accepted templates and views | Treat ledger, consent, evidence, and retry behavior as core work, even when the UI looks simple |
+| G4 native journeys and release factory | Astra medium for original native UI; Astra high for signing, tenant routing, privacy, recovery, and release integration | Sol or Terra may extend accepted UI patterns; mechanical assets and listings can use Luna; external actions retain their authorization boundaries |
+
+If a routine assignment discovers a contract change, security boundary, or repeated failure, stop dependent writes, preserve the reproduction, and route the problem to Astra. If Astra is unavailable, use Sol high with the same proof and review requirements and record the fallback. Model availability in this local environment does not establish access on another host, API project, or cloud task.
+
+For UI acceptance, Astra should inspect rendered screens at representative mobile and desktop sizes and exercise the main journey, including loading, empty, error, and success states. Check hierarchy, spacing, typography, keyboard navigation, and focus behavior against the accepted design. Native UI requires device-level inspection. Use a fresh Astra reviewer for the first core screens and shared design system; routine pattern extensions may use Sol review. Better UI from this route is an expectation to validate on TideGrid, not a measured model comparison.
 
 ### RACI for a goal
 
@@ -100,11 +124,11 @@ Record the intended model and reasoning effort in every agent assignment. Set bo
 | Adversarial and acceptance tests | A | C | C | R |
 | Integration and release evidence | A/R | C | C | C |
 
-One person may fill more than one role, but the implementer should not be the only reviewer for money, tenancy, waiver evidence, migration, or native signing changes.
+These are responsibilities, not mandatory separate agents. The hands-on lead normally fills the coordinator, contract lead, and implementer columns. It cannot also count as its own independent reviewer for money, tenancy, waiver evidence, migration, or native signing changes.
 
 ## Work allocation rules
 
-Parallelize only workstreams with stable interfaces and disjoint files. Good examples are an API adapter and its independent provider fixture suite, or a guest UI and an operator UI consuming an already accepted contract. Do not parallelize two agents that both need to design the same schema, edit the same migration, or redefine the same domain invariant.
+Parallelize only workstreams with stable interfaces and disjoint files. Good examples are an API adapter and its independent provider fixture suite, or a guest UI and an operator UI consuming an already accepted contract. Keep a coupled state transition with one owner even if its files could be split. Do not parallelize two agents that both need to design the same schema, edit the same migration, or redefine the same domain invariant.
 
 For every assignment, record:
 
@@ -138,6 +162,8 @@ Owned paths: <exact paths>
 Read-only dependencies: <exact paths>
 Forbidden writes: <all paths outside Owned paths unless the coordinator reassigns them>
 Delegation: <none, or one level with named purpose and slot limit>
+Model and effort: <explicit model ID and supported reasoning effort>
+Routing reason: <risk, independent work, or accepted mechanical pattern>
 Fork mode: <none or bounded recent-turn count; required for model/effort override>
 Invariants: <tenant, money, capacity, evidence, retry rules>
 Non-goals: <excluded features and provider actions>
@@ -162,6 +188,10 @@ Do not use raw transcripts as the implementation authority. If a discussion chan
 
 ## Token and execution controls
 
+Track allowance or billed cost separately from raw tokens. The [published Codex credit table](https://learn.chatgpt.com/docs/pricing), checked September 5, 2026, lists Astra at 250/25/1,250 credits per million input/cached-input/output tokens and Sol at 100/10/500. Astra therefore costs 2.5 times as many standard credits for an identical token mix. This is not a per-task cost or subscription-allowance multiplier; actual consumption, caching, retries, speed settings, and account terms differ. Use standard speed initially and recheck rates before each goal.
+
+The economic hypothesis is that keeping difficult work with Astra avoids enough failed attempts, handoffs, and owner intervention to justify its higher rate. Record total accepted-slice cost, elapsed time, owner review minutes, and defects. Fewer tokens alone cannot establish savings across models. If billing detail is unavailable, report token usage and the attribution gap rather than inventing a dollar cost or treating shared account usage as this goal's consumption.
+
 The user should set an explicit token budget for each goal after reviewing its slice. Do not assign one budget to the full roadmap. Establish the first budget from the accepted contract and file surface, then use observed consumption and rework to calibrate later goals.
 
 Create the goal only after its roadmap gate, outcome, integration commit, budget, and proof are explicit. Budget exhaustion does not make a goal complete and must not weaken its acceptance criteria. If remaining budget cannot support the required review, stop adding scope and produce the recovery handoff so the user can authorize a narrower continuation.
@@ -180,6 +210,7 @@ The current goal interface provides goal-level token usage, elapsed time, remain
 Record these items at the goal level:
 
 - token and elapsed-time usage plus remaining budget at each checkpoint;
+- attributable credits or billed cost when available, model mix, speed settings, and owner review minutes;
 - files and lines changed;
 - narrow and integration test results;
 - defects found during independent review or after integration;
@@ -208,12 +239,14 @@ Every goal passes these gates in order:
 
 1. **Contract:** Scope, invariants, file ownership, API/schema effects, and rollback behavior are accepted.
 2. **Narrow proof:** Each implementation assignment passes its focused tests and returns a complete handoff.
-3. **Independent review:** Another agent checks the diff against the contract, failure modes, and excluded scope.
+3. **Independent review:** A fresh agent checks the diff against the contract, failure modes, and excluded scope. Give it the baseline, final diff or SHA, original acceptance criteria, authoritative contracts, and test evidence, without the implementer's persuasive summary. It must independently inspect the code and evidence.
 4. **Integration:** The coordinator resolves seams and runs the complete tests relevant to the goal.
 5. **Artifact:** Contracts, ADRs, generated clients, migration evidence, SBOM, or release packet are updated when applicable.
 6. **Goal acceptance:** The observable roadmap exit condition passes with no required work left.
 
 Money, capacity, equipment, packages, webhooks, and remedies require retry, replay, duplicate, concurrency, and partial-failure tests. Tenant-facing work requires at least two-tenant escape tests. Native work requires builds from manifests without source edits and device-level deep-link, push, account, privacy, and update checks. A build, upload, or green unit suite alone does not complete the goal.
+
+Fresh context separates the review from the implementation conversation; using the same model does not eliminate correlated mistakes. High-risk slices receive fresh Astra review plus executable adversarial evidence. Routine slices may use Sol review. The qualified external human review before first live use remains mandatory under the sole-owner rule. Recheck affected findings after fixes, and tie final review evidence to the final diff or SHA.
 
 ## Failure and recovery
 
@@ -232,13 +265,13 @@ An interrupted goal remains recoverable when its handoff states:
 
 ## Example goal request
 
-The user selects `gpt-5.6-sol` at high effort when creating the root task. A goal request cannot change the current root model. Replace the bracketed values and recheck model availability, pricing, and concurrency before use:
+The user selects `gpt-6-astra` at high effort when creating the root task. A goal request cannot change the current root model. Replace the bracketed values and recheck model availability, pricing, and concurrency before use:
 
 ```text
 Create a bounded Codex goal to implement TideGrid G2.7 Charge to confirmation
 with a token budget of <TOKEN_BUDGET>. The paid-validation gate has passed and
 the integration commit is <SHA>. The root task is already running on
-gpt-5.6-sol at high effort.
+gpt-6-astra at high effort and standard speed.
 
 Use docs/v2/02-product-scope.md, docs/v2/04-architecture.md,
 docs/v2/05-roadmap-validation.md, docs/v2/06-decision-register.md, and the
@@ -247,11 +280,13 @@ accounts, webhook endpoints, and deterministic provider fixtures are in scope.
 Do not expand pilot scope, provision live or unapproved provider resources,
 use live customer data, push, or publish.
 
-Keep the root agent as coordinator and contract owner. Delegate bounded
-implementation work to gpt-5.6-terra at medium effort. Use gpt-5.6-luna only
-for mechanical fixtures or repetitive tests after the contract is accepted.
-Use context-free or bounded-turn forks for those overrides. Assign an
-independent reviewer before integration.
+Keep the root agent as hands-on lead: own the contract, payment state machine,
+critical implementation, and integration. Add at most one specialist initially,
+only for disjoint work after contract acceptance. Use gpt-5.6-sol for independent
+failure scenarios, gpt-5.6-terra for stable peripheral adapters, and gpt-5.6-luna
+only for accepted mechanical fixtures. Use context-free or bounded-turn forks
+for overrides. After implementation, use a fresh gpt-6-astra reviewer at high
+effort with the original contract, final diff, and executable evidence.
 
 Give every agent exact path ownership, non-goals, invariants, and commands.
 Complete only when an immutable quote and order, atomic resource holds, one
@@ -261,6 +296,8 @@ Deposits, balance collection, post-confirmation policy refunds, credits,
 external payments, and monthly fee reconciliation are non-goals. Update the
 required contracts and evidence, record all get_goal checkpoints, and return
 goal-level token, time, retry, test, and rework telemetry with the handoff.
+Record attributable credit cost and owner review time when available; label
+missing attribution explicitly. Do not infer savings from token counts alone.
 ```
 
 ## Process acceptance
@@ -276,4 +313,8 @@ The build method is working when:
 - goal telemetry is recorded consistently enough to compare model routes and slice sizes; and
 - TideGrid maintains one source tree, zero customer forks, and the commercial and operating gates in the roadmap.
 
-After the first three production goals, review token use, rework, escaped defects, and elapsed time by task type. Keep model and effort routes that produce accepted results with less rework. Change routes that repeatedly require escalation or independent repair. That evidence, rather than a speculative long-run estimate, should determine how the remaining build is staffed.
+Calibrate during the first authorized technical work, then revisit after the first three production goals. Use three representative tasks: a synthetic hold/late-payment failure case, an ordinary client workflow against a fixed contract, and a mechanical fixture transformation. Each must fit an already authorized spike or goal; this plan does not authorize a new benchmark or production build.
+
+Where an approved budget allows a comparison, run the same baseline, acceptance criteria, and fixed failure cases in isolated worktrees using Astra lead plus fresh review and the previous Sol lead/Terra implementation route. Count all implementation, review, repair, and integration work. Prefer comparable completed work when available; do not duplicate every goal merely to benchmark it.
+
+Retain Astra where it improves acceptance quality, reduces owner intervention, or justifies its total cost through less rework or elapsed time. Retain Terra and Luna where they pass the same relevant checks with lower cost. Three tasks provide an initial routing signal, not a reliable forecast for the entire build. Preserve the existing goal boundaries until actual integration evidence supports changing them.

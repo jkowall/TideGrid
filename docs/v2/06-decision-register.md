@@ -1,7 +1,7 @@
 # TideGrid V2 decision register
 
 **Status:** Canonical conflict-resolution record
-**Date:** September 4, 2026
+**Date:** September 5, 2026
 
 Use this register when V2 conflicts with the V1 specification, schema, API, diagrams, tests, or ADR wording. The V1 files remain unchanged design evidence unless their indexes carry a historical-status notice.
 
@@ -57,10 +57,11 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 | Native operating scale | At least 95% of variants build automatically; routine fleet-release handling remains below 15 minutes per operator; one failed account or review cannot block the fleet |
 | Native review response | Standard setup includes one corrected resubmission or one evidence-based appeal per store; additional cycles require custom scope unless the sole owner approves them as pilot research within the pilot-customer subsidy limits |
 | Build goal boundary | Use one bounded goal per accepted vertical slice; do not place Stages 2 through 5 in one long-running goal |
-| Agent topology | One coordinating agent and at most three subagents; parallel writes require stable interfaces and disjoint paths |
-| Model routing | Select the root model when the task starts; default implementation subagents to GPT-5.6 Terra, use Sol for coordination and high-risk contracts, Luna for accepted mechanical patterns, and Daybreak Blue only for authorized defensive security review; set effort per supported fork and recheck availability and price |
+| Agent topology | Default to one hands-on lead followed by a fresh reviewer; add one independent specialist when useful. Four concurrent slots are the current ceiling, not a target. Parallel writes require accepted interfaces and disjoint paths; keep coupled state transitions with one owner |
+| Model routing | Proposed Astra revision: select GPT-6 Astra for difficult slices, owning contracts, critical implementation, and integration together; use fresh Astra review for high-risk work, Sol for complex stable work and routine review, Terra for accepted routine contracts, Luna for mechanical patterns, and Daybreak Blue only for authorized defensive security work. Recheck model access and rates; use Sol high as the Astra fallback |
+| UI model routing | Astra owns original UI design, implementation, rendered inspection, and refinement across web and native, including the shared design system. Terra and Sol may extend accepted visual and interaction patterns; a stable API alone does not make UI work routine. Review first core screens with fresh Astra and inspect browser or device behavior |
 | External-action goals | Engineering goals end at internally proven artifacts; account changes, store submission, customer communication, deployment, and live cutover require separately authorized operational goals |
-| Token control | Set and measure a token budget per goal, use `get_goal` at defined checkpoints, retain compact context packets and durable artifacts, and compare accepted slices using rework and defects as well as token count; treat per-agent token attribution as an estimate unless exposed directly |
+| Token control | Set and measure a token budget per goal, use `get_goal` checkpoints, and retain compact context packets and durable artifacts. Compare accepted-slice cost, elapsed time, owner review minutes, rework, and defects; distinguish raw tokens from attributable credits or billed cost. Calibrate Astra routing within authorized work; do not assume model savings |
 | Solo operating scale | Launch pilot operators sequentially. Before customer four, approve a monthly owner-hours budget and measure all support, release, reconciliation, finance, incident, and launch work. Pause growth, automate, or buy non-equity capacity when total workload exceeds that budget |
 | Pilot launch cadence | Keep only one pilot operator in active initial configuration, acceptance, store-review response, or production cutover. Require 14 consecutive operating days with reconciled totals, no unresolved critical defect, no overdue support response, and owner workload inside budget before the next cutover |
 | Pilot support | Use email or ticket support from 9:00 a.m. to 5:00 p.m. Eastern Time on US business days, with severity-based acknowledgement targets. Promise no guaranteed resolution time, continuous human coverage, SLA, or uptime credit without contracted backup and revised pricing |

@@ -1,7 +1,7 @@
 # TideGrid V2 planning package
 
 **Version:** 2.0 planning baseline
-**Date:** September 4, 2026
+**Date:** September 5, 2026
 **Status:** Canonical product and pilot plan; implementation remains gated by paid validation
 **Market:** United States first
 
@@ -48,6 +48,8 @@ This package replaces the V1 product direction for new planning work. It does no
 - Require customer-owned booking subdomains during the pilot. Apex domains are custom work because the proposed Cloudflare path does not include apex proxying on self-service plans.
 - Treat the $4,500 Native setup price and 22-hour ceiling as provisional until one public-store launch is reproduced for a second operator without source changes.
 - Execute the build as bounded, roadmap-aligned goals with explicit token budgets, disjoint subagent path ownership, independent review, and durable contract and test handoffs. Do not put Stages 2 through 5 into one goal run.
+- Use the proposed Astra execution route for difficult slices: one hands-on lead owns contracts, critical code, and integration, followed by a fresh reviewer. Add specialists only for independent work; retain Sol, Terra, and Luna for appropriate routine work. Measure accepted-slice cost and owner effort before claiming savings.
+- Astra also owns original UI design, implementation, and visual refinement across web and native. Delegate UI extensions only after the visual and interaction patterns are accepted.
 
 ## Commercial decisions
 

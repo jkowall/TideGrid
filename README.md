@@ -50,7 +50,7 @@ After 12 interviews produce at least five direct-first prospects and three quali
 
 The native model is feasible for three pilot operators but not proven scalable. Apple requires commercial-template apps to be submitted by the content provider, so the operator owns its organization account and performs the final Apple review submission. TideGrid can automate configuration, build, testing, upload, and listing preparation from the shared source line.
 
-If the build gate passes, use a series of bounded long-running goals rather than one goal for the full roadmap. The [build execution and agent plan](docs/v2/10-build-execution-and-agent-plan.md) defines goal slices, model routing, file ownership, token checkpoints, independent review, and recovery handoffs.
+If the build gate passes, use a series of bounded long-running goals rather than one goal for the full roadmap. The [build execution and agent plan](docs/v2/10-build-execution-and-agent-plan.md) proposes Astra as the hands-on lead for difficult slices and original UI design, implementation, and visual refinement, with fresh review and optional specialists. It defines model routing, file ownership, token and cost checkpoints, and recovery handoffs; routine work and extensions of accepted UI patterns can stay on Sol, Terra, or Luna.
 
 ## Historical V1 package
 
