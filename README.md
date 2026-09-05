@@ -17,6 +17,7 @@ Start with the [V2 planning index](docs/v2/00-index.md).
 - [Pre-customer formation and validation plan](docs/v2/11-pre-customer-formation-and-validation.md)
 - [Customer validation deck, PowerPoint](docs/customer/TideGrid-Customer-Validation-Deck.pptx)
 - [Customer validation deck, PDF](docs/customer/TideGrid-Customer-Validation-Deck.pdf)
+- [Customer feedback follow-up drafts and shareable PDF](docs/customer/follow-up-message-drafts.md)
 - [Customer-facing validation brief](docs/customer/tidegrid-validation-brief.md)
 - [Internal operator validation guide](docs/customer/operator-validation-guide.md)
 - [Product strategy](docs/v2/01-product-strategy.md)

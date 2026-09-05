@@ -33,6 +33,8 @@ Each operator would receive a mobile-first booking experience on its own web dom
 
 An optional Native add-on would provide one operator-branded iOS app and one Android app. All of the operator's boats would appear inside the same app. The native experience would focus on repeat use: upcoming trips, saved guest profiles, booking changes, waiver status, package balances, deep links, and push notifications.
 
+An **Important links** section in the web experience and optional native app would let you add and update resources guests need before a trip, such as where to get a fishing license. Guests could also find the relevant links alongside their arrival instructions.
+
 ### One connected booking record
 
 The proposed Booking Core would support shared-seat trips and exclusive private charters, schedules and blackouts, boat capacity, passenger categories, add-ons, taxes, mandatory fees, and simple promotion codes. It would also support direct, phone, walk-up, imported, complimentary, and externally paid bookings.

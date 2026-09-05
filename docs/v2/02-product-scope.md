@@ -483,6 +483,8 @@ Raw card data, medical data, certification documents, full accounting history, o
 
 The supported brand configuration includes operator name, logo, approved color tokens, imagery, contact details, legal links, support links, custom web domain, app icons, splash assets, store copy, and enabled in-scope modules. Configuration must meet accessibility, security, and store-policy constraints.
 
+Operators can manage an **Important links** section from the web console, adding, editing, ordering, or removing named HTTPS links with optional short descriptions. Links may apply to all trips or selected products, such as a fishing-license purchase page for fishing trips. Guests can find them in the branded PWA and optional native app, including alongside the relevant booking's arrival instructions. These are operator-supplied external resources; TideGrid does not issue licenses or verify license eligibility or completion.
+
 Content blocks and approved settings may vary. Navigation, data model, transactional rules, component behavior, and release code do not vary by operator. A request that needs a source fork or operator-only business logic is custom software and is outside the offer.
 
 ### PWA launch
@@ -500,6 +502,7 @@ The contract and launch runbook define who pays store fees, who performs account
 ### Acceptance behavior
 
 - Branding changes cannot expose another operator's content or alter shared transactional rules.
+- Important links show only the current operator's resources and respect product applicability. Authorized configuration changes appear in the PWA and native app without a source change or new store release; invalid URLs are rejected, and external destinations are clearly identified before opening.
 - The PWA passes installability, responsive layout, accessibility, custom-domain, deep-link, and production payment tests.
 - The first production pilot cannot start until its operator apps are approved for public distribution in both stores.
 - A native deep link opens the correct operator, booking, participant, waiver, balance, or tip destination after authentication.
