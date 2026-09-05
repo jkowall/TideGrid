@@ -8,7 +8,7 @@
 
 This is a snapshot of the nine-slide customer deck, including the Important links section. When the deck changes, replace the PDF in this Drive file to preserve the shared link.
 
-**Sharing status:** Uploaded to the owner's personal Drive. External access is pending approval; the link is currently restricted. Enable viewer access for the intended recipients or approve anyone-with-link viewing before sending either draft.
+**Sharing status:** Anyone with the link can view the PDF, with the owner's approval. Recipients do not need editing access or a Google account. Drive search discovery is disabled.
 
 ## Text message
 
