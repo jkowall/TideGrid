@@ -28,6 +28,10 @@ Marine conditions show fictional wind, gusts, combined seas, swell height/period
 
 Operators can set or clear a marine watch, prepare a delay or cancellation proposal, inspect affected bookings, and save a previewed local guest notice. Proposals remain pending approval; this prototype does not change departure times, close sales, cancel bookings, or execute refunds or credits. Live NOAA evidence and the production trip-change workflow remain in the [product plan](../../docs/v2/02-product-scope.md#advisory-weather-and-operator-directed-disruptions).
 
+Cancellation proposals now require a credit or original-payment refund choice for every affected sample booking. The saved proposal shows each customer, amount and remedy. These examples assume full payment in money; mixed payments and original trip-card restoration are specified in the plan. Saving a proposal does not issue credit or change the Trip cards section.
+
+The operator's Trip cards section demonstrates named customers holding whole trips or USD balances. Operators can issue sample cards, select eligible experiences for trip-count cards, simulate partial redemption and inspect balance history. Whole-trip cards reject fractional or ineligible use; USD cards use integer cents; neither can overdraw. This is a separate balance demonstration, without checkout payment, customer authentication, actual card purchases or cancellation issuance. The [trip-card plan](../../docs/v2/02-product-scope.md#trip-cards-trip-counts-and-dollar-balances) covers those connections, source lots, split tender, original-denomination restoration and fee treatment.
+
 The operator identity, trips, availability, prices, booking reference, and confirmation are illustrative. An external fishing-license information link points to the [Florida Fish and Wildlife Conservation Commission](https://myfwc.com/license/recreational/saltwater-fishing/); it does not determine whether a license is required for a particular guest or charter.
 
 This prototype does not create reservations, take payments, collect a legal signature, verify licenses, send messages, or persist guest data. The operator workspace is a local demonstration with an optional external Windy map. It does not implement production capacity controls, authentication, transactional provider integrations, or native apps. Those production obligations remain in the V2 plan.
@@ -42,6 +46,7 @@ Ask the operator to use sample details and complete these tasks without a walkth
 4. Send sample waiver requests, open one as the guest, and sign the sample. Return to the booking and explain who still needs to sign. Find arrival instructions and the fishing-license resource.
 5. Switch to the operator workspace, locate the same booking, and inspect waiver and check-in status. Add an Important link or trip notice and find it in the guest preparation screen.
 6. Inspect Marine conditions, compare Windy's wind and wave layers, then simulate stale trip evidence. Set a local watch, preview a trip-change proposal, and explain what still needs operator approval before guests are affected.
+7. Propose a cancellation and choose credit for one booking and refund for another. Then compare a five-trip card with a dollar card, issue a sample of each and try a partial redemption. Explain which actions are only demonstrations.
 
 Then explain where the real workflow differs and which task would still require another tool or a staff message.
 
@@ -66,6 +71,13 @@ git diff --check
 ```
 
 The domain tests cover shared inventory consistency, combined date/type/experience filters, sold-out versus no-sailing states, party capacity, explicit departure selection, shared versus flat charter pricing, and arrival/date labels. Waiver tests cover send-before-sign, recipient validation, individual participant transitions, required acknowledgments, booking binding, and complete-party status.
+
+## Trip cards and cancellation credit verification, September 10, 2026
+
+- All 16 automated tests passed, including exact integer cents, fractional-trip rejection, experience eligibility, overdraw, full-use and immutable balance history. JavaScript syntax and whitespace checks passed.
+- Browser testing required all four cancellation remedies before saving, then retained three credit choices and one refund, each for $318, in the pending proposal. No balance or booking mutation occurred.
+- Browser testing issued a $250 card and a five-trip card; rejected fractional trips, ineligible experiences and overdraw; redeemed one trip and $25.29 correctly, leaving three trips and $174.71 on the respective seeded cards. Reset restored only the original sample balances.
+- Inspected the card UI at 1280px and 390px with no horizontal document overflow. Independent source and event-harness review covered card isolation/reset, safe rendering, frozen remedies, stale-preview rejection and separation from real payment actions.
 
 ## Marine conditions verification, September 10, 2026
 

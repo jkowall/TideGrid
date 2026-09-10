@@ -334,7 +334,7 @@ footer { max-width: 1280px; margin: auto; padding: 25px 40px; border-top: 1px so
 .op-manifest { scroll-margin-top: 56px; }
 .op-shortcuts { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 0 0 24px; }
 .op-shortcuts a { font-size: 13px; padding: 10px 0; }
-#operator-weather, #operator-guest-tools, #op-sailings-title, #op-manifest-title { scroll-margin-top: 56px; }
+#operator-weather, #operator-trip-cards, #operator-guest-tools, #op-sailings-title, #op-manifest-title { scroll-margin-top: 56px; }
 @media (max-width: 760px) {
   .site-header { flex-wrap: wrap; gap: 16px; }
   .workspace-nav { order: 3; width: 100%; }

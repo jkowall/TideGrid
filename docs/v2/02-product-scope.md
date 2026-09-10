@@ -210,6 +210,8 @@ Stripe refunds are created against the original operator charge. TideGrid record
 
 A booking credit is USD-denominated, belongs to one verified customer, and is not transferable. It has an immutable issue, redemption, expiration, reinstatement, and adjustment ledger. An operator may set an expiration date and remains responsible for applicable stored-value law. Credit used on a later canceled booking is restored as credit according to the applicable policy, not converted silently to cash.
 
+Cancellation previews offer **customer credit** as an explicit alternative to an original-payment refund for each eligible booking, with customer, amount, policy and resulting balance shown before confirmation. Credit appears in the customer's dollar trip-card balance, with its cancellation source retained. A trip-count card restores the eligible trip units instead of creating their cash equivalent. Dollar-card tender restores dollars to the original card. For mixed funding, preview each portion separately and prevent refund, credit and trip restoration from returning the same value twice. A refund/credit choice applies to the eligible money-paid portion; restoration preserves the original card's denomination and ownership.
+
 ### Acceptance behavior
 
 - The guest sees the applicable policy and must accept it before payment.
@@ -455,17 +457,21 @@ Checkout tips are part of the initial payment. Post-trip tipping becomes availab
 
 Crew splits, tip pools, individual payouts, payroll, cash-tip tracking, and tip-based staff performance reporting are outside the pilot.
 
-## Fixed-unit trip packages
+## Trip cards: trip counts and dollar balances
 
 ### Required behavior
 
-An operator can sell a named-customer package containing a fixed whole-number quantity of trip units. The package defines eligible products, units consumed per eligible booking item, sale price, tax treatment, sale window, and optional expiration date.
+An operator can sell two types of named-customer **trip cards**: a fixed whole-number trip entitlement (for example, five reef dives) or a USD balance (for example, $250 toward eligible bookings). Trip cards are reusable customer balances, distinct from the trip listings used in discovery. The card type is fixed after issue; a trip is never silently converted into a dollar amount. These are operator-specific customer accounts, not anonymous or transferable gift cards.
+
+A trip-count card uses the package model: eligible products, units consumed per eligible booking item, sale price, tax treatment, sale window, and optional expiration date. Each eligible participant or booking item consumes the configured number of units, rather than treating one group booking as one trip automatically.
 
 Packages belong to one verified customer and cannot be transferred or shared. A package unit covers only the configured trip entitlement. Taxes, equipment, mandatory fees, tips, and other uncovered party members can be paid separately at checkout.
 
 The package ledger records purchase, issue, hold, release, redemption, cancellation reinstatement, expiration, refund adjustment, and authorized manual adjustment. Purchase uses a Stripe direct charge or an explicitly recorded external payment. TideGrid's platform fee applies at purchase and not again at unit redemption, as defined by the commercial model.
 
 A unit is held atomically with capacity and equipment during checkout. It is redeemed only when the booking confirms. Cancellation or reschedule restores or moves the unit according to the booking's snapshotted policy.
+
+A dollar card holds integer USD cents and supports partial redemption, with any remaining amount due shown before checkout. Track purchased value, cancellation credit, and promotional credit as separate source lots even when the customer sees one dollar balance. Each lot retains its applicable eligibility, validity, issue cause, and fee-assessment history. Authorized staff can issue or adjust value with a recorded source and reason; recording a card is never proof of receiving payment. The guest and operator see card type, eligible trips or charges, available and held value, remaining balance, applicable expiration, and transaction history. Purchased dollar value uses the fee timing in the commercial model; returning or reusing previously assessed value cannot create a second fee.
 
 ### Acceptance behavior
 
@@ -475,8 +481,11 @@ A unit is held atomically with capacity and equipment during checkout. It is red
 - Package purchase, unit balance, redemption, and reinstatement can be rebuilt from immutable ledger entries.
 - Staff adjustments require a reason and never edit a prior ledger entry.
 - A guest sees eligible products, expiration, remaining whole units, and any additional amount due before confirmation.
+- Dollar-card holds and redemptions use integer cents, support partial use and split tender, and never overdraw or mix currencies. Failed checkout releases both card types with the other held resources.
+- Cancellation previews and receipts distinguish money refunded, dollar credit issued or restored, and trip units restored. Replaying a cancellation cannot issue value twice.
+- Card issuance, redemption and restoration remain tenant- and customer-scoped. Type, ownership, eligibility and source history survive import and cannot be bypassed by entering another person's card number.
 
-Points, status tiers, recurring memberships, gift cards, cash conversion, fractional units, package sharing, and package transfers are outside the pilot.
+Points, status tiers, recurring memberships, anonymous or transferable gift cards, automatic cash conversion, fractional trip units, card sharing, and card transfers are outside the pilot. Refunds of card purchases follow the operator-approved policy and retain their original purchase reference.
 
 ## Migration and launch data
 
@@ -575,7 +584,7 @@ The following are not part of the production pilot:
 - offline booking, offline staff operations, or an offline captain app;
 - serialized equipment, custody, return, cleaning, damage, and maintenance;
 - automated weather or safety decisions;
-- loyalty points, memberships, gift cards, or transferable stored value;
+- loyalty points, memberships, anonymous gift cards, or transferable stored value;
 - marketing automation, reviews, social messaging, and WhatsApp;
 - public APIs, custom accounting integrations, and a generalized integration marketplace; and
 - international currencies, languages, tax regimes, data residency, or non-US messaging registration.

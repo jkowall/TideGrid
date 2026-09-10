@@ -87,7 +87,7 @@ The pilot excludes:
 - crew scheduling, payroll, tip distribution, vessel readiness, and maintenance;
 - medical or certification evidence review;
 - serialized equipment custody, damage, cleaning, or tank-fill operations;
-- loyalty points, tiers, memberships, gift cards, or transferable value;
+- loyalty points, tiers, memberships, anonymous gift cards, or transferable value;
 - marketing campaigns, WhatsApp, and autonomous weather or safety decisions;
 - TideGrid control of processing prices, operator funds, or merchant-of-record duties.
 

@@ -44,7 +44,7 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 | Messaging | Branded email plus a dedicated, metered transactional SMS sender with consent, replies, and opt-out handling |
 | Equipment | Pooled bookable rental quantities; no serialized or custody lifecycle |
 | Marine conditions | Timestamped wind, wave, swell and alert evidence for a human operator decision, with separate Windy map exploration; no safety recommendation or automatic trip change |
-| Loyalty | Fixed-unit named-customer trip packages; no points, memberships, gift cards, or transfers |
+| Trip cards | Named-customer cards hold whole trip units or USD cents; explicit cancellation credit and restoration preserve tender and fee provenance. No points, memberships, anonymous gift cards, sharing or transfers |
 | OTA | Direct-first pilot; import known reservations without live two-way synchronization |
 | Customization | Configuration and shared product modules only; custom work requires a statement of work and cannot create a customer fork |
 | Application stack | If the paid-validation gate passes, use a pnpm TypeScript monorepo with Hono Workers, React and Vite web clients, Expo React Native, shared generated contracts, and a configuration-driven app factory |
@@ -77,7 +77,7 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 | 0003 PostgreSQL tenancy | Retained | Shared-schema tenant-aware keys support one product serving many operator brands |
 | 0004 Row-level security | Retained | PostgreSQL RLS remains defense in depth for tenant isolation |
 | 0005 Stripe Connect | Retained with commercial update | Direct charges and operator merchant-of-record status remain; V2 rates and the net managed booking fee base replace V1 rates |
-| 0006 Stored-value ledgers | Narrowed | Keep append-only ledgers for fixed-unit trip packages and service or refund credit; defer gift cards and points |
+| 0006 Stored-value ledgers | Revised | Append-only trip-count and USD trip-card ledgers, including purchased dollar value and cancellation credit; defer anonymous/transferable gift cards and points |
 | 0007 Booking/payment saga | Retained | Booking confirmation coordinates capacity, pooled equipment, package units, payment, and compensating refund behavior |
 | 0008 Transactional outbox | Retained | Publish booking, payment, message, waiver, and remedy effects after commit |
 | 0009 Webhook inbox | Retained | Deduplicate and order Stripe, Twilio, email, and other provider callbacks through a canonical inbox |

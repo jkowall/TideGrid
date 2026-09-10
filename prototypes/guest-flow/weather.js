@@ -64,8 +64,15 @@ const WeatherOps = (() => {
     const counts = impact(bookings);
     const changed = preview && preview.bookingSignature !== bookingSignature(bookings);
     return `<section class="weather-proposal"><h3>Prepare a trip change</h3><p class="op-footnote">Preview the effect, then save a proposal for operator approval. This prototype cannot apply a delay or cancellation.</p><form id="weather-proposal-form"><div class="weather-form-row"><div><label class="field-label" for="weather-action">Proposed action</label><select id="weather-action"><option value="delay" ${state.draft.action === 'delay' ? 'selected' : ''}>Delay departure</option><option value="cancel" ${state.draft.action === 'cancel' ? 'selected' : ''}>Cancel departure</option></select></div>${state.draft.action === 'delay' ? `<div><label class="field-label" for="weather-delay-time">Proposed time · EDT</label><input id="weather-delay-time" type="time" required value="${esc(state.draft.time)}" min="${esc(departure.time)}" max="23:59"><span class="op-footnote">Same day · currently ${D.timeLabel(departure.time)}</span></div>` : ''}</div><label class="field-label" for="weather-change-reason">Reason for the proposed change</label><textarea id="weather-change-reason" required maxlength="300" rows="2" placeholder="Record the operator’s reason for review.">${esc(state.draft.reason)}</textarea><button class="secondary" type="submit">Preview impact</button></form>
-      ${preview ? `<div class="weather-impact"><p class="op-kicker">Impact preview · no change applied</p><h4>${esc(proposedLabel(departure, preview))}</h4><p class="weather-preview-reason">${esc(preview.reason)}</p><dl class="weather-impact-counts"><div><dt>Bookings</dt><dd>${counts.bookings}</dd></div><div><dt>Guests</dt><dd>${counts.guests}</dd></div><div><dt>Sample booking value</dt><dd>${D.money(counts.total)}</dd></div></dl><p>${preview.action === 'cancel' ? 'Approval would require a remedy review for every affected booking: original-payment refund or named-customer service credit, plus eligible package-unit restoration. No remedy has been selected or issued.' : 'Approval would require checking the revised schedule, sales and resource conflicts, then confirming the change and preparing guest updates. The original departure time still applies.'}</p><p>Package, equipment and remedy details are outside this demo. Counts show the currently visible sample bookings; no customer update is sent.</p>${changed ? '<p class="weather-stale-note">The booking list changed after this preview. Preview impact again before saving.</p>' : ''}<button type="button" class="primary" data-weather-save-proposal ${changed ? 'disabled' : ''}>Save proposal only</button></div>` : ''}
-      ${state.proposal ? `<div class="weather-saved-proposal"><span class="weather-pending">Pending operator approval · not applied</span><h4>${esc(proposedLabel(departure, state.proposal))}</h4><p>${esc(state.proposal.reason)}</p><p>${state.proposal.impact.bookings} bookings · ${state.proposal.impact.guests} guests at save · ${timestamp(state.proposal.savedAt)}</p><p>Departure time, booking status, inventory and payments remain unchanged.</p><button type="button" class="text-button" data-weather-discard-proposal>Discard pending proposal</button></div>` : ''}</section>`;
+      ${preview ? `<div class="weather-impact"><p class="op-kicker">Impact preview · no change applied</p><h4>${esc(proposedLabel(departure, preview))}</h4><p class="weather-preview-reason">${esc(preview.reason)}</p><dl class="weather-impact-counts"><div><dt>Bookings</dt><dd>${counts.bookings}</dd></div><div><dt>Guests</dt><dd>${counts.guests}</dd></div><div><dt>Sample booking value</dt><dd>${D.money(counts.total)}</dd></div></dl>${preview.action === 'cancel' ? remedyChoices(preview) : '<p>Approval would require checking the revised schedule, sales and resource conflicts, then confirming the change and preparing guest updates. The original departure time still applies.</p>'}<p>Counts show the currently visible sample bookings; no customer update is sent.</p>${changed ? '<p class="weather-stale-note">The booking list changed after this preview. Preview impact again before saving.</p>' : ''}<button type="button" class="primary" data-weather-save-proposal ${changed ? 'disabled' : ''}>Save proposal only</button></div>` : ''}
+      ${state.proposal ? `<div class="weather-saved-proposal"><span class="weather-pending">Pending operator approval · not applied</span><h4>${esc(proposedLabel(departure, state.proposal))}</h4><p>${esc(state.proposal.reason)}</p><p>${state.proposal.impact.bookings} bookings · ${state.proposal.impact.guests} guests at save · ${timestamp(state.proposal.savedAt)}</p>${state.proposal.action === 'cancel' ? remedySummary(state.proposal) : ''}<p>Departure time, booking status, inventory and payments remain unchanged. No credit or trip-card value has been issued.</p><button type="button" class="text-button" data-weather-discard-proposal>Discard pending proposal</button></div>` : ''}</section>`;
+  }
+  const remedyLabel = type => type === 'credit' ? 'Customer credit · USD card' : 'Original-payment refund';
+  function remedyChoices(preview) {
+    return `<h4>Choose each booking’s cancellation remedy</h4><p>These examples assume the full sample booking value was paid in money. Choose credit for a future trip or refund to the original payment method.</p>${preview.remedies.map((item, index) => `<div class="weather-remedy"><label class="field-label" for="weather-remedy-${index}">${esc(item.name)} · ${esc(item.id)} · ${D.money(item.amount)}</label><select id="weather-remedy-${index}" data-weather-remedy="${index}"><option value="">Choose a remedy</option><option value="credit" ${item.type === 'credit' ? 'selected' : ''}>Customer credit · USD trip card</option><option value="refund" ${item.type === 'refund' ? 'selected' : ''}>Refund to original payment</option></select></div>`).join('') || '<p>No bookings need a remedy.</p>'}<p>Trip-count payments restore eligible trips to the same card; dollar-card payments restore dollars. Mixed payments are handled by their original funding portions. Those payment allocations are not modeled in these sample bookings.</p>`;
+  }
+  function remedySummary(proposal) {
+    return `<ul>${proposal.remedies.map(item => `<li>${esc(item.name)} · ${D.money(item.amount)} ${remedyLabel(item.type)}</li>`).join('')}</ul><p>Credit stays with the named customer for future bookings with this operator. This is a proposal only.</p>`;
   }
   function render({ departure, bookings = [], savedNotice = '' } = {}) {
     if (!departure) return '';
@@ -122,6 +129,11 @@ const WeatherOps = (() => {
     root.querySelector('#weather-action')?.addEventListener('change', event => { state.draft.action = event.target.value === 'cancel' ? 'cancel' : 'delay'; state.preview = null; redraw('', '#weather-action'); });
     root.querySelector('#weather-delay-time')?.addEventListener('input', event => { state.draft.time = event.target.value; state.preview = null; event.target.setCustomValidity(''); root.querySelector('[data-weather-save-proposal]')?.setAttribute('disabled', ''); });
     root.querySelector('#weather-change-reason')?.addEventListener('input', event => { state.draft.reason = event.target.value.slice(0, 300); state.preview = null; event.target.setCustomValidity(''); root.querySelector('[data-weather-save-proposal]')?.setAttribute('disabled', ''); });
+    root.querySelectorAll('[data-weather-remedy]').forEach(field => field.addEventListener('change', () => {
+      const item = state.preview?.remedies?.[Number(field.dataset.weatherRemedy)];
+      if (item) item.type = ['credit', 'refund'].includes(field.value) ? field.value : '';
+      field.setCustomValidity('');
+    }));
     root.querySelector('#weather-proposal-form')?.addEventListener('submit', formEvent => {
       formEvent.preventDefault();
       const reasonField = root.querySelector('#weather-change-reason');
@@ -131,18 +143,27 @@ const WeatherOps = (() => {
       if (state.draft.action === 'delay' && (!timeField || !/^\d{2}:\d{2}$/.test(timeField.value) || timeField.value <= departure.time || new Date(`${departure.date}T${timeField.value}:00-04:00`).getTime() <= state.clock || !timeField.checkValidity())) { timeField?.setCustomValidity('Choose a same-day time later than the scheduled departure and the simulation clock.'); timeField?.reportValidity(); return; }
       state.draft.reason = reason;
       if (timeField) state.draft.time = timeField.value;
-      state.preview = { ...state.draft, bookingSignature: bookingSignature(bookings) };
+      state.preview = { ...state.draft, bookingSignature: bookingSignature(bookings), remedies: state.draft.action === 'cancel' ? bookings.map(booking => ({ key: booking.key || booking.id, id: booking.id, name: booking.name, amount: Number(booking.total || 0), type: '' })) : [] };
       redraw('Impact preview ready. Nothing has been saved or applied.', '[data-weather-save-proposal]');
     });
     root.querySelector('[data-weather-save-proposal]')?.addEventListener('click', () => {
       if (!state.preview || state.preview.bookingSignature !== bookingSignature(bookings)) return;
+      if (state.preview.action === 'cancel') {
+        const missing = state.preview.remedies.findIndex(item => !['credit', 'refund'].includes(item.type));
+        if (missing >= 0) {
+          const field = root.querySelector(`#weather-remedy-${missing}`);
+          field?.setCustomValidity('Choose credit or refund for this booking before saving.');
+          field?.reportValidity();
+          return;
+        }
+      }
       if (state.preview.action === 'delay' && new Date(`${departure.date}T${state.preview.time}:00-04:00`).getTime() <= state.clock) {
         state.preview = null;
         redraw('The simulation clock has passed the proposed time. Choose a later time and preview again.', '#weather-delay-time');
         return;
       }
       event(state, `${state.preview.action === 'cancel' ? 'Cancellation' : 'Delay'} proposal saved for operator approval. No trip or financial change was applied.`);
-      state.proposal = { ...state.preview, impact: impact(bookings), savedAt: state.clock };
+      state.proposal = { ...state.preview, remedies: state.preview.remedies.map(item => ({ ...item })), impact: impact(bookings), savedAt: state.clock };
       state.preview = null; state.noticeMode = 'proposal';
       redraw('Proposal saved locally, pending operator approval. Bookings and payments are unchanged.', '[data-weather-save-notice]');
     });

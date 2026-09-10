@@ -82,6 +82,7 @@ The following rules apply:
 - Payment-processing fees, TideGrid fees, and unrelated retail sales are not booking value and do not enter the fee base.
 - Package redemption is excluded because TideGrid charges the package sale. A refunded package creates a reversing adjustment.
 - A credit that preserves value already counted on the original booking is not charged again when redeemed.
+- Dollar trip-card purchases create prepaid value and are excluded from net managed booking value at issue. When redeemed, their eligible booking lines enter the fee base at the normal booking-completion or retained-cancellation point. Taxes and tips remain excluded. Track purchased, promotional and cancellation-credit source lots so previously assessed value is excluded on reuse. Unit trip-card packages retain sale-time assessment and no second assessment at redemption.
 - A future direct or staff-assisted reservation imported for TideGrid to manage is included on the same basis as a TideGrid-created booking.
 - During the pilot, every imported OTA reservation is a capacity and roster shadow managed in its source system and is excluded from the fee base. Converting an OTA record into a TideGrid-managed booking is not supported. Live OTA synchronization remains outside the pilot.
 - Complimentary bookings and fully refunded cancellations contribute zero. Retained cancellation and no-show amounts remain included.

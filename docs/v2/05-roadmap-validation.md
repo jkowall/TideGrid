@@ -65,7 +65,7 @@ The first production pilot includes the complete scope in [Pilot product scope](
 - Add pooled rental inventory, participant allocation, holds, release, rescheduling, and manual blocks.
 - Add NOAA/NWS marine evidence (wind, gusts, combined seas, swell and wind waves where available), separate Windy map exploration, operator watch/delay/cancel actions, frozen affected bookings, refund or credit remedies, and customer notifications. Verify provenance, units, missing components, and trip dates outside forecast coverage.
 - Add checkout and post-trip tips without crew allocation.
-- Add named-customer fixed-unit packages with purchase, hold, redemption, release, restoration, and import reconciliation.
+- Add named-customer trip-count and USD trip cards with purchase, hold, partial redemption, release, original-tender cancellation restoration, source-lot and fee provenance, and import reconciliation. Cancellation previews allow credit or refund for each eligible money-paid booking portion.
 - Complete operational and financial dashboards and exports.
 
 **Exit:** Cross-domain cancellation, disruption, refund, message, waiver, rental, package, and fee tests pass without manual database repair.

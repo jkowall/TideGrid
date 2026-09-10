@@ -91,6 +91,10 @@ The locked balance projection must remain nonnegative. A package purchase may co
 
 The locked credit balance remains nonnegative. Checkout holds credit atomically with capacity, equipment, and package units. Expiry or failed payment releases it with the other resources. Credit that preserves value already assessed on an earlier booking does not enter net managed booking value again when redeemed.
 
+The guest-facing `TripCard` identifies either a trip-count `PackageAccount` or a USD `CreditAccount`; denomination is immutable. Purchased dollar cards extend the credit ledger with source lots for purchased value, cancellation value and promotional value, each retaining eligibility, validity, payment/issue references and fee provenance. Money uses integer cents; trip units use integers. Card identifiers alone do not authorize access. One displayed balance may aggregate compatible lots, but holds and redemptions record the specific lots consumed. Pending purchases cannot create spendable value before payment or an authorized external-payment record confirms.
+
+Cancellation plans allocate remedies against the booking's original tenders: eligible money-paid amounts choose refund or new credit, USD-card amounts restore to their source lots, and unit-card amounts restore eligible units. Store the frozen per-tender amounts, customer/account, policy and cause. Idempotency and balance constraints prevent returning the same portion through both a refund and a card entry. Card issue, hold, spend, release, restoration, expiration and adjustment remain append-only and auditable.
+
 ### Waivers
 
 `WaiverTemplateVersion` owns immutable operator-approved text, rendering version, effective dates, hash, required signer relationship, and re-sign policy. `WaiverRequest` links the required version to a booking participant. `WaiverEvidence` records the participant, signer or guardian, template version, content hash, consent evidence, signature result, and recorded time.

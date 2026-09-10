@@ -34,9 +34,9 @@ This package replaces the V1 product direction for new planning work. It does no
 - Build every operator app from one Expo source line and a validated tenant manifest. Each operator owns its organization developer accounts and published identity.
 - Prepare and upload Apple releases through delegated access, but require the operator's authorized representative to perform the final App Review submission under Apple's current commercial-template rule.
 - Keep the operator as merchant of record. TideGrid owns the booking and payment-management experience through Stripe Connect direct charges. Pilot pricing also requires Stripe to set and collect processing fees and accept connected-account negative-balance loss; merchant-of-record status alone is insufficient.
-- Include shared-seat and private-charter booking, deposits, customer self-service, native waivers, transactional email and SMS, pooled equipment, advisory weather, tipping, and fixed-unit trip packages in the paid pilot.
+- Include shared-seat and private-charter booking, deposits, customer self-service, native waivers, transactional email and SMS, pooled equipment, advisory marine conditions, tipping, and named-customer trip-count and dollar trip cards in the paid pilot.
 - Require all selected capabilities to pass acceptance before the first production pilot. Pilot operators may use staging builds during development.
-- Exclude medical and certification review, points, gift cards, serialized equipment, crew and vessel operations, offline departure workflows, marketing campaigns, and live OTA synchronization.
+- Exclude medical and certification review, points, anonymous or transferable gift cards, serialized equipment, crew and vessel operations, offline departure workflows, marketing campaigns, and live OTA synchronization.
 
 ## Company and delivery decisions
 
