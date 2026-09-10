@@ -60,10 +60,10 @@ The first production pilot includes the complete scope in [Pilot product scope](
 
 **Outcome:** Every selected pilot feature works through the same booking record.
 
-- Add versioned TideGrid-hosted liability waivers, guardian signing, approved non-medical intake questions, consent evidence, and signed PDFs.
+- Add versioned TideGrid-hosted liability waivers, automatic requests after booking, resend and reminders, participant QR and staff-assisted no-email signing, verified-email participant matching, guardian signing, approved non-medical intake questions, consent evidence, and signed PDFs.
 - Add branded email, dedicated Twilio senders, transactional SMS, consent records, delivery callbacks, STOP/START/HELP, email fallback, and booking-scoped replies.
 - Add pooled rental inventory, participant allocation, holds, release, rescheduling, and manual blocks.
-- Add NOAA/NWS evidence, operator watch/delay/cancel actions, frozen affected bookings, refund or credit remedies, and customer notifications.
+- Add NOAA/NWS marine evidence (wind, gusts, combined seas, swell and wind waves where available), separate Windy map exploration, operator watch/delay/cancel actions, frozen affected bookings, refund or credit remedies, and customer notifications. Verify provenance, units, missing components, and trip dates outside forecast coverage.
 - Add checkout and post-trip tips without crew allocation.
 - Add named-customer fixed-unit packages with purchase, hold, redemption, release, restoration, and import reconciliation.
 - Complete operational and financial dashboards and exports.

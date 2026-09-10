@@ -238,7 +238,7 @@ The primary booker receives a scoped, expiring management link after booking. Fr
 
 A participant can manage only their own profile, intake answers, equipment, and waiver. A guardian can manage only the linked minor records for which they are acting. The primary booker cannot sign another adult's waiver.
 
-Guest accounts use verified, passwordless sign-in. Booking does not require account creation. When a guest verifies the same email used on an existing booking, TideGrid can link it after identity checks. Suspected duplicate customers enter an operator review flow rather than merging automatically.
+Guest accounts use verified, passwordless sign-in. Booking does not require account creation. A one-time email link or code verifies access to that mailbox; it does not prove a person's identity or authorize signing for everyone using that address. TideGrid can propose a same-tenant customer match using the verified address and participant details, then require confirmation of the intended participant. Shared family addresses, conflicting names, changed contacts, and multiple candidate records require resolution rather than an automatic merge. A new participant can complete their own waiver without first merging historical customer records.
 
 Native and PWA accounts support sign-out and a deletion request. TideGrid deletes or de-identifies data that is not required for financial, fraud, waiver-evidence, or other legal retention and explains any retained records.
 
@@ -271,6 +271,26 @@ Waiver assignment depends on the booked product, location, participant, and appl
 
 Payment and booking confirmation do not depend on waiver completion. The guest sees the waiver immediately after booking and in reminders. The operator sets a completion cutoff and sees complete, incomplete, expired, and superseded status for each participant.
 
+### Automatic requests and resend
+
+The normal journey is **confirm booking → automatically send the required waiver request → guest verifies their email access and participant match → review and sign → update the booking roster**. Sending the first request is not a manual operator step. Each confirmed booking creates the applicable participant or guardian requests and queues transactional delivery after the booking commits, regardless of payment rail. Participants added later receive the same workflow. A guest may also open the assigned waiver immediately from their authorized booking journey.
+
+Send to each participant's supplied email address. If a participant or contact is missing, show that exception on the roster and prompt the booker to invite or identify the remaining guests. Do not treat the booker's email as verified contact information for every adult in the party. A failed email leaves the booking confirmed and the waiver outstanding, with a visible delivery exception. Imported history does not trigger a mass email: record an explicit notification policy during migration and cutover for active future bookings.
+
+Operators can resend an outstanding request or correct its recipient and send a replacement. Scheduled reminders use the configured completion cutoff and stop once the requirement is satisfied, the participant is removed, or the booking is canceled. Resend is rate-limited and audited, uses the existing assignment, and cannot duplicate a request, reset a signature, or overwrite signed evidence. Correcting the recipient or replacing a link revokes prior access; an expired access link can be renewed without creating a new waiver version. Keep delivery status, email verification, participant matching, and signature completion separate on the roster. Provider acceptance or delivery is not proof that a guest verified an email or signed.
+
+### QR and guests without email
+
+The operator can show a participant-specific QR code from the booking roster. Scanning opens the branded PWA and the same assigned waiver, without requiring an app installation. The QR represents a short-lived, revocable signing entry point; it does not expose the booking roster, payment details, or another guest's answers. It is not proof of the scanner's identity.
+
+A generic QR displayed at the dock opens an operator-branded lookup or staff-assistance start page, not a public list of bookings. Booking lookup details alone do not grant access to private participant records. When lookup is ambiguous, or a guest has no email, staff locate the booking, confirm the intended participant with the guest, and issue a scoped QR session. A guest without a phone can use a staff device in a separate signing session that clears before the next person. Record staff-assisted matching as its own method; never label it email-verified. The guest still reviews and signs for themselves, or uses the existing linked-guardian flow. This path does not require identity-document collection.
+
+### Verification and matching
+
+Email entry and syntax validation are not verification. Use a short-lived, single-use link or code to verify mailbox access, then have the guest confirm the named participant and trip. An already authenticated, authorized guest with a verified address can use the same participant flow without redundant verification. Reverify a changed address before using it to link a customer record. Do not automatically merge people based on email similarity, name similarity, a shared mailbox, QR possession, or the booker's assertion.
+
+Record how email access and participant matching were established, including a staff actor when applicable, alongside the signer and waiver evidence. These signals support matching and auditability; they are not a claim of government-ID verification. Reuse of an earlier signed waiver still requires the correct participant, applicable immutable version, and approved validity rule.
+
 A signed waiver never changes when the operator publishes a new version. A participant must sign again when the assigned waiver version changes. A rescheduled booking can reuse a signature only when the same waiver version remains applicable and the operator's approved validity rule permits reuse.
 
 ### Acceptance behavior
@@ -282,6 +302,10 @@ A signed waiver never changes when the operator publishes a new version. A parti
 - A changed waiver version marks affected unsigned work correctly and never rewrites existing evidence.
 - Booking staff can see status and allowed intake answers but cannot edit a signed waiver.
 - A source-matrix test proves that Stripe-paid, externally paid, staff-entered, complimentary, and imported bookings assign the same required participant and guardian waiver versions and produce the same evidence fields.
+- Booking confirmation and later participant addition queue the initial request automatically; duplicate events and retries cannot create duplicate assignments or sends. Missing contacts, bounces, and suppressed migration notifications remain visible exceptions.
+- Resend, reminder, corrected-recipient, cancellation, and signature races preserve signed evidence and stop obsolete work. A late delivery callback cannot regress a signed requirement to pending.
+- Email verification, participant confirmation, and signing remain distinct. Shared mailboxes and conflicting matches cannot expose or merge another adult's records; changed addresses and forwarded, expired, revoked, or already-used links are tested.
+- Participant QR, generic dock QR, and staff-device journeys work without requiring email. Cross-tenant access, participant swapping, repeated redemption, roster enumeration, and leftover shared-device sessions are rejected.
 
 Medical questionnaires, medical clearance, health-readiness decisions, certification capture or verification, identity-document collection, and legal advice are outside the pilot.
 
@@ -295,7 +319,7 @@ The pilot includes transactional messages for:
 
 - booking confirmation and receipt;
 - participant invitation;
-- waiver reminder;
+- automatic initial waiver request, operator resend, and scheduled waiver reminder;
 - private-charter balance reminder;
 - customer or operator cancellation and reschedule;
 - delay, weather disruption, and meeting-detail change;
@@ -394,13 +418,19 @@ Serial numbers, physical checkout and return, cleaning, damage, loss, repair, ma
 
 ### Required behavior
 
-TideGrid shows available NOAA forecast and alert data for the trip location and time. The display identifies the source, issue time, last successful retrieval, and stale or unavailable state. Weather data is advisory and does not produce a safety score, recommendation, delay, cancellation, or refund automatically.
+The operator workspace presents **Marine conditions** for the trip area and time: sustained wind and direction, gusts, significant wave height, swell height/period/direction, and wind waves where the provider supplies them. Visibility and relevant marine alerts supplement that sea-state picture. Missing measurements remain unavailable rather than being inferred from another field. NOAA is the initial planned evidence adapter.
+
+Each forecast or observation identifies its source, model or station where available, location, units, issue or observation time, valid time, last successful retrieval, and stale or unavailable state. Observations and forecasts remain distinct; wave components are not added together into an invented total. Marine data is advisory and does not produce a safety score, recommendation, delay, cancellation, or refund automatically.
+
+An embedded Windy map provides visual wind and wave exploration, with an external-map fallback. The map's selected model and time belong to Windy; the workspace must not imply that a current map describes a future departure outside the provider's forecast window. Windy visualization is separate from the recorded evidence used in a trip-change review. The prototype uses Windy's [official map embed](https://embed.windy.com/config/map) for a fixed example coastal area, alongside clearly fictional trip-date metrics. Production location mapping, provider coverage, usage terms, and any paid API requirements must be verified before integration. Guest, booking, and waiver data never enter map URLs.
 
 An authorized operator can place a trip on watch, close sales, delay it, cancel it, or mark it completed. A watch records the concern without changing availability. A sales closure blocks new bookings but does not change existing ones. For a delay or material detail change, the operator previews and sends one branded update to affected bookings. For a cancellation, the operator selects one remedy per affected booking: refund to the original payment method or named-customer service credit.
 
 ### Acceptance behavior
 
 - Missing or stale weather data is visible and does not block booking or operator action.
+- Wind, combined seas, swell, and wind-wave fields retain their units and provenance. Missing components, conflicting sources, an unavailable map, and a trip outside forecast coverage have explicit states.
+- Loading or changing a Windy layer never changes recorded trip evidence, inventory, customer notices, or operator decisions.
 - Only an authorized human action changes the trip or starts a customer remedy.
 - The disruption preview shows affected bookings, amounts, package units, equipment, and message recipients before confirmation.
 - Retrying a disruption does not repeat a refund, credit, unit reinstatement, reschedule, or message.

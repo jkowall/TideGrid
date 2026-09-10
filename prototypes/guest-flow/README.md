@@ -20,11 +20,17 @@ Guests can browse a monthly calendar, chronological departure list, or experienc
 
 The post-booking journey separates booking confirmation from waiver completion. In the operator demo, enter fictional participant names and email addresses and simulate sending their requests. Open a participant's email preview, review the nonbinding sample waiver as that guest, and type a fictional signature. Returning to the booking shows each participant's status; signing one request leaves the others pending. This demonstrates adult participant interactions only. Guardian signing, legal waiver documents, identity verification, actual delivery, and durable signature evidence are not implemented.
 
+**Plan correction after prototype feedback:** The intended product sends initial waiver requests automatically after booking confirmation. Manual controls are for resend and exceptions. The [current product scope](../../docs/v2/02-product-scope.md#automatic-requests-and-resend) also specifies email verification and participant matching, QR entry, and staff-assisted signing without email. The prototype's manual initial send illustrates the steps but does not implement that intended automation or those verification and QR paths.
+
 The operator workspace adds a daily departure overview, fictional booking manifests, waiver status, and simulated check-in for signed participants. The guest booking created in this session appears alongside explicitly seeded examples. Operators can edit Important links and save a local trip notice; the guest preparation screen reads those settings. Notices are entered by the operator, not generated weather or safety decisions, and saving one sends no messages.
+
+Marine conditions show fictional wind, gusts, combined seas, swell height/period/direction, wind waves, and visibility. The trip-date demo clock exposes forecast validity, retrieval time, and fresh/stale states. A separate click-to-load [Windy map embed](https://embed.windy.com/config/map) offers Wind and Waves layers for an example Pompano Beach coastal area. Windy's current/available forecasts are independent of the fictional September–October trip dates and do not populate the sample metrics. Only public area coordinates and display options enter the external map URL.
+
+Operators can set or clear a marine watch, prepare a delay or cancellation proposal, inspect affected bookings, and save a previewed local guest notice. Proposals remain pending approval; this prototype does not change departure times, close sales, cancel bookings, or execute refunds or credits. Live NOAA evidence and the production trip-change workflow remain in the [product plan](../../docs/v2/02-product-scope.md#advisory-weather-and-operator-directed-disruptions).
 
 The operator identity, trips, availability, prices, booking reference, and confirmation are illustrative. An external fishing-license information link points to the [Florida Fish and Wildlife Conservation Commission](https://myfwc.com/license/recreational/saltwater-fishing/); it does not determine whether a license is required for a particular guest or charter.
 
-This prototype does not create reservations, take payments, collect a legal signature, verify licenses, send messages, or persist guest data. The operator workspace is a local demonstration. It does not implement production capacity controls, authentication, provider integrations, or native apps. Those production obligations remain in the V2 plan.
+This prototype does not create reservations, take payments, collect a legal signature, verify licenses, send messages, or persist guest data. The operator workspace is a local demonstration with an optional external Windy map. It does not implement production capacity controls, authentication, transactional provider integrations, or native apps. Those production obligations remain in the V2 plan.
 
 ## Five-minute customer session
 
@@ -35,6 +41,7 @@ Ask the operator to use sample details and complete these tasks without a walkth
 3. Complete the simulated booking and identify what still needs attention.
 4. Send sample waiver requests, open one as the guest, and sign the sample. Return to the booking and explain who still needs to sign. Find arrival instructions and the fishing-license resource.
 5. Switch to the operator workspace, locate the same booking, and inspect waiver and check-in status. Add an Important link or trip notice and find it in the guest preparation screen.
+6. Inspect Marine conditions, compare Windy's wind and wave layers, then simulate stale trip evidence. Set a local watch, preview a trip-change proposal, and explain what still needs operator approval before guests are affected.
 
 Then explain where the real workflow differs and which task would still require another tool or a staff message.
 
@@ -59,6 +66,13 @@ git diff --check
 ```
 
 The domain tests cover shared inventory consistency, combined date/type/experience filters, sold-out versus no-sailing states, party capacity, explicit departure selection, shared versus flat charter pricing, and arrival/date labels. Waiver tests cover send-before-sign, recipient validation, individual participant transitions, required acknowledgments, booking binding, and complete-party status.
+
+## Marine conditions verification, September 10, 2026
+
+- All 12 existing domain/waiver tests, JavaScript syntax checks, and whitespace checks passed. Independent source and VM review found no unresolved actionable issues in map loading/layers, fixed public URLs, per-departure state/reset, data isolation, proposal validation, escaping, notice comparison, or proposal withdrawal.
+- Browser inspection at 1365px verified the marine metrics and rendered Windy Wind and Waves maps. The Waves embed displayed its wave legend in feet. Map data remained independent of the sample departure and metrics.
+- Browser execution covered stale/fresh simulation, setting a watch, impact preview for four bookings/eight guests, saving a pending proposal and explicitly saving its local guest notice. A delay overtaken by the simulation clock was rejected; a later time succeeded without changing the original departure.
+- Responsive browser controls stalled during phone testing. After recovery, the document measured 354px with no horizontal document overflow, and the proposal/notice flow passed at that width. Phone visual inspection was limited by the browser's scaled screenshot output; this is not a physical-device test. Temporary viewport overrides and the test tab were cleared.
 
 ## Waiver and operator verification, September 10, 2026
 

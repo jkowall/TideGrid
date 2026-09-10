@@ -1,7 +1,7 @@
 # TideGrid V2 decision register
 
 **Status:** Canonical conflict-resolution record
-**Date:** September 5, 2026
+**Date:** September 10, 2026
 
 Use this register when V2 conflicts with the V1 specification, schema, API, diagrams, tests, or ADR wording. The V1 files remain unchanged design evidence unless their indexes carry a historical-status notice.
 
@@ -39,10 +39,11 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 | Payment model | Stripe Connect direct charges; operator remains merchant of record; Stripe sets and collects processing fees; pilot accounts require Stripe, not TideGrid, as negative-balance loss collector or a written Managed Risk equivalent |
 | Fee base | Net managed booking value across approved payment rails; exclusions and timing live in `03-commercial-model.md` |
 | Tips | Operator-settled, separately refundable, excluded from TideGrid's fee base, no crew allocation |
-| Waivers | TideGrid-native liability and intake workflow after booking, including guardians and immutable evidence |
+| Waivers | Automatically assign and send required waivers after booking; retain audited resend and reminders, participant and guardian signing, and immutable evidence |
+| Waiver access and matching | Verify mailbox access and confirm the intended participant; a shared email does not establish identity or authorize an automatic customer merge. Support scoped participant QR, generic dock lookup without roster exposure, and staff-assisted signing without email; record the matching method |
 | Messaging | Branded email plus a dedicated, metered transactional SMS sender with consent, replies, and opt-out handling |
 | Equipment | Pooled bookable rental quantities; no serialized or custody lifecycle |
-| Weather | Timestamped evidence for a human operator decision; no safety recommendation or automatic trip change |
+| Marine conditions | Timestamped wind, wave, swell and alert evidence for a human operator decision, with separate Windy map exploration; no safety recommendation or automatic trip change |
 | Loyalty | Fixed-unit named-customer trip packages; no points, memberships, gift cards, or transfers |
 | OTA | Direct-first pilot; import known reservations without live two-way synchronization |
 | Customization | Configuration and shared product modules only; custom work requires a statement of work and cannot create a customer fork |

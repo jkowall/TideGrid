@@ -46,11 +46,12 @@ const OperatorView = (() => {
     const trip = D.experience(item.experienceId);
     const counts = stats([item]);
     const remaining = Math.max(0, trip.max - counts.guests);
+    const weather = typeof WeatherOps === 'undefined' ? {} : WeatherOps.status(item.id);
     return `<button type="button" class="op-departure ${selectedId === item.id ? 'is-selected' : ''}" data-op-departure="${esc(item.id)}" aria-pressed="${selectedId === item.id}">
       <span class="op-trip-time">${D.timeLabel(item.time)}<small>EDT · ${trip.duration}</small></span>
       <span class="op-trip-name"><strong>${esc(trip.name)}</strong><small>${esc(trip.boat)} · ${trip.type === 'private' ? 'Private charter' : 'Shared trip'}</small></span>
       <span class="op-trip-capacity"><strong>${counts.guests} / ${trip.max} guests</strong><span class="op-capacity-track" aria-hidden="true"><span style="width:${Math.min(100, counts.guests / trip.max * 100)}%"></span></span><small>${trip.type === 'private' ? counts.guests ? 'Boat assigned · sample' : 'Whole boat available' : remaining ? `${remaining} seats available` : 'Full departure'}</small></span>
-      <span class="op-trip-status"><span class="op-pill ${counts.pending ? 'op-pill-amber' : ''}">${counts.pending ? `${counts.pending} ${counts.pending === 1 ? 'waiver' : 'waivers'} pending` : counts.guests ? 'Waivers complete' : 'No bookings'}</span><small>${counts.checked} demo checked in</small></span>
+      <span class="op-trip-status"><span class="op-pill ${counts.pending ? 'op-pill-amber' : ''}">${counts.pending ? `${counts.pending} ${counts.pending === 1 ? 'waiver' : 'waivers'} pending` : counts.guests ? 'Waivers complete' : 'No bookings'}</span>${weather.watch ? '<span class="op-pill op-pill-amber">Marine watch</span>' : ''}${weather.proposal ? `<small>${weather.proposal === 'delay' ? 'Delay' : 'Cancellation'} proposal · pending</small>` : ''}<small>${counts.checked} demo checked in</small></span>
       <span class="op-row-arrow" aria-hidden="true">↗</span>
     </button>`;
   }
@@ -96,11 +97,13 @@ const OperatorView = (() => {
     const activeDay = D.departure(active?.departureId)?.date;
     return `<div class="operator-workspace"><header class="op-heading"><div><p class="op-kicker">Saltline · Operator workspace</p><h1 tabindex="-1">A good day starts<br>with <em>everyone ready.</em></h1><p class="op-muted">Your sailings, your guests, and the details that keep the day moving.</p></div><div class="op-day-control"><label class="field-label" for="op-date">Operations date</label><input id="op-date" type="date" min="2026-09-01" max="2026-10-31" value="${day}"><span>Sample dates · Eastern Time (EDT)</span></div></header>
       <div class="op-demo-note"><span class="op-demo-dot" aria-hidden="true"></span><span>Interactive operator demo. All bookings and totals are fictional; edits clear on page refresh.</span></div>
+      <nav class="op-shortcuts" aria-label="Operator sections"><a href="#op-sailings-title">Departures</a><a href="#operator-weather">Marine conditions</a><a href="#op-manifest-title">Manifest</a><a href="#operator-guest-tools">Guest tools</a></nav>
       <div class="op-feedback" role="status" ${message ? '' : 'hidden'}>${esc(message)}</div>
       ${active && activeDay ? `<div class="op-active-note"><span><strong>Your prototype booking</strong><br>${esc(D.experience(D.departure(active.departureId).experienceId).name)} · ${shortDate(activeDay)}</span><div class="op-link-actions"><button type="button" class="text-button" data-op-active-day>View its manifest →</button><button type="button" class="text-button" data-op-open-booking>Guest preparation →</button></div></div>` : ''}
       <section class="op-metrics" aria-label="Daily sample totals"><div><span>Departures</span><strong>${items.length}</strong><small>${shortDate(day)}</small></div><div><span>Guests expected</span><strong>${totals.guests}</strong><small>${totals.checked} demo checked in</small></div><div class="${totals.pending ? 'op-metric-attention' : ''}"><span>Waivers to complete</span><strong>${totals.pending}</strong><small>${totals.pending ? 'Signatures still needed' : 'No outstanding signatures'}</small></div><div><span>Simulated booking totals</span><strong>${D.money(totals.total)}</strong><small>USD · no money collected</small></div></section>
       <section class="op-sailings" aria-labelledby="op-sailings-title"><div class="op-section-heading"><div><p class="op-kicker">On the water</p><h2 id="op-sailings-title">${shortDate(day)} departures</h2></div><span class="op-muted">Select a trip to open its manifest</span></div><div class="op-departures">${items.map(departureCard).join('') || '<div class="op-empty"><h3>A quiet day on the dock.</h3><p>No sample departures on this date. Try September 26 or another sailing day.</p><button class="secondary" type="button" data-op-default-day>Show September 26</button></div>'}</div><p class="op-footnote">Capacity uses the guest calendar’s sample inventory${active ? ', plus your prototype booking' : ''}. No seats are actually reserved.</p></section>
-      <div class="op-work-grid">${manifest(item)}<aside class="op-tools" aria-label="Guest communications tools">${noticeEditor(item)}${linksEditor()}</aside></div></div>`;
+      <div id="operator-weather">${typeof WeatherOps === 'undefined' ? '' : WeatherOps.render({ departure: item, bookings: item ? bookings(item) : [], savedNotice: item ? notices[item.id] || '' : '' })}</div>
+      <div class="op-work-grid">${manifest(item)}<aside class="op-tools" id="operator-guest-tools" aria-label="Guest communications tools">${noticeEditor(item)}${linksEditor()}</aside></div></div>`;
   }
   function bind(root, { onOpenBooking, onGuest, refresh }) {
     const rerender = (feedback = '', focusSelector = '') => {
@@ -108,6 +111,17 @@ const OperatorView = (() => {
       refresh();
       if (focusSelector) root.querySelector(focusSelector)?.focus();
     };
+    const weatherDeparture = D.departure(selectedId);
+    if (typeof WeatherOps !== 'undefined') WeatherOps.bind(root, {
+      departure: weatherDeparture,
+      bookings: weatherDeparture ? bookings(weatherDeparture) : [],
+      refresh: () => rerender(),
+      onNotice: text => {
+        if (!weatherDeparture) return;
+        notices[weatherDeparture.id] = text;
+        drafts[weatherDeparture.id] = text;
+      }
+    });
     root.querySelector('#op-date')?.addEventListener('change', event => {
       const value = event.target.value;
       if (!/^2026-(09|10)-\d{2}$/.test(value) || !event.target.checkValidity()) return;
@@ -168,6 +182,7 @@ const OperatorView = (() => {
     });
   }
   function reset() {
+    if (typeof WeatherOps !== 'undefined') WeatherOps.reset();
     day = '2026-09-26'; selectedId = ''; links = defaultLinks(); notices = {}; drafts = {}; checked = new Set(); editingLink = null; expanded = new Set(); message = ''; sequence = 0; active = null;
   }
   return { render, bind, resources: () => links.map(link => ({ ...link })), notice: departureId => notices[departureId] || '', reset };
