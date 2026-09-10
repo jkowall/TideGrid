@@ -24,6 +24,10 @@ The post-booking journey separates booking confirmation from waiver completion. 
 
 The operator workspace adds a daily departure overview, fictional booking manifests, waiver status, and simulated check-in for signed participants. The guest booking created in this session appears alongside explicitly seeded examples. Operators can edit Important links and save a local trip notice; the guest preparation screen reads those settings. Notices are entered by the operator, not generated weather or safety decisions, and saving one sends no messages.
 
+The workspace opens on **Sailings** and shows one view at a time: Sailings, Manifest, Marine conditions, Trip cards, or Guest tools. Selecting a sailing opens its manifest. A shared date and sailing selector keeps trip-specific views in context; cards remain customer-wide. Notes, link drafts, card forms and marine proposals survive view changes. Reset returns to Sailings and clears the demo.
+
+Guest pages prioritize filters, prices and next actions. Calendar help, booking policy, preparation checklists and forecast timestamps expand on demand. The global prototype banner, price disclosures, fictional meeting-point warning and required checkout/signature acknowledgments remain visible at the relevant steps.
+
 Marine conditions show fictional wind, gusts, combined seas, swell height/period/direction, wind waves, and visibility. The trip-date demo clock exposes forecast validity, retrieval time, and fresh/stale states. A separate click-to-load [Windy map embed](https://embed.windy.com/config/map) offers Wind and Waves layers for an example Pompano Beach coastal area. Windy's current/available forecasts are independent of the fictional September–October trip dates and do not populate the sample metrics. Only public area coordinates and display options enter the external map URL.
 
 Operators can set or clear a marine watch, prepare a delay or cancellation proposal, inspect affected bookings, and save a previewed local guest notice. Proposals remain pending approval; this prototype does not change departure times, close sales, cancel bookings, or execute refunds or credits. Live NOAA evidence and the production trip-change workflow remain in the [product plan](../../docs/v2/02-product-scope.md#advisory-weather-and-operator-directed-disruptions).
@@ -71,6 +75,13 @@ git diff --check
 ```
 
 The domain tests cover shared inventory consistency, combined date/type/experience filters, sold-out versus no-sailing states, party capacity, explicit departure selection, shared versus flat charter pricing, and arrival/date labels. Waiver tests cover send-before-sign, recipient validation, individual participant transitions, required acknowledgments, booking binding, and complete-party status.
+
+## Simplified navigation verification, September 10, 2026
+
+- All 16 domain, waiver and card tests passed, with JavaScript syntax and whitespace checks. Independent navigation/state checks covered one-view rendering, selection context, empty days, active booking navigation and reset.
+- Browser checks at 1280px and 390px confirmed compact guest and operator layouts without horizontal document overflow. The mobile journey completed booking at $212, waiver requests, one guest signature and navigation to that booking's manifest; the other guest remained pending.
+- Switching views preserved a marine watch, unfinished arrival note, link label, card issue form and redemption amount. Card issuance starts collapsed and stays open while changing card type. A no-sailing date disabled the trip selector and recovered through the suggested date.
+- Secondary disclosures were checked as native expandable controls. Required checkout and both sample-signature acknowledgments remain unchanged. This is browser emulation, not a physical-device accessibility audit.
 
 ## Trip cards and cancellation credit verification, September 10, 2026
 

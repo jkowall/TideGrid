@@ -44,8 +44,9 @@ h2 { font-size: 20px; margin: 0 0 15px; font-weight: 600; }
 h3 { font-size: 15px; margin: 0 0 8px; }
 p { line-height: 1.65; }
 .intro { color: var(--muted); font-size: 14px; line-height: 1.75; margin: 0 0 28px; max-width: 520px; }
-.discovery-hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 64px; align-items: center; margin: 6px 0 38px; }
-.discovery-hero h1 { font-size: clamp(48px, 4.8vw, 66px); }
+.discovery-hero { display: grid; grid-template-columns: 1.4fr 1fr; gap: 36px; align-items: center; margin: 0 0 24px; }
+.discovery-hero h1 { font-size: clamp(34px, 4vw, 48px); }
+.discovery-hero .intro { margin-bottom: 0; }
 .discovery-hero .intro { max-width: 405px; }
 .hero-caption { font-size: 9px; letter-spacing: .13em; font-weight: bold; margin: 0; color: var(--muted); }
 .hero-caption span { margin: 0 10px; }
@@ -58,12 +59,12 @@ p { line-height: 1.65; }
 .sea-art .boat { fill: #fbf6e5; stroke: #fbf6e5; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .sea-art .boat path + path { fill: none; }
 .sea-art > span { position: absolute; top: 23px; left: 25px; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: #234b47; }
-.sea-art.hero { height: 282px; border-radius: 140px 140px 6px 6px; background: #dae3d4; --water: #81a99b; --front: #5a887d; }
+.sea-art.hero { height: 150px; border-radius: 80px 80px 6px 6px; background: #dae3d4; --water: #81a99b; --front: #5a887d; }
 .sea-art.hero > span { top: 48px; left: 50%; transform: translateX(-50%); white-space: nowrap; }
 .sea-art.reef { background: #b9d5d6; --water: #4d9294; --front: #2c717c; }
 .sea-art.sunset { background: #ecd4b9; --water: #b09e86; --front: #788e89; }
 .sea-art.private { background: #d2d9c7; --water: #7f9c8e; --front: #3f6e65; }
-.filters { display: grid; grid-template-columns: 1.5fr 1.2fr .65fr 1fr; align-items: start; gap: 20px; padding: 24px; background: white; border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 4px 15px #193e4005; }
+.filters { display: grid; grid-template-columns: 1.5fr 1.2fr .65fr; align-items: start; gap: 20px; padding: 20px; background: white; border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 4px 15px #193e4005; }
 .field-label { display: block; margin-bottom: 10px; font-size: 12px; font-weight: bold; }
 input[type="text"], input[type="email"], input[type="number"], select { width: 100%; min-width: 0; height: 46px; border: 1px solid #a6b7af; border-radius: 4px; padding: 11px 12px; background: white; color: var(--ink); font-size: 16px; }
 select { padding-right: 25px; }
@@ -249,8 +250,9 @@ footer { max-width: 1280px; margin: auto; padding: 25px 40px; border-top: 1px so
   .steps li { gap: 4px; }
   .step-number { width: 20px; height: 20px; }
   .discovery-hero { grid-template-columns: 1fr; gap: 25px; margin-bottom: 27px; }
-  .discovery-hero h1 { font-size: 51px; }
-  .discovery-hero .intro { max-width: 450px; margin-bottom: 18px; }
+  .discovery-hero h1 { font-size: 36px; margin-bottom: 10px; }
+  .discovery-hero .intro { max-width: 450px; margin-bottom: 0; }
+  .discovery-hero > .sea-art { display: none; }
   .sea-art.hero { height: 165px; border-radius: 90px 90px 5px 5px; }
   .sea-art.hero > span { top: 25px; font-size: 9px; }
   .filters { grid-template-columns: 1fr 90px; padding: 18px; gap: 17px 14px; }
@@ -310,7 +312,7 @@ footer { max-width: 1280px; margin: auto; padding: 25px 40px; border-top: 1px so
   .site-header { padding-left: 15px; padding-right: 15px; }
   .steps { font-size: 9px; gap: 5px; }
   .step-number { width: 18px; height: 18px; }
-  .discovery-hero h1 { font-size: 46px; }
+  .discovery-hero h1 { font-size: 34px; }
   .calendar-panel { padding: 13px 6px; }
   .calendar-grid { gap: 2px; }
   .calendar-day { min-height: 66px; }
@@ -331,6 +333,9 @@ footer { max-width: 1280px; margin: auto; padding: 25px 40px; border-top: 1px so
 .workspace-nav button { min-height: 42px; padding: 8px 14px; border: 0; background: transparent; color: var(--ink); font-size: 13px; }
 .workspace-nav button[aria-pressed="true"] { background: var(--ink); color: white; border-radius: 4px; }
 .guest-trip-notice p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.compact-details { margin: 16px 0; font-size: 13px; color: var(--muted); }
+.compact-details > summary { cursor: pointer; color: var(--ink); padding: 10px 0; font-weight: 600; }
+.compact-details > summary:focus-visible { outline: 3px solid #a65b20; outline-offset: 3px; }
 .op-manifest { scroll-margin-top: 56px; }
 .op-shortcuts { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 0 0 24px; }
 .op-shortcuts a { font-size: 13px; padding: 10px 0; }

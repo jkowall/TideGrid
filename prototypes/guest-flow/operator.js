@@ -16,6 +16,9 @@ const OperatorView = (() => {
   let message = '';
   let sequence = 0;
   let active = null;
+  let view = 'sailings';
+  let linkDraft = null;
+  const views = [['sailings', 'Sailings'], ['manifest', 'Manifest'], ['marine', 'Marine conditions'], ['cards', 'Trip cards'], ['tools', 'Guest tools']];
   const shortDate = date => D.dateLabel(date, { weekday: 'short', month: 'short', day: 'numeric' });
   const statusLabel = status => status === 'signed' ? 'Signed · demo' : status === 'awaiting-signature' ? 'Awaiting signature' : 'Not sent';
   function sampleBookings(item) {
@@ -76,17 +79,21 @@ const OperatorView = (() => {
     return `<section class="op-panel op-manifest" aria-labelledby="op-manifest-title"><div class="op-section-heading"><div><p class="op-kicker">Departure manifest</p><h2 id="op-manifest-title">${esc(trip.name)}</h2><p>${shortDate(item.date)} · ${D.timeLabel(item.time)} EDT · ${esc(trip.boat)}</p></div><span class="op-pill">${counts.guests} guests</span></div>
       <div class="op-manifest-summary"><span><strong>${counts.guests - counts.pending}/${counts.guests}</strong> waivers signed</span><span><strong>${counts.checked}/${counts.guests}</strong> demo checked in</span><span><strong>${D.arrivalTime(item)}</strong> sample arrival</span></div>
       ${rows.length ? rows.map(bookingCard).join('') : '<div class="op-empty"><span aria-hidden="true">≈</span><h3>A little room for possibility.</h3><p>No sample bookings on this departure. Make a guest booking to see it appear here.</p><button type="button" class="secondary" data-op-guest>Explore guest booking →</button></div>'}
-      <p class="op-footnote">Check-in controls unlock after that participant’s sample waiver is signed. These are local demo marks, not boarding clearance or a real check-in.</p>
+      <p class="op-footnote">Demo check-in requires a signed sample waiver. It is not boarding clearance.</p>
     </section>`;
   }
   function noticeEditor(item) {
     if (!item) return '';
     const value = drafts[item.id] ?? notices[item.id] ?? '';
-    return `<section class="op-panel"><p class="op-kicker">Before they arrive</p><h2>Trip notice</h2><p class="op-muted">A short operator note for ${esc(D.experience(item.experienceId).name)}, ${D.timeLabel(item.time)} on ${shortDate(item.date)}. Saved notes appear on this departure’s guest arrival screen.</p><form id="op-notice-form"><label class="field-label" for="op-notice">Arrival note</label><textarea id="op-notice" maxlength="600" rows="4" placeholder="Example: Meet beside the blue sign at the sample marina.">${esc(value)}</textarea><p class="op-footnote">Operator-entered text only. Nothing is sent. This is not a weather forecast or a safety assessment.</p><div class="op-form-actions"><button class="primary" type="submit">Save local notice</button>${notices[item.id] ? '<button class="text-button" type="button" data-op-clear-notice>Remove saved notice</button>' : ''}</div></form>${notices[item.id] ? `<div class="op-saved-note"><strong>Saved sample notice</strong><p>${esc(notices[item.id])}</p></div>` : ''}</section>`;
+    return `<section class="op-panel"><h2>Trip notice</h2><p class="op-muted">Shown on this departure’s guest arrival screen.</p><form id="op-notice-form"><label class="field-label" for="op-notice">Arrival note</label><textarea id="op-notice" maxlength="600" rows="4" placeholder="Meet beside the blue sign at the sample marina.">${esc(value)}</textarea><div class="op-form-actions"><button class="primary" type="submit">Save local notice</button>${notices[item.id] ? '<button class="text-button" type="button" data-op-clear-notice>Remove notice</button>' : ''}</div></form>${notices[item.id] ? `<div class="op-saved-note"><strong>Current guest notice</strong><p>${esc(notices[item.id])}</p></div>` : ''}</section>`;
   }
   function linksEditor() {
     const editing = links.find(link => link.id === editingLink);
-    return `<section class="op-panel"><p class="op-kicker">A useful little detail</p><h2>Guest essentials</h2><p class="op-muted">Manage the important links shown on every guest’s ready screen. Changes live only in this open prototype.</p><ul class="op-resource-list">${links.map(link => `<li><div><a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)} ↗</a><span>${esc(new URL(link.url).hostname)}</span></div><div class="op-link-actions"><button class="text-button" type="button" data-op-edit-link="${esc(link.id)}" aria-label="Edit ${esc(link.label)}">Edit</button><button class="text-button" type="button" data-op-remove-link="${esc(link.id)}" aria-label="Remove ${esc(link.label)}">Remove</button></div></li>`).join('') || '<li class="op-muted">No links yet. Add an operator resource below.</li>'}</ul><form id="op-link-form"><h3>${editing ? 'Edit link' : 'Add an important link'}</h3><label class="field-label" for="op-link-label">Link label</label><input id="op-link-label" name="label" type="text" required maxlength="80" value="${esc(editing?.label || '')}" placeholder="What guests should know"><label class="field-label" for="op-link-url">Website URL</label><input id="op-link-url" name="url" type="url" required maxlength="1000" value="${esc(editing?.url || '')}" placeholder="https://example.com/guest-info" aria-describedby="op-link-hint"><p id="op-link-hint" class="op-footnote">Use a full https:// address. Add your actual operator contact link here when available.</p><div class="op-form-actions"><button class="secondary" type="submit">${editing ? 'Save link' : 'Add link'}</button>${editing ? '<button class="text-button" type="button" data-op-cancel-link>Cancel edit</button>' : ''}</div></form></section>`;
+    const values = linkDraft || editing || {};
+    return `<section class="op-panel"><h2>Important links</h2><p class="op-muted">Shown on every guest’s ready screen.</p><ul class="op-resource-list">${links.map(link => `<li><div><a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)} ↗</a><span>${esc(new URL(link.url).hostname)}</span></div><div class="op-link-actions"><button class="text-button" type="button" data-op-edit-link="${esc(link.id)}" aria-label="Edit ${esc(link.label)}">Edit</button><button class="text-button" type="button" data-op-remove-link="${esc(link.id)}" aria-label="Remove ${esc(link.label)}">Remove</button></div></li>`).join('') || '<li class="op-muted">No links yet.</li>'}</ul><form id="op-link-form"><h3>${editing ? 'Edit link' : 'Add link'}</h3><label class="field-label" for="op-link-label">Link label</label><input id="op-link-label" name="label" type="text" required maxlength="80" value="${esc(values.label || '')}" placeholder="What guests should know"><label class="field-label" for="op-link-url">Website URL</label><input id="op-link-url" name="url" type="url" required maxlength="1000" value="${esc(values.url || '')}" placeholder="https://example.com/guest-info" aria-describedby="op-link-hint"><p id="op-link-hint" class="op-footnote">Use a full https:// address.</p><div class="op-form-actions"><button class="secondary" type="submit">${editing ? 'Save link' : 'Add link'}</button>${editing ? '<button class="text-button" type="button" data-op-cancel-link>Cancel edit</button>' : ''}</div></form></section>`;
+  }
+  function emptyDay() {
+    return '<div class="op-empty"><h2>No sailings this day</h2><p>Choose another date.</p><button class="secondary" type="button" data-op-default-day>Show September 26</button></div>';
   }
   function render({ activeBooking = null } = {}) {
     active = activeBooking;
@@ -95,16 +102,19 @@ const OperatorView = (() => {
     const item = D.departure(selectedId);
     const totals = stats(items);
     const activeDay = D.departure(active?.departureId)?.date;
-    return `<div class="operator-workspace"><header class="op-heading"><div><p class="op-kicker">Saltline · Operator workspace</p><h1 tabindex="-1">A good day starts<br>with <em>everyone ready.</em></h1><p class="op-muted">Your sailings, your guests, and the details that keep the day moving.</p></div><div class="op-day-control"><label class="field-label" for="op-date">Operations date</label><input id="op-date" type="date" min="2026-09-01" max="2026-10-31" value="${day}"><span>Sample dates · Eastern Time (EDT)</span></div></header>
-      <div class="op-demo-note"><span class="op-demo-dot" aria-hidden="true"></span><span>Interactive operator demo. All bookings and totals are fictional; edits clear on page refresh.</span></div>
-      <nav class="op-shortcuts" aria-label="Operator sections"><a href="#op-sailings-title">Departures</a><a href="#operator-weather">Marine conditions</a><a href="#operator-trip-cards">Trip cards</a><a href="#op-manifest-title">Manifest</a><a href="#operator-guest-tools">Guest tools</a></nav>
+    let content = '';
+    if (view === 'sailings') content = `<section class="op-metrics" aria-label="Daily sample totals"><div><span>Sailings</span><strong>${items.length}</strong></div><div><span>Guests</span><strong>${totals.guests}</strong></div><div class="${totals.pending ? 'op-metric-attention' : ''}"><span>Waivers pending</span><strong>${totals.pending}</strong></div><div><span>Sample bookings</span><strong>${D.money(totals.total)}</strong></div></section><section class="op-sailings" aria-labelledby="op-sailings-title"><div class="op-section-heading"><h2 id="op-sailings-title">${shortDate(day)}</h2><span class="op-muted">Select a sailing for its manifest</span></div><div class="op-departures">${items.map(departureCard).join('') || emptyDay()}</div></section>`;
+    if (view === 'manifest') content = item ? manifest(item) : emptyDay();
+    if (view === 'marine') content = item ? `<div id="operator-weather">${typeof WeatherOps === 'undefined' ? '' : WeatherOps.render({ departure: item, bookings: bookings(item), savedNotice: notices[item.id] || '' })}</div>` : emptyDay();
+    if (view === 'cards') content = `<div id="operator-trip-cards">${typeof TripCards === 'undefined' ? '' : TripCards.render()}</div>`;
+    if (view === 'tools') content = `<div class="op-tools op-tools-grid" id="operator-guest-tools">${item ? noticeEditor(item) : emptyDay()}${linksEditor()}</div>`;
+    const scoped = ['manifest', 'marine', 'tools'].includes(view);
+    return `<div class="operator-workspace"><header class="op-heading"><h1 tabindex="-1">Operator workspace</h1>${view !== 'cards' ? `<div class="op-day-control"><label class="field-label" for="op-date">Date · EDT</label><input id="op-date" type="date" min="2026-09-01" max="2026-10-31" value="${day}"></div>` : ''}</header>
+      <nav class="op-view-nav" aria-label="Operator views">${views.map(([id, label]) => `<button type="button" data-op-view="${id}" aria-pressed="${view === id}" aria-controls="op-view-content">${label}</button>`).join('')}</nav>
+      ${active && activeDay ? `<div class="op-active-note"><span><strong>Your booking</strong> · ${shortDate(activeDay)} · ${esc(D.experience(D.departure(active.departureId).experienceId).name)}</span><div class="op-link-actions"><button type="button" class="text-button" data-op-active-day>Manifest →</button><button type="button" class="text-button" data-op-open-booking>Guest view →</button></div></div>` : ''}
       <div class="op-feedback" role="status" ${message ? '' : 'hidden'}>${esc(message)}</div>
-      ${active && activeDay ? `<div class="op-active-note"><span><strong>Your prototype booking</strong><br>${esc(D.experience(D.departure(active.departureId).experienceId).name)} · ${shortDate(activeDay)}</span><div class="op-link-actions"><button type="button" class="text-button" data-op-active-day>View its manifest →</button><button type="button" class="text-button" data-op-open-booking>Guest preparation →</button></div></div>` : ''}
-      <section class="op-metrics" aria-label="Daily sample totals"><div><span>Departures</span><strong>${items.length}</strong><small>${shortDate(day)}</small></div><div><span>Guests expected</span><strong>${totals.guests}</strong><small>${totals.checked} demo checked in</small></div><div class="${totals.pending ? 'op-metric-attention' : ''}"><span>Waivers to complete</span><strong>${totals.pending}</strong><small>${totals.pending ? 'Signatures still needed' : 'No outstanding signatures'}</small></div><div><span>Simulated booking totals</span><strong>${D.money(totals.total)}</strong><small>USD · no money collected</small></div></section>
-      <section class="op-sailings" aria-labelledby="op-sailings-title"><div class="op-section-heading"><div><p class="op-kicker">On the water</p><h2 id="op-sailings-title">${shortDate(day)} departures</h2></div><span class="op-muted">Select a trip to open its manifest</span></div><div class="op-departures">${items.map(departureCard).join('') || '<div class="op-empty"><h3>A quiet day on the dock.</h3><p>No sample departures on this date. Try September 26 or another sailing day.</p><button class="secondary" type="button" data-op-default-day>Show September 26</button></div>'}</div><p class="op-footnote">Capacity uses the guest calendar’s sample inventory${active ? ', plus your prototype booking' : ''}. No seats are actually reserved.</p></section>
-      <div id="operator-weather">${typeof WeatherOps === 'undefined' ? '' : WeatherOps.render({ departure: item, bookings: item ? bookings(item) : [], savedNotice: item ? notices[item.id] || '' : '' })}</div>
-      <div id="operator-trip-cards">${typeof TripCards === 'undefined' ? '' : TripCards.render()}</div>
-      <div class="op-work-grid">${manifest(item)}<aside class="op-tools" id="operator-guest-tools" aria-label="Guest communications tools">${noticeEditor(item)}${linksEditor()}</aside></div></div>`;
+      ${scoped ? `<div class="op-departure-context"><label class="field-label" for="op-departure-context">Selected sailing</label><select id="op-departure-context" ${items.length ? '' : 'disabled'}>${items.length ? items.map(row => `<option value="${row.id}" ${row.id === selectedId ? 'selected' : ''}>${D.timeLabel(row.time)} · ${esc(D.experience(row.experienceId).name)} · ${esc(D.experience(row.experienceId).boat)}</option>`).join('') : '<option>No sailings this day</option>'}</select></div>` : ''}
+      <div id="op-view-content">${content}</div></div>`;
   }
   function bind(root, { onOpenBooking, onGuest, refresh }) {
     const rerender = (feedback = '', focusSelector = '') => {
@@ -113,8 +123,8 @@ const OperatorView = (() => {
       if (focusSelector) root.querySelector(focusSelector)?.focus();
     };
     const weatherDeparture = D.departure(selectedId);
-    if (typeof TripCards !== 'undefined') TripCards.bind(root, { refresh: () => rerender() });
-    if (typeof WeatherOps !== 'undefined') WeatherOps.bind(root, {
+    if (view === 'cards' && typeof TripCards !== 'undefined') TripCards.bind(root, { refresh: () => rerender() });
+    if (view === 'marine' && typeof WeatherOps !== 'undefined') WeatherOps.bind(root, {
       departure: weatherDeparture,
       bookings: weatherDeparture ? bookings(weatherDeparture) : [],
       refresh: () => rerender(),
@@ -124,6 +134,16 @@ const OperatorView = (() => {
         drafts[weatherDeparture.id] = text;
       }
     });
+    root.querySelectorAll('[data-op-view]').forEach(button => button.addEventListener('click', () => {
+      if (!views.some(([id]) => id === button.dataset.opView)) return;
+      view = button.dataset.opView;
+      rerender('', `[data-op-view="${view}"]`);
+    }));
+    root.querySelector('#op-departure-context')?.addEventListener('change', event => {
+      if (!D.departures.some(item => item.id === event.target.value && item.date === day)) return;
+      selectedId = event.target.value;
+      rerender('', '#op-departure-context');
+    });
     root.querySelector('#op-date')?.addEventListener('change', event => {
       const value = event.target.value;
       if (!/^2026-(09|10)-\d{2}$/.test(value) || !event.target.checkValidity()) return;
@@ -131,6 +151,7 @@ const OperatorView = (() => {
       rerender('', '#op-date');
     });
     const openManifest = () => {
+      view = 'manifest';
       rerender();
       const heading = root.querySelector('#op-manifest-title');
       heading?.setAttribute('tabindex', '-1');
@@ -159,15 +180,16 @@ const OperatorView = (() => {
       rerender(notices[selectedId] ? 'Local notice saved. It now appears on this departure’s guest arrival screen. Nothing was sent.' : 'The saved notice is now empty.', '#op-notice');
     });
     root.querySelector('[data-op-clear-notice]')?.addEventListener('click', () => { delete notices[selectedId]; delete drafts[selectedId]; rerender('Saved notice removed from the sample guest arrival screen.', '#op-notice'); });
-    root.querySelectorAll('[data-op-edit-link]').forEach(button => button.addEventListener('click', () => { editingLink = button.dataset.opEditLink; rerender('', '#op-link-label'); }));
-    root.querySelector('[data-op-cancel-link]')?.addEventListener('click', () => { editingLink = null; rerender('', '#op-link-label'); });
+    root.querySelectorAll('[data-op-edit-link]').forEach(button => button.addEventListener('click', () => { editingLink = button.dataset.opEditLink; linkDraft = null; rerender('', '#op-link-label'); }));
+    root.querySelector('[data-op-cancel-link]')?.addEventListener('click', () => { editingLink = null; linkDraft = null; rerender('', '#op-link-label'); });
     root.querySelectorAll('[data-op-remove-link]').forEach(button => button.addEventListener('click', () => {
       links = links.filter(link => link.id !== button.dataset.opRemoveLink);
-      if (editingLink === button.dataset.opRemoveLink) editingLink = null;
+      if (editingLink === button.dataset.opRemoveLink) { editingLink = null; linkDraft = null; }
       rerender('Link removed from the guest ready screen.', '#op-link-label');
     }));
-    root.querySelector('#op-link-url')?.addEventListener('input', event => event.target.setCustomValidity(''));
-    root.querySelector('#op-link-label')?.addEventListener('input', event => event.target.setCustomValidity(''));
+    const retainLinkDraft = event => { event.target.setCustomValidity(''); linkDraft = { label: root.querySelector('#op-link-label').value, url: root.querySelector('#op-link-url').value }; };
+    root.querySelector('#op-link-url')?.addEventListener('input', retainLinkDraft);
+    root.querySelector('#op-link-label')?.addEventListener('input', retainLinkDraft);
     root.querySelector('#op-link-form')?.addEventListener('submit', event => {
       event.preventDefault();
       const labelInput = root.querySelector('#op-link-label');
@@ -179,14 +201,14 @@ const OperatorView = (() => {
       if (!url || url.protocol !== 'https:' || url.username || url.password) { urlInput.setCustomValidity('Enter a full https:// website address without a username or password.'); urlInput.reportValidity(); return; }
       const updated = { id: editingLink || `link-${++sequence}`, label, url: url.href };
       links = editingLink ? links.map(link => link.id === editingLink ? updated : link) : [...links, updated];
-      editingLink = null;
+      editingLink = null; linkDraft = null;
       rerender('Important links updated on the guest ready screen.', '#op-link-label');
     });
   }
   function reset() {
     if (typeof WeatherOps !== 'undefined') WeatherOps.reset();
     if (typeof TripCards !== 'undefined') TripCards.reset();
-    day = '2026-09-26'; selectedId = ''; links = defaultLinks(); notices = {}; drafts = {}; checked = new Set(); editingLink = null; expanded = new Set(); message = ''; sequence = 0; active = null;
+    day = '2026-09-26'; selectedId = ''; links = defaultLinks(); notices = {}; drafts = {}; checked = new Set(); editingLink = null; expanded = new Set(); message = ''; sequence = 0; active = null; view = 'sailings'; linkDraft = null;
   }
   return { render, bind, resources: () => links.map(link => ({ ...link })), notice: departureId => notices[departureId] || '', reset };
 })();
