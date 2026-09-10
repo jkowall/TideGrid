@@ -16,11 +16,15 @@ Open [the local prototype](http://127.0.0.1:4287). No dependencies, build step, 
 
 Can a guest complete one booking journey on a phone, understand the price and next steps, and find trip preparation information without staff help?
 
-Guests can browse a monthly calendar, chronological departure list, or experience cards. Coastal fishing, reef diving, sunset cruises, and private charters share one fictional September–October 2026 inventory. Date, experience, charter type, and party filters help guests find a departure; sold-out days, days with no sailings, and insufficient capacity have distinct states. Selecting a departure leads into guest details, simulated checkout, a demo confirmation, a nonbinding waiver interaction, arrival instructions, and Important links.
+Guests can browse a monthly calendar, chronological departure list, or experience cards. Coastal fishing, reef diving, sunset cruises, and private charters share one fictional September–October 2026 inventory. Date, experience, charter type, and party filters help guests find a departure; sold-out days, days with no sailings, and insufficient capacity have distinct states. Selecting a departure leads into guest details, simulated checkout, a booking dashboard, participant waiver requests, guest signing, arrival instructions, and Important links.
+
+The post-booking journey separates booking confirmation from waiver completion. In the operator demo, enter fictional participant names and email addresses and simulate sending their requests. Open a participant's email preview, review the nonbinding sample waiver as that guest, and type a fictional signature. Returning to the booking shows each participant's status; signing one request leaves the others pending. This demonstrates adult participant interactions only. Guardian signing, legal waiver documents, identity verification, actual delivery, and durable signature evidence are not implemented.
+
+The operator workspace adds a daily departure overview, fictional booking manifests, waiver status, and simulated check-in for signed participants. The guest booking created in this session appears alongside explicitly seeded examples. Operators can edit Important links and save a local trip notice; the guest preparation screen reads those settings. Notices are entered by the operator, not generated weather or safety decisions, and saving one sends no messages.
 
 The operator identity, trips, availability, prices, booking reference, and confirmation are illustrative. An external fishing-license information link points to the [Florida Fish and Wildlife Conservation Commission](https://myfwc.com/license/recreational/saltwater-fishing/); it does not determine whether a license is required for a particular guest or charter.
 
-This prototype does not create reservations, take payments, collect a legal signature, verify licenses, send messages, or persist guest data. It does not implement production capacity controls, authentication, a provider integration, native apps, or an operator console. Those production obligations remain in the V2 plan.
+This prototype does not create reservations, take payments, collect a legal signature, verify licenses, send messages, or persist guest data. The operator workspace is a local demonstration. It does not implement production capacity controls, authentication, provider integrations, or native apps. Those production obligations remain in the V2 plan.
 
 ## Five-minute customer session
 
@@ -29,14 +33,16 @@ Ask the operator to use sample details and complete these tasks without a walkth
 1. Find an outing for two guests using the calendar, then compare the list and trip-card views. Explain which view helps you decide.
 2. Try another date or party size, find a sold-out day, and recover to an available departure. Explain the total price before checkout.
 3. Complete the simulated booking and identify what still needs attention.
-4. Complete the sample waiver interaction and find arrival instructions and the fishing-license resource.
-5. Explain where their real workflow differs and which task would still require another tool or a staff message.
+4. Send sample waiver requests, open one as the guest, and sign the sample. Return to the booking and explain who still needs to sign. Find arrival instructions and the fishing-license resource.
+5. Switch to the operator workspace, locate the same booking, and inspect waiver and check-in status. Add an Important link or trip notice and find it in the guest preparation screen.
+
+Then explain where the real workflow differs and which task would still require another tool or a staff message.
 
 Record where they hesitate, need help, misread a status, or cannot find information. Separate observed behavior from requested features. Ask about the most recent real booking that would not fit this flow. Completion here does not establish demand, migration feasibility, willingness to pay, or acceptance of the native add-on.
 
 ## Acceptance and agent ownership
 
-- Astra owns the original UI and implementation in `index.html`, `styles.css`, `app.js`, and `domain.js`.
+- Astra owns the original UI and implementation. Waiver and operator work use separate file owners; the coordinating agent integrates their shared booking snapshot.
 - The coordinating agent owns this brief, repository documentation, integration, and verification.
 - A fresh Astra reviewer checks the initial UI, keyboard behavior, mobile fit, and workflow correctness before handoff.
 - Verify discovery view switching, month and date navigation, combined filters, empty results, shared and private bookings, invalid guest details, sold-out or over-capacity choices, back/edit behavior, quote consistency, waiver status, Important links, and reset behavior.
@@ -47,12 +53,21 @@ The fanout follows [the saved agent plan](../../docs/v2/10-build-execution-and-a
 ## Automated checks
 
 ```sh
-node --test prototypes/guest-flow/domain.test.cjs
+node --test prototypes/guest-flow/*.test.cjs
 node --check prototypes/guest-flow/app.js
 git diff --check
 ```
 
-The domain tests cover shared inventory consistency, combined date/type/experience filters, sold-out versus no-sailing states, party capacity, explicit departure selection, shared versus flat charter pricing, and arrival/date labels.
+The domain tests cover shared inventory consistency, combined date/type/experience filters, sold-out versus no-sailing states, party capacity, explicit departure selection, shared versus flat charter pricing, and arrival/date labels. Waiver tests cover send-before-sign, recipient validation, individual participant transitions, required acknowledgments, booking binding, and complete-party status.
+
+## Waiver and operator verification, September 10, 2026
+
+- All 12 domain and waiver tests passed, along with JavaScript syntax and whitespace checks.
+- Browser testing completed book → send requests → email preview → review and type a sample signature → receipt → booking status. Invalid recipient email, missing name, and missing acknowledgments blocked progression. Returning without signing preserved the pending request; signing the first guest left the second pending, and completing both changed preparation status to complete.
+- The operator manifest displayed the session's booking and live waiver status. Only its signed participant could be marked checked in. Editing and reconfirming the same trip cleared both prior signatures and check-in.
+- Added a custom Important link and saved a departure notice in the operator view, then verified both in guest preparation. Unsafe URL schemes were rejected. A no-sailing date showed an empty state, and the session booking remained discoverable across dates.
+- Inspected desktop at 1365px and phone layouts at 390px and 320px, including signing and the operator manifest, without horizontal document overflow. Selecting a departure moves focus and scroll to its manifest.
+- Fresh Astra review found no unresolved actionable findings in state transitions, participant isolation, input escaping, resource URL validation, or guest/operator integration. Independent execution used Node tests and VM harnesses; rendered browser checks were performed by the coordinating agent, not on a physical phone.
 
 ## Discovery expansion verification, September 10, 2026
 

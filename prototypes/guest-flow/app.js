@@ -1,9 +1,12 @@
 'use strict';
 
 const D = TideGrid;
+const W = WaiverFlow;
 const main = document.querySelector('#main');
-const initialState = () => ({ step: 0, view: 'calendar', month: '2026-09', selectedDay: '2026-09-26', experience: '', type: '', party: '2', selectedDepartureId: null, name: '', email: '', confirmed: false, waiver: false, checkout: false });
+const initialState = () => ({ step: 0, view: 'calendar', month: '2026-09', selectedDay: '2026-09-26', experience: '', type: '', party: '2', selectedDepartureId: null, name: '', email: '', confirmed: false, checkout: false, waiverFlow: null, prepView: 'dashboard', participantId: null, requestDrafts: {} });
 let state = initialState();
+let workspace = 'guest';
+let bookingRevision = 0;
 const escapeHTML = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const selected = () => D.departure(state.selectedDepartureId);
 const trip = () => D.experience(selected()?.experienceId);
@@ -14,6 +17,8 @@ const unit = item => item.type === 'private' ? 'boat' : 'guest';
 const kind = item => item.type === 'private' ? 'Private charter' : 'Shared trip';
 const filtered = () => D.matching(state);
 const available = rows => rows.filter(item => !D.availability(item, state.party));
+const bookingKey = () => `${state.selectedDepartureId}|${state.party}|${bookingRevision}`;
+const participant = () => state.waiverFlow?.participants.find(item => item.id === state.participantId);
 
 function seaArt(theme, small = false) {
   return `<div class="sea-art ${theme} ${small ? 'small-art' : ''}" aria-hidden="true"><svg viewBox="0 0 500 230" preserveAspectRatio="xMidYMid slice"><circle class="sun" cx="380" cy="62" r="30"/><path class="far-water" d="M0 135 Q130 111 250 135 T500 132 V230 H0Z"/><path class="near-water" d="M0 173 Q120 151 255 180 T500 170 V230 H0Z"/><path class="wake" d="M55 202 Q130 185 207 199 M280 210 Q350 195 432 203"/><g class="boat"><path d="M157 138 L300 138 L279 159 L177 159Z"/><path d="M207 134 V96 H259 L276 134 M225 96 V77 M192 114 H272"/></g><path class="horizon" d="M26 130 H111 M326 130 H470"/></svg><span>${theme === 'reef' ? 'Beneath the blue' : theme === 'sunset' ? 'Chase the last light' : theme === 'private' ? 'Make the day yours' : 'Out where you belong'}</span></div>`;
@@ -112,7 +117,7 @@ function tripScreen() {
 
 function detailsScreen() {
   return `<p class="eyebrow">A little introduction</p><h1 tabindex="-1">Who’s coming aboard?</h1><p class="intro">Start with the person making the booking. Use fictional details for this demo. No email will be sent.</p>
-    <form id="details-form" novalidate autocomplete="off"><div class="field-grid"><div><label class="field-label" for="guest-name">Booker’s name</label><input id="guest-name" type="text" maxlength="100" required autocomplete="off" placeholder="Alex Example" value="${escapeHTML(state.name)}"></div><div><label class="field-label" for="guest-email">Email address</label><input id="guest-email" type="email" maxlength="254" required autocomplete="off" placeholder="alex@example.com" value="${escapeHTML(state.email)}"></div></div><p class="hint">No account needed. Inputs stay in this page and clear on refresh.</p><div id="details-error" class="error" role="alert" hidden></div><div class="notice">Your group: ${escapeHTML(state.party)} guests. This concept does not collect participant identities, medical information, or certifications.</div><div class="actions"><button class="text-button" data-back="0" type="button">← Back to trips</button><button class="primary" type="submit">Review sample booking →</button></div></form>`;
+    <form id="details-form" novalidate autocomplete="off"><div class="field-grid"><div><label class="field-label" for="guest-name">Booker’s name</label><input id="guest-name" type="text" maxlength="100" required autocomplete="off" placeholder="Alex Example" value="${escapeHTML(state.name)}"></div><div><label class="field-label" for="guest-email">Email address</label><input id="guest-email" type="email" maxlength="254" required autocomplete="off" placeholder="alex@example.com" value="${escapeHTML(state.email)}"></div></div><p class="hint">No account needed. Inputs stay in this page and clear on refresh.</p><div id="details-error" class="error" role="alert" hidden></div><div class="notice">Your group: ${escapeHTML(state.party)} guests. After booking, try sending a sample waiver request to each guest. Use fictional names and email addresses throughout.</div><div class="actions"><button class="text-button" data-back="0" type="button">← Back to trips</button><button class="primary" type="submit">Review sample booking →</button></div></form>`;
 }
 
 function reviewScreen() {
@@ -124,16 +129,51 @@ function reviewScreen() {
 }
 
 function readyScreen() {
-  return `<div class="success-mark" aria-hidden="true">✓</div><p class="eyebrow">Demo reference · SAMPLE-001</p><h1 tabindex="-1">Your sample trip<br>is all set.</h1><p class="intro">Thanks, ${escapeHTML(state.name)}. No booking was made, no payment was taken, and no email was sent.</p><span class="status-chip">Demo confirmed · ${D.money(quote().total)} simulated</span>
-    <section class="section"><h2>Before you arrive</h2><div class="review-block"><h3>Sample waiver acknowledgment</h3><p>This placeholder shows where a guest would review an operator’s waiver. It is not a legal waiver, signature, or release of rights.</p><label class="check-label waiver-label"><input type="checkbox" id="waiver-ack" ${state.waiver ? 'checked' : ''}><span>I have read this nonbinding sample acknowledgment.</span></label><p class="hint" id="waiver-status" role="status">${waiverStatus()}</p></div></section>
-    <section class="section" id="arrival"><h2>Arrival instructions</h2><ol class="arrival-list"><li><strong>Arrive 30 minutes early.</strong> ${D.arrivalTime(selected())} EDT on ${D.dateLabel(selected().date)}. Departure is at ${D.timeLabel(selected().time)} EDT.</li><li><strong>Meet at Saltline Marina, Dock C, for ${trip().boat}.</strong> This is a fictional meeting point. Do not travel to it.</li><li>${trip().preparation}</li></ol></section>
-    <section class="section" id="trip-preparation"><h2>Important links</h2><ul class="links"><li><a href="#arrival">Meeting point & arrival checklist</a><p>Sample instructions above; no real marina or map.</p></li>${trip().id === 'fishing' ? '<li><a href="https://myfwc.com/license/recreational/saltwater-fishing/" target="_blank" rel="noopener noreferrer">Florida fishing license information ↗ (opens a new tab)</a><p>Check with your operator which requirements apply.</p></li>' : `<li><button class="text-button" data-detail="${trip().id}">${trip().id === 'reef' ? 'Dive eligibility & equipment' : 'What to expect & bring'}</button><p>Review the sample trip preparation notes.</p></li>`}<li><span>Contact your operator · placeholder</span><p>A verified contact method would appear here. No messages can be sent in this demo.</p></li></ul></section><div class="actions"><button class="text-button" data-back="0" type="button">Edit sample trip</button><button class="primary" id="new-booking" type="button">Start a new demo</button></div>`;
+  if (state.prepView === 'requests') return requestScreen();
+  if (state.prepView === 'waiver') return waiverScreen();
+  if (state.prepView === 'receipt') return receiptScreen();
+  const progress = W.progress(state.waiverFlow);
+  const unsent = progress.total - progress.sent;
+  return `${roleLabel('Operator demo')}<p class="eyebrow">Demo reference · SAMPLE-001</p><h1 tabindex="-1">${progress.complete ? 'Sample preparation<br>complete.' : 'Booked in the demo.<br>Let’s get ready.'}</h1><p class="intro">${progress.complete ? 'Every guest has signed their own sample waiver. Review the arrival details below.' : 'Your sample booking is confirmed. Each guest still needs to receive and sign their own sample waiver.'}</p>
+    <div class="prep-progress" aria-label="Preparation progress"><div><span>01</span><strong>Booked</strong><small>${D.money(quote().total)} simulated</small></div><div><span>02</span><strong>Send waivers</strong><small>${progress.sent} of ${progress.total} requested</small></div><div><span>03</span><strong>Sign waivers</strong><small>${progress.signed} of ${progress.total} signed</small></div></div>
+    <section class="section" aria-labelledby="waiver-heading"><div class="review-heading"><h2 id="waiver-heading">Guest waivers</h2><span class="status-chip ${progress.complete ? '' : 'pending-chip'}" role="status">${progress.complete ? 'All signed (demo)' : `${progress.pending} pending`}</span></div>
+      <p class="hint">${progress.signed} of ${progress.total} signed. ${unsent ? 'Next: send a request to the guests marked Not sent.' : progress.complete ? 'All sample waiver steps are complete.' : 'Next: preview a guest’s email, then try their signing flow.'}</p>
+      <div class="participant-list">${state.waiverFlow.participants.map((guest, index) => `<article class="participant-row"><span class="guest-number" aria-hidden="true">${index + 1}</span><div><h3>${escapeHTML(guest.name)}</h3><p>${escapeHTML(guest.email)}</p><span class="waiver-status ${guest.status}">${statusLabel(guest.status)}</span></div><button class="${guest.status === 'not-sent' ? 'secondary' : 'text-button'}" ${guest.status === 'not-sent' ? `data-request="${guest.id}"` : guest.status === 'signed' ? `data-receipt="${guest.id}"` : `data-email="${guest.id}"`} aria-label="${guest.status === 'not-sent' ? 'Send request to' : guest.status === 'signed' ? 'View receipt for' : 'Preview email for'} ${escapeHTML(guest.name)}">${guest.status === 'not-sent' ? 'Send request' : guest.status === 'signed' ? 'View receipt' : 'Preview email →'}</button></article>`).join('')}</div>
+      ${unsent ? '<button class="primary" id="send-waivers">Send waiver requests →</button>' : ''}<p class="hint">This operator view and the guest previews share one demo session. No identities are verified and no emails are delivered.</p>
+    </section>${arrivalInfo()}<div class="actions"><button class="text-button" data-back="0" type="button">Edit sample trip</button><button class="primary" id="new-booking" type="button">Start a new demo</button></div><p class="hint">Editing the trip or guest details clears all sample requests and signatures.</p>`;
 }
 
-function waiverStatus() { return state.waiver ? 'Sample acknowledged. No legal document was signed.' : 'Sample acknowledgment not yet completed.'; }
-function invalidate() { state.confirmed = false; state.waiver = false; state.checkout = false; }
+function arrivalInfo() {
+  const resources = typeof OperatorView === 'undefined' ? [{ label: 'Florida fishing license information', url: 'https://myfwc.com/license/recreational/saltwater-fishing/' }] : OperatorView.resources();
+  const notice = typeof OperatorView === 'undefined' ? '' : OperatorView.notice(selected().id);
+  return `<section class="section" id="arrival"><h2>Arrival instructions</h2>${notice ? `<div class="notice guest-trip-notice"><strong>Trip notice from your operator</strong><p>${escapeHTML(notice)}</p><small>Saved in this demo only. No message was sent.</small></div>` : ''}<ol class="arrival-list"><li><strong>Arrive 30 minutes early.</strong> ${D.arrivalTime(selected())} EDT on ${D.dateLabel(selected().date)}. Departure is at ${D.timeLabel(selected().time)} EDT.</li><li><strong>Meet at Saltline Marina, Dock C, for ${trip().boat}.</strong> This is a fictional meeting point. Do not travel to it.</li><li>${trip().preparation}</li></ol></section>
+    <section class="section" id="trip-preparation"><h2>Important links</h2><ul class="links"><li><a href="#arrival">Meeting point & arrival checklist</a><p>Sample instructions above; no real marina or map.</p></li><li><button class="text-button" data-detail="${trip().id}">${trip().id === 'reef' ? 'Dive eligibility & equipment' : 'What to expect & bring'}</button><p>Review the sample trip preparation notes.</p></li>${resources.map(link => `<li><a href="${escapeHTML(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(link.label)} ↗ (opens a new tab)</a></li>`).join('')}<li><span>Contact your operator · placeholder</span><p>A verified contact method would appear here. No messages can be sent in this demo.</p></li></ul><p class="hint">Links are managed in the operator demo. Check with your operator which requirements apply.</p></section>`;
+}
+
+function roleLabel(role, name = '') { return `<div class="role-label"><span aria-hidden="true">${role === 'Operator demo' ? '◈' : '↗'}</span><strong>${role}</strong>${name ? `<span>· ${escapeHTML(name)}</span>` : ''}</div>`; }
+function statusLabel(status) { return { 'not-sent': 'Not sent', 'awaiting-signature': 'Awaiting signature', signed: 'Signed (demo)' }[status]; }
+function requestScreen() {
+  const guests = state.waiverFlow.participants.filter(item => item.status === 'not-sent');
+  return `${roleLabel('Operator demo')}<p class="eyebrow">Step 2 · Send waiver requests</p><h1 tabindex="-1">Invite everyone<br>to get ready.</h1><p class="intro">Check the sample recipient details and choose who gets a request. The booker is prefilled; the other guests are fictional adult examples you can edit. Guardian signing is outside this demo.</p>
+    <form id="request-form" novalidate autocomplete="off">${guests.map((guest, index) => { const draft = state.requestDrafts[guest.id] || guest; return `<fieldset class="request-card"><legend>Guest ${state.waiverFlow.participants.indexOf(guest) + 1}${guest.id === 'guest-1' ? ' · booker' : ' · fictional example'}</legend><label class="check-label"><input type="checkbox" data-recipient="${guest.id}" ${draft.checked === false ? '' : 'checked'}><span>Include this guest in the sample send</span></label><div class="field-grid"><div><label class="field-label" for="name-${guest.id}">Fictional full name</label><input id="name-${guest.id}" data-guest="${guest.id}" data-field="name" type="text" maxlength="100" value="${escapeHTML(draft.name)}" required></div><div><label class="field-label" for="email-${guest.id}">Sample email address</label><input id="email-${guest.id}" data-guest="${guest.id}" data-field="email" type="email" maxlength="254" value="${escapeHTML(draft.email)}" required></div></div></fieldset>`; }).join('')}<div id="request-error" class="error" role="alert" tabindex="-1" hidden></div><p class="hint">A sample email preview is created for each selected guest. Nothing is actually sent.</p><div class="actions"><button class="text-button" data-prep="dashboard" type="button">← Return to booking</button><button class="primary" type="submit">Simulate sending requests →</button></div></form>`;
+}
+
+function waiverScreen() {
+  const guest = participant();
+  return `${roleLabel('Guest preview', guest.name)}<p class="eyebrow">Step 3 · Review & sign</p><h1 tabindex="-1">A little preparation.<br>Then, the water.</h1><p class="intro">This sample request is for <strong>${escapeHTML(guest.name)}</strong>. Review the information, then try the signing interaction.</p>
+    <article class="sample-document" aria-label="Nonbinding sample waiver"><p class="eyebrow">Saltline Charters · Sample waiver</p><h2>${trip().name}</h2><p>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} EDT<br>Aboard ${trip().boat}</p><hr><h3>About this sample</h3><p>This is a preview of the information a guest might review before a trip. It contains no release of liability or binding agreement.</p><h3>Your day on the water</h3><p>${trip().preparation}</p><h3>Arrival & questions</h3><p>Sample arrival is ${D.arrivalTime(selected())} EDT, 30 minutes before departure. A real operator would explain their requirements and answer questions before asking you to sign.</p></article>
+    <form id="signature-form" novalidate autocomplete="off"><label class="field-label" for="signature-name">Type your fictional full name</label><input id="signature-name" type="text" maxlength="100" required aria-describedby="signature-help" placeholder="${escapeHTML(guest.name)}"><p class="hint" id="signature-help">For this preview, enter ${escapeHTML(guest.name)}. This does not verify anyone’s identity.</p><label class="check-label waiver-label"><input type="checkbox" id="waiver-read" required><span>I have read the sample trip and arrival information above.</span></label><label class="check-label waiver-label"><input type="checkbox" id="signature-demo" required><span>I understand this is a simulated signature, not a legal waiver or release of rights.</span></label><div id="signature-error" class="error" role="alert" tabindex="-1" hidden></div><div class="actions"><button class="text-button" data-prep="dashboard" type="button">← Return without signing</button><button class="primary" type="submit">Sign sample waiver →</button></div></form>`;
+}
+
+function receiptScreen() {
+  const guest = participant();
+  const progress = W.progress(state.waiverFlow);
+  return `${roleLabel('Guest preview', guest.name)}<div class="success-mark" aria-hidden="true">✓</div><p class="eyebrow">Sample waiver receipt</p><h1 tabindex="-1">Your sample waiver<br>is signed.</h1><p class="intro">Thanks, ${escapeHTML(guest.name)}. Your individual status is now Signed (demo). No legal document was signed.</p><div class="sample-document receipt"><span class="status-chip">Signed (demo)</span><dl><dt>Fictional signer</dt><dd class="signature-script">${escapeHTML(guest.signature.fullName)}</dd><dt>Sample recipient</dt><dd>${escapeHTML(guest.email)}</dd><dt>Trip</dt><dd>${trip().name}<br>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} EDT</dd><dt>Reference</dt><dd>SAMPLE-001 · ${guest.id}</dd></dl><p class="hint">Recorded only in this page’s current demo session. No signed PDF, delivery record, or legal evidence was created.</p></div><p class="notice">${progress.complete ? 'Every guest has now completed their sample signing step.' : `${progress.signed} of ${progress.total} guests signed. The other ${progress.pending === 1 ? 'guest still needs' : `${progress.pending} guests still need`} to complete their own sample signing step.`}</p><div class="actions"><button class="primary" data-prep="dashboard" type="button">Return to booking →</button></div>`;
+}
+
+function invalidate() { state.confirmed = false; state.checkout = false; state.waiverFlow = null; state.prepView = 'dashboard'; state.participantId = null; state.requestDrafts = {}; }
 function go(step) { if (state.confirmed) invalidate(); state.step = step; render(); }
-function reset() { state = initialState(); render(); }
+function reset() { state = initialState(); workspace = 'guest'; if (typeof OperatorView !== 'undefined') OperatorView.reset(); render(); }
 function changeSearch(patch, focusSelector) {
   Object.assign(state, patch, { selectedDepartureId: null });
   invalidate();
@@ -141,8 +181,19 @@ function changeSearch(patch, focusSelector) {
   if (focusSelector) main.querySelector(focusSelector)?.focus();
 }
 function render(focus = true) {
+  document.querySelectorAll('[data-workspace]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.workspace === workspace)));
+  if (workspace === 'operator') {
+    main.innerHTML = OperatorView.render({ activeBooking: BookingDemo.snapshot() });
+    OperatorView.bind(main, {
+      onOpenBooking: () => { workspace = 'guest'; BookingDemo.openPreparation(); },
+      onGuest: () => { workspace = 'guest'; render(); },
+      refresh: () => render(false)
+    });
+    if (focus) { main.querySelector('h1')?.focus(); window.scrollTo({ top: 0, behavior: 'instant' }); }
+    return;
+  }
   const screens = [tripScreen, detailsScreen, reviewScreen, readyScreen];
-  main.innerHTML = `<nav aria-label="Booking progress"><ol class="steps">${['Find a trip', 'Guest details', 'Review', 'Ready'].map((label, i) => `<li ${i === state.step ? 'aria-current="step"' : ''}><span class="step-number">${i + 1}</span>${label}</li>`).join('')}</ol></nav>${state.step ? `<div class="layout"><div>${screens[state.step]()}</div>${summary()}</div>` : tripScreen()}`;
+  main.innerHTML = `<nav aria-label="Booking progress"><ol class="steps">${['Find a trip', 'Guest details', 'Review', 'Prepare'].map((label, i) => `<li ${i === state.step ? 'aria-current="step"' : ''}><span class="step-number">${i + 1}</span>${label}</li>`).join('')}</ol></nav>${state.step ? `<div class="layout"><div>${screens[state.step]()}</div>${summary()}</div>` : tripScreen()}`;
   bindEvents();
   if (focus) { main.querySelector('h1').focus(); window.scrollTo({ top: 0, behavior: 'instant' }); }
 }
@@ -164,7 +215,56 @@ function viewDates(id) {
   main.querySelector('.browse-toolbar').scrollIntoView({ block: 'start' });
 }
 
+function openRequests(id = null) {
+  state.waiverFlow.participants.filter(guest => guest.status === 'not-sent').forEach(guest => {
+    state.requestDrafts[guest.id] = { ...guest, ...state.requestDrafts[guest.id], checked: !id || id === guest.id };
+  });
+  state.prepView = 'requests'; render();
+}
+function showEmail(id, trigger) {
+  const guest = state.waiverFlow.participants.find(item => item.id === id);
+  if (guest?.status !== 'awaiting-signature') return;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'trip-dialog email-dialog';
+  dialog.setAttribute('aria-labelledby', 'email-title');
+  dialog.innerHTML = `<div class="dialog-top"><p class="eyebrow">Guest preview · Sample email</p><button class="icon-button" aria-label="Close email preview">×</button></div><div class="dialog-body"><p class="email-recipient"><strong>To</strong> ${escapeHTML(guest.name)} &lt;${escapeHTML(guest.email)}&gt;</p><h2 id="email-title">One more step before<br>your day on the water.</h2><p>Hello ${escapeHTML(guest.name)},</p><p>Your sample ${trip().name.toLowerCase()} is booked for ${D.dateLabel(selected().date)} at ${D.timeLabel(selected().time)} EDT. Please review and sign your individual sample waiver before you arrive.</p><div class="notice"><strong>Sample request · ${guest.id}</strong><p>This preview represents the email that would be sent to this guest. No message was delivered and no real guest link exists.</p></div><button class="primary" id="open-waiver">Open waiver →</button><p class="hint">You are switching to this guest’s preview within the same demo session.</p></div>`;
+  document.body.append(dialog);
+  dialog.querySelector('.icon-button').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => { dialog.remove(); if (trigger.isConnected) trigger.focus(); });
+  dialog.querySelector('#open-waiver').addEventListener('click', () => { dialog.close(); state.participantId = id; state.prepView = 'waiver'; render(); });
+  dialog.showModal();
+}
+function bindWaiverEvents() {
+  main.querySelector('#send-waivers')?.addEventListener('click', () => openRequests());
+  main.querySelectorAll('[data-request]').forEach(button => button.addEventListener('click', () => openRequests(button.dataset.request)));
+  main.querySelectorAll('[data-prep]').forEach(button => button.addEventListener('click', () => { state.prepView = button.dataset.prep; render(); }));
+  main.querySelectorAll('[data-email]').forEach(button => button.addEventListener('click', () => showEmail(button.dataset.email, button)));
+  main.querySelectorAll('[data-receipt]').forEach(button => button.addEventListener('click', () => { state.participantId = button.dataset.receipt; state.prepView = 'receipt'; render(); }));
+  main.querySelectorAll('[data-guest]').forEach(input => input.addEventListener('input', () => { state.requestDrafts[input.dataset.guest][input.dataset.field] = input.value; }));
+  main.querySelectorAll('[data-recipient]').forEach(input => input.addEventListener('change', () => { state.requestDrafts[input.dataset.recipient].checked = input.checked; }));
+  main.querySelector('#request-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    try {
+      const recipients = [...main.querySelectorAll('[data-recipient]:checked')].map(input => ({ id: input.dataset.recipient, ...state.requestDrafts[input.dataset.recipient] }));
+      state.waiverFlow = W.sendRequests(state.waiverFlow, recipients);
+      state.prepView = 'dashboard'; render();
+    } catch (error) {
+      const notice = main.querySelector('#request-error'); notice.textContent = error.message; notice.hidden = false; notice.focus();
+    }
+  });
+  main.querySelector('#signature-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    try {
+      state.waiverFlow = W.sign(state.waiverFlow, state.participantId, { fullName: main.querySelector('#signature-name').value, read: main.querySelector('#waiver-read').checked, simulation: main.querySelector('#signature-demo').checked }, bookingKey());
+      state.prepView = 'receipt'; render();
+    } catch (error) {
+      const notice = main.querySelector('#signature-error'); notice.textContent = error.message; notice.hidden = false; notice.focus();
+    }
+  });
+}
+
 function bindEvents() {
+  bindWaiverEvents();
   main.querySelectorAll('[data-back]').forEach(button => button.addEventListener('click', () => go(Number(button.dataset.back))));
   main.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => {
     state.view = button.dataset.view;
@@ -212,12 +312,24 @@ function bindEvents() {
     event.preventDefault();
     if (!state.checkout) return;
     if (!quote()) { go(0); return; }
-    state.confirmed = true; state.step = 3; render();
+    bookingRevision += 1;
+    state.waiverFlow = W.create(bookingKey(), state.party, { name: state.name, email: state.email });
+    state.confirmed = true; state.step = 3; state.prepView = 'dashboard'; render();
   });
-  main.querySelector('#waiver-ack')?.addEventListener('change', event => { state.waiver = event.target.checked; main.querySelector('#waiver-status').textContent = waiverStatus(); });
   main.querySelector('#new-booking')?.addEventListener('click', reset);
 }
 
+const BookingDemo = {
+  snapshot() {
+    return state.confirmed ? { id: 'SAMPLE-001', key: bookingKey(), departureId: state.selectedDepartureId, party: Number(state.party), name: state.name, email: state.email, participants: structuredClone(state.waiverFlow.participants), total: quote().total } : null;
+  },
+  openPreparation() { if (state.confirmed) { state.step = 3; state.prepView = 'dashboard'; render(); } }
+};
+
 document.querySelector('#reset').addEventListener('click', reset);
+document.querySelectorAll('[data-workspace]').forEach(button => button.addEventListener('click', () => {
+  workspace = button.dataset.workspace;
+  render();
+}));
 window.addEventListener('pageshow', event => { if (event.persisted) reset(); });
 render(false);
