@@ -91,6 +91,12 @@ git diff --check
 
 The domain tests cover shared inventory consistency, combined date/type/experience filters, sold-out versus no-sailing states, party capacity, explicit departure selection, shared versus flat charter pricing, and arrival/date labels. Waiver tests cover send-before-sign, recipient validation, individual participant transitions, required acknowledgments, booking binding, and complete-party status.
 
+## Cloudflare deployment verification, September 10, 2026
+
+- Deployed source commit `3a8c753` as Worker `tidegrid-prototype`, version `aac88b58-c89b-4da1-b013-47b760cffc13`, at [demo.tidegrid.us](https://demo.tidegrid.us). The custom domain and Cloudflare-provided fallback returned HTTPS 200.
+- All 11 public runtime assets matched local SHA-256 hashes. README, all three test files, `.assetsignore`, `_headers` and the Wrangler configuration returned 404. Verified no-index, nosniff and no-referrer response headers.
+- All 16 automated tests passed. The public browser loaded guest discovery and operator sailings, switched to Marine conditions, and reported no browser errors during the smoke check. The deployed app assets are unchanged from the earlier desktop and phone workflow verification.
+
 ## Simplified navigation verification, September 10, 2026
 
 - All 16 domain, waiver and card tests passed, with JavaScript syntax and whitespace checks. Independent navigation/state checks covered one-view rendering, selection context, empty days, active booking navigation and reset.
