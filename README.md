@@ -1,6 +1,6 @@
 # TideGrid
 
-TideGrid is an exploratory US-first product for branded passenger-vessel booking. This repository contains product, commercial, validation, and architecture plans. It does not contain a production application.
+TideGrid is an exploratory US-first product for branded passenger-vessel booking. This repository contains product, commercial, validation, and architecture plans, plus a bounded [guest workflow prototype](prototypes/guest-flow/README.md). It does not contain a production application.
 
 ## Current direction
 
