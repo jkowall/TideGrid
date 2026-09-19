@@ -1,7 +1,8 @@
 # TideGrid V2 build execution and agent plan
 
 **Status:** Proposed execution baseline; use only after the applicable roadmap gate passes
-**Date:** September 5, 2026
+
+Model and tool names in this document are operational choices with a short shelf life. They carry no product authority; the decision register records only the tool-agnostic principles.
 
 ## Recommendation
 
@@ -17,55 +18,57 @@ The model names and capabilities below reflect the models exposed in the current
 
 Current [OpenAI model guidance](https://learn.chatgpt.com/docs/models) recommends Astra for the hardest end-to-end work, Sol for complex work, Terra for everyday work, and Luna for clear, repeatable tasks. Our inference is that Astra should reduce contract-to-implementation handoffs on TideGrid's coupled transaction paths. That is a routing hypothesis, not a measured TideGrid quality, speed, or savings claim.
 
-Astra changes who owns a slice, not the paid-validation gate, product scope, independent review, or human production authority. Do not enlarge the roadmap or shorten a delivery estimate solely because a stronger model is available.
+Astra changes who owns a slice, not the [Validation gate](05-roadmap-validation.md#validation-gate), product scope, independent review, or human production authority. Do not enlarge the roadmap or shorten a delivery estimate solely because a stronger model is available.
 
 ## Sole-owner authority
 
 The operating baseline assumes one human founder and owner. That person retains business decisions, customer commitments, provider authorization, and production authority. Codex subagents are implementation tools; they are not founders, employees, production on-call coverage, or legal segregation of duties.
 
-Before the first live use, money, tenancy, native signing, recovery, and security-sensitive production changes require review by a qualified external human. No production goal may overlap an active pilot launch or incident. Incident response and recovery take priority, and planned production work resumes only after the launch or incident closes with recorded evidence.
+Before the first live use of each area (money, tenancy, recovery, security-sensitive production changes, and, when the Native add-on goes live, native signing), that area requires review by a qualified external human. The order in which areas go live follows [Gates](05-roadmap-validation.md#gates): native signing is Native pilot gate work and may not exist at an operator's first live booking. No production goal may overlap an active pilot launch or incident. Incident response and recovery take priority, and planned production work resumes only after the launch or incident closes with recorded evidence.
 
 ## Goal map
 
-No production goal may cross the paid-validation gate in [`05-roadmap-validation.md`](05-roadmap-validation.md). Each row below is a separate goal. Combine adjacent rows only after the coordinator proves that the combined change still has one contract, one end-to-end outcome, and one independently reviewable diff.
+No production goal may cross the [Validation gate](05-roadmap-validation.md#validation-gate). Each row below is a separate goal. Combine adjacent rows only after the coordinator proves that the combined change still has one contract, one end-to-end outcome, and one independently reviewable diff.
 
-| Goal | Outcome | Principal proof |
-|---|---|---|
-| G0.1 Domain and infrastructure spikes | Validate transaction seams, tenant manifest, hosting topology, and database connection behavior | Recorded spike results and accepted decisions; no production provisioning |
-| G0.2 Native factory dry run | Generate two branded development variants from one source without manual native edits | Reproducible manifests, builds, timing, and gap report |
-| G0.3 Pilot harness | Build the standard import prototype, deterministic provider fixtures, and acceptance-test skeleton | Stage 0 technical evidence; no live customer data |
-| G2.1 Workspace foundation | Establish the monorepo, pinned toolchain, contract generation, migration runner, environment configuration, and CI baseline | Clean bootstrap plus repeatable build, migration, and test commands |
-| G2.2 Tenant access and audit | Implement tenant identity, request context, roles, row-level security, and immutable audit records | Two-tenant escape tests and role-denial tests |
-| G2.3 Idempotent delivery foundation | Implement command idempotency, webhook inbox, transactional outbox, queue publication, retry, and DLQ evidence | Duplicate, out-of-order, crash, replay, and recovery tests |
-| G2.4 Catalog and schedule | Implement products, boats, departures, recurring schedules, blackouts, cutoffs, buffers, and sales states | Schedule-boundary and availability tests |
-| G2.5 Pricing, add-ons, fees, and policies | Implement ticket and charter prices, paid add-ons, taxes, mandatory fees, promotion codes, deposits, and versioned policies | Quote snapshot, add-on eligibility, tax, discount, and policy-version tests |
-| G2.6 Capacity and holds | Implement seat and exclusive-boat capacity, atomic holds, expiry, and confirmation transitions | Concurrent final-seat and whole-boat tests |
-| G2.7 Charge to confirmation | Implement immutable quote and order, Stripe direct charge, verified callbacks, booking confirmation, safe hold release, and late-success compensation | Success, failure, expiry, replay, and late-callback tests |
-| G2.8 Deposits and balances | Add one private-charter deposit, one balance deadline, reminders, staff collection, and overdue state | Deposit, reminder, collection, and deadline tests |
-| G2.9 Refunds, credits, and fee reversal | Implement policy-driven refund, noncash service credit, manager override, and proportional TideGrid fee reversal | Partial and full refund, retry, credit, and ledger tests |
-| G2.10 External payment and reconciliation | Add externally paid records, monthly fee assessment, dispute visibility, provider reconciliation, and control totals | Missing, duplicate, changed, and mismatched settlement tests |
-| G2.11 Guest booking management | Implement secure accountless access, receipts, participant invitations, profile changes, cancellation, and whole-booking rescheduling | End-to-end browser journeys and authorization tests |
-| G2.12 Operator console and roster | Implement calendar, search, booking detail, manual booking, roles, roster, notes, and basic reports | Staff journeys, role tests, printable roster, and CSV control totals |
-| G2.13 Standard migration | Implement mapping preview, deduplication, rehearsal, signed controls, final delta, and rollback criteria | Repeatable import and financial-count reconciliation |
-| G2.14 Branded PWA and hostname | Deliver brand configuration, tenant-safe custom-hostname resolution, deep links, support pages, and PWA installability | Two-brand browser, hostname, and tenant-boundary tests |
-| G3.1 Waiver evidence | Implement immutable templates, source-independent assignment, participant and guardian signing, hashes, signed PDFs, status, and reuse rules | Booking-source matrix, cross-participant, guardian, version, and evidence tests |
-| G3.2 Outbound transactional messaging | Implement branded email and SMS templates, consent evidence, delivery state, reminders, and email fallback | Consent, send, callback, failure, and fallback tests |
-| G3.3 SMS replies and opt-out | Implement dedicated-number routing, booking-scoped replies, ambiguous inbox, STOP, START, and HELP | Routing, authorization, opt-out, restart, and replay tests |
-| G3.4 Pooled equipment | Implement inventory pools, participant allocation, buffers, blocks, holds, and release | Concurrent last-unit and overlapping-window tests |
-| G3.5 Weather disruption and remedies | Implement weather evidence, freshness, authorized actions, frozen impact sets, one remedy, and notifications | Stale-data, authorization, retry, and one-remedy tests |
-| G3.6 Tips | Implement checkout and post-trip tips, exclusions, requests, refunds, and reporting | Timing, duplicate, fee-exclusion, and refund tests |
-| G3.7 Fixed-unit packages | Implement sale, append-only units, holds, redemption, restoration, expiration, and adjustment | Last-unit race, replay, restoration, and fee-timing tests |
-| G3.8 Cross-domain reporting | Complete revenue, occupancy, tax, tip, refund, package, fee, and reconciliation exports | Ledger-to-report and export control totals |
-| G4.1 Native shell and manifest | Implement the shared Expo shell, validated manifest, identity, assets, navigation, authentication, and branded tests | Two variants build and authenticate without source edits |
-| G4.2 Native guest journeys | Implement upcoming trips, booking management, balance payment, saved profiles, waiver completion and status, and package and credit balances | Device-level parity tests against the accepted PWA and API contracts |
-| G4.3 Native deep links, push, and privacy | Add tenant-safe links, push routing, account deletion, privacy manifests, and supported-version behavior | Device-level link, notification, deletion, and upgrade tests |
-| G4.4 iOS release factory | Generate iOS signing inputs, metadata, screenshots, privacy answers, signed artifacts, TestFlight upload, and release packet | One internally rehearsed, submission-ready iOS packet with immutable evidence |
-| G4.5 Android release factory | Generate Android signing inputs, metadata, screenshots, Data safety answers, signed artifacts, internal-track upload, and release packet | One internally rehearsed, submission-ready Android packet with immutable evidence |
-| G4.6 Second-brand reproduction | Reproduce both factories for another operator and isolate a failed tenant from the release train | Timing, touch-time, automated-pass, and failure-isolation evidence |
-| G4.7.`operator` Pilot operator readiness | Generate one pilot operator's migration rehearsal, configured applications, acceptance evidence, rollback plan, and support handoff | Complete internally approved packet for one pilot operator; no claim of operator or store approval |
-| G4.8 Engineering cohort gate | Compare the three completed pilot-operator packets, shared acceptance suite, delivery time, and unresolved cross-customer risks | Recorded go, change, or stop recommendation; no customer-specific implementation |
+The Gate column names the gate in [Gates](05-roadmap-validation.md#gates) that the goal feeds. The G2 series is Core live gate work and must be complete before an operator's first real booking. The G3 series is Staged Core module work; an operator may already be live while it is built, and each module is enabled per operator only after its own acceptance. The G4 series is Native pilot gate work and does not block the PWA or the Core live gate. The G0 series is pre-build evidence inside the Validation gate.
 
-G2.1 establishes the integration harness before parallel feature work begins. G2.7 proves only charge-to-confirmation; deposits, post-confirmation refunds, and monthly reconciliation remain separate. G4.4 and G4.5 stop at an internally rehearsed submission-ready state.
+| Goal | Gate | Outcome | Principal proof |
+|---|---|---|---|
+| G0.1 Domain and infrastructure spikes | Validation gate (feasibility spike) | Validate transaction seams, tenant manifest, hosting topology, and database connection behavior | Recorded spike results and accepted decisions; no production provisioning |
+| G0.2 Native factory dry run | Validation gate (feasibility spike) | Generate two branded development variants from one source without manual native edits | Reproducible manifests, builds, timing, and gap report |
+| G0.3 Pilot harness | Validation gate (feasibility spike) | Build the standard import prototype, deterministic provider fixtures, and acceptance-test skeleton | Stage 0 technical evidence; no live customer data |
+| G2.1 Workspace foundation | Core live gate | Establish the monorepo, pinned toolchain, contract generation, migration runner, environment configuration, and CI baseline | Clean bootstrap plus repeatable build, migration, and test commands |
+| G2.2 Tenant access and audit | Core live gate | Implement tenant identity, request context, roles, row-level security, and immutable audit records | Two-tenant escape tests and role-denial tests |
+| G2.3 Idempotent delivery foundation | Core live gate | Implement command idempotency, webhook inbox, transactional outbox, queue publication, retry, and DLQ evidence | Duplicate, out-of-order, crash, replay, and recovery tests |
+| G2.4 Catalog and schedule | Core live gate | Implement products, boats, departures, recurring schedules, blackouts, cutoffs, buffers, and sales states | Schedule-boundary and availability tests |
+| G2.5 Pricing, add-ons, fees, and policies | Core live gate | Implement ticket and charter prices, paid add-ons, taxes, mandatory fees, promotion codes, deposits, and versioned policies | Quote snapshot, add-on eligibility, tax, discount, and policy-version tests |
+| G2.6 Capacity and holds | Core live gate | Implement seat and exclusive-boat capacity, atomic holds, expiry, and confirmation transitions | Concurrent final-seat and whole-boat tests |
+| G2.7 Charge to confirmation | Core live gate | Implement immutable quote and order, Stripe direct charge, verified callbacks, booking confirmation, safe hold release, and late-success compensation | Success, failure, expiry, replay, and late-callback tests |
+| G2.8 Deposits and balances | Core live gate | Add one private-charter deposit, one balance deadline, reminders, staff collection, and overdue state | Deposit, reminder, collection, and deadline tests |
+| G2.9 Refunds, credits, and fee reversal | Core live gate | Implement policy-driven refund, noncash service credit, manager override, and proportional TideGrid fee reversal | Partial and full refund, retry, credit, and ledger tests |
+| G2.10 External payment and reconciliation | Core live gate | Add externally paid records, monthly fee assessment, dispute visibility, provider reconciliation, and control totals | Missing, duplicate, changed, and mismatched settlement tests |
+| G2.11 Guest booking management | Core live gate | Implement secure accountless access, receipts, participant invitations, profile changes, cancellation, and whole-booking rescheduling | End-to-end browser journeys and authorization tests |
+| G2.12 Operator console and roster | Core live gate | Implement calendar, search, booking detail, manual booking, roles, roster, notes, and basic reports | Staff journeys, role tests, printable roster, and CSV control totals |
+| G2.13 Standard migration | Core live gate | Implement mapping preview, deduplication, rehearsal, signed controls, final delta, and rollback criteria | Repeatable import and financial-count reconciliation |
+| G2.14 Branded PWA and hostname | Core live gate | Deliver brand configuration, tenant-safe custom-hostname resolution, deep links, support pages, and PWA installability | Two-brand browser, hostname, and tenant-boundary tests |
+| G2.15 Waiver evidence | Core live gate | Implement immutable templates, source-independent automatic assignment, email verification and participant matching, scoped QR and staff-assisted no-email entry, participant and guardian signing, hashes, signed PDFs, status, and reuse rules | Booking-source matrix, shared-email ambiguity, cross-participant and tenant denial, token replay/revocation, shared-device cleanup, guardian, version, and evidence tests |
+| G2.16 Transactional email and waiver delivery | Core live gate | Implement branded email templates, sender-domain authentication, automatic initial waiver delivery after booking, audited resend, delivery state, reminders, and delivery-failure exceptions | Confirmation/retry deduplication, corrected recipient, completion/cancellation races, migration suppression, delivery-failure, and silent-failure tests |
+| G3.1 Transactional SMS, replies, and opt-out | Staged Core module (transactional SMS and replies) | Implement dedicated Twilio senders, SMS templates, consent evidence, delivery callbacks, email fallback, dedicated-number routing, booking-scoped replies, ambiguous inbox, STOP, START, and HELP | Consent, callback replay, failure, fallback, routing, authorization, opt-out, restart, and replay tests |
+| G3.2 Pooled equipment | Staged Core module (pooled equipment) | Implement inventory pools, participant allocation, buffers, blocks, holds, and release | Concurrent last-unit and overlapping-window tests |
+| G3.3 Marine conditions, disruption and remedies | Staged Core module (marine conditions and operator-directed disruptions) | Implement wind/sea/swell evidence, provenance and freshness, separate Windy exploration, authorized actions, frozen impact sets, one remedy, and notifications | Missing components, units, observation/forecast separation, map failure and forecast horizon, stale-data, authorization, retry, and one-remedy tests |
+| G3.4 Tips | Staged Core module (tips) | Implement checkout and post-trip tips, exclusions, requests, refunds, and reporting | Timing, duplicate, fee-exclusion, and refund tests |
+| G3.5 Trip cards | Staged Core module (trip cards) | Implement trip-count and USD cards, sale, source lots, append-only balances, holds, partial redemption, original-tender restoration, expiration, and adjustment | Last-unit/cent races, customer and tenant isolation, mixed tender, cancellation credit/refund replay, restoration, and fee-provenance tests |
+| G3.6 Cross-domain reporting | Each Staged Core module for its own lines (the Core live gate exports ship in G2.12) | Extend the revenue, occupancy, tax, refund, fee, and reconciliation exports with tip, equipment, trip-card, and disruption lines | Ledger-to-report and export control totals |
+| G4.1 Native shell and manifest | Native pilot gate | Implement the shared Expo shell, validated manifest, identity, assets, navigation, authentication, and branded tests | Two variants build and authenticate without source edits |
+| G4.2 Native guest journeys | Native pilot gate | Implement upcoming trips, booking management, balance payment, saved profiles, waiver completion and status, and package and credit balances | Device-level parity tests against the accepted PWA and API contracts |
+| G4.3 Native deep links, push, and privacy | Native pilot gate | Add tenant-safe links, push routing, account deletion, privacy manifests, and supported-version behavior | Device-level link, notification, deletion, and upgrade tests |
+| G4.4 iOS release factory | Native pilot gate | Generate iOS signing inputs, metadata, screenshots, privacy answers, signed artifacts, TestFlight upload, and release packet | One internally rehearsed, submission-ready iOS packet with immutable evidence |
+| G4.5 Android release factory | Native pilot gate | Generate Android signing inputs, metadata, screenshots, Data safety answers, signed artifacts, internal-track upload, and release packet | One internally rehearsed, submission-ready Android packet with immutable evidence |
+| G4.6 Second-brand reproduction | Native pilot gate | Reproduce both factories for another operator and isolate a failed tenant from the release train | Timing, touch-time, automated-pass, and failure-isolation evidence |
+| G4.7.`operator` Pilot operator readiness | Core live gate for the migration rehearsal, acceptance evidence, rollback plan, and support handoff; Native pilot gate for the configured applications | Generate one pilot operator's migration rehearsal, configured applications, acceptance evidence, rollback plan, and support handoff | Complete internally approved packet for one pilot operator; no claim of operator or store approval |
+| G4.8 Engineering cohort gate | Commercial gate input (Stage 5 pilot cohort review) | Compare the three completed pilot-operator packets, shared acceptance suite, delivery time, and unresolved cross-customer risks | Recorded go, change, or stop recommendation; no customer-specific implementation |
+
+G2.1 establishes the integration harness before parallel feature work begins. G2.7 proves only charge-to-confirmation; deposits, post-confirmation refunds, and monthly reconciliation remain separate. G2.15 and G2.16 are Core live gate work because native waivers and transactional email are required before the first real booking; SMS templates, consent, callbacks, and replies belong to G3.1 and stay disabled for an operator until that module passes. G4.4 and G4.5 stop at an internally rehearsed submission-ready state.
 
 Human-controlled work uses separately authorized operational goals after the applicable engineering evidence exists:
 
@@ -75,6 +78,9 @@ Human-controlled work uses separately authorized operational goals after the app
 | O4.`operator`.2 Store submission | Prepare the final packets, support the operator's Apple submission, and submit Google only with recorded approval | Both authorized submission receipts are recorded; approval remains a store-controlled outcome |
 | O4.`operator`.3 Store review response | Monitor one review cycle and prepare the included correction or appeal with operator approval | The review decision and any authorized response are recorded; an unresolved external wait follows the goal blocked-status rule |
 | O5.`operator` Launch and stabilization | Perform an approved cutover, verify live surfaces, monitor reconciliation, and record support and cost | Live acceptance passes; an unresolved external dependency follows the goal blocked-status rule and retains recovery evidence |
+| O6.`operator` Native go-live | After both stores approve, verify the published store records, links, tenant identity, push, deep links, and production backend, then release the Native add-on for that operator | The Native pilot gate passes and the attended go-live evidence is recorded |
+
+The O5 cutover is gated by the Core live gate and may run before the O4 store goals; an operator can be live on the PWA while its apps wait for verification, submission, or review. O6 is gated by the Native pilot gate and never blocks O5. Each cutover or Native go-live starts its own 14-day stabilization window under the serialization rule in [Stage 5](05-roadmap-validation.md#stage-5-pilot-launches-and-review).
 
 These operational goals require explicit authority for provider changes, submissions, customer communication, or production deployment. An engineering goal cannot mark itself complete based on an unsigned operator approval, an unperformed store action, or an assumed future launch.
 
@@ -106,7 +112,7 @@ Record the intended model and reasoning effort in every agent assignment. Set bo
 | G2.2 tenancy, G2.3 delivery, G2.6 holds, G2.7 confirmation, G2.9 refunds, G2.10 reconciliation, G2.13 migration | Astra high owns the critical path; fresh Astra high reviews | Sol may develop adversarial scenarios; Terra may implement stable peripheral adapters |
 | G2.1 tooling and G2.4 catalog implementation against accepted contracts | Terra medium; Sol medium for complex integration | Route new UI design and authorization, schedule, or capacity invariants to Astra |
 | G2.11/G2.12 guest and operator UI, G2.14 brand presentation, and original UI across G3/G4 | Astra medium owns design, implementation, and visual refinement; high for complex interaction design | Terra may extend accepted components and screen patterns; API stability alone is insufficient for delegation |
-| G2.5 price/fee rules and G2.8 deposits; G3 waivers, consent/routing, equipment, remedies, tips, packages, and financial reports | Astra high for new invariants; Sol or Terra for accepted templates and views | Treat ledger, consent, evidence, and retry behavior as core work, even when the UI looks simple |
+| G2.5 price/fee rules, G2.8 deposits, G2.15 waivers, and G2.16 email delivery; G3 SMS consent/routing, equipment, remedies, tips, trip cards, and financial reports | Astra high for new invariants; Sol or Terra for accepted templates and views | Treat ledger, consent, evidence, and retry behavior as core work, even when the UI looks simple |
 | G4 native journeys and release factory | Astra medium for original native UI; Astra high for signing, tenant routing, privacy, recovery, and release integration | Sol or Terra may extend accepted UI patterns; mechanical assets and listings can use Luna; external actions retain their authorization boundaries |
 
 If a routine assignment discovers a contract change, security boundary, or repeated failure, stop dependent writes, preserve the reproduction, and route the problem to Astra. If Astra is unavailable, use Sol high with the same proof and review requirements and record the fallback. Model availability in this local environment does not establish access on another host, API project, or cloud task.
@@ -246,7 +252,7 @@ Every goal passes these gates in order:
 
 Money, capacity, equipment, packages, webhooks, and remedies require retry, replay, duplicate, concurrency, and partial-failure tests. Tenant-facing work requires at least two-tenant escape tests. Native work requires builds from manifests without source edits and device-level deep-link, push, account, privacy, and update checks. A build, upload, or green unit suite alone does not complete the goal.
 
-Fresh context separates the review from the implementation conversation; using the same model does not eliminate correlated mistakes. High-risk slices receive fresh Astra review plus executable adversarial evidence. Routine slices may use Sol review. The qualified external human review before first live use remains mandatory under the sole-owner rule. Recheck affected findings after fixes, and tie final review evidence to the final diff or SHA.
+Fresh context separates the review from the implementation conversation; using the same model does not eliminate correlated mistakes. High-risk slices receive fresh Astra review plus executable adversarial evidence. Routine slices may use Sol review. The qualified external human review before the first live use of each area remains mandatory under the sole-owner rule. Recheck affected findings after fixes, and tie final review evidence to the final diff or SHA.
 
 ## Failure and recovery
 
@@ -269,7 +275,7 @@ The user selects `gpt-6-astra` at high effort when creating the root task. A goa
 
 ```text
 Create a bounded Codex goal to implement TideGrid G2.7 Charge to confirmation
-with a token budget of <TOKEN_BUDGET>. The paid-validation gate has passed and
+with a token budget of <TOKEN_BUDGET>. The Validation gate has passed and
 the integration commit is <SHA>. The root task is already running on
 gpt-6-astra at high effort and standard speed.
 

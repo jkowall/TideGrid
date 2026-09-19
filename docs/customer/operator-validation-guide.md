@@ -1,7 +1,6 @@
 # TideGrid operator validation guide
 
 **Status:** Internal research guide, not customer-facing
-**Date:** September 4, 2026
 **Interview length:** 45 minutes
 
 ## Purpose
@@ -9,6 +8,8 @@
 Use this guide for the 12-operator validation round before TideGrid forms customer obligations or starts the production build. The interview must establish what the operator did, what it cost, and what it displaced before TideGrid shows a concept or discusses price.
 
 The interview is not a product demonstration, sales presentation, requirements session, or request for feature approval. A compliment, stated interest, or answer to "would you use this?" is not demand evidence.
+
+The [validation gate in the roadmap](../v2/05-roadmap-validation.md#validation-gate) is the canonical definition of the interview and paid-pilot sequence. This guide restates the criteria an interviewer applies so it stands on its own during fieldwork.
 
 ## Research objectives
 
@@ -164,9 +165,9 @@ Ask which category produced the most consequential recent exception and probe th
 - "Tell me about the most recent departure you watched, delayed, changed, or cancelled because of weather or another operator decision."
 - "Who made the decision, what evidence did they use, and how were affected customers, payments, and credits handled?"
 
-**Equipment, packages, or returning customers**
+**Equipment, trip cards, or returning customers**
 
-- "Tell me about the last time rental availability, a prepaid package, or a returning customer's history affected a booking."
+- "Tell me about the last time rental availability, a prepaid trip card (use the operator's own term for it), or a returning customer's history affected a booking."
 - "Where was the quantity or balance recorded, and did anyone have to correct it?"
 
 For each event, capture when it happened, frequency, people involved, systems touched, staff time, money affected, customer consequence, workaround, and whether the operator has already paid or tried to fix it.
@@ -175,7 +176,7 @@ For each event, capture when it happened, frequency, people involved, systems to
 
 Ask for the most recent complete trailing 12 months, or the most recent full operating season when the business has less history. Record the period and source for every number.
 
-- "Which booking, payment, waiver, messaging, equipment, accounting, package, and customer tools did you pay for or use during that period?"
+- "Which booking, payment, waiver, messaging, equipment, accounting, trip card, and customer tools did you pay for or use during that period?"
 - "What did each cost, including fixed fees, booking percentages, processing, texting, and staff or contractor work?"
 - "What was total eligible booking value for trips, charters, required fees, rentals, and paid add-ons, excluding taxes, tips, refunds, complimentary value, and promotional credit?"
 - "How many total bookings were completed? How many came through your direct website, phone, walk-up, or staff? How many came through each OTA?"
@@ -212,7 +213,7 @@ Use the dated brief to test comprehension and workflow fit rather than presentin
 
 Do not ask whether the participant likes the design or would use the product. Record confusion, task completion, missing evidence, and conflicts with real workflow. A request is not automatically a roadmap commitment.
 
-If a later interview uses a low-fidelity prototype, keep the same discovery-first order, record the prototype version, and distinguish observed interaction problems from reactions to the written concept. A prototype is not required for the first interviews.
+If a later interview uses a low-fidelity prototype, keep the same discovery-first order, record the prototype version, and distinguish observed interaction problems from reactions to the written concept. A prototype is not required for the first interviews. The prototype session script, split into an unmoderated guest journey and a separate moderated operator walkthrough, is in [the prototype README](../../prototypes/guest-flow/README.md).
 
 ### 0:39 to 0:43: Price reveal and commitment tests
 
@@ -254,7 +255,7 @@ Thank the participant and state only the agreed follow-up. Do not imply selectio
 
 ## Qualified-prospect commercial follow-up
 
-Conduct the separate 30-minute discussions only after all 12 initial interviews are complete, at least five operators meet the direct-first profile, and at least three provisionally Native-qualified prospects across two operator types accept the follow-up. Each participant's record must support the Native qualification criteria. The initial interview may secure agreement to this follow-up, but it does not include the commitment ask. Include the other financial or operational decision-maker when approval is shared.
+Conduct the separate 30-minute discussions only after all 12 initial interviews are complete, at least five operators meet the direct-first profile, and at least three provisionally Native-qualified prospects across two operator types accept the follow-up. The [validation gate](../v2/05-roadmap-validation.md#validation-gate) is the canonical statement of this sequence. Each participant's record must support the Native qualification criteria. The initial interview may secure agreement to this follow-up, but it does not include the commitment ask. Include the other financial or operational decision-maker when approval is shared.
 
 Before the meeting:
 
@@ -269,7 +270,7 @@ For a qualified prospect, ask whether the authorized buyer will provide a dated 
 
 ## Qualification rules
 
-Apply these rules after the interview. Do not bend them to count a promising conversation.
+Apply these rules after the interview. Do not bend them to count a promising conversation. The counts these rules feed are defined once in the [validation gate](../v2/05-roadmap-validation.md#validation-gate); if the two ever differ, the roadmap wins and this guide gets corrected.
 
 ### Direct-first discovery profile
 
@@ -326,7 +327,7 @@ Verbal enthusiasm, a survey checkbox, permission to follow up, a referral, a let
 | Gate fails | Fewer than five of 12 fit, fewer than three qualified written commitments result, or all three come from one operator type | Do not form customer obligations or start the production build; change the segment, scope, offer, or price and run a new declared test |
 | OTA dependency is systematic | Five otherwise qualified prospects are blocked by OTA dependency | Evaluate a one-way intake adapter before considering full channel management |
 
-Passing the interview gates does not authorize paid-pilot-readiness spending, customer contracts, deposits, provider production accounts, or the production build. Those require the funding, legal, insurance, account-readiness, and paid-contract gates in the V2 roadmap. The earlier bare-bones entity filing is administrative preparation and does not satisfy any of those gates.
+Passing the interview gates does not authorize paid-pilot-readiness spending, customer contracts, deposits, provider production accounts, or the production build. Those require the funding, legal, insurance, account-readiness, and paid-contract gates in the [V2 roadmap](../v2/05-roadmap-validation.md#gates). The earlier bare-bones entity filing is administrative preparation and does not satisfy any of those gates.
 
 ## Evidence grading
 
@@ -376,7 +377,7 @@ RECENT EXCEPTIONS
 Last change, cancellation, or refund:
 Last waiver issue:
 Last weather or operator disruption:
-Last equipment, package, or return-customer event:
+Last equipment, trip card, or return-customer event:
 Most consequential event and why:
 Workaround or attempted solution:
 Evidence grade and source for each:

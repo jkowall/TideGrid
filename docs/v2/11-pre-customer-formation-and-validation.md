@@ -1,7 +1,6 @@
 # TideGrid pre-customer formation and validation plan
 
 **Status:** Canonical near-term execution sequence; no filing, spending, outreach, or publication is authorized by this document
-**Date:** September 4, 2026
 
 ## Recommendation
 
@@ -122,12 +121,7 @@ Evaluate the gate only after all 12 are complete. Do not change the denominator 
 
 Authorize the bounded feasibility and cost spikes in the roadmap only when at least five of the 12 operators meet the direct-first profile and at least three provisionally Native-qualified prospects across two operator types accept a commercial follow-up. Then hold that separate meeting with each qualified Native prospect. Use the verified aggregate economics, disclose the full standard price before the pilot credit, and ask the authorized buyer for a written conditional commitment only after confirming the standard scope, fee base, pass-throughs, and store-account responsibilities.
 
-Across all 12 interviews, preserve the existing gates:
-
-- at least five prospects receive at least 80% of bookings through direct channels;
-- three qualified prospects across at least two operator types provide written conditional commitments for the Native pilot;
-- at least two of those three accept TideGrid's fee on TideGrid-managed bookings paid outside Stripe; and
-- the evidence supports the same standard configuration without a customer source fork.
+Across all 12 interviews, preserve the thresholds defined once in the roadmap [validation gate](05-roadmap-validation.md#validation-gate); do not move them in response to any single interview.
 
 Compliments, future-tense interest, feature requests, and willingness to join a mailing list do not count as demand evidence.
 
@@ -135,7 +129,7 @@ Compliments, future-tense interest, feature requests, and willingness to join a 
 
 ### Step 6: Fund and complete paid-pilot readiness
 
-Only after the interview gate supports continuing:
+Only after the interview thresholds of the [Validation gate](05-roadmap-validation.md#validation-gate) support continuing:
 
 - approve the bottom-up build and delivery budget, funding source, contingency, and refund or long-stop treatment;
 - obtain counsel-approved pilot contracts, privacy and guest terms, waiver-process allocation, payment responsibilities, SMS terms, support terms, and native-store responsibilities;

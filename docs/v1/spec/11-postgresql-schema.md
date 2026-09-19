@@ -4,7 +4,7 @@
 
 PostgreSQL 17 on Neon Scale in Azure East US 2 is the transactional authority. Cloudflare Hyperdrive provides transaction-mode connection pooling for runtime traffic. The MVP uses a cache-disabled Hyperdrive configuration so authorization, capacity, payment, stored-value, and read-after-write queries reach PostgreSQL. Migrations, logical backups, and operational repair use separate restricted roles through Neon’s direct, unpooled TLS endpoint because Hyperdrive is not a migration or lock-management plane.
 
-The executable baseline is [`database/schema.sql`](../../database/schema.sql). The [database implementation guide](../../database/README.md) defines migration order, transaction conventions, retry behavior, and concurrency validation.
+The executable baseline is [`database/schema.sql`](../../../database/schema.sql). The [database implementation guide](../../../database/README.md) defines migration order, transaction conventions, retry behavior, and concurrency validation.
 
 ## Schema map
 

@@ -1,6 +1,6 @@
 # Requirements traceability matrix
 
-**Status:** Historical V1 traceability. Its use of “canonical” applies only inside the preserved V1 package. Current scope and authority begin with the [V2 planning index](../v2/00-index.md).
+**Status:** Historical V1 traceability. Its use of “canonical” applies only inside the preserved V1 package. Current scope and authority begin with the [V2 planning index](../../v2/00-index.md).
 
 This matrix maps the supplied prompt to specification, delivery phase, executable surface, and validation. Functional ID ranges mean every individual requirement in that inclusive range inherits the mapping. Detailed wording is canonical in [section 5](05-functional-requirements.md).
 
@@ -8,7 +8,7 @@ This matrix maps the supplied prompt to specification, delivery phase, executabl
 
 | Requirement ID | Prompt requirement | Specification | Phase | Schema/API coverage | Validation |
 |---|---|---|---|---|---|
-| PRM-001 | Preserve supplied prompt verbatim | Source prompt, `README` | Package | `TIDEGRID_PLATFORM_ARCHITECTURE_PROMPT.md` | Byte comparison and SHA-256 |
+| PRM-001 | Preserve supplied prompt verbatim | Source prompt, `README` | Package | `docs/archive/TIDEGRID_PLATFORM_ARCHITECTURE_PROMPT.md` | Byte comparison and SHA-256 |
 | PRM-002 | US-first assumptions and current primary research | 1, 2, 16, 21; source register | 0 | Provider ports and policy metadata | Dated primary-link check, legal review |
 | PRM-003 | TideGrid canonical; theme board unchanged; superseded Tideline Grid copy | 00, 1, 21 | 0/GA | No runtime dependency | File-diff and launch gate |
 | PRM-004 | Original 1% assumption superseded by approved 0.75% to 3.00% plan rates; fee still assessed once on eligible non-tax/non-tip TideGrid value | 1, 4, 5, 7, 11; pricing strategy | 1 | `orders`, `order_lines`, `platform_fees`, refund API | Per-plan fee, order/fee snapshot, property, and reconciliation tests |
@@ -67,8 +67,8 @@ This matrix maps the supplied prompt to specification, delivery phase, executabl
 | REL-001 | Required SLOs and RTO/RPO | 17 | 0+ | SLI table and dashboards | Synthetic tests and error-budget review |
 | REL-002 | Logs, traces, metrics, alerts, reconciliation and provider health | 17 | 0+ | Telemetry catalog | Observability acceptance and alert drills |
 | TST-001 | Complete unit/integration/concurrency/security/offline test set | 18 | 0+ | Test matrix | CI reports and release evidence |
-| ADR-001..020 | Nineteen prompt-required decisions plus the Neon provider decision | 9 and `docs/adr` | Package/0 | 20 accepted ADR files | File count and required-heading check |
-| DIA-001..015 | Fifteen required Mermaid diagrams | 10 and `docs/diagrams` | Package | 15 `.mmd` files | Mermaid parse |
+| ADR-001..020 | Nineteen prompt-required decisions plus the Neon provider decision | 9 and `docs/v1/adr` | Package/0 | 20 accepted ADR files | File count and required-heading check |
+| DIA-001..015 | Fifteen required Mermaid diagrams | 10 and `docs/v1/diagrams` | Package | 15 `.mmd` files | Mermaid parse |
 | DB-001 | Production PostgreSQL DDL, constraints, indexes, RLS, transactions | 11 and `database` | Package/0 | `schema.sql` and guide | Clean PG17 apply and catalog assertions |
 | RSK-001..036 | Every named risk with seven required attributes | 19 | All | Risk table | Row/column completeness check |
 | RDM-001 | MVP, post-MVP, non-goals and phased roadmap | 4, 20 | All | Scope matrix and exit gates | Product/architecture gate review |

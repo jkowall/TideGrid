@@ -1,6 +1,6 @@
 # 12. API design
 
-The normative contract is [`api/openapi.yaml`](../../api/openapi.yaml). It uses OpenAPI 3.0.3 so the same document can feed Hono validation, SDK generation, contract tests, documentation, and Cloudflare API Shield schema validation.
+The normative contract is [`api/openapi.yaml`](../../../api/openapi.yaml). It uses OpenAPI 3.0.3 so the same document can feed Hono validation, SDK generation, contract tests, documentation, and Cloudflare API Shield schema validation.
 
 ## Conventions
 

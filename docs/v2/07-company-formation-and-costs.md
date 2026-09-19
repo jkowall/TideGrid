@@ -2,8 +2,6 @@
 
 **Status:** Execution plan; bare-bones formation precedes outreach, but no filing or spend is authorized by this document
 
-**Date:** September 4, 2026
-
 **Jurisdiction:** Florida operating base; United States first
 
 TideGrid remains exploratory. This document is planning guidance, not legal, tax, accounting, insurance, or trademark advice. It does not authorize a filing, purchase, account opening, professional engagement, or public launch.
@@ -21,7 +19,7 @@ Form the bare-bones entity before the next operator-validation outreach, after a
 - the owner accepts the $125 required state filing, public-record exposure, annual-report obligation, and the possible registered-agent and local-registration costs; and
 - the required Pompano Beach and Broward registration path has been confirmed or a written timing decision is recorded.
 
-Full legal, tax, insurance, contract, payment, messaging, continuity, production-account, and build-budget readiness is not required merely to file. The bare-bones company may conduct validation but may not sign customer contracts, accept pilot payments, store production customer data, open production provider accounts, or submit a production native app. After the interview and conditional-demand gates pass, complete the separate paid-pilot readiness gate below. The production-build gate still requires three executed recurring agreements and three settled $2,250 setup payments.
+Full legal, tax, insurance, contract, payment, messaging, continuity, production-account, and build-budget readiness is not required merely to file. The bare-bones company may conduct validation but may not sign customer contracts, accept pilot payments, store production customer data, open production provider accounts, or submit a production native app. The interview, conditional-demand, paid-pilot readiness, and production-build sequence is defined once in the roadmap [gates](05-roadmap-validation.md#gates); the paid-pilot readiness exit gate below lists only the formation and readiness evidence.
 
 ## Florida LLC execution checklist
 
@@ -160,7 +158,7 @@ Do not use a paid EIN site. Do not let an incorporation service choose the entit
 - no receipt, custody, or commingling of operator booking funds; and
 - monthly reconciliation of subscriptions, managed-booking fees, setup revenue, credits, pass-through charges, processor settlements, and the pilot-customer subsidy ledger.
 
-Stripe direct charges should place guest payments on each operator's connected account. The operator remains merchant of record and is responsible to guests for refunds and disputes. For the pilot, Stripe must set and collect processing fees and accept connected-account negative-balance loss through `defaults.responsibilities.fees_collector = stripe` and `defaults.responsibilities.losses_collector = stripe`, or a written Managed Risk equivalent. TideGrid invoices its own subscription and managed-booking fee separately. Require Stripe confirmation before signing the pilot contracts because merchant-of-record status alone does not assign unrecoverable loss. See [Stripe's SaaS platform guidance](https://docs.stripe.com/connect/saas-platforms-and-marketplaces), [connected-account configuration](https://docs.stripe.com/connect/accounts-v2/connected-account-configuration), [Managed Risk](https://docs.stripe.com/connect/risk-management/managed-risk), and [direct-charge documentation](https://docs.stripe.com/connect/direct-charges).
+The Stripe connected-account responsibility configuration that pilot contracts require, and the confirmation Stripe must give before signing, are defined in [Payment economics](03-commercial-model.md#payment-economics).
 
 ## Public website and domain topology
 
@@ -224,4 +222,4 @@ Paid-pilot readiness is complete only after the interview and conditional-demand
 - each prospective pilot operator's entity, account, store, domain, content, and Stripe prerequisites are verified; and
 - the sole owner or properly activated emergency custodian can produce the current costs, contracts, provider owners, customer-export procedure, and safe-shutdown procedure without relying on a personal inbox or undocumented account.
 
-Only after the paid-pilot-readiness gate may TideGrid execute the pilot agreements and accept the three setup payments. Only after all three agreements are signed and all three payments settle may the full production build begin.
+Only after the paid-pilot-readiness gate may TideGrid execute the pilot agreements and accept the setup payments; the commercial conditions for starting the full production build are in the roadmap [gates](05-roadmap-validation.md#gates).

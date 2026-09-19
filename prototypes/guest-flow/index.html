@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Saltline Charters · Guest booking prototype</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="operator.css">
+  <link rel="stylesheet" href="weather.css">
+  <link rel="stylesheet" href="trip-cards.css">
+  <script src="domain.js" defer></script>
+  <script src="waiver.js" defer></script>
+  <script src="weather.js" defer></script>
+  <script src="trip-cards.js" defer></script>
+  <script src="operator.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to trips</a>
+  <div class="demo-banner">Interactive prototype · no real booking, payment, email or legal signature</div>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="Saltline Charters, start over"><span class="brand-mark" aria-hidden="true">≈</span><span>SALTLINE<small>CHARTERS</small></span></a>
+    <nav class="workspace-nav" aria-label="Prototype workspace"><button type="button" data-workspace="guest" aria-pressed="true">Guest booking</button><button type="button" data-workspace="operator" aria-pressed="false">Operator view</button></nav>
+    <button class="text-button" id="reset" type="button">Reset demo</button>
+  </header>
+  <main id="main" tabindex="-1"></main>
+  <footer><span>Saltline Charters · A TideGrid concept</span><span>Use fictional details. Inputs stay in this page and clear on refresh or reset.</span></footer>
+  <noscript><p class="notice">Enable JavaScript to try this interactive sample.</p></noscript>
+</body>
+</html>

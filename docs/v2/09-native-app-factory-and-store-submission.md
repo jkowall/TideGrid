@@ -2,9 +2,7 @@
 
 **Status:** Canonical native delivery and store-operations plan
 
-**Date:** September 4, 2026
-
-This document defines how TideGrid would build, submit, maintain, and retire one branded iOS and Android application pair per operator brand. It supplements the product scope and target architecture. It is not evidence that store approval, customer demand, or delivery economics have been validated.
+This document defines how TideGrid would build, submit, maintain, and retire one branded iOS and Android application pair per operator brand. It supplements the product scope and target architecture. It is not evidence that store approval, customer demand, or delivery economics have been validated. Public store approval of an operator's app pair is one condition of the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate) for that operator, together with push, deep links, and the native guest journeys passing in production. That gate controls when the Native add-on goes live and does not block the operator's PWA or Core live gate.
 
 ## Feasibility decision
 
@@ -43,17 +41,17 @@ TideGrid will use the following conservative operating rule until Apple gives wr
 
 Automation must stop at `READY_FOR_OPERATOR_SUBMISSION` on Apple. A release credential must not silently cross that state.
 
-The application must demonstrate durable native value through upcoming trips, booking management, saved guest profiles, waiver status, package balances, secure deep links, and push notifications. A thin WebView of the PWA is not the native product.
+The application must demonstrate durable native value through upcoming trips, booking management, saved guest profiles, waiver status, trip-card balances, secure deep links, and push notifications. A thin WebView of the PWA is not the native product.
 
 ### Google
 
 Google's [white-label guidance](https://support.google.com/googleplay/android-developer/answer/15884185) recommends decentralized account management. Each operator owns a separate Play Console account and may grant TideGrid managed administrative access. This isolates account enforcement and lets the operator publish under its own developer identity.
 
-TideGrid may automate Google Play preparation and submission after the operator records approval. Each listing must use operator-specific descriptions, icons, graphics, screenshots, support information, and actual content. Metadata or screenshots reused across operators without meaningful changes fail the TideGrid release gate even if the console accepts them.
+TideGrid may automate Google Play preparation and submission after the operator records approval. Each listing must use operator-specific descriptions, icons, graphics, screenshots, support information, and actual content. Metadata or screenshots reused across operators without meaningful changes fail TideGrid's release checklist for the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate) even if the console accepts them.
 
 ### Physical-service payments
 
-Trip, charter, equipment, package, and tip payments buy physical services consumed outside the application. Apple [requires a method other than In-App Purchase for those purchases](https://developer.apple.com/app-store/review/guidelines/), and Google says [Play Billing must not be used for physical services](https://support.google.com/googleplay/android-developer/answer/9858738).
+Trip, charter, equipment, trip-card, and tip payments buy physical services consumed outside the application. Apple [requires a method other than In-App Purchase for those purchases](https://developer.apple.com/app-store/review/guidelines/), and Google says [Play Billing must not be used for physical services](https://support.google.com/googleplay/android-developer/answer/9858738).
 
 The review notes for every app must explain this model. The native client uses the approved Stripe payment flow for the operator's real-world service. TideGrid does not sell digital application functionality to guests.
 
@@ -99,7 +97,7 @@ Over-the-air JavaScript updates may fix behavior already represented in the appr
 
 ### Solo release authority and launch capacity
 
-TideGrid serializes the pilot's human-controlled launch work. Across the pilot cohort, only one operator may be in initial configuration, operator acceptance testing, an active store-review response, or production cutover at a time. Automated validation and artifact generation may run for other operators when they do not require a production decision.
+TideGrid serializes the pilot's human-controlled launch work. Across the pilot cohort, only one operator may be in initial configuration, operator acceptance testing, an active store-review response, production cutover, or Native go-live at a time; the rule is stated once in [Stage 5](05-roadmap-validation.md#stage-5-pilot-launches-and-review). Automated validation and artifact generation may run for other operators when they do not require a production decision.
 
 The sole TideGrid owner and the operator's authorized representative retain human release authority. Agents and automated workflows may prepare, validate, build, test, upload drafts, and collect evidence. They cannot approve content or a release candidate, send a store-review response, submit a production release, schedule publication, or authorize cutover without the required recorded human decisions. For Google, automation may submit the exact approved candidate only after the operator approves it and the TideGrid owner releases the job. For Apple, automation stops at `READY_FOR_OPERATOR_SUBMISSION`, and the operator's Account Holder or App Manager performs the final App Review submission.
 
@@ -318,7 +316,7 @@ Every app has a disclosed, isolated reviewer mode or synthetic reviewer tenant w
 - reusable credentials that do not depend on a one-time password, location, or expiring link;
 - no real customer, payment, waiver, or message data;
 - seeded upcoming and past trips;
-- a booking, participant invitation, waiver, package balance, cancellation, refund status, tip, and deletion example;
+- a booking, participant invitation, waiver, trip-card balance, cancellation, refund status, tip, and deletion example;
 - a no-charge booking or documented sandboxed payment demonstration that cannot charge a real card;
 - clear instructions for every restricted feature; and
 - an operator and TideGrid review contact available during the submission window.
@@ -351,7 +349,7 @@ An App Store Connect build is the release authority for Apple. An exported `.ipa
 - manifest-schema and all-tenant configuration validation;
 - operator-specific branded smoke test;
 - screenshot visual comparison and accessibility checks;
-- real-device authentication, account deletion, deep-link, push, payment, waiver, and package tests;
+- real-device authentication, account deletion, deep-link, push, payment, waiver, and trip-card tests;
 - `apple-app-site-association` and `assetlinks.json` verification;
 - TestFlight and Google internal-track installation evidence;
 - operator acceptance with approver and timestamp;
@@ -401,7 +399,7 @@ Only the operator can move an Apple release from `READY_FOR_OPERATOR_SUBMISSION`
 13. TideGrid prepares both submissions. The operator approves both and performs the final Apple review submission.
 14. Monitor review messages. The operator answers publisher, rights, and business questions; TideGrid answers technical questions.
 15. If rejected, classify the issue before changing anything. Use the included review-response cycle only for a correction or appeal within standard scope.
-16. After both stores approve, schedule a staffed production launch, run the migration cutover, and verify store, PWA, API, payment, message, and push health.
+16. After both stores approve, schedule an attended Native go-live for that operator and verify store, PWA, API, payment, message, and push health. The operator's migration cutover and first live bookings belong to its Core live gate and may already be complete; store approval does not block them, and an operator that has not yet cut over still waits for its Core live gate rather than for the stores.
 17. Record customer-specific hours, direct costs, review duration, exceptions, and first-day results.
 
 Store submission is not proof of approval. Store approval is not proof of release. Release is not proof that the correct production version, tenant, links, and backend are healthy.
@@ -465,7 +463,7 @@ The initial operating assumption is one shared native train every eight weeks, p
 
 The API supports a documented native compatibility window. A native application outside that window receives a clear upgrade requirement and a PWA route where possible. An old client must never bypass current price, waiver, authorization, or payment rules.
 
-As of this document's date, Apple requires uploads to use [Xcode 26 and the iOS 26 SDK](https://developer.apple.com/news/upcoming-requirements/), and Google requires new apps and updates to target [Android 16, API level 36](https://support.google.com/googleplay/android-developer/answer/11926878). These requirements change. The pipeline checks current store requirements before every train instead of treating the recorded versions as permanent.
+As of September 2026, Apple requires uploads to use [Xcode 26 and the iOS 26 SDK](https://developer.apple.com/news/upcoming-requirements/), and Google requires new apps and updates to target [Android 16, API level 36](https://support.google.com/googleplay/android-developer/answer/11926878). These requirements change. The pipeline checks current store requirements before every train instead of treating the recorded versions as permanent.
 
 ## Security fixes and operational support
 
@@ -503,7 +501,7 @@ The contract and runbook must define whether the operator will unpublish, keep t
 
 At offboarding TideGrid will:
 
-1. export contractually required customer, booking, financial, waiver, package, and configuration data;
+1. export contractually required customer, booking, financial, waiver, trip-card, and configuration data;
 2. archive the manifest, metadata, public signing fingerprints, store history, review correspondence, and last supported release record;
 3. disable new bookings at the agreed cutover and give installed applications an explicit service-state response;
 4. revoke TideGrid users, API keys, APNs keys, upload credentials, Firebase access, and CI access;
@@ -566,6 +564,8 @@ At 85 Native operators, one shared version still creates 170 store-specific subm
 
 ## Acceptance gates
 
+This list is the operator-level checklist for the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate). It gates the Native add-on going live for that operator. It does not block the Core live gate or the PWA, and an operator may already be live on the PWA while its apps are in review.
+
 An operator application pair is ready for production only when:
 
 - both binaries build from one clean shared-source revision without operator code changes;
@@ -579,7 +579,7 @@ An operator application pair is ready for production only when:
 - the reviewer account exposes every in-scope feature without real customer data or expiring credentials;
 - physical-service payment treatment is explained in both review packets;
 - TestFlight and Play internal installations pass on supported physical devices;
-- deep links, push, authentication, account deletion, payment, waiver, package, and version compatibility pass;
+- deep links, push, authentication, account deletion, payment, waiver, trip-card, and version compatibility pass;
 - the operator records acceptance and performs the final Apple submission;
 - both stores approve public distribution; and
 - production verification confirms the correct operator, version, links, and backend.

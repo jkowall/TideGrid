@@ -1,0 +1,14 @@
+{
+  "name": "tidegrid",
+  "private": true,
+  "description": "TideGrid planning package and guest workflow prototype",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test prototypes/guest-flow/*.test.cjs",
+    "check": "node --check prototypes/guest-flow/app.js && node --check prototypes/guest-flow/domain.js && node --check prototypes/guest-flow/waiver.js && node --check prototypes/guest-flow/operator.js && node --check prototypes/guest-flow/weather.js && node --check prototypes/guest-flow/trip-cards.js && node scripts/check-links.cjs",
+    "deploy:demo:dry": "npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc --dry-run",
+    "deploy:demo": "npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc"
+  }
+}

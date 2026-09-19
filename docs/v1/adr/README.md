@@ -1,6 +1,6 @@
 # Architecture decision records
 
-**Status:** V1 decision history. The [V2 decision register](../v2/06-decision-register.md) retains, modifies, defers, or supersedes each ADR for current planning. An `Accepted` status below describes acceptance inside V1, not automatic authority over V2.
+**Status:** V1 decision history. The [V2 decision register](../../v2/06-decision-register.md) retains, modifies, defers, or supersedes each ADR for current planning. An `Accepted` status below describes acceptance inside V1, not automatic authority over V2.
 
 | ADR | Status | Topic |
 |---|---|---|

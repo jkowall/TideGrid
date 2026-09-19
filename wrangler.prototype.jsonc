@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/wrangler@4.125.0/config-schema.json",
+  "name": "tidegrid-prototype",
+  "account_id": "9fe896cf9fa5b827ab222f5f9471c44e",
+  "compatibility_date": "2026-09-10",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./prototypes/guest-flow",
+    "not_found_handling": "none"
+  },
+  "routes": [
+    { "pattern": "demo.tidegrid.us", "custom_domain": true }
+  ]
+}

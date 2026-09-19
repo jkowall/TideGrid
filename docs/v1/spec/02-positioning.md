@@ -52,4 +52,4 @@ TideGrid coordinates information and workflows. It does not navigate a vessel, c
 4. Run a weather cancellation with partial-party rebooking and refunds.
 5. Reconcile the charge, snapshotted plan application fee, refund, tip, and payout.
 
-Marketing claims must link to tested product behavior. Current competitor evidence is recorded in the [source register](../../research/source-register.md), and the commercial baseline is defined in the [pricing strategy](pricing-strategy.md).
+Marketing claims must link to tested product behavior. Current competitor evidence is recorded in the [source register](../../../research/source-register.md), and the commercial baseline is defined in the [pricing strategy](pricing-strategy.md).

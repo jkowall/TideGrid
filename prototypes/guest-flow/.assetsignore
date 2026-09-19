@@ -1,0 +1,13 @@
+# Publish only the runtime files; keep tests and documentation out of the demo.
+*
+!index.html
+!app.js
+!domain.js
+!waiver.js
+!operator.js
+!weather.js
+!trip-cards.js
+!styles.css
+!operator.css
+!weather.css
+!trip-cards.css

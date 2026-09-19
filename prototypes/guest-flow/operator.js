@@ -1,0 +1,224 @@
+'use strict';
+
+// An in-memory operator workspace. Every booking, payment and waiver request is a sample.
+const OperatorView = (() => {
+  const D = TideGrid;
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+  const defaultLinks = () => [{ id: 'license', label: 'Florida saltwater fishing licenses', url: 'https://myfwc.com/license/recreational/saltwater-fishing/' }];
+  const resendLimit = typeof WaiverFlow === 'undefined' ? 3 : WaiverFlow.resendLimit;
+  let day = D.defaultDay;
+  let selectedId = '';
+  let links = defaultLinks();
+  let notices = {};
+  let drafts = {};
+  let editingLink = null;
+  let expanded = new Set();
+  let message = '';
+  let sequence = 0;
+  let active = null;
+  let view = 'sailings';
+  let linkDraft = null;
+  const views = [['sailings', 'Sailings'], ['roster', 'Roster'], ['marine', 'Marine conditions'], ['cards', 'Trip cards'], ['tools', 'Guest tools']];
+  const shortDate = date => D.dateLabel(date, { weekday: 'short', month: 'short', day: 'numeric' });
+  const statusLabel = status => status === 'signed' ? 'Signed · demo' : status === 'awaiting-signature' ? 'Awaiting signature' : 'Needs details';
+  const validDay = value => /^\d{4}-\d{2}-\d{2}$/.test(String(value)) && D.months.includes(String(value).slice(0, 7)) && value >= D.bounds.start && value <= D.bounds.end;
+  function sampleBookings(item) {
+    const trip = D.experience(item.experienceId);
+    const count = trip.max - item.remaining;
+    const names = ['Avery Sample', 'Morgan Sample', 'Jordan Sample', 'Riley Sample', 'Casey Sample', 'Quinn Sample', 'Taylor Sample', 'Drew Sample', 'Alex Sample', 'Jamie Sample', 'Robin Sample', 'Sam Sample'];
+    const rows = [];
+    const groupSize = trip.type === 'private' ? trip.max : 2;
+    for (let index = 0; index < count; index += groupSize) {
+      const participants = names.slice(index, Math.min(index + groupSize, count)).map((name, offset) => {
+        const status = index + offset < Math.ceil(count * .65) ? 'signed' : index + offset === count - 1 ? 'needs-details' : 'awaiting-signature';
+        return { id: `p-${index + offset}`, name: status === 'needs-details' ? '' : name, status };
+      });
+      const subtotal = trip.price * (trip.type === 'private' ? 1 : participants.length);
+      rows.push({ id: `DEMO-${String(index / 2 + 1).padStart(3, '0')}`, key: `${item.id}-${index}`, name: names[index], email: `sample${index + 1}@example.com`, participants, party: participants.length, total: subtotal + 1000 + Math.round((subtotal + 1000) * .06), seeded: true });
+    }
+    return rows;
+  }
+  function bookings(item) {
+    const rows = sampleBookings(item);
+    if (active?.departureId === item.id) rows.unshift({ ...active, key: `active-${active.key || active.departureId}`, seeded: false });
+    return rows;
+  }
+  const people = item => bookings(item).flatMap(booking => booking.participants);
+  function stats(items) {
+    const participants = items.flatMap(people);
+    const count = status => participants.filter(person => person.status === status).length;
+    return { guests: participants.length, signed: count('signed'), awaiting: count('awaiting-signature'), missing: count('needs-details'), pending: participants.length - count('signed'), total: items.flatMap(bookings).reduce((sum, booking) => sum + Number(booking.total || 0), 0) };
+  }
+  const waiverStatus = counts => counts.pending ? `${counts.pending} ${counts.pending === 1 ? 'waiver' : 'waivers'} pending` : counts.guests ? 'Waivers complete' : 'No bookings';
+  function departureCard(item) {
+    const trip = D.experience(item.experienceId);
+    const counts = stats([item]);
+    const remaining = Math.max(0, trip.max - counts.guests);
+    const weather = typeof WeatherOps === 'undefined' ? {} : WeatherOps.status(item.id);
+    const label = [`${D.timeLabel(item.time)}, ${trip.name}, ${trip.boat}, ${counts.guests} of ${trip.max} guests, ${waiverStatus(counts)}`, weather.watch ? 'marine watch' : '', weather.proposal ? `${weather.proposal === 'delay' ? 'delay' : 'cancellation'} proposal pending` : ''].filter(Boolean).join(', ');
+    return `<button type="button" class="op-departure ${selectedId === item.id ? 'is-selected' : ''}" data-op-departure="${esc(item.id)}" aria-pressed="${selectedId === item.id}" aria-label="${esc(label)}">
+      <span class="op-trip-time">${D.timeLabel(item.time)}<small>${D.zoneLabel(item.date)} · ${trip.duration}</small></span>
+      <span class="op-trip-name"><strong>${esc(trip.name)}</strong><small>${esc(trip.boat)} · ${trip.type === 'private' ? 'Private charter' : 'Shared trip'}</small></span>
+      <span class="op-trip-capacity"><strong>${counts.guests} / ${trip.max} guests</strong><meter min="0" max="${trip.max}" value="${counts.guests}" aria-hidden="true"></meter><small>${trip.type === 'private' ? counts.guests ? 'Boat assigned · sample' : 'Whole boat available' : remaining ? `${remaining} seats available` : 'Full departure'}</small></span>
+      <span class="op-trip-status"><span class="op-pill ${counts.pending ? 'op-pill-amber' : ''}">${waiverStatus(counts)}</span>${weather.watch ? '<span class="op-pill op-pill-amber">Marine watch</span>' : ''}${weather.proposal ? `<small>${weather.proposal === 'delay' ? 'Delay' : 'Cancellation'} proposal · pending</small>` : ''}</span>
+      <span class="op-row-arrow" aria-hidden="true">↗</span>
+    </button>`;
+  }
+  function bookingCard(booking) {
+    const signed = booking.participants.filter(person => person.status === 'signed').length;
+    const isExpanded = expanded.has(booking.key);
+    return `<article class="op-booking ${booking.seeded ? '' : 'op-booking-active'}"><div class="op-booking-top"><div><p class="op-kicker">${booking.seeded ? 'Fictional seeded booking' : 'Your prototype booking'} · ${esc(booking.id)}</p><h3>${esc(booking.name)}</h3><p>${booking.participants.length} guests · ${signed}/${booking.participants.length} waivers signed</p></div><div class="op-booking-money"><strong>${D.money(Number(booking.total || 0))}</strong><span>Payment simulated</span></div></div>
+      <ul class="op-participants">${booking.participants.map(person => {
+        const name = person.name || 'Guest not yet identified';
+        const canResend = !booking.seeded && person.status === 'awaiting-signature';
+        const resends = Math.max(0, Number(person.deliveries || 1) - 1);
+        const atLimit = resends >= resendLimit;
+        // At the limit the button is disabled and the status span takes focus after the last resend, so focus is not lost.
+        const status = `<span class="op-person-status ${person.status === 'signed' ? 'op-person-signed' : ''}" ${canResend && atLimit ? `data-op-resend-limit="${esc(person.id)}" tabindex="-1"` : ''}>${statusLabel(person.status)}${canResend && resends ? ` · re-sent ${resends} of ${resendLimit}` : ''}</span>`;
+        const action = canResend ? `<button type="button" class="text-button" data-op-resend="${esc(person.id)}" aria-label="${atLimit ? `Resend limit reached for ${esc(name)}` : `Resend request to ${esc(name)}`}" ${atLimit ? 'disabled' : ''}>${atLimit ? 'Resend limit reached' : 'Resend request'}</button>` : '';
+        return `<li><div><strong>${esc(name)}</strong>${status}</div>${action}</li>`;
+      }).join('')}</ul>
+      <div class="op-booking-actions">${!booking.seeded ? `<button type="button" class="text-button" data-op-open-booking>${signed < booking.participants.length ? 'Open guest booking' : 'View guest booking'} →</button>` : `<button type="button" class="text-button" data-op-preview="${esc(booking.key)}" aria-expanded="${isExpanded}">${isExpanded ? 'Hide' : 'Preview'} sample booking details</button>`}</div>
+      ${isExpanded && booking.seeded ? `<div class="op-sample-detail"><strong>Booking preview</strong><p>Booker: ${esc(booking.name)} · ${esc(booking.email)}</p><p>Full payment is simulated. Pending waivers show where an operator would follow up; this sample does not contact anyone.</p></div>` : ''}</article>`;
+  }
+  function roster(item) {
+    if (!item) return '<section class="op-panel"><h2>No departures scheduled</h2><p class="op-muted">Pick a sailing day to explore the sample roster.</p></section>';
+    const trip = D.experience(item.experienceId);
+    const rows = bookings(item);
+    const counts = stats([item]);
+    return `<section class="op-panel op-roster" aria-labelledby="op-roster-title"><div class="op-section-heading"><div><p class="op-kicker">Selected sailing</p><h2 id="op-roster-title">Departure roster</h2><p><strong>${esc(trip.name)}</strong> · ${shortDate(item.date)} · ${D.timeLabel(item.time)} ${D.zoneLabel(item.date)} · ${esc(trip.boat)}</p></div><span class="op-pill">${counts.guests} guests</span></div>
+      <div class="op-roster-summary"><span><strong>${counts.signed}</strong> signed</span><span><strong>${counts.awaiting}</strong> awaiting signature</span><span><strong>${counts.missing}</strong> needs details</span><span><strong>${D.arrivalTime(item)}</strong> sample arrival</span></div>
+      ${rows.length ? rows.map(bookingCard).join('') : '<div class="op-empty"><span aria-hidden="true">≈</span><h3>A little room for possibility.</h3><p>No sample bookings on this departure. Make a guest booking to see it appear here.</p><button type="button" class="secondary" data-op-guest>Explore guest booking →</button></div>'}
+      <p class="op-footnote">This roster is a booking-management view. It is not a manifest, check-in record, or boarding record.</p>
+    </section>`;
+  }
+  function noticeEditor(item) {
+    if (!item) return '';
+    const value = drafts[item.id] ?? notices[item.id] ?? '';
+    return `<section class="op-panel"><h2>Trip notice</h2><p class="op-muted">Shown on this departure’s guest arrival screen.</p><form id="op-notice-form"><label class="field-label" for="op-notice">Arrival note</label><textarea id="op-notice" maxlength="600" rows="4" placeholder="Meet beside the blue sign at the sample marina.">${esc(value)}</textarea><div class="op-form-actions"><button class="primary" type="submit">Save local notice</button>${notices[item.id] ? '<button class="text-button" type="button" data-op-clear-notice>Remove notice</button>' : ''}</div></form>${notices[item.id] ? `<div class="op-saved-note"><strong>Current guest notice</strong><p>${esc(notices[item.id])}</p></div>` : ''}</section>`;
+  }
+  function linksEditor() {
+    const editing = links.find(link => link.id === editingLink);
+    const values = linkDraft || editing || {};
+    return `<section class="op-panel"><h2>Important links</h2><p class="op-muted">Shown on every guest’s ready screen.</p><ul class="op-resource-list">${links.map(link => `<li><div><a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer">${esc(link.label)} ↗</a><span>${esc(new URL(link.url).hostname)}</span></div><div class="op-link-actions"><button class="text-button" type="button" data-op-edit-link="${esc(link.id)}" aria-label="Edit ${esc(link.label)}">Edit</button><button class="text-button" type="button" data-op-remove-link="${esc(link.id)}" aria-label="Remove ${esc(link.label)}">Remove</button></div></li>`).join('') || '<li class="op-muted">No links yet.</li>'}</ul><form id="op-link-form"><h3>${editing ? 'Edit link' : 'Add link'}</h3><label class="field-label" for="op-link-label">Link label</label><input id="op-link-label" name="label" type="text" required maxlength="80" value="${esc(values.label || '')}" placeholder="What guests should know"><label class="field-label" for="op-link-url">Website URL</label><input id="op-link-url" name="url" type="url" required maxlength="1000" value="${esc(values.url || '')}" placeholder="https://example.com/guest-info" aria-describedby="op-link-hint"><p id="op-link-hint" class="op-footnote">Use a full https:// address.</p><div class="op-form-actions"><button class="secondary" type="submit">${editing ? 'Save link' : 'Add link'}</button>${editing ? '<button class="text-button" type="button" data-op-cancel-link>Cancel edit</button>' : ''}</div></form></section>`;
+  }
+  function emptyDay() {
+    return `<div class="op-empty"><h2>No sailings this day</h2><p>Choose another date.</p><button class="secondary" type="button" data-op-default-day>Show ${shortDate(D.defaultDay)}</button></div>`;
+  }
+  function render({ activeBooking = null } = {}) {
+    active = activeBooking;
+    const items = D.departures.filter(item => item.date === day);
+    if (!items.some(item => item.id === selectedId)) selectedId = items.find(item => item.id === active?.departureId)?.id || items.find(item => sampleBookings(item).length)?.id || items[0]?.id || '';
+    const item = D.departure(selectedId);
+    const totals = stats(items);
+    const activeDay = D.departure(active?.departureId)?.date;
+    let content = '';
+    if (view === 'sailings') content = `<section class="op-metrics" aria-label="Daily sample totals"><div><span>Sailings</span><strong>${items.length}</strong></div><div><span>Guests</span><strong>${totals.guests}</strong></div><div class="${totals.pending ? 'op-metric-attention' : ''}"><span>Waivers pending</span><strong>${totals.pending}</strong></div><div><span>Sample bookings</span><strong>${D.money(totals.total)}</strong></div></section><section class="op-sailings" aria-labelledby="op-sailings-title"><div class="op-section-heading"><h2 id="op-sailings-title">${shortDate(day)}</h2><span class="op-muted">Select a sailing for its roster</span></div><div class="op-departures">${items.map(departureCard).join('') || emptyDay()}</div></section>`;
+    if (view === 'roster') content = item ? roster(item) : emptyDay();
+    if (view === 'marine') content = item ? `<div id="operator-weather">${typeof WeatherOps === 'undefined' ? '' : WeatherOps.render({ departure: item, bookings: bookings(item), savedNotice: notices[item.id] || '' })}</div>` : emptyDay();
+    if (view === 'cards') content = `<div id="operator-trip-cards">${typeof TripCards === 'undefined' ? '' : TripCards.render()}</div>`;
+    if (view === 'tools') content = `<div class="op-tools op-tools-grid" id="operator-guest-tools">${item ? noticeEditor(item) : emptyDay()}${linksEditor()}</div>`;
+    const scoped = ['roster', 'marine', 'tools'].includes(view);
+    return `<div class="operator-workspace"><header class="op-heading"><h1 tabindex="-1">Operator workspace</h1>${view !== 'cards' ? `<div class="op-day-control"><label class="field-label" for="op-date">Date · ${D.zoneLabel(day)}</label><input id="op-date" type="date" min="${D.bounds.start}" max="${D.bounds.end}" value="${day}"></div>` : ''}</header>
+      <nav class="op-view-nav" aria-label="Operator views">${views.map(([id, label]) => `<button type="button" data-op-view="${id}" aria-pressed="${view === id}" aria-controls="op-view-content">${label}</button>`).join('')}</nav>
+      ${active && activeDay ? `<div class="op-active-note"><span><strong>Your booking</strong> · ${shortDate(activeDay)} · ${esc(D.experience(D.departure(active.departureId).experienceId).name)}</span><div class="op-link-actions"><button type="button" class="text-button" data-op-active-day>Roster →</button><button type="button" class="text-button" data-op-open-booking>Guest view →</button></div></div>` : ''}
+      <div class="op-feedback" role="status" ${message ? '' : 'hidden'}>${esc(message)}</div>
+      ${scoped ? `<div class="op-departure-context"><label class="field-label" for="op-departure-context">Selected sailing</label><select id="op-departure-context" ${items.length ? '' : 'disabled'}>${items.length ? items.map(row => `<option value="${row.id}" ${row.id === selectedId ? 'selected' : ''}>${D.timeLabel(row.time)} · ${esc(D.experience(row.experienceId).name)} · ${esc(D.experience(row.experienceId).boat)}</option>`).join('') : '<option>No sailings this day</option>'}</select></div>` : ''}
+      <div id="op-view-content">${content}</div></div>`;
+  }
+  function bind(root, { onOpenBooking, onGuest, onResend, refresh }) {
+    const rerender = (feedback = '', focusSelector = '') => {
+      message = feedback;
+      refresh();
+      if (focusSelector) root.querySelector(focusSelector)?.focus();
+    };
+    const weatherDeparture = D.departure(selectedId);
+    if (view === 'cards' && typeof TripCards !== 'undefined') TripCards.bind(root, { refresh: () => rerender() });
+    if (view === 'marine' && typeof WeatherOps !== 'undefined') WeatherOps.bind(root, {
+      departure: weatherDeparture,
+      bookings: weatherDeparture ? bookings(weatherDeparture) : [],
+      refresh: () => rerender(),
+      onNotice: text => {
+        if (!weatherDeparture) return;
+        notices[weatherDeparture.id] = text;
+        drafts[weatherDeparture.id] = text;
+      }
+    });
+    root.querySelectorAll('[data-op-view]').forEach(button => button.addEventListener('click', () => {
+      if (!views.some(([id]) => id === button.dataset.opView)) return;
+      view = button.dataset.opView;
+      rerender('', `[data-op-view="${view}"]`);
+    }));
+    root.querySelector('#op-departure-context')?.addEventListener('change', event => {
+      if (!D.departures.some(item => item.id === event.target.value && item.date === day)) return;
+      selectedId = event.target.value;
+      rerender('', '#op-departure-context');
+    });
+    root.querySelector('#op-date')?.addEventListener('change', event => {
+      const value = event.target.value;
+      if (!validDay(value) || !event.target.checkValidity()) return;
+      day = value;
+      rerender('', '#op-date');
+    });
+    const openRoster = () => {
+      view = 'roster';
+      rerender();
+      const heading = root.querySelector('#op-roster-title');
+      heading?.setAttribute('tabindex', '-1');
+      heading?.focus({ preventScroll: true });
+      root.querySelector('.op-roster')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    };
+    root.querySelectorAll('[data-op-departure]').forEach(button => button.addEventListener('click', () => { selectedId = button.dataset.opDeparture; openRoster(); }));
+    root.querySelector('[data-op-default-day]')?.addEventListener('click', () => { day = D.defaultDay; rerender('', '#op-date'); });
+    root.querySelector('[data-op-active-day]')?.addEventListener('click', () => { day = D.departure(active.departureId).date; selectedId = active.departureId; openRoster(); });
+    root.querySelectorAll('[data-op-open-booking]').forEach(button => button.addEventListener('click', () => onOpenBooking?.()));
+    root.querySelectorAll('[data-op-guest]').forEach(button => button.addEventListener('click', () => onGuest?.()));
+    root.querySelectorAll('[data-op-preview]').forEach(button => button.addEventListener('click', () => { const key = button.dataset.opPreview; expanded.has(key) ? expanded.delete(key) : expanded.add(key); rerender('', `[data-op-preview="${key}"]`); }));
+    root.querySelectorAll('[data-op-resend]').forEach(button => button.addEventListener('click', () => {
+      const id = button.dataset.opResend;
+      if (!onResend || !active?.participants?.some(person => person.id === id && person.status === 'awaiting-signature')) return;
+      let feedback;
+      try { feedback = `Sample request re-sent (${onResend(id)} of ${resendLimit}). Nothing was emailed.`; } catch (error) { feedback = error.message; }
+      // Once the limit is reached the button renders disabled, so focus moves to that guest's status text instead.
+      rerender(feedback, `[data-op-resend="${id}"]:not([disabled]), [data-op-resend-limit="${id}"]`);
+    }));
+    root.querySelector('#op-notice')?.addEventListener('input', event => { drafts[selectedId] = event.target.value; });
+    root.querySelector('#op-notice-form')?.addEventListener('submit', event => {
+      event.preventDefault();
+      notices[selectedId] = root.querySelector('#op-notice').value.trim().slice(0, 600);
+      drafts[selectedId] = notices[selectedId];
+      rerender(notices[selectedId] ? 'Local notice saved. It now appears on this departure’s guest arrival screen. Nothing was sent.' : 'The saved notice is now empty.', '#op-notice');
+    });
+    root.querySelector('[data-op-clear-notice]')?.addEventListener('click', () => { delete notices[selectedId]; delete drafts[selectedId]; rerender('Saved notice removed from the sample guest arrival screen.', '#op-notice'); });
+    root.querySelectorAll('[data-op-edit-link]').forEach(button => button.addEventListener('click', () => { editingLink = button.dataset.opEditLink; linkDraft = null; rerender('', '#op-link-label'); }));
+    root.querySelector('[data-op-cancel-link]')?.addEventListener('click', () => { editingLink = null; linkDraft = null; rerender('', '#op-link-label'); });
+    root.querySelectorAll('[data-op-remove-link]').forEach(button => button.addEventListener('click', () => {
+      links = links.filter(link => link.id !== button.dataset.opRemoveLink);
+      if (editingLink === button.dataset.opRemoveLink) { editingLink = null; linkDraft = null; }
+      rerender('Link removed from the guest ready screen.', '#op-link-label');
+    }));
+    const retainLinkDraft = event => { event.target.setCustomValidity(''); linkDraft = { label: root.querySelector('#op-link-label').value, url: root.querySelector('#op-link-url').value }; };
+    root.querySelector('#op-link-url')?.addEventListener('input', retainLinkDraft);
+    root.querySelector('#op-link-label')?.addEventListener('input', retainLinkDraft);
+    root.querySelector('#op-link-form')?.addEventListener('submit', event => {
+      event.preventDefault();
+      const labelInput = root.querySelector('#op-link-label');
+      const urlInput = root.querySelector('#op-link-url');
+      const label = labelInput.value.trim().slice(0, 80);
+      let url;
+      try { url = new URL(urlInput.value.trim()); } catch { /* Show native field feedback below. */ }
+      if (!label) { labelInput.setCustomValidity('Enter a label for guests.'); labelInput.reportValidity(); return; }
+      if (!url || url.protocol !== 'https:' || url.username || url.password) { urlInput.setCustomValidity('Enter a full https:// website address without a username or password.'); urlInput.reportValidity(); return; }
+      const updated = { id: editingLink || `link-${++sequence}`, label, url: url.href };
+      links = editingLink ? links.map(link => link.id === editingLink ? updated : link) : [...links, updated];
+      editingLink = null; linkDraft = null;
+      rerender('Important links updated on the guest ready screen.', '#op-link-label');
+    });
+  }
+  function reset() {
+    if (typeof WeatherOps !== 'undefined') WeatherOps.reset();
+    if (typeof TripCards !== 'undefined') TripCards.reset();
+    day = D.defaultDay; selectedId = ''; links = defaultLinks(); notices = {}; drafts = {}; editingLink = null; expanded = new Set(); message = ''; sequence = 0; active = null; view = 'sailings'; linkDraft = null;
+  }
+  return { render, bind, resources: () => links.map(link => ({ ...link })), notice: departureId => notices[departureId] || '', reset };
+})();
