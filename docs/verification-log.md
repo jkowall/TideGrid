@@ -4,6 +4,10 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-09-19
 
+### Customer deck terminology fix, September 19, 2026
+
+- Replaced "Tip requests and trip packages" with "Tip requests and trip cards" on slide 2 of the customer deck PPTX (one text run in `ppt/slides/slide2.xml`; no other slide used the old term) and regenerated the PDF from the corrected PPTX with LibreOffice. Slide 2 was rendered and inspected; the replaced line fits its card and no other content moved. The repacked file opens in python-pptx with nine slides. Not done: the skill's OOXML validator needs Python 3.10 or later and the machine's interpreters lack its dependencies, so only a zip integrity check and a python-pptx load were run. The shared Drive PDF still holds the previous snapshot until the owner replaces it.
+
 ### Cloudflare deployment verification, September 19, 2026
 
 - Deployed source commit `4970f37` as Worker `tidegrid-prototype`, version `07b413a0-100f-4edb-bf59-905c49dfa94f`, at [demo.tidegrid.us](https://demo.tidegrid.us); the workers.dev fallback also returned HTTPS 200. All 11 public runtime assets matched local SHA-256 hashes (the page is served at `/`; `/index.html` redirects there with 307). README, all four test files, `_headers`, `.assetsignore`, `package.json`, and the Wrangler configuration returned 404.
