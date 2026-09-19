@@ -4,6 +4,13 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-09-19
 
+### Cloudflare deployment verification, September 19, 2026
+
+- Deployed source commit `4970f37` as Worker `tidegrid-prototype`, version `07b413a0-100f-4edb-bf59-905c49dfa94f`, at [demo.tidegrid.us](https://demo.tidegrid.us); the workers.dev fallback also returned HTTPS 200. All 11 public runtime assets matched local SHA-256 hashes (the page is served at `/`; `/index.html` redirects there with 307). README, all four test files, `_headers`, `.assetsignore`, `package.json`, and the Wrangler configuration returned 404.
+- The first deploy exposed a real Content-Security-Policy conflict: the Cloudflare zone injects its Web Analytics beacon from `static.cloudflareinsights.com` into every page, and `script-src 'self'` blocked it with a console error on each load. `_headers` now allows that script origin and `cloudflareinsights.com` for `connect-src`, the prototype README documents why, and version `869c6ee8-9749-490e-836c-f71a61f071e6` was deployed with the corrected policy.
+- After the second deploy, a fresh request returned the corrected Content-Security-Policy, Strict-Transport-Security, Permissions-Policy, no-index, nosniff, and no-referrer headers. In the built-in browser the beacon loaded, no new policy violation was logged, the calendar opened on September 23, and the operator workspace rendered five sailing rows with capacity meters and the Roster, Marine conditions, Trip cards, and Guest tools views. Network interruptions on the reviewing machine caused some `ERR_NETWORK_CHANGED` entries during testing; they were not server errors and did not recur on reload.
+- Not done: no physical-device test; the customer deck PDF and PPTX still say "trip packages" on one slide.
+
 ### Review application and verification, September 19, 2026
 
 - Applied the September 19 design and documentation review across the repository: the production gate was split into the Core live gate, Staged Core modules, and Native pilot gate (canonical in the roadmap Gates section, logged in the decision register); customer-facing terminology settled on trip card, trip-count card, and dollar card; the interview gate, no-equity, and Stripe responsibility text were reduced to one canonical home each with links; per-document Date headers were removed; model and tool names now appear only in the build execution and agent plan; V1 material moved to `docs/v1` and source prompts to `docs/archive` with `git mv`; the root README and AGENTS.md were rewritten; the customer brief was rewritten in plain register with two hedges and one remaining conditional.
