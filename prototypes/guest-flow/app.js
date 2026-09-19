@@ -3,7 +3,7 @@
 const D = TideGrid;
 const W = WaiverFlow;
 const main = document.querySelector('#main');
-const initialState = () => ({ step: 0, view: 'calendar', month: '2026-09', selectedDay: '2026-09-26', experience: '', type: '', party: '2', selectedDepartureId: null, name: '', email: '', confirmed: false, checkout: false, waiverFlow: null, prepView: 'dashboard', participantId: null, requestDrafts: {} });
+const initialState = () => ({ step: 0, view: 'calendar', month: D.defaultDay.slice(0, 7), selectedDay: D.defaultDay, experience: '', type: '', party: '2', selectedDepartureId: null, name: '', email: '', confirmed: false, checkout: false, waiverFlow: null, prepView: 'dashboard', participantId: null, requestDrafts: {} });
 let state = initialState();
 let workspace = 'guest';
 let bookingRevision = 0;
@@ -15,8 +15,9 @@ const shortDate = date => D.dateLabel(date, { weekday: 'short', month: 'short', 
 const monthLabel = () => D.dateLabel(`${state.month}-01`, { month: 'long', year: 'numeric' });
 const unit = item => item.type === 'private' ? 'boat' : 'guest';
 const kind = item => item.type === 'private' ? 'Private charter' : 'Shared trip';
-const filtered = () => D.matching(state);
+const filtered = () => D.matching(state).filter(item => !D.isPast(item.date));
 const available = rows => rows.filter(item => !D.availability(item, state.party));
+const zoneNote = () => state.selectedDay ? `All times ${D.zoneLabel(state.selectedDay)}` : 'All times Eastern';
 const bookingKey = () => `${state.selectedDepartureId}|${state.party}|${bookingRevision}`;
 const participant = () => state.waiverFlow?.participants.find(item => item.id === state.participantId);
 
@@ -39,7 +40,7 @@ function summary(browsing = false) {
   const item = selected();
   if (!item || !quote()) return browsing ? `<div class="selection-placeholder"><span aria-hidden="true">↗</span><div><strong>Select a departure to see your total.</strong></div></div>` : '';
   return `<aside class="summary ${browsing ? 'browse-summary' : ''}" aria-label="Your trip summary">
-    <div class="summary-top"><p class="eyebrow">Your trip</p><h2>${trip().name}</h2><p>${kind(trip())} · ${trip().duration} · ${trip().boat}</p><p><strong>${shortDate(item.date)} · ${D.timeLabel(item.time)} EDT</strong><br>${escapeHTML(state.party)} guests${trip().type === 'private' ? ' · whole boat' : ''}</p></div>
+    <div class="summary-top"><p class="eyebrow">Your trip</p><h2>${trip().name}</h2><p>${kind(trip())} · ${trip().duration} · ${trip().boat}</p><p><strong>${shortDate(item.date)} · ${D.timeLabel(item.time)} ${D.zoneLabel(item.date)}</strong><br>${escapeHTML(state.party)} guests${trip().type === 'private' ? ' · whole boat' : ''}</p></div>
     <div class="summary-body">${pricing()}${browsing ? '<button class="primary" id="continue" type="button">Continue to guest details →</button>' : ''}</div>
   </aside>`;
 }
@@ -56,7 +57,7 @@ function toolbar() {
   const monthIndex = D.months.indexOf(state.month);
   return `<div class="browse-toolbar"><div class="view-switch" role="group" aria-label="Browse view">${[['calendar', '▦', 'Calendar'], ['list', '☷', 'List'], ['trips', '≈', 'Trips']].map(([id, icon, label]) => `<button type="button" data-view="${id}" aria-pressed="${state.view === id}"><span aria-hidden="true">${icon}</span> ${label}</button>`).join('')}</div>
     <div class="month-nav"><button class="icon-button" data-month="-1" aria-label="Previous month" ${monthIndex === 0 ? 'disabled' : ''}>←</button><h2 id="month-title">${monthLabel()}</h2><button class="icon-button" data-month="1" aria-label="Next month" ${monthIndex === D.months.length - 1 ? 'disabled' : ''}>→</button></div></div>
-    <div class="date-scope"><span>${state.selectedDay ? `Showing ${shortDate(state.selectedDay)}` : `Any day in ${monthLabel()}`} · ${escapeHTML(state.party || '—')} guests</span>${state.selectedDay ? '<button class="text-button" id="any-day">Show any day this month</button>' : '<span class="hint">Sample dates · all times Eastern (EDT)</span>'}</div>`;
+    <div class="date-scope"><span>${state.selectedDay ? `Showing ${shortDate(state.selectedDay)}` : `Any day in ${monthLabel()}`} · ${escapeHTML(state.party || '—')} guests</span>${state.selectedDay ? '<button class="text-button" id="any-day">Show any day this month</button>' : `<span class="hint">Sample dates · ${zoneNote()}</span>`}</div>`;
 }
 
 function calendar() {
@@ -67,13 +68,40 @@ function calendar() {
   for (let day = 1; day <= total; day++) {
     const date = `${state.month}-${String(day).padStart(2, '0')}`;
     const matches = rows.filter(item => item.date === date);
-    const options = available(matches);
+    // A day is past once the date has passed, or once every matching departure today has already started.
+    const past = D.isPast(date) || (matches.length > 0 && matches.every(D.departed));
+    const options = past ? [] : available(matches);
     const low = options.length ? Math.min(...options.map(item => D.experience(item.experienceId).price)) : null;
-    const status = options.length ? `${options.length} ${options.length === 1 ? 'trip' : 'trips'}` : matches.length ? matches.every(item => !item.remaining) ? 'Sold out' : 'No fit' : 'No trips';
+    const status = past ? 'Past' : options.length ? `${options.length} ${options.length === 1 ? 'trip' : 'trips'}` : matches.length ? matches.every(item => !item.remaining) ? 'Sold out' : 'No fit' : 'No trips';
     const label = `${D.dateLabel(date)}. ${status}${low ? `. Base rates from ${D.money(low)}, per guest or boat; excludes fee and tax` : ''}`;
-    cells += `<button class="calendar-day ${options.length ? 'has-trips' : 'no-trips'}" data-day="${date}" aria-label="${label}" aria-pressed="${state.selectedDay === date}"><span class="day-number">${day}</span><span class="day-status">${status}</span>${low ? `<span class="day-price">$${low / 100}+</span>` : '<span class="day-price">—</span>'}</button>`;
+    cells += `<button class="calendar-day ${options.length ? 'has-trips' : 'no-trips'} ${past ? 'is-past' : ''}" data-day="${date}" aria-label="${label}" aria-pressed="${state.selectedDay === date}" tabindex="-1" ${past ? 'disabled' : ''}><span class="day-number">${day}</span><span class="day-status">${status}</span>${low ? `<span class="day-price">$${low / 100}+</span>` : '<span class="day-price">—</span>'}</button>`;
   }
-  return `<section class="calendar-panel" aria-labelledby="month-title"><div class="weekdays" aria-hidden="true">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => `<span>${day}</span>`).join('')}</div><div class="calendar-grid">${cells}</div><p class="calendar-key"><span class="key-dot" aria-hidden="true"></span> Available for your group <span>Base price / guest or boat · excludes fee & tax</span></p><details class="compact-details hint"><summary>Calendar key</summary><p>No trips: no matching sailings. No fit: insufficient space for your group.</p></details></section>`;
+  return `<section class="calendar-panel" aria-labelledby="month-title"><div class="weekdays" aria-hidden="true">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => `<span>${day}</span>`).join('')}</div><div class="calendar-grid">${cells}</div><p class="calendar-key"><span class="key-dot" aria-hidden="true"></span> Available for your group <span>Base price / guest or boat · excludes fee & tax</span></p><details class="compact-details hint"><summary>Calendar key</summary><p>No trips: no matching sailings. No fit: insufficient space for your group. Past: the day, or every departure on it, has already started. Use the arrow keys, Home and End to move between days.</p></details></section>`;
+}
+
+// Roving tabindex: one day is in the Tab order; arrow keys, Home and End move focus without selecting.
+function bindCalendarKeys() {
+  const grid = main.querySelector('.calendar-grid');
+  if (!grid) return;
+  const days = [...grid.querySelectorAll('.calendar-day')];
+  const focusable = item => item && !item.disabled;
+  const start = days.find(item => item.dataset.day === state.selectedDay && focusable(item)) || days.find(item => item.classList.contains('has-trips')) || days.find(focusable) || days[0];
+  const settle = target => days.forEach(item => { item.tabIndex = item === target ? 0 : -1; });
+  settle(start);
+  grid.addEventListener('keydown', event => {
+    const index = days.indexOf(event.target);
+    if (index < 0) return;
+    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[event.key];
+    let target;
+    if (step) { let next = index + step; while (days[next] && !focusable(days[next])) next += Math.sign(step); target = days[next]; }
+    else if (event.key === 'Home') target = days.find(focusable);
+    else if (event.key === 'End') target = [...days].reverse().find(focusable);
+    else return;
+    event.preventDefault();
+    if (!target || target === days[index]) return;
+    settle(target);
+    target.focus();
+  });
 }
 
 function departureCard(item) {
@@ -83,7 +111,7 @@ function departureCard(item) {
   return `<article class="departure-card ${isSelected ? 'is-selected' : ''} ${error ? 'unavailable' : ''}">
     <div class="departure-time"><strong>${D.timeLabel(item.time)}</strong><span>${experience.duration}</span></div>
     <div class="departure-info"><span class="trip-label ${experience.theme}">${kind(experience)}</span><h3>${experience.name}</h3><p>${experience.boat} · ${error || (experience.type === 'private' ? `Whole boat · up to ${experience.max}` : `${item.remaining} seats left`)}</p><button class="text-button" data-detail="${experience.id}" aria-label="Trip details for ${experience.name}">Trip details</button></div>
-    <div class="departure-action"><p><strong>${D.money(experience.price)}</strong><span>/ ${unit(experience)}</span></p><button class="${isSelected ? 'selected-button' : 'secondary'}" data-select="${item.id}" ${error ? 'disabled' : ''} aria-label="${error ? error : isSelected ? 'Selected' : 'Select'} ${experience.name}, ${shortDate(item.date)}, ${D.timeLabel(item.time)}">${isSelected ? 'Selected ✓' : error ? item.remaining ? 'No fit' : 'Sold out' : 'Select →'}</button></div>
+    <div class="departure-action"><p><strong>${D.money(experience.price)}</strong><span>/ ${unit(experience)}</span></p><button class="${isSelected ? 'selected-button' : 'secondary'}" data-select="${item.id}" ${error ? 'disabled' : ''} aria-label="${error ? error : isSelected ? 'Selected' : 'Select'} ${experience.name}, ${shortDate(item.date)}, ${D.timeLabel(item.time)}">${isSelected ? 'Selected ✓' : error === 'Past' ? 'Past' : error ? item.remaining ? 'No fit' : 'Sold out' : 'Select →'}</button></div>
   </article>`;
 }
 
@@ -95,10 +123,10 @@ function results() {
   const rows = filtered();
   const count = available(rows).length;
   const days = [...new Set(rows.map(item => item.date))];
-  const unavailableMessage = rows.every(item => !item.remaining) ? 'All matching departures are sold out.' : 'No departures fit your group on these dates.';
+  const unavailableMessage = rows.every(item => D.availability(item, state.party) === 'Past') ? 'These departures have already sailed.' : rows.every(item => !item.remaining) ? 'All matching departures are sold out.' : 'No departures fit your group on these dates.';
   return `<section class="departure-results" aria-label="Departure results"><div class="results-heading"><div><p class="eyebrow">${state.selectedDay ? shortDate(state.selectedDay) : monthLabel()}</p><h2>Departures</h2></div><span class="result-count" role="status">${count} available</span></div>
     ${rows.length ? `${!count ? `<div class="notice">${unavailableMessage} Try another day or adjust your filters. <button class="text-button" id="clear-filters">Clear filters & show any day</button></div>` : ''}${days.map(date => `<div class="day-group">${!state.selectedDay ? `<h3 class="date-heading">${D.dateLabel(date, { weekday: 'long', month: 'short', day: 'numeric' })}</h3>` : ''}${rows.filter(item => item.date === date).map(departureCard).join('')}</div>`).join('')}` : emptyState()}
-    <p class="hint">Base rates · excludes fee & tax · All times EDT</p></section>`;
+    <p class="hint">Base rates · excludes fee & tax · ${zoneNote()}</p></section>`;
 }
 
 function experienceCards() {
@@ -121,7 +149,7 @@ function detailsScreen() {
 
 function reviewScreen() {
   return `<h1 tabindex="-1">Review your booking</h1>
-    <div class="review-block"><div class="review-heading"><h2>Your trip</h2><button class="text-button" data-back="0">Edit trip</button></div><p>${trip().name} · ${trip().duration}<br>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} EDT<br>${escapeHTML(state.party)} guests · ${trip().boat}</p></div>
+    <div class="review-block"><div class="review-heading"><h2>Your trip</h2><button class="text-button" data-back="0">Edit trip</button></div><p>${trip().name} · ${trip().duration}<br>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} ${D.zoneLabel(selected().date)}<br>${escapeHTML(state.party)} guests · ${trip().boat}</p></div>
     <div class="review-block"><div class="review-heading"><h2>Guest details</h2><button class="text-button" data-back="1">Edit details</button></div><p>${escapeHTML(state.name)}<br>${escapeHTML(state.email)}</p></div>
     <details class="compact-details section"><summary>Sample booking policy</summary><p>Changes or cancellations up to 48 hours before departure. The operator handles weather changes. Fictional terms for this demo.</p></details>
     <form id="checkout-form"><div class="review-block" aria-label="Checkout amount"><div class="money-row checkout-total"><strong>Sample total</strong><strong>${D.money(quote().total)}</strong></div><p class="hint">USD · Fee and illustrative tax included · No later balance</p></div><label class="check-label"><input type="checkbox" id="checkout-ack" required ${state.checkout ? 'checked' : ''}><span>I understand this is a sample booking and no payment will be taken.</span></label><div class="actions"><button class="text-button" data-back="1" type="button">← Back to details</button><button class="primary" type="submit">Simulate booking →</button></div></form>`;
@@ -132,42 +160,47 @@ function readyScreen() {
   if (state.prepView === 'waiver') return waiverScreen();
   if (state.prepView === 'receipt') return receiptScreen();
   const progress = W.progress(state.waiverFlow);
-  const unsent = progress.total - progress.sent;
-  return `${roleLabel('Operator demo')}<p class="eyebrow">SAMPLE-001</p><h1 tabindex="-1">${progress.complete ? 'Preparation complete' : 'Booking confirmed'}</h1><p class="intro">${progress.complete ? 'All guest waivers signed. Check your arrival details below.' : 'Next: send and sign each guest’s waiver.'}</p>
-    <div class="prep-progress" aria-label="Preparation progress"><div><span>01</span><strong>Booked</strong><small>${D.money(quote().total)} simulated</small></div><div><span>02</span><strong>Send waivers</strong><small>${progress.sent} of ${progress.total} requested</small></div><div><span>03</span><strong>Sign waivers</strong><small>${progress.signed} of ${progress.total} signed</small></div></div>
+  const intro = progress.complete ? 'All guest waivers signed. Check your arrival details below.' : progress.missing ? `Booking confirmed. Your waiver request was sent to ${escapeHTML(state.email)} (simulated). Add your guests so each receives theirs.` : 'Every guest has a waiver request. Open an email preview to try signing.';
+  return `<p class="eyebrow">SAMPLE-001</p><h1 tabindex="-1">${progress.complete ? 'Preparation complete' : 'Booking confirmed'}</h1><p class="intro">${intro}</p>
+    <div class="prep-progress" aria-label="Preparation progress"><div><span>01</span><strong>Booked</strong><small>${D.money(quote().total)} simulated</small></div><div><span>02</span><strong>Guest details</strong><small>${progress.identified} of ${progress.total} identified</small></div><div><span>03</span><strong>Sign waivers</strong><small>${progress.signed} of ${progress.total} signed</small></div></div>
     <section class="section" aria-labelledby="waiver-heading"><div class="review-heading"><h2 id="waiver-heading">Guest waivers</h2><span class="status-chip ${progress.complete ? '' : 'pending-chip'}" role="status">${progress.complete ? 'All signed (demo)' : `${progress.pending} pending`}</span></div>
-      ${!unsent && !progress.complete ? '<p class="hint">Open an email preview to try the guest signing flow.</p>' : ''}
-      <div class="participant-list">${state.waiverFlow.participants.map((guest, index) => `<article class="participant-row"><span class="guest-number" aria-hidden="true">${index + 1}</span><div><h3>${escapeHTML(guest.name)}</h3><p>${escapeHTML(guest.email)}</p><span class="waiver-status ${guest.status}">${statusLabel(guest.status)}</span></div><button class="${guest.status === 'not-sent' ? 'secondary' : 'text-button'}" ${guest.status === 'not-sent' ? `data-request="${guest.id}"` : guest.status === 'signed' ? `data-receipt="${guest.id}"` : `data-email="${guest.id}"`} aria-label="${guest.status === 'not-sent' ? 'Send request to' : guest.status === 'signed' ? 'View receipt for' : 'Preview email for'} ${escapeHTML(guest.name)}">${guest.status === 'not-sent' ? 'Send request' : guest.status === 'signed' ? 'View receipt' : 'Preview email →'}</button></article>`).join('')}</div>
-      ${unsent ? '<button class="primary" id="send-waivers">Send waiver requests →</button>' : ''}
+      <div class="participant-list">${state.waiverFlow.participants.map(participantRow).join('')}</div>
+      ${progress.missing ? '<button class="primary" id="add-guests">Add your guests →</button>' : ''}
     </section>${arrivalInfo()}<div class="actions"><button class="text-button" data-back="0" type="button">Edit sample trip</button><button class="primary" id="new-booking" type="button">Start a new demo</button></div><p class="hint">Editing the trip or guest details clears all sample requests and signatures.</p>`;
 }
 
 function arrivalInfo() {
   const resources = typeof OperatorView === 'undefined' ? [{ label: 'Florida fishing license information', url: 'https://myfwc.com/license/recreational/saltwater-fishing/' }] : OperatorView.resources();
   const notice = typeof OperatorView === 'undefined' ? '' : OperatorView.notice(selected().id);
-  return `<section class="section" id="arrival"><h2>Arrival instructions</h2>${notice ? `<div class="notice guest-trip-notice"><strong>Trip notice from your operator</strong><p>${escapeHTML(notice)}</p></div>` : ''}<ol class="arrival-list"><li><strong>${D.arrivalTime(selected())} EDT · ${shortDate(selected().date)}</strong><br>Arrive 30 minutes before departure.</li><li><strong>Saltline Marina, Dock C · ${trip().boat}</strong><br>Fictional meeting point. Do not travel to it.</li></ol><details class="compact-details"><summary>Trip checklist</summary><p>${trip().preparation}</p></details></section>
+  return `<section class="section" id="arrival"><h2>Arrival instructions</h2>${notice ? `<div class="notice guest-trip-notice"><strong>Trip notice from your operator</strong><p>${escapeHTML(notice)}</p></div>` : ''}<ol class="arrival-list"><li><strong>${D.arrivalTime(selected())} ${D.zoneLabel(selected().date)} · ${shortDate(selected().date)}</strong><br>Arrive 30 minutes before departure.</li><li><strong>Saltline Marina, Dock C · ${trip().boat}</strong><br>Fictional meeting point. Do not travel to it.</li></ol><details class="compact-details"><summary>Trip checklist</summary><p>${trip().preparation}</p></details></section>
     <section class="section" id="trip-preparation"><h2>Important links</h2><ul class="links"><li><a href="#arrival">Meeting point & arrival checklist</a></li><li><button class="text-button" data-detail="${trip().id}">${trip().id === 'reef' ? 'Dive eligibility & equipment' : 'What to expect & bring'}</button></li>${resources.map(link => `<li><a href="${escapeHTML(link.url)}" target="_blank" rel="noopener noreferrer">${escapeHTML(link.label)} ↗ (opens a new tab)</a></li>`).join('')}<li><span>Operator contact · unavailable in demo</span></li></ul><p class="hint">Confirm requirements with your operator.</p></section>`;
 }
 
-function roleLabel(role, name = '') { return `<div class="role-label"><span aria-hidden="true">${role === 'Operator demo' ? '◈' : '↗'}</span><strong>${role}</strong>${name ? `<span>· ${escapeHTML(name)}</span>` : ''}</div>`; }
-function statusLabel(status) { return { 'not-sent': 'Not sent', 'awaiting-signature': 'Awaiting signature', signed: 'Signed (demo)' }[status]; }
+function roleLabel(role, name = '') { return `<div class="role-label"><span aria-hidden="true">↗</span><strong>${role}</strong>${name ? `<span>· ${escapeHTML(name)}</span>` : ''}</div>`; }
+function statusLabel(status) { return { 'needs-details': 'Needs details', 'awaiting-signature': 'Awaiting signature', signed: 'Signed (demo)' }[status]; }
+function participantRow(guest, index) {
+  const missing = guest.status === 'needs-details';
+  const name = missing ? `Guest ${index + 1}` : guest.name;
+  const [key, text, prefix] = missing ? ['request', 'Add details', 'Add details for'] : guest.status === 'signed' ? ['receipt', 'View receipt', 'View receipt for'] : ['email', 'Preview email →', 'Preview email for'];
+  return `<article class="participant-row"><span class="guest-number" aria-hidden="true">${index + 1}</span><div><h3>${escapeHTML(name)}</h3><p>${missing ? 'Name and email needed' : escapeHTML(guest.email)}</p><span class="waiver-status ${guest.status}">${statusLabel(guest.status)}</span></div><button class="${missing ? 'secondary' : 'text-button'}" data-${key}="${guest.id}" aria-label="${prefix} ${escapeHTML(name)}">${text}</button></article>`;
+}
 function requestScreen() {
-  const guests = state.waiverFlow.participants.filter(item => item.status === 'not-sent');
-  return `${roleLabel('Operator demo')}<h1 tabindex="-1">Send waiver requests</h1><p class="intro">Choose recipients and edit the fictional adult details. No guardian signing in this demo.</p>
-    <form id="request-form" novalidate autocomplete="off">${guests.map((guest, index) => { const draft = state.requestDrafts[guest.id] || guest; return `<fieldset class="request-card"><legend>Guest ${state.waiverFlow.participants.indexOf(guest) + 1}${guest.id === 'guest-1' ? ' · booker' : ' · fictional example'}</legend><label class="check-label"><input type="checkbox" data-recipient="${guest.id}" ${draft.checked === false ? '' : 'checked'}><span>Include this guest</span></label><div class="field-grid"><div><label class="field-label" for="name-${guest.id}">Fictional full name</label><input id="name-${guest.id}" data-guest="${guest.id}" data-field="name" type="text" maxlength="100" value="${escapeHTML(draft.name)}" required></div><div><label class="field-label" for="email-${guest.id}">Sample email address</label><input id="email-${guest.id}" data-guest="${guest.id}" data-field="email" type="email" maxlength="254" value="${escapeHTML(draft.email)}" required></div></div></fieldset>`; }).join('')}<div id="request-error" class="error" role="alert" tabindex="-1" hidden></div><div class="actions"><button class="text-button" data-prep="dashboard" type="button">← Return to booking</button><button class="primary" type="submit">Simulate sending requests →</button></div></form>`;
+  const guests = state.waiverFlow.participants.filter(item => item.status === 'needs-details');
+  return `<h1 tabindex="-1">Add your guests</h1><p class="intro">Enter a fictional name and email for each guest travelling with you. Each guest you add is sent a sample waiver request right away. Adults only in this demo; no guardian signing.</p>
+    <form id="request-form" novalidate autocomplete="off">${guests.map(guest => { const draft = state.requestDrafts[guest.id] || { name: '', email: '' }; return `<fieldset class="request-card"><legend>Guest ${state.waiverFlow.participants.indexOf(guest) + 1}</legend><label class="check-label"><input type="checkbox" data-recipient="${guest.id}" ${draft.checked === false ? '' : 'checked'}><span>Add this guest now</span></label><div class="field-grid"><div><label class="field-label" for="name-${guest.id}">Fictional full name</label><input id="name-${guest.id}" data-guest="${guest.id}" data-field="name" type="text" maxlength="100" placeholder="Jamie Example" value="${escapeHTML(draft.name)}" required></div><div><label class="field-label" for="email-${guest.id}">Sample email address</label><input id="email-${guest.id}" data-guest="${guest.id}" data-field="email" type="email" maxlength="254" placeholder="jamie@example.com" value="${escapeHTML(draft.email)}" required></div></div></fieldset>`; }).join('') || '<p class="hint">Every guest on this booking already has their details.</p>'}<div id="request-error" class="error" role="alert" tabindex="-1" hidden></div><div class="actions"><button class="text-button" data-prep="dashboard" type="button">← Return to booking</button>${guests.length ? '<button class="primary" type="submit">Add guests →</button>' : ''}</div></form>`;
 }
 
 function waiverScreen() {
   const guest = participant();
   return `${roleLabel('Guest preview', guest.name)}<h1 tabindex="-1">Review & sign</h1>
-    <article class="sample-document" aria-label="Nonbinding sample waiver"><p class="eyebrow">Nonbinding sample waiver</p><h2>${trip().name}</h2><p>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} EDT<br>Aboard ${trip().boat} · Arrive ${D.arrivalTime(selected())} EDT</p><hr><p>${trip().preparation}</p><p class="hint">No release of liability or binding agreement.</p></article>
+    <article class="sample-document" aria-label="Nonbinding sample waiver"><p class="eyebrow">Nonbinding sample waiver</p><h2>${trip().name}</h2><p>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} ${D.zoneLabel(selected().date)}<br>Aboard ${trip().boat} · Arrive ${D.arrivalTime(selected())} ${D.zoneLabel(selected().date)}</p><hr><p>${trip().preparation}</p><p class="hint">No release of liability or binding agreement.</p></article>
     <form id="signature-form" novalidate autocomplete="off"><label class="field-label" for="signature-name">Type your fictional full name</label><input id="signature-name" type="text" maxlength="100" required aria-describedby="signature-help" placeholder="${escapeHTML(guest.name)}"><p class="hint" id="signature-help">Enter ${escapeHTML(guest.name)}. Identity is not verified.</p><label class="check-label waiver-label"><input type="checkbox" id="waiver-read" required><span>I have read the sample trip and arrival information above.</span></label><label class="check-label waiver-label"><input type="checkbox" id="signature-demo" required><span>I understand this is a simulated signature, not a legal waiver or release of rights.</span></label><div id="signature-error" class="error" role="alert" tabindex="-1" hidden></div><div class="actions"><button class="text-button" data-prep="dashboard" type="button">← Return without signing</button><button class="primary" type="submit">Sign sample waiver →</button></div></form>`;
 }
 
 function receiptScreen() {
   const guest = participant();
   const progress = W.progress(state.waiverFlow);
-  return `${roleLabel('Guest preview', guest.name)}<div class="success-mark" aria-hidden="true">✓</div><h1 tabindex="-1">Sample waiver signed</h1><div class="sample-document receipt"><span class="status-chip">Signed (demo)</span><dl><dt>Fictional signer</dt><dd class="signature-script">${escapeHTML(guest.signature.fullName)}</dd><dt>Sample recipient</dt><dd>${escapeHTML(guest.email)}</dd><dt>Trip</dt><dd>${trip().name}<br>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} EDT</dd><dt>Reference</dt><dd>SAMPLE-001 · ${guest.id}</dd></dl><p class="hint">Session-only receipt · No legal signature</p></div><p class="notice">${progress.signed} of ${progress.total} guests signed${progress.complete ? '. Preparation complete.' : ` · ${progress.pending} still pending.`}</p><div class="actions"><button class="primary" data-prep="dashboard" type="button">Return to booking →</button></div>`;
+  return `${roleLabel('Guest preview', guest.name)}<div class="success-mark" aria-hidden="true">✓</div><h1 tabindex="-1">Sample waiver signed</h1><div class="sample-document receipt"><span class="status-chip">Signed (demo)</span><dl><dt>Fictional signer</dt><dd class="signature-script">${escapeHTML(guest.signature.fullName)}</dd><dt>Sample recipient</dt><dd>${escapeHTML(guest.email)}</dd><dt>Trip</dt><dd>${trip().name}<br>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} ${D.zoneLabel(selected().date)}</dd><dt>Reference</dt><dd>SAMPLE-001 · ${guest.id}</dd></dl><p class="hint">Session-only receipt · No legal signature</p></div><p class="notice">${progress.signed} of ${progress.total} guests signed${progress.complete ? '. Preparation complete.' : ` · ${progress.pending} still pending.`}</p><div class="actions"><button class="primary" data-prep="dashboard" type="button">Return to booking →</button></div>`;
 }
 
 function invalidate() { state.confirmed = false; state.checkout = false; state.waiverFlow = null; state.prepView = 'dashboard'; state.participantId = null; state.requestDrafts = {}; }
@@ -186,6 +219,7 @@ function render(focus = true) {
     OperatorView.bind(main, {
       onOpenBooking: () => { workspace = 'guest'; BookingDemo.openPreparation(); },
       onGuest: () => { workspace = 'guest'; render(); },
+      onResend: id => BookingDemo.resend(id),
       refresh: () => render(false)
     });
     if (focus) { main.querySelector('h1')?.focus(); window.scrollTo({ top: 0, behavior: 'instant' }); }
@@ -215,8 +249,8 @@ function viewDates(id) {
 }
 
 function openRequests(id = null) {
-  state.waiverFlow.participants.filter(guest => guest.status === 'not-sent').forEach(guest => {
-    state.requestDrafts[guest.id] = { ...guest, ...state.requestDrafts[guest.id], checked: !id || id === guest.id };
+  state.waiverFlow.participants.filter(guest => guest.status === 'needs-details').forEach(guest => {
+    state.requestDrafts[guest.id] = { name: '', email: '', ...state.requestDrafts[guest.id], checked: !id || id === guest.id };
   });
   state.prepView = 'requests'; render();
 }
@@ -226,7 +260,7 @@ function showEmail(id, trigger) {
   const dialog = document.createElement('dialog');
   dialog.className = 'trip-dialog email-dialog';
   dialog.setAttribute('aria-labelledby', 'email-title');
-  dialog.innerHTML = `<div class="dialog-top"><p class="eyebrow">Guest preview · Sample email</p><button class="icon-button" aria-label="Close email preview">×</button></div><div class="dialog-body"><p class="email-recipient"><strong>To</strong> ${escapeHTML(guest.name)} &lt;${escapeHTML(guest.email)}&gt;</p><h2 id="email-title">Please sign your waiver</h2><p>${trip().name}<br>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} EDT</p><button class="primary" id="open-waiver">Open waiver →</button><p class="hint">Opens this guest’s demo preview. No email was sent.</p></div>`;
+  dialog.innerHTML = `<div class="dialog-top"><p class="eyebrow">Guest preview · Sample email</p><button class="icon-button" aria-label="Close email preview">×</button></div><div class="dialog-body"><p class="email-recipient"><strong>To</strong> ${escapeHTML(guest.name)} &lt;${escapeHTML(guest.email)}&gt;</p><h2 id="email-title">Please sign your waiver</h2><p>${trip().name}<br>${D.dateLabel(selected().date)} · ${D.timeLabel(selected().time)} ${D.zoneLabel(selected().date)}</p><button class="primary" id="open-waiver">Open waiver →</button><p class="hint">Opens this guest’s demo preview. No email was sent.</p></div>`;
   document.body.append(dialog);
   dialog.querySelector('.icon-button').addEventListener('click', () => dialog.close());
   dialog.addEventListener('close', () => { dialog.remove(); if (trigger.isConnected) trigger.focus(); });
@@ -234,7 +268,7 @@ function showEmail(id, trigger) {
   dialog.showModal();
 }
 function bindWaiverEvents() {
-  main.querySelector('#send-waivers')?.addEventListener('click', () => openRequests());
+  main.querySelector('#add-guests')?.addEventListener('click', () => openRequests());
   main.querySelectorAll('[data-request]').forEach(button => button.addEventListener('click', () => openRequests(button.dataset.request)));
   main.querySelectorAll('[data-prep]').forEach(button => button.addEventListener('click', () => { state.prepView = button.dataset.prep; render(); }));
   main.querySelectorAll('[data-email]').forEach(button => button.addEventListener('click', () => showEmail(button.dataset.email, button)));
@@ -244,8 +278,8 @@ function bindWaiverEvents() {
   main.querySelector('#request-form')?.addEventListener('submit', event => {
     event.preventDefault();
     try {
-      const recipients = [...main.querySelectorAll('[data-recipient]:checked')].map(input => ({ id: input.dataset.recipient, ...state.requestDrafts[input.dataset.recipient] }));
-      state.waiverFlow = W.sendRequests(state.waiverFlow, recipients);
+      const entries = [...main.querySelectorAll('[data-recipient]:checked')].map(input => ({ id: input.dataset.recipient, ...state.requestDrafts[input.dataset.recipient] }));
+      state.waiverFlow = W.addDetails(state.waiverFlow, entries);
       state.prepView = 'dashboard'; render();
     } catch (error) {
       const notice = main.querySelector('#request-error'); notice.textContent = error.message; notice.hidden = false; notice.focus();
@@ -264,6 +298,7 @@ function bindWaiverEvents() {
 
 function bindEvents() {
   bindWaiverEvents();
+  bindCalendarKeys();
   main.querySelectorAll('[data-back]').forEach(button => button.addEventListener('click', () => go(Number(button.dataset.back))));
   main.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => {
     state.view = button.dataset.view;
@@ -322,7 +357,14 @@ const BookingDemo = {
   snapshot() {
     return state.confirmed ? { id: 'SAMPLE-001', key: bookingKey(), departureId: state.selectedDepartureId, party: Number(state.party), name: state.name, email: state.email, participants: structuredClone(state.waiverFlow.participants), total: quote().total } : null;
   },
-  openPreparation() { if (state.confirmed) { state.step = 3; state.prepView = 'dashboard'; render(); } }
+  openPreparation() { if (state.confirmed) { state.step = 3; state.prepView = 'dashboard'; render(); } },
+  // Operator-initiated resend of a sample request. Applies the waiver rules, re-renders, and returns the resend count.
+  resend(id) {
+    if (!state.confirmed) throw new Error('There is no session booking to resend for.');
+    state.waiverFlow = W.resend(state.waiverFlow, id);
+    render(false);
+    return state.waiverFlow.participants.find(item => item.id === id).deliveries - 1;
+  }
 };
 
 document.querySelector('#reset').addEventListener('click', reset);

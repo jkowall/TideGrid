@@ -2,8 +2,6 @@
 
 **Status:** Canonical architecture direction; not an implementation contract
 
-**Date:** September 3, 2026
-
 This document defines the approved V2 architecture direction. It is a product and system design baseline, not an implementation contract.
 
 The existing [`database/schema.sql`](../../database/schema.sql) and [`api/openapi.yaml`](../../api/openapi.yaml) remain V1 artifacts. They have not been revised for V2. No V2 database migration, generated API contract, client SDK, or production application has been created yet.
@@ -16,11 +14,11 @@ The system uses one TypeScript modular monolith, one shared versioned API, one P
 
 V2 has three client surfaces:
 
-1. A branded guest PWA on an operator-owned custom domain for discovery, booking, payment, participant details, waivers, packages, trip changes, and tips.
+1. A branded guest PWA on an operator-owned custom domain for discovery, booking, payment, participant details, waivers, trip cards, trip changes, and tips.
 2. A shared configurable native shell built from one codebase. Each operator build has its own app identity, store listing, icons, and immutable operator application identifier. Business configuration and waiver content are loaded from versioned server state.
-3. A TideGrid operator web console for catalog, schedules, bookings, pooled equipment, packages, waiver templates, trip changes, messaging status, imports, and exceptions.
+3. A TideGrid operator web console for catalog, schedules, bookings, pooled equipment, trip cards, waiver templates, trip changes, messaging status, imports, and exceptions.
 
-The PWA is the universal fallback. A guest or invited participant must be able to book, manage a booking, and sign a waiver without installing the native app. Neither guest client is an offline booking or operational authority. Capacity, payments, equipment, package balances, waiver acceptance, and booking changes require a server-confirmed command.
+The PWA is the universal fallback. A guest or invited participant must be able to book, manage a booking, and sign a waiver without installing the native app. Neither guest client is an offline booking or operational authority. Capacity, payments, equipment, trip-card balances, waiver acceptance, and booking changes require a server-confirmed command.
 
 ## Runtime topology
 
@@ -81,9 +79,9 @@ V2 supports pooled quantity, pricing, checkout selection, manual availability bl
 
 ### Packages
 
-`PackageDefinition` describes a supported prepaid unit product with versioned eligibility, consumption, validity, and cancellation-reinstatement rules. `PackageAccount` is tenant-scoped and associated with a known customer. `PackageLedgerEntry` is append-only and records purchase, hold, redemption, release, reinstatement, expiration, and approved correction.
+`PackageDefinition` describes a supported trip-count card product with versioned eligibility, consumption, validity, and cancellation-reinstatement rules. `PackageAccount` is tenant-scoped and associated with a known customer. `PackageLedgerEntry` is append-only and records purchase, hold, redemption, release, reinstatement, expiration, and approved correction.
 
-The locked balance projection must remain nonnegative. A package purchase may contribute to net managed booking value once. Redemption never incurs a second TideGrid platform fee. V2 does not include points, status tiers, automatic earning, partner rewards, anonymous gift cards, transfer, family sharing, or arbitrary customer-specific loyalty formulas.
+The locked balance projection must remain nonnegative. A trip-count card purchase may contribute to net managed booking value once. Redemption never incurs a second TideGrid platform fee. V2 does not include points, status tiers, automatic earning, partner rewards, anonymous gift cards, transfer, family sharing, or arbitrary customer-specific loyalty formulas.
 
 ### Service credits
 
@@ -91,9 +89,9 @@ The locked balance projection must remain nonnegative. A package purchase may co
 
 The locked credit balance remains nonnegative. Checkout holds credit atomically with capacity, equipment, and package units. Expiry or failed payment releases it with the other resources. Credit that preserves value already assessed on an earlier booking does not enter net managed booking value again when redeemed.
 
-The guest-facing `TripCard` identifies either a trip-count `PackageAccount` or a USD `CreditAccount`; denomination is immutable. Purchased dollar cards extend the credit ledger with source lots for purchased value, cancellation value and promotional value, each retaining eligibility, validity, payment/issue references and fee provenance. Money uses integer cents; trip units use integers. Card identifiers alone do not authorize access. One displayed balance may aggregate compatible lots, but holds and redemptions record the specific lots consumed. Pending purchases cannot create spendable value before payment or an authorized external-payment record confirms.
+The guest-facing `TripCard` facade presents either a trip-count card backed by a `PackageAccount` or a dollar card backed by a USD `CreditAccount`; denomination is immutable. Purchased dollar cards extend the credit ledger with source lots for purchased value, cancellation value and promotional value, each retaining eligibility, validity, payment/issue references and fee provenance. Money uses integer cents; trip units use integers. Card identifiers alone do not authorize access. One displayed balance may aggregate compatible lots, but holds and redemptions record the specific lots consumed. Pending purchases cannot create spendable value before payment or an authorized external-payment record confirms.
 
-Cancellation plans allocate remedies against the booking's original tenders: eligible money-paid amounts choose refund or new credit, USD-card amounts restore to their source lots, and unit-card amounts restore eligible units. Store the frozen per-tender amounts, customer/account, policy and cause. Idempotency and balance constraints prevent returning the same portion through both a refund and a card entry. Card issue, hold, spend, release, restoration, expiration and adjustment remain append-only and auditable.
+Cancellation plans allocate remedies against the booking's original tenders: eligible money-paid amounts choose refund or new credit, dollar-card amounts restore to their source lots, and trip-count-card amounts restore eligible units. Store the frozen per-tender amounts, customer/account, policy and cause. Idempotency and balance constraints prevent returning the same portion through both a refund and a card entry. Card issue, hold, spend, release, restoration, expiration and adjustment remain append-only and auditable.
 
 ### Waivers
 
@@ -115,7 +113,7 @@ V2 does not collect medical questionnaires, certification documents, physician c
 
 Windy's embedded map is a separate visualization, with a direct-link fallback and explicit model/time context. Its browsing state is not captured as `WeatherEvidence`, does not drive commands, and must not silently stand in for unavailable trip-date forecasts. Map URLs contain only public area coordinates and display options. Production embedding and any API use require verification of current provider terms, coverage, and credentials handling; no private API key belongs in a client bundle.
 
-`TripChange` records an authorized human decision for one scheduled trip. The initial actions are watch, sales closure, delay, and pre-service cancellation. A watch records concern without changing sales or bookings. The other approved actions close affected sales when applicable and freeze the affected booking set. Cancellation creates one idempotent remedy task per booking. The operator selects one remedy per affected booking: refund to the original payment method or noncash service credit. Package-funded bookings restore eligible units under the snapshotted policy. Messages report the operator's decision and each customer's result.
+`TripChange` records an authorized human decision for one scheduled trip. The initial actions are watch, sales closure, delay, and pre-service cancellation. A watch records concern without changing sales or bookings. The other approved actions close affected sales when applicable and freeze the affected booking set. Cancellation creates one idempotent remedy task per booking. The operator selects one remedy per affected booking: refund to the original payment method or noncash service credit. Trip-count-card-funded bookings restore eligible units under the snapshotted policy. Messages report the operator's decision and each customer's result.
 
 V2 does not include automated safety decisions, at-sea aborts, vessel or crew substitution, partial-party moves, waitlist priority, multi-trip disruption plans, or incident workflows.
 
@@ -123,13 +121,13 @@ V2 does not include automated safety decisions, at-sea aborts, vessel or crew su
 
 Email uses a provider-neutral adapter. SMS uses a dedicated Twilio subaccount, Messaging Service, and sending number for each operator. Tenant configuration stores provider identifiers and server-side credential references, never provider secrets in a client or public configuration.
 
-Transactional and marketing consent remain separate. Provider callbacks enter an idempotent inbox before changing delivery state. Booking confirmation, participant invitation, waiver reminder, trip change, refund, package, and tip messages use versioned templates and record delivery outcome. A Twilio failure can fall back to email only when the message policy and consent allow it.
+Transactional and marketing consent remain separate. Provider callbacks enter an idempotent inbox before changing delivery state. Booking confirmation, participant invitation, waiver reminder, trip change, refund, trip-card, and tip messages use versioned templates and record delivery outcome. A Twilio failure can fall back to email only when the message policy and consent allow it.
 
 Native push uses a provider-neutral adapter over Apple and Google delivery services. Device registrations bind a token to one tenant, application identity, authenticated guest, device, and permission state. Sign-out, account deletion, token rotation, or permission revocation disables the registration. Notifications contain no sensitive booking or waiver detail; they open a scoped deep link and require current authorization before showing protected data. Push sends originate from the transactional outbox, record provider outcome when available, and remain best effort. A push failure is visible and does not replace required email or consented SMS delivery.
 
 ### Imports
 
-V2 is direct-first. TideGrid owns direct web, native, phone, and staff-created bookings after operator cutover. The import boundary supports controlled, one-way ingestion of future bookings, customers, and approved package balances. Every imported object records source system, external identifier, mapping version, import batch, and reconciliation status.
+V2 is direct-first. TideGrid owns direct web, native, phone, and staff-created bookings after operator cutover. The import boundary supports controlled, one-way ingestion of future bookings, customers, and approved trip-card balances. Every imported object records source system, external identifier, mapping version, import batch, and reconciliation status.
 
 Imports do not create a live synchronization contract. TideGrid is the booking and inventory system of record for direct and staff-created bookings after cutover. An imported OTA reservation remains a labeled capacity and roster shadow of the incumbent record. The incumbent continues to control its price, availability, cancellation, payment, and channel communication, and operator staff record changes in TideGrid. TideGrid does not dual-write with an incumbent, publish inventory to an OTA, or accept live OTA booking updates in V2.
 
@@ -202,6 +200,8 @@ Provider degradation is explicit:
 - NOAA failure or stale data displays source age and leaves the decision with the operator.
 - Queue failure leaves the committed outbox as recoverable truth.
 - Native store delay does not block the PWA or operator console.
+
+Live use is gated in three steps: the Core live gate before an operator's first real booking, Staged Core modules that an operator enables only after each module passes its own acceptance, and the Native pilot gate before that operator's Native add-on goes live; see the roadmap [gates](05-roadmap-validation.md#gates).
 
 Database migrations use expand, migrate, and contract sequencing. App and API changes remain backward compatible across the defined native support window. A release pipeline must build and test every enabled operator configuration, but a failure in one store account or listing must not block web deployment or other operators' submissions.
 

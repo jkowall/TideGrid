@@ -2,8 +2,6 @@
 
 **Status:** Unvalidated pilot pricing hypothesis
 
-**Date:** September 4, 2026
-
 **Currency:** USD
 
 None of the prices, conversion assumptions, cost assumptions, or margin targets in this document has been validated through paid use. They are the terms TideGrid will test, not evidence of willingness to pay or a scalable business.
@@ -19,7 +17,7 @@ None of the prices, conversion assumptions, cost assumptions, or margin targets 
 
 Booking Core includes two active boats. Each additional active boat costs $75 per month. The Native add-on covers one operator-branded iOS and Android app pair. Boats are inventory inside that app, not separate apps. Each additional operator brand or store-app pair carries another applicable Native setup and recurring fee and requires a custom quote.
 
-The Pilot Native offer is a customer discount and research program. It grants no membership interest, equity, governance right, profit share, intellectual-property right, exclusivity, or authority to act for TideGrid.
+The Pilot Native offer is a customer discount and research program that grants no equity, governance, profit share, intellectual-property, exclusivity, or agency right, as recorded in the [decision register](06-decision-register.md) row "Ownership and control".
 
 There is no monthly, seasonal, or usage pause during the initial 12-month term. A seasonal operator continues to pay the fixed subscription when no trips run.
 
@@ -60,13 +58,13 @@ Negative fee adjustments carry forward against later variable fees or the contra
 
 The fee applies to all value TideGrid manages, including bookings paid outside TideGrid's card flow. Payment rail does not change the fee.
 
-For a trip booking, TideGrid assesses net managed booking value when the trip completes. A retained cancellation or no-show amount is assessed when that booking reaches a final closed outcome. For a fixed-unit trip package, TideGrid recognizes value when the package is sold. The billing-period calculation is:
+For a trip booking, TideGrid assesses net managed booking value when the trip completes. A retained cancellation or no-show amount is assessed when that booking reaches a final closed outcome. For a trip-count card, TideGrid recognizes value when the card is sold. The billing-period calculation is:
 
 ```text
 eligible trip fares and private-charter value
 + mandatory operator fees
 + eligible booking-linked add-ons and equipment rentals
-+ fixed-unit trip-package sales
++ trip-count card sales
 + retained cancellation and no-show amounts
 - discounts
 - refunded or charged-back eligible value
@@ -78,11 +76,11 @@ The following rules apply:
 
 - Guest checkout, staff-assisted, imported direct, cash, check, external point-of-sale, and Stripe records count when the booking is managed in TideGrid. Payment rail and import origin do not determine fee treatment.
 - Deposits and balances are not charged twice. The closed booking contributes only its final retained eligible value.
-- Taxes, tips, complimentary value, promotional credit, refunded value, and later package-unit redemption are excluded from the fee base.
+- Taxes, tips, complimentary value, promotional credit, refunded value, and later trip-count card redemption are excluded from the fee base.
 - Payment-processing fees, TideGrid fees, and unrelated retail sales are not booking value and do not enter the fee base.
-- Package redemption is excluded because TideGrid charges the package sale. A refunded package creates a reversing adjustment.
+- Trip-count card redemption is excluded because TideGrid charges the card sale. A refunded trip-count card creates a reversing adjustment.
 - A credit that preserves value already counted on the original booking is not charged again when redeemed.
-- Dollar trip-card purchases create prepaid value and are excluded from net managed booking value at issue. When redeemed, their eligible booking lines enter the fee base at the normal booking-completion or retained-cancellation point. Taxes and tips remain excluded. Track purchased, promotional and cancellation-credit source lots so previously assessed value is excluded on reuse. Unit trip-card packages retain sale-time assessment and no second assessment at redemption.
+- Dollar card purchases create prepaid value and are excluded from net managed booking value at issue. When redeemed, their eligible booking lines enter the fee base at the normal booking-completion or retained-cancellation point. Taxes and tips remain excluded. Track purchased, promotional and cancellation-credit source lots so previously assessed value is excluded on reuse. Trip-count cards retain sale-time assessment and no second assessment at redemption.
 - A future direct or staff-assisted reservation imported for TideGrid to manage is included on the same basis as a TideGrid-created booking.
 - During the pilot, every imported OTA reservation is a capacity and roster shadow managed in its source system and is excluded from the fee base. Converting an OTA record into a TideGrid-managed booking is not supported. Live OTA synchronization remains outside the pilot.
 - Complimentary bookings and fully refunded cancellations contribute zero. Retained cancellation and no-show amounts remain included.
@@ -189,7 +187,7 @@ Work expected to exceed eight hours requires a written custom quote before it st
 
 The standard $4,500 setup covers one operator brand, one iOS app, one Android app, standard TideGrid configuration, one store listing per platform, release preparation, and one standard review-response cycle per store. That response cycle is one corrected resubmission or one evidence-based appeal, selected from the rejection cause. A further resubmission or appeal is custom work. The customer supplies approved brand assets, copy, policies, support details, and access to customer-owned developer accounts on schedule.
 
-The operator must meet the legal-entity, business-website, D-U-N-S, verified organization-account, account-ownership, and content-approval prerequisites in [Native app factory and store submission](09-native-app-factory-and-store-submission.md) before its non-refundable setup payment counts toward the production-build gate. Customer-controlled account verification and store review do not count as TideGrid delivery hours, but TideGrid assistance, remediation, and appeal preparation do. The operator performs the final Apple App Review submission; TideGrid may submit Google only after recorded operator approval.
+The operator must meet the legal-entity, business-website, D-U-N-S, verified organization-account, account-ownership, and content-approval prerequisites in [Native app factory and store submission](09-native-app-factory-and-store-submission.md) before its non-refundable setup payment counts toward the [Validation gate](05-roadmap-validation.md#validation-gate). Customer-controlled account verification and store review do not count as TideGrid delivery hours, but TideGrid assistance, remediation, and appeal preparation do. The operator performs the final Apple App Review submission; TideGrid may submit Google only after recorded operator approval.
 
 Native setup must target at least 40% gross margin using loaded customer-specific labor and direct cost. Price each delivery band from measured or credibly estimated customer-specific work:
 
@@ -204,6 +202,8 @@ At the illustrative $100 loaded hourly cost and a $500 direct-cost ceiling, 22 h
 App-store approval and timing are controlled by the stores. Setup purchases a defined launch service, not guaranteed approval by a particular date.
 
 The $4,500 and 22-hour band remain provisional until TideGrid completes one public-store launch and reproduces the factory for a second operator without source changes. Until then, the price is a paid validation hypothesis, not demonstrated delivery economics.
+
+An operator's Native add-on goes live only after that operator passes the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate), while its Booking Core may already be live on the PWA under the Core live gate.
 
 ## Pilot Native offer controls
 
@@ -223,14 +223,14 @@ To receive it, each pilot operator must:
 
 - fit the pilot segment and standard product scope;
 - sign 12-month Booking Core and Native agreements;
-- pay the $2,250 Native setup invoice before the production-build gate;
+- pay the $2,250 Native setup invoice before the [Validation gate](05-roadmap-validation.md#validation-gate) passes;
 - pay the full recurring, extra-boat, pass-through, and custom-work charges;
 - use one legal operator, one brand, one operating location, and one app pair;
 - supply approved branding, waiver language, legal URLs, business records, clean data, provider accounts, and approvals on the agreed schedule;
 - participate in weekly design reviews during delivery and complete agreed acceptance testing on schedule; and
 - accept shared product configuration with no source fork or exclusive feature commitment.
 
-The offer ends after three paid, qualified pilot operators. It cannot be stacked, transferred, converted to cash, extended to another brand, or used to fund custom work. It creates no ownership, partnership, governance, profit-sharing, or agency relationship. Public reference or case-study rights require separate consent.
+The offer ends after three paid, qualified pilot operators. It cannot be stacked, transferred, converted to cash, extended to another brand, or used to fund custom work. Public reference or case-study rights require separate consent.
 
 ## Pass-through costs and custom work
 
@@ -245,7 +245,7 @@ The following costs pass through at cost and do not count toward any minimum:
 
 Routine shared hosting is included in the subscription. Provider price changes pass through prospectively. TideGrid must show the source charge and billing period and may not hide margin in a pass-through line.
 
-Complex migration or stored-package reconciliation starts at $2,500. Other work outside published configuration requires a fixed-price statement of work or is billed at $175 per hour under a written scope and budget. This includes custom data cleanup, integrations, design, workflows, reports, legal-policy preparation, on-site work, and extra store cycles. No custom work is included in recurring fees or the pilot credit.
+Complex migration or stored trip-card reconciliation starts at $2,500. Other work outside published configuration requires a fixed-price statement of work or is billed at $175 per hour under a written scope and budget. This includes custom data cleanup, integrations, design, workflows, reports, legal-policy preparation, on-site work, and extra store cycles. No custom work is included in recurring fees or the pilot credit.
 
 A custom quote is also required for any operator with:
 
@@ -282,11 +282,8 @@ These vendor claims are pricing anchors, not TideGrid demand evidence. TideGrid'
 
 ### Before full production build
 
-- Complete 12 problem and pricing interviews across at least two operator types.
-- Confirm that at least five interviewees fit the direct-first profile and that three qualified pilot operators across at least two operator types provide written conditional commitments.
-- Verify trailing booking value, direct-channel mix, seasonality, current software cost, and external-payment share for each serious prospect.
-- Complete the paid-pilot-readiness gate with a funded bottom-up build and delivery budget, contingency, runway limit, and contract refund or long-stop treatment. The bare-bones LLC already exists but does not satisfy this gate.
-- Verify each pilot operator's legal entity, D-U-N-S record, public website, domain email, authorized representative, and Apple and Google organization accounts.
+The interview, qualification, and paid-pilot readiness sequence is defined once in the roadmap [gates](05-roadmap-validation.md#gates). The full production build starts only after that sequence passes and the commercial conditions below are met.
+
 - Obtain Stripe confirmation of Stripe-set processing fees and Stripe negative-balance loss responsibility for the exact pilot connected-account configuration.
 - Obtain three signed 12-month Booking Core and Native agreements at the Pilot Native terms.
 - Collect all three $2,250 setup payments. Interest, letters of intent, refundable placeholders, and negotiated recurring discounts do not pass the gate.

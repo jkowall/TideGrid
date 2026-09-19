@@ -1,147 +1,102 @@
 # Guest booking workflow prototype
 
-**Status:** Bounded prototype authorized September 10, 2026. Customer agreement on the problem supports testing this flow; price acceptance and switching commitments remain unverified.
+**Status:** Bounded, throwaway prototype authorized September 10, 2026, with public demo hosting authorized the same day. Interview evidence supports the booking, payment, and waiver problem; price acceptance and switching commitments remain unverified, and nothing here is an implementation contract.
 
 ## Run locally
 
-From the repository root:
+From the repository root, with no dependencies, build step, account, or provider credentials:
 
 ```sh
 python3 -m http.server 4287 --bind 127.0.0.1 --directory prototypes/guest-flow
 ```
 
-Open [the local prototype](http://127.0.0.1:4287). No dependencies, build step, account, or provider credentials are required. Use fictional guest details. The prototype keeps inputs in page memory; refreshing or resetting starts over.
+Open [the local prototype](http://127.0.0.1:4287) and use fictional guest details. Inputs live in page memory; refreshing or resetting starts over. Use port 4287 for this repository; port 4173 carried a cached service worker from another local application during testing. Python's `http.server` sends no `Cache-Control` header, so a browser that loaded the same port earlier may serve stale CSS or JavaScript; use a cache-bypassing reload after edits. Production is unaffected because Workers Static Assets sets ETags, which is why `index.html` carries no `?v=` query strings.
 
 ## Public demo and deployment
 
-The public demo address is [demo.tidegrid.us](https://demo.tidegrid.us). Cloudflare Workers serves the static assets using [the deployment configuration](../../wrangler.prototype.jsonc). The main `tidegrid.us` site is separate. The demo is publicly accessible; the no-index response header discourages search indexing but is not access control.
-
-Deploy from the repository root with an authenticated Cloudflare account:
+The public demo is [demo.tidegrid.us](https://demo.tidegrid.us). Cloudflare Workers serves the static assets using [the deployment configuration](../../wrangler.prototype.jsonc); the main `tidegrid.us` site is separate. Deploy from the repository root with an authenticated Cloudflare account, and only when the owner asks:
 
 ```sh
 npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc --dry-run
 npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc
 ```
 
-The `.assetsignore` allowlist publishes only the HTML, runtime JavaScript and CSS. `_headers` configures response headers. Tests, documentation and provider configuration are excluded; newly added runtime assets must be added explicitly. There is no build step or server-side application. After deployment, verify HTTPS, guest and operator views, matching local/public runtime assets, and HTTP 404 responses for excluded files. Updates require an explicit deploy; pushing Git alone does not publish them.
+The `.assetsignore` allowlist publishes only `index.html`, the runtime JavaScript, and the CSS. Tests, documentation, `_headers` itself, and provider configuration return 404; a new runtime asset must be added to the allowlist explicitly. Pushing Git does not publish; every update needs an explicit deploy. `_headers` sets these response headers on every path:
 
-Use fictional guest details when sharing. Refresh clears session inputs; booking, payment, messages and signatures remain simulations. Hosting this demo does not implement the production system or satisfy the production validation gates.
+- `X-Robots-Tag: noindex, nofollow`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`.
+- `Content-Security-Policy`: every source is `'self'`, except `frame-src`, which allows only `https://embed.windy.com`; `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, and `frame-ancestors 'none'`, so the demo cannot be embedded in an iframe anywhere. No asset uses `data:` URIs or web fonts, so `img-src` is `'self'` only and `font-src` falls back to `default-src`; widen the policy only when an asset needs it.
+- `Strict-Transport-Security: max-age=31536000` (this host only; no `includeSubDomains` or `preload`).
+- `Permissions-Policy`: camera, microphone, geolocation, payment, and USB are disabled.
+
+The CSP forbids inline `style=` attributes, inline `<script>`, `on*=` handler attributes, and `javascript:` URLs. The capacity bar in the operator view is a `<meter>` styled in `operator.css` for that reason; any future runtime asset must follow the same rule or the page breaks in production only. `source.test.cjs` greps `index.html` and the six runtime scripts for those patterns, for `?v=` query strings, and for out-of-scope vocabulary, so `npm test` fails before a deploy would. Cloudflare serves a managed `robots.txt` at HTTP 200 for the zone; it is not in the repository, and the `X-Robots-Tag` noindex header still applies. Neither is access control; the demo is publicly reachable.
+
+After each deploy, verify HTTPS on the custom domain, the guest and operator views, matching local and public asset hashes, HTTP 404 for excluded files, and the six response headers above. Hosting the demo does not implement the production system or pass any [production gate](../../docs/v2/05-roadmap-validation.md#gates).
+
+### Sharing the demo
+
+The owner approves sharing the link with operators after approving the session scripts below. Customer communication stays separate and follows [the follow-up drafts](../../docs/customer/follow-up-message-drafts.md); any message that links the demo must say it is a clickable concept with sample data, not a product.
 
 ## What this tests
 
 Can a guest complete one booking journey on a phone, understand the price and next steps, and find trip preparation information without staff help?
 
-Guests can browse a monthly calendar, chronological departure list, or experience cards. Coastal fishing, reef diving, sunset cruises, and private charters share one fictional September–October 2026 inventory. Date, experience, charter type, and party filters help guests find a departure; sold-out days, days with no sailings, and insufficient capacity have distinct states. Selecting a departure leads into guest details, simulated checkout, a booking dashboard, participant waiver requests, guest signing, arrival instructions, and Important links.
+- **Inventory** is generated relative to today in `America/New_York`: the window is the current month and the next month, on a fixed weekly sailing pattern. Inside the next 14 days there is exactly one fully sold-out sailing day and one weekday with no sailings; the default selected day is three or more days ahead with availability, and the sold-out day is in the month the calendar opens on, even near a month end. Past days show as "Past" and are disabled; a departure earlier today whose start time has passed in `America/New_York` also shows "Past" and cannot be quoted, and today's day is disabled once every matching departure has started. Time labels compute EDT or EST per date. Calendar days use a roving tabindex with arrow-key, Home, and End navigation.
+- **Discovery**: monthly calendar, chronological departure list, or experience cards for coastal fishing, reef diving, sunset cruises, and private charters. Date, experience, charter type, and party filters; sold-out, no-sailing, and insufficient-capacity states are distinct.
+- **Booking**: guest details, simulated checkout with the total shown before confirmation, and a booking dashboard.
+- **Waivers**: confirming the booking automatically sends the booker's own waiver request (status "Awaiting signature"). Other party members start as "Needs details" with no name or email. The booker adds each guest's details from the dashboard, and each added guest is sent a request automatically; there is no manual send step and no operator role badge on the guest side. Opening a guest's email preview shows the nonbinding sample waiver, which that guest signs by typing a fictional name and accepting two acknowledgments. Signing one request leaves the others pending.
+- **Preparation**: arrival instructions with the operator's trip notice, a trip checklist, and Important links, including the [Florida saltwater fishing license](https://myfwc.com/license/recreational/saltwater-fishing/) resource. The link does not decide whether a particular guest or charter needs a license.
 
-The post-booking journey separates booking confirmation from waiver completion. In the operator demo, enter fictional participant names and email addresses and simulate sending their requests. Open a participant's email preview, review the nonbinding sample waiver as that guest, and type a fictional signature. Returning to the booking shows each participant's status; signing one request leaves the others pending. This demonstrates adult participant interactions only. Guardian signing, legal waiver documents, identity verification, actual delivery, and durable signature evidence are not implemented.
+Simulated: the operator, boats, availability, prices, booking reference, payment, confirmation, email delivery, signatures, and the meeting point. Nothing is reserved, charged, sent, verified, or persisted.
 
-**Plan correction after prototype feedback:** The intended product sends initial waiver requests automatically after booking confirmation. Manual controls are for resend and exceptions. The [current product scope](../../docs/v2/02-product-scope.md#automatic-requests-and-resend) also specifies email verification and participant matching, QR entry, and staff-assisted signing without email. The prototype's manual initial send illustrates the steps but does not implement that intended automation or those verification and QR paths.
+## What the operator concept shows
 
-The operator workspace adds a daily departure overview, fictional booking manifests, waiver status, and simulated check-in for signed participants. The guest booking created in this session appears alongside explicitly seeded examples. Operators can edit Important links and save a local trip notice; the guest preparation screen reads those settings. Notices are entered by the operator, not generated weather or safety decisions, and saving one sends no messages.
+The workspace opens on **Sailings** and shows one view at a time. A shared date and sailing selector keeps trip-specific views in context; notes, link drafts, card forms, and marine proposals survive view changes. Reset returns to Sailings and clears the demo.
 
-The workspace opens on **Sailings** and shows one view at a time: Sailings, Manifest, Marine conditions, Trip cards, or Guest tools. Selecting a sailing opens its manifest. A shared date and sailing selector keeps trip-specific views in context; cards remain customer-wide. Notes, link drafts, card forms and marine proposals survive view changes. Reset returns to Sailings and clears the demo.
+- **Sailings**: daily departure overview with sample totals and a capacity meter per sailing.
+- **Roster**: the "Departure roster" heading, with the selected sailing's trip, date, time, and boat beneath it, and each participant's waiver status ("Signed", "Awaiting signature", or "Needs details"). For the booking made in this session, "Resend request" re-sends an awaiting-signature guest's request, limited to three resends per guest; after the third the button reads "Resend limit reached" and is disabled. A resend never changes a signature and nothing is emailed. Roster is a booking-management view. Check-in and manifests are out of scope, and the view is not a check-in, boarding, or manifest record.
+- **Marine conditions**: fictional wind, seas, swell, and visibility with forecast validity and fresh or stale states; a click-to-load [Windy map embed](https://embed.windy.com/config/map) with Wind and Waves layers for an example Pompano Beach area, independent of the sample metrics. Operators can set a watch, prepare a delay or cancellation proposal with a credit or refund remedy per booking, and save a local guest notice. Proposals stay pending; nothing changes departures, closes sales, cancels bookings, or issues refunds or credits.
+- **Trip cards**: named customers holding trip-count cards or dollar cards; operators issue samples, pick eligible experiences, simulate partial redemption, and inspect balance history. No checkout payment, authentication, or purchase.
+- **Guest tools**: the trip notice for the selected sailing and the Important links list, both read by the guest preparation screen. Notices are typed by the operator, not generated, and saving one sends nothing.
 
-Guest pages prioritize filters, prices and next actions. Calendar help, booking policy, preparation checklists and forecast timestamps expand on demand. The global prototype banner, price disclosures, fictional meeting-point warning and required checkout/signature acknowledgments remain visible at the relevant steps.
+Marine conditions, trip cards, SMS, pooled equipment, and tips are [staged Core modules](../../docs/v2/05-roadmap-validation.md#staged-core-modules); an operator can go live without them. The operator prototype avoids out-of-scope vocabulary; the only mention of check-in or manifests is the roster footnote that rules them out.
 
-Marine conditions show fictional wind, gusts, combined seas, swell height/period/direction, wind waves, and visibility. The trip-date demo clock exposes forecast validity, retrieval time, and fresh/stale states. A separate click-to-load [Windy map embed](https://embed.windy.com/config/map) offers Wind and Waves layers for an example Pompano Beach coastal area. Windy's current/available forecasts are independent of the fictional September–October trip dates and do not populate the sample metrics. Only public area coordinates and display options enter the external map URL.
+## Session A: guest journey (five minutes, unmoderated)
 
-Operators can set or clear a marine watch, prepare a delay or cancellation proposal, inspect affected bookings, and save a previewed local guest notice. Proposals remain pending approval; this prototype does not change departure times, close sales, cancel bookings, or execute refunds or credits. Live NOAA evidence and the production trip-change workflow remain in the [product plan](../../docs/v2/02-product-scope.md#advisory-weather-and-operator-directed-disruptions).
+Ask the operator to use fictional details and complete these tasks on a phone without a walkthrough:
 
-Cancellation proposals now require a credit or original-payment refund choice for every affected sample booking. The saved proposal shows each customer, amount and remedy. These examples assume full payment in money; mixed payments and original trip-card restoration are specified in the plan. Saving a proposal does not issue credit or change the Trip cards section.
+1. Find an outing for two guests using the calendar, then compare the list and experience-card views. Explain which view helps you decide.
+2. Try another date or party size, find the sold-out day, and recover to an available departure. Explain the total price before checkout.
+3. Complete the simulated booking and say what still needs attention.
+4. Add one guest from the booking dashboard, open that guest's email preview, and sign the sample waiver as the guest. Return to the booking and explain who still needs to sign. Find the arrival instructions and the fishing-license link.
 
-The operator's Trip cards section demonstrates named customers holding whole trips or USD balances. Operators can issue sample cards, select eligible experiences for trip-count cards, simulate partial redemption and inspect balance history. Whole-trip cards reject fractional or ineligible use; USD cards use integer cents; neither can overdraw. This is a separate balance demonstration, without checkout payment, customer authentication, actual card purchases or cancellation issuance. The [trip-card plan](../../docs/v2/02-product-scope.md#trip-cards-trip-counts-and-dollar-balances) covers those connections, source lots, split tender, original-denomination restoration and fee treatment.
+## Session B: operator concept walkthrough (moderated, separate)
 
-The operator identity, trips, availability, prices, booking reference, and confirmation are illustrative. An external fishing-license information link points to the [Florida Fish and Wildlife Conservation Commission](https://myfwc.com/license/recreational/saltwater-fishing/); it does not determine whether a license is required for a particular guest or charter.
+Run this in a separate, moderated session after Session A. Narrate the concept and ask the operator to react:
 
-This prototype does not create reservations, take payments, collect a legal signature, verify licenses, send messages, or persist guest data. The operator workspace is a local demonstration with an optional external Windy map. It does not implement production capacity controls, authentication, transactional provider integrations, or native apps. Those production obligations remain in the V2 plan.
-
-## Five-minute customer session
-
-Ask the operator to use sample details and complete these tasks without a walkthrough:
-
-1. Find an outing for two guests using the calendar, then compare the list and trip-card views. Explain which view helps you decide.
-2. Try another date or party size, find a sold-out day, and recover to an available departure. Explain the total price before checkout.
-3. Complete the simulated booking and identify what still needs attention.
-4. Send sample waiver requests, open one as the guest, and sign the sample. Return to the booking and explain who still needs to sign. Find arrival instructions and the fishing-license resource.
-5. Switch to the operator workspace, locate the same booking, and inspect waiver and check-in status. Add an Important link or trip notice and find it in the guest preparation screen.
+5. Open the operator workspace, locate the Session A booking in Roster, and resend one waiver request. Add an Important link and a trip notice in Guest tools, then find both in the guest preparation screen.
 6. Inspect Marine conditions, compare Windy's wind and wave layers, then simulate stale trip evidence. Set a local watch, preview a trip-change proposal, and explain what still needs operator approval before guests are affected.
-7. Propose a cancellation and choose credit for one booking and refund for another. Then compare a five-trip card with a dollar card, issue a sample of each and try a partial redemption. Explain which actions are only demonstrations.
+7. Propose a cancellation and choose credit for one booking and refund for another. Then compare a five-trip card with a dollar card, issue a sample of each, and try a partial redemption. Explain which actions are only demonstrations.
 
-Then explain where the real workflow differs and which task would still require another tool or a staff message.
+Close by asking where the real workflow differs, which task would still need another tool or a staff message, and about the most recent real booking that would not fit this flow.
 
-Record where they hesitate, need help, misread a status, or cannot find information. Separate observed behavior from requested features. Ask about the most recent real booking that would not fit this flow. Completion here does not establish demand, migration feasibility, willingness to pay, or acceptance of the native add-on.
+## What to record
 
-## Acceptance and agent ownership
-
-- Astra owns the original UI and implementation. Waiver and operator work use separate file owners; the coordinating agent integrates their shared booking snapshot.
-- The coordinating agent owns this brief, repository documentation, integration, and verification.
-- A fresh Astra reviewer checks the initial UI, keyboard behavior, mobile fit, and workflow correctness before handoff.
-- Verify discovery view switching, month and date navigation, combined filters, empty results, shared and private bookings, invalid guest details, sold-out or over-capacity choices, back/edit behavior, quote consistency, waiver status, Important links, and reset behavior.
-- Inspect the main path at representative phone and desktop widths. Any missing or simulated behavior must be clear to a test participant.
-
-The fanout follows [the saved agent plan](../../docs/v2/10-build-execution-and-agent-plan.md). This is a bounded prototype exception permitted by [the roadmap](../../docs/v2/05-roadmap-validation.md), not completion of a production goal. Public Cloudflare demo hosting was subsequently authorized on September 10, 2026. Customer communication remains separate.
+Record where the operator hesitates, needs help, misreads a status, or cannot find information. Separate observed behavior from requested features. Completion proves nothing about demand, price acceptance, or migration; those come from the [interview guide](../../docs/customer/operator-validation-guide.md), not this prototype.
 
 ## Automated checks
 
 ```sh
-node --test prototypes/guest-flow/*.test.cjs
-node --check prototypes/guest-flow/app.js
-git diff --check
+npm test
+npm run check
+node scripts/check-links.cjs
 ```
 
-The domain tests cover shared inventory consistency, combined date/type/experience filters, sold-out versus no-sailing states, party capacity, explicit departure selection, shared versus flat charter pricing, and arrival/date labels. Waiver tests cover send-before-sign, recipient validation, individual participant transitions, required acknowledgments, booking binding, and complete-party status.
+`npm test` runs the domain, waiver, trip-card, and source-lint tests. The domain tests inject the date and, where the clock matters, the instant, so the relative inventory stays deterministic. `npm run check` runs the syntax checks and the link checker. Node 22 or later.
 
-## Cloudflare deployment verification, September 10, 2026
+## Known gaps
 
-- Deployed source commit `3a8c753` as Worker `tidegrid-prototype`, version `aac88b58-c89b-4da1-b013-47b760cffc13`, at [demo.tidegrid.us](https://demo.tidegrid.us). The custom domain and Cloudflare-provided fallback returned HTTPS 200.
-- All 11 public runtime assets matched local SHA-256 hashes. README, all three test files, `.assetsignore`, `_headers` and the Wrangler configuration returned 404. Verified no-index, nosniff and no-referrer response headers.
-- All 16 automated tests passed. The public browser loaded guest discovery and operator sailings, switched to Marine conditions, and reported no browser errors during the smoke check. The deployed app assets are unchanged from the earlier desktop and phone workflow verification.
+Guardian signing, email verification and participant matching, QR entry and staff-assisted signing, real email or SMS delivery, persistence, authentication, live NOAA evidence, payment and other provider integrations, and a physical-device accessibility audit. Browser checks used emulated phone widths, not a physical phone. The production obligations are in the [product scope](../../docs/v2/02-product-scope.md).
 
-## Simplified navigation verification, September 10, 2026
+## History
 
-- All 16 domain, waiver and card tests passed, with JavaScript syntax and whitespace checks. Independent navigation/state checks covered one-view rendering, selection context, empty days, active booking navigation and reset.
-- Browser checks at 1280px and 390px confirmed compact guest and operator layouts without horizontal document overflow. The mobile journey completed booking at $212, waiver requests, one guest signature and navigation to that booking's manifest; the other guest remained pending.
-- Switching views preserved a marine watch, unfinished arrival note, link label, card issue form and redemption amount. Card issuance starts collapsed and stays open while changing card type. A no-sailing date disabled the trip selector and recovered through the suggested date.
-- Secondary disclosures were checked as native expandable controls. Required checkout and both sample-signature acknowledgments remain unchanged. This is browser emulation, not a physical-device accessibility audit.
-
-## Trip cards and cancellation credit verification, September 10, 2026
-
-- All 16 automated tests passed, including exact integer cents, fractional-trip rejection, experience eligibility, overdraw, full-use and immutable balance history. JavaScript syntax and whitespace checks passed.
-- Browser testing required all four cancellation remedies before saving, then retained three credit choices and one refund, each for $318, in the pending proposal. No balance or booking mutation occurred.
-- Browser testing issued a $250 card and a five-trip card; rejected fractional trips, ineligible experiences and overdraw; redeemed one trip and $25.29 correctly, leaving three trips and $174.71 on the respective seeded cards. Reset restored only the original sample balances.
-- Inspected the card UI at 1280px and 390px with no horizontal document overflow. Independent source and event-harness review covered card isolation/reset, safe rendering, frozen remedies, stale-preview rejection and separation from real payment actions.
-
-## Marine conditions verification, September 10, 2026
-
-- All 12 existing domain/waiver tests, JavaScript syntax checks, and whitespace checks passed. Independent source and VM review found no unresolved actionable issues in map loading/layers, fixed public URLs, per-departure state/reset, data isolation, proposal validation, escaping, notice comparison, or proposal withdrawal.
-- Browser inspection at 1365px verified the marine metrics and rendered Windy Wind and Waves maps. The Waves embed displayed its wave legend in feet. Map data remained independent of the sample departure and metrics.
-- Browser execution covered stale/fresh simulation, setting a watch, impact preview for four bookings/eight guests, saving a pending proposal and explicitly saving its local guest notice. A delay overtaken by the simulation clock was rejected; a later time succeeded without changing the original departure.
-- Responsive browser controls stalled during phone testing. After recovery, the document measured 354px with no horizontal document overflow, and the proposal/notice flow passed at that width. Phone visual inspection was limited by the browser's scaled screenshot output; this is not a physical-device test. Temporary viewport overrides and the test tab were cleared.
-
-## Waiver and operator verification, September 10, 2026
-
-- All 12 domain and waiver tests passed, along with JavaScript syntax and whitespace checks.
-- Browser testing completed book → send requests → email preview → review and type a sample signature → receipt → booking status. Invalid recipient email, missing name, and missing acknowledgments blocked progression. Returning without signing preserved the pending request; signing the first guest left the second pending, and completing both changed preparation status to complete.
-- The operator manifest displayed the session's booking and live waiver status. Only its signed participant could be marked checked in. Editing and reconfirming the same trip cleared both prior signatures and check-in.
-- Added a custom Important link and saved a departure notice in the operator view, then verified both in guest preparation. Unsafe URL schemes were rejected. A no-sailing date showed an empty state, and the session booking remained discoverable across dates.
-- Inspected desktop at 1365px and phone layouts at 390px and 320px, including signing and the operator manifest, without horizontal document overflow. Selecting a departure moves focus and scroll to its manifest.
-- Fresh Astra review found no unresolved actionable findings in state transitions, participant isolation, input escaping, resource URL validation, or guest/operator integration. Independent execution used Node tests and VM harnesses; rendered browser checks were performed by the coordinating agent, not on a physical phone.
-
-## Discovery expansion verification, September 10, 2026
-
-- All six domain tests, JavaScript syntax, and whitespace checks passed.
-- Browser checks covered all three views, preserved departure selection when switching views, clearing selection when party or filters changed, September 21 sold-out departures, September 22 with no sailings, empty-result recovery, and October navigation with 31 calendar dates.
-- A two-guest October 3 sunset booking showed $156.88 through review and confirmation, with arrival at 4:30 PM for its 5:00 PM departure. Required guest details, sample acknowledgment, and trip-specific preparation were exercised.
-- Inspected desktop at 1365px and phones at 390px and 320px. Calendar, cards, trip-detail dialog, selection summary, and checkout fit without horizontal document overflow; phone metadata was enlarged after visual inspection. A six-person private charter completed at 320px with a $699.60 total and 12:30 PM arrival for a 1:00 PM departure.
-- Independent Astra source review found and verified a fix for the result banner on fully sold-out dates. No unresolved actionable source findings remained. Browser checks were performed by the coordinating agent, not on a physical phone; calendar buttons use ordinary Tab navigation.
-
-## Initial checkout verification, September 10, 2026
-
-- JavaScript syntax and `git diff --check` passed.
-- Desktop browser checks covered the shared booking, blank name and malformed email, required simulation acknowledgment, waiver status, editing with retained guest details, and refresh clearing those details.
-- Sold-out and over-capacity departures blocked progression and removed the invalid quote. The two-guest shared fixture totaled $212.00; a private charter remained $699.60 when its party changed from three to six.
-- Browser checks at 390px completed the simulated booking and sample acknowledgment. Screens inspected at 390px and 320px had no horizontal document overflow. The 320px reset returned focus to the heading, and Tab advanced to the trip radio control.
-- A fresh Astra source review identified the mobile total appearing below the final action. The UI owner added it directly above the acknowledgment and confirmation controls; the coordinating agent verified the fix in the mobile browser.
-- The independent reviewer's mobile browser operation stalled. The coordinating agent completed mobile execution and visual checks; this was not an independent device test or an exhaustive accessibility audit.
-
-Use port 4287 for this repository. Port 4173 had a cached service worker from another local application during testing; its storage was left untouched.
+Dated verification records, including independent review of each slice, are in the [prototype verification log](../../docs/verification-log.md). Ownership and review rules are in [the build execution and agent plan](../../docs/v2/10-build-execution-and-agent-plan.md).

@@ -3,9 +3,9 @@
 **Version:** 1.0 design baseline  
 **Date:** July 15, 2026  
 **Market:** United States first  
-**Status:** Historical design package; superseded for current planning by [TideGrid V2](../v2/00-index.md)
+**Status:** Historical design package; superseded for current planning by [TideGrid V2](../../v2/00-index.md)
 
-> This specification describes the broader July 2026 departure-operations concept. Preserve it as design evidence, but do not use it to define current product scope, pricing, or implementation commitments. The [V2 decision register](../v2/06-decision-register.md) records which decisions remain applicable.
+> This specification describes the broader July 2026 departure-operations concept. Preserve it as design evidence, but do not use it to define current product scope, pricing, or implementation commitments. The [V2 decision register](../../v2/06-decision-register.md) records which decisions remain applicable.
 
 ## Required reading order
 
@@ -37,11 +37,11 @@
 - [Pricing strategy](pricing-strategy.md)
 - [ADR catalog](../adr/README.md)
 - [Diagram catalog](../diagrams/README.md)
-- [Production-oriented DDL](../../database/schema.sql)
-- [Database implementation guide](../../database/README.md)
-- [Database acceptance tests](../../database/acceptance-tests.sql) and [concurrency race harness](../../database/concurrency-tests.sh)
-- [OpenAPI 3.0 contract](../../api/openapi.yaml)
-- [Primary-source register](../../research/source-register.md)
+- [Production-oriented DDL](../../../database/schema.sql)
+- [Database implementation guide](../../../database/README.md)
+- [Database acceptance tests](../../../database/acceptance-tests.sql) and [concurrency race harness](../../../database/concurrency-tests.sh)
+- [OpenAPI 3.0 contract](../../../api/openapi.yaml)
+- [Primary-source register](../../../research/source-register.md)
 
 ## Architecture at a glance
 
@@ -77,7 +77,7 @@
 
 ## Naming note
 
-The package uses TideGrid. The existing theme board’s “Tideline Grid” wording is treated as superseded for architecture purposes. The separate brand strategy’s naming-clearance warning remains a pre-launch risk.
+The package uses TideGrid. The existing theme board’s “Tideline Grid” wording is treated as superseded for architecture purposes. The naming-clearance warning in the separate [brand strategy](../../archive/TIDEGRID_BRAND_STRATEGY.md) remains a pre-launch risk.
 
 ## Package validation
 
@@ -85,7 +85,7 @@ Validated July 15, 2026:
 
 | Check | Result |
 |---|---|
-| Source prompt | Byte-identical; SHA-256 `100389aff11673dc8839e275302c25c18781c3e9a6df10b34fd79de395da1772` |
+| [Source prompt](../../archive/TIDEGRID_PLATFORM_ARCHITECTURE_PROMPT.md) | Byte-identical; SHA-256 `100389aff11673dc8839e275302c25c18781c3e9a6df10b34fd79de395da1772` |
 | Artifact counts | 21 numbered sections plus index, 20 ADRs, 15 diagrams, 36 named risks |
 | PostgreSQL | Clean apply on PostgreSQL 17.10; 90 tables; all 89 tenant-scoped tables use forced RLS |
 | Tenant keys | Zero tenant-to-tenant foreign keys missing `tenant_id` |

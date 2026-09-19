@@ -1,8 +1,6 @@
 # TideGrid V2 build, hosting, and operations plan
 
-**Status:** Proposed pilot baseline; provisional until the paid-validation gate
-
-**Date:** September 4, 2026
+**Status:** Proposed pilot baseline; provisional until the [Validation gate](05-roadmap-validation.md#validation-gate) passes
 
 This document turns the V2 architecture direction into a build and operating plan. It does not authorize production work or provider spending. TideGrid should provision production infrastructure only after three pilot operators pay the native setup fee and sign the recurring agreement in [`05-roadmap-validation.md`](05-roadmap-validation.md).
 
@@ -351,22 +349,23 @@ Build storage must apply access control, retention, legal hold, and deletion pol
 
 ## Architecture acceptance gates
 
-TideGrid must pass each gate before processing live bookings:
+TideGrid must pass each gate before the live use it protects. Each row maps to one of the named gates in [Gates](05-roadmap-validation.md#gates): the Core live gate blocks an operator's first real booking; a Staged Core module blocks only that module's enablement for that operator; the Native pilot gate blocks only the Native add-on going live for that operator; the commercial and operating gates block selling beyond the pilot cohort. No Staged Core module proof and no Native pilot gate proof blocks the first live booking.
 
-| Gate | Proof |
-|---|---|
-| Shared web build | One immutable guest PWA build serves at least two distinct brands from server configuration with no source change |
-| Custom hostname | An operator-owned external DNS zone completes CNAME, certificate pre-validation, activation, renewal observation, and removal without manual origin changes |
-| Tenant isolation | Hostname, token, application identity, PostgreSQL rows, R2 objects, queues, logs, and provider context cannot cross two synthetic tenants |
-| Database connection | Hyperdrive reaches the direct Neon endpoint, avoids Neon's pooled endpoint, survives compute restart, and preserves read-after-write behavior with query caching disabled |
-| Transaction correctness | Production-shaped final-seat, exclusive-boat, equipment, package, service-credit, payment-late-arrival, and duplicate-callback tests pass |
-| Async recovery | A lost queue hint, duplicate delivery, retry exhaustion, and DLQ replay produce one recorded outcome through the PostgreSQL outbox/inbox contracts |
-| Deployment | Staging promotion, production version upload, synthetic check, traffic change, and Worker rollback complete from CI with retained evidence |
-| Migration | Expand, backfill, verify, contract, and forward-fix rehearsals preserve old and new application compatibility |
-| Recovery | Neon point-in-time restore and independent logical restore meet the approved RPO/RTO and reconcile provider records |
-| Observability | Alerts identify payment finalization gaps, outbox age, critical DLQ, database loss, backup age, and suspected tenant escape without exposing customer data |
-| Cost | One month of production-shaped testing attributes provider use and supports the accepted shared and per-tenant cost envelope |
-| Native integration | One pilot-operator build and a second brand build use the same source commit, pass shared tests, and produce complete store release bundles without source edits |
+| Gate | Blocks | Proof |
+|---|---|---|
+| Shared web build | [Core live gate](05-roadmap-validation.md#core-live-gate) | One immutable guest PWA build serves at least two distinct brands from server configuration with no source change |
+| Custom hostname | Core live gate | An operator-owned external DNS zone completes CNAME, certificate pre-validation, activation, renewal observation, and removal without manual origin changes |
+| Tenant isolation | Core live gate | Hostname, token, application identity, PostgreSQL rows, R2 objects, queues, logs, and provider context cannot cross two synthetic tenants |
+| Database connection | Core live gate | Hyperdrive reaches the direct Neon endpoint, avoids Neon's pooled endpoint, survives compute restart, and preserves read-after-write behavior with query caching disabled |
+| Transaction correctness (Core) | Core live gate | Production-shaped final-seat, exclusive-boat, service-credit, payment-late-arrival, and duplicate-callback tests pass |
+| Transaction correctness (staged modules) | [Staged Core modules](05-roadmap-validation.md#staged-core-modules): pooled equipment and trip cards | Production-shaped equipment-pool and trip-card (package unit and credit lot) tests pass before the matching module is enabled for an operator |
+| Async recovery | Core live gate | A lost queue hint, duplicate delivery, retry exhaustion, and DLQ replay produce one recorded outcome through the PostgreSQL outbox/inbox contracts |
+| Deployment | Core live gate | Staging promotion, production version upload, synthetic check, traffic change, and Worker rollback complete from CI with retained evidence |
+| Migration | Core live gate | Expand, backfill, verify, contract, and forward-fix rehearsals preserve old and new application compatibility |
+| Recovery | Core live gate | Neon point-in-time restore and independent logical restore meet the approved RPO/RTO and reconcile provider records |
+| Observability | Core live gate | Alerts identify payment finalization gaps, outbox age, critical DLQ, database loss, backup age, and suspected tenant escape without exposing customer data |
+| Cost | [Commercial and operating gates](05-roadmap-validation.md#commercial-and-operating-gates) | One month of production-shaped testing attributes provider use and supports the accepted shared and per-tenant cost envelope |
+| Native integration | [Native pilot gate](05-roadmap-validation.md#native-pilot-gate) | One pilot-operator build and a second brand build use the same source commit, pass shared tests, and produce complete store release bundles without source edits |
 
 Reject or revise this baseline when a gate shows that:
 

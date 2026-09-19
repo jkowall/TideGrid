@@ -1,17 +1,16 @@
 # TideGrid V2 product strategy
 
 **Status:** Canonical strategy for discovery and paid pilot validation
-**Date:** September 4, 2026
 
 ## Product direction
 
-TideGrid will sell a productized branded booking service to passenger-vessel operators. Guests book, pay, manage participants, sign waivers, reserve rental equipment, receive trip updates, tip, and use trip packages through the operator's brand.
+TideGrid will sell a productized branded booking service to passenger-vessel operators. Guests book, pay, manage participants, sign waivers, reserve rental equipment, receive trip updates, tip, and use trip cards through the operator's brand.
 
 The operator works from a shared TideGrid web console. TideGrid maintains one product and configures branding, boats, products, policies, and enabled modules for each operator. Customer-specific source forks are outside the business model.
 
 TideGrid remains exploratory. Paid validation determines whether the company should fund the build.
 
-Before the next operator outreach, approve the validation materials and form a bare-bones single-member Florida LLC after resolving the private filing inputs. Formation is administrative preparation and does not validate demand or authorize contracts, deposits, production accounts, live customer data, or a production build. After the 12-interview and direct-first-profile gate passes, three written conditional pilot-operator commitments across at least two operator types and an approved, funded build budget trigger the separate paid-pilot readiness work. The [pre-customer plan](11-pre-customer-formation-and-validation.md) and [company formation plan](07-company-formation-and-costs.md) define the sequence and cost boundaries.
+The order before any production build is fixed: approve the validation materials, form the bare-bones Florida LLC (administrative preparation, not demand evidence), meet the 12-interview thresholds of the [Validation gate](05-roadmap-validation.md#validation-gate), obtain three written conditional commitments across at least two operator types, complete paid-pilot readiness, and collect three setup payments; [Gates](05-roadmap-validation.md#gates) holds the sequence, and the [pre-customer plan](11-pre-customer-formation-and-validation.md) and [company formation plan](07-company-formation-and-costs.md) hold the steps and cost boundaries.
 
 ## First customer segment
 
@@ -48,7 +47,7 @@ When plans change, I want one reliable source for the trip status, balance, refu
 
 TideGrid gives the operator a direct branded channel and connects the commercial records that most affect a booking. The product reduces duplicate entry and makes incomplete payment, waiver, participant, equipment, and customer-notification work visible.
 
-The native add-on serves operators that can earn repeat use. Saved profiles, upcoming trips, waiver status, package balances, booking management, and push notifications give the app utility beyond a wrapped website.
+The native add-on serves operators that can earn repeat use. Saved profiles, upcoming trips, waiver status, trip card balances, booking management, and push notifications give the app utility beyond a wrapped website.
 
 TideGrid competes through maritime-specific workflow fit and hands-on launch service. It does not compete on the lowest booking fee or an OTA distribution network.
 
@@ -68,11 +67,11 @@ The [commercial model](03-commercial-model.md) defines prices, calculations, and
 
 ## Ownership and operating model
 
-TideGrid has one human founder and no cofounders or equity partners. The plan is to form a single-member, member-managed Florida LLC owned 100% by that founder before customer-validation outreach. The first three pilot operators are paying customers. They receive no membership interest, governance right, profit share, intellectual-property right, exclusivity, or authority to act for TideGrid.
+TideGrid has one human founder and no cofounders or equity partners. The plan is to form a single-member, member-managed Florida LLC owned 100% by that founder before customer-validation outreach. The first three pilot operators are paying customers with no ownership, governance, or control right; the "Ownership and control" row of the [decision register](06-decision-register.md#v2-product-and-commercial-decisions) and the [company formation plan](07-company-formation-and-costs.md#company-and-ownership) hold the canonical statement.
 
-The owner performs product management, sales, delivery, support, and company operations during the pilot. Attorneys, accountants, brokers, registered agents, security reviewers, and other contractors are scoped vendors rather than owners. Codex agents are implementation tools, not company personnel, legal reviewers, segregation of duties, or production coverage.
+The owner performs product management, sales, delivery, support, and company operations during the pilot. Attorneys, accountants, brokers, registered agents, security reviewers, and other contractors are scoped vendors rather than owners. Automated coding agents are implementation tools, not company personnel, legal reviewers, segregation of duties, or production coverage.
 
-The initial pilot remains capped at three operators and launches them sequentially. Only one operator may be in active configuration, acceptance, review-response, or production cutover at a time. TideGrid offers documented business-hours support during the pilot, not continuous human coverage or a 24-hour service commitment.
+The initial pilot remains capped at three operators and launches them sequentially. Only one operator may be in active configuration, acceptance, review-response, production cutover, or Native go-live at a time (see [Stage 5](05-roadmap-validation.md#stage-5-pilot-launches-and-review)). TideGrid offers documented business-hours support during the pilot, not continuous human coverage or a 24-hour service commitment.
 
 Before accepting a fourth customer, the owner must approve a monthly TideGrid time budget and reconcile it to measured support, release, finance, incident, and platform work. The current sensitivity assumes as much as three support hours per Core-plus-Native operator each month. At that rate, 85 operators require 255 support hours per month before shared operations or new launches, so the $1 million recurring-revenue scenario is not a permanently solo business under the current assumptions. TideGrid must automate further, pause growth, or deliberately buy non-equity operating capacity when measured work exceeds the owner's approved limit.
 
@@ -110,14 +109,14 @@ Track these supporting measures:
 - net managed booking value and recurring revenue per operator;
 - direct booking conversion and repeat-booking rate;
 - waiver completion before the operator cutoff;
-- payment, refund, equipment, and package reconciliation exceptions;
+- payment, refund, equipment, and trip-card reconciliation exceptions;
 - message delivery and response rate;
 - onboarding and native-launch hours;
 - monthly support hours and gross margin;
 - total owner operating hours, support backlog, and remaining monthly capacity;
 - native install, active-use, and booking-management rates.
 
-**Current proof target:** three paid native pilot operators across at least two operator types.
+**Current proof target:** three paid Native pilot operators across at least two operator types, each passing the [Core live gate](05-roadmap-validation.md#core-live-gate) and the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate), with every Staged Core module accepted, before the pilot cohort review counts as complete.
 
 ## Capabilities TideGrid must build
 
