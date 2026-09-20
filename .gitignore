@@ -1,3 +1,12 @@
 .wrangler/
 .DS_Store
 node_modules/
+dist/
+coverage/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+worker-configuration.d.ts
+*.tsbuildinfo

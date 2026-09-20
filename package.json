@@ -1,14 +1,37 @@
 {
   "name": "tidegrid",
   "private": true,
-  "description": "TideGrid planning package and guest workflow prototype",
+  "description": "TideGrid planning package, guest workflow prototype, and demo build monorepo",
+  "packageManager": "pnpm@10.17.1",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
-    "test": "node --test prototypes/guest-flow/*.test.cjs",
-    "check": "node --check prototypes/guest-flow/app.js && node --check prototypes/guest-flow/domain.js && node --check prototypes/guest-flow/waiver.js && node --check prototypes/guest-flow/operator.js && node --check prototypes/guest-flow/weather.js && node --check prototypes/guest-flow/trip-cards.js && node scripts/check-links.cjs",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "test": "pnpm -r --if-present test",
+    "test:integration": "pnpm --filter @tidegrid/database test:integration",
+    "build": "pnpm -r --if-present build",
+    "contracts:generate": "pnpm --filter @tidegrid/api-worker contracts:generate",
+    "db:migrate": "pnpm --filter @tidegrid/database migrate",
+    "db:seed": "pnpm --filter @tidegrid/seed seed",
+    "check:docs": "node scripts/check-links.cjs",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm check:docs && pnpm test:prototype",
+    "test:prototype": "node --test prototypes/guest-flow/*.test.cjs",
+    "check:prototype": "node --check prototypes/guest-flow/app.js && node --check prototypes/guest-flow/domain.js && node --check prototypes/guest-flow/waiver.js && node --check prototypes/guest-flow/operator.js && node --check prototypes/guest-flow/weather.js && node --check prototypes/guest-flow/trip-cards.js",
     "deploy:demo:dry": "npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc --dry-run",
     "deploy:demo": "npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "typescript": "^5.9.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd",
+      "@biomejs/biome"
+    ]
   }
 }

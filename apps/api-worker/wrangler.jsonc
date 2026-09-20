@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tidegrid-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "vars": {
+    "ENVIRONMENT": "preview",
+    "BUILD_ID": "dev"
+  },
+  // DATABASE_URL is a secret (wrangler secret put DATABASE_URL). It carries the
+  // tidegrid_app role's direct Neon connection string. When a Hyperdrive scope is
+  // available, add the binding below and the code prefers it automatically:
+  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<id>" }]
+  "placement": { "mode": "smart" }
+}
