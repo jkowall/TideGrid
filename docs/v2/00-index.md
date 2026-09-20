@@ -23,8 +23,9 @@ This package replaces the V1 product direction for new planning work. It does no
 10. [Build, hosting, and operations](08-build-hosting-and-operations.md)
 11. [Native app factory and store submission](09-native-app-factory-and-store-submission.md)
 12. [Build execution and agent plan](10-build-execution-and-agent-plan.md)
-13. [Roadmap and validation](05-roadmap-validation.md)
-14. [Decision register](06-decision-register.md)
+13. [Demo build plan](12-demo-build-plan.md)
+14. [Roadmap and validation](05-roadmap-validation.md)
+15. [Decision register](06-decision-register.md)
 
 ## Product decisions
 

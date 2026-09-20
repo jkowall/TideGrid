@@ -1,6 +1,6 @@
 # TideGrid V2 build execution and agent plan
 
-**Status:** Proposed execution baseline; use only after the applicable roadmap gate passes
+**Status:** Proposed execution baseline. The Codex route below is retained as written. The [Claude Code execution route](#claude-code-execution-route) is the active route for the demo build authorized on 2026-09-20 in the [decision register](06-decision-register.md#2026-09-20); production goals still wait for the applicable roadmap gate
 
 Model and tool names in this document are operational choices with a short shelf life. They carry no product authority; the decision register records only the tool-agnostic principles.
 
@@ -268,6 +268,38 @@ An interrupted goal remains recoverable when its handoff states:
 - provider or user-controlled state;
 - decisions still required; and
 - the smallest safe next action.
+
+## Claude Code execution route
+
+This section maps the topology above onto Claude Code in the Claude desktop app. The roles, gates, context packet, ownership rules, and telemetry requirements are unchanged; only the mechanics and model names differ. Recheck model availability and pricing at the start of each goal.
+
+### Role to model mapping
+
+| Role | Claude Code mechanism | Model and effort | Writes |
+|---|---|---|---|
+| Hands-on goal lead and UI lead | The root session | `claude-fable-5-1`; high effort for transaction, tenancy, evidence, and release slices; medium for accepted-pattern work | Core slice, design system, and integration paths |
+| Independent reviewer | `independent-reviewer` agent in `.claude/agents`, fresh context, read-only tools | `claude-opus-5`; the lead may run a second review on `claude-fable-5-1` for money, tenancy, waiver evidence, and migration slices | None; findings only |
+| UI reviewer | `ui-reviewer` agent with the built-in browser, fresh context | `claude-opus-5` | None; findings with screenshots |
+| Test and evidence specialist | `test-specialist` agent, optional worktree | `claude-opus-5` for race and failure scenarios; `claude-sonnet-5` for ordinary acceptance coverage | Test and fixture paths only |
+| Routine slice implementer | `routine-implementer` agent, worktree isolation when its paths could collide | `claude-sonnet-5`, medium | One enumerated path set |
+| Mechanical worker | General-purpose agent with `model: haiku` | `claude-haiku-4-5-20251001`, low | Narrow, enumerated files |
+| Defensive security reviewer | `security-reviewer` agent, read-only | `claude-opus-5`, high, when explicitly authorized | Review artifact; fixes only when authorized |
+
+The lead implements as well as coordinates. It cannot count as its own independent reviewer for money, tenancy, waiver evidence, migration, or native signing changes; those use a fresh agent with the baseline, final diff, acceptance criteria, and contracts, and without the lead's summary.
+
+### Mechanics
+
+- **Spawning.** Use the Agent tool with the context packet as the prompt. Give every agent exact owned paths, forbidden writes, invariants, non-goals, and proof commands. Continue a warmed agent with SendMessage for a closely related follow-up inside the same goal; start a fresh agent when path ownership or domain changes.
+- **Isolation.** Agents share the working tree by default. Use `isolation: worktree` for an independent specialist whose paths could collide with the lead, for a risky upgrade, or for a spike. Routine agents on disjoint paths do not need a worktree.
+- **Concurrency.** Treat the ceiling as two active writing agents plus the lead. Review runs after implementation and does not need a slot. Expand only when disjoint work saves elapsed time.
+- **Orchestration.** The Workflow tool runs many agents from one script and is used only when the owner opts in explicitly for a goal (for example, "use a workflow"). The default is the Agent tool with one or two agents.
+- **Branches and commits.** Each goal runs on its own branch from the recorded integration commit. The lead commits only when the owner authorizes commits for that goal, one reviewed commit or a small series per goal, and opens a pull request that carries the reviewer's findings and the acceptance evidence. Merge is the owner's action.
+- **Telemetry.** Claude Code exposes session-level usage, not per-goal or per-agent attribution. Record session usage at the four checkpoints (contract accepted, first green end-to-end path, before independent review, final handoff) in the goal handoff, label per-agent splits as estimates, and record elapsed time, retries, defects found in review, and owner review minutes.
+- **Budgets.** The owner sets a token budget per goal at goal start. The checkpoint rule (report when half the budget is spent without a green end-to-end path) and the rule that budget exhaustion never weakens acceptance are unchanged.
+
+### Agent definitions
+
+The agent files in `.claude/agents` carry the standing role instructions. The goal packet supplies everything goal-specific. Do not put goal scope, paths, or invariants in the agent files.
 
 ## Example goal request
 

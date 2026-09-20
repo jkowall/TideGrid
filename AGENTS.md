@@ -2,9 +2,9 @@
 
 ## Product status
 
-- TideGrid is exploratory. Do not assume the owner has committed to building, launching, or funding it.
-- Default to discovery, evidence gathering, and decision support.
-- Treat implementation as authorized only when the owner explicitly asks for build work.
+- TideGrid is exploratory. Do not assume the owner has committed to launching or funding it.
+- A demo-grade Core build is authorized as of 2026-09-20 within the boundaries in the [demo build plan](docs/v2/12-demo-build-plan.md): synthetic data, Stripe test mode, no SMS, no live payments, no customer data, and no gate claims. Production work beyond that plan still waits for the applicable roadmap gate.
+- Build goals follow the [build execution and agent plan](docs/v2/10-build-execution-and-agent-plan.md), including its Claude Code route and the agent definitions in `.claude/agents`. One goal per branch, an independent review before handoff, commits and pull requests only when the owner authorizes them for that goal.
 
 ## Authority order
 
@@ -16,6 +16,7 @@
 - `docs/v1` and `docs/archive` are read-only history. Never edit them to match V2; record the current decision in V2 and link back.
 - `prototypes/guest-flow` is a throwaway demo, not production code. Do not treat its behavior as an implementation contract.
 - Model and tool names belong only in [docs/v2/10-build-execution-and-agent-plan.md](docs/v2/10-build-execution-and-agent-plan.md). Elsewhere, say "the build execution and agent plan" and link to it.
+- Agent definition files in `.claude/agents` carry standing role instructions only. Goal scope, owned paths, and invariants come from the goal packet, not from those files.
 - No customer data, credentials, or personal filing details in this repository. The owner keeps those in a private location outside the repo.
 
 ## Commands
