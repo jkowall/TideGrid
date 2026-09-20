@@ -5,7 +5,13 @@ export default defineConfig({
   plugins: [
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
-      miniflare: { bindings: { ENVIRONMENT: "local", BUILD_ID: "test" } },
+      miniflare: {
+        bindings: {
+          ENVIRONMENT: "local",
+          BUILD_ID: "test",
+          ALLOWED_ORIGINS: "https://guest.test,https://console.test",
+        },
+      },
     }),
   ],
   test: { include: ["test/**/*.test.ts"] },

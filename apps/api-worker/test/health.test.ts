@@ -36,3 +36,35 @@ describe("GET /v1/health", () => {
     expect(Object.keys(doc.paths)).toContain("/v1/health");
   });
 });
+
+describe("CORS", () => {
+  it("allows a configured origin and exposes the request id", async () => {
+    const res = await SELF.fetch("https://api.test/v1/health", {
+      headers: { origin: "https://guest.test" },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://guest.test");
+    expect(res.headers.get("access-control-expose-headers")).toContain("X-Request-Id");
+  });
+
+  it("answers a preflight for a configured origin", async () => {
+    const res = await SELF.fetch("https://api.test/v1/health", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://console.test",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "idempotency-key",
+      },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://console.test");
+    expect(res.headers.get("access-control-allow-headers")).toContain("Idempotency-Key");
+  });
+
+  it("does not reflect an unknown origin", async () => {
+    const res = await SELF.fetch("https://api.test/v1/health", {
+      headers: { origin: "https://evil.example" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});

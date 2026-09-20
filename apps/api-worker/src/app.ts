@@ -3,7 +3,8 @@ import { apiVersion, ErrorResponse, HealthResponse } from "@tidegrid/contracts";
 import { createDb } from "@tidegrid/database";
 import { createLogger, newRequestId } from "@tidegrid/observability";
 import type { Context } from "hono";
-import { type Bindings, databaseUrl } from "./env.ts";
+import { cors } from "hono/cors";
+import { allowedOrigins, type Bindings, databaseUrl } from "./env.ts";
 
 type Variables = { requestId: string; log: ReturnType<typeof createLogger> };
 
@@ -46,6 +47,19 @@ export function createApp() {
       "http.response.status_code": c.res.status,
       duration_ms: Date.now() - started,
     });
+  });
+
+  // Browser origins are an explicit allowlist. G2.14 replaces this with the
+  // verified tenant hostname; until then only configured origins may call.
+  app.use("*", async (c, next) => {
+    const origins = allowedOrigins(c.env);
+    return cors({
+      origin: (origin) => (origins.includes(origin) ? origin : null),
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowHeaders: ["Content-Type", "Idempotency-Key", "X-Request-Id"],
+      exposeHeaders: ["X-Request-Id"],
+      maxAge: 600,
+    })(c, next);
   });
 
   app.onError((err, c) => {
