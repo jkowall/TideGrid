@@ -38,7 +38,7 @@ pnpm --filter @tidegrid/database neon:branch create <name>   # expiring Neon bra
 pnpm --filter @tidegrid/api-worker dev                       # local API on :8787 (reads apps/api-worker/.dev.vars)
 ```
 
-Secrets never enter the repository. Local values live in gitignored `.dev.vars` and `.env.local` files; deployed values are Wrangler secrets. Deploy a Worker only when the owner asks: `pnpm --filter @tidegrid/api-worker deploy`, and the same for `guest-site` and `operator-site`.
+Secrets never enter the repository. Local values live in gitignored `.dev.vars` and `.env.local` files; deployed values are Wrangler secrets. Deploy a Worker only when the owner asks: `pnpm --filter @tidegrid/api-worker run release`, and the same for `guest-site` and `operator-site`. The script is named `release` because `pnpm deploy` is a built-in pnpm command. `pnpm release:dry` dry-runs all three.
 
 The throwaway prototype keeps its own commands until it is retired:
 

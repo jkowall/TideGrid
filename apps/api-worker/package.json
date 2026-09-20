@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "deploy:dry": "wrangler deploy --dry-run",
     "types": "wrangler types",
-    "typecheck": "wrangler types --check 2>/dev/null || wrangler types; tsc -p tsconfig.json",
+    "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p test/tsconfig.json",
     "contracts:generate": "tsx scripts/generate-openapi.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "release": "wrangler deploy --var BUILD_ID:$(git describe --always --dirty)",
+    "release:dry": "wrangler deploy --dry-run"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.1.0",

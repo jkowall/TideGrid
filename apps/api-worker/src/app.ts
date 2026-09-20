@@ -29,7 +29,9 @@ export function createApp() {
   });
 
   app.use("*", async (c, next) => {
-    const requestId = c.req.header("x-request-id") ?? newRequestId();
+    const supplied = c.req.header("x-request-id");
+    const requestId =
+      supplied && /^[A-Za-z0-9._-]{8,128}$/.test(supplied) ? supplied : newRequestId();
     const started = Date.now();
     const url = new URL(c.req.url);
     const log = createLogger({
@@ -116,6 +118,14 @@ export function createApp() {
   return app;
 }
 
+// The health endpoint is public. Memoize the database probe per isolate so a
+// request burst cannot open a connection per request against a scale-to-zero branch.
+let probeCache: {
+  at: number;
+  value: Pick<HealthResponse, "status" | "database" | "migrations">;
+} | null = null;
+const probeTtlMs = 10_000;
+
 async function checkHealth(c: Context<AppEnv>): Promise<HealthResponse> {
   const url = databaseUrl(c.env);
   const base = {
@@ -126,6 +136,18 @@ async function checkHealth(c: Context<AppEnv>): Promise<HealthResponse> {
   if (!url) {
     return { ...base, status: "degraded", database: "unconfigured", migrations: null };
   }
+  if (probeCache && Date.now() - probeCache.at < probeTtlMs) {
+    return { ...base, ...probeCache.value };
+  }
+  const probe = await probeDatabase(c, url);
+  probeCache = { at: Date.now(), value: probe };
+  return { ...base, ...probe };
+}
+
+async function probeDatabase(
+  c: Context<AppEnv>,
+  url: string,
+): Promise<Pick<HealthResponse, "status" | "database" | "migrations">> {
   const { db, end } = createDb(url, { max: 1 });
   try {
     const rows = await db
@@ -134,15 +156,14 @@ async function checkHealth(c: Context<AppEnv>): Promise<HealthResponse> {
       .execute();
     const row = rows[0];
     return {
-      ...base,
       status: "ok",
       database: "ok",
       migrations: { applied: Number(row?.applied ?? 0), latest: row?.latest ?? null },
     };
   } catch (err) {
     c.get("log").warn("database health failed", { "error.type": (err as Error).name });
-    return { ...base, status: "degraded", database: "error", migrations: null };
+    return { status: "degraded", database: "error", migrations: null };
   } finally {
-    c.executionCtx.waitUntil(end());
+    c.executionCtx.waitUntil(end().catch(() => undefined));
   }
 }

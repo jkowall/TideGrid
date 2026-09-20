@@ -8,8 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
-    "deploy": "vite build && wrangler deploy",
-    "deploy:dry": "vite build && wrangler deploy --dry-run"
+    "release": "vite build && wrangler deploy",
+    "release:dry": "vite build && wrangler deploy --dry-run"
   },
   "dependencies": {
     "@tidegrid/contracts": "workspace:*",

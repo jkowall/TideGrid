@@ -9,7 +9,7 @@
   "vars": {
     "ENVIRONMENT": "preview",
     "BUILD_ID": "dev",
-    "ALLOWED_ORIGINS": "https://tidegrid-guest.jkowall.workers.dev,https://tidegrid-console.jkowall.workers.dev,http://localhost:5173,http://localhost:5174"
+    "ALLOWED_ORIGINS": "https://tidegrid-guest.jkowall.workers.dev,https://tidegrid-console.jkowall.workers.dev"
   },
   // DATABASE_URL is a secret (wrangler secret put DATABASE_URL). It carries the
   // tidegrid_app role's direct Neon connection string. When a Hyperdrive scope is

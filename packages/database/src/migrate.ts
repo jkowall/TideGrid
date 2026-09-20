@@ -24,8 +24,25 @@ export interface MigrationFile {
   checksum: string;
 }
 
+const namePattern = /^(\d{4})_[a-z0-9_]+\.sql$/;
+
 export async function loadMigrations(dir = migrationsDir): Promise<MigrationFile[]> {
-  const entries = (await readdir(dir)).filter((f) => /^\d{4}_[a-z0-9_]+\.sql$/.test(f)).sort();
+  const all = (await readdir(dir)).filter((f) => !f.startsWith(".")).sort();
+  const bad = all.filter((f) => !namePattern.test(f));
+  if (bad.length > 0) {
+    throw new Error(
+      `Migration files must be named NNNN_lower_snake_case.sql; rejected: ${bad.join(", ")}`,
+    );
+  }
+  const entries = all;
+  entries.forEach((name, i) => {
+    const n = Number(name.slice(0, 4));
+    if (n !== i + 1) {
+      throw new Error(
+        `Migration numbering must be contiguous from 0001; ${name} is out of sequence`,
+      );
+    }
+  });
   return Promise.all(
     entries.map(async (name) => {
       const sql = await readFile(join(dir, name), "utf8");
@@ -48,15 +65,16 @@ export async function migrate(
   const applied: string[] = [];
   const skipped: string[] = [];
   try {
-    await sql.unsafe(`
-      CREATE TABLE IF NOT EXISTS schema_migrations (
-        name text PRIMARY KEY,
-        checksum text NOT NULL,
-        applied_at timestamptz NOT NULL DEFAULT now()
-      )`);
-    // Serialize concurrent runners (CI and a developer) on one advisory lock.
+    // Serialize concurrent runners (CI and a developer) on one advisory lock,
+    // taken before the table exists because CREATE TABLE IF NOT EXISTS races.
     await sql`SELECT pg_advisory_lock(${lockKey})`;
     try {
+      await sql.unsafe(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          name text PRIMARY KEY,
+          checksum text NOT NULL,
+          applied_at timestamptz NOT NULL DEFAULT now()
+        )`);
       const rows = await sql<{ name: string; checksum: string }[]>`
         SELECT name, checksum FROM schema_migrations`;
       const done = new Map(rows.map((r) => [r.name, r.checksum]));
@@ -96,7 +114,11 @@ export async function status(connectionString: string) {
   try {
     const rows = await sql<
       { name: string }[]
-    >`SELECT name FROM schema_migrations ORDER BY name`.catch(() => [] as { name: string }[]);
+    >`SELECT name FROM schema_migrations ORDER BY name`.catch((err: { code?: string }) => {
+      // 42P01 undefined_table means no migration has run yet; anything else is real.
+      if (err.code === "42P01") return [] as { name: string }[];
+      throw err;
+    });
     const done = new Set(rows.map((r) => r.name));
     return migrations.map((m) => ({ name: m.name, applied: done.has(m.name) }));
   } finally {

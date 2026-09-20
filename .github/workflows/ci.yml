@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -25,15 +28,17 @@ jobs:
       - run: pnpm test
       - run: pnpm contracts:generate && git diff --exit-code -- packages/contracts/generated
       - run: pnpm build
+      - run: pnpm release:dry
       - run: pnpm check:docs
       - run: pnpm check:prototype && pnpm test:prototype
 
   integration:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' }}
+    # Same-repository pull requests only: forks cannot read secrets, and the
+    # job must fail rather than skip when the key is missing.
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
     env:
-      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+      CI: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -44,21 +49,23 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Create expiring Neon branch
         id: branch
-        if: ${{ env.NEON_API_KEY != '' }}
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
         run: |
+          test -n "$NEON_API_KEY" || { echo "NEON_API_KEY secret is not set"; exit 1; }
           out=$(pnpm --filter @tidegrid/database --silent neon:branch create "ci-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}")
           echo "::add-mask::$(echo "$out" | jq -r .connectionString)"
           echo "branch_id=$(echo "$out" | jq -r .branchId)" >> "$GITHUB_OUTPUT"
           echo "DATABASE_URL=$(echo "$out" | jq -r .connectionString)" >> "$GITHUB_ENV"
       - name: Migrate, seed, and run integration tests
-        if: ${{ env.NEON_API_KEY != '' }}
         run: |
           pnpm db:migrate
           pnpm db:seed
           pnpm test:integration
       - name: Delete Neon branch
         if: ${{ always() && steps.branch.outputs.branch_id != '' }}
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
         run: pnpm --filter @tidegrid/database --silent neon:branch delete "${{ steps.branch.outputs.branch_id }}"
-      - name: Skipped
-        if: ${{ env.NEON_API_KEY == '' }}
-        run: echo "NEON_API_KEY not set; integration job skipped"

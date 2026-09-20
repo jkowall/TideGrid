@@ -19,14 +19,35 @@ if (password.length < 24) {
 }
 const sql = postgres(url, { max: 1 });
 try {
-  // Identifier is fixed; only the password is interpolated, as a literal.
-  await sql.unsafe(`ALTER ROLE tidegrid_app LOGIN PASSWORD '${password.replaceAll("'", "''")}'`);
-  const [row] = await sql<{ rolbypassrls: boolean; rolcreaterole: boolean }[]>`
-    SELECT rolbypassrls, rolcreaterole FROM pg_roles WHERE rolname = 'tidegrid_app'`;
-  if (!row || row.rolbypassrls || row.rolcreaterole) {
-    console.error("tidegrid_app has elevated attributes; it must not bypass RLS or create roles.");
+  // Refuse before issuing any credential: the role must be the plain SQL role
+  // from migration 0001, never a Neon console role (which joins neon_superuser).
+  const [row] = await sql<
+    {
+      rolsuper: boolean;
+      rolbypassrls: boolean;
+      rolcreaterole: boolean;
+      rolcreatedb: boolean;
+      groups: string[];
+    }[]
+  >`
+    SELECT r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb,
+           array(SELECT b.rolname FROM pg_auth_members m JOIN pg_roles b ON b.oid = m.roleid
+                 WHERE m.member = r.oid) AS groups
+    FROM pg_roles r WHERE r.rolname = 'tidegrid_app'`;
+  if (!row) {
+    console.error("tidegrid_app does not exist; run migrations first.");
     process.exit(1);
   }
+  const elevated = row.rolsuper || row.rolbypassrls || row.rolcreaterole || row.rolcreatedb;
+  const privilegedGroups = row.groups.filter((g) => g === "neon_superuser" || g.startsWith("pg_"));
+  if (elevated || privilegedGroups.length > 0) {
+    console.error(
+      `tidegrid_app is elevated (attributes: ${elevated}; groups: ${privilegedGroups.join(", ") || "none"}). Drop it and let migration 0001 recreate it.`,
+    );
+    process.exit(1);
+  }
+  // Identifier is fixed; only the password is interpolated, as a quoted literal.
+  await sql.unsafe(`ALTER ROLE tidegrid_app LOGIN PASSWORD '${password.replaceAll("'", "''")}'`);
   console.log("tidegrid_app password set");
 } finally {
   await sql.end();

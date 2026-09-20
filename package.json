@@ -17,11 +17,12 @@
     "db:migrate": "pnpm --filter @tidegrid/database migrate",
     "db:seed": "pnpm --filter @tidegrid/seed seed",
     "check:docs": "node scripts/check-links.cjs",
-    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm check:docs && pnpm test:prototype",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm release:dry && pnpm check:docs && pnpm check:prototype && pnpm test:prototype",
     "test:prototype": "node --test prototypes/guest-flow/*.test.cjs",
     "check:prototype": "node --check prototypes/guest-flow/app.js && node --check prototypes/guest-flow/domain.js && node --check prototypes/guest-flow/waiver.js && node --check prototypes/guest-flow/operator.js && node --check prototypes/guest-flow/weather.js && node --check prototypes/guest-flow/trip-cards.js",
     "deploy:demo:dry": "npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc --dry-run",
-    "deploy:demo": "npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc"
+    "deploy:demo": "npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc",
+    "release:dry": "pnpm -r --if-present release:dry"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",

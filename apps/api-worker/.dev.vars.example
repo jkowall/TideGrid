@@ -1,0 +1,3 @@
+# Copy to .dev.vars (gitignored). Values here override wrangler.jsonc vars in wrangler dev.
+DATABASE_URL=postgresql://tidegrid_app:password@host/neondb?sslmode=require
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174

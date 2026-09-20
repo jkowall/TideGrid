@@ -16,9 +16,12 @@ BEGIN
 END
 $$;
 
+-- Default privileges are read and append only. Tables that allow UPDATE or
+-- DELETE grant them explicitly in their own migration, so append-only tables
+-- (audit, outbox, ledgers) never receive them by accident.
 GRANT USAGE ON SCHEMA public TO tidegrid_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO tidegrid_app;
+  GRANT SELECT, INSERT ON TABLES TO tidegrid_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO tidegrid_app;
 

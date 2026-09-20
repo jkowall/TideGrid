@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { loadMigrations, migrate, status } from "./migrate.ts";
 
 const url = process.env.DATABASE_URL;
+if (!url && process.env.CI) {
+  throw new Error("DATABASE_URL is required in CI; the integration suite must not skip silently.");
+}
 
 describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
   it("applies every migration once, then is a no-op, and the app role can read", async () => {
