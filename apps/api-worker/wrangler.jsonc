@@ -10,7 +10,12 @@
   "vars": {
     "ENVIRONMENT": "preview",
     "BUILD_ID": "dev",
-    "ALLOWED_ORIGINS": "https://tidegrid-guest.jkowall.workers.dev,https://tidegrid-console.jkowall.workers.dev,https://console.tidegrid.us"
+    "ALLOWED_ORIGINS": "https://tidegrid-guest.jkowall.workers.dev,https://tidegrid-console.jkowall.workers.dev,https://console.tidegrid.us",
+    // Cloudflare Access application for console.tidegrid.us. The audience tag
+    // and team domain are public identifiers, not secrets; G2.2 verifies the
+    // Cf-Access-Jwt-Assertion header against them.
+    "CF_ACCESS_TEAM_DOMAIN": "winter-feather-7169.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "9e89e2b88c98e68596a7433251be06f0b7013c38540aa3c1c7c6feec0c52e78f"
   },
   // DATABASE_URL is a secret (wrangler secret put DATABASE_URL) holding the
   // tidegrid_app role's direct Neon connection string. It is the fallback; the

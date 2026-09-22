@@ -10,7 +10,8 @@ This log records each dated verification pass over the throwaway guest workflow 
 - Created Hyperdrive config `tidegrid-nonprod` (query caching disabled) over the Neon direct endpoint with the `tidegrid_app` role and bound it to the API Worker as `HYPERDRIVE`; the code prefers the binding and keeps the `DATABASE_URL` secret as fallback. The deployed health check answers through the binding in about 0.6 seconds.
 - The Workers test runtime cannot emulate Hyperdrive without a local Postgres, so the tests run against a named wrangler environment `test` that carries vars only (bindings are not inherited); all 7 Worker tests pass and the default configuration still binds Hyperdrive on dry run.
 - Attached Worker custom domains `api.tidegrid.us` (API) and `console.tidegrid.us` (operator console); both answer HTTPS 200. The console origin was added to the CORS allowlist.
-- Not done, owner decision required: Zero Trust activation stops at a page that asks to accept Cloudflare's terms and authorize the card on file for usage above the free tier, which the owner must click; Cloudflare for SaaS custom hostnames report no quota on the zone and need enabling under SSL/TLS before G2.14 can attach operator subdomains.
+- The owner activated Zero Trust Free. Created the Access application for `console.tidegrid.us` through the API (24-hour session, one allow policy limited to the owner's two email addresses; one-time PIN is the default login method, so no identity provider was added). The console now answers 302 to the team login page. The application audience and team domain are recorded as public Worker variables for the G2.2 JWT verification; the application id and audience are also in the owner's private env file.
+- Not done: Cloudflare for SaaS custom hostnames report no quota on the zone and need enabling under SSL/TLS before G2.14 can attach operator subdomains.
 
 ## 2026-09-20
 

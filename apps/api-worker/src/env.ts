@@ -3,6 +3,9 @@ export interface Bindings {
   BUILD_ID: string;
   /** Comma-separated browser origins allowed to call the API. */
   ALLOWED_ORIGINS?: string;
+  /** Cloudflare Access team domain and application audience for the console. */
+  CF_ACCESS_TEAM_DOMAIN?: string;
+  CF_ACCESS_AUD?: string;
   /** Secret. Direct connection string for the runtime role. */
   DATABASE_URL?: string;
   /** Optional Hyperdrive binding; preferred when present. */
