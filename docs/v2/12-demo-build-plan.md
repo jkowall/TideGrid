@@ -24,7 +24,7 @@ Boundaries:
 | Runtime | Cloudflare Workers on the existing account, Workers Paid | Hyperdrive requires Workers Paid |
 | API | TypeScript and Hono on a Worker | One modular monolith, one versioned API |
 | Data access | Kysely over the postgres.js driver, with reviewed SQL migrations | postgres.js is ESM and runs in Workers and Node; node-postgres could not be bundled for the Workers test runtime. Migrations are hand-written SQL applied by a repo script |
-| Database | PostgreSQL 17 on a Neon nonproduction project, through Hyperdrive with query caching disabled | Direct, unpooled Neon endpoint behind Hyperdrive; one branch per pull request, one long-lived staging branch. Until the Cloudflare token or Wrangler login carries a Hyperdrive scope, the API connects directly over TLS and the code prefers the binding once it exists |
+| Database | PostgreSQL 17 on a Neon nonproduction project, through Hyperdrive with query caching disabled | Direct, unpooled Neon endpoint behind Hyperdrive; one branch per pull request, one long-lived staging branch. The Hyperdrive binding is in place since September 22; the `DATABASE_URL` secret remains the fallback |
 | Guest web | React and Vite PWA on Workers Static Assets | One build serves every tenant from server-provided brand configuration |
 | Operator web | React and Vite on a separate Workers Static Assets deployment | Different CSP and release cadence from the guest surface |
 | Contracts | Zod schemas generating OpenAPI, shared through `packages/contracts` | Generated client for both web apps |

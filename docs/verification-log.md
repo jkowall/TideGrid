@@ -2,6 +2,16 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-09-22
+
+### Cloudflare account changes and Hyperdrive, September 22, 2026
+
+- The account API token "workers for tidegrid" gained Hyperdrive Edit, Access Apps and Policies Edit, Email Sending Edit, Billing Read, and on all zones DNS Edit and SSL and Certificates Edit, applied through the dashboard in the owner's browser and verified by calling the previously refused endpoints with the same token value. The account is on Workers Paid.
+- Created Hyperdrive config `tidegrid-nonprod` (query caching disabled) over the Neon direct endpoint with the `tidegrid_app` role and bound it to the API Worker as `HYPERDRIVE`; the code prefers the binding and keeps the `DATABASE_URL` secret as fallback. The deployed health check answers through the binding in about 0.6 seconds.
+- The Workers test runtime cannot emulate Hyperdrive without a local Postgres, so the tests run against a named wrangler environment `test` that carries vars only (bindings are not inherited); all 7 Worker tests pass and the default configuration still binds Hyperdrive on dry run.
+- Attached Worker custom domains `api.tidegrid.us` (API) and `console.tidegrid.us` (operator console); both answer HTTPS 200. The console origin was added to the CORS allowlist.
+- Not done, owner decision required: Zero Trust activation stops at a page that asks to accept Cloudflare's terms and authorize the card on file for usage above the free tier, which the owner must click; Cloudflare for SaaS custom hostnames report no quota on the zone and need enabling under SSL/TLS before G2.14 can attach operator subdomains.
+
 ## 2026-09-20
 
 ### G2.1 Workspace foundation verification, September 20, 2026

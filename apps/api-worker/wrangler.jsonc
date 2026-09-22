@@ -5,15 +5,29 @@
   "compatibility_date": "2026-08-22",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "routes": [{ "pattern": "api.tidegrid.us", "custom_domain": true }],
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "vars": {
     "ENVIRONMENT": "preview",
     "BUILD_ID": "dev",
-    "ALLOWED_ORIGINS": "https://tidegrid-guest.jkowall.workers.dev,https://tidegrid-console.jkowall.workers.dev"
+    "ALLOWED_ORIGINS": "https://tidegrid-guest.jkowall.workers.dev,https://tidegrid-console.jkowall.workers.dev,https://console.tidegrid.us"
   },
-  // DATABASE_URL is a secret (wrangler secret put DATABASE_URL). It carries the
-  // tidegrid_app role's direct Neon connection string. When a Hyperdrive scope is
-  // available, add the binding below and the code prefers it automatically:
-  // "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "<id>" }]
-  "placement": { "mode": "smart" }
+  // DATABASE_URL is a secret (wrangler secret put DATABASE_URL) holding the
+  // tidegrid_app role's direct Neon connection string. It is the fallback; the
+  // code prefers the Hyperdrive binding below (query caching disabled at the
+  // config, pooled connections to the direct Neon endpoint).
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "0857f5560fc548319ec6a106f095db5f" }],
+  "placement": { "mode": "smart" },
+  // The Workers test runtime cannot emulate Hyperdrive without a local Postgres,
+  // and named environments do not inherit bindings, so tests run in this
+  // binding-free environment and exercise the "unconfigured" health path.
+  "env": {
+    "test": {
+      "vars": {
+        "ENVIRONMENT": "local",
+        "BUILD_ID": "test",
+        "ALLOWED_ORIGINS": "https://guest.test,https://console.test"
+      }
+    }
+  }
 }
