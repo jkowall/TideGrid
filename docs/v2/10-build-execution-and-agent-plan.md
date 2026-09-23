@@ -277,8 +277,8 @@ This section maps the topology above onto Claude Code in the Claude desktop app.
 
 | Role | Claude Code mechanism | Model and effort | Writes |
 |---|---|---|---|
-| Hands-on goal lead and UI lead | The root session | `claude-fable-5-1`; high effort for transaction, tenancy, evidence, and release slices; medium for accepted-pattern work | Core slice, design system, and integration paths |
-| Independent reviewer | `independent-reviewer` agent in `.claude/agents`, fresh context, read-only tools | `claude-opus-5`; the lead may run a second review on `claude-fable-5-1` for money, tenancy, waiver evidence, and migration slices | None; findings only |
+| Hands-on goal lead and UI lead | The root session | `claude-opus-5` at `xhigh` effort for every goal (decision of 2026-09-23, after G2.1 ran on `claude-fable-5-1`); `claude-fable-5-1` remains available for a named unresolved problem | Core slice, design system, and integration paths |
+| Independent reviewer | `independent-reviewer` agent in `.claude/agents`, fresh context, read-only tools | `claude-opus-5` by default. For G2.2 tenancy, G2.6 holds, G2.7 charge to confirmation, and G2.15 waiver evidence the review runs on `claude-fable-5-1` by passing the model override at spawn time; the agent file stays pinned to Opus | None; findings only |
 | UI reviewer | `ui-reviewer` agent with the built-in browser, fresh context | `claude-opus-5` | None; findings with screenshots |
 | Test and evidence specialist | `test-specialist` agent, optional worktree | `claude-opus-5` for race and failure scenarios; `claude-sonnet-5` for ordinary acceptance coverage | Test and fixture paths only |
 | Routine slice implementer | `routine-implementer` agent, worktree isolation when its paths could collide | `claude-sonnet-5`, medium | One enumerated path set |
@@ -295,6 +295,7 @@ The lead implements as well as coordinates. It cannot count as its own independe
 - **Orchestration.** The Workflow tool runs many agents from one script and is used only when the owner opts in explicitly for a goal (for example, "use a workflow"). The default is the Agent tool with one or two agents.
 - **Branches and commits.** Each goal runs on its own branch from the recorded integration commit. The lead commits only when the owner authorizes commits for that goal, one reviewed commit or a small series per goal, and opens a pull request that carries the reviewer's findings and the acceptance evidence. Merge is the owner's action.
 - **Telemetry.** Claude Code exposes session-level usage, not per-goal or per-agent attribution. Record session usage at the four checkpoints (contract accepted, first green end-to-end path, before independent review, final handoff) in the goal handoff, label per-agent splits as estimates, and record elapsed time, retries, defects found in review, and owner review minutes.
+- **Model choice, recorded 2026-09-23.** The lead runs on Opus at `xhigh` because G2.1 showed the hard parts were tooling bisections and review cycles, which Opus handles at half the token price. Fable reviews the four goals whose invariants are coupled and expensive to get wrong (tenancy, holds, payment confirmation, waiver evidence), where a stronger reviewer with executable adversarial tests is worth more than a stronger author. Revisit after G2.7 using the recorded rework and defect counts.
 - **Budgets.** The owner sets a token budget per goal at goal start. The checkpoint rule (report when half the budget is spent without a green end-to-end path) and the rule that budget exhaustion never weakens acceptance are unchanged.
 
 ### Agent definitions
