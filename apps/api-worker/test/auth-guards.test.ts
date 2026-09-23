@@ -5,15 +5,35 @@ async function errorCode(res: Response): Promise<string> {
   return ((await res.json()) as { error: { code: string } }).error.code;
 }
 
+describe("the public entry hides staff and sign-in routes", () => {
+  for (const [method, path] of [
+    ["GET", "/v1/me"],
+    ["POST", "/v1/auth/login-links"],
+    ["POST", "/v1/auth/sessions"],
+    ["DELETE", "/v1/auth/sessions/current"],
+    ["GET", "/v1/staff/tenants/11111111-1111-4111-8111-111111111111/members"],
+  ] as const) {
+    it(`answers ${method} ${path} with the ordinary 404`, async () => {
+      const res = await SELF.fetch(`https://api.test${path}`, {
+        method,
+        headers: { origin: "https://console.test", "content-type": "application/json" },
+        body: method === "GET" ? null : "{}",
+      });
+      expect(res.status).toBe(404);
+      expect(await errorCode(res)).toBe("not_found");
+    });
+  }
+});
+
 describe("staff authentication fails closed before touching the database", () => {
   it("answers 401 unauthenticated with no credentials", async () => {
-    const res = await SELF.fetch("https://api.test/v1/me");
+    const res = await SELF.fetch("http://localhost/v1/me");
     expect(res.status).toBe(401);
     expect(await errorCode(res)).toBe("unauthenticated");
   });
 
   it("answers 401 for a malformed session cookie", async () => {
-    const res = await SELF.fetch("https://api.test/v1/me", {
+    const res = await SELF.fetch("http://localhost/v1/me", {
       headers: { cookie: "__Host-tg_session=not-a-token" },
     });
     expect(res.status).toBe(401);
@@ -21,7 +41,7 @@ describe("staff authentication fails closed before touching the database", () =>
   });
 
   it("refuses an Access assertion where Access is not configured", async () => {
-    const res = await SELF.fetch("https://api.test/v1/me", {
+    const res = await SELF.fetch("http://localhost/v1/me", {
       headers: { "cf-access-jwt-assertion": "eyJhbGciOiJub25lIn0.e30." },
     });
     expect(res.status).toBe(401);
@@ -29,7 +49,7 @@ describe("staff authentication fails closed before touching the database", () =>
   });
 
   it("authenticates before revealing whether a tenant id is valid", async () => {
-    const res = await SELF.fetch("https://api.test/v1/staff/tenants/not-a-uuid/members");
+    const res = await SELF.fetch("http://localhost/v1/staff/tenants/not-a-uuid/members");
     expect(res.status).toBe(401);
   });
 });
@@ -41,7 +61,7 @@ describe("state-changing staff requests require the console origin", () => {
     ["a guest Origin", { origin: "https://guest.test" }],
   ] as const) {
     it(`rejects ${label}`, async () => {
-      const res = await SELF.fetch("https://api.test/v1/auth/login-links", {
+      const res = await SELF.fetch("http://localhost/v1/auth/login-links", {
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
         body: JSON.stringify({ email: "someone@example.test" }),
@@ -53,7 +73,7 @@ describe("state-changing staff requests require the console origin", () => {
 
   it("rejects a member change without the console origin even before authentication", async () => {
     const res = await SELF.fetch(
-      "https://api.test/v1/staff/tenants/11111111-1111-4111-8111-111111111111/members",
+      "http://localhost/v1/staff/tenants/11111111-1111-4111-8111-111111111111/members",
       { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
     );
     expect(res.status).toBe(403);

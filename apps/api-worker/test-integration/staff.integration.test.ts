@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { createAccessVerifier } from "../src/auth/access.ts";
 import type { LoginLinkSender } from "../src/auth/login-links.ts";
+import type { Bindings } from "../src/env.ts";
+import { markConsoleGateway } from "../src/gateway.ts";
 
 type Sql = ReturnType<typeof postgres>;
 type Json = Record<string, unknown> & { error?: { code: string; message: string } };
@@ -55,7 +57,7 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
   const bindings = () => ({
     ENVIRONMENT: "local" as const,
     BUILD_ID: "integration",
-    DATABASE_URL: env?.runtimeUrl,
+    DATABASE_URL: env?.runtimeUrl ?? "",
     ALLOWED_ORIGINS: CONSOLE,
     STAFF_ORIGINS: CONSOLE,
   });
@@ -83,6 +85,7 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
     access?: string;
     origin?: string | null;
     headers?: Record<string, string>;
+    env?: Bindings;
   }
 
   async function call(method: string, path: string, opts: CallOptions = {}) {
@@ -95,7 +98,7 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
     const res = await app.request(
       `http://localhost${path}`,
       { method, headers, body: opts.body === undefined ? null : JSON.stringify(opts.body) },
-      bindings(),
+      opts.env ?? bindings(),
       executionCtx,
     );
     await Promise.allSettled(pending.splice(0));
@@ -132,13 +135,13 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
       await admin`insert into public.staff_users (id, email, display_name)
         values (${p.id}, ${p.email}, ${p.email.split("@")[0] ?? "person"})`;
     }
-    await admin`insert into public.tenant_memberships (tenant_id, user_id, role) values
-      (${A.id}, ${ownerA.id}, 'owner'),
-      (${A.id}, ${staffA.id}, 'booking_staff'),
-      (${A.id}, ${financeA.id}, 'finance'),
-      (${A.id}, ${limited.id}, 'booking_staff'),
-      (${B.id}, ${ownerB.id}, 'owner'),
-      (${C.id}, ${ownerA.id}, 'owner')`;
+    await admin`insert into public.tenant_memberships (tenant_id, user_id, role, display_name) values
+      (${A.id}, ${ownerA.id}, 'owner', 'Fixture member'),
+      (${A.id}, ${staffA.id}, 'booking_staff', 'Fixture member'),
+      (${A.id}, ${financeA.id}, 'finance', 'Fixture member'),
+      (${A.id}, ${limited.id}, 'booking_staff', 'Fixture member'),
+      (${B.id}, ${ownerB.id}, 'owner', 'Fixture member'),
+      (${C.id}, ${ownerA.id}, 'owner', 'Fixture member')`;
     await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
       values (${previewHost}, ${A.id}, 'preview', 'active', now())`;
 
@@ -275,6 +278,39 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
         access: await accessToken(ownerB.email),
       });
       expect(r.json.principal).toMatchObject({ userId: ownerB.id, authMethod: "access" });
+    });
+  });
+
+  describe("console gateway", () => {
+    const deployed = (): Bindings => ({ ...bindings(), ENVIRONMENT: "preview" });
+
+    it("hides staff and sign-in routes on a deployed public entry", async () => {
+      const token = await accessToken(ownerA.email);
+      for (const [method, path] of [
+        ["GET", "/v1/me"],
+        ["GET", membersPath(A.id)],
+        ["POST", "/v1/auth/login-links"],
+      ] as const) {
+        const r = await call(method, path, {
+          access: token,
+          env: deployed(),
+          ...(method === "POST" ? { body: { email: ownerA.email } } : {}),
+        });
+        expect({ path, status: r.res.status, code: r.json.error?.code }).toEqual({
+          path,
+          status: 404,
+          code: "not_found",
+        });
+      }
+    });
+
+    it("serves them through the gateway entrypoint's mark", async () => {
+      const r = await call("GET", "/v1/me", {
+        access: await accessToken(ownerA.email),
+        env: markConsoleGateway(deployed()),
+      });
+      expect(r.res.status).toBe(200);
+      expect(r.json.principal).toMatchObject({ userId: ownerA.id });
     });
   });
 

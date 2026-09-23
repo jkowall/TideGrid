@@ -16,6 +16,6 @@
   },
   // The console calls the API same-origin under /api. Access injects its
   // assertion on every request to this hostname; the Worker forwards /api/* to
-  // the API Worker over a service binding with that assertion intact.
-  "services": [{ "binding": "API", "service": "tidegrid-api" }]
+  // the API's ConsoleGateway entrypoint, the only place staff routes answer.
+  "services": [{ "binding": "API", "service": "tidegrid-api", "entrypoint": "ConsoleGateway" }]
 }

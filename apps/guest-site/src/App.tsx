@@ -1,7 +1,8 @@
 import type { HealthResponse } from "@tidegrid/contracts";
 import { useEffect, useState } from "react";
 
-const apiBase = import.meta.env.VITE_API_BASE ?? "";
+const apiBase =
+  import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? "https://api.tidegrid.us" : "");
 
 export function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);

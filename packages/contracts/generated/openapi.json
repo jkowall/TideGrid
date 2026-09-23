@@ -235,7 +235,7 @@
                   "email": {
                     "type": "string",
                     "maxLength": 254,
-                    "format": "email"
+                    "pattern": "^[\\x21-\\x7e]+$"
                   }
                 },
                 "required": [
@@ -421,7 +421,7 @@
                         "email": {
                           "type": "string",
                           "maxLength": 254,
-                          "format": "email"
+                          "pattern": "^[\\x21-\\x7e]+$"
                         },
                         "displayName": {
                           "type": "string"
@@ -673,7 +673,7 @@
                         "email": {
                           "type": "string",
                           "maxLength": 254,
-                          "format": "email"
+                          "pattern": "^[\\x21-\\x7e]+$"
                         },
                         "displayName": {
                           "type": "string"
@@ -852,7 +852,7 @@
                           "email": {
                             "type": "string",
                             "maxLength": 254,
-                            "format": "email"
+                            "pattern": "^[\\x21-\\x7e]+$"
                           },
                           "displayName": {
                             "type": "string"
@@ -1046,12 +1046,14 @@
                   "email": {
                     "type": "string",
                     "maxLength": 254,
-                    "format": "email"
+                    "pattern": "^[\\x21-\\x7e]+$"
                   },
                   "displayName": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 120
+                    "maxLength": 120,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "How this operator names the person"
                   },
                   "role": {
                     "type": "string",
@@ -1065,6 +1067,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
                     "description": "Recorded in the audit history"
                   }
                 },
@@ -1096,7 +1099,7 @@
                         "email": {
                           "type": "string",
                           "maxLength": 254,
-                          "format": "email"
+                          "pattern": "^[\\x21-\\x7e]+$"
                         },
                         "displayName": {
                           "type": "string"

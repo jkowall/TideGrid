@@ -44,7 +44,23 @@ export type AuthMethod = z.infer<typeof AuthMethod>;
 
 const Instant = z.iso.datetime({ offset: true });
 const Uuid = z.uuid();
-const EmailAddress = z.email().max(254);
+/**
+ * ASCII only. Case folding of some non-ASCII characters (the Kelvin sign folds
+ * to "k") would otherwise let a lookalike address match another person's.
+ */
+const EmailAddress = z
+  .email()
+  .max(254)
+  .regex(/^[\x21-\x7e]+$/, "Addresses must be ASCII");
+/** Single-line human text: no control characters, which PostgreSQL rejects or renders unsafely. */
+const SingleLineText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+    .regex(/^[^\u0000-\u001f\u007f]*$/, "Control characters are not allowed");
 
 export const Principal = z
   .object({
@@ -119,9 +135,9 @@ export type MemberListResponse = z.infer<typeof MemberListResponse>;
 
 export const MemberCreateRequest = z.object({
   email: EmailAddress,
-  displayName: z.string().trim().min(1).max(120),
+  displayName: SingleLineText(120).describe("How this operator names the person"),
   role: StaffRole,
-  reason: z.string().trim().min(1).max(500).describe("Recorded in the audit history"),
+  reason: SingleLineText(500).describe("Recorded in the audit history"),
 });
 export type MemberCreateRequest = z.infer<typeof MemberCreateRequest>;
 

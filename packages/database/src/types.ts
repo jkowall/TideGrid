@@ -48,10 +48,10 @@ export interface TenantHostnamesTable {
 
 export type StaffUserStatus = "active" | "disabled";
 
+/** The runtime may read these columns only; the identity's own name is withheld from tenants. */
 export interface StaffUsersTable {
   id: Generated<string>;
   email: string;
-  display_name: string;
   status: Generated<StaffUserStatus>;
   created_at: CreatedAt;
 }
@@ -63,6 +63,8 @@ export interface TenantMembershipsTable {
   user_id: ColumnType<string, string, never>;
   role: StaffRole;
   status: Generated<MembershipStatus>;
+  /** How this tenant names the person; other tenants never see it. */
+  display_name: string;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
 }

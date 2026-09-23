@@ -77,13 +77,13 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         values (${u.id}, ${u.email}, ${u.email.split("@")[0] ?? "user"},
                 ${u === users.disabled ? "disabled" : "active"})`;
     }
-    await admin`insert into public.tenant_memberships (tenant_id, user_id, role, status) values
-      (${A.id}, ${users.ownerA.id}, 'owner', 'active'),
-      (${A.id}, ${users.shared.id}, 'finance', 'active'),
-      (${A.id}, ${users.disabled.id}, 'booking_staff', 'active'),
-      (${B.id}, ${users.ownerB.id}, 'owner', 'active'),
-      (${B.id}, ${users.shared.id}, 'booking_staff', 'active'),
-      (${C.id}, ${users.shared.id}, 'owner', 'active')`;
+    await admin`insert into public.tenant_memberships (tenant_id, user_id, role, status, display_name) values
+      (${A.id}, ${users.ownerA.id}, 'owner', 'active', 'Fixture member'),
+      (${A.id}, ${users.shared.id}, 'finance', 'active', 'Fixture member'),
+      (${A.id}, ${users.disabled.id}, 'booking_staff', 'active', 'Fixture member'),
+      (${B.id}, ${users.ownerB.id}, 'owner', 'active', 'Fixture member'),
+      (${B.id}, ${users.shared.id}, 'booking_staff', 'active', 'Fixture member'),
+      (${C.id}, ${users.shared.id}, 'owner', 'active', 'Fixture member')`;
     await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at) values
       (${hosts.aPreview}, ${A.id}, 'preview', 'active', now()),
       (${hosts.aPending}, ${A.id}, 'custom', 'pending', null),
@@ -166,8 +166,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
       ],
       [
         "membership in B",
-        (tx) => tx`insert into public.tenant_memberships (tenant_id, user_id, role)
-          values (${B.id}, ${users.outsider.id}, 'owner')`,
+        (tx) => tx`insert into public.tenant_memberships (tenant_id, user_id, role, display_name)
+          values (${B.id}, ${users.outsider.id}, 'owner', 'Fixture member')`,
       ],
       [
         "outbox for B",
@@ -293,24 +293,70 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
     expect((await list(users.ownerA.id)).map((r) => r.tenant_id)).toEqual([A.id]);
   });
 
-  it("creates identities only inside a tenant transaction and never overwrites them", async () => {
+  it("creates identities only for an active tenant, ASCII only, named by their own address", async () => {
     const email = `new-${run}@example.test`;
+    expect(await pgError(runtime`select app.ensure_staff_user(${email}, 'req-1')`)).toBe("42501");
     expect(
-      await pgError(runtime`select app.ensure_staff_user(${email}, 'New Person', 'req-1')`),
+      await pgError(
+        runtime.begin(async (tx) => {
+          await tx`select set_config('app.tenant_id', 'not-a-uuid', true)`;
+          await tx`select app.ensure_staff_user(${email}, 'req-2')`;
+        }),
+      ),
+    ).toBe("22P02");
+    expect(
+      await pgError(
+        asTenant(randomUUID(), (tx) => tx`select app.ensure_staff_user(${email}, 'req-3')`),
+      ),
     ).toBe("42501");
+    expect(
+      await pgError(asTenant(C.id, (tx) => tx`select app.ensure_staff_user(${email}, 'req-4')`)),
+    ).toBe("42501");
+    expect(
+      await pgError(
+        asTenant(
+          A.id,
+          (tx) => tx`select app.ensure_staff_user(${"\u212Aelvin@example.test"}, 'req-5')`,
+        ),
+      ),
+    ).toBe("22023");
+
     const [first] = await asTenant(
       A.id,
-      (tx) => tx`select app.ensure_staff_user(${email.toUpperCase()}, 'New Person', 'req-2') as id`,
+      (tx) => tx`select app.ensure_staff_user(${email.toUpperCase()}, 'req-6') as id`,
     );
     const [again] = await asTenant(
       B.id,
-      (tx) => tx`select app.ensure_staff_user(${email}, 'Renamed', 'req-3') as id`,
+      (tx) => tx`select app.ensure_staff_user(${email}, 'req-7') as id`,
     );
     expect(first?.id).toBeTruthy();
     expect(again?.id).toBe(first?.id);
     const [stored] =
       await admin`select email, display_name from public.staff_users where id = ${first?.id}`;
-    expect(stored).toEqual({ email, display_name: "New Person" });
+    expect(stored).toEqual({ email, display_name: email.split("@")[0] });
+  });
+
+  it("withholds an identity's own display name from every tenant", async () => {
+    expect(
+      await pgError(asTenant(A.id, (tx) => tx`select display_name from public.staff_users`)),
+    ).toBe("42501");
+    const names = await asTenant(
+      A.id,
+      (tx) => tx`select display_name from public.tenant_memberships where tenant_id = ${A.id}`,
+    );
+    expect(names.length).toBeGreaterThan(0);
+  });
+
+  it("refuses to reuse a connection that carries a leaked session-level tenant", async () => {
+    const handle = createDb(env?.runtimeUrl ?? "", { max: 1 });
+    try {
+      await handle.sql`select set_config('app.tenant_id', ${A.id}, false)`;
+      await expect(
+        inTenantTransaction(handle.db, { tenantId: B.id, actorType: "system" }, async () => 1),
+      ).rejects.toThrow(/already set on this connection/);
+    } finally {
+      await handle.end();
+    }
   });
 
   it("issues single-use, expiring, rate-limited login tokens and revocable sessions", async () => {
@@ -581,7 +627,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         schema_migrations: ["SELECT"],
         tenants: ["SELECT"],
         tenant_hostnames: ["SELECT"],
-        staff_users: ["SELECT"],
+        staff_users: [],
         tenant_memberships: ["INSERT", "SELECT"],
         audit_events: ["INSERT", "SELECT"],
         idempotency_keys: ["INSERT", "SELECT"],
@@ -606,9 +652,16 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         rows.filter((r) => r.update_columns.length > 0).map((r) => [r.relname, r.update_columns]),
       );
       expect(updates).toEqual({
-        tenant_memberships: ["role", "status", "updated_at"],
+        tenant_memberships: ["display_name", "role", "status", "updated_at"],
         idempotency_keys: ["completed_at", "response_body", "response_status", "status"],
       });
+      const [identity] = await admin`
+        select array(select a.attname::text from pg_attribute a
+                      where a.attrelid = 'public.staff_users'::regclass and a.attnum > 0 and not a.attisdropped
+                        and has_column_privilege('tidegrid_app', a.attrelid, a.attnum, 'SELECT')
+                      order by a.attname) as columns,
+               has_database_privilege('tidegrid_app', current_database(), 'TEMP') as temp`;
+      expect(identity).toEqual({ columns: ["created_at", "email", "id", "status"], temp: false });
     });
 
     it("pins search_path and withholds PUBLIC execute on every app function", async () => {

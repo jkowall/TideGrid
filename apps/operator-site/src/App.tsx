@@ -11,6 +11,7 @@ type ErrorBody = { error: { code: string; message: string } };
 
 type State =
   | { kind: "loading" }
+  | { kind: "confirm-link"; token: string }
   | { kind: "signed-in"; me: MeResponse }
   | { kind: "signed-out"; notice?: string }
   | { kind: "not-provisioned"; message: string }
@@ -56,12 +57,27 @@ const input: CSSProperties = {
   width: "100%",
 };
 
+/**
+ * Read a sign-in token from the URL fragment once per page load and remove it
+ * from the address bar and history right away. Module scope, not an effect, so
+ * development double-rendering cannot lose it.
+ */
+const linkToken = (() => {
+  const token = new URLSearchParams(window.location.hash.slice(1)).get("token");
+  if (token) window.history.replaceState(null, "", "/");
+  return token;
+})();
+
 async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
 export function App() {
-  const [state, setState] = useState<State>({ kind: "loading" });
+  // A sign-in link waits for a click: mail scanners that run scripts must not
+  // use it up, and a page on another site must not sign this browser in unasked.
+  const [state, setState] = useState<State>(
+    linkToken ? { kind: "confirm-link", token: linkToken } : { kind: "loading" },
+  );
 
   const refresh = useCallback(async () => {
     const res = await fetch("/api/v1/me", { credentials: "same-origin" });
@@ -75,27 +91,26 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const token = new URLSearchParams(window.location.hash.slice(1)).get("token");
-    void (async () => {
-      if (token) {
-        // Drop the token from the address bar and history before using it.
-        window.history.replaceState(null, "", "/");
-        const res = await fetch("/api/v1/auth/sessions", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ token }),
-        });
-        if (!res.ok) {
-          return setState({
-            kind: "signed-out",
-            notice: "That sign-in link is invalid, already used, or expired.",
-          });
-        }
-      }
-      await refresh();
-    })().catch(() => setState({ kind: "failed", message: "The API could not be reached." }));
+    if (linkToken) return;
+    refresh().catch(() => setState({ kind: "failed", message: "The API could not be reached." }));
   }, [refresh]);
+
+  const redeem = async (token: string) => {
+    setState({ kind: "loading" });
+    const res = await fetch("/api/v1/auth/sessions", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    }).catch(() => null);
+    if (!res?.ok) {
+      return setState({
+        kind: "signed-out",
+        notice: "That sign-in link is invalid, already used, or expired.",
+      });
+    }
+    await refresh();
+  };
 
   return (
     <main style={shell}>
@@ -104,6 +119,15 @@ export function App() {
         <h1>Operator console</h1>
         <div aria-live="polite">
           {state.kind === "loading" && <p style={muted}>Checking your sign-in…</p>}
+          {state.kind === "confirm-link" && (
+            <section aria-labelledby="continue">
+              <h2 id="continue">Finish signing in</h2>
+              <p style={muted}>This link signs this browser in to the operator console.</p>
+              <button type="button" style={button} onClick={() => void redeem(state.token)}>
+                Continue signing in
+              </button>
+            </section>
+          )}
           {state.kind === "signed-in" && <SignedIn me={state.me} onSignedOut={refresh} />}
           {state.kind === "signed-out" && <SignIn notice={state.notice} />}
           {state.kind === "not-provisioned" && (

@@ -59,9 +59,9 @@ export async function listMembers(trx: TenantTransaction, tenantId: string): Pro
   const rows = await trx
     .selectFrom("tenant_memberships as m")
     .innerJoin("staff_users as u", "u.id", "m.user_id")
-    .select(["m.user_id", "u.email", "u.display_name", "m.role", "m.status", "m.created_at"])
+    .select(["m.user_id", "u.email", "m.display_name", "m.role", "m.status", "m.created_at"])
     .where("m.tenant_id", "=", tenantId)
-    .orderBy("u.display_name")
+    .orderBy("m.display_name")
     .orderBy("m.user_id")
     .execute();
   return rows.map(toMember);
@@ -81,24 +81,23 @@ export async function addMember(
 ): Promise<AddMemberResult> {
   const email = input.email.trim().toLowerCase();
   const ensured = await sql<{ id: string }>`
-    select app.ensure_staff_user(${email}, ${input.displayName}, ${ctx.requestId ?? null}) as id
+    select app.ensure_staff_user(${email}, ${ctx.requestId ?? null}) as id
   `.execute(trx);
   const userId = ensured.rows[0]?.id;
   if (!userId) throw new Error("ensure_staff_user returned no id");
 
   const inserted = await trx
     .insertInto("tenant_memberships")
-    .values({ tenant_id: ctx.tenantId, user_id: userId, role: input.role })
+    .values({
+      tenant_id: ctx.tenantId,
+      user_id: userId,
+      role: input.role,
+      display_name: input.displayName,
+    })
     .onConflict((oc) => oc.columns(["tenant_id", "user_id"]).doNothing())
-    .returning(["user_id", "role", "status", "created_at"])
+    .returning(["user_id", "role", "status", "display_name", "created_at"])
     .executeTakeFirst();
   if (!inserted) return { kind: "exists" };
-
-  const user = await trx
-    .selectFrom("staff_users")
-    .select(["email", "display_name"])
-    .where("id", "=", userId)
-    .executeTakeFirstOrThrow();
 
   await recordAudit(trx, ctx, {
     action: "membership.created",
@@ -116,7 +115,7 @@ export async function addMember(
   });
   return {
     kind: "created",
-    member: toMember({ ...inserted, email: user.email, display_name: user.display_name }),
+    member: toMember({ ...inserted, email }),
   };
 }
 

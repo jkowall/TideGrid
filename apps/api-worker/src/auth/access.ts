@@ -42,7 +42,11 @@ export function createAccessVerifier(options: {
       if (payload.type !== undefined && payload.type !== "app") {
         throw new Error("unexpected Access token type");
       }
-      const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+      const raw = typeof payload.email === "string" ? payload.email.trim() : "";
+      // ASCII before case folding: some non-ASCII characters (the Kelvin sign)
+      // lowercase to ASCII letters and would match another person's address.
+      if (!/^[\x21-\x7e]+$/.test(raw)) throw new Error("Access email must be ASCII");
+      const email = raw.toLowerCase();
       if (email.length > 254 || !emailPattern.test(email)) {
         throw new Error("Access token carries no usable email");
       }

@@ -4,9 +4,17 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-22",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
+  // Public entry is api.tidegrid.us only; no workers.dev or preview URLs.
+  "workers_dev": false,
+  "preview_urls": false,
   "routes": [{ "pattern": "api.tidegrid.us", "custom_domain": true }],
-  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  // The app writes its own allowlisted request log. Invocation logs are off so
+  // request headers (cookies, Access assertions) are never retained.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": false }
+  },
   "vars": {
     "ENVIRONMENT": "preview",
     "BUILD_ID": "dev",

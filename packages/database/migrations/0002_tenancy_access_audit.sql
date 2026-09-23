@@ -21,6 +21,14 @@
 -- Functions are not executable by PUBLIC unless a migration grants them.
 ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
+-- The runtime needs no temporary objects. Without them it cannot plant a
+-- pg_temp object for any function to resolve.
+DO $$
+BEGIN
+  EXECUTE format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
+END
+$$;
+
 CREATE SCHEMA app;
 GRANT USAGE ON SCHEMA app TO tidegrid_app;
 
@@ -97,13 +105,17 @@ REVOKE INSERT ON public.tenant_hostnames FROM tidegrid_app;
 -- Staff identities and memberships --------------------------------------------
 
 -- A staff identity is global because one person may work for more than one
--- operator. A tenant sees only identities that hold a membership in it.
+-- operator. A tenant sees only identities that hold a membership in it, and
+-- never the identity's own display name: each membership carries the name that
+-- tenant chose. Addresses are ASCII so that case folding cannot map a lookalike
+-- character (for example the Kelvin sign) onto another person's address.
 CREATE TABLE public.staff_users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text NOT NULL
     CHECK (email = lower(email)
            AND char_length(email) <= 254
-           AND email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
+           AND email ~ '^[\x21-\x7e]+$'
+           AND email ~ '^[^@]+@[^@]+\.[^@]+$'),
   display_name text NOT NULL CHECK (char_length(display_name) BETWEEN 1 AND 120),
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   created_at timestamptz NOT NULL DEFAULT now()
@@ -117,6 +129,7 @@ CREATE TABLE public.tenant_memberships (
   user_id uuid NOT NULL REFERENCES public.staff_users (id),
   role text NOT NULL CHECK (role IN ('owner', 'booking_staff', 'finance')),
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+  display_name text NOT NULL CHECK (char_length(display_name) BETWEEN 1 AND 120),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, user_id)
@@ -128,7 +141,7 @@ ALTER TABLE public.tenant_memberships FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON public.tenant_memberships
   USING (tenant_id = (SELECT app.current_tenant_id()))
   WITH CHECK (tenant_id = (SELECT app.current_tenant_id()));
-GRANT UPDATE (role, status, updated_at) ON public.tenant_memberships TO tidegrid_app;
+GRANT UPDATE (role, status, display_name, updated_at) ON public.tenant_memberships TO tidegrid_app;
 
 ALTER TABLE public.staff_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.staff_users FORCE ROW LEVEL SECURITY;
@@ -139,8 +152,11 @@ CREATE POLICY staff_users_visible_through_membership ON public.staff_users
      WHERE m.user_id = staff_users.id
        AND m.tenant_id = (SELECT app.current_tenant_id())
   ));
--- Identities are created only through app.ensure_staff_user.
+-- Identities are created only through app.ensure_staff_user. Tenants read the
+-- membership's display name, not the identity's.
 REVOKE INSERT ON public.staff_users FROM tidegrid_app;
+REVOKE SELECT ON public.staff_users FROM tidegrid_app;
+GRANT SELECT (id, email, status, created_at) ON public.staff_users TO tidegrid_app;
 
 -- Audit -----------------------------------------------------------------------
 
@@ -330,7 +346,8 @@ CREATE FUNCTION app.auth_find_staff_by_email(p_email text)
   AS $$
     SELECT u.id, u.email, u.display_name
       FROM public.staff_users u
-     WHERE u.email = lower(btrim(p_email))
+     WHERE btrim(p_email) ~ '^[\x21-\x7e]+$'
+       AND u.email = lower(btrim(p_email))
        AND u.status = 'active'
   $$;
 
@@ -370,7 +387,9 @@ BEGIN
 
   SELECT u.id INTO v_user
     FROM public.staff_users u
-   WHERE u.email = lower(btrim(p_email)) AND u.status = 'active';
+   WHERE btrim(p_email) ~ '^[\x21-\x7e]+$'
+     AND u.email = lower(btrim(p_email))
+     AND u.status = 'active';
 
   IF v_user IS NULL THEN
     INSERT INTO public.security_events (kind, request_id)
@@ -479,23 +498,31 @@ END;
 $$;
 
 -- Find or create the identity for an address being added to a tenant. Callable
--- only inside a tenant transaction; the caller has already authorized the
--- membership change. An existing identity keeps its display name.
-CREATE FUNCTION app.ensure_staff_user(p_email text, p_display_name text, p_request_id text)
+-- only inside a transaction bound to an existing, active tenant; the caller has
+-- already authorized the membership change. A new identity's own display name
+-- is the address's local part, so no tenant can choose what another tenant or
+-- the person sees. Tenants name people on the membership instead.
+CREATE FUNCTION app.ensure_staff_user(p_email text, p_request_id text)
   RETURNS uuid
   LANGUAGE plpgsql VOLATILE SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
   AS $$
 DECLARE
-  v_email text := lower(btrim(p_email));
+  v_tenant uuid := app.current_tenant_id();
+  v_email text;
   v_user uuid;
 BEGIN
-  IF nullif(pg_catalog.current_setting('app.tenant_id', true), '') IS NULL THEN
-    RAISE EXCEPTION 'ensure_staff_user requires tenant context' USING ERRCODE = '42501';
+  IF v_tenant IS NULL OR NOT EXISTS (
+       SELECT 1 FROM public.tenants t WHERE t.id = v_tenant AND t.status = 'active') THEN
+    RAISE EXCEPTION 'ensure_staff_user requires an active tenant context' USING ERRCODE = '42501';
   END IF;
+  IF btrim(p_email) !~ '^[\x21-\x7e]+$' THEN
+    RAISE EXCEPTION 'staff addresses must be ASCII' USING ERRCODE = '22023';
+  END IF;
+  v_email := lower(btrim(p_email));
 
   INSERT INTO public.staff_users (email, display_name)
-    VALUES (v_email, btrim(p_display_name))
+    VALUES (v_email, left(split_part(v_email, '@', 1), 120))
     ON CONFLICT (email) DO NOTHING
     RETURNING id INTO v_user;
 
@@ -517,7 +544,7 @@ REVOKE ALL ON FUNCTION app.auth_issue_login_token(text, text, integer, text) FRO
 REVOKE ALL ON FUNCTION app.auth_consume_login_token(text, text, integer, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.auth_resolve_session(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.auth_revoke_session(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.ensure_staff_user(text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.ensure_staff_user(text, text) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION app.resolve_hostname(text) TO tidegrid_app;
 GRANT EXECUTE ON FUNCTION app.auth_find_staff_by_email(text) TO tidegrid_app;
@@ -526,4 +553,4 @@ GRANT EXECUTE ON FUNCTION app.auth_issue_login_token(text, text, integer, text) 
 GRANT EXECUTE ON FUNCTION app.auth_consume_login_token(text, text, integer, text) TO tidegrid_app;
 GRANT EXECUTE ON FUNCTION app.auth_resolve_session(text) TO tidegrid_app;
 GRANT EXECUTE ON FUNCTION app.auth_revoke_session(text, text) TO tidegrid_app;
-GRANT EXECUTE ON FUNCTION app.ensure_staff_user(text, text, text) TO tidegrid_app;
+GRANT EXECUTE ON FUNCTION app.ensure_staff_user(text, text) TO tidegrid_app;

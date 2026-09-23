@@ -13,15 +13,12 @@ describe("GET /v1/health", () => {
     expect(body.environment).toBe("local");
   });
 
-  it("echoes a well-formed caller-supplied request id and replaces a bad one", async () => {
-    const good = await SELF.fetch("https://api.test/v1/health", {
+  it("always issues its own request id and ignores a caller-supplied one", async () => {
+    const res = await SELF.fetch("https://api.test/v1/health", {
       headers: { "x-request-id": "trace-abc-12345" },
     });
-    expect(good.headers.get("x-request-id")).toBe("trace-abc-12345");
-    const bad = await SELF.fetch("https://api.test/v1/health", {
-      headers: { "x-request-id": "<script>" },
-    });
-    expect(bad.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(res.headers.get("x-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(res.headers.get("x-request-id")).not.toBe("trace-abc-12345");
   });
 
   it("returns a contract-shaped 404 with a request id", async () => {

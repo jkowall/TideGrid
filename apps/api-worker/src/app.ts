@@ -7,6 +7,7 @@ import type { AppDeps, AppEnv } from "./context.ts";
 import { releaseDb } from "./db.ts";
 import { allowedOrigins } from "./env.ts";
 import { ApiError } from "./errors.ts";
+import { requireConsoleGateway } from "./gateway.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
@@ -33,9 +34,9 @@ export function createApp(deps: AppDeps = {}) {
   });
 
   app.use("*", async (c, next) => {
-    const supplied = c.req.header("x-request-id");
-    const requestId =
-      supplied && /^[A-Za-z0-9._-]{8,128}$/.test(supplied) ? supplied : newRequestId();
+    // Always server-issued: the id is written into audit rows, so a client must
+    // not be able to choose it.
+    const requestId = newRequestId();
     const started = Date.now();
     const url = new URL(c.req.url);
     const log = createLogger({
@@ -73,8 +74,9 @@ export function createApp(deps: AppDeps = {}) {
     })(c, next);
   });
 
-  app.use("/v1/auth/*", requireStaffOrigin);
-  app.use("/v1/staff/*", requireStaffOrigin);
+  app.use("/v1/auth/*", requireConsoleGateway, requireStaffOrigin);
+  app.use("/v1/staff/*", requireConsoleGateway, requireStaffOrigin);
+  app.use("/v1/me", requireConsoleGateway);
 
   app.onError((err, c) => {
     const requestId = c.get("requestId") ?? "unknown";

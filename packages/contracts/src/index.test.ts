@@ -47,6 +47,17 @@ describe("contracts", () => {
     expect(MemberCreateRequest.safeParse({ ...base, role: "admin" }).success).toBe(false);
   });
 
+  it("rejects non-ASCII addresses and control characters", () => {
+    const base = { email: "a@example.test", displayName: "A", role: "owner", reason: "hire" };
+    expect(
+      MemberCreateRequest.safeParse({ ...base, email: "\u212Aelvin@example.test" }).success,
+    ).toBe(false);
+    expect(
+      MemberCreateRequest.safeParse({ ...base, displayName: "Night\u0000shift" }).success,
+    ).toBe(false);
+    expect(MemberCreateRequest.safeParse({ ...base, reason: "line\nbreak" }).success).toBe(false);
+  });
+
   it("accepts only 43-character base64url opaque tokens", () => {
     expect(OpaqueToken.safeParse("a".repeat(43)).success).toBe(true);
     expect(OpaqueToken.safeParse("a".repeat(42)).success).toBe(false);

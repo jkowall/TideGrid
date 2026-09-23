@@ -37,6 +37,15 @@ export async function setTenantContext(trx: TenantTransaction, ctx: TenantContex
   if (!actorTypes.includes(ctx.actorType)) {
     throw new TypeError(`unknown actor type ${String(ctx.actorType)}`);
   }
+  // A session-level set_config would survive on a pooled connection and follow
+  // it into the next request. Nothing in this codebase does that; refuse to run
+  // if something ever has.
+  const leaked = await sql<{ tenant: string | null }>`
+    select nullif(current_setting('app.tenant_id', true), '') as tenant
+  `.execute(trx);
+  if (leaked.rows[0]?.tenant) {
+    throw new Error("tenant context is already set on this connection; refusing to reuse it");
+  }
   await sql`
     select
       set_config('app.tenant_id', ${ctx.tenantId}, true),

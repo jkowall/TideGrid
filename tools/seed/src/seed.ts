@@ -84,8 +84,8 @@ try {
       for (const index of p.tenants) {
         const tenant = demoTenants[index];
         if (!tenant || !user) continue;
-        await tx`insert into public.tenant_memberships (tenant_id, user_id, role)
-          values (${tenant.id}, ${user.id}, ${p.role}) on conflict do nothing`;
+        await tx`insert into public.tenant_memberships (tenant_id, user_id, role, display_name)
+          values (${tenant.id}, ${user.id}, ${p.role}, ${p.name}) on conflict do nothing`;
       }
     }
   });
