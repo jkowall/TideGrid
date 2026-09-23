@@ -49,7 +49,7 @@ export async function withStaffTenant<T extends JsonObject>(
   deps: AppDeps,
   options: { tenantId: string; permission: Permission; idempotency?: IdempotentCommand },
   run: (trx: TenantTransaction, ctx: StaffTenantContext) => Promise<T>,
-): Promise<{ body: T; replayed: boolean }> {
+): Promise<{ body: T; status: number; replayed: boolean }> {
   const principal = await requirePrincipal(c, deps);
   if (!isUuid(options.tenantId)) throw tenantNotFound();
   const ctx: TenantContext = {
@@ -86,13 +86,15 @@ export async function withStaffTenant<T extends JsonObject>(
       }
       if (claim && idem) {
         const claimed = await claimIdempotencyKey(trx, ctx, claim);
-        if (claimed.kind === "replay") return { body: claimed.body as T, replayed: true };
+        if (claimed.kind === "replay") {
+          return { body: claimed.body as T, status: claimed.status, replayed: true };
+        }
       }
       const body = await run(trx, { ...ctx, principal, access });
       if (claim && idem) {
         await completeIdempotencyKey(trx, ctx, claim, { status: idem.successStatus, body });
       }
-      return { body, replayed: false };
+      return { body, status: idem?.successStatus ?? 200, replayed: false };
     });
   } catch (err) {
     if (err instanceof IdempotencyKeyMismatchError) {

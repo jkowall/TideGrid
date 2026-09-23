@@ -765,36 +765,43 @@ describe.skipIf(!env)("adversarial staff API checks as the runtime role", () => 
 
   describe("rollback and audit", () => {
     it("rolls back the new identity and every other write when a later statement fails", async () => {
-      const body = { ...newMember("nul-reason"), reason: "Night\u0000shift" };
-      const key = `nul-reason-${run}`;
-      const requestId = `adv-nul-reason-${run}`;
+      // Fault injection: the outbox insert, the last write before the key is
+      // completed, fails after the identity, membership, and audit rows exist.
+      const body = newMember("late-failure");
+      const key = `late-failure-${run}`;
       const access = await accessToken(ownerA.email);
-      const failed = await call("POST", membersPath(A.id), {
-        access,
-        headers: { "idempotency-key": key, "x-request-id": requestId },
-        body,
-      });
-      const [left] = await admin`select
-          (select count(*)::int from public.idempotency_keys where tenant_id = ${A.id} and key = ${key}) as keys,
-          (select count(*)::int from public.audit_events where request_id = ${requestId}) as audits,
-          (select count(*)::int from public.outbox_events where request_id = ${requestId}) as events,
-          (select count(*)::int from public.security_events where request_id = ${requestId}) as security`;
+      const fn = `adv_fail_outbox_${run.replaceAll("-", "_")}`;
+      await admin.unsafe(`create function public.${fn}() returns trigger language plpgsql
+        as $$ begin raise exception 'injected outbox failure'; end $$`);
+      await admin.unsafe(`create trigger ${fn} before insert on public.outbox_events
+        for each row when (new.tenant_id = '${A.id}') execute function public.${fn}()`);
+      let failed: Awaited<ReturnType<typeof call>>;
+      try {
+        failed = await call("POST", membersPath(A.id), {
+          access,
+          headers: { "idempotency-key": key },
+          body,
+        });
+      } finally {
+        await admin.unsafe(`drop trigger if exists ${fn} on public.outbox_events`);
+        await admin.unsafe(`drop function if exists public.${fn}()`);
+      }
+      const [keys] = await admin`select count(*)::int as n from public.idempotency_keys
+        where tenant_id = ${A.id} and key = ${key}`;
       expect({
-        failed: failed.res.status >= 400,
+        status: failed.res.status,
+        code: failed.json.error?.code,
         footprint: await footprint(body.email),
-        left,
-      }).toEqual({
-        failed: true,
-        footprint: nothing,
-        left: { keys: 0, audits: 0, events: 0, security: 0 },
-      });
-      // Nothing was burned: the same key with a clean body executes exactly once.
+        keys: keys?.n,
+      }).toEqual({ status: 500, code: "internal_error", footprint: nothing, keys: 0 });
+      // Nothing was burned: the same key and body now execute exactly once.
       const retried = await call("POST", membersPath(A.id), {
         access,
         headers: { "idempotency-key": key },
-        body: { ...body, reason: "Night shift" },
+        body,
       });
       expect(retried.res.status).toBe(201);
+      expect(retried.res.headers.get("idempotent-replayed")).toBeNull();
       expect(await footprint(body.email)).toEqual({
         users: 1,
         memberships: 1,

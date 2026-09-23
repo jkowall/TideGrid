@@ -18,6 +18,21 @@
 -- grants UPDATE column by column where it may change them. The runtime never
 -- receives DELETE or TRUNCATE.
 
+-- The SECURITY DEFINER functions below read platform tables that have forced
+-- row-level security and no policies. They work only because their owner, the
+-- role running this migration, bypasses row-level security, as Neon's owner role
+-- does. Refuse to install them under a role that would make every sign-in fail
+-- silently.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolbypassrls)
+  ) THEN
+    RAISE EXCEPTION 'migration 0002 must run as a role that bypasses row-level security';
+  END IF;
+END
+$$;
+
 -- Functions are not executable by PUBLIC unless a migration grants them.
 ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
@@ -26,6 +41,10 @@ ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 DO $$
 BEGIN
   EXECUTE format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
+  -- A non-owner's REVOKE only warns; make that a failure.
+  IF has_database_privilege('tidegrid_app', current_database(), 'TEMP') THEN
+    RAISE EXCEPTION 'tidegrid_app still holds TEMPORARY; run this migration as the database owner';
+  END IF;
 END
 $$;
 

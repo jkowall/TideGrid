@@ -668,7 +668,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
       const rows = await admin`
         select p.proname, p.prosecdef, p.proconfig, p.proacl is null as default_acl,
                exists (select 1 from aclexplode(p.proacl) x where x.grantee = 0) as public_execute,
-               pg_get_userbyid(p.proowner) as owner
+               pg_get_userbyid(p.proowner) as owner,
+               (select r.rolsuper or r.rolbypassrls from pg_roles r where r.oid = p.proowner) as owner_bypasses_rls
           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'app'`;
       expect(rows.length).toBeGreaterThanOrEqual(11);
@@ -684,9 +685,16 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         });
         expect(r.owner).not.toBe("tidegrid_app");
         if (r.prosecdef) {
-          expect({ fn: r.proname, config: r.proconfig }).toEqual({
+          // Definer functions read tables with forced RLS and no policies; their
+          // owner must bypass RLS or every sign-in silently finds nothing.
+          expect({
+            fn: r.proname,
+            config: r.proconfig,
+            ownerBypassesRls: r.owner_bypasses_rls,
+          }).toEqual({
             fn: r.proname,
             config: ["search_path=pg_catalog, pg_temp"],
+            ownerBypassesRls: true,
           });
         }
       }

@@ -100,6 +100,8 @@ export function registerStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
       },
     );
     if (result.replayed) c.header("Idempotent-Replayed", "true");
+    // The stored status is replayed as-is; this command only ever stores 201.
+    if (result.status !== 201) throw new Error(`unexpected stored status ${result.status}`);
     return c.json(result.body, 201);
   });
 
