@@ -39,6 +39,8 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
     env:
       CI: "true"
+      # Integration suites rotate tidegrid_app's password; this job's branch is disposable.
+      TIDEGRID_EPHEMERAL_DB: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

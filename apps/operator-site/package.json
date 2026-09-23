@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p worker/tsconfig.json",
     "release": "vite build && wrangler deploy",
     "release:dry": "vite build && wrangler deploy --dry-run"
   },

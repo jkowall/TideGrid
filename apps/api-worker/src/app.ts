@@ -1,16 +1,20 @@
-import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
-import { apiVersion, ErrorResponse, HealthResponse } from "@tidegrid/contracts";
-import { createDb } from "@tidegrid/database";
+import { OpenAPIHono } from "@hono/zod-openapi";
 import { createLogger, newRequestId } from "@tidegrid/observability";
-import type { Context } from "hono";
 import { cors } from "hono/cors";
-import { allowedOrigins, type Bindings, databaseUrl } from "./env.ts";
+import { HTTPException } from "hono/http-exception";
+import { requireStaffOrigin } from "./auth/guards.ts";
+import type { AppDeps, AppEnv } from "./context.ts";
+import { releaseDb } from "./db.ts";
+import { allowedOrigins } from "./env.ts";
+import { ApiError } from "./errors.ts";
+import { registerAuthRoutes } from "./routes/auth.ts";
+import { registerPublicRoutes } from "./routes/public.ts";
+import { registerStaffRoutes } from "./routes/staff.ts";
+import { registerSystemRoutes } from "./routes/system.ts";
 
-type Variables = { requestId: string; log: ReturnType<typeof createLogger> };
+export type { AppDeps, AppEnv } from "./context.ts";
 
-export type AppEnv = { Bindings: Bindings; Variables: Variables };
-
-export function createApp() {
+export function createApp(deps: AppDeps = {}) {
   const app = new OpenAPIHono<AppEnv>({
     defaultHook: (result, c) => {
       if (!result.success) {
@@ -44,58 +48,70 @@ export function createApp() {
     c.set("requestId", requestId);
     c.set("log", log);
     c.header("x-request-id", requestId);
-    await next();
+    try {
+      await next();
+    } finally {
+      releaseDb(c);
+    }
     log.info("request", {
       "http.response.status_code": c.res.status,
+      "user.id": c.get("principal")?.userId,
       duration_ms: Date.now() - started,
     });
   });
 
-  // Browser origins are an explicit allowlist. G2.14 replaces this with the
-  // verified tenant hostname; until then only configured origins may call.
+  // Browser origins are an explicit allowlist. G2.14 adds verified tenant
+  // hostnames; until then only configured origins may call from a browser.
   app.use("*", async (c, next) => {
     const origins = allowedOrigins(c.env);
     return cors({
       origin: (origin) => (origins.includes(origin) ? origin : null),
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowHeaders: ["Content-Type", "Idempotency-Key", "X-Request-Id"],
-      exposeHeaders: ["X-Request-Id"],
+      exposeHeaders: ["X-Request-Id", "Idempotent-Replayed"],
       maxAge: 600,
     })(c, next);
   });
 
+  app.use("/v1/auth/*", requireStaffOrigin);
+  app.use("/v1/staff/*", requireStaffOrigin);
+
   app.onError((err, c) => {
+    const requestId = c.get("requestId") ?? "unknown";
+    if (err instanceof ApiError) {
+      if (err.status >= 500) c.get("log")?.error(err.code, { "error.type": err.name });
+      return c.json({ error: { code: err.code, message: err.message, requestId } }, err.status);
+    }
+    if (err instanceof HTTPException && err.status < 500) {
+      return c.json(
+        { error: { code: "bad_request", message: err.message || "Bad request", requestId } },
+        err.status,
+      );
+    }
     c.get("log")?.error("unhandled", { "error.type": err.name });
     return c.json(
-      {
-        error: {
-          code: "internal_error",
-          message: "Something went wrong",
-          requestId: c.get("requestId") ?? "unknown",
-        },
-      },
+      { error: { code: "internal_error", message: "Something went wrong", requestId } },
       500,
     );
   });
 
-  const health = createRoute({
-    method: "get",
-    path: `/${apiVersion}/health`,
-    tags: ["system"],
-    summary: "Service health",
-    responses: {
-      200: {
-        content: { "application/json": { schema: HealthResponse } },
-        description: "Healthy or degraded",
-      },
-      500: { content: { "application/json": { schema: ErrorResponse } }, description: "Failure" },
-    },
+  app.openAPIRegistry.registerComponent("securitySchemes", "accessJwt", {
+    type: "apiKey",
+    in: "header",
+    name: "Cf-Access-Jwt-Assertion",
+    description: "Cloudflare Access application token, injected by Access in front of the console",
+  });
+  app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {
+    type: "apiKey",
+    in: "cookie",
+    name: "__Host-tg_session",
+    description: "Magic-link session; HttpOnly, Secure, SameSite=Strict",
   });
 
-  app.openapi(health, async (c) => {
-    const body = await checkHealth(c);
-    return c.json(body, 200);
-  });
+  registerSystemRoutes(app);
+  registerPublicRoutes(app);
+  registerAuthRoutes(app, deps);
+  registerStaffRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",
@@ -116,54 +132,4 @@ export function createApp() {
   );
 
   return app;
-}
-
-// The health endpoint is public. Memoize the database probe per isolate so a
-// request burst cannot open a connection per request against a scale-to-zero branch.
-let probeCache: {
-  at: number;
-  value: Pick<HealthResponse, "status" | "database" | "migrations">;
-} | null = null;
-const probeTtlMs = 10_000;
-
-async function checkHealth(c: Context<AppEnv>): Promise<HealthResponse> {
-  const url = databaseUrl(c.env);
-  const base = {
-    version: c.env.BUILD_ID,
-    environment: c.env.ENVIRONMENT,
-    time: new Date().toISOString(),
-  };
-  if (!url) {
-    return { ...base, status: "degraded", database: "unconfigured", migrations: null };
-  }
-  if (probeCache && Date.now() - probeCache.at < probeTtlMs) {
-    return { ...base, ...probeCache.value };
-  }
-  const probe = await probeDatabase(c, url);
-  probeCache = { at: Date.now(), value: probe };
-  return { ...base, ...probe };
-}
-
-async function probeDatabase(
-  c: Context<AppEnv>,
-  url: string,
-): Promise<Pick<HealthResponse, "status" | "database" | "migrations">> {
-  const { db, end } = createDb(url, { max: 1 });
-  try {
-    const rows = await db
-      .selectFrom("schema_migrations")
-      .select(({ fn }) => [fn.countAll<string>().as("applied"), fn.max("name").as("latest")])
-      .execute();
-    const row = rows[0];
-    return {
-      status: "ok",
-      database: "ok",
-      migrations: { applied: Number(row?.applied ?? 0), latest: row?.latest ?? null },
-    };
-  } catch (err) {
-    c.get("log").warn("database health failed", { "error.type": (err as Error).name });
-    return { status: "degraded", database: "error", migrations: null };
-  } finally {
-    c.executionCtx.waitUntil(end().catch(() => undefined));
-  }
 }

@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --env dev --port 8787",
     "types": "wrangler types",
-    "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p test/tsconfig.json",
+    "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p test/tsconfig.json && tsc -p test-integration/tsconfig.json",
     "contracts:generate": "tsx scripts/generate-openapi.ts",
     "test": "vitest run",
     "release": "wrangler deploy --var BUILD_ID:$(git describe --always --dirty)",
-    "release:dry": "wrangler deploy --dry-run"
+    "release:dry": "wrangler deploy --dry-run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.1.0",
@@ -18,7 +19,10 @@
     "@tidegrid/database": "workspace:*",
     "@tidegrid/observability": "workspace:*",
     "hono": "^4.9.0",
-    "zod": "^4.1.0"
+    "zod": "^4.1.0",
+    "@tidegrid/domain-identity": "workspace:*",
+    "jose": "^6.2.0",
+    "kysely": "^0.29.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
@@ -26,6 +30,7 @@
     "tsx": "^4.20.0",
     "typescript": "^5.9.0",
     "vitest": "^4.1.0",
-    "wrangler": "^4.135.0"
+    "wrangler": "^4.135.0",
+    "postgres": "^3.4.0"
   }
 }

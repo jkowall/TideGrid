@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@tidegrid/api-worker", "dev"],
+      "port": 8787
+    },
+    {
+      "name": "console",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@tidegrid/operator-site", "dev"],
+      "port": 5174
+    }
+  ]
+}

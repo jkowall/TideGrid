@@ -6,6 +6,7 @@ coverage/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+!.dev.vars.test
 .env
 .env.*
 !.env.example

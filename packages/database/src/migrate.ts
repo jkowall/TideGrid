@@ -61,7 +61,7 @@ export async function migrate(
   files?: MigrationFile[],
 ): Promise<MigrateResult> {
   const migrations = files ?? (await loadMigrations());
-  const sql = postgres(connectionString, { max: 1, prepare: false });
+  const sql = postgres(connectionString, { max: 1, prepare: false, onnotice: () => {} });
   const applied: string[] = [];
   const skipped: string[] = [];
   try {
@@ -110,7 +110,7 @@ export async function migrate(
 
 export async function status(connectionString: string) {
   const migrations = await loadMigrations();
-  const sql = postgres(connectionString, { max: 1, prepare: false });
+  const sql = postgres(connectionString, { max: 1, prepare: false, onnotice: () => {} });
   try {
     const rows = await sql<
       { name: string }[]

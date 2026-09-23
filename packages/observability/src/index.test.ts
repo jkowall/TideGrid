@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLogger, redact } from "./index.ts";
+import { createLogger, redact, redactPath } from "./index.ts";
 
 describe("observability", () => {
   it("drops attributes that are not on the allowlist", () => {
@@ -18,5 +18,18 @@ describe("observability", () => {
     expect(parsed["tidegrid.request_id"]).toBe("r1");
     expect(parsed.duration_ms).toBe(3);
     expect(parsed.secret).toBeUndefined();
+  });
+});
+
+describe("redactPath", () => {
+  it("masks token-like segments and keeps UUIDs and short segments", () => {
+    const token = "a".repeat(43);
+    const id = "11111111-1111-4111-8111-111111111111";
+    expect(redactPath(`/v1/staff/tenants/${id}/members`)).toBe(`/v1/staff/tenants/${id}/members`);
+    expect(redactPath(`/v1/links/${token}`)).toBe("/v1/links/:redacted");
+  });
+
+  it("applies to url.path through redact()", () => {
+    expect(redact({ "url.path": `/x/${"b".repeat(30)}` })).toEqual({ "url.path": "/x/:redacted" });
   });
 });

@@ -16,6 +16,8 @@ export interface RequestAttributes {
   "tidegrid.environment"?: string;
   "error.type"?: string;
   "event.name"?: string;
+  /** Staff user id (a UUID). Never an email address. */
+  "user.id"?: string;
   duration_ms?: number;
 }
 
@@ -29,13 +31,30 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.environment",
   "error.type",
   "event.name",
+  "user.id",
   "duration_ms",
 ]);
+
+const tokenLike = /^[A-Za-z0-9_-]{24,}$/;
+const uuidLike = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Replace path segments that look like bearer material. Routes are designed so
+ * tokens travel in fragments, bodies, and cookies, never paths; this is the
+ * backstop if one ever does. UUID identifiers are kept for correlation.
+ */
+export function redactPath(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => (tokenLike.test(segment) && !uuidLike.test(segment) ? ":redacted" : segment))
+    .join("/");
+}
 
 export function redact(attrs: Record<string, unknown>): RequestAttributes {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(attrs)) {
-    if (allowedKeys.has(k as keyof RequestAttributes) && v !== undefined) out[k] = v;
+    if (!allowedKeys.has(k as keyof RequestAttributes) || v === undefined) continue;
+    out[k] = k === "url.path" && typeof v === "string" ? redactPath(v) : v;
   }
   return out as RequestAttributes;
 }

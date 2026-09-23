@@ -1,0 +1,2 @@
+# Intentionally empty. Wrangler reads .dev.vars.<environment> instead of
+# .dev.vars, so a developer's local database URL never reaches the unit tests.

@@ -29,7 +29,7 @@ Boundaries:
 | Operator web | React and Vite on a separate Workers Static Assets deployment | Different CSP and release cadence from the guest surface |
 | Contracts | Zod schemas generating OpenAPI, shared through `packages/contracts` | Generated client for both web apps |
 | Email | Cloudflare Email Service behind the provider-neutral email adapter | Sender domain on `tidegrid.us`; guest email is branded per tenant in content, sent from a TideGrid-controlled address during the demo |
-| Operator sign-in | Cloudflare Access on deployed environments; built-in magic link for local and as fallback | Both produce the same application session and tenant role mapping. Access is the perimeter, the application still checks tenant and role |
+| Operator sign-in | Cloudflare Access on deployed environments; built-in magic link for local and as fallback | Both resolve to the same principal and tenant role mapping. Access is the perimeter, the application still checks tenant and role. The console calls the API same-origin under `/api`, forwarded by the console Worker over a service binding, so Access protects both and the API verifies the Access assertion itself. Deployed environments cannot deliver magic links until transactional email lands in G2.16 |
 | Guest access | Accountless, short-lived, single-purpose links and tokens | As the architecture requires |
 | Payments | Stripe Connect direct charges in test mode, Stripe-hosted or embedded payment element | Operator remains merchant of record; test connected account per synthetic tenant |
 | Async work | Idempotency keys and a PostgreSQL outbox table from the first migration; a cron-triggered sweep on the API Worker for hold expiry and outbox delivery | Cloudflare Queues and a dedicated async Worker are deferred with G2.3 |
@@ -57,6 +57,7 @@ apps/
 packages/
   contracts/          Zod schemas, generated OpenAPI and client
   database/           Kysely types, migrations, migration runner, seed
+  domain-identity/    staff roles and permissions, memberships, hostname normalization, audit history
   domain-catalog/     products, boats, scheduled trips, availability
   domain-booking/     checkout, holds, booking, order, quote
   domain-payments/    Stripe direct charge, inbox, reconciliation seams
@@ -94,7 +95,7 @@ Goal identifiers keep the [goal map](10-build-execution-and-agent-plan.md#goal-m
 | Order | Goal | Outcome for the demo | Route | Proof |
 |---|---|---|---|---|
 | 1 | G2.1 Workspace foundation | pnpm workspace, pinned toolchain, `packages/contracts` generation, migration runner, seed, environment files, CI, one deployable hello Worker and two static sites | Lead; routine implementer for CI and lint configuration | Clean bootstrap on a fresh clone: install, typecheck, migrate against a Neon branch, seed, test, deploy preview |
-| 2 | G2.2 Tenant access and audit | Tenants, hostname mapping, request context, roles, forced row-level security, append-only audit, idempotency table, outbox table; Cloudflare Access JWT verification and magic-link session | Lead at high effort; independent reviewer plus security reviewer | Two-tenant escape tests on every query path; role-denial tests; replayed idempotency key returns the first result |
+| 2 | G2.2 Tenant access and audit | Tenants, hostname mapping, request context, the pilot roles (owner, booking staff, read-only finance), forced row-level security, append-only audit, idempotency table, outbox table; Cloudflare Access JWT verification and magic-link session. Support access (time-bound, reason-bound, masked) is deferred to the first goal that needs it | Lead at high effort; independent reviewer plus security reviewer | Two-tenant escape tests on every query path; role-denial tests; replayed idempotency key returns the first result |
 | 3 | G2.4 Catalog and schedule | Products, boats, scheduled trips with local time and IANA zone, recurring schedules, blackouts, cutoffs, sales states, availability query | Lead for invariants; routine implementer for recurrence expansion against the accepted contract | Schedule-boundary, DST, cutoff, and availability tests |
 | 3, parallel | G2.14a Design system and brand bootstrap | `packages/design-system` tokens, fonts, components with states; guest shell that loads a tenant's brand configuration by hostname; operator shell | Lead as UI lead; UI reviewer on the shells | Two synthetic brands render from configuration; contrast and focus checks pass |
 | 4 | G2.5 Pricing, add-ons, fees, and policies | Ticket and charter prices, paid add-ons, taxes, mandatory fees, one promotion code, versioned policies, immutable quote snapshot | Lead at high effort; test specialist | Quote snapshot, eligibility, tax, discount, and policy-version tests |

@@ -16,6 +16,8 @@
 - `docs/v1` and `docs/archive` are read-only history. Never edit them to match V2; record the current decision in V2 and link back.
 - `prototypes/guest-flow` is a throwaway demo, not production code. Do not treat its behavior as an implementation contract.
 - The demo build lives in `apps/`, `packages/`, `tools/`, and `config/`. Migrations in `packages/database/migrations` are forward-only once merged; write a new file instead of editing an applied one. Runtime code connects as `tidegrid_app`, which is created by migration 0001 in SQL and must never be created through the Neon console or API.
+- Tenant isolation follows the contract in [packages/database/README.md](packages/database/README.md): every tenant-owned read or write runs inside `inTenantTransaction`, every tenant table has forced row-level security, the runtime never receives DELETE, and credential tables are reachable only through the functions in schema `app`. Integration tests check these rules from the catalog.
+- Integration suites run only against a throwaway Neon branch with `TIDEGRID_EPHEMERAL_DB=1`. They rotate the runtime role's password, so never point them at the main branch.
 - Model and tool names belong only in [docs/v2/10-build-execution-and-agent-plan.md](docs/v2/10-build-execution-and-agent-plan.md). Elsewhere, say "the build execution and agent plan" and link to it.
 - Agent definition files in `.claude/agents` carry standing role instructions only. Goal scope, owned paths, and invariants come from the goal packet, not from those files.
 - No customer data, credentials, or personal filing details in this repository. The owner keeps those in a private location outside the repo.

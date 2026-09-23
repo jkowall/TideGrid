@@ -11,7 +11,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "pnpm -r --if-present test",
-    "test:integration": "pnpm --filter @tidegrid/database test:integration",
+    "test:integration": "pnpm -r --workspace-concurrency=1 --if-present test:integration",
     "build": "pnpm -r --if-present build",
     "contracts:generate": "pnpm --filter @tidegrid/api-worker contracts:generate",
     "db:migrate": "pnpm --filter @tidegrid/database migrate",
