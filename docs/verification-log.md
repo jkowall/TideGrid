@@ -4,6 +4,13 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-09-23
 
+### G2.2 deployment verification, September 24, 2026
+
+- Landed through a new pull request to `main`, because the earlier stacked pull requests merged into intermediate branches and G2.1 and G2.2 never reached `main`. CI passed on the deployed commit `b87e269` (checks and integration on a fresh Neon branch).
+- Applied migration 0002 to the Neon main branch and seeded two demo operators with synthetic staff in each role, plus the owner's two Access addresses as owners of both, supplied at seed time rather than committed.
+- Deployed the API, the console (bound to `tidegrid-api#ConsoleGateway`), and the guest site. Health reports build `b87e269`, database ok, two migrations. On the public `api.tidegrid.us`, `/v1/me`, `/v1/auth/login-links`, and a staff member route answer 404 even with an Access header and the console Origin. The public tenant lookup resolves `demo-harbor.book.tidegrid.us`. Both workers.dev URLs answer 404. `console.tidegrid.us` and its `/api/v1/me` redirect to the Access login, including with a forged assertion header. The guest page on workers.dev reads the API across origins with no console errors.
+- Not done: the signed-in console path through Access needs the owner's one-time PIN, so the owner verifies it by signing in.
+
 ### G2.2 Tenant access and audit verification, September 23, 2026
 
 - Built migration 0002 (tenants, hostnames, staff identities, memberships with the pilot roles owner, booking staff, and read-only finance, append-only audit, idempotency keys, outbox, and credential tables), the tenancy primitives in `packages/database` (tenant transaction, audit, outbox, idempotency), `packages/domain-identity` (role matrix, hostname normalization, member and audit services), the API's Access assertion verification, magic-link sign-in with `__Host-` session cookies, `/v1/me`, the three staff routes, and the public tenant lookup, plus a console gateway Worker that forwards `/api/*` to the API over a service binding behind Cloudflare Access.
