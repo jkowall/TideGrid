@@ -33,6 +33,30 @@ BEGIN
 END
 $$;
 
+-- Every policy below assumes the runtime role is the plain role that migration
+-- 0001 creates. A role made through the Neon console or API joins
+-- neon_superuser and bypasses row-level security, and 0001 cannot tell because
+-- it skips creation when the role already exists. Refuse to continue.
+DO $$
+DECLARE
+  r record;
+BEGIN
+  SELECT u.rolsuper, u.rolbypassrls, u.rolcreaterole, u.rolcreatedb,
+         EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+                  WHERE m.member = u.oid
+                    AND (g.rolname = 'neon_superuser' OR g.rolname LIKE 'pg\_%')) AS privileged
+    INTO r
+    FROM pg_roles u
+   WHERE u.rolname = 'tidegrid_app';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'tidegrid_app is missing; migration 0001 creates it';
+  END IF;
+  IF r.rolsuper OR r.rolbypassrls OR r.rolcreaterole OR r.rolcreatedb OR r.privileged THEN
+    RAISE EXCEPTION 'tidegrid_app is elevated; drop it and let migration 0001 recreate it';
+  END IF;
+END
+$$;
+
 -- Functions are not executable by PUBLIC unless a migration grants them.
 ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 

@@ -10,7 +10,8 @@ import postgres from "postgres";
  * password is sent once, over TLS, as a quoted literal.
  */
 
-const printableAscii = /^[\x21-\x7e]+$/;
+/** base64url only: nothing that could interact with SQL string quoting. */
+const passwordAlphabet = /^[A-Za-z0-9_-]+$/;
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -44,15 +45,15 @@ export async function assertRuntimeRoleIsPlain(sql: Sql): Promise<void> {
 }
 
 export async function setRuntimeRolePassword(adminUrl: string, password: string): Promise<void> {
-  if (password.length < 24 || !printableAscii.test(password)) {
-    throw new RangeError("runtime role password must be 24+ printable ASCII characters");
+  if (password.length < 24 || !passwordAlphabet.test(password)) {
+    throw new RangeError("runtime role password must be 24+ base64url characters");
   }
   const sql = postgres(adminUrl, { max: 1, onnotice: () => {} });
   try {
     await assertRuntimeRoleIsPlain(sql);
-    // ALTER ROLE takes no bind parameters. Quote doubling is sufficient because
-    // standard_conforming_strings is on, so backslashes are literal.
-    await sql.unsafe(`ALTER ROLE tidegrid_app LOGIN PASSWORD '${password.replaceAll("'", "''")}'`);
+    // ALTER ROLE takes no bind parameters. The alphabet check above rules out
+    // quotes and backslashes, so the literal cannot be broken out of.
+    await sql.unsafe(`ALTER ROLE tidegrid_app LOGIN PASSWORD '${password}'`);
   } finally {
     await sql.end();
   }

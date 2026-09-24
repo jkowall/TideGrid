@@ -27,7 +27,9 @@ async function neon<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!res.ok)
     throw new Error(`Neon ${init.method ?? "GET"} ${path} -> ${res.status} ${await res.text()}`);
-  return (await res.json()) as T;
+  // Some responses (for example deleting a branch Neon already expired) have no body.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : {}) as T;
 }
 
 interface CreateResponse {
@@ -52,9 +54,14 @@ export async function createBranch(name: string, ttlSeconds = 6 * 3600) {
   return { branchId, connectionString: uri.uri };
 }
 
+/** Idempotent: a branch that is already gone (deleted or expired) counts as deleted. */
 export async function deleteBranch(branchId: string) {
   const project = env("NEON_PROJECT_ID");
-  await neon(`/projects/${project}/branches/${branchId}`, { method: "DELETE" });
+  try {
+    await neon(`/projects/${project}/branches/${branchId}`, { method: "DELETE" });
+  } catch (err) {
+    if (!/-> 404 /.test((err as Error).message)) throw err;
+  }
 }
 
 const [, , command, arg] = process.argv;
