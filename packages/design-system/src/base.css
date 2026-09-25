@@ -45,9 +45,15 @@ select,
 textarea {
   font: inherit;
 }
-button,
-a,
-[role="button"] {
+button {
+  min-height: var(--tap-min);
+}
+/* A link is an inline box, where min-height does nothing. Standalone links and
+   other non-button controls take .tap-target for a real box. Links inside
+   running text stay inline, which WCAG 2.5.8 exempts. */
+.tap-target {
+  display: inline-flex;
+  align-items: center;
   min-height: var(--tap-min);
 }
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {

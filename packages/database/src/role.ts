@@ -16,30 +16,61 @@ const passwordAlphabet = /^[A-Za-z0-9_-]+$/;
 type Sql = ReturnType<typeof postgres>;
 
 /**
- * Refuse to issue a credential unless tidegrid_app is the plain role from
- * migration 0001. A role created through the Neon console or API joins
- * neon_superuser, which bypasses row-level security.
+ * Everything that makes `role` more than the plain login role migration 0001
+ * creates, or null when the role does not exist. Any membership counts, not
+ * only neon_superuser: SET ROLE to a table owner, or to any role that is itself
+ * in neon_superuser, reaches BYPASSRLS. Any ownership counts, because an owner
+ * can alter what it owns and a schema owner can drop anything in the schema.
  */
-export async function assertRuntimeRoleIsPlain(sql: Sql): Promise<void> {
-  const [row] = await sql<
-    {
-      rolsuper: boolean;
-      rolbypassrls: boolean;
-      rolcreaterole: boolean;
-      rolcreatedb: boolean;
-      groups: string[];
-    }[]
-  >`
-    SELECT r.rolsuper, r.rolbypassrls, r.rolcreaterole, r.rolcreatedb,
-           array(SELECT b.rolname FROM pg_auth_members m JOIN pg_roles b ON b.oid = m.roleid
-                 WHERE m.member = r.oid) AS groups
-      FROM pg_roles r WHERE r.rolname = 'tidegrid_app'`;
-  if (!row) throw new Error("tidegrid_app does not exist; run migrations first.");
-  const elevated = row.rolsuper || row.rolbypassrls || row.rolcreaterole || row.rolcreatedb;
-  const privilegedGroups = row.groups.filter((g) => g === "neon_superuser" || g.startsWith("pg_"));
-  if (elevated || privilegedGroups.length > 0) {
+export async function runtimeRoleFindings(
+  sql: Sql,
+  role = "tidegrid_app",
+): Promise<string[] | null> {
+  const [row] = await sql<{ attributes: string[]; member_of: string[]; owns: string[] }[]>`
+    SELECT array_remove(ARRAY[
+             CASE WHEN r.rolsuper THEN 'SUPERUSER' END,
+             CASE WHEN r.rolcreaterole THEN 'CREATEROLE' END,
+             CASE WHEN r.rolcreatedb THEN 'CREATEDB' END,
+             CASE WHEN r.rolreplication THEN 'REPLICATION' END,
+             CASE WHEN r.rolbypassrls THEN 'BYPASSRLS' END
+           ], NULL) AS attributes,
+           array(SELECT g.rolname::text FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid
+                  WHERE m.member = r.oid ORDER BY 1) AS member_of,
+           array_remove(ARRAY[
+             CASE WHEN EXISTS (SELECT 1 FROM pg_database WHERE datdba = r.oid) THEN 'database' END,
+             CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner = r.oid) THEN 'schema' END,
+             CASE WHEN EXISTS (SELECT 1 FROM pg_class WHERE relowner = r.oid) THEN 'relation' END,
+             CASE WHEN EXISTS (SELECT 1 FROM pg_proc WHERE proowner = r.oid) THEN 'function' END,
+             CASE WHEN EXISTS (SELECT 1 FROM pg_type WHERE typowner = r.oid) THEN 'type' END
+           ], NULL) AS owns
+      FROM pg_roles r WHERE r.rolname = ${role}`;
+  if (!row) return null;
+  const findings: string[] = [];
+  if (row.attributes.length > 0) findings.push(`has ${row.attributes.join(", ")}`);
+  if (row.member_of.length > 0) findings.push(`is a member of ${row.member_of.join(", ")}`);
+  if (row.owns.length > 0) findings.push(`owns a ${row.owns.join(", a ")}`);
+  return findings;
+}
+
+/**
+ * Refuse to continue unless tidegrid_app is the plain role from migration
+ * 0001. The migration runner checks before and after every run, and the
+ * password command checks before it issues a credential. A role created
+ * through the Neon console or API joins neon_superuser, which bypasses
+ * row-level security.
+ */
+export async function assertRuntimeRoleIsPlain(
+  sql: Sql,
+  { mustExist = true }: { mustExist?: boolean } = {},
+): Promise<void> {
+  const findings = await runtimeRoleFindings(sql);
+  if (findings === null) {
+    if (mustExist) throw new Error("tidegrid_app does not exist; run migrations first.");
+    return;
+  }
+  if (findings.length > 0) {
     throw new Error(
-      `tidegrid_app is elevated (attributes: ${elevated}; groups: ${privilegedGroups.join(", ") || "none"}). Drop it and let migration 0001 recreate it.`,
+      `tidegrid_app is not the plain role migration 0001 creates: it ${findings.join("; it ")}. Revoke these. On a database with no migrations applied, dropping the role lets 0001 recreate it.`,
     );
   }
 }

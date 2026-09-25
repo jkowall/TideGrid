@@ -3,6 +3,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
+import { assertRuntimeRoleIsPlain } from "./role.ts";
 
 /**
  * Forward-only SQL migration runner.
@@ -78,6 +79,11 @@ export async function migrate(
       const rows = await sql<{ name: string; checksum: string }[]>`
         SELECT name, checksum FROM schema_migrations`;
       const done = new Map(rows.map((r) => [r.name, r.checksum]));
+      // Migrations grant privileges to tidegrid_app. A role that already exists
+      // must be the plain one 0001 would create before anything is granted to
+      // it; checking again afterward makes drift fail every run, including runs
+      // with nothing pending.
+      await assertRuntimeRoleIsPlain(sql, { mustExist: false });
       for (const m of migrations) {
         const existing = done.get(m.name);
         if (existing !== undefined) {
@@ -99,6 +105,7 @@ export async function migrate(
         }
         applied.push(m.name);
       }
+      await assertRuntimeRoleIsPlain(sql, { mustExist: false });
     } finally {
       await sql`SELECT pg_advisory_unlock(${lockKey})`;
     }

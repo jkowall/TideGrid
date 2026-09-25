@@ -2,7 +2,14 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
-## 2026-09-23
+## 2026-09-24
+
+### G2.2 landing review follow-up, September 24, 2026
+
+- The landing pull request's reviewer left three threads on `f8fffaa`. The base64url password alphabet in `b87e269` already resolved the password thread. The other two still had gaps, now fixed.
+- Runtime role: the guard `b87e269` added to migration 0002 checks only direct membership in `neon_superuser` or `pg_*` roles and ignores REPLICATION, and 0002 is applied, so it cannot change. A `tidegrid_app` in an ordinary role, such as the table owner that is itself in `neon_superuser`, passed it, and SET ROLE through that chain reaches BYPASSRLS. The migration runner now refuses, before any pending migration runs and again after every run, a `tidegrid_app` with any elevated attribute including REPLICATION, membership in any role, or ownership of any database, schema, relation, function, or type. The password command applies the same check. A read-only catalog query on the Neon main branch confirmed its role passes.
+- Touch targets: `b87e269` boxed the two console links, but the shared stylesheet still set a min-height on every link, which inline boxes ignore. Standalone links now take a `tap-target` class with a real box; links in running text stay inline, which WCAG 2.5.8 exempts. In the browser, a `tap-target` link measured at least 44 px, an inline text link stayed inline, and buttons were unchanged.
+- On a fresh throwaway branch: 40 database integration tests (two new), 39 API integration tests, and 62 unit tests pass. The new tests show the runner refusing a role with an ordinary group membership on a no-op run and before a pending probe migration, which neither ran nor was recorded, and the role check naming REPLICATION, CREATEDB, a membership, and an owned schema on a throwaway role. Mutation checks: removing the pre-run check turned the runner test red; counting only `neon_superuser` and `pg_*` memberships turned both new tests red. Both were restored.
 
 ### G2.2 deployment verification, September 24, 2026
 
@@ -10,6 +17,8 @@ This log records each dated verification pass over the throwaway guest workflow 
 - Applied migration 0002 to the Neon main branch and seeded two demo operators with synthetic staff in each role, plus the owner's two Access addresses as owners of both, supplied at seed time rather than committed.
 - Deployed the API, the console (bound to `tidegrid-api#ConsoleGateway`), and the guest site. Health reports build `b87e269`, database ok, two migrations. On the public `api.tidegrid.us`, `/v1/me`, `/v1/auth/login-links`, and a staff member route answer 404 even with an Access header and the console Origin. The public tenant lookup resolves `demo-harbor.book.tidegrid.us`. Both workers.dev URLs answer 404. `console.tidegrid.us` and its `/api/v1/me` redirect to the Access login, including with a forged assertion header. The guest page on workers.dev reads the API across origins with no console errors.
 - Not done: the signed-in console path through Access needs the owner's one-time PIN, so the owner verifies it by signing in.
+
+## 2026-09-23
 
 ### G2.2 Tenant access and audit verification, September 23, 2026
 

@@ -47,13 +47,8 @@ const button: CSSProperties = {
   fontWeight: 600,
   cursor: "pointer",
 };
-/** min-height has no effect on inline boxes, so standalone links get a box. */
-const tapLink: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  minHeight: "var(--tap-min)",
-  color: "var(--tg-tide-lime)",
-};
+/** Standalone links also take the design system's `tap-target` class. */
+const link: CSSProperties = { color: "var(--tg-tide-lime)" };
 const input: CSSProperties = {
   minHeight: "var(--tap-min)",
   padding: "0 var(--space-3)",
@@ -181,7 +176,7 @@ function SignedIn({ me, onSignedOut }: { me: MeResponse; onSignedOut: () => Prom
           Sign out
         </button>
       ) : (
-        <a href="/cdn-cgi/access/logout" style={tapLink}>
+        <a href="/cdn-cgi/access/logout" className="tap-target" style={link}>
           Sign out of Cloudflare Access
         </a>
       )}
@@ -236,7 +231,7 @@ function SignIn({ notice }: { notice?: string | undefined }) {
       {status === "failed" && <p role="alert">The link could not be requested. Try again.</p>}
       {devLink && (
         <p>
-          <a href={devLink} style={tapLink}>
+          <a href={devLink} className="tap-target" style={link}>
             Open the local sign-in link
           </a>{" "}
           <span style={muted}>(local development only)</span>
