@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tidegrid-console",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-22",
+  // Cloudflare Access protects console.tidegrid.us only. A workers.dev or
+  // preview URL would bypass it, so both are disabled.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "console.tidegrid.us", "custom_domain": true }],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  // The console calls the API same-origin under /api. Access injects its
+  // assertion on every request to this hostname; the Worker forwards /api/* to
+  // the API's ConsoleGateway entrypoint, the only place staff routes answer.
+  "services": [{ "binding": "API", "service": "tidegrid-api", "entrypoint": "ConsoleGateway" }]
+}

@@ -1,0 +1,3 @@
+# Copy to .dev.vars (gitignored) for `pnpm dev`, which runs the "dev" environment.
+# A tidegrid_app connection string for a throwaway Neon branch, never the main branch.
+DATABASE_URL=postgresql://tidegrid_app:password@host/neondb?sslmode=require

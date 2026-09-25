@@ -1,0 +1,74 @@
+/*
+ * TideGrid design tokens. Brand palette and type from the selected identity
+ * inputs (see docs/v2/12-demo-build-plan.md, Design direction). Guest surfaces
+ * override the --brand-* tokens from tenant configuration; the operator console
+ * uses the TideGrid values below. Status colors are never used for brand and
+ * are always paired with an icon and a label.
+ */
+:root {
+  /* Brand palette */
+  --tg-deep-forest: #0e2b1f;
+  --tg-pine-green: #143f2e;
+  --tg-tide-lime: #a7d129;
+  --tg-mist: #e8ece8;
+  --tg-foam: #f6f7f6;
+  --tg-harbor: #1a1f1d;
+
+  /* Functional status: dark-on-light, then light-on-dark */
+  --tg-status-ready: #2e7d32;
+  --tg-status-warning: #9a5200;
+  --tg-status-blocked: #b42318;
+  --tg-status-info: #00639b;
+  --tg-status-pending: #6941c6;
+  --tg-status-ready-on-dark: #a7d129;
+  --tg-status-warning-on-dark: #ffb020;
+  --tg-status-blocked-on-dark: #ff7a70;
+  --tg-status-info-on-dark: #5cc8ff;
+  --tg-status-pending-on-dark: #c2a5ff;
+
+  /* Tenant-overridable brand slots (defaults are TideGrid) */
+  --brand-primary: var(--tg-pine-green);
+  --brand-primary-ink: #ffffff;
+  --brand-accent: var(--tg-tide-lime);
+  --brand-surface: var(--tg-foam);
+  --brand-ink: var(--tg-deep-forest);
+
+  /* Type */
+  --font-display: "Sora", "Inter", system-ui, sans-serif;
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --text-xs: 0.75rem; /* 12 */
+  --text-sm: 0.875rem; /* 14 */
+  --text-md: 1rem; /* 16 */
+  --text-lg: 1.125rem; /* 18 */
+  --text-xl: 1.375rem; /* 22 */
+  --text-2xl: 1.75rem; /* 28 */
+  --text-3xl: 2.25rem; /* 36 */
+  --text-4xl: 3rem; /* 48 */
+  --leading-tight: 1.15;
+  --leading-body: 1.55;
+  --measure: 65ch;
+
+  /* Spacing (4px base) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Shape and elevation */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgb(14 43 31 / 0.08);
+  --shadow-md: 0 4px 16px rgb(14 43 31 / 0.1);
+
+  /* Interaction */
+  --tap-min: 44px;
+  --focus-ring: 3px solid var(--tg-status-info);
+  --focus-offset: 2px;
+}

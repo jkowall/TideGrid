@@ -1,0 +1,68 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tidegrid-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-22",
+  "compatibility_flags": ["nodejs_compat"],
+  // Public entry is api.tidegrid.us only; no workers.dev or preview URLs.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "api.tidegrid.us", "custom_domain": true }],
+  // The app writes its own allowlisted request log. Invocation logs are off so
+  // request headers (cookies, Access assertions) are never retained.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": false }
+  },
+  "vars": {
+    "ENVIRONMENT": "preview",
+    "BUILD_ID": "dev",
+    "ALLOWED_ORIGINS": "https://tidegrid-guest.jkowall.workers.dev,https://console.tidegrid.us",
+    // Origins allowed to send state-changing staff requests (CSRF guard).
+    "STAFF_ORIGINS": "https://console.tidegrid.us",
+    // Cloudflare Access application for console.tidegrid.us. The audience tag
+    // and team domain are public identifiers, not secrets; G2.2 verifies the
+    // Cf-Access-Jwt-Assertion header against them.
+    "CF_ACCESS_TEAM_DOMAIN": "winter-feather-7169.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "9e89e2b88c98e68596a7433251be06f0b7013c38540aa3c1c7c6feec0c52e78f"
+  },
+  // DATABASE_URL is a secret (wrangler secret put DATABASE_URL) holding the
+  // tidegrid_app role's direct Neon connection string. It is the fallback; the
+  // code prefers the Hyperdrive binding below (query caching disabled at the
+  // config, pooled connections to the direct Neon endpoint).
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "0857f5560fc548319ec6a106f095db5f" }],
+  "placement": { "mode": "smart" },
+  // Per-IP limit on the sign-in endpoints, on top of the per-user limit in the
+  // database. The namespace id is an account-unique integer chosen here.
+  "ratelimits": [
+    { "name": "AUTH_RATE_LIMITER", "namespace_id": "7211", "simple": { "limit": 10, "period": 60 } }
+  ],
+  // The Workers test runtime cannot emulate Hyperdrive without a local Postgres,
+  // and named environments do not inherit bindings, so tests run in this
+  // binding-free environment and exercise the "unconfigured" health path.
+  "env": {
+    // Local development (`pnpm dev`): no Hyperdrive binding, so the Worker
+    // connects with DATABASE_URL from the gitignored .dev.vars.
+    "dev": {
+      // Named environments inherit routes; an empty list keeps this one from
+      // ever claiming the api.tidegrid.us custom domain.
+      "routes": [],
+      "vars": {
+        "ENVIRONMENT": "local",
+        "BUILD_ID": "dev",
+        "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:5174",
+        "STAFF_ORIGINS": "http://localhost:5174"
+      }
+    },
+    "test": {
+      "routes": [],
+      "vars": {
+        "ENVIRONMENT": "local",
+        "BUILD_ID": "test",
+        "ALLOWED_ORIGINS": "https://guest.test,https://console.test",
+        "STAFF_ORIGINS": "https://console.test"
+      }
+    }
+  }
+}
