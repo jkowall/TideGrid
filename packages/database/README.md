@@ -18,8 +18,9 @@ PostgreSQL access for the TideGrid demo build: Kysely over postgres.js, reviewed
 7. Every function in schema `app` has EXECUTE revoked from PUBLIC. Every SECURITY DEFINER function pins `search_path = pg_catalog, pg_temp`, qualifies every relation, and filters explicitly because its owner bypasses row-level security.
 8. The runtime cannot create objects anywhere: no CREATE on any schema and no TEMPORARY on the database.
 9. Staff identities are global and their addresses are ASCII, so case folding cannot turn a lookalike character into someone else's address. A tenant reads an identity's id, email, status, and creation time only; the name a tenant shows lives on its own membership row, so no tenant can read or set what another tenant sees.
+10. A reference from one tenant row to another includes `tenant_id` in a composite foreign key, as the catalog tables in 0003 do, so a row cannot point at another tenant's row even when application code passes the wrong id.
 
-The integration suite enforces rules 1, 5, 6, 7, 8, and the column limits in rule 9 from the catalog, so a later migration that forgets them fails CI.
+The integration suite enforces rules 1, 5, 6, 7, 8, and the column limits in rule 9 from the catalog, so a later migration that forgets them fails CI. The catalog suite checks rule 10 by trying cross-tenant references.
 
 ## Behavior by design, and known gaps
 
@@ -35,7 +36,7 @@ The integration suite enforces rules 1, 5, 6, 7, 8, and the column limits in rul
 A state-changing command follows one shape, all inside one tenant transaction:
 
 1. Authorize (the API checks membership and permission first).
-2. `claimIdempotencyKey` before any domain write. A concurrent duplicate blocks on the key until the first commits, then replays its stored response. A failed command rolls back its claim.
+2. `claimIdempotencyKey` before any domain write. A concurrent duplicate blocks on the key until the first commits, then replays its stored response. A failed command rolls back its claim. The request hash covers the method, route template, every path id, and the body, so the same key sent for another resource is refused, never replayed.
 3. Write domain state.
 4. `recordAudit` with the action, subject, reason, and before and after values. Audit rows are append-only for every role, including the owner.
 5. `enqueueOutbox` for any event other modules or providers need. The row exists only if the command commits.

@@ -118,6 +118,126 @@ export interface OutboxEventsTable {
   last_error: ColumnType<string | null, never, never>;
 }
 
+// Catalog and schedule (migration 0003). Columns typed `never` for update are
+// not granted to the runtime.
+
+/** A column written once and never updated by the runtime. */
+type Fixed<T> = ColumnType<T, T, never>;
+type FixedDefault<T> = ColumnType<T, T | undefined, never>;
+/**
+ * A date column. postgres.js parses dates into Dates at UTC midnight; write them
+ * as "YYYY-MM-DD" and read them back through that UTC calendar date.
+ */
+type DateColumn = ColumnType<Date, string, never>;
+type Instant = ColumnType<Date, Date | string, never>;
+type UpdatedAt = ColumnType<Date, Date | string | undefined, Date | string>;
+
+export type ProductKind = "shared_seat" | "private_charter";
+export type ProductSalesStatus = "draft" | "published" | "archived";
+export type TripSalesState = "draft" | "published" | "closed" | "canceled" | "completed";
+export type AmbiguousTimeChoice = "earlier" | "later" | "reject";
+
+export interface LocationsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  name: Fixed<string>;
+  time_zone: Fixed<string>;
+  meeting_point: FixedDefault<string>;
+  meeting_instructions: FixedDefault<string>;
+  status: FixedDefault<"active" | "archived">;
+  created_at: CreatedAt;
+  updated_at: FixedDefault<Date>;
+}
+
+export interface BoatsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  name: Fixed<string>;
+  guest_capacity: Fixed<number>;
+  status: FixedDefault<"active" | "retired">;
+  created_at: CreatedAt;
+  updated_at: FixedDefault<Date>;
+}
+
+export interface ProductsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  location_id: Fixed<string>;
+  kind: Fixed<ProductKind>;
+  name: Fixed<string>;
+  summary: FixedDefault<string>;
+  duration_minutes: Fixed<number>;
+  booking_cutoff_minutes: FixedDefault<number>;
+  turnaround_buffer_minutes: FixedDefault<number>;
+  min_party_size: FixedDefault<number>;
+  max_party_size: Fixed<number>;
+  seat_limit: FixedDefault<number | null>;
+  sales_status: ColumnType<ProductSalesStatus, ProductSalesStatus | undefined, ProductSalesStatus>;
+  created_at: CreatedAt;
+  updated_at: UpdatedAt;
+}
+
+export interface ProductBoatsTable {
+  tenant_id: TenantColumn;
+  product_id: Fixed<string>;
+  boat_id: Fixed<string>;
+  created_at: CreatedAt;
+}
+
+export interface SchedulesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  product_id: Fixed<string>;
+  boat_id: Fixed<string>;
+  time_zone: Fixed<string>;
+  starts_on: DateColumn;
+  ends_on: DateColumn;
+  weekdays: Fixed<number[]>;
+  /** "HH:MM:SS" strings. */
+  start_times: Fixed<string[]>;
+  ambiguous_time: FixedDefault<AmbiguousTimeChoice>;
+  status: FixedDefault<"active" | "paused" | "ended">;
+  created_at: CreatedAt;
+  updated_at: FixedDefault<Date>;
+}
+
+export interface ScheduledTripsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  product_id: Fixed<string>;
+  boat_id: Fixed<string>;
+  schedule_id: FixedDefault<string | null>;
+  time_zone: Fixed<string>;
+  local_date: DateColumn;
+  /** "HH:MM:SS". */
+  local_start_time: Fixed<string>;
+  starts_at: Instant;
+  ends_at: Instant;
+  start_utc_offset_minutes: Fixed<number>;
+  end_utc_offset_minutes: Fixed<number>;
+  duration_minutes: Fixed<number>;
+  seat_capacity: Fixed<number>;
+  sales_state: ColumnType<TripSalesState, TripSalesState | undefined, TripSalesState>;
+  sales_state_changed_at: UpdatedAt;
+  created_at: CreatedAt;
+  updated_at: UpdatedAt;
+}
+
+export interface BlackoutsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  location_id: FixedDefault<string | null>;
+  product_id: FixedDefault<string | null>;
+  boat_id: FixedDefault<string | null>;
+  time_zone: Fixed<string>;
+  starts_on: DateColumn;
+  ends_on: DateColumn;
+  starts_at: Instant;
+  ends_at: Instant;
+  reason: Fixed<string>;
+  created_at: CreatedAt;
+}
+
 export interface Database {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
@@ -127,6 +247,13 @@ export interface Database {
   audit_events: AuditEventsTable;
   idempotency_keys: IdempotencyKeysTable;
   outbox_events: OutboxEventsTable;
+  locations: LocationsTable;
+  boats: BoatsTable;
+  products: ProductsTable;
+  product_boats: ProductBoatsTable;
+  schedules: SchedulesTable;
+  scheduled_trips: ScheduledTripsTable;
+  blackouts: BlackoutsTable;
 }
 
 export type { Generated, GeneratedAlways };

@@ -635,6 +635,13 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         staff_login_tokens: [],
         staff_sessions: [],
         security_events: [],
+        locations: ["INSERT", "SELECT"],
+        boats: ["INSERT", "SELECT"],
+        products: ["INSERT", "SELECT"],
+        product_boats: ["INSERT", "SELECT"],
+        schedules: ["INSERT", "SELECT"],
+        scheduled_trips: ["INSERT", "SELECT"],
+        blackouts: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -654,6 +661,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
       expect(updates).toEqual({
         tenant_memberships: ["display_name", "role", "status", "updated_at"],
         idempotency_keys: ["completed_at", "response_body", "response_status", "status"],
+        products: ["sales_status", "updated_at"],
+        scheduled_trips: ["sales_state", "sales_state_changed_at", "updated_at"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

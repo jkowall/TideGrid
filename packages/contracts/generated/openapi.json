@@ -218,6 +218,293 @@
         }
       }
     },
+    "/v1/public/trips": {
+      "get": {
+        "tags": [
+          "public"
+        ],
+        "summary": "Bookable trips for the calling site",
+        "description": "Resolves the browser Origin to an active, verified tenant hostname, as /v1/public/tenant does, and lists that tenant's bookable trips. Grants no permission and never reveals another tenant's trips.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "First local date, inclusive"
+            },
+            "required": true,
+            "description": "First local date, inclusive",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "Last local date, inclusive; at most 92 days after from"
+            },
+            "required": true,
+            "description": "Last local date, inclusive; at most 92 days after from",
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 1
+            },
+            "required": false,
+            "name": "party",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Limit results to one product"
+            },
+            "required": false,
+            "description": "Limit results to one product",
+            "name": "product",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bookable trips, sorted by start",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "trips": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "timeZone": {
+                            "type": "string",
+                            "description": "IANA time zone name, such as America/New_York"
+                          },
+                          "localDate": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Local calendar date, YYYY-MM-DD"
+                          },
+                          "localStartTime": {
+                            "type": "string",
+                            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "Local wall-clock time, HH:MM, 24-hour"
+                          },
+                          "startsAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "endsAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "startsAtLocal": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "The same instant with the zone's offset, for display"
+                          },
+                          "endsAtLocal": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "The same instant with the zone's offset, for display"
+                          },
+                          "durationMinutes": {
+                            "type": "integer"
+                          },
+                          "tripId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "product": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "shared_seat",
+                                  "private_charter"
+                                ]
+                              },
+                              "summary": {
+                                "type": "string"
+                              },
+                              "minPartySize": {
+                                "type": "integer"
+                              },
+                              "maxPartySize": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "kind",
+                              "summary",
+                              "minPartySize",
+                              "maxPartySize"
+                            ]
+                          },
+                          "location": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "meetingPoint": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "meetingPoint"
+                            ]
+                          },
+                          "salesCloseAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "Booking cutoff: no new checkout at or after this instant"
+                          },
+                          "capacity": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "seats",
+                                  "whole_boat"
+                                ]
+                              },
+                              "total": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Seats sold per trip, or guests aboard a charter"
+                              },
+                              "remaining": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "total",
+                              "remaining"
+                            ],
+                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                          }
+                        },
+                        "required": [
+                          "timeZone",
+                          "localDate",
+                          "localStartTime",
+                          "startsAt",
+                          "endsAt",
+                          "startsAtLocal",
+                          "endsAtLocal",
+                          "durationMinutes",
+                          "tripId",
+                          "product",
+                          "location",
+                          "salesCloseAt",
+                          "capacity"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "trips"
+                  ],
+                  "description": "Published trips of published products, inside the sales window, clear of blackouts, with room for the party. Sorted by start."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid date range or party size",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/auth/login-links": {
       "post": {
         "tags": [
@@ -1568,6 +1855,2002 @@
           },
           "404": {
             "description": "No such tenant for this account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/catalog": {
+      "get": {
+        "tags": [
+          "staff",
+          "catalog"
+        ],
+        "summary": "The tenant's locations, boats, products, and schedules",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "locations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "timeZone": {
+                            "type": "string",
+                            "description": "IANA time zone name, such as America/New_York"
+                          },
+                          "meetingPoint": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "archived"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "timeZone",
+                          "meetingPoint",
+                          "status"
+                        ]
+                      }
+                    },
+                    "boats": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "guestCapacity": {
+                            "type": "integer"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "retired"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "guestCapacity",
+                          "status"
+                        ]
+                      }
+                    },
+                    "products": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "locationId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "shared_seat",
+                              "private_charter"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "summary": {
+                            "type": "string"
+                          },
+                          "durationMinutes": {
+                            "type": "integer"
+                          },
+                          "bookingCutoffMinutes": {
+                            "type": "integer"
+                          },
+                          "turnaroundBufferMinutes": {
+                            "type": "integer"
+                          },
+                          "minPartySize": {
+                            "type": "integer"
+                          },
+                          "maxPartySize": {
+                            "type": "integer"
+                          },
+                          "seatLimit": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "salesStatus": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "published",
+                              "archived"
+                            ]
+                          },
+                          "eligibleBoatIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "locationId",
+                          "kind",
+                          "name",
+                          "summary",
+                          "durationMinutes",
+                          "bookingCutoffMinutes",
+                          "turnaroundBufferMinutes",
+                          "minPartySize",
+                          "maxPartySize",
+                          "seatLimit",
+                          "salesStatus",
+                          "eligibleBoatIds"
+                        ]
+                      }
+                    },
+                    "schedules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "boatId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "timeZone": {
+                            "type": "string",
+                            "description": "IANA time zone name, such as America/New_York"
+                          },
+                          "startsOn": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Local calendar date, YYYY-MM-DD"
+                          },
+                          "endsOn": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Local calendar date, YYYY-MM-DD"
+                          },
+                          "weekdays": {
+                            "type": "array",
+                            "items": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 7
+                            },
+                            "description": "1 is Monday, 7 is Sunday"
+                          },
+                          "startTimes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            }
+                          },
+                          "ambiguousTime": {
+                            "type": "string",
+                            "enum": [
+                              "earlier",
+                              "later",
+                              "reject"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "paused",
+                              "ended"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "productId",
+                          "boatId",
+                          "timeZone",
+                          "startsOn",
+                          "endsOn",
+                          "weekdays",
+                          "startTimes",
+                          "ambiguousTime",
+                          "status"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "locations",
+                    "boats",
+                    "products",
+                    "schedules"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant for this account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/trips": {
+      "get": {
+        "tags": [
+          "staff",
+          "catalog"
+        ],
+        "summary": "Every trip in a local date range, in any sales state",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "First local date, inclusive"
+            },
+            "required": true,
+            "description": "First local date, inclusive",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "Last local date, inclusive; at most 92 days after from"
+            },
+            "required": true,
+            "description": "Last local date, inclusive; at most 92 days after from",
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trips sorted by start",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "trips": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "timeZone": {
+                            "type": "string",
+                            "description": "IANA time zone name, such as America/New_York"
+                          },
+                          "localDate": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Local calendar date, YYYY-MM-DD"
+                          },
+                          "localStartTime": {
+                            "type": "string",
+                            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "Local wall-clock time, HH:MM, 24-hour"
+                          },
+                          "startsAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "endsAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "startsAtLocal": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "The same instant with the zone's offset, for display"
+                          },
+                          "endsAtLocal": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "The same instant with the zone's offset, for display"
+                          },
+                          "durationMinutes": {
+                            "type": "integer"
+                          },
+                          "tripId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productName": {
+                            "type": "string"
+                          },
+                          "productKind": {
+                            "type": "string",
+                            "enum": [
+                              "shared_seat",
+                              "private_charter"
+                            ]
+                          },
+                          "boatId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "boatName": {
+                            "type": "string"
+                          },
+                          "scheduleId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "uuid"
+                          },
+                          "salesState": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "published",
+                              "closed",
+                              "canceled",
+                              "completed"
+                            ]
+                          },
+                          "salesStateChangedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "salesCloseAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "blackedOut": {
+                            "type": "boolean",
+                            "description": "A blackout overlaps the trip, so it is hidden from guests"
+                          },
+                          "capacity": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "seats",
+                                  "whole_boat"
+                                ]
+                              },
+                              "total": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Seats sold per trip, or guests aboard a charter"
+                              },
+                              "remaining": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "total",
+                              "remaining"
+                            ],
+                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                          }
+                        },
+                        "required": [
+                          "timeZone",
+                          "localDate",
+                          "localStartTime",
+                          "startsAt",
+                          "endsAt",
+                          "startsAtLocal",
+                          "endsAtLocal",
+                          "durationMinutes",
+                          "tripId",
+                          "productId",
+                          "productName",
+                          "productKind",
+                          "boatId",
+                          "boatName",
+                          "scheduleId",
+                          "salesState",
+                          "salesStateChangedAt",
+                          "salesCloseAt",
+                          "blackedOut",
+                          "capacity"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "trips"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid date range",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant for this account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/schedules/{scheduleId}/trips": {
+      "post": {
+        "tags": [
+          "staff",
+          "catalog"
+        ],
+        "summary": "Create a schedule's trips for a local date range",
+        "description": "Owner only. Existing departures are left as they are, including canceled ones. Departures in a spring-forward gap, in an unchosen fall-back overlap, or on a blackout are skipped and listed. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "scheduleId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fromDate": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "First local date, inclusive"
+                  },
+                  "toDate": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Last local date, inclusive; at most 366 days after fromDate"
+                  },
+                  "publish": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Create the trips published instead of draft"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "Recorded in the audit history"
+                  }
+                },
+                "required": [
+                  "fromDate",
+                  "toDate",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trips created, departures already scheduled, and departures skipped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "timeZone": {
+                            "type": "string",
+                            "description": "IANA time zone name, such as America/New_York"
+                          },
+                          "localDate": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Local calendar date, YYYY-MM-DD"
+                          },
+                          "localStartTime": {
+                            "type": "string",
+                            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "Local wall-clock time, HH:MM, 24-hour"
+                          },
+                          "startsAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "endsAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "startsAtLocal": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "The same instant with the zone's offset, for display"
+                          },
+                          "endsAtLocal": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "The same instant with the zone's offset, for display"
+                          },
+                          "durationMinutes": {
+                            "type": "integer"
+                          },
+                          "tripId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productName": {
+                            "type": "string"
+                          },
+                          "productKind": {
+                            "type": "string",
+                            "enum": [
+                              "shared_seat",
+                              "private_charter"
+                            ]
+                          },
+                          "boatId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "boatName": {
+                            "type": "string"
+                          },
+                          "scheduleId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "uuid"
+                          },
+                          "salesState": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "published",
+                              "closed",
+                              "canceled",
+                              "completed"
+                            ]
+                          },
+                          "salesStateChangedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "salesCloseAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "blackedOut": {
+                            "type": "boolean",
+                            "description": "A blackout overlaps the trip, so it is hidden from guests"
+                          },
+                          "capacity": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "seats",
+                                  "whole_boat"
+                                ]
+                              },
+                              "total": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Seats sold per trip, or guests aboard a charter"
+                              },
+                              "remaining": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "total",
+                              "remaining"
+                            ],
+                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                          }
+                        },
+                        "required": [
+                          "timeZone",
+                          "localDate",
+                          "localStartTime",
+                          "startsAt",
+                          "endsAt",
+                          "startsAtLocal",
+                          "endsAtLocal",
+                          "durationMinutes",
+                          "tripId",
+                          "productId",
+                          "productName",
+                          "productKind",
+                          "boatId",
+                          "boatName",
+                          "scheduleId",
+                          "salesState",
+                          "salesStateChangedAt",
+                          "salesCloseAt",
+                          "blackedOut",
+                          "capacity"
+                        ]
+                      }
+                    },
+                    "alreadyScheduled": {
+                      "type": "integer",
+                      "description": "Departures that already existed; left unchanged"
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "localDate": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Local calendar date, YYYY-MM-DD"
+                          },
+                          "localStartTime": {
+                            "type": "string",
+                            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "Local wall-clock time, HH:MM, 24-hour"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "nonexistent_local_time",
+                              "ambiguous_local_time",
+                              "blackout"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "localDate",
+                          "localStartTime",
+                          "reason"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "created",
+                    "alreadyScheduled",
+                    "skipped"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid date range",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or origin does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The schedule is not active or its product is archived",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key reused with a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/trips/{tripId}/sales-state": {
+      "post": {
+        "tags": [
+          "staff",
+          "catalog"
+        ],
+        "summary": "Publish, close, cancel, or complete a trip",
+        "description": "Owners and booking staff. Closing or canceling stops new sales without touching existing bookings. Canceled and completed are final; completion needs the trip to have departed. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tripId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string",
+                    "enum": [
+                      "published",
+                      "closed",
+                      "canceled",
+                      "completed"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "Recorded in the audit history"
+                  }
+                },
+                "required": [
+                  "to",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The trip",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "trip": {
+                      "type": "object",
+                      "properties": {
+                        "timeZone": {
+                          "type": "string",
+                          "description": "IANA time zone name, such as America/New_York"
+                        },
+                        "localDate": {
+                          "type": "string",
+                          "format": "date",
+                          "description": "Local calendar date, YYYY-MM-DD"
+                        },
+                        "localStartTime": {
+                          "type": "string",
+                          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                          "description": "Local wall-clock time, HH:MM, 24-hour"
+                        },
+                        "startsAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "endsAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "startsAtLocal": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The same instant with the zone's offset, for display"
+                        },
+                        "endsAtLocal": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The same instant with the zone's offset, for display"
+                        },
+                        "durationMinutes": {
+                          "type": "integer"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productName": {
+                          "type": "string"
+                        },
+                        "productKind": {
+                          "type": "string",
+                          "enum": [
+                            "shared_seat",
+                            "private_charter"
+                          ]
+                        },
+                        "boatId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "boatName": {
+                          "type": "string"
+                        },
+                        "scheduleId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uuid"
+                        },
+                        "salesState": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "published",
+                            "closed",
+                            "canceled",
+                            "completed"
+                          ]
+                        },
+                        "salesStateChangedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "salesCloseAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "blackedOut": {
+                          "type": "boolean",
+                          "description": "A blackout overlaps the trip, so it is hidden from guests"
+                        },
+                        "capacity": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "seats",
+                                "whole_boat"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "description": "Seats sold per trip, or guests aboard a charter"
+                            },
+                            "remaining": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "total",
+                            "remaining"
+                          ],
+                          "description": "Held and confirmed bookings reduce this from G2.6 on"
+                        }
+                      },
+                      "required": [
+                        "timeZone",
+                        "localDate",
+                        "localStartTime",
+                        "startsAt",
+                        "endsAt",
+                        "startsAtLocal",
+                        "endsAtLocal",
+                        "durationMinutes",
+                        "tripId",
+                        "productId",
+                        "productName",
+                        "productKind",
+                        "boatId",
+                        "boatName",
+                        "scheduleId",
+                        "salesState",
+                        "salesStateChangedAt",
+                        "salesCloseAt",
+                        "blackedOut",
+                        "capacity"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "trip"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or origin does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or trip",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The trip cannot move to that state now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key reused with a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/products/{productId}/publish": {
+      "post": {
+        "tags": [
+          "staff",
+          "catalog"
+        ],
+        "summary": "Publish a draft product",
+        "description": "Owner only. Blocked with a specific error code when the product could not be sold: product_archived, product_location_inactive, product_missing_eligible_boat, or product_party_exceeds_capacity. Publishing a published product changes nothing. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "productId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "Recorded in the audit history"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "locationId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "shared_seat",
+                            "private_charter"
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "summary": {
+                          "type": "string"
+                        },
+                        "durationMinutes": {
+                          "type": "integer"
+                        },
+                        "bookingCutoffMinutes": {
+                          "type": "integer"
+                        },
+                        "turnaroundBufferMinutes": {
+                          "type": "integer"
+                        },
+                        "minPartySize": {
+                          "type": "integer"
+                        },
+                        "maxPartySize": {
+                          "type": "integer"
+                        },
+                        "seatLimit": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "salesStatus": {
+                          "type": "string",
+                          "enum": [
+                            "draft",
+                            "published",
+                            "archived"
+                          ]
+                        },
+                        "eligibleBoatIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "format": "uuid"
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "locationId",
+                        "kind",
+                        "name",
+                        "summary",
+                        "durationMinutes",
+                        "bookingCutoffMinutes",
+                        "turnaroundBufferMinutes",
+                        "minPartySize",
+                        "maxPartySize",
+                        "seatLimit",
+                        "salesStatus",
+                        "eligibleBoatIds"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "product"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or origin does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not publishable; the code names the first problem and the message lists all",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key reused with a different request",
             "content": {
               "application/json": {
                 "schema": {
