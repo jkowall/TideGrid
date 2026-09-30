@@ -213,6 +213,8 @@ export interface ScheduledTripsTable {
   local_start_time: Fixed<string>;
   starts_at: Instant;
   ends_at: Instant;
+  /** The end plus the product's turnaround buffer; set by the database. */
+  boat_free_at: ColumnType<Date, never, never>;
   start_utc_offset_minutes: Fixed<number>;
   end_utc_offset_minutes: Fixed<number>;
   duration_minutes: Fixed<number>;

@@ -83,6 +83,21 @@ export function validateScheduleRule(rule: ScheduleRule): ScheduleRuleProblem[] 
   return problems;
 }
 
+/**
+ * True when two of a day's departures are closer than the trip plus its
+ * turnaround buffer, so one boat could not run both. Schedule creation refuses
+ * such a rule. Expansion itself accepts any spacing; the database constraint on
+ * boat occupancy is the guard across schedules and days.
+ */
+export function departuresTooClose(rule: ScheduleRule): boolean {
+  const gap = rule.durationMinutes + (rule.turnaroundBufferMinutes ?? 0);
+  const starts = rule.startTimes
+    .filter(isLocalTime)
+    .map((t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)))
+    .sort((a, b) => a - b);
+  return starts.some((start, i) => i > 0 && start - (starts[i - 1] ?? start) < gap);
+}
+
 /** Reject anything that would make the expansion guess or run unbounded. */
 function assertExpandable(
   rule: ScheduleRule,

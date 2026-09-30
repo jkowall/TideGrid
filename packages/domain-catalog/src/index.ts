@@ -4,6 +4,8 @@ export {
   checkRange,
   findAvailableTrips,
   type GenerateTripsResult,
+  type GenerationSkip,
+  type GenerationSkipReason,
   generateTrips,
   listTrips,
   loadCatalog,
@@ -13,7 +15,7 @@ export {
   type RangeProblem,
   type TripStateResult,
 } from "./catalog.ts";
-export { expandSchedule, validateScheduleRule } from "./recurrence.ts";
+export { departuresTooClose, expandSchedule, validateScheduleRule } from "./recurrence.ts";
 export * from "./schedule-types.ts";
 export {
   type BlackoutScope,
@@ -23,5 +25,6 @@ export {
   createLocation,
   createProduct,
   createSchedule,
+  ZoneDataMismatchError,
 } from "./setup.ts";
 export * from "./time.ts";

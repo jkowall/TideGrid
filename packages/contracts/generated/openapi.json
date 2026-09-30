@@ -2625,7 +2625,7 @@
           "catalog"
         ],
         "summary": "Create a schedule's trips for a local date range",
-        "description": "Owner only. Existing departures are left as they are, including canceled ones. Departures in a spring-forward gap, in an unchosen fall-back overlap, or on a blackout are skipped and listed. Idempotent by key.",
+        "description": "Owner only. Existing departures are left as they are, including canceled ones. Departures in a spring-forward gap, in an unchosen fall-back overlap, on a blackout, overlapping another live trip on the boat (counting turnaround), or where the runtime and database zone data disagree are skipped and listed. Idempotent by key.",
         "security": [
           {
             "accessJwt": []
@@ -2678,7 +2678,7 @@
                   "toDate": {
                     "type": "string",
                     "format": "date",
-                    "description": "Last local date, inclusive; at most 366 days after fromDate"
+                    "description": "Last local date, inclusive; at most 92 days after fromDate"
                   },
                   "publish": {
                     "type": "boolean",
@@ -2881,8 +2881,11 @@
                             "enum": [
                               "nonexistent_local_time",
                               "ambiguous_local_time",
-                              "blackout"
-                            ]
+                              "blackout",
+                              "boat_conflict",
+                              "zone_data_mismatch"
+                            ],
+                            "description": "boat_conflict: the boat is busy then, counting turnaround. zone_data_mismatch: the runtime and the database read this zone's clock differently, so nothing was guessed."
                           }
                         },
                         "required": [
@@ -3039,7 +3042,7 @@
             }
           },
           "409": {
-            "description": "The schedule is not active or its product is archived",
+            "description": "The schedule is not active, its product is archived, or a concurrent change took the boat (boat_schedule_conflict; retry)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3708,6 +3711,40 @@
                   },
                   "required": [
                     "product"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
                   ]
                 }
               }

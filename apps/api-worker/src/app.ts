@@ -92,7 +92,14 @@ export function createApp(deps: AppDeps = {}) {
         err.status,
       );
     }
-    c.get("log")?.error("unhandled", { "error.type": err.name });
+    // A database error carries its SQLSTATE; log it so a 500 names its cause.
+    const code = (err as { code?: unknown }).code;
+    c.get("log")?.error("unhandled", {
+      "error.type": err.name,
+      ...(typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)
+        ? { "db.response.status_code": code }
+        : {}),
+    });
     return c.json(
       { error: { code: "internal_error", message: "Something went wrong", requestId } },
       500,

@@ -19,6 +19,11 @@ export interface ScheduleRule {
   startTimes: readonly LocalTime[];
   /** Trip length. The end instant is the start instant plus this many minutes of elapsed time. */
   durationMinutes: number;
+  /**
+   * Time the boat needs after a trip before its next departure. Departures on
+   * one day must be at least durationMinutes plus this apart. Defaults to 0.
+   */
+  turnaroundBufferMinutes?: number;
   /** What to do with a departure that falls in a fall-back overlap. Gaps are always skipped. */
   ambiguousTime: Disambiguation;
 }
@@ -70,7 +75,9 @@ export type ScheduleRuleProblem =
   | "too_many_start_times"
   | "invalid_start_time"
   | "duplicate_start_time"
-  | "invalid_duration";
+  | "invalid_duration"
+  /** Reported by schedule creation, not by validateScheduleRule: see departuresTooClose. */
+  | "departures_too_close";
 
 /** Largest window one expansion may cover, which bounds a single generation request. */
 export const MAX_EXPANSION_DAYS = 400;

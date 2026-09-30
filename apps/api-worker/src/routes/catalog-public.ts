@@ -37,7 +37,13 @@ export function registerCatalogPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
     if (problem === "range_too_large") {
       throw new ApiError(400, problem, "Ask for at most 93 days at a time");
     }
-    if (problem) throw new ApiError(400, problem, "from must be a date on or before to");
+    if (problem) {
+      throw new ApiError(
+        400,
+        problem,
+        "Use dates from 2000-01-02 to 2099-12-30, with from on or before to",
+      );
+    }
     const host = normalizeHostname(c.req.header("origin"));
     if (!host) throw notPublished();
     const db = getDb(c);

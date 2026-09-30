@@ -185,7 +185,7 @@ export const ProductParams = z.object({ tenantId: z.string(), productId: z.strin
 
 export const GenerateTripsRequest = z.object({
   fromDate: LocalDate.describe("First local date, inclusive"),
-  toDate: LocalDate.describe("Last local date, inclusive; at most 366 days after fromDate"),
+  toDate: LocalDate.describe("Last local date, inclusive; at most 92 days after fromDate"),
   publish: z.boolean().default(false).describe("Create the trips published instead of draft"),
   reason: Reason,
 });
@@ -194,7 +194,17 @@ export type GenerateTripsRequest = z.infer<typeof GenerateTripsRequest>;
 export const SkippedDeparture = z.object({
   localDate: LocalDate,
   localStartTime: LocalTime,
-  reason: z.enum(["nonexistent_local_time", "ambiguous_local_time", "blackout"]),
+  reason: z
+    .enum([
+      "nonexistent_local_time",
+      "ambiguous_local_time",
+      "blackout",
+      "boat_conflict",
+      "zone_data_mismatch",
+    ])
+    .describe(
+      "boat_conflict: the boat is busy then, counting turnaround. zone_data_mismatch: the runtime and the database read this zone's clock differently, so nothing was guessed.",
+    ),
 });
 
 export const GenerateTripsResponse = z.object({

@@ -19,10 +19,24 @@ const utc = (y: number, mo: number, d: number, h = 0, mi = 0) => Date.UTC(y, mo 
 
 describe("time zone names", () => {
   it("accepts IANA names and UTC, and rejects POSIX forms and unknown zones", () => {
-    for (const z of ["America/New_York", "UTC", "Etc/GMT+5", "America/Argentina/Buenos_Aires"]) {
+    for (const z of [
+      "America/New_York",
+      "UTC",
+      "America/Argentina/Buenos_Aires",
+      "Asia/Ho_Chi_Minh",
+    ]) {
       expect(isValidTimeZone(z), z).toBe(true);
     }
-    for (const z of ["EST5EDT", "UTC+3", "america/new_york", "Mars/Olympus", "", "New_York"]) {
+    for (const z of [
+      "EST5EDT",
+      "UTC+3",
+      "Etc/GMT+5",
+      "america/new_york",
+      "America/new_york",
+      "Mars/Olympus",
+      "",
+      "New_York",
+    ]) {
       expect(isValidTimeZone(z), z).toBe(false);
     }
   });

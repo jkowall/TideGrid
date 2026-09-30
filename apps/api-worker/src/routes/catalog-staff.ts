@@ -41,7 +41,16 @@ const idempotencyHeader = z.object({ "idempotency-key": IdempotencyKey });
 function rangeError(problem: RangeProblem): ApiError {
   return problem === "range_too_large"
     ? new ApiError(400, problem, "Ask for at most 93 days at a time")
-    : new ApiError(400, problem, "The start date must be on or before the end date");
+    : new ApiError(
+        400,
+        problem,
+        "Use dates from 2000-01-02 to 2099-12-30, with the start on or before the end",
+      );
+}
+
+/** SQLSTATE 23P01: another writer took the boat for an overlapping time first. */
+function isBoatRace(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === "23P01";
 }
 
 /** A malformed id answers like a missing one, so ids cannot be probed. */
@@ -122,7 +131,7 @@ export function registerCatalogStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "catalog"],
     summary: "Create a schedule's trips for a local date range",
     description:
-      "Owner only. Existing departures are left as they are, including canceled ones. Departures in a spring-forward gap, in an unchosen fall-back overlap, or on a blackout are skipped and listed. Idempotent by key.",
+      "Owner only. Existing departures are left as they are, including canceled ones. Departures in a spring-forward gap, in an unchosen fall-back overlap, on a blackout, overlapping another live trip on the boat (counting turnaround), or where the runtime and database zone data disagree are skipped and listed. Idempotent by key.",
     security: staffSecurity,
     request: {
       params: ScheduleParams,
@@ -138,7 +147,9 @@ export function registerCatalogStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       401: errorBody("Not signed in"),
       403: errorBody("Role or origin does not allow this"),
       404: errorBody("No such tenant or schedule"),
-      409: errorBody("The schedule is not active or its product is archived"),
+      409: errorBody(
+        "The schedule is not active, its product is archived, or a concurrent change took the boat (boat_schedule_conflict; retry)",
+      ),
       422: errorBody("Idempotency key reused with a different request"),
     },
   });
@@ -171,6 +182,15 @@ export function registerCatalogStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           toDate: input.toDate,
           publish: input.publish,
           reason: input.reason,
+        }).catch((err: unknown) => {
+          if (isBoatRace(err)) {
+            throw new ApiError(
+              409,
+              "boat_schedule_conflict",
+              "Another change scheduled this boat at an overlapping time; try again",
+            );
+          }
+          throw err;
         });
         switch (generated.kind) {
           case "generated":
@@ -284,6 +304,7 @@ export function registerCatalogStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         content: { "application/json": { schema: ProductResponse } },
         description: "The product",
       },
+      400: errorBody("Invalid request"),
       401: errorBody("Not signed in"),
       403: errorBody("Role or origin does not allow this"),
       404: errorBody("No such tenant or product"),

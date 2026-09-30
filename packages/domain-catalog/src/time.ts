@@ -43,8 +43,12 @@ const MAX_YEAR = 2099;
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
-/** IANA Area/Location names and UTC. Excludes POSIX forms such as EST5EDT or UTC+3. */
-const ZONE = /^(?:UTC|[A-Z][A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)+)$/;
+/**
+ * Geographic IANA Area/Location names and UTC, capitalized as the zone database
+ * spells them. Excludes POSIX forms such as EST5EDT or UTC+3 and the Etc/GMT
+ * zones, which invert their sign. Migration 0003 applies the same pattern.
+ */
+const ZONE = /^(?:UTC|(?!Etc\/)[A-Z][A-Za-z_]+(?:\/[A-Z0-9][A-Za-z0-9_+-]*)+)$/;
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
 

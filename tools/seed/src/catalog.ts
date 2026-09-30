@@ -2,7 +2,7 @@
  * Synthetic catalog for the demo operators: a location, boats, published
  * products, seasonal schedules, blackouts, and a fixed season of trips. It goes
  * through the catalog services, so seeded data passes the same validation and
- * audit a console will. Idempotent: an operator that already has locations
+ * audit a console will. Idempotent: an operator that already has schedules
  * keeps its catalog, and trip generation skips departures that exist.
  */
 import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";

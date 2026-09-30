@@ -16,7 +16,7 @@ import {
 } from "@tidegrid/database";
 import { sql } from "kysely";
 import { expandSchedule } from "./recurrence.ts";
-import type { BlackoutInterval, ScheduleRule, SkippedOccurrence } from "./schedule-types.ts";
+import type { BlackoutInterval, Occurrence, ScheduleRule, SkipReason } from "./schedule-types.ts";
 import {
   addDays,
   type Disambiguation,
@@ -36,6 +36,8 @@ export type RangeProblem = "invalid_range" | "range_too_large";
 /** Validates an inclusive local date range. */
 export function checkRange(from: string, to: string): RangeProblem | null {
   if (!isLocalDate(from) || !isLocalDate(to)) return "invalid_range";
+  // Generation reaches a day past each end, which must still be a service date.
+  if (!isLocalDate(addDays(from, -1)) || !isLocalDate(addDays(to, 1))) return "invalid_range";
   const span = daysBetween(from, to);
   if (span < 0) return "invalid_range";
   if (span > MAX_RANGE_DAYS) return "range_too_large";
@@ -416,7 +418,19 @@ export async function publishProduct(
     .where("sales_status", "=", "draft")
     .returningAll()
     .executeTakeFirst();
-  if (!updated) return { kind: "not_publishable", problems: ["product_archived"] };
+  if (!updated) {
+    // Another request moved the product first; report where it ended up.
+    const current = await trx
+      .selectFrom("products")
+      .selectAll()
+      .where("tenant_id", "=", ctx.tenantId)
+      .where("id", "=", product.id)
+      .executeTakeFirst();
+    if (current?.sales_status === "published") {
+      return { kind: "unchanged", product: toCatalogProduct(current, eligibleBoatIds) };
+    }
+    return { kind: "not_publishable", problems: ["product_archived"] };
+  }
   await recordAudit(trx, ctx, {
     action: "product.published",
     subjectType: "product",
@@ -477,7 +491,12 @@ export async function changeTripSalesState(
     .where("sales_state", "=", from)
     .returning("id")
     .executeTakeFirst();
-  if (!updated) return { kind: "conflict", from, to: input.to };
+  if (!updated) {
+    // Another request moved the trip first; report the state it is in now.
+    const current = await loadTrip(trx, ctx.tenantId, trip.trip_id);
+    if (!current) return { kind: "not_found" };
+    return { kind: "conflict", from: current.sales_state, to: input.to };
+  }
   await recordAudit(trx, ctx, {
     action: "trip.sales_state_changed",
     subjectType: "scheduled_trip",
@@ -497,12 +516,21 @@ export async function changeTripSalesState(
   return { kind: "changed", trip: toStaffTrip(reloaded) };
 }
 
+/** Why a departure was not created. The first three come from expansion. */
+export type GenerationSkipReason = SkipReason | "zone_data_mismatch" | "boat_conflict";
+
+export interface GenerationSkip {
+  localDate: string;
+  localStartTime: string;
+  reason: GenerationSkipReason;
+}
+
 export type GenerateTripsResult =
   | {
       kind: "generated";
       created: StaffTrip[];
       alreadyScheduled: number;
-      skipped: SkippedOccurrence[];
+      skipped: GenerationSkip[];
     }
   | { kind: "not_found" }
   | { kind: "schedule_inactive" }
@@ -510,11 +538,53 @@ export type GenerateTripsResult =
   | { kind: "range"; problem: RangeProblem };
 
 const INSERT_BATCH = 500;
+const DAY_MS = 86_400_000;
+
+function compareSkips(a: GenerationSkip, b: GenerationSkip): number {
+  if (a.localDate !== b.localDate) return a.localDate < b.localDate ? -1 : 1;
+  if (a.localStartTime !== b.localStartTime) return a.localStartTime < b.localStartTime ? -1 : 1;
+  return 0;
+}
+
+/**
+ * Positions of occurrences that PostgreSQL's zone data reads differently from
+ * the runtime's. The two ship separately and sometimes disagree after a zone
+ * changes its rules. The database refuses such rows, so generation skips and
+ * reports them instead of failing the whole request. Values travel as text so
+ * the driver never reinterprets a wall-clock time in the process's zone.
+ */
+async function zoneDataMismatches(
+  trx: TenantTransaction,
+  zone: string,
+  occurrences: readonly Occurrence[],
+): Promise<Set<number>> {
+  if (occurrences.length === 0) return new Set();
+  const { rows } = await sql<{ position: number }>`
+    select (o.n - 1)::int as position
+      from unnest(
+             ${occurrences.map((o) => new Date(o.startsAtMs).toISOString())}::text[],
+             ${occurrences.map((o) => `${o.localDate} ${o.localStartTime}`)}::text[],
+             ${occurrences.map((o) => o.startOffsetMinutes)}::int[],
+             ${occurrences.map((o) => new Date(o.endsAtMs).toISOString())}::text[],
+             ${occurrences.map((o) => o.endOffsetMinutes)}::int[]
+           ) with ordinality as o(starts_at, local_start, start_offset, ends_at, end_offset, n)
+     where pg_catalog.timezone(${zone}, o.starts_at::timestamptz) <> o.local_start::timestamp
+        or extract(epoch from pg_catalog.timezone(${zone}, o.starts_at::timestamptz)
+             - pg_catalog.timezone('UTC', o.starts_at::timestamptz)) / 60 <> o.start_offset
+        or extract(epoch from pg_catalog.timezone(${zone}, o.ends_at::timestamptz)
+             - pg_catalog.timezone('UTC', o.ends_at::timestamptz)) / 60 <> o.end_offset
+  `.execute(trx);
+  return new Set(rows.map((r) => r.position));
+}
 
 /**
  * Expands a schedule into trips for an inclusive local date range. Idempotent:
  * a departure that already exists (same product, boat, and instant) is left
- * untouched, including a canceled one, so generation never revives it.
+ * untouched, including a canceled one, so generation never revives it. A
+ * boat runs one departure at a time, counting each trip's turnaround buffer,
+ * so a departure that would overlap another live trip on the boat is skipped
+ * as a boat conflict. The database enforces the same rule for concurrent
+ * writers; a lost race surfaces as SQLSTATE 23P01 for the caller to retry.
  */
 export async function generateTrips(
   trx: TenantTransaction,
@@ -545,6 +615,7 @@ export async function generateTrips(
       "p.kind",
       "p.location_id",
       "p.duration_minutes",
+      "p.turnaround_buffer_minutes",
       "p.seat_limit",
       "p.sales_status",
       "b.guest_capacity",
@@ -563,18 +634,19 @@ export async function generateTrips(
     weekdays: schedule.weekdays as IsoWeekday[],
     startTimes: schedule.start_times.map((t) => t.slice(0, 5)),
     durationMinutes: schedule.duration_minutes,
+    turnaroundBufferMinutes: schedule.turnaround_buffer_minutes,
     ambiguousTime: schedule.ambiguous_time as Disambiguation,
   };
-  const toExclusive = addDays(input.toDate, 1);
-  // A day either side covers any trip that starts in the range and runs past it.
-  const windowStart = startOfLocalDay(rule.timeZone, addDays(input.fromDate, -1)).epochMs;
-  const windowEnd = startOfLocalDay(rule.timeZone, addDays(toExclusive, 1)).epochMs;
+  // Wide enough for any trip that starts in the range, runs a full day, and
+  // then needs its buffer, and for earlier trips still occupying the boat.
+  const windowStart = new Date(startOfLocalDay(rule.timeZone, input.fromDate).epochMs - 2 * DAY_MS);
+  const windowEnd = new Date(startOfLocalDay(rule.timeZone, input.toDate).epochMs + 3 * DAY_MS);
   const blackoutRows = await trx
     .selectFrom("blackouts")
     .select(["starts_at", "ends_at"])
     .where("tenant_id", "=", ctx.tenantId)
-    .where("starts_at", "<", new Date(windowEnd))
-    .where("ends_at", ">", new Date(windowStart))
+    .where("starts_at", "<", windowEnd)
+    .where("ends_at", ">", windowStart)
     .where((eb) =>
       eb.or([
         eb.and([
@@ -595,17 +667,62 @@ export async function generateTrips(
 
   const expansion = expandSchedule(
     rule,
-    { fromDate: input.fromDate, toDate: toExclusive },
+    { fromDate: input.fromDate, toDate: addDays(input.toDate, 1) },
     blackouts,
   );
+
+  // Every trip on the boat near the range, canceled ones included: a canceled
+  // departure still counts as already scheduled, but no longer occupies the boat.
+  const onBoat = await trx
+    .selectFrom("scheduled_trips")
+    .select(["product_id", "starts_at", "boat_free_at", "sales_state"])
+    .where("tenant_id", "=", ctx.tenantId)
+    .where("boat_id", "=", schedule.boat_id)
+    .where("starts_at", "<", windowEnd)
+    .where("boat_free_at", ">", windowStart)
+    .execute();
+  const existing = new Set(
+    onBoat
+      .filter((t) => t.product_id === schedule.product_id)
+      .map((t) => new Date(t.starts_at).getTime()),
+  );
+  const occupied = onBoat
+    .filter((t) => t.sales_state !== "canceled")
+    .map((t) => ({
+      start: new Date(t.starts_at).getTime(),
+      end: new Date(t.boat_free_at).getTime(),
+    }));
+  const mismatched = await zoneDataMismatches(trx, rule.timeZone, expansion.occurrences);
+
+  const bufferMs = schedule.turnaround_buffer_minutes * MINUTE_MS;
+  const accepted: Occurrence[] = [];
+  const skipped: GenerationSkip[] = [...expansion.skipped];
+  let alreadyScheduled = 0;
+  expansion.occurrences.forEach((o, position) => {
+    const at = { localDate: o.localDate, localStartTime: o.localStartTime };
+    if (existing.has(o.startsAtMs)) {
+      alreadyScheduled += 1;
+    } else if (mismatched.has(position)) {
+      skipped.push({ ...at, reason: "zone_data_mismatch" });
+    } else {
+      const span = { start: o.startsAtMs, end: o.endsAtMs + bufferMs };
+      if (occupied.some((t) => t.start < span.end && span.start < t.end)) {
+        skipped.push({ ...at, reason: "boat_conflict" });
+      } else {
+        occupied.push(span);
+        accepted.push(o);
+      }
+    }
+  });
+  skipped.sort(compareSkips);
+
   const seatCapacity =
     schedule.kind === "shared_seat"
       ? Math.min(schedule.seat_limit ?? schedule.guest_capacity, schedule.guest_capacity)
       : schedule.guest_capacity;
-
   const createdIds: string[] = [];
-  for (let i = 0; i < expansion.occurrences.length; i += INSERT_BATCH) {
-    const batch = expansion.occurrences.slice(i, i + INSERT_BATCH);
+  for (let i = 0; i < accepted.length; i += INSERT_BATCH) {
+    const batch = accepted.slice(i, i + INSERT_BATCH);
     const inserted = await trx
       .insertInto("scheduled_trips")
       .values(
@@ -626,6 +743,7 @@ export async function generateTrips(
           sales_state: input.publish ? ("published" as const) : ("draft" as const),
         })),
       )
+      // A concurrent request that created the same departure first wins quietly.
       .onConflict((oc) =>
         oc.columns(["tenant_id", "product_id", "boat_id", "starts_at"]).doNothing(),
       )
@@ -633,24 +751,25 @@ export async function generateTrips(
       .execute();
     createdIds.push(...inserted.map((r) => r.id));
   }
-  const alreadyScheduled = expansion.occurrences.length - createdIds.length;
+  alreadyScheduled += accepted.length - createdIds.length;
 
-  await recordAudit(trx, ctx, {
-    action: "schedule.trips_generated",
-    subjectType: "schedule",
-    subjectId: schedule.id,
-    reason: input.reason,
-    before: null,
-    after: {
-      fromDate: input.fromDate,
-      toDate: input.toDate,
-      publish: input.publish,
-      created: createdIds.length,
-      alreadyScheduled,
-      skipped: expansion.skipped.length,
-    },
-  });
+  // A run that creates nothing changes nothing, so it leaves no audit row.
   if (createdIds.length > 0) {
+    await recordAudit(trx, ctx, {
+      action: "schedule.trips_generated",
+      subjectType: "schedule",
+      subjectId: schedule.id,
+      reason: input.reason,
+      before: null,
+      after: {
+        fromDate: input.fromDate,
+        toDate: input.toDate,
+        publish: input.publish,
+        created: createdIds.length,
+        alreadyScheduled,
+        skipped: skipped.length,
+      },
+    });
     await enqueueOutbox(trx, ctx, {
       topic: "catalog.schedule.trips_generated",
       aggregateType: "schedule",
@@ -673,5 +792,5 @@ export async function generateTrips(
              where t.tenant_id = ${ctx.tenantId} and t.id = any(${createdIds}::uuid[])
              order by t.starts_at, t.id`.execute(trx)
         ).rows.map(toStaffTrip);
-  return { kind: "generated", created, alreadyScheduled, skipped: expansion.skipped };
+  return { kind: "generated", created, alreadyScheduled, skipped };
 }

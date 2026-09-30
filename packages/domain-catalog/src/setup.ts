@@ -1,6 +1,7 @@
 import type { ProductKind } from "@tidegrid/contracts";
 import { recordAudit, type TenantContext, type TenantTransaction } from "@tidegrid/database";
-import { validateScheduleRule } from "./recurrence.ts";
+import { sql } from "kysely";
+import { departuresTooClose, validateScheduleRule } from "./recurrence.ts";
 import type { ScheduleRule, ScheduleRuleProblem } from "./schedule-types.ts";
 import {
   addDays,
@@ -12,6 +13,18 @@ import {
   type LocalTime,
   startOfLocalDay,
 } from "./time.ts";
+
+/**
+ * The runtime's zone data and PostgreSQL's disagree for this zone, so the
+ * database would refuse the row. Update whichever side is behind; nothing is
+ * guessed in the meantime.
+ */
+export class ZoneDataMismatchError extends Error {
+  constructor(readonly timeZone: string) {
+    super(`The runtime and the database disagree about ${timeZone}; nothing was written`);
+    this.name = "ZoneDataMismatchError";
+  }
+}
 
 /**
  * Catalog setup commands. The demo seeds its catalog through these, so seeded
@@ -156,7 +169,7 @@ export async function createSchedule(
     .innerJoin("locations as l", (j) =>
       j.onRef("l.tenant_id", "=", "p.tenant_id").onRef("l.id", "=", "p.location_id"),
     )
-    .select(["p.id", "p.duration_minutes", "l.time_zone"])
+    .select(["p.id", "p.duration_minutes", "p.turnaround_buffer_minutes", "l.time_zone"])
     .where("p.tenant_id", "=", ctx.tenantId)
     .where("p.id", "=", input.productId)
     .executeTakeFirst();
@@ -168,9 +181,11 @@ export async function createSchedule(
     weekdays: input.weekdays,
     startTimes: input.startTimes,
     durationMinutes: product.duration_minutes,
+    turnaroundBufferMinutes: product.turnaround_buffer_minutes,
     ambiguousTime: input.ambiguousTime ?? "reject",
   };
   const problems = validateScheduleRule(rule);
+  if (problems.length === 0 && departuresTooClose(rule)) problems.push("departures_too_close");
   if (problems.length > 0) return { kind: "invalid", problems };
   const { id } = await trx
     .insertInto("schedules")
@@ -251,6 +266,16 @@ export async function createBlackout(
   if (!isValidTimeZone(timeZone)) throw new RangeError(`Unknown time zone: ${timeZone}`);
   const startsAt = startOfLocalDay(timeZone, input.startsOn).epochMs;
   const endsAt = startOfLocalDay(timeZone, addDays(input.endsOn, 1)).epochMs;
+  // The same day-boundary test the database trigger applies, asked first so a
+  // zone-data disagreement is named instead of failing the transaction.
+  const { rows } = await sql<{ agrees: boolean }>`
+    select pg_catalog.timezone(${timeZone}, s)::date = ${input.startsOn}::date
+       and pg_catalog.timezone(${timeZone}, s - interval '1 second')::date = ${input.startsOn}::date - 1
+       and pg_catalog.timezone(${timeZone}, e)::date = ${input.endsOn}::date + 1
+       and pg_catalog.timezone(${timeZone}, e - interval '1 second')::date = ${input.endsOn}::date as agrees
+      from (select ${new Date(startsAt).toISOString()}::timestamptz as s,
+                   ${new Date(endsAt).toISOString()}::timestamptz as e) bounds`.execute(trx);
+  if (!rows[0]?.agrees) throw new ZoneDataMismatchError(timeZone);
   const { id } = await trx
     .insertInto("blackouts")
     .values({

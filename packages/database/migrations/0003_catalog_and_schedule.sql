@@ -14,10 +14,15 @@
 
 -- Zone names ------------------------------------------------------------------
 
--- IANA Area/Location names and UTC only. POSIX forms such as 'UTC+3' invert
--- their sign and abbreviations are ambiguous, so neither is accepted.
+-- Geographic IANA Area/Location names and UTC only. POSIX forms such as
+-- 'UTC+3' and the Etc/GMT zones invert their sign, and abbreviations are
+-- ambiguous, so none is accepted. Segments are capitalized as the zone
+-- database spells them.
 CREATE DOMAIN app.iana_zone AS text
-  CHECK (VALUE ~ '^(UTC|[A-Z][A-Za-z_]+(/[A-Za-z0-9_+-]+)+)$');
+  CHECK (VALUE ~ '^(UTC|(?!Etc/)[A-Z][A-Za-z_]+(/[A-Z0-9][A-Za-z0-9_+-]*)+)$');
+
+-- Exclusion constraints on (uuid, range) need the btree operator classes for GiST.
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 
 -- Trigger functions run with the privileges of the role that fired them and
 -- call only pg_catalog functions, so the runtime needs no EXECUTE grant.
@@ -163,6 +168,11 @@ CREATE TRIGGER schedules_consistency BEFORE INSERT OR UPDATE OF time_zone, produ
 -- rewrite, so the runtime can update only the sales state. Stored sales states
 -- are draft, published, closed, canceled, and completed. Sold out is computed
 -- from capacity; delayed belongs to trip changes, which the demo defers.
+--
+-- A boat runs one departure at a time. boat_free_at is the trip's end plus its
+-- product's turnaround buffer, set by the trigger below, and no two live trips
+-- on one boat may overlap across [starts_at, boat_free_at). A canceled trip
+-- frees the boat.
 CREATE TABLE public.scheduled_trips (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
@@ -174,6 +184,7 @@ CREATE TABLE public.scheduled_trips (
   local_start_time time(0) NOT NULL,
   starts_at timestamptz NOT NULL,
   ends_at timestamptz NOT NULL,
+  boat_free_at timestamptz NOT NULL,
   start_utc_offset_minutes smallint NOT NULL CHECK (start_utc_offset_minutes BETWEEN -1080 AND 1080),
   end_utc_offset_minutes smallint NOT NULL CHECK (end_utc_offset_minutes BETWEEN -1080 AND 1080),
   duration_minutes integer NOT NULL CHECK (duration_minutes BETWEEN 15 AND 1440),
@@ -189,7 +200,11 @@ CREATE TABLE public.scheduled_trips (
   FOREIGN KEY (tenant_id, product_id, boat_id)
     REFERENCES public.product_boats (tenant_id, product_id, boat_id),
   FOREIGN KEY (tenant_id, schedule_id) REFERENCES public.schedules (tenant_id, id),
-  CHECK (ends_at = starts_at + make_interval(mins => duration_minutes))
+  CHECK (ends_at = starts_at + make_interval(mins => duration_minutes)),
+  CHECK (boat_free_at >= ends_at),
+  CONSTRAINT scheduled_trips_one_departure_per_boat
+    EXCLUDE USING gist (tenant_id WITH =, boat_id WITH =, tstzrange(starts_at, boat_free_at) WITH &&)
+    WHERE (sales_state <> 'canceled')
 );
 CREATE INDEX scheduled_trips_local_date_idx ON public.scheduled_trips (tenant_id, local_date);
 CREATE INDEX scheduled_trips_boat_idx ON public.scheduled_trips (tenant_id, boat_id, starts_at);
@@ -203,6 +218,7 @@ DECLARE
   local_start timestamp := pg_catalog.timezone(NEW.time_zone, NEW.starts_at);
   local_end timestamp := pg_catalog.timezone(NEW.time_zone, NEW.ends_at);
   location_zone text;
+  buffer_minutes integer;
   boat_capacity integer;
   schedule record;
 BEGIN
@@ -218,7 +234,7 @@ BEGIN
     RAISE EXCEPTION 'trip offset snapshot does not match % at its instants', NEW.time_zone
       USING ERRCODE = '23514';
   END IF;
-  SELECT l.time_zone INTO location_zone
+  SELECT l.time_zone, p.turnaround_buffer_minutes INTO location_zone, buffer_minutes
     FROM public.products p
     JOIN public.locations l ON l.tenant_id = p.tenant_id AND l.id = p.location_id
    WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.product_id;
@@ -226,6 +242,7 @@ BEGIN
     RAISE EXCEPTION 'trip zone % must match its product location', NEW.time_zone
       USING ERRCODE = '23514';
   END IF;
+  NEW.boat_free_at := NEW.ends_at + make_interval(mins => buffer_minutes);
   SELECT b.guest_capacity INTO boat_capacity
     FROM public.boats b WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.boat_id;
   IF boat_capacity IS NULL OR NEW.seat_capacity > boat_capacity THEN
@@ -249,12 +266,19 @@ CREATE TRIGGER scheduled_trips_consistency
   ON public.scheduled_trips
   FOR EACH ROW EXECUTE FUNCTION app.check_scheduled_trip();
 
--- Canceled and completed are final. Completion is recorded after departure.
+-- A trip starts as draft or published. Canceled and completed are final, and
+-- completion is recorded after departure.
 CREATE FUNCTION app.check_trip_sales_state() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.sales_state NOT IN ('draft', 'published') THEN
+      RAISE EXCEPTION 'a trip cannot start as %', NEW.sales_state USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+  END IF;
   IF NEW.sales_state IS DISTINCT FROM OLD.sales_state AND NOT (
        (OLD.sales_state = 'draft' AND NEW.sales_state IN ('published', 'canceled'))
     OR (OLD.sales_state = 'published' AND NEW.sales_state IN ('closed', 'canceled', 'completed'))
@@ -270,7 +294,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-CREATE TRIGGER scheduled_trips_sales_state BEFORE UPDATE OF sales_state ON public.scheduled_trips
+CREATE TRIGGER scheduled_trips_sales_state
+  BEFORE INSERT OR UPDATE OF sales_state ON public.scheduled_trips
   FOR EACH ROW EXECUTE FUNCTION app.check_trip_sales_state();
 
 -- Blackouts -------------------------------------------------------------------
@@ -307,7 +332,21 @@ CREATE FUNCTION app.check_blackout() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
   AS $$
+DECLARE
+  location_zone text;
 BEGIN
+  IF NEW.location_id IS NOT NULL OR NEW.product_id IS NOT NULL THEN
+    SELECT l.time_zone INTO location_zone
+      FROM public.locations l
+     WHERE l.tenant_id = NEW.tenant_id
+       AND l.id = coalesce(NEW.location_id, (
+             SELECT p.location_id FROM public.products p
+              WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.product_id));
+    IF location_zone IS DISTINCT FROM NEW.time_zone THEN
+      RAISE EXCEPTION 'blackout zone % must match its location', NEW.time_zone
+        USING ERRCODE = '23514';
+    END IF;
+  END IF;
   IF pg_catalog.timezone(NEW.time_zone, NEW.starts_at)::date <> NEW.starts_on
      OR pg_catalog.timezone(NEW.time_zone, NEW.starts_at - interval '1 second')::date
         <> NEW.starts_on - 1

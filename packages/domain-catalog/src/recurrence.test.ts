@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { expandSchedule, validateScheduleRule } from "./recurrence.ts";
+import { departuresTooClose, expandSchedule, validateScheduleRule } from "./recurrence.ts";
 import type {
   BlackoutInterval,
   ExpansionWindow,
@@ -1387,5 +1387,31 @@ describe("a realistic season", () => {
     ].map((window) => expandSchedule(season, window));
     expect(months.map((m) => m.occurrences.length)).toEqual([60, 62, 62]);
     expect(months.flatMap((m) => m.occurrences)).toEqual(exact.occurrences);
+  });
+});
+
+describe("departuresTooClose", () => {
+  it("needs the trip and its turnaround between a day's departures, in any input order", () => {
+    // 120-minute trips: 09:00 and 11:00 just fit; a 30-minute buffer makes them too close.
+    expect(departuresTooClose(makeRule({ startTimes: ["11:00", "09:00"] }))).toBe(false);
+    expect(
+      departuresTooClose(makeRule({ startTimes: ["11:00", "09:00"], turnaroundBufferMinutes: 30 })),
+    ).toBe(true);
+    expect(departuresTooClose(makeRule({ startTimes: ["09:00", "10:59"] }))).toBe(true);
+    expect(
+      departuresTooClose(makeRule({ startTimes: ["08:00", "10:30"], turnaroundBufferMinutes: 30 })),
+    ).toBe(false);
+  });
+
+  it("does not count across midnight, where the database constraint is the guard", () => {
+    expect(departuresTooClose(makeRule({ startTimes: ["23:00"], durationMinutes: 240 }))).toBe(
+      false,
+    );
+  });
+
+  it("leaves expansion itself unconstrained", () => {
+    const rule = makeRule({ startTimes: ["09:00", "09:30"] });
+    expect(validateScheduleRule(rule)).toEqual([]);
+    expect(expandSchedule(rule, dayOf("2026-06-01")).occurrences).toHaveLength(2);
   });
 });
