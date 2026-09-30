@@ -1,4 +1,5 @@
 import "@tidegrid/design-system/base.css";
+import "./console.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";

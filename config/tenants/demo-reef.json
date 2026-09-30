@@ -1,0 +1,22 @@
+{
+  "slug": "demo-reef",
+  "displayName": "Demo Reef Divers",
+  "previewHostname": "demo-reef.book.tidegrid.us",
+  "brand": {
+    "name": "Demo Reef Divers",
+    "tagline": "Small-group reef dives and snorkel trips, all synthetic",
+    "colors": { "primary": "#006d77", "accent": "#ffd166" },
+    "fonts": { "display": "bricolage-grotesque", "body": "atkinson-hyperlegible-next" },
+    "logo": {
+      "file": "demo-reef/logo.svg",
+      "kind": "mark",
+      "alt": "Demo Reef Divers",
+      "width": 64,
+      "height": 64
+    },
+    "contact": { "email": "dive@demo-reef.test", "phone": "+13055550187" },
+    "legal": { "terms": "/legal/terms", "privacy": "/legal/privacy" },
+    "locale": "en-US",
+    "capabilities": []
+  }
+}

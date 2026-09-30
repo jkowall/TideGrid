@@ -1,4 +1,6 @@
 @import "./tokens.css";
+@import "./fonts.css";
+@import "./components.css";
 
 *,
 *::before,
@@ -13,8 +15,8 @@ body {
   font-family: var(--font-ui);
   font-size: var(--text-md);
   line-height: var(--leading-body);
-  color: var(--brand-ink);
-  background: var(--brand-surface);
+  color: var(--text-body);
+  background: var(--surface-page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -23,7 +25,9 @@ h2,
 h3 {
   font-family: var(--font-display);
   line-height: var(--leading-tight);
+  color: var(--text-strong);
   margin: 0 0 var(--space-4);
+  text-wrap: balance;
 }
 h1 {
   font-size: var(--text-3xl);
@@ -39,6 +43,10 @@ p {
   margin: 0 0 var(--space-4);
   max-width: var(--measure);
 }
+a {
+  color: var(--link);
+  text-underline-offset: 0.18em;
+}
 button,
 input,
 select,
@@ -48,6 +56,9 @@ textarea {
 button {
   min-height: var(--tap-min);
 }
+img {
+  max-width: 100%;
+}
 /* A link is an inline box, where min-height does nothing. Standalone links and
    other non-button controls take .tap-target for a real box. Links inside
    running text stay inline, which WCAG 2.5.8 exempts. */
@@ -56,15 +67,25 @@ button {
   align-items: center;
   min-height: var(--tap-min);
 }
+/* The ring color follows the surface: info blue on light, Tide Lime on the
+   console, the tenant accent on a primary band. Each clears 3:1 against the
+   surface it sits on. */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: var(--focus-ring);
+  outline: var(--focus-width) solid var(--focus-color);
   outline-offset: var(--focus-offset);
 }
+/* Reduced motion must beat every component's own timing, including rules
+   that load later or select more precisely. Only !important does that from a
+   base sheet; :where() gave this rule no weight at all. */
+/* biome-ignore-start lint/complexity/noImportantStyles: a user preference must override component timing. */
 @media (prefers-reduced-motion: reduce) {
-  :where(*, *::before, *::after) {
-    animation-duration: 0.01ms;
-    animation-iteration-count: 1;
-    transition-duration: 0.01ms;
-    scroll-behavior: auto;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
+/* biome-ignore-end lint/complexity/noImportantStyles: end of the reduced-motion rule. */

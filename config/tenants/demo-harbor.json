@@ -1,0 +1,22 @@
+{
+  "slug": "demo-harbor",
+  "displayName": "Demo Harbor Charters",
+  "previewHostname": "demo-harbor.book.tidegrid.us",
+  "brand": {
+    "name": "Demo Harbor Charters",
+    "tagline": "Sunrise fishing and sunset sails from a synthetic marina",
+    "colors": { "primary": "#0b3c5d", "accent": "#e0a526" },
+    "fonts": { "display": "fraunces", "body": "source-sans-3" },
+    "logo": {
+      "file": "demo-harbor/logo.svg",
+      "kind": "mark",
+      "alt": "Demo Harbor Charters",
+      "width": 64,
+      "height": 64
+    },
+    "contact": { "email": "hello@demo-harbor.test", "phone": "+13055550142" },
+    "legal": { "terms": "/legal/terms", "privacy": "/legal/privacy" },
+    "locale": "en-US",
+    "capabilities": []
+  }
+}

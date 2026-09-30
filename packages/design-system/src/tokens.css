@@ -1,18 +1,31 @@
 /*
  * TideGrid design tokens. Brand palette and type from the selected identity
- * inputs (see docs/v2/12-demo-build-plan.md, Design direction). Guest surfaces
- * override the --brand-* tokens from tenant configuration; the operator console
- * uses the TideGrid values below. Status colors are never used for brand and
- * are always paired with an icon and a label.
+ * inputs (see docs/v2/12-demo-build-plan.md, Design direction).
+ *
+ * Three layers:
+ * 1. Palette and scales: fixed TideGrid values.
+ * 2. Tenant brand slots (--brand-*, --font-display, --font-ui): TideGrid
+ *    defaults here. A guest surface replaces them on <html> from the tenant's
+ *    validated brand (brandCssVariables in @tidegrid/design-system/brand).
+ *    They must be set on <html>, not deeper: the semantic roles below are
+ *    declared on :root and resolve their var() references there.
+ * 3. Semantic roles (--surface-*, --text-*, --action-*, --status-*): what
+ *    components use. Light by default; `.tg-dark` switches a subtree to the
+ *    operator console's dark theme.
+ *
+ * Status colors are never brand colors and always travel with an icon and a
+ * label. Tide Lime marks rules, selection, and actions on dark surfaces; it is
+ * never text on a light surface (1.66:1 on Foam).
  */
 :root {
-  /* Brand palette */
+  /* Palette */
   --tg-deep-forest: #0e2b1f;
   --tg-pine-green: #143f2e;
   --tg-tide-lime: #a7d129;
   --tg-mist: #e8ece8;
   --tg-foam: #f6f7f6;
   --tg-harbor: #1a1f1d;
+  --tg-white: #ffffff;
 
   /* Functional status: dark-on-light, then light-on-dark */
   --tg-status-ready: #2e7d32;
@@ -26,7 +39,7 @@
   --tg-status-info-on-dark: #5cc8ff;
   --tg-status-pending-on-dark: #c2a5ff;
 
-  /* Tenant-overridable brand slots (defaults are TideGrid) */
+  /* Tenant brand slots (TideGrid defaults) */
   --brand-primary: var(--tg-pine-green);
   --brand-primary-ink: #ffffff;
   --brand-accent: var(--tg-tide-lime);
@@ -34,10 +47,10 @@
   --brand-ink: var(--tg-deep-forest);
 
   /* Type */
-  --font-display: "Sora", "Inter", system-ui, sans-serif;
+  --font-display: "Sora", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --text-xs: 0.75rem; /* 12 */
-  --text-sm: 0.875rem; /* 14 */
+  --text-xs: 0.75rem; /* 12: eyebrows and captions only */
+  --text-sm: 0.875rem; /* 14: smallest body text */
   --text-md: 1rem; /* 16 */
   --text-lg: 1.125rem; /* 18 */
   --text-xl: 1.375rem; /* 22 */
@@ -45,8 +58,16 @@
   --text-3xl: 2.25rem; /* 36 */
   --text-4xl: 3rem; /* 48 */
   --leading-tight: 1.15;
+  --leading-snug: 1.35;
   --leading-body: 1.55;
-  --measure: 65ch;
+  /* About 65 characters a line in Inter. A brand's body font sets its own
+     calibrated measure (bodyFonts in brand/fonts.ts). Not ch: "0" is much
+     wider than an average letter, so 65ch ran to 80 or more characters. */
+  --measure: 30em;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
 
   /* Spacing (4px base) */
   --space-1: 0.25rem;
@@ -64,11 +85,71 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
+  --radius-pill: 999px;
   --shadow-sm: 0 1px 2px rgb(14 43 31 / 0.08);
   --shadow-md: 0 4px 16px rgb(14 43 31 / 0.1);
 
   /* Interaction */
   --tap-min: 44px;
-  --focus-ring: 3px solid var(--tg-status-info);
+  --focus-width: 3px;
   --focus-offset: 2px;
+  --duration-fast: 150ms;
+
+  /* Semantic roles, light (guest surfaces) */
+  --surface-page: var(--brand-surface);
+  --surface-raised: var(--tg-white);
+  --surface-sunken: var(--tg-mist);
+  --surface-hover: rgb(14 43 31 / 0.06);
+  --text-strong: var(--brand-ink);
+  --text-body: var(--brand-ink);
+  --text-muted: #52615a; /* 6.08:1 on Foam, 5.47:1 on Mist */
+  --border-subtle: var(--tg-mist);
+  --border-control: #72817a; /* 3.81:1 on Foam: input and control boundaries */
+  --link: var(--brand-primary);
+  --action-bg: var(--brand-primary);
+  --action-bg-hover: color-mix(in srgb, var(--brand-primary) 84%, #000000);
+  --action-ink: var(--brand-primary-ink);
+  --focus-color: var(--tg-status-info); /* 6.00:1 on Foam */
+  --status-ready: var(--tg-status-ready);
+  --status-warning: var(--tg-status-warning);
+  --status-blocked: var(--tg-status-blocked);
+  --status-info: var(--tg-status-info);
+  --status-pending: var(--tg-status-pending);
+  --status-neutral: var(--text-muted);
+
+  /* Kept for callers written before the semantic roles */
+  --focus-ring: var(--focus-width) solid var(--tg-status-info);
+}
+
+/*
+ * Operator console theme: Harbor content, Deep Forest rail, Mist for grouping,
+ * Tide Lime for selected scope, actions, and ready states. Values are literal
+ * or palette references so they resolve correctly on any descendant.
+ */
+.tg-dark {
+  color-scheme: dark;
+  /* The console is always TideGrid: Sora and Inter, whatever brand a page carries. */
+  --font-display: "Sora", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
+  --surface-page: var(--tg-harbor);
+  --surface-raised: #222a26;
+  --surface-sunken: #151a18;
+  --surface-hover: rgb(232 236 232 / 0.08);
+  --text-strong: var(--tg-foam); /* 15.55:1 on Harbor */
+  --text-body: var(--tg-mist);
+  --text-muted: #aebbb4; /* 8.40:1 on Harbor, 7.40:1 raised */
+  --border-subtle: rgb(232 236 232 / 0.14);
+  --border-control: #7a8881; /* 4.51:1 on Harbor, 3.97:1 raised */
+  --link: var(--tg-tide-lime);
+  --action-bg: var(--tg-tide-lime);
+  --action-bg-hover: #b9e03e;
+  --action-ink: var(--tg-deep-forest);
+  --focus-color: var(--tg-tide-lime); /* 9.38:1 on Harbor */
+  --status-ready: var(--tg-status-ready-on-dark);
+  --status-warning: var(--tg-status-warning-on-dark);
+  --status-blocked: var(--tg-status-blocked-on-dark);
+  --status-info: var(--tg-status-info-on-dark);
+  --status-pending: var(--tg-status-pending-on-dark);
+  --status-neutral: var(--text-muted);
 }

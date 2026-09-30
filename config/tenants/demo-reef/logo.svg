@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>Demo Reef Divers</title>
+  <rect x="1" y="1" width="62" height="62" rx="16" fill="#006d77"/>
+  <circle cx="45" cy="18" r="7" fill="#ffd166"/>
+  <path d="M8 31c4 0 4-3 8-3s4 3 8 3 4-3 8-3 4 3 8 3 4-3 8-3 4 3 8 3" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+  <ellipse cx="30" cy="46" rx="11" ry="6.5" fill="#ffd166"/>
+  <polygon points="39.5,46 49,39.5 49,52.5" fill="#ffd166"/>
+  <circle cx="24.5" cy="44.5" r="1.7" fill="#006d77"/>
+  <circle cx="14.5" cy="41" r="2" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+  <circle cx="11" cy="35.5" r="1.3" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+</svg>
