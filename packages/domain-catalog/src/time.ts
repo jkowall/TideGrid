@@ -44,11 +44,22 @@ const MAX_YEAR = 2099;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 /**
- * Geographic IANA Area/Location names and UTC, capitalized as the zone database
- * spells them. Excludes POSIX forms such as EST5EDT or UTC+3 and the Etc/GMT
- * zones, which invert their sign. Migration 0003 applies the same pattern.
+ * Geographic IANA Area/Location names and UTC. Excludes POSIX forms such as
+ * EST5EDT or UTC+3. Migration 0003 applies the same pattern, and its triggers
+ * also require the exact spelling the zone database lists.
  */
-const ZONE = /^(?:UTC|(?!Etc\/)[A-Z][A-Za-z_]+(?:\/[A-Z0-9][A-Za-z0-9_+-]*)+)$/;
+const ZONE = /^(?:UTC|[A-Z][A-Za-z_]+(?:\/[A-Z0-9][A-Za-z0-9_+-]*)+)$/;
+
+/**
+ * The Etc/GMT zones invert their sign, so they are refused in any case. Every
+ * segment of a geographic name has a lowercase letter, which refuses all-caps
+ * spellings such as AMERICA/NEW_YORK that lookups would otherwise accept.
+ */
+function isGeographicSpelling(zone: string): boolean {
+  if (zone === "UTC") return true;
+  if (/^etc\//i.test(zone)) return false;
+  return zone.split("/").every((segment) => /[a-z]/.test(segment));
+}
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
@@ -72,7 +83,7 @@ function formatterFor(zone: string): Intl.DateTimeFormat {
 
 /** True for an IANA zone name the runtime knows, spelled as the database stores it. */
 export function isValidTimeZone(zone: string): boolean {
-  if (!ZONE.test(zone)) return false;
+  if (!ZONE.test(zone) || !isGeographicSpelling(zone)) return false;
   try {
     formatterFor(zone);
     return true;

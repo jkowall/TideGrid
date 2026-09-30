@@ -96,7 +96,7 @@ export function createApp(deps: AppDeps = {}) {
     const code = (err as { code?: unknown }).code;
     c.get("log")?.error("unhandled", {
       "error.type": err.name,
-      ...(typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)
+      ...(err.name === "PostgresError" && typeof code === "string"
         ? { "db.response.status_code": code }
         : {}),
     });

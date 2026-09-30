@@ -109,6 +109,8 @@ Goal identifiers keep the [goal map](10-build-execution-and-agent-plan.md#goal-m
 
 Deferred from the Core live gate list and not in the demo: G2.3 queues and DLQ (the outbox and cron sweep stand in), G2.8 deposits and balances, G2.9 refunds and credits, G2.10 external payment and reconciliation, G2.13 migration. Every Staged Core module and every G4 native goal is out of scope.
 
+**Boat inventory in the demo (proposed narrowing, awaiting the owner's confirmation).** A boat runs one departure at a time, counting each trip's turnaround buffer, so a slot is scheduled either as shared seats or as a private charter, never offered both ways at once. The [product scope](02-product-scope.md#catalog-schedules-and-availability) says shared-seat and private inventory cannot overlap on an exclusive boat; the demo enforces that at scheduling time with a database constraint (G2.4). If operators need a slot offered either way until one sells, G2.6 moves the rule to booking time instead.
+
 Parallel work runs only on accepted interfaces and disjoint paths: the design system beside the catalog after G2.2 is accepted, and the two UI goals beside each other after G2.7 is accepted. Coupled state transitions (holds, charge, confirmation, waiver assignment) keep one owner.
 
 ## Demo acceptance

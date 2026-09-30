@@ -19,7 +19,7 @@ This log records each dated verification pass over the throwaway guest workflow 
 - Checks on a fresh throwaway Neon branch:
   - migrate, then seed: 892 trips, with 5 departures skipped on blackout days;
   - a second seed: 0 new trips;
-  - integration: 40 database, 22 catalog, and 48 API tests;
+  - integration: 40 database, 23 catalog, and 49 API tests (final commit);
   - unit: 181 tests across six packages, 24 of them in the Workers runtime, plus 29 prototype tests.
 - A routine implementer wrote recurrence expansion and its 96 tests against the accepted contract. Its mutation run caught 72 of 73 deliberate bugs; the one survivor cannot change output.
 - Independent review (fresh agent) accepted with fixes and found no blocking defect. Applied:
@@ -32,6 +32,11 @@ This log records each dated verification pass over the throwaway guest workflow 
     - The sales-state trigger covers inserts, and a location or product blackout must use its location's zone.
     - `Etc/GMT` zones are refused, and a no-op generation leaves no audit row.
     - Date edges return 400, not 500, and the README states what the database enforces and what only the service checks.
+- The reviewer rechecked `32620ae` and confirmed every finding fixed or documented, on its own branch: 40 database, 22 catalog, and 48 API integration tests. It accepted with small follow-ups, all applied:
+  - Zone names are now case-proof, and locations and blackouts must use the exact spelling PostgreSQL lists.
+  - The one-departure-per-boat rule is recorded as a proposed narrowing in the demo build plan, pending the owner's confirmation.
+  - An API test holds a conflicting trip uncommitted until the request blocks on it, and proves the retryable 409.
+  - The README now says disagreeing zone data can also surface as gap or overlap skips.
 - Flaky runs:
   - The reviewer's five 500s came from the parallel G2.14a agent. Through a shared scratch file it rotated the runtime password on the reviewer's branch. Each agent now gets its own scratch folder.
   - Connect stalls, and one silent hang in integration setup, hit the coordinator's own branches. The cause is not known. Setup now bounds every step and waits until both roles answer, and unhandled errors log their SQLSTATE.

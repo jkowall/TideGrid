@@ -743,7 +743,9 @@ export async function generateTrips(
           sales_state: input.publish ? ("published" as const) : ("draft" as const),
         })),
       )
-      // A concurrent request that created the same departure first wins quietly.
+      // A concurrent request that created the same departure first normally
+      // wins quietly through the unique index. If the boat constraint fires
+      // first instead, the request fails with 23P01 and the caller retries.
       .onConflict((oc) =>
         oc.columns(["tenant_id", "product_id", "boat_id", "starts_at"]).doNothing(),
       )

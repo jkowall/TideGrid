@@ -500,6 +500,19 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
       expect(await insert({})).toBeUndefined();
     });
 
+    it("accepts only exact geographic zone names", async () => {
+      const location = (zone: string) =>
+        pgCode(
+          admin`insert into public.locations (tenant_id, name, time_zone)
+            values (${A.id}, 'Spelling', ${zone})`,
+        );
+      // Zone lookups ignore case; the stored name must be the listed spelling.
+      expect(await location("AMERICA/NEW_YORK")).toBe("22023");
+      expect(await location("ETC/GMT+5")).toBe("23514");
+      expect(await location("Etc/GMT+5")).toBe("23514");
+      expect(await location("America/New_York")).toBeUndefined();
+    });
+
     it("requires a location blackout to use its location's zone", async () => {
       // Correct Chicago day boundaries, but the location keeps New York time.
       const code = await pgCode(

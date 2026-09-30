@@ -387,6 +387,45 @@ describe.skipIf(!env)("catalog API against a real database as the runtime role",
       expect(otherSchedule.json.error?.code).toBe("idempotency_key_reused");
     });
 
+    it("answers a retryable 409 when another writer takes the boat mid-request", async () => {
+      // Hold an overlapping trip uncommitted, let the request's insert block on
+      // the boat constraint, then commit: the request must lose with 23P01.
+      const [first] = await tripsOnA();
+      if (!first) throw new Error("fixture trips missing");
+      const [trip] = await admin<{ product_id: string; boat_id: string }[]>`
+        select product_id, boat_id from public.scheduled_trips where id = ${first.tripId}`;
+      if (!trip) throw new Error("fixture trip row missing");
+      const path = staffPath(A.id, `/schedules/${fixture.scheduleA}/trips`);
+      const body = { fromDate: "2026-11-20", toDate: "2026-11-20", publish: true, reason: "race" };
+      let response: Awaited<ReturnType<typeof call>> | undefined;
+      await admin.begin(async (tx) => {
+        await tx`insert into public.scheduled_trips (tenant_id, product_id, boat_id, time_zone,
+            local_date, local_start_time, starts_at, ends_at, start_utc_offset_minutes,
+            end_utc_offset_minutes, duration_minutes, seat_capacity)
+          values (${A.id}, ${trip.product_id}, ${trip.boat_id}, 'America/New_York', '2026-11-20',
+            '09:30', '2026-11-20T14:30:00Z', '2026-11-20T15:30:00Z', -300, -300, 60, 10)`;
+        const pending = call("POST", path, { as: ownerA.email, key: randomUUID(), body }).then(
+          (r) => {
+            response = r;
+          },
+        );
+        const deadline = Date.now() + 30_000;
+        for (;;) {
+          const [waiting] = await admin<{ n: number }[]>`
+            select count(*)::int as n from pg_locks where not granted`;
+          if ((waiting?.n ?? 0) > 0 || response || Date.now() > deadline) break;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        // Commit by returning, then let the request finish.
+        void pending;
+      });
+      for (let i = 0; !response && i < 300; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(response?.res.status).toBe(409);
+      expect(response?.json.error?.code).toBe("boat_schedule_conflict");
+    });
+
     it("blocks publishing with a specific code, for owners only", async () => {
       const path = staffPath(A.id, `/products/${fixture.orphanA}/publish`);
       const staff = await call("POST", path, {

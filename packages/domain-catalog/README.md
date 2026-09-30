@@ -5,7 +5,7 @@ Locations, boats, products, seasonal schedules, scheduled trips, blackouts, and 
 ## Time
 
 - A trip stores its IANA zone, local date and start time, resolved UTC start and end, and the offset at each end. The database refuses a row whose local time, UTC instant, and offsets disagree under its own zone data, or whose zone is not its location's.
-- Zones are geographic IANA names such as `America/New_York`, plus `UTC`. POSIX forms and the `Etc/GMT` zones are refused because they invert their sign.
+- Zones are geographic IANA names such as `America/New_York`, plus `UTC`, spelled exactly as the zone database lists them. POSIX forms and the `Etc/GMT` zones, in any case, are refused because they invert their sign.
 - `time.ts` resolves a local time against the runtime's zone data. A time in a spring-forward gap does not exist and is never shifted. A time in a fall-back overlap is ambiguous and needs an explicit `earlier` or `later` choice on the schedule; the default, `reject`, skips it.
 - A trip's end is its start plus its duration in elapsed minutes, so a trip that crosses a clock change keeps its real length.
 - Local dates are the operator's calendar at the trip's location. Queries filter on them, so a guest asking for November 1 gets the trips that depart on November 1 locally.
@@ -17,6 +17,7 @@ Locations, boats, products, seasonal schedules, scheduled trips, blackouts, and 
 The runtime (the ICU data in V8) resolves local times, and PostgreSQL checks them with its own zone data. The two ship separately and disagree for a while after a zone changes its rules. On 2026-09-30 they disagreed about Vancouver, Edmonton, Casablanca, and El Aaiun.
 
 - Generation asks PostgreSQL about every departure before writing. A departure the two read differently is skipped and reported as `zone_data_mismatch`, and the rest of the range is written.
+- Gap and overlap decisions come from the runtime first. When the sources disagree, a departure PostgreSQL considers ordinary can be skipped as `nonexistent_local_time` or `ambiguous_local_time` instead. Nothing wrong is stored either way.
 - Blackout creation raises `ZoneDataMismatchError` instead of writing.
 - Nothing is guessed. The fix is to update whichever side is behind.
 - `zone-data.integration.test.ts` compares both sources for every accepted zone, daily for three years, including day boundaries on transition days. It fails on any drift outside its known list.
@@ -31,9 +32,9 @@ The runtime (the ICU data in V8) resolves local times, and PostgreSQL checks the
 
 ### One departure per boat
 
-A boat runs one departure at a time. Each trip holds its boat from departure until its end plus its product's turnaround buffer (`boat_free_at`). No two live trips on one boat may overlap, whatever their products. So a shared-seat trip and a private charter cannot both be scheduled on the same boat at the same time, and an operator schedules one product per slot.
+A boat runs one departure at a time. Each trip holds its boat from departure until its end plus its product's turnaround buffer (`boat_free_at`). No two live trips on one boat may overlap, whatever their products. So a shared-seat trip and a private charter cannot both be scheduled on the same boat at the same time, and an operator schedules one product per slot. This is a demo narrowing recorded in the [demo build plan](../../docs/v2/12-demo-build-plan.md#goal-sequence) and awaiting the owner's confirmation.
 
-- Schedule creation refuses a day's departures that are closer than the trip plus its buffer (`departures_too_close`).
+- Schedule creation refuses a day's departures that are closer than the trip plus its buffer (`departures_too_close`). It checks one day's clock times; departures that collide across midnight are skipped at generation instead.
 - Generation skips a departure that would overlap another live trip on the boat (`boat_conflict`).
 - A PostgreSQL exclusion constraint enforces the rule for every writer. If two requests race, the loser gets SQLSTATE 23P01, which the API returns as a retryable 409 `boat_schedule_conflict`.
 - A canceled trip frees its boat.

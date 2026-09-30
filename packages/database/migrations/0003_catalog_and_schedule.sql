@@ -15,24 +15,28 @@
 -- Zone names ------------------------------------------------------------------
 
 -- Geographic IANA Area/Location names and UTC only. POSIX forms such as
--- 'UTC+3' and the Etc/GMT zones invert their sign, and abbreviations are
--- ambiguous, so none is accepted. Segments are capitalized as the zone
--- database spells them.
+-- 'UTC+3' and the Etc/GMT zones (in any case) invert their sign, and
+-- abbreviations are ambiguous, so none is accepted. Zone lookups ignore case,
+-- so the triggers below also require the exact name the zone database lists.
 CREATE DOMAIN app.iana_zone AS text
-  CHECK (VALUE ~ '^(UTC|(?!Etc/)[A-Z][A-Za-z_]+(/[A-Z0-9][A-Za-z0-9_+-]*)+)$');
+  CHECK (VALUE ~ '^(UTC|[A-Z][A-Za-z_]+(/[A-Z0-9][A-Za-z0-9_+-]*)+)$'
+         AND VALUE !~* '^etc/');
 
 -- Exclusion constraints on (uuid, range) need the btree operator classes for GiST.
 CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
 
 -- Trigger functions run with the privileges of the role that fired them and
 -- call only pg_catalog functions, so the runtime needs no EXECUTE grant.
+-- Locations, schedules, and blackouts name a zone directly; trips must match
+-- their location's zone exactly, so this spelling check covers them too.
 CREATE FUNCTION app.check_time_zone() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
-  -- Raises 22023 for a zone this server does not know.
-  PERFORM pg_catalog.timezone(NEW.time_zone, pg_catalog.now());
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_timezone_names WHERE name = NEW.time_zone) THEN
+    RAISE EXCEPTION 'unknown time zone %', NEW.time_zone USING ERRCODE = '22023';
+  END IF;
   RETURN NEW;
 END;
 $$;
@@ -359,6 +363,8 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+CREATE TRIGGER blackouts_time_zone BEFORE INSERT OR UPDATE OF time_zone ON public.blackouts
+  FOR EACH ROW EXECUTE FUNCTION app.check_time_zone();
 CREATE TRIGGER blackouts_consistency BEFORE INSERT OR UPDATE ON public.blackouts
   FOR EACH ROW EXECUTE FUNCTION app.check_blackout();
 
