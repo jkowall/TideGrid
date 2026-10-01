@@ -8,6 +8,8 @@
     "seed": "tsx src/seed.ts"
   },
   "dependencies": {
+    "@tidegrid/database": "workspace:*",
+    "@tidegrid/domain-catalog": "workspace:*",
     "postgres": "^3.4.0"
   },
   "devDependencies": {

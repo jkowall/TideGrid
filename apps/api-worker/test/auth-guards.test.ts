@@ -109,8 +109,14 @@ describe("contract", () => {
         "/v1/health",
         "/v1/me",
         "/v1/public/tenant",
+        "/v1/public/trips",
         "/v1/staff/tenants/{tenantId}/audit-events",
+        "/v1/staff/tenants/{tenantId}/catalog",
         "/v1/staff/tenants/{tenantId}/members",
+        "/v1/staff/tenants/{tenantId}/products/{productId}/publish",
+        "/v1/staff/tenants/{tenantId}/schedules/{scheduleId}/trips",
+        "/v1/staff/tenants/{tenantId}/trips",
+        "/v1/staff/tenants/{tenantId}/trips/{tripId}/sales-state",
       ].sort(),
     );
     expect(Object.keys(doc.components.securitySchemes).sort()).toEqual([

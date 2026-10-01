@@ -12,3 +12,6 @@ coverage/
 !.env.example
 worker-configuration.d.ts
 *.tsbuildinfo
+
+# Agent worktrees created by Claude Code
+.claude/worktrees/

@@ -180,3 +180,4 @@ export const PublicTenantResponse = z
   .object({ tenant: z.object({ slug: z.string(), name: z.string() }) })
   .describe("Public brand context for a verified hostname. Grants no permission.");
 export type PublicTenantResponse = z.infer<typeof PublicTenantResponse>;
+export * from "./catalog.ts";

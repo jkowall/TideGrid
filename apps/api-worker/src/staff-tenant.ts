@@ -33,6 +33,8 @@ export interface IdempotentCommand {
   key: string;
   /** Route template, so the same body on another route never matches. */
   route: string;
+  /** Path ids beyond the tenant, so the same key on another resource never replays. */
+  params?: Record<string, string>;
   body: unknown;
   successStatus: number;
 }
@@ -68,7 +70,7 @@ export async function withStaffTenant<T extends JsonObject>(
         requestHash: await requestHash({
           method: c.req.method,
           route: idem.route,
-          params: { tenantId: options.tenantId },
+          params: { ...idem.params, tenantId: options.tenantId },
           body: idem.body,
         }),
       }

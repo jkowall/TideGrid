@@ -20,6 +20,7 @@
     "@tidegrid/observability": "workspace:*",
     "hono": "^4.9.0",
     "zod": "^4.1.0",
+    "@tidegrid/domain-catalog": "workspace:*",
     "@tidegrid/domain-identity": "workspace:*",
     "jose": "^6.2.0",
     "kysely": "^0.29.0"

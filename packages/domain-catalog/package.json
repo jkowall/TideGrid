@@ -1,0 +1,25 @@
+{
+  "name": "@tidegrid/domain-catalog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@tidegrid/contracts": "workspace:*",
+    "@tidegrid/database": "workspace:*",
+    "kysely": "^0.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0",
+    "postgres": "^3.4.0"
+  }
+}
