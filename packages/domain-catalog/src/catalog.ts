@@ -382,18 +382,20 @@ export async function publishProduct(
     .where("tenant_id", "=", ctx.tenantId)
     .where("id", "=", product.location_id)
     .executeTakeFirst();
-  const boats = await trx
+  // Every eligible boat goes back in the response, as loadCatalog reports them;
+  // only active boats count toward whether the product can be sold.
+  const eligible = await trx
     .selectFrom("product_boats as pb")
     .innerJoin("boats as b", (j) =>
       j.onRef("b.tenant_id", "=", "pb.tenant_id").onRef("b.id", "=", "pb.boat_id"),
     )
-    .select(["b.id", "b.guest_capacity"])
+    .select(["b.id", "b.guest_capacity", "b.status"])
     .where("pb.tenant_id", "=", ctx.tenantId)
     .where("pb.product_id", "=", product.id)
-    .where("b.status", "=", "active")
     .orderBy("b.id")
     .execute();
-  const eligibleBoatIds = boats.map((b) => b.id);
+  const eligibleBoatIds = eligible.map((b) => b.id);
+  const boats = eligible.filter((b) => b.status === "active");
 
   const problems: ProductPublishProblem[] = [];
   if (product.sales_status === "archived") problems.push("product_archived");

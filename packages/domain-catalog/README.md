@@ -68,6 +68,7 @@ Capacity is the trip's seat count until holds and bookings exist. G2.6 subtracts
 
 - Ticket types, prices, fees, taxes, and cancellation policy, including the change cutoff, arrive with G2.5, and the publish check grows with them.
 - Partial-day operator blocks are deferred. A single departure is blocked by closing it.
+- Browser access from tenant hostnames is deferred to G2.14b. `/v1/public/trips` resolves the tenant from the verified Origin, but the API's CORS allowlist is static configuration until G2.14b adds verified-origin CORS with its preflights. Until then a browser can call it only from a configured origin.
 - Location contact details are deferred. A tenant's contact details belong to its brand configuration (G2.14a).
 - Staff endpoints that create or change locations, boats, products, schedules, and blackouts arrive with the console goal. Until then the seed and tests use the setup commands in `setup.ts`, which apply the same validation and audit.
 - The runtime has no UPDATE grant on locations, boats, schedules, or blackouts yet. Pausing a schedule, archiving a location, retiring a boat, or lifting a blackout therefore arrives with those endpoints. The code paths that honor those states are tested by changing them as the admin.

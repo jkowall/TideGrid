@@ -534,6 +534,32 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
   });
 
   describe("publishing", () => {
+    it("reports every eligible boat after publishing, retired ones included", async () => {
+      const [productId, spare] = await inA(async (trx) => {
+        const c = ctx(A.id);
+        const boat = await createBoat(trx, c, { name: "Spare", guestCapacity: 8, reason: "test" });
+        const id = await createProduct(trx, c, {
+          locationId: a.location,
+          kind: "shared_seat",
+          name: "Two boats",
+          durationMinutes: 60,
+          maxPartySize: 4,
+          eligibleBoatIds: [a.boat, boat],
+          reason: "test",
+        });
+        return [id, boat] as const;
+      });
+      await admin`update public.boats set status = 'retired' where id = ${spare}`;
+      const result = await inA((trx) =>
+        publishProduct(trx, ctx(A.id), { productId, reason: "test" }),
+      );
+      if (result.kind !== "published") throw new Error(JSON.stringify(result));
+      const listed = await inA((trx) => loadCatalog(trx, A.id));
+      const fromCatalog = listed.products.find((p) => p.id === productId)?.eligibleBoatIds ?? [];
+      expect([...result.product.eligibleBoatIds].sort()).toEqual([a.boat, spare].sort());
+      expect([...fromCatalog].sort()).toEqual([...result.product.eligibleBoatIds].sort());
+    });
+
     it("blocks a product with no eligible boat or a party larger than it can seat", async () => {
       const results = await inA(async (trx) => {
         const c = ctx(A.id);

@@ -10,7 +10,8 @@ const DAY_MS = 86_400_000;
 
 /**
  * Zones where the runtime's zone data and PostgreSQL's disagreed when this was
- * written (2026-09-30: Node 24.21 with tz 2026a, Neon PostgreSQL 17.11).
+ * written. An alias such as Canada/Pacific counts as drift when its canonical
+ * zone is listed here. (2026-09-30: Node 24.21 with tz 2026a, Neon PostgreSQL 17.11).
  * PostgreSQL reads Vancouver and Edmonton as keeping daylight time through the
  * 2026-27 winter; the runtime does not. The two read Casablanca and El Aaiun an
  * hour apart for most of the year. Generation skips and names such departures
@@ -37,13 +38,16 @@ describe.skipIf(!env)("runtime zone data against PostgreSQL", () => {
   });
 
   it("reads offsets and day boundaries the same for every accepted zone, apart from known drift", async () => {
-    const pgZones = new Set(
-      (await admin<{ name: string }[]>`select name from pg_timezone_names`).map((r) => r.name),
-    );
-    const zones = Intl.supportedValuesOf("timeZone").filter(
-      (z) => isValidTimeZone(z) && pgZones.has(z),
-    );
+    // Every name the catalog accepts: PostgreSQL's names that pass the
+    // validator, aliases included, not only the runtime's canonical list.
+    const zones = (await admin<{ name: string }[]>`select name from pg_timezone_names`)
+      .map((r) => r.name)
+      .filter(isValidTimeZone)
+      .sort();
     expect(zones.length).toBeGreaterThan(300);
+    const canonical = (zone: string) =>
+      new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions().timeZone;
+    const knownDrift = (zone: string) => KNOWN_DRIFT.has(zone) || KNOWN_DRIFT.has(canonical(zone));
 
     // Noon UTC every day for three years.
     const first = Date.UTC(2026, 9, 1, 12);
@@ -79,7 +83,7 @@ describe.skipIf(!env)("runtime zone data against PostgreSQL", () => {
         });
       }
     }
-    expect([...drift].filter((z) => !KNOWN_DRIFT.has(z)).sort()).toEqual([]);
+    expect([...drift].filter((z) => !knownDrift(z)).sort()).toEqual([]);
     for (const zone of [
       "America/New_York",
       "Pacific/Honolulu",
