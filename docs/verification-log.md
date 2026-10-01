@@ -34,7 +34,7 @@ This log records each dated verification pass over the throwaway guest workflow 
     - Date edges return 400, not 500, and the README states what the database enforces and what only the service checks.
 - The reviewer rechecked `32620ae` and confirmed every finding fixed or documented, on its own branch: 40 database, 22 catalog, and 48 API integration tests. It accepted with small follow-ups, all applied:
   - Zone names are now case-proof, and locations and blackouts must use the exact spelling PostgreSQL lists.
-  - The one-departure-per-boat rule is recorded as a proposed narrowing in the demo build plan, pending the owner's confirmation.
+  - The one-departure-per-boat rule is recorded as a demo narrowing in the demo build plan; the owner confirmed it on 2026-10-01.
   - An API test holds a conflicting trip uncommitted until the request blocks on it, and proves the retryable 409.
   - The README now says disagreeing zone data can also surface as gap or overlap skips.
 - Flaky runs:

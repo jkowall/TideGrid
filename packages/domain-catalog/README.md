@@ -32,7 +32,7 @@ The runtime (the ICU data in V8) resolves local times, and PostgreSQL checks the
 
 ### One departure per boat
 
-A boat runs one departure at a time. Each trip holds its boat from departure until its end plus its product's turnaround buffer (`boat_free_at`). No two live trips on one boat may overlap, whatever their products. So a shared-seat trip and a private charter cannot both be scheduled on the same boat at the same time, and an operator schedules one product per slot. This is a demo narrowing recorded in the [demo build plan](../../docs/v2/12-demo-build-plan.md#goal-sequence) and awaiting the owner's confirmation.
+A boat runs one departure at a time. Each trip holds its boat from departure until its end plus its product's turnaround buffer (`boat_free_at`). No two live trips on one boat may overlap, whatever their products. So a shared-seat trip and a private charter cannot both be scheduled on the same boat at the same time, and an operator schedules one product per slot. This is a demo narrowing recorded in the [demo build plan](../../docs/v2/12-demo-build-plan.md#goal-sequence), confirmed by the owner on 2026-10-01.
 
 - Schedule creation refuses a day's departures that are closer than the trip plus its buffer (`departures_too_close`). It checks one day's clock times; departures that collide across midnight are skipped at generation instead.
 - Generation skips a departure that would overlap another live trip on the boat (`boat_conflict`).
