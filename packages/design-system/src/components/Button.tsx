@@ -86,6 +86,8 @@ export interface ButtonLinkProps
   extends CommonProps,
     Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "children"> {
   href: string;
+  /** The link element, for moving focus to it. */
+  ref?: Ref<HTMLAnchorElement>;
 }
 
 /** A link that looks like a button, for navigation such as tel: and mailto:. */
@@ -96,10 +98,12 @@ export function ButtonLink({
   iconPosition = "start",
   className,
   children,
+  ref,
   ...rest
 }: ButtonLinkProps) {
   return (
     <a
+      ref={ref}
       className={cx("tg-button", `tg-button--${variant}`, block && "tg-button--block", className)}
       {...rest}
     >

@@ -1,7 +1,40 @@
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { contrastRatio } from "@tidegrid/design-system/brand";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(new URL("./console.css", import.meta.url), "utf8");
+const calendarCss = readFileSync(new URL("./calendar/calendar.css", import.meta.url), "utf8");
+const tokens = readFileSync(
+  createRequire(import.meta.url).resolve("@tidegrid/design-system/tokens.css"),
+  "utf8",
+);
+
+/** A color token's hex value, as tokens.css declares it. */
+function token(name: string): string {
+  const value = new RegExp(`${name}:\\s*(#[0-9a-f]{6});`).exec(tokens)?.[1];
+  expect(value, name).toBeDefined();
+  return value as string;
+}
+
+/** A translucent `rgb(r g b / a)` laid over an opaque hex color, as a hex color. */
+function over(tint: string, under: string): string {
+  const m = /^rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)$/.exec(tint);
+  expect(m, tint).not.toBeNull();
+  const [r, g, b, a] = (m as RegExpExecArray).slice(1).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+  ];
+  const mixed = [r, g, b].map((c, i) => {
+    const base = Number.parseInt(under.slice(1 + i * 2, 3 + i * 2), 16);
+    return Math.round(a * c + (1 - a) * base)
+      .toString(16)
+      .padStart(2, "0");
+  });
+  return `#${mixed.join("")}`;
+}
 
 /** The declarations of the first rule for `selector` inside `scope`. */
 function rule(scope: string, selector: string): string {
@@ -40,7 +73,24 @@ describe("console styles", () => {
   });
 });
 
+describe("calendar styles", () => {
+  it("keeps the Today pill's Tide Lime text at 4.5:1 on its tint over Harbor", () => {
+    const pill = rule(calendarCss, ".cal-day__today");
+    expect(pill).toMatch(/color:\s*var\(--tg-tide-lime\);/);
+    const tint = /background:\s*(rgb\([^)]*\));/.exec(pill)?.[1] ?? "";
+    const ground = over(tint, token("--tg-harbor"));
+    expect(contrastRatio(token("--tg-tide-lime"), ground)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe("static files", () => {
+  it("wraps the whole console in an error boundary with the designed failure screen", () => {
+    const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
+    expect(main).toMatch(
+      /<ErrorBoundary fallback=\{<CrashedConsole \/>\}>\s*<App \/>\s*<\/ErrorBoundary>/,
+    );
+  });
+
   it("serves a favicon so /favicon.ico is never a 404", () => {
     const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
     expect(index).toContain('<link rel="icon" href="/favicon.ico" sizes="32x32" />');

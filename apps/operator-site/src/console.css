@@ -283,6 +283,13 @@
 .console-nav a .tg-icon {
   color: var(--text-muted);
 }
+/* Below 24rem a label and its icon no longer fit a third of the row; the
+   labels stay, the decorative icons go. */
+@media (max-width: 23.99rem) {
+  .console-nav a .tg-icon {
+    display: none;
+  }
+}
 .console-nav a:hover {
   background: var(--surface-hover);
   color: var(--text-strong);

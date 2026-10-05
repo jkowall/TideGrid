@@ -2,10 +2,12 @@ import type { StaffTrip, TripSalesState, TripSalesStateRequest } from "@tidegrid
 import type { IconName, StatusTone } from "@tidegrid/design-system/components";
 import {
   addDays,
-  formatClock,
+  earlier,
   formatDate,
+  formatTripTime,
   isLocalDate,
   type LocalDate,
+  later,
   startOfWeek,
 } from "@tidegrid/design-system/format";
 
@@ -21,10 +23,40 @@ export function weekOf(date: LocalDate): { start: LocalDate; end: LocalDate; day
   return { start, end: addDays(start, 6), days };
 }
 
-/** Read `?week=` from the address: any date in the week, or this week when missing or wrong. */
+/** Staff page two years back and two years ahead of today. */
+export const horizonDays = 730;
+/** The API's date range: weeks must start on or after the first and end by the last. */
+const apiFirstDate = "2000-01-02";
+const apiLastDate = "2099-12-30";
+
+/** The first and last week a person can reach, as the Sundays that start them. */
+export function weekBounds(today: LocalDate): { first: LocalDate; last: LocalDate } {
+  const firstAllowed = startOfWeek(addDays(apiFirstDate, 6));
+  const lastAllowed = startOfWeek(addDays(apiLastDate, -6));
+  return {
+    first: later(firstAllowed, startOfWeek(addDays(today, -horizonDays))),
+    last: earlier(lastAllowed, startOfWeek(addDays(today, horizonDays))),
+  };
+}
+
+/** A week start kept within the bounds. */
+export function clampWeek(start: LocalDate, today: LocalDate): LocalDate {
+  const { first, last } = weekBounds(today);
+  return later(first, earlier(startOfWeek(start), last));
+}
+
+/**
+ * Read `?week=` from the address: any date in the week, kept within two years
+ * of today, or this week when it is missing or unreadable.
+ */
 export function readWeek(search: string, today: LocalDate): LocalDate {
   const value = new URLSearchParams(search).get("week") ?? "";
-  return startOfWeek(isLocalDate(value) ? value : today);
+  return isLocalDate(value) ? clampWeek(value, today) : startOfWeek(today);
+}
+
+/** Whether a value is a sales state this console knows how to show. */
+export function isKnownSalesState(value: unknown): value is TripSalesState {
+  return typeof value === "string" && Object.hasOwn(salesStates, value);
 }
 
 export const salesStates: Record<
@@ -142,53 +174,98 @@ export function hasDeparted(trip: Pick<StaffTrip, "startsAt">, now: Date): boole
   return Date.parse(trip.startsAt) <= now.getTime();
 }
 
+export function cutoffPassed(trip: Pick<StaffTrip, "salesCloseAt">, now: Date): boolean {
+  return Date.parse(trip.salesCloseAt) <= now.getTime();
+}
+
 /**
  * The changes a trip offers, in the API's transition rules: publish from
  * draft, close from published, reopen from closed, cancel from any state that
- * is not final, and complete once the trip has departed. Opening or closing
- * sales on a trip that has left is pointless, so a departed trip offers
- * complete and cancel only.
+ * is not final, and complete once the trip has departed.
+ *
+ * Publishing, closing, and reopening only matter while guests can still book,
+ * so they are offered until the booking cutoff. After it, a trip that has not
+ * left offers cancel only, and a departed trip offers complete and cancel.
  */
-export function actionsFor(trip: Pick<StaffTrip, "salesState" | "startsAt">, now: Date) {
-  const departed = hasDeparted(trip, now);
-  const actions: ActionKind[] = [];
-  switch (trip.salesState) {
-    case "draft":
-      if (!departed) actions.push("publish");
-      actions.push("cancel");
-      break;
-    case "published":
-      actions.push(departed ? "complete" : "close", "cancel");
-      break;
-    case "closed":
-      actions.push(departed ? "complete" : "reopen", "cancel");
-      break;
-    case "canceled":
-    case "completed":
-      break;
+export function actionsFor(
+  trip: Pick<StaffTrip, "salesState" | "startsAt" | "salesCloseAt">,
+  now: Date,
+) {
+  if (trip.salesState === "canceled" || trip.salesState === "completed") return [];
+  if (hasDeparted(trip, now)) {
+    return trip.salesState === "draft"
+      ? (["cancel"] as ActionKind[])
+      : (["complete", "cancel"] as ActionKind[]);
   }
-  return actions;
+  if (cutoffPassed(trip, now)) return ["cancel"] as ActionKind[];
+  const sales: Record<"draft" | "published" | "closed", ActionKind> = {
+    draft: "publish",
+    published: "close",
+    closed: "reopen",
+  };
+  return [sales[trip.salesState], "cancel"] as ActionKind[];
 }
 
-/** What the dialog says the change does, in the operator's words. */
-export function consequence(kind: ActionKind, cutoff: string): string {
+/** What the dialog says a change does, in the operator's words, for this trip now. */
+export function consequence(
+  kind: ActionKind,
+  trip: { cutoff: string; cutoffPassed: boolean; departed: boolean; blackedOut: boolean },
+): string {
+  const hidden = trip.blackedOut
+    ? " A blackout covers this trip, so guests don't see it while the blackout applies."
+    : "";
   switch (kind) {
     case "publish":
-      return `Guests can book this trip until the booking cutoff, ${cutoff}.`;
+      return trip.blackedOut
+        ? "A blackout covers this trip, so guests can't see or book it while the blackout applies, even once it is published."
+        : `Guests can book this trip until the booking cutoff, ${trip.cutoff}.`;
     case "reopen":
-      return `Guests can book this trip again until the booking cutoff, ${cutoff}.`;
+      return trip.blackedOut
+        ? "A blackout covers this trip, so guests can't see or book it while the blackout applies, even with sales open."
+        : `Guests can book this trip again until the booking cutoff, ${trip.cutoff}.`;
     case "close":
-      return "Guests can't book this trip while sales are closed. Existing bookings stay as they are, and you can reopen sales later.";
+      return `Guests can't book this trip while sales are closed. Existing bookings stay as they are, and you can reopen sales before the booking cutoff, ${trip.cutoff}.${hidden}`;
     case "complete":
       return "This records that the trip ran. Completed is final.";
     case "cancel":
-      return "Canceling is final. The trip stops selling, and it can't be reopened or completed. Existing bookings are not changed.";
+      if (trip.departed) {
+        return "Canceling is final. It records that this trip did not run, and it can't be marked completed afterwards. Existing bookings are not changed.";
+      }
+      if (trip.cutoffPassed) {
+        return "Canceling is final. Online booking for this trip has already closed, and it can't be reopened or completed. Existing bookings are not changed.";
+      }
+      return "Canceling is final. Guests can't book the trip from now on, and it can't be reopened or completed. Existing bookings are not changed.";
   }
 }
 
+/**
+ * The trip's start on the marina's clock, with the zone's short name in the
+ * hour clocks go back, when the same time happens twice.
+ */
+export function tripStart(trip: Pick<StaffTrip, "localStartTime" | "startsAt" | "timeZone">) {
+  return formatTripTime(trip.localStartTime, trip.startsAt, trip.timeZone);
+}
+
 /** A trip as one line, for dialogs and announcements: "Sunset Harbor Cruise, Sun, Nov 1, 6:00 PM". */
-export function tripLine(trip: Pick<StaffTrip, "productName" | "localDate" | "localStartTime">) {
-  return `${trip.productName}, ${formatDate(trip.localDate, "medium")}, ${formatClock(trip.localStartTime)}`;
+export function tripLine(
+  trip: Pick<StaffTrip, "productName" | "localDate" | "localStartTime" | "startsAt" | "timeZone">,
+) {
+  return `${trip.productName}, ${formatDate(trip.localDate, "medium")}, ${tripStart(trip)}`;
+}
+
+/**
+ * Seats for the calendar. Seats left only mean something while the trip can
+ * still sell, so a trip that has left, or is final, shows its size instead.
+ */
+export function capacityText(trip: Pick<StaffTrip, "capacity" | "salesState">, departed: boolean) {
+  const { kind, total, remaining } = trip.capacity;
+  const settled = departed || trip.salesState === "canceled" || trip.salesState === "completed";
+  if (kind === "whole_boat") {
+    if (settled) return `Whole boat, up to ${total} guests`;
+    return remaining > 0 ? `Whole boat, up to ${total} guests` : "Whole boat, booked";
+  }
+  if (settled) return `${total} ${total === 1 ? "seat" : "seats"}`;
+  return `${remaining} of ${total} seats left`;
 }
 
 /** Why a change did not happen, from the API's answer. */
@@ -197,6 +274,7 @@ export type ActionFailure =
   | { kind: "not_departed" }
   | { kind: "signed_out" }
   | { kind: "forbidden" }
+  | { kind: "suspended" }
   | { kind: "not_found" }
   | { kind: "key_reused" }
   | { kind: "invalid" }
@@ -207,6 +285,7 @@ export function failureFrom(status: number, code: string | undefined): ActionFai
   if (status === 409 && code === "trip_state_conflict") return { kind: "conflict" };
   if (status === 409 && code === "trip_not_departed") return { kind: "not_departed" };
   if (status === 401) return { kind: "signed_out" };
+  if (status === 403 && code === "tenant_suspended") return { kind: "suspended" };
   if (status === 403) return { kind: "forbidden" };
   if (status === 404) return { kind: "not_found" };
   if (status === 422) return { kind: "key_reused" };
@@ -215,27 +294,39 @@ export function failureFrom(status: number, code: string | undefined): ActionFai
 }
 
 /**
+ * What the calendar learned when it reloaded after a conflict: the trip's
+ * state now, that the trip was not in the week, or that the reload failed.
+ */
+export type AfterConflict =
+  | { reloaded: true; current: TripSalesState }
+  | { reloaded: true; current?: undefined }
+  | { reloaded: false; current?: undefined };
+
+/**
  * Plain words for a failure. `retry`: the form stays, because sending the
- * same change again can work (and the API makes it happen once).
+ * same change again can work (and the API makes it happen once). `signIn`:
+ * the way forward is signing in again.
  */
 export function failureCopy(
   failure: ActionFailure,
-  trip: Pick<StaffTrip, "localStartTime" | "localDate">,
-  current: TripSalesState | undefined,
-): { title: string; body: string; retry: boolean } {
+  trip: Pick<StaffTrip, "localStartTime" | "localDate" | "startsAt" | "timeZone">,
+  after: AfterConflict = { reloaded: false },
+): { title: string; body: string; retry: boolean; signIn?: true } {
   switch (failure.kind) {
     case "conflict":
       return {
         title: "Someone changed this trip first",
-        body: current
-          ? `It's ${salesStates[current].label.toLowerCase()} now, so nothing was changed. Check it on the calendar, then try again if you still need to.`
-          : "Nothing was changed. The calendar now shows the trip as it is.",
+        body: after.current
+          ? `It's ${salesStates[after.current].label.toLowerCase()} now, so nothing was changed. Check it on the calendar, then try again if you still need to.`
+          : after.reloaded
+            ? "Nothing was changed, and the trip is no longer in this week."
+            : "Nothing was changed. Reload the calendar to see the trip as it is now.",
         retry: false,
       };
     case "not_departed":
       return {
         title: "This trip hasn't departed yet",
-        body: `You can mark it completed after it leaves at ${formatClock(trip.localStartTime)} on ${formatDate(trip.localDate, "medium")}.`,
+        body: `You can mark it completed after it leaves at ${tripStart(trip)} on ${formatDate(trip.localDate, "medium")}.`,
         retry: false,
       };
     case "signed_out":
@@ -243,11 +334,18 @@ export function failureCopy(
         title: "You're signed out",
         body: "Nothing was changed. Sign in again, then make the change.",
         retry: false,
+        signIn: true,
       };
     case "forbidden":
       return {
         title: "Your role can't change trips",
         body: "Nothing was changed. An owner or booking staff member can make this change.",
+        retry: false,
+      };
+    case "suspended":
+      return {
+        title: "This operator is suspended",
+        body: "Nothing was changed. Trips can't be changed while the operator is suspended.",
         retry: false,
       };
     case "not_found":

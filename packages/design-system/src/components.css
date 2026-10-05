@@ -137,6 +137,14 @@
   cursor: not-allowed;
   text-decoration: none;
 }
+/* On the dark console a sunken fill vanished into Harbor; an unavailable
+   button keeps its outline, dimmed, so it still reads as a button. */
+.tg-dark .tg-button:disabled,
+.tg-dark .tg-button[aria-disabled="true"]:not([aria-busy="true"]) {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
 /* Busy keeps its colors and focus: it is working, not unavailable. */
 .tg-button[aria-busy="true"] {
   cursor: progress;

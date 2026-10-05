@@ -34,11 +34,29 @@
     padding-inline: var(--space-2);
   }
 }
+/* Below 24rem the three words no longer fit: Previous and Next become 44 px
+   chevrons, still named "Previous week" and "Next week", and This week takes
+   the rest of the row. */
+@media (max-width: 23.99rem) {
+  .cal-bar__nav {
+    display: grid;
+    grid-template-columns: var(--tap-min) minmax(0, 1fr) var(--tap-min);
+  }
+  .cal-bar__word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
 .cal-readonly {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  max-width: 44rem;
+  max-width: var(--measure);
   margin: 0;
   padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border-subtle);
@@ -77,14 +95,24 @@
 }
 
 /* The week at a glance: one box a day, each a jump to that day. Today carries
-   the console's "current" mark, Tide Lime, and says "Today" in words. */
+   the console's "current" mark, Tide Lime, and says "Today" in words.
+   Every box is at least 44 px wide. Where seven do not fit, at about 352 px
+   and below, the strip scrolls sideways inside itself; the page never does.
+   The padding keeps focus rings inside the scrolling box. */
 .cal-strip {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(var(--tap-min), 1fr));
   gap: var(--space-1);
-  margin: 0;
-  padding: 0;
+  margin: -0.375rem;
+  padding: 0.375rem;
+  overflow-x: auto;
   list-style: none;
+  scrollbar-width: thin;
+}
+@media (max-width: 23.99rem) {
+  .cal-strip {
+    gap: 0.125rem;
+  }
 }
 @media (min-width: 48rem) {
   .cal-strip {
@@ -142,9 +170,12 @@
   color: var(--tg-tide-lime);
 }
 .cal-strip--skeleton {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: var(--space-2);
+  overflow: hidden;
+}
+/* Placeholders a step lighter than Harbor, so the shimmer reads on the page. */
+.cal-week--skeleton {
+  --surface-sunken: #2a3330;
+  --surface-raised: #36413c;
 }
 
 .cal-day {
@@ -360,6 +391,10 @@
   grid-template-areas: none;
   border-left-color: var(--border-subtle);
 }
+/* Without named areas, "main" would place the bars in empty implicit tracks. */
+.cal-trip--skeleton .cal-trip__main {
+  grid-area: auto;
+}
 
 /* Change dialog */
 .cal-dialog__trip {
@@ -381,6 +416,9 @@
   margin: 0;
   font-size: var(--text-sm);
 }
-.cal-dialog__trip .tg-status {
+.cal-dialog__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   margin-top: var(--space-2);
 }

@@ -192,9 +192,21 @@ export function ConsoleShell({
   focusHeading?: boolean;
 }) {
   const { path, moved, navigate } = usePath();
-  const focusPage = focusHeading || moved;
   const { principal, memberships } = me;
   const [scopeId, setScopeId] = useState(memberships[0]?.tenantId);
+  // Switching operators on a page restarts pages keyed on the operator. Their
+  // headings must not take focus then: the person is still in the picker, and
+  // moving them away on a change of value would be a surprise.
+  const [switchedOn, setSwitchedOn] = useState<string | null>(null);
+  useEffect(() => {
+    void path;
+    setSwitchedOn(null);
+  }, [path]);
+  const focusPage = switchedOn !== path && (focusHeading || moved);
+  const selectScope = (tenantId: string) => {
+    setScopeId(tenantId);
+    setSwitchedOn(path);
+  };
   const selected = memberships.find((m) => m.tenantId === scopeId) ?? memberships[0];
   const current = sections.find((s) => s.path === path);
   useDocumentTitle(
@@ -215,7 +227,8 @@ export function ConsoleShell({
   if (path === "/") {
     page = <Overview me={me} selected={selected} focusHeading={focusPage} />;
   } else if (path === "/calendar") {
-    page = <CalendarPage membership={selected} focusHeading={focusPage} />;
+    // Keyed on the operator: another operator's week starts from nothing.
+    page = <CalendarPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />;
   } else if (path === "/bookings") {
     page = (
       <Placeholder
@@ -249,7 +262,7 @@ export function ConsoleShell({
         <div className="console-rail__top">
           <Wordmark />
         </div>
-        <ScopePicker memberships={memberships} selected={selected} onSelect={setScopeId} />
+        <ScopePicker memberships={memberships} selected={selected} onSelect={selectScope} />
         <nav className="console-nav" aria-label="Console">
           <ul>
             {sections.map((s) => (
