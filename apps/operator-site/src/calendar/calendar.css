@@ -217,6 +217,18 @@
     padding: var(--space-4) var(--space-5);
   }
 }
+/* A final trip, or anyone who can only look: no empty row where actions go. */
+.cal-trip--no-actions {
+  grid-template-areas:
+    "time status"
+    "main main";
+}
+@media (min-width: 60rem) {
+  .cal-trip--no-actions {
+    grid-template-areas: "time main status";
+    grid-template-rows: auto;
+  }
+}
 .cal-trip[data-state="draft"] {
   --tone: var(--status-pending);
 }

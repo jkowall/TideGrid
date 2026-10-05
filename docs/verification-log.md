@@ -2,6 +2,42 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-10-05
+
+### G2.11a and G2.12a trips slice verification, October 5, 2026
+
+- Built on branch `build/g2.11a-trips-slice` from `9349807`, which is G2.14a rebased onto main after G2.4 merged. The owner pulled the first, thinnest pieces of G2.11 and G2.12 forward on 2026-10-05 so the demo can be tested end to end; the step is recorded in the [demo build plan](v2/12-demo-build-plan.md#goal-sequence). The slice consumes the G2.4 catalog API unchanged. Contracts, domain packages, the database, the API, migrations, and CI are untouched.
+- Guest, on each branded site:
+  - upcoming trips from `GET /v1/public/trips`, four weeks at a time from the guest's today, with Previous and Next, and a party size from 1 to 12;
+  - trips grouped by the marina's local date, with "Today" and "Tomorrow" on the marina's calendar;
+  - each trip shows its stored local start time, its duration, the product, shared seats left or the whole boat, the meeting point, and "Book by" from the booking cutoff on the trip zone's clock;
+  - the page says whose clock the times use, and names a clock change in the dates shown;
+  - the address keeps the dates and party, so a reload shows the same list;
+  - loading, updating, empty, error with retry, and contract-failure states;
+  - no Book button. The screen's one primary action is calling or emailing the operator, and "Try again" takes that role while trips fail to load.
+- Console calendar, for the selected operator:
+  - a Sunday to Saturday week from `GET /api/v1/staff/tenants/{tenantId}/trips`, with Previous, This week, and Next, kept in the address;
+  - each trip shows its local time, product, boat, a sales-state badge with icon and label, a "Blacked out" badge, capacity, and the booking cutoff;
+  - owners and booking staff publish, close, reopen, cancel, and complete trips through a dialog that requires a reason. Canceling confirms in a danger dialog. Completing is offered only after departure;
+  - each change sends a new Idempotency-Key. Sending the same change again after a failure reuses its key, so the API applies it once;
+  - finance sees the same week with no controls and a view-only note. The API also refused a hand-made finance request with 403 and left the trip published;
+  - `trip_state_conflict` and `trip_not_departed` read in plain words, with no codes;
+  - focus follows the G2.14a rules. After a change it lands on the trip's heading, and after a dismissal on the trip's own button.
+- Design system: date and time formatting in a trip's zone, a select field, a modal dialog on the native `<dialog>`, a danger button, a badge icon override, and ten icons. Every new color pair has a contrast test.
+- Time zones. Start times are the API's stored wall clock, never recomputed in the browser. The cutoff is converted with the trip's zone and names the zone when the clock changes between the cutoff and the departure. On both surfaces the Nov 1, 2026 charter at 8:00 AM EST shows its cutoff as Sat, Oct 31, 9:00 AM EDT. Unit tests run with the viewer in Tokyo and the marina in New York.
+- Automated checks: `pnpm check` is green. It ran 411 unit tests across ten packages (28 in the Workers runtime), Biome on 184 files, typecheck, three dry-run deploys, doc links, and 29 prototype tests. New tests cover grouping by local date, party changes, paging, empty, error, retry focus, contract failure, and the address on the guest page. On the console they cover role gating (finance gets no actions; roles come from `/v1/me`), the reason requirement, the Idempotency-Key header and its reuse on retry, both 409 codes, the danger dialog, Escape, focus after the dialog, and week navigation across the clock change.
+- Browser walkthrough in the built-in browser at 375 and 1280, on a throwaway Neon branch with migrations and the seed, against the local API. The production builds were served with their `_headers` policies. Two local changes were made to the served policies: the guest's `connect-src` gained the local API, and both gained a `report-uri`.
+  - Both brands' lists render in their own colors and fonts. Honolulu times stay Honolulu's on a browser in New York.
+  - The Oct 31 to Nov 1 change reads correctly on both sides in the guest list and in the console's Oct 25 to 31 and Nov 1 to 7 weeks.
+  - The console works as owner, booking staff (marked a departed trip completed), finance, and the Reef owner.
+  - End to end: the Tuesday, Oct 6 cruise was closed in the console and was gone from the Harbor guest list on reload; reopened, it was back.
+  - Cancel confirmed in its danger dialog; Escape and "Keep trip" changed nothing and returned focus to the button.
+  - A real `trip_state_conflict`, from two console tabs, read in plain words.
+  - Clean production tabs logged nothing to the console. No content security policy reports arrived; a deliberate control violation proved the report path. No page overflowed horizontally at 375.
+  - The blacked-out view used one synthetic boat blackout added on the throwaway branch through the catalog's own setup service. The seed creates its blackouts before generating trips, so it has no blacked-out trip.
+- Fixed during the browser pass: at 375 the guest dates wrapped to three lines between Previous and Next with a wide body font; a conflict dialog kept showing the old state; after a dialog closed, focus could return to whatever had it before, which in Safari need not be the button that opened it; read-only rows kept an empty actions row.
+- Not done: the independent review and the UI review; screen reader and physical device tests; Cloudflare Access sign-in (the magic link was used); deployed CORS for tenant hostnames, which G2.14b owns. `trip_not_departed` is covered by unit tests only, since the console offers Complete only after departure.
+
 ## 2026-09-30
 
 ### G2.14a Design system and brand bootstrap verification, September 30, 2026

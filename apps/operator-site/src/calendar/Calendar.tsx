@@ -580,7 +580,10 @@ function TripRow({
   const actions = canChange ? actionsFor(trip, now) : [];
   const place = showZone ? ` ${zoneCity(trip.timeZone)} time` : "";
   return (
-    <li className="cal-trip" data-state={trip.salesState}>
+    <li
+      className={actions.length > 0 ? "cal-trip" : "cal-trip cal-trip--no-actions"}
+      data-state={trip.salesState}
+    >
       {/* Read once, inside the heading. */}
       <div className="cal-trip__time" aria-hidden="true">
         <span className="cal-trip__start">{start}</span>
