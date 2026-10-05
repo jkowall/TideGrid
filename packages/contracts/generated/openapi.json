@@ -4166,6 +4166,1862 @@
           }
         }
       }
+    },
+    "/v1/public/trips/{tripId}/offer": {
+      "get": {
+        "tags": [
+          "public",
+          "pricing"
+        ],
+        "summary": "What the calling site's operator sells for one trip",
+        "description": "Resolves the browser Origin as /v1/public/trips does. For a trip on sale now: its ticket types or charter price, the add-ons offered on its date, mandatory fees, active tax rates, and the cancellation policy, under the current versions. Grants no permission and never reveals another tenant's trips.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Trip UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Trip UUID; anything else answers 404",
+            "name": "tripId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trip's offer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "offer": {
+                      "type": "object",
+                      "properties": {
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "product": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "shared_seat",
+                                "private_charter"
+                              ]
+                            },
+                            "minPartySize": {
+                              "type": "integer"
+                            },
+                            "maxPartySize": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "kind",
+                            "minPartySize",
+                            "maxPartySize"
+                          ]
+                        },
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "timeZone": {
+                              "type": "string"
+                            },
+                            "localDate": {
+                              "type": "string",
+                              "format": "date",
+                              "description": "Local calendar date, YYYY-MM-DD"
+                            },
+                            "localStartTime": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            },
+                            "startsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "startsAtLocal": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The same instant with the zone's offset, for display"
+                            }
+                          },
+                          "required": [
+                            "timeZone",
+                            "localDate",
+                            "localStartTime",
+                            "startsAt",
+                            "startsAtLocal"
+                          ]
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "priceListVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "tickets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                                "description": "Ticket type, add-on, or fee code from the trip's offer"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "name",
+                              "unitAmount",
+                              "taxable"
+                            ]
+                          },
+                          "description": "Ticket types; empty for a private charter"
+                        },
+                        "charter": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "The whole boat, whatever the party size"
+                            },
+                            "taxable": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "amount",
+                            "taxable"
+                          ],
+                          "description": "The charter price; null for shared seats"
+                        },
+                        "addOns": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                                "description": "Ticket type, add-on, or fee code from the trip's offer"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "quantityRule": {
+                                "type": "string",
+                                "enum": [
+                                  "per_booking",
+                                  "per_participant"
+                                ],
+                                "description": "per_booking: charged or limited once per booking. per_participant: once per participant, or up to the limit for each participant"
+                              },
+                              "maxQuantity": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Per booking, or per participant when quantityRule is per_participant"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "name",
+                              "unitAmount",
+                              "quantityRule",
+                              "maxQuantity",
+                              "taxable"
+                            ]
+                          },
+                          "description": "Paid add-ons offered on this trip's date"
+                        },
+                        "fees": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                                "description": "Ticket type, add-on, or fee code from the trip's offer"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "per_booking",
+                                  "per_participant"
+                                ],
+                                "description": "per_booking: charged or limited once per booking. per_participant: once per participant, or up to the limit for each participant"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "name",
+                              "unitAmount",
+                              "basis",
+                              "taxable"
+                            ]
+                          },
+                          "description": "Mandatory fees added to every booking"
+                        },
+                        "taxes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "ratePpm": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Parts per million: 70000 is 7%"
+                              },
+                              "inclusive": {
+                                "type": "boolean",
+                                "description": "Included in prices rather than added to them"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "ratePpm",
+                              "inclusive"
+                            ]
+                          }
+                        },
+                        "policy": {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "changeCutoffMinutes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "changeCutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "Trip start minus the cutoff. A guest cancellation or reschedule before this instant gets beforeCutoff; at or after it, afterCutoff"
+                            },
+                            "beforeCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "afterCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "noShow": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "text": {
+                              "type": "object",
+                              "properties": {
+                                "cancellation": {
+                                  "type": "string"
+                                },
+                                "reschedule": {
+                                  "type": "string"
+                                },
+                                "noShow": {
+                                  "type": "string"
+                                },
+                                "operatorCancellation": {
+                                  "type": "string"
+                                },
+                                "weather": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "cancellation",
+                                "reschedule",
+                                "noShow",
+                                "operatorCancellation",
+                                "weather"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "changeCutoffMinutes",
+                            "changeCutoffAt",
+                            "beforeCutoff",
+                            "afterCutoff",
+                            "noShow",
+                            "text"
+                          ],
+                          "description": "The product's policy version in force, which the guest accepts before paying"
+                        }
+                      },
+                      "required": [
+                        "tripId",
+                        "product",
+                        "trip",
+                        "currency",
+                        "priceListVersion",
+                        "tickets",
+                        "charter",
+                        "addOns",
+                        "fees",
+                        "taxes",
+                        "policy"
+                      ],
+                      "description": "What the operator sells for one bookable trip, under its current versions"
+                    }
+                  },
+                  "required": [
+                    "offer"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin, or no such trip",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The trip is not on sale now (trip_not_bookable) or has no price list or policy (pricing_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/quotes": {
+      "post": {
+        "tags": [
+          "public",
+          "pricing"
+        ],
+        "summary": "Price a party on a trip and keep the quote",
+        "description": "Resolves the browser Origin as /v1/public/trips does. Prices the party, add-ons, and optional promotion code on the server under the current versions and stores an immutable quote that names every version it used. Idempotent by key: a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tripId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "party": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "tickets"
+                            ]
+                          },
+                          "tickets": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                                  "description": "Ticket type, add-on, or fee code from the trip's offer"
+                                },
+                                "quantity": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 500
+                                }
+                              },
+                              "required": [
+                                "code",
+                                "quantity"
+                              ]
+                            },
+                            "minItems": 1,
+                            "maxItems": 20,
+                            "description": "Shared seats: one entry per ticket type; each ticket is one participant"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "tickets"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "charter"
+                            ]
+                          },
+                          "guests": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 500,
+                            "description": "Private charter: participants aboard; the charter price does not change"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "guests"
+                        ]
+                      }
+                    ]
+                  },
+                  "addOns": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                          "description": "Ticket type, add-on, or fee code from the trip's offer"
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 50000
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "quantity"
+                      ]
+                    },
+                    "maxItems": 50,
+                    "default": []
+                  },
+                  "promotionCode": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$",
+                    "description": "Promotion code; case does not matter"
+                  }
+                },
+                "required": [
+                  "tripId",
+                  "party"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored quote (or the stored response replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "quote": {
+                      "type": "object",
+                      "properties": {
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "product": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "shared_seat",
+                                "private_charter"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "kind"
+                          ]
+                        },
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "timeZone": {
+                              "type": "string"
+                            },
+                            "localDate": {
+                              "type": "string",
+                              "format": "date",
+                              "description": "Local calendar date, YYYY-MM-DD"
+                            },
+                            "localStartTime": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            },
+                            "startsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "startsAtLocal": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The same instant with the zone's offset, for display"
+                            }
+                          },
+                          "required": [
+                            "timeZone",
+                            "localDate",
+                            "localStartTime",
+                            "startsAt",
+                            "startsAtLocal"
+                          ]
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "priceListVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "lines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "lineNo": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "ticket",
+                                  "charter",
+                                  "add_on",
+                                  "fee",
+                                  "discount"
+                                ]
+                              },
+                              "code": {
+                                "type": "string",
+                                "description": "Ticket, add-on, or fee code; charter; or the promotion code"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "per_booking",
+                                  "per_participant",
+                                  null
+                                ],
+                                "description": "Fees and add-ons only"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "quantity times unitAmount; negative on the discount line"
+                              },
+                              "discountAmount": {
+                                "type": "integer",
+                                "description": "This trip-price line's share of the discount"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              },
+                              "taxes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "taxRateId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "ratePpm": {
+                                      "type": "integer"
+                                    },
+                                    "inclusive": {
+                                      "type": "boolean"
+                                    },
+                                    "taxableAmount": {
+                                      "type": "integer",
+                                      "description": "Pre-tax amount of this line the rate applies to"
+                                    },
+                                    "amount": {
+                                      "type": "integer",
+                                      "description": "Integer US cents"
+                                    }
+                                  },
+                                  "required": [
+                                    "taxRateId",
+                                    "name",
+                                    "ratePpm",
+                                    "inclusive",
+                                    "taxableAmount",
+                                    "amount"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "lineNo",
+                              "kind",
+                              "code",
+                              "name",
+                              "basis",
+                              "quantity",
+                              "unitAmount",
+                              "amount",
+                              "discountAmount",
+                              "taxable",
+                              "taxes"
+                            ]
+                          }
+                        },
+                        "taxes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "taxRateId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "version": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "ratePpm": {
+                                "type": "integer"
+                              },
+                              "inclusive": {
+                                "type": "boolean"
+                              },
+                              "taxableAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              }
+                            },
+                            "required": [
+                              "taxRateId",
+                              "version",
+                              "name",
+                              "ratePpm",
+                              "inclusive",
+                              "taxableAmount",
+                              "amount"
+                            ]
+                          },
+                          "description": "Per rate, summed over the lines"
+                        },
+                        "promotion": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "discountKind": {
+                              "type": "string",
+                              "enum": [
+                                "fixed_amount",
+                                "percent"
+                              ]
+                            },
+                            "amountOff": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "description": "Integer US cents"
+                            },
+                            "percentOffBp": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "version",
+                            "discountKind",
+                            "amountOff",
+                            "percentOffBp"
+                          ]
+                        },
+                        "totals": {
+                          "type": "object",
+                          "properties": {
+                            "subtotal": {
+                              "type": "integer",
+                              "description": "Trip price and add-ons, before the discount"
+                            },
+                            "discount": {
+                              "type": "integer",
+                              "description": "Promotion discount, off the trip price only"
+                            },
+                            "fees": {
+                              "type": "integer",
+                              "description": "Mandatory fees"
+                            },
+                            "tax": {
+                              "type": "integer",
+                              "description": "Taxes added on top of prices"
+                            },
+                            "includedTax": {
+                              "type": "integer",
+                              "description": "Taxes already inside prices; informational"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "description": "subtotal - discount + fees + tax"
+                            },
+                            "amountDueNow": {
+                              "type": "integer",
+                              "description": "What checkout charges for this quote"
+                            }
+                          },
+                          "required": [
+                            "subtotal",
+                            "discount",
+                            "fees",
+                            "tax",
+                            "includedTax",
+                            "total",
+                            "amountDueNow"
+                          ],
+                          "description": "Every total is the sum of the lines above it"
+                        },
+                        "policy": {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "changeCutoffMinutes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "changeCutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "Trip start minus the cutoff. A guest cancellation or reschedule before this instant gets beforeCutoff; at or after it, afterCutoff"
+                            },
+                            "beforeCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "afterCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "noShow": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "text": {
+                              "type": "object",
+                              "properties": {
+                                "cancellation": {
+                                  "type": "string"
+                                },
+                                "reschedule": {
+                                  "type": "string"
+                                },
+                                "noShow": {
+                                  "type": "string"
+                                },
+                                "operatorCancellation": {
+                                  "type": "string"
+                                },
+                                "weather": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "cancellation",
+                                "reschedule",
+                                "noShow",
+                                "operatorCancellation",
+                                "weather"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "changeCutoffMinutes",
+                            "changeCutoffAt",
+                            "beforeCutoff",
+                            "afterCutoff",
+                            "noShow",
+                            "text"
+                          ],
+                          "description": "The product's policy version in force, which the guest accepts before paying"
+                        },
+                        "quotedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Checkout must start before this instant or ask for a new quote"
+                        }
+                      },
+                      "required": [
+                        "quoteId",
+                        "tripId",
+                        "product",
+                        "trip",
+                        "partySize",
+                        "currency",
+                        "priceListVersion",
+                        "lines",
+                        "taxes",
+                        "promotion",
+                        "totals",
+                        "policy",
+                        "quotedAt",
+                        "expiresAt"
+                      ],
+                      "description": "An immutable priced quote. Later price, tax, promotion, or policy changes never alter it."
+                    }
+                  },
+                  "required": [
+                    "quote"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin, or no such trip",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The trip is not on sale now (trip_not_bookable), has no price list or policy (pricing_unavailable), or has too few seats left (insufficient_capacity)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The party, add-ons, or promotion code cannot be priced (the code names the first problem; see QuoteProblemCode), or the idempotency key was reused with another request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/quotes/{quoteId}": {
+      "get": {
+        "tags": [
+          "public",
+          "pricing"
+        ],
+        "summary": "A stored quote, exactly as it was priced",
+        "description": "Resolves the browser Origin as /v1/public/trips does and returns the quote if it belongs to that tenant. Later price, tax, promotion, or policy changes never alter it; expiresAt says until when checkout may use it. Another tenant's quote and a malformed id answer the same 404.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Quote UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Quote UUID; anything else answers 404",
+            "name": "quoteId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "quote": {
+                      "type": "object",
+                      "properties": {
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "product": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "shared_seat",
+                                "private_charter"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "kind"
+                          ]
+                        },
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "timeZone": {
+                              "type": "string"
+                            },
+                            "localDate": {
+                              "type": "string",
+                              "format": "date",
+                              "description": "Local calendar date, YYYY-MM-DD"
+                            },
+                            "localStartTime": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            },
+                            "startsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "startsAtLocal": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The same instant with the zone's offset, for display"
+                            }
+                          },
+                          "required": [
+                            "timeZone",
+                            "localDate",
+                            "localStartTime",
+                            "startsAt",
+                            "startsAtLocal"
+                          ]
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "priceListVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "lines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "lineNo": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "ticket",
+                                  "charter",
+                                  "add_on",
+                                  "fee",
+                                  "discount"
+                                ]
+                              },
+                              "code": {
+                                "type": "string",
+                                "description": "Ticket, add-on, or fee code; charter; or the promotion code"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "per_booking",
+                                  "per_participant",
+                                  null
+                                ],
+                                "description": "Fees and add-ons only"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "quantity times unitAmount; negative on the discount line"
+                              },
+                              "discountAmount": {
+                                "type": "integer",
+                                "description": "This trip-price line's share of the discount"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              },
+                              "taxes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "taxRateId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "ratePpm": {
+                                      "type": "integer"
+                                    },
+                                    "inclusive": {
+                                      "type": "boolean"
+                                    },
+                                    "taxableAmount": {
+                                      "type": "integer",
+                                      "description": "Pre-tax amount of this line the rate applies to"
+                                    },
+                                    "amount": {
+                                      "type": "integer",
+                                      "description": "Integer US cents"
+                                    }
+                                  },
+                                  "required": [
+                                    "taxRateId",
+                                    "name",
+                                    "ratePpm",
+                                    "inclusive",
+                                    "taxableAmount",
+                                    "amount"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "lineNo",
+                              "kind",
+                              "code",
+                              "name",
+                              "basis",
+                              "quantity",
+                              "unitAmount",
+                              "amount",
+                              "discountAmount",
+                              "taxable",
+                              "taxes"
+                            ]
+                          }
+                        },
+                        "taxes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "taxRateId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "version": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "ratePpm": {
+                                "type": "integer"
+                              },
+                              "inclusive": {
+                                "type": "boolean"
+                              },
+                              "taxableAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              }
+                            },
+                            "required": [
+                              "taxRateId",
+                              "version",
+                              "name",
+                              "ratePpm",
+                              "inclusive",
+                              "taxableAmount",
+                              "amount"
+                            ]
+                          },
+                          "description": "Per rate, summed over the lines"
+                        },
+                        "promotion": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "discountKind": {
+                              "type": "string",
+                              "enum": [
+                                "fixed_amount",
+                                "percent"
+                              ]
+                            },
+                            "amountOff": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "description": "Integer US cents"
+                            },
+                            "percentOffBp": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "version",
+                            "discountKind",
+                            "amountOff",
+                            "percentOffBp"
+                          ]
+                        },
+                        "totals": {
+                          "type": "object",
+                          "properties": {
+                            "subtotal": {
+                              "type": "integer",
+                              "description": "Trip price and add-ons, before the discount"
+                            },
+                            "discount": {
+                              "type": "integer",
+                              "description": "Promotion discount, off the trip price only"
+                            },
+                            "fees": {
+                              "type": "integer",
+                              "description": "Mandatory fees"
+                            },
+                            "tax": {
+                              "type": "integer",
+                              "description": "Taxes added on top of prices"
+                            },
+                            "includedTax": {
+                              "type": "integer",
+                              "description": "Taxes already inside prices; informational"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "description": "subtotal - discount + fees + tax"
+                            },
+                            "amountDueNow": {
+                              "type": "integer",
+                              "description": "What checkout charges for this quote"
+                            }
+                          },
+                          "required": [
+                            "subtotal",
+                            "discount",
+                            "fees",
+                            "tax",
+                            "includedTax",
+                            "total",
+                            "amountDueNow"
+                          ],
+                          "description": "Every total is the sum of the lines above it"
+                        },
+                        "policy": {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "changeCutoffMinutes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "changeCutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "Trip start minus the cutoff. A guest cancellation or reschedule before this instant gets beforeCutoff; at or after it, afterCutoff"
+                            },
+                            "beforeCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "afterCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "noShow": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "text": {
+                              "type": "object",
+                              "properties": {
+                                "cancellation": {
+                                  "type": "string"
+                                },
+                                "reschedule": {
+                                  "type": "string"
+                                },
+                                "noShow": {
+                                  "type": "string"
+                                },
+                                "operatorCancellation": {
+                                  "type": "string"
+                                },
+                                "weather": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "cancellation",
+                                "reschedule",
+                                "noShow",
+                                "operatorCancellation",
+                                "weather"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "changeCutoffMinutes",
+                            "changeCutoffAt",
+                            "beforeCutoff",
+                            "afterCutoff",
+                            "noShow",
+                            "text"
+                          ],
+                          "description": "The product's policy version in force, which the guest accepts before paying"
+                        },
+                        "quotedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Checkout must start before this instant or ask for a new quote"
+                        }
+                      },
+                      "required": [
+                        "quoteId",
+                        "tripId",
+                        "product",
+                        "trip",
+                        "partySize",
+                        "currency",
+                        "priceListVersion",
+                        "lines",
+                        "taxes",
+                        "promotion",
+                        "totals",
+                        "policy",
+                        "quotedAt",
+                        "expiresAt"
+                      ],
+                      "description": "An immutable priced quote. Later price, tax, promotion, or policy changes never alter it."
+                    }
+                  },
+                  "required": [
+                    "quote"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin, or no such quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

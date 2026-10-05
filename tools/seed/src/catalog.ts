@@ -19,6 +19,7 @@ import {
   MAX_RANGE_DAYS,
   publishProduct,
 } from "@tidegrid/domain-catalog";
+import { seedProductTerms } from "./pricing.ts";
 
 /** The season the demo sells. Fixed dates keep reruns identical. */
 const SEASON_START = "2026-09-01";
@@ -235,6 +236,8 @@ export async function seedCatalog(
             eligibleBoatIds: [boatId(p.boat)],
             reason: REASON,
           });
+          // A product publishes only with a price list and a policy (G2.5).
+          await seedProductTerms(trx, ctx, tenant.slug, p.name, productId);
           const published = await publishProduct(trx, ctx, { productId, reason: REASON });
           if (published.kind !== "published") {
             throw new Error(`seed product ${p.key} did not publish: ${JSON.stringify(published)}`);

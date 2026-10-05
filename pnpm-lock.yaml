@@ -32,6 +32,9 @@ importers:
       '@tidegrid/domain-identity':
         specifier: workspace:*
         version: link:../../packages/domain-identity
+      '@tidegrid/domain-pricing':
+        specifier: workspace:*
+        version: link:../../packages/domain-pricing
       '@tidegrid/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -308,6 +311,34 @@ importers:
         specifier: ^4.1.0
         version: 4.1.11(@types/node@24.13.6)(jsdom@30.1.1)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
+  packages/domain-pricing:
+    dependencies:
+      '@tidegrid/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@tidegrid/database':
+        specifier: workspace:*
+        version: link:../database
+      '@tidegrid/domain-catalog':
+        specifier: workspace:*
+        version: link:../domain-catalog
+      kysely:
+        specifier: ^0.29.0
+        version: 0.29.6
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.6
+      postgres:
+        specifier: ^3.4.0
+        version: 3.4.9
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.11(@types/node@24.13.6)(jsdom@30.1.1)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
   packages/observability:
     devDependencies:
       '@types/node':
@@ -347,6 +378,9 @@ importers:
       '@tidegrid/domain-catalog':
         specifier: workspace:*
         version: link:../../packages/domain-catalog
+      '@tidegrid/domain-pricing':
+        specifier: workspace:*
+        version: link:../../packages/domain-pricing
       '@tidegrid/tenant-config':
         specifier: workspace:*
         version: link:../../packages/tenant-config
