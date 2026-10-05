@@ -2,6 +2,53 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-10-05
+
+### G2.5 Pricing, add-ons, fees, and policies verification, October 5, 2026
+
+- Built on branch `build/g2.5-pricing-and-policies` from `a541eab`:
+  - migration 0005: per-product price lists (ticket types or a charter price, mandatory fees, and paid add-ons with optional date ranges), per-product policy versions, tenant tax rates (inclusive or exclusive), promotion codes with versioned terms, and immutable quotes with their lines and per-line taxes;
+  - `packages/domain-pricing`: the pure quote computation, commands that append versions, loaders, and the quote and offer services;
+  - `GET /v1/public/trips/{tripId}/offer`, an idempotent `POST /v1/public/quotes`, and `GET /v1/public/quotes/{quoteId}`, each resolved by verified origin;
+  - the publish check: a product needs a price list and a policy, in the service and in a trigger;
+  - seeded terms for both demo operators. Demo Harbor adds a state and a county tax and offers `HARBOR10`. Demo Reef's prices include its tax, and it offers `REEF25`.
+- Money rules, set out in the [pricing contract](../packages/domain-pricing/README.md):
+  - integer cents, rounded half up, per line;
+  - the discount comes off the trip price only and is split by the largest remainder;
+  - tax is charged on discounted amounts, inclusive tax is extracted from the price, and no tax is charged on tax.
+- The database holds the rules for every writer:
+  - every 0005 table is append-only for every role, and child rows can be written only in their parent's transaction;
+  - actors are stamped from the transaction, so a guest cannot write terms;
+  - a price list must be complete at commit;
+  - a quote must add up, and must be what its trip and named versions produce, or it does not commit.
+- Checks on a fresh throwaway Neon branch:
+  - migrate, then seed: 892 trips, 5 price lists with 24 items, 5 policies, 3 tax rates, 2 promotion codes, and 5 published products;
+  - a second seed: nothing added;
+  - integration: 40 database, 25 catalog, 45 pricing, and 90 API tests;
+  - unit: 457 tests across 11 packages, 28 of them in the Workers runtime, plus 29 prototype tests.
+- Workers runtime: on the same branch, `wrangler dev` served the seeded data through the runtime role.
+  - Harbor's sunset cruise, for two adults, a child, and a photo with `HARBOR10`, came to $131.09: $127.00, less $11.50, plus a $7.50 harbor fee and $8.09 in state and county tax.
+  - Reef's dive for two divers with `REEF25` came to $325.00, with $13.72 of excise tax included.
+  - Each retry replayed the same quote with `Idempotent-Replayed: true`, and each read matched.
+  - A trip asked for from the other operator's origin answered 404.
+- Seed backfill: a branch was set up like a database seeded before this goal, with published products and no terms. The seed added 5 price lists and 5 policies, and a rerun added nothing.
+- Mutation checks, each reverted:
+  - half-down rounding turned 5 of the lead's unit tests red;
+  - taxing the amount before the discount turned 5 of them red;
+  - with the two new quote checks neutered, all 9 inconsistent quote copies committed.
+- An independent test specialist wrote 79 adversarial tests: 27 unit, 32 database, and 20 API. They found five defects, each red before its fix and green after:
+  - a per-booking add-on limit was skipped when the party could not be counted;
+  - names with C1 control characters passed validation but failed the insert;
+  - a guest transaction could write terms by naming another actor;
+  - pricing error responses could be cached;
+  - a trip starting at a time with seconds could not be quoted.
+- The specialist also probed what the database self-check cannot see. Current versions, active rates, and the quote instant come from the service and its clock. The quote validity bound was added; the rest is written down in the contract.
+- Not done:
+  - independent review;
+  - 0005 is not applied to the Neon main branch, and nothing is deployed;
+  - no staff endpoints for terms or quotes, and no per-client limit on quote creation;
+  - tax rates are tenant-wide, not per location.
+
 ## 2026-09-30
 
 ### G2.14a Design system and brand bootstrap verification, September 30, 2026
