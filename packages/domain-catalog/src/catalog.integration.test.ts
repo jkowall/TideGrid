@@ -181,7 +181,14 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
         ["2026-11-02", "18:00", "2026-11-02T23:00:00.000Z", "2026-11-02T18:00:00-05:00"],
       ]);
       expect(result.created.every((t) => t.salesState === "published")).toBe(true);
-      expect(result.created[0]?.capacity).toEqual({ kind: "seats", total: 12, remaining: 12 });
+      expect(result.created[0]?.capacity).toEqual({
+        kind: "seats",
+        total: 12,
+        remaining: 12,
+        soldOut: false,
+        held: 0,
+        confirmed: 0,
+      });
     });
 
     it("keeps departures that exist on the spring-forward day and snapshots the new offset", async () => {
@@ -640,7 +647,12 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
       expect(open.map((t) => [t.product.name, t.startsAtLocal, t.salesCloseAt])).toEqual([
         ["Private Charter", "2026-11-02T00:30:00-05:00", "2026-11-01T05:30:00.000Z"],
       ]);
-      expect(open[0]?.capacity).toEqual({ kind: "whole_boat", total: 6, remaining: 6 });
+      expect(open[0]?.capacity).toEqual({
+        kind: "whole_boat",
+        total: 6,
+        remaining: 6,
+        soldOut: false,
+      });
       expect(await find(new Date("2026-11-01T05:30:00Z"))).toEqual([]);
     });
 

@@ -57,6 +57,21 @@ The active brand is simply the highest activation id, and nothing in the schema 
 
 `app.resolve_public_brand(hostname)` is the public bootstrap. It resolves the hostname through `app.resolve_hostname`, so only active, verified hostnames of active tenants return a row, and joins that tenant's active brand, filtering by the resolved tenant explicitly. The brand columns are NULL until the tenant publishes one. The API validates the stored config against the contract again before serving it, and fails closed if it does not validate.
 
+## Capacity holds
+
+The capacity and holds migration adds `capacity_holds` under rules 1 to 10. The contract, the concurrency design, and the clock decision are in the [inventory README](../domain-inventory/README.md); what matters for tenancy:
+
+- The runtime keeps the default SELECT and INSERT and may UPDATE `state` only. A trigger sets the kind, the seats taken, and every timestamp, enforces the one-way states and the capacity rule for every role, and refuses DELETE and TRUNCATE for every role, the owner included.
+- The trigger runs as the caller. It reads the trip under the caller's row-level security and filters by the hold's tenant, so a hold can never name another tenant's trip; the composite foreign key backs that up.
+- `app.trip_capacity_usage(tenant, trip)` is an invoker function. Row-level security applies inside it, and it filters by tenant explicitly.
+
+`app.capacity_hold_sweep_tenants(limit)` lets the cron sweep find the tenants with holds past their expiry instant. It is the one cross-tenant read the runtime has beyond sign-in and hostname resolution. The argument for it:
+
+- It returns tenant ids and nothing else: no hold, trip, owner, or count. An id grants nothing. Every read and write that follows runs in `inTenantTransaction` under forced row-level security, and tenant ids already appear in staff URLs.
+- What it reveals is that some tenant has at least one stale hold. That is a weaker activity signal than the shared audit and outbox id sequences already give (see the known gaps above).
+- It is read-only and STABLE, a SECURITY DEFINER function with `search_path` pinned, every relation qualified, explicit predicates, and at most 1,000 rows. EXECUTE is granted to `tidegrid_app` only.
+- The alternatives are worse. A row-level-security bypass for the cron's connection would expose every tenant's rows to one session. A tenant list in configuration drifts from the database and would silently skip new tenants. One definer function that expired holds across tenants would write audit and outbox rows outside any tenant's transaction.
+
 ## Tests
 
 - `pnpm test` runs unit tests.

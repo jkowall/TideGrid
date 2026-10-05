@@ -62,7 +62,7 @@ A trip is bookable when:
 
 A blackout is whole local days for the tenant, a location, a product, or a boat; the last is an operator block. Generation skips blackout days, and availability hides existing trips a later blackout covers without canceling them. Staff see every trip with a `blackedOut` flag.
 
-Capacity is the trip's seat count until holds and bookings exist. G2.6 subtracts held and confirmed seats; `capacityOf` in `catalog.ts` is the seam it replaces.
+Capacity left is the trip's seat count minus seats held by holds still within their time and confirmed seats, read from `app.trip_capacity_usage` by the database clock (G2.6, [inventory README](../domain-inventory/README.md#availability)). A whole-boat hold takes every seat. A guest listing leaves out a trip without room for the party; staff see every trip with `soldOut`, `held`, and `confirmed`. Only acquiring a hold decides; the listing is advisory.
 
 ## Deferred and not yet reachable
 

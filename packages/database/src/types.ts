@@ -267,6 +267,32 @@ export interface BrandActivationsTable {
   reason: ColumnType<string, string, never>;
 }
 
+// Capacity and holds (G2.6). The trigger sets kind, seats, and every
+// timestamp; the runtime may update state only.
+
+export type HoldState = "active" | "confirmed" | "released" | "expired";
+export type HoldKind = "seats" | "whole_boat";
+
+export interface CapacityHoldsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  trip_id: Fixed<string>;
+  /** Opaque owner, "<type>:<id>", such as "checkout_session:<uuid>". */
+  owner_ref: Fixed<string>;
+  /** seats on a shared-seat trip, whole_boat on a private charter; set by the database. */
+  kind: ColumnType<HoldKind, never, never>;
+  party_size: Fixed<number>;
+  /** Capacity taken: the party size, or every seat for a whole boat; set by the database. */
+  seats: ColumnType<number, never, never>;
+  state: ColumnType<HoldState, "active" | undefined, HoldState>;
+  expires_at: ColumnType<Date, Date | string, never>;
+  created_at: CreatedAt;
+  confirmed_at: ColumnType<Date | null, never, never>;
+  released_at: ColumnType<Date | null, never, never>;
+  expired_at: ColumnType<Date | null, never, never>;
+  updated_at: ColumnType<Date, never, never>;
+}
+
 export interface Database {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
@@ -285,6 +311,8 @@ export interface Database {
   blackouts: BlackoutsTable;
   brand_config_versions: BrandConfigVersionsTable;
   brand_activations: BrandActivationsTable;
+  // Capacity and holds (G2.6).
+  capacity_holds: CapacityHoldsTable;
 }
 
 export type { Generated, GeneratedAlways };

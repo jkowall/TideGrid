@@ -81,18 +81,35 @@ interface TripRow {
   sales_state: TripSalesState;
   sales_state_changed_at: Date | string;
   blacked_out: boolean;
+  /** Seats taken by holds within their time and by confirmed holds (G2.6). */
+  seats_held: number;
+  seats_confirmed: number;
 }
 
+type CapacityRow = Pick<
+  TripRow,
+  "product_kind" | "seat_capacity" | "seats_held" | "seats_confirmed"
+>;
+
 /**
- * Capacity before any booking exists. G2.6 subtracts held and confirmed seats
- * and marks a whole boat taken; this is the seam it replaces.
+ * Capacity left now. Seats held by holds within their time and confirmed
+ * seats are taken; a whole-boat hold takes every seat, so a held charter has
+ * nothing left. The numbers come from app.trip_capacity_usage, which the
+ * inventory service reads too, and are advisory: only acquisition decides.
  */
-function capacityOf(row: Pick<TripRow, "product_kind" | "seat_capacity">): TripCapacity {
+function capacityOf(row: CapacityRow): TripCapacity {
+  const remaining = Math.max(0, row.seat_capacity - row.seats_held - row.seats_confirmed);
   return {
     kind: row.product_kind === "shared_seat" ? "seats" : "whole_boat",
     total: row.seat_capacity,
-    remaining: row.seat_capacity,
+    remaining,
+    soldOut: remaining === 0,
   };
+}
+
+/** Staff also see how much is held and how much is confirmed. */
+function staffCapacityOf(row: CapacityRow): StaffTrip["capacity"] {
+  return { ...capacityOf(row), held: row.seats_held, confirmed: row.seats_confirmed };
 }
 
 function timing(row: TripRow) {
@@ -138,7 +155,7 @@ function toStaffTrip(row: TripRow): StaffTrip {
     salesStateChangedAt: instant(row.sales_state_changed_at),
     salesCloseAt: salesCloseAt(row),
     blackedOut: row.blacked_out,
-    capacity: capacityOf(row),
+    capacity: staffCapacityOf(row),
   };
 }
 
@@ -163,6 +180,7 @@ function toAvailableTrip(row: TripRow): AvailableTrip {
 /**
  * The trip columns every view needs. A blackout applies when it overlaps the
  * trip and is tenant-wide or names the trip's location, product, or boat.
+ * Seats taken (u) come from app.trip_capacity_usage, by the database clock.
  */
 const tripSelect = sql`
   select t.id as trip_id, t.product_id, p.name as product_name, p.kind as product_kind,
@@ -180,11 +198,13 @@ const tripSelect = sql`
                    or x.location_id = p.location_id
                    or x.product_id = t.product_id
                    or x.boat_id = t.boat_id)
-         ) as blacked_out
+         ) as blacked_out,
+         u.held as seats_held, u.confirmed as seats_confirmed
     from scheduled_trips t
     join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
     join locations l on l.tenant_id = p.tenant_id and l.id = p.location_id
-    join boats b on b.tenant_id = t.tenant_id and b.id = t.boat_id`;
+    join boats b on b.tenant_id = t.tenant_id and b.id = t.boat_id
+    cross join lateral app.trip_capacity_usage(t.tenant_id, t.id) u`;
 
 // Reads ---------------------------------------------------------------------------
 
@@ -199,7 +219,8 @@ export interface AvailabilityQuery {
 /**
  * What a guest may book: published trips of published products at active
  * locations on active boats, before the booking cutoff, clear of blackouts,
- * where the party fits the product and the trip's capacity.
+ * where the party fits the product and the capacity left after holds. A trip
+ * with no room for the party, sold out included, is left out.
  */
 export async function findAvailableTrips(
   trx: TenantTransaction,
@@ -216,7 +237,7 @@ export async function findAvailableTrips(
        and b.status = 'active'
        and t.starts_at - make_interval(mins => p.booking_cutoff_minutes) > ${query.now}
        and ${query.party}::int between p.min_party_size and p.max_party_size
-       and t.seat_capacity >= ${query.party}::int
+       and t.seat_capacity - u.held - u.confirmed >= ${query.party}::int
        ${query.productId ? sql`and t.product_id = ${query.productId}` : sql``}
     ) trips
     where not blacked_out

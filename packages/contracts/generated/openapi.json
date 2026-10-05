@@ -642,6 +642,10 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              },
+                              "soldOut": {
+                                "type": "boolean",
+                                "description": "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there"
                               }
                             },
                             "required": [
@@ -649,7 +653,7 @@
                               "total",
                               "remaining"
                             ],
-                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                            "description": "Seats held by unexpired checkouts and confirmed seats are taken; a whole-boat hold takes every seat. Advisory: only acquiring a hold decides"
                           }
                         },
                         "required": [
@@ -2681,6 +2685,20 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              },
+                              "soldOut": {
+                                "type": "boolean",
+                                "description": "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there"
+                              },
+                              "held": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats taken by holds still within their time; a held charter counts every seat"
+                              },
+                              "confirmed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats taken by confirmed holds; a confirmed charter counts every seat"
                               }
                             },
                             "required": [
@@ -2688,7 +2706,7 @@
                               "total",
                               "remaining"
                             ],
-                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                            "description": "Capacity left, with the taken seats split into held and confirmed. Advisory"
                           }
                         },
                         "required": [
@@ -3067,6 +3085,20 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              },
+                              "soldOut": {
+                                "type": "boolean",
+                                "description": "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there"
+                              },
+                              "held": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats taken by holds still within their time; a held charter counts every seat"
+                              },
+                              "confirmed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats taken by confirmed holds; a confirmed charter counts every seat"
                               }
                             },
                             "required": [
@@ -3074,7 +3106,7 @@
                               "total",
                               "remaining"
                             ],
-                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                            "description": "Capacity left, with the taken seats split into held and confirmed. Advisory"
                           }
                         },
                         "required": [
@@ -3552,6 +3584,20 @@
                               "type": "integer",
                               "minimum": 0,
                               "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                            },
+                            "soldOut": {
+                              "type": "boolean",
+                              "description": "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there"
+                            },
+                            "held": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Seats taken by holds still within their time; a held charter counts every seat"
+                            },
+                            "confirmed": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Seats taken by confirmed holds; a confirmed charter counts every seat"
                             }
                           },
                           "required": [
@@ -3559,7 +3605,7 @@
                             "total",
                             "remaining"
                           ],
-                          "description": "Held and confirmed bookings reduce this from G2.6 on"
+                          "description": "Capacity left, with the taken seats split into held and confirmed. Advisory"
                         }
                       },
                       "required": [
