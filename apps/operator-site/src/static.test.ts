@@ -84,6 +84,13 @@ describe("calendar styles", () => {
 });
 
 describe("static files", () => {
+  it("allows no inline styles: the console styles only from its files and the CSSOM", () => {
+    const headers = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
+    const policy = /Content-Security-Policy: (.+)/.exec(headers)?.[1] ?? "";
+    expect(policy).toContain("style-src 'self';");
+    expect(policy).not.toContain("'unsafe-inline'");
+  });
+
   it("wraps the whole console in an error boundary with the designed failure screen", () => {
     const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
     expect(main).toMatch(
