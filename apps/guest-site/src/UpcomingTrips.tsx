@@ -167,7 +167,7 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
               setQuery((q) => ({ ...q, start: back < today ? today : back }));
             }}
           >
-            Previous<VisuallyHidden> 4 weeks</VisuallyHidden>
+            Previous <VisuallyHidden>4 weeks</VisuallyHidden>
           </Button>
           <p className="trips__range-label">
             {formatDateRange(range.start, range.end, "medium", { currentYear: currentYear() })}
@@ -177,7 +177,7 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
             iconPosition="end"
             onClick={() => setQuery((q) => ({ ...q, start: addDays(q.start, windowDays) }))}
           >
-            Next<VisuallyHidden> 4 weeks</VisuallyHidden>
+            Next <VisuallyHidden>4 weeks</VisuallyHidden>
           </Button>
         </nav>
       </div>
@@ -265,22 +265,30 @@ function TimeNote({
   const [zone] = zones;
   if (zones.length !== 1 || !zone) {
     return (
-      <p className="trips__note">
-        <Icon name="clock" />
-        <span>Times are local to each trip's departure point.</span>
-      </p>
+      <ul className="trips__notes">
+        <li>
+          <Icon name="clock" />
+          <span>Times are local to each trip's departure point.</span>
+        </li>
+      </ul>
     );
   }
   const where = places.length === 1 ? places[0] : "the marina";
-  const changes = clockChanges(start, end, zone).map(describeClockChange);
   return (
-    <p className="trips__note">
-      <Icon name="clock" />
-      <span>
-        Times are local to {where} ({zoneCity(zone)}).
-        {changes.length > 0 && ` ${changes.join(" ")}`}
-      </span>
-    </p>
+    <ul className="trips__notes">
+      <li>
+        <Icon name="clock" />
+        <span>
+          Times are local to {where} ({zoneCity(zone)}).
+        </span>
+      </li>
+      {clockChanges(start, end, zone).map((change) => (
+        <li key={change.date}>
+          <Icon name="info" />
+          <span>{describeClockChange(change)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -323,7 +331,7 @@ function TripList({ trips, busy }: { trips: readonly AvailableTrip[]; busy: bool
 
 function capacityText(trip: AvailableTrip): string {
   const { kind, total, remaining } = trip.capacity;
-  if (kind === "whole_boat") return `Private charter, the whole boat for up to ${total} guests`;
+  if (kind === "whole_boat") return `Whole boat, up to ${total} guests`;
   return `Shared trip, ${remaining} ${remaining === 1 ? "seat" : "seats"} left`;
 }
 
@@ -352,8 +360,8 @@ function TripCard({ trip, showZone }: { trip: AvailableTrip; showZone: boolean }
         <h4 className="trip-card__title">
           <VisuallyHidden>
             {start}
-            {place},{" "}
-          </VisuallyHidden>
+            {place},
+          </VisuallyHidden>{" "}
           {trip.product.name}
         </h4>
         <p className="trip-card__summary">{trip.product.summary}</p>
@@ -382,12 +390,10 @@ export function TripListSkeleton() {
   return (
     <div className="trips__list trips__list--skeleton" aria-hidden="true">
       {[2, 1].map((count, day) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: a fixed, decorative placeholder.
         <div key={day} className="trips-day">
           <Skeleton className="trips-day__skeleton-title" width="14rem" height="1.25rem" />
           <ul className="trips-day__list">
             {Array.from({ length: count }, (_, card) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a fixed, decorative placeholder.
               <li key={card} className="trip-card">
                 <div className="trip-card__when">
                   <Skeleton width="5rem" height="1.5rem" />
