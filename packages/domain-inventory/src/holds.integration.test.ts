@@ -743,18 +743,29 @@ describe.skipIf(!env)("capacity holds against a real database as the runtime rol
 
     it("backs the whole-boat rule with a unique index that needs no trigger", async () => {
       const trip = tripsA.charter();
-      const result = await failure(
+      const insert = (q: postgres.TransactionSql) => q`
+        insert into public.capacity_holds
+          (tenant_id, trip_id, owner_ref, kind, party_size, seats, expires_at)
+        values (${A.id}, ${trip}, ${owner()}, 'whole_boat', 2, 6, now() + interval '10 minutes')`;
+      // The trigger is switched off inside a transaction that always rolls back,
+      // so even a regression here cannot leave it off or leave rows behind.
+      const rollback = new Error("always roll back");
+      let second: unknown = "not attempted";
+      await expect(
         admin.begin(async (tx) => {
           await tx`alter table public.capacity_holds disable trigger capacity_holds_rules`;
-          for (let i = 0; i < 2; i++) {
-            await tx`
-              insert into public.capacity_holds
-                (tenant_id, trip_id, owner_ref, kind, party_size, seats, expires_at)
-              values (${A.id}, ${trip}, ${owner()}, 'whole_boat', 2, 6, now() + interval '10 minutes')`;
+          await insert(tx);
+          try {
+            await tx.savepoint((sp) => insert(sp));
+            second = "inserted";
+          } catch (err) {
+            const e = err as { code?: string; constraint_name?: string };
+            second = { code: e.code, constraint: e.constraint_name };
           }
+          throw rollback;
         }),
-      );
-      expect(result).toEqual({ code: "23505", constraint: "capacity_holds_one_whole_boat" });
+      ).rejects.toBe(rollback);
+      expect(second).toEqual({ code: "23505", constraint: "capacity_holds_one_whole_boat" });
       const [rules] = await admin<{ enabled: string }[]>`
         select tgenabled as enabled from pg_trigger
          where tgname = 'capacity_holds_rules' and tgrelid = 'public.capacity_holds'::regclass`;
