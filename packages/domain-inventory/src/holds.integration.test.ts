@@ -576,6 +576,30 @@ describe.skipIf(!env)("capacity holds against a real database as the runtime rol
       });
     });
 
+    it("works in batches and stops starting batches when its budget runs out", async () => {
+      const trip = tripsB.shared();
+      const due = [
+        await acquired(B.id, trip, 1),
+        await acquired(B.id, trip, 1),
+        await acquired(B.id, trip, 1),
+      ];
+      for (const h of due) await backdateHold(admin, h.id);
+      const spent = await sweepExpiredHolds(runtime.db, {
+        runId: `sweep-${randomUUID()}`,
+        budgetMs: 0,
+      });
+      expect(spent).toMatchObject({ tenants: 0, expired: 0, complete: false });
+      for (const h of due) expect(await holdState(B.id, h.id)).toBe("active");
+
+      const batched = await sweepExpiredHolds(runtime.db, {
+        runId: `sweep-${randomUUID()}`,
+        batchSize: 1,
+      });
+      expect(batched.failedTenants).toBe(0);
+      expect(batched.expired).toBeGreaterThanOrEqual(3);
+      for (const h of due) expect(await holdState(B.id, h.id)).toBe("expired");
+    });
+
     it("lists only tenants with due holds, by id only", async () => {
       const hold = await acquired(B.id, tripsB.shared(), 1);
       await backdateHold(admin, hold.id);
