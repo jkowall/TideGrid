@@ -1,4 +1,4 @@
-import type { AnchorHTMLAttributes, ButtonHTMLAttributes, MouseEvent, ReactNode } from "react";
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes, MouseEvent, ReactNode, Ref } from "react";
 import { cx } from "./cx.ts";
 import { Icon, type IconName } from "./Icon.tsx";
 
@@ -34,6 +34,8 @@ export interface ButtonProps
    * attribute, so keyboard and screen reader users can still find it.
    */
   disabled?: boolean;
+  /** The button element, for moving focus to it. */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 export function Button({
@@ -48,6 +50,7 @@ export function Button({
   children,
   onClick,
   type = "button",
+  ref,
   ...rest
 }: ButtonProps) {
   const inactive = busy || disabled;
@@ -60,6 +63,7 @@ export function Button({
   };
   return (
     <button
+      ref={ref}
       type={type}
       className={cx("tg-button", `tg-button--${variant}`, block && "tg-button--block", className)}
       aria-busy={busy || undefined}

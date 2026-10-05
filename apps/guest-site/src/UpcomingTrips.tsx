@@ -14,10 +14,10 @@ import {
   clockChanges,
   describeClockChange,
   formatClock,
+  formatCutoff,
   formatDate,
   formatDateRange,
   formatDuration,
-  inZone,
   type LocalDate,
   todayIn,
   zoneCity,
@@ -335,12 +335,9 @@ function capacityText(trip: AvailableTrip): string {
   return `Shared trip, ${remaining} ${remaining === 1 ? "seat" : "seats"} left`;
 }
 
-/** When booking closes, on the marina's clock. The day is named when it is not the trip's. */
+/** When booking closes, on the marina's clock. See formatCutoff. */
 function bookBy(trip: AvailableTrip): string {
-  const close = inZone(trip.salesCloseAt, trip.timeZone);
-  return close.date === trip.localDate
-    ? `Book by ${close.time}`
-    : `Book by ${formatDate(close.date, "medium")}, ${close.time}`;
+  return `Book by ${formatCutoff(trip.salesCloseAt, trip)}`;
 }
 
 function TripCard({ trip, showZone }: { trip: AvailableTrip; showZone: boolean }) {

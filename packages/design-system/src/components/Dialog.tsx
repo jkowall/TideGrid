@@ -68,11 +68,13 @@ export function Dialog({
       );
     target?.focus();
     return () => {
+      // Read before closing: the dialog is still in the document here.
+      const active = document.activeElement;
+      const inside = active !== null && element.contains(active);
       if (typeof element.close === "function" && element.open) element.close();
       else element.removeAttribute("open");
-      // Back to the opener, unless something else already took focus.
-      const active = document.activeElement;
-      const lost = !active || active === document.body || !active.isConnected;
+      // Back to the opener, unless focus already moved somewhere outside.
+      const lost = inside || !active || active === document.body || !active.isConnected;
       if (lost && opener?.isConnected) opener.focus();
     };
     // Mount only: the dialog opens once per render of it.

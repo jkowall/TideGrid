@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { MeResponse } from "@tidegrid/contracts";
+import type { Membership, MeResponse } from "@tidegrid/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const me = (authMethod: "magic_link" | "access" = "magic_link"): MeResponse => ({
@@ -260,6 +260,76 @@ describe("sign out", () => {
     const rail = container.querySelector<HTMLElement>(".console-rail__user") as HTMLElement;
     const link = within(rail).getByRole("link", { name: "Sign out of Cloudflare Access" });
     expect(link.getAttribute("href")).toBe("/cdn-cgi/access/logout");
+  });
+});
+
+describe("calendar roles come from /v1/me", () => {
+  it("shows no trip controls where the person is finance, and shows them where they own", async () => {
+    const base = me();
+    const [harbor, reef] = base.memberships as [Membership, Membership];
+    const mixed: MeResponse = {
+      ...base,
+      memberships: [
+        { ...harbor, role: "finance" },
+        { ...reef, role: "owner" },
+      ],
+    };
+    const tripsFor: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost:5174");
+        if (url.pathname === "/api/v1/me") return json(mixed);
+        const match = /^\/api\/v1\/staff\/tenants\/([^/]+)\/trips$/.exec(url.pathname);
+        if (!match) throw new Error(`unexpected request ${url.pathname}`);
+        tripsFor.push(match[1] as string);
+        // A future, published trip on the Saturday of whichever week is asked for.
+        const saturday = url.searchParams.get("to") as string;
+        return json({
+          trips: [
+            {
+              tripId: "bc5f3492-d330-487d-8078-7221db331801",
+              timeZone: "America/New_York",
+              localDate: saturday,
+              localStartTime: "18:00",
+              startsAt: "2099-01-01T23:00:00.000Z",
+              endsAt: "2099-01-02T00:30:00.000Z",
+              startsAtLocal: `${saturday}T18:00:00-05:00`,
+              endsAtLocal: `${saturday}T19:30:00-05:00`,
+              durationMinutes: 90,
+              productId: "4f51db31-f9aa-492a-ad2b-05d7c1c3cb2a",
+              productName: "Sunset Harbor Cruise",
+              productKind: "shared_seat",
+              boatId: "9a0e7c55-3b1d-4f2a-8c6e-1d2f3a4b5c01",
+              boatName: "Sea Lark",
+              scheduleId: null,
+              salesState: "published",
+              salesStateChangedAt: "2026-09-30T12:00:00.000Z",
+              salesCloseAt: "2099-01-01T22:00:00.000Z",
+              blackedOut: false,
+              capacity: { kind: "seats", total: 20, remaining: 20 },
+            },
+          ],
+        });
+      }),
+    );
+    const App = await loadApp();
+    window.history.replaceState(null, "", "/calendar");
+    render(<App />);
+    await heading("Calendar");
+    await screen.findByRole("heading", { level: 4, name: /Sunset Harbor Cruise/ });
+    expect(tripsFor).toEqual([harbor.tenantId]);
+    expect(screen.queryByRole("button", { name: /^Close sales/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Cancel trip/ })).toBeNull();
+    expect(screen.getByText(/View only\. Your role here, finance/)).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Operator" }), {
+      target: { value: reef.tenantId },
+    });
+    expect(await screen.findByRole("button", { name: /^Close sales/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Cancel trip/ })).toBeTruthy();
+    expect(screen.queryByText(/View only/)).toBeNull();
+    expect(tripsFor).toEqual([harbor.tenantId, reef.tenantId]);
   });
 });
 

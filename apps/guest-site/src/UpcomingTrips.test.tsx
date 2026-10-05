@@ -184,7 +184,7 @@ describe("upcoming trips on a branded site", () => {
     expect(text(sundayCharter)).toContain("Whole boat, up to 12 guests");
     expect(text(sundayCharter)).toContain("Meet at Dock C, slip 14");
     // The cutoff is on the other side of the change: 9:00 AM EDT the day before.
-    expect(text(sundayCharter)).toContain("Book by Sat, Oct 31, 9:00 AM");
+    expect(text(sundayCharter)).toContain("Book by Sat, Oct 31, 9:00 AM EDT");
     const sundaySunset = cardTitled(nov1, /Sunset Harbor Cruise/);
     expect(text(sundaySunset)).toContain("6:00 PM");
     expect(text(sundaySunset)).toContain("Book by 5:00 PM");

@@ -225,6 +225,23 @@ export function inZone(
 }
 
 /**
+ * A trip's booking cutoff on the trip zone's clock: "5:00 PM" on the trip's
+ * own day, "Sat, Oct 31, 9:00 AM" on another. When the clock changes between
+ * the cutoff and the departure, the zone's short name follows ("9:00 AM EDT"),
+ * so a cutoff 24 elapsed hours before an 8:00 AM departure does not look wrong.
+ */
+export function formatCutoff(
+  cutoff: string,
+  trip: { timeZone: string; localDate: LocalDate; startsAt: string },
+): string {
+  const close = inZone(cutoff, trip.timeZone);
+  const departs = zoneAbbreviation(new Date(trip.startsAt), trip.timeZone);
+  const day = close.date === trip.localDate ? "" : `${formatDate(close.date, "medium")}, `;
+  const zone = close.abbreviation === departs ? "" : ` ${close.abbreviation}`;
+  return `${day}${close.time}${zone}`;
+}
+
+/**
  * Elapsed time.
  * - short: "45 min", "1 h 30 min", "4 h"
  * - long, for screen readers: "45 minutes", "1 hour 30 minutes", "4 hours"

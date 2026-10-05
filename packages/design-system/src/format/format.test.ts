@@ -6,6 +6,7 @@ import {
   daysBetween,
   describeClockChange,
   formatClock,
+  formatCutoff,
   formatDate,
   formatDateRange,
   formatDuration,
@@ -90,6 +91,27 @@ describe("times", () => {
     });
     // Honolulu has no daylight saving time.
     expect(inZone("2026-11-01T05:30:00.000Z", "Pacific/Honolulu").time).toBe("7:30 PM");
+  });
+
+  it("names the cutoff's day and, across a clock change, its zone", () => {
+    const nov1Charter = {
+      timeZone: "America/New_York",
+      localDate: "2026-11-01",
+      startsAt: "2026-11-01T13:00:00.000Z",
+    };
+    expect(formatCutoff("2026-10-31T13:00:00.000Z", nov1Charter)).toBe("Sat, Oct 31, 9:00 AM EDT");
+    const nov1Sunset = {
+      timeZone: "America/New_York",
+      localDate: "2026-11-01",
+      startsAt: "2026-11-01T23:00:00.000Z",
+    };
+    expect(formatCutoff("2026-11-01T22:00:00.000Z", nov1Sunset)).toBe("5:00 PM");
+    const oct31Charter = {
+      timeZone: "America/New_York",
+      localDate: "2026-10-31",
+      startsAt: "2026-10-31T12:00:00.000Z",
+    };
+    expect(formatCutoff("2026-10-30T12:00:00.000Z", oct31Charter)).toBe("Fri, Oct 30, 8:00 AM");
   });
 
   it("measures offsets on both sides of the change", () => {
