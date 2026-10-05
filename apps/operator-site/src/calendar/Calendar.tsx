@@ -103,6 +103,8 @@ export function CalendarPage({
   const [done, setDone] = useState<Done | null>(null);
   const retryRequested = useRef(false);
   const focusRangeOnLoad = useRef(false);
+  /** The week's heading takes focus once the new week renders; see goToWeek. */
+  const focusRangeOnWeek = useRef(false);
   /**
    * Where focus goes once the dialog is gone. After a change, the trip's
    * heading: its buttons are different now. After a dismissal, the button that
@@ -163,6 +165,10 @@ export function CalendarPage({
   useEffect(() => {
     void weekStart;
     setDone(null);
+    if (focusRangeOnWeek.current) {
+      focusRangeOnWeek.current = false;
+      range.current?.focus();
+    }
   }, [weekStart]);
 
   // The address keeps the week, so a reload shows the same one.
@@ -215,7 +221,19 @@ export function CalendarPage({
     setAttempt((n) => n + 1);
   };
 
-  const goToWeek = (start: LocalDate) => setWeekStart(clampWeek(start, today));
+  /**
+   * Show another week. `moveFocus`: the control pressed goes away with the
+   * change, such as an empty week's "Go to this week", so the week's heading
+   * takes focus and the person keeps their place.
+   */
+  const goToWeek = (start: LocalDate, moveFocus = false) => {
+    const next = clampWeek(start, today);
+    if (moveFocus) {
+      if (next === weekStart) range.current?.focus();
+      else focusRangeOnWeek.current = true;
+    }
+    setWeekStart(next);
+  };
 
   const close = () => {
     if (dialog) {
@@ -309,7 +327,7 @@ export function CalendarPage({
             failures={load.failures}
             retrying={load.retrying}
             onRetry={retry}
-            onThisWeek={() => goToWeek(today)}
+            onThisWeek={() => goToWeek(today, true)}
           />
         )}
 
@@ -321,7 +339,7 @@ export function CalendarPage({
               title="No trips this week"
               actions={
                 weekStart !== thisWeek ? (
-                  <Button icon="calendar" onClick={() => goToWeek(today)}>
+                  <Button icon="calendar" onClick={() => goToWeek(today, true)}>
                     Go to this week
                   </Button>
                 ) : undefined

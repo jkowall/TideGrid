@@ -321,16 +321,28 @@ describe("the week", () => {
     await waitFor(() => expect(weekCalls(calls)).toHaveLength(3));
     expect(weekCalls(calls)[2]?.query.get("from")).toBe("2026-11-15");
 
-    fireEvent.click(screen.getByRole("button", { name: "This week" }));
+    // The empty week's button goes with it, so the week's heading takes focus.
+    const back = within(
+      await screen.findByRole("region", { name: "No trips this week" }),
+    ).getByRole("button", { name: "Go to this week" });
+    back.focus();
+    fireEvent.click(back);
+    const range = screen.getByRole("heading", { level: 2, name: "Nov 1 to 7, 2026" });
+    expect(document.activeElement).toBe(range);
     await screen.findByRole("region", { name: /^Sunday, November 1/ });
     expect(weekCalls(calls)[3]?.query.get("from")).toBe("2026-11-01");
     expect(window.location.search).toBe("");
+    expect(document.activeElement).toBe(range);
   });
 
   it("opens on the week in the address, and Previous crosses the clock change", async () => {
     window.history.replaceState(null, "", "/calendar?week=2026-11-04");
     const calls = api({
-      [tripsPath()]: [() => json({ trips: week }), () => json({ trips: [] })],
+      [tripsPath()]: [
+        () => json({ trips: week }),
+        () => json({ trips: [] }),
+        () => json({ trips: week }),
+      ],
     });
     render(<CalendarPage membership={membership("owner")} focusHeading={false} />);
     await screen.findByRole("region", { name: /^Sunday, November 1/ });
@@ -339,6 +351,15 @@ describe("the week", () => {
     await screen.findByRole("heading", { name: "No trips this week" });
     expect(weekCalls(calls)[1]?.query.get("from")).toBe("2026-10-25");
     expect(weekCalls(calls)[1]?.query.get("to")).toBe("2026-10-31");
+
+    // This week in the bar stays put once pressed: unavailable, still focused.
+    const thisWeek = screen.getByRole("button", { name: "This week" });
+    thisWeek.focus();
+    fireEvent.click(thisWeek);
+    await screen.findByRole("region", { name: /^Sunday, November 1/ });
+    expect(weekCalls(calls)[2]?.query.get("from")).toBe("2026-11-01");
+    expect(thisWeek.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(thisWeek);
   });
 
   it("opens on the marina's week, not the viewer's, once the catalog names its zone", async () => {
@@ -428,6 +449,9 @@ describe("the week", () => {
     fireEvent.click(within(alert).getByRole("button", { name: "Go to this week" }));
     await screen.findByRole("region", { name: /^Sunday, November 1/ });
     expect(weekCalls(calls)[1]?.query.get("from")).toBe("2026-11-01");
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { level: 2, name: "Nov 1 to 7, 2026" }),
+    );
   });
 
   it.each([

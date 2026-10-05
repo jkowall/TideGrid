@@ -72,6 +72,8 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
   const rangeLabel = useRef<HTMLParagraphElement>(null);
   const retryRequested = useRef(false);
   const focusRangeOnLoad = useRef(false);
+  /** The dates take focus once the new dates or party render; see goTo. */
+  const focusRangeOnQuery = useRef(false);
   const range = windowOf(query.start, today);
 
   useEffect(() => {
@@ -127,17 +129,34 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
     }
   }, [state]);
 
+  useEffect(() => {
+    void query;
+    if (focusRangeOnQuery.current) {
+      focusRangeOnQuery.current = false;
+      rangeLabel.current?.focus();
+    }
+  }, [query]);
+
   const retry = () => {
     retryRequested.current = true;
     focusRangeOnLoad.current = true;
     setAttempt((n) => n + 1);
   };
 
-  /** Show another four weeks. From the foot of the list, the person goes back to the top. */
-  const goTo = (start: LocalDate, fromBottom = false) => {
-    setQuery((q) => ({ ...q, start: clampStart(start, today) }));
-    if (fromBottom) rangeLabel.current?.focus();
+  /**
+   * Show other dates, or another party. `moveFocus`: the control pressed is at
+   * the foot of the list, or goes away with the change, such as an empty
+   * state's action, so the dates at the top take focus and the person keeps
+   * their place.
+   */
+  const goTo = (change: Partial<TripQuery>, moveFocus = false) => {
+    setQuery((q) => {
+      const next = { ...q, ...change };
+      return { ...next, start: clampStart(next.start, today) };
+    });
+    if (moveFocus) focusRangeOnQuery.current = true;
   };
+  const goToStart = (start: LocalDate, moveFocus = false) => goTo({ start }, moveFocus);
 
   // What is on screen matches the dates and party asked for, or it is the same
   // dates for the previous party while the new list loads. Nothing older: a
@@ -184,15 +203,15 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
           label="Party size"
           options={partyOptions}
           value={String(query.party)}
-          onChange={(event) => setQuery((q) => ({ ...q, party: Number(event.target.value) }))}
+          onChange={(event) => goTo({ party: Number(event.target.value) })}
         />
         <RangeNav
           label={label}
           labelRef={rangeLabel}
           canPrevious={canPrevious}
           canNext={canNext}
-          onPrevious={() => goTo(addDays(query.start, -windowDays))}
-          onNext={() => goTo(addDays(query.start, windowDays))}
+          onPrevious={() => goToStart(addDays(query.start, -windowDays))}
+          onNext={() => goToStart(addDays(query.start, windowDays))}
         />
       </div>
 
@@ -213,7 +232,7 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
           failures={state.failures}
           retrying={state.retrying}
           onRetry={retry}
-          onFromToday={() => goTo(today)}
+          onFromToday={() => goToStart(today, true)}
         />
       )}
 
@@ -228,8 +247,8 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
               label={label}
               canPrevious={canPrevious}
               canNext={canNext}
-              onPrevious={() => goTo(addDays(query.start, -windowDays), true)}
-              onNext={() => goTo(addDays(query.start, windowDays), true)}
+              onPrevious={() => goToStart(addDays(query.start, -windowDays), true)}
+              onNext={() => goToStart(addDays(query.start, windowDays), true)}
             />
           </>
         ) : (
@@ -239,13 +258,11 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
             title="No trips in these dates"
             actions={
               canPrevious ? (
-                <Button icon="arrow-left" onClick={() => goTo(today)}>
+                <Button icon="arrow-left" onClick={() => goToStart(today, true)}>
                   Show from today
                 </Button>
               ) : shown.query.party > 1 ? (
-                <Button onClick={() => setQuery((q) => ({ ...q, party: 1 }))}>
-                  Show trips for 1 guest
-                </Button>
+                <Button onClick={() => goTo({ party: 1 }, true)}>Show trips for 1 guest</Button>
               ) : undefined
             }
           >

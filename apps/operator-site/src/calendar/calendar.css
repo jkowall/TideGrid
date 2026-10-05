@@ -4,8 +4,11 @@
  * in words, so color is never the only signal.
  */
 
+/* One column that never grows past the page: the day strip scrolls inside
+   itself instead of widening everything around it. */
 .cal {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-5);
   max-width: 72rem;
 }
@@ -25,19 +28,21 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+/* On a phone the three buttons share the row, each from its own width, so
+   "Previous" gets the room it needs before the others grow. */
 @media (max-width: 29.99rem) {
   .cal-bar__nav {
     width: 100%;
   }
   .cal-bar__nav > .tg-button {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     padding-inline: var(--space-2);
   }
 }
-/* Below 24rem the three words no longer fit: Previous and Next become 44 px
+/* Below 360 px the three words no longer fit: Previous and Next become 44 px
    chevrons, still named "Previous week" and "Next week", and This week takes
    the rest of the row. */
-@media (max-width: 23.99rem) {
+@media (max-width: 22.49rem) {
   .cal-bar__nav {
     display: grid;
     grid-template-columns: var(--tap-min) minmax(0, 1fr) var(--tap-min);
@@ -74,6 +79,7 @@
 }
 .cal-week {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-6);
 }
 .cal-notes {
@@ -172,10 +178,12 @@
 .cal-strip--skeleton {
   overflow: hidden;
 }
-/* Placeholders a step lighter than Harbor, so the shimmer reads on the page. */
-.cal-week--skeleton {
-  --surface-sunken: #2a3330;
-  --surface-raised: #36413c;
+/* The placeholder bars a step lighter than Harbor and than the rows they sit
+   in, so the shimmer reads. The rows keep their own color, so the week
+   arrives without a flash. */
+.cal-week--skeleton .tg-skeleton {
+  --surface-sunken: #34403b;
+  --surface-raised: #4a5852;
 }
 
 .cal-day {

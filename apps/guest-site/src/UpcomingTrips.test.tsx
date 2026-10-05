@@ -301,6 +301,11 @@ describe("upcoming trips on a branded site", () => {
     fireEvent.click(within(empty).getByRole("button", { name: "Show trips for 1 guest" }));
     await waitFor(() => expect(queries).toHaveLength(2));
     expect(queries[1]?.get("party")).toBe("1");
+    // The button goes with the empty state, so the dates keep the guest's place.
+    const dates = within(screen.getByRole("navigation", { name: "Trip dates" })).getByText(
+      "Tue, Oct 6 to Mon, Nov 2",
+    );
+    await waitFor(() => expect(document.activeElement).toBe(dates));
   });
 
   it("names the year in an empty later window as the dates above do, and offers today", async () => {
@@ -316,6 +321,10 @@ describe("upcoming trips on a branded site", () => {
     fireEvent.click(within(empty).getByRole("button", { name: "Show from today" }));
     await waitFor(() => expect(queries).toHaveLength(2));
     expect(queries[1]?.get("from")).toBe("2026-10-05");
+    const dates = within(screen.getByRole("navigation", { name: "Trip dates" })).getByText(
+      "Tue, Oct 6 to Mon, Nov 2",
+    );
+    await waitFor(() => expect(document.activeElement).toBe(dates));
   });
 
   it("shows an error with Try again, keeps focus there while it works, then focuses the dates", async () => {
@@ -384,6 +393,11 @@ describe("upcoming trips on a branded site", () => {
     fireEvent.click(within(alert).getByRole("button", { name: "Show from today" }));
     await screen.findByRole("region", { name: "Saturday, October 31" });
     expect(queries).toHaveLength(2);
+    expect(document.activeElement).toBe(
+      within(screen.getByRole("navigation", { name: "Trip dates" })).getByText(
+        "Tue, Oct 6 to Mon, Nov 2",
+      ),
+    );
   });
 
   it("keeps the address's dates within a year, so a far-off date cannot break the page", async () => {

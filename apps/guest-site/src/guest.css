@@ -289,6 +289,10 @@
 .trips__reserve .tg-notice__actions .tg-button--ghost {
   padding-inline: var(--space-5);
 }
+/* A phone number reads as one unit: at 320 px it broke after "555-". */
+.guest-phone {
+  white-space: nowrap;
+}
 @media (min-width: 60rem) {
   /* Text on the left, the ways to reach the operator on the right. */
   .trips__reserve > div {

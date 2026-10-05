@@ -17,7 +17,8 @@ export function ContactActions({
   const { phone, email } = brand.contact;
   const first = phone ? (
     <ButtonLink variant={primary ? "primary" : "secondary"} icon="phone" href={`tel:${phone}`}>
-      Call {formatPhone(phone)}
+      {/* On a narrow screen "Call" may sit above the number; the number never breaks. */}
+      Call <span className="guest-phone">{formatPhone(phone)}</span>
     </ButtonLink>
   ) : (
     <ButtonLink variant={primary ? "primary" : "secondary"} icon="mail" href={`mailto:${email}`}>

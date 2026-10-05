@@ -283,9 +283,10 @@
 .console-nav a .tg-icon {
   color: var(--text-muted);
 }
-/* Below 24rem a label and its icon no longer fit a third of the row; the
-   labels stay, the decorative icons go. */
-@media (max-width: 23.99rem) {
+/* Below 26rem a label and its icon no longer fit a third of the row with room
+   to spare (at 390 px "Overview" filled its link exactly); the labels stay,
+   the decorative icons go. */
+@media (max-width: 25.99rem) {
   .console-nav a .tg-icon {
     display: none;
   }
