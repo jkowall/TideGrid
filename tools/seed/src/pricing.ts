@@ -433,7 +433,7 @@ export async function seedPricing(
       });
     }
     console.log(
-      `seeded pricing: ${counts.priceLists} price list(s), ${counts.policies} policy version(s), ${counts.taxRates} tax rate(s), ${counts.promotions} promotion(s) added`,
+      `seeded pricing: ${counts.priceLists} price list(s) and ${counts.policies} policy version(s) backfilled for products created earlier, ${counts.taxRates} tax rate(s) and ${counts.promotions} promotion(s) added`,
     );
     return counts;
   } finally {

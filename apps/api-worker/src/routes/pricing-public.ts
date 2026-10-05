@@ -4,6 +4,7 @@ import {
   PublicTripParams,
   QuoteCreateRequest,
   QuoteParams,
+  QuoteProblemCode,
   QuoteResponse,
   TripOfferResponse,
 } from "@tidegrid/contracts";
@@ -22,6 +23,10 @@ const tripNotOnSale = () => new ApiError(409, "trip_not_bookable", "This trip is
 const pricingUnavailable = () =>
   new ApiError(409, "pricing_unavailable", "This trip cannot be priced yet");
 
+/** Quote problems that depend on the trip's state rather than the request. */
+const conflictProblems: readonly string[] = ["insufficient_capacity", "pricing_unavailable"];
+const requestProblems = QuoteProblemCode.options.filter((c) => !conflictProblems.includes(c));
+
 /**
  * The first problem is the error code; the message lists every problem with
  * the ticket type or add-on it is about. Promotion problems share one code
@@ -29,7 +34,7 @@ const pricingUnavailable = () =>
  */
 function quoteRejected(problems: readonly QuoteProblem[]): ApiError {
   const code = problems[0]?.code ?? "pricing_unavailable";
-  const status = code === "insufficient_capacity" || code === "pricing_unavailable" ? 409 : 422;
+  const status = conflictProblems.includes(code) ? 409 : 422;
   const detail = problems.map((p) => (p.subject ? `${p.code} (${p.subject})` : p.code)).join(", ");
   return new ApiError(status, code, `This quote cannot be priced: ${detail}`);
 }
@@ -100,7 +105,7 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
         "The trip is not on sale now (trip_not_bookable), has no price list or policy (pricing_unavailable), or has too few seats left (insufficient_capacity)",
       ),
       422: errorBody(
-        "The party, add-ons, or promotion code cannot be priced (the code names the first problem; see QuoteProblemCode), or the idempotency key was reused with another request",
+        `The party, add-ons, or promotion code cannot be priced; the code names the first problem and the message lists all: ${requestProblems.join(", ")}. Or idempotency_key_reused: the key was used with another request`,
       ),
     },
   });

@@ -1,4 +1,9 @@
-import { recordAudit, type TenantContext, type TenantTransaction } from "@tidegrid/database";
+import {
+  isUuid,
+  recordAudit,
+  type TenantContext,
+  type TenantTransaction,
+} from "@tidegrid/database";
 import { sql } from "kysely";
 import { normalizePromotionCode } from "./compute.ts";
 import type { Discount } from "./terms.ts";
@@ -47,6 +52,7 @@ export async function createPriceListVersion(
   ctx: TenantContext,
   input: PriceListInput & { productId: string; reason: string },
 ): Promise<VersionResult> {
+  if (!isUuid(input.productId)) return { kind: "not_found" };
   const product = await trx
     .selectFrom("products")
     .select(["id", "kind"])
@@ -151,6 +157,7 @@ export async function createPolicyVersion(
   ctx: TenantContext,
   input: PolicyInput & { productId: string; reason: string },
 ): Promise<VersionResult> {
+  if (!isUuid(input.productId)) return { kind: "not_found" };
   const product = await trx
     .selectFrom("products")
     .select("id")
@@ -232,6 +239,7 @@ export async function createTaxRateVersion(
 ): Promise<VersionResult> {
   const problems = withReason(validateTaxRate(input), input.reason);
   if (problems.length > 0) return { kind: "invalid", problems };
+  if (!isUuid(input.taxRateId)) return { kind: "not_found" };
   await lock(trx, `tidegrid.tax_rate:${ctx.tenantId}:${input.taxRateId}`);
   const current = await trx
     .selectFrom("tax_rate_versions")
@@ -349,6 +357,7 @@ export async function createPromotionVersion(
     problems.push("invalid_products");
   }
   if (problems.length > 0) return { kind: "invalid", problems };
+  if (!isUuid(input.promotionId)) return { kind: "not_found" };
   await lock(trx, `tidegrid.promotion:${ctx.tenantId}:${input.promotionId}`);
   const current = await trx
     .selectFrom("promotion_versions")

@@ -5424,7 +5424,7 @@
             }
           },
           "422": {
-            "description": "The party, add-ons, or promotion code cannot be priced (the code names the first problem; see QuoteProblemCode), or the idempotency key was reused with another request",
+            "description": "The party, add-ons, or promotion code cannot be priced; the code names the first problem and the message lists all: party_kind_mismatch, invalid_quantity, unknown_ticket_type, duplicate_ticket_type, party_size_out_of_range, unknown_add_on, duplicate_add_on, add_on_unavailable, add_on_quantity_exceeded, promotion_not_applicable, quote_amount_too_large. Or idempotency_key_reused: the key was used with another request",
             "content": {
               "application/json": {
                 "schema": {

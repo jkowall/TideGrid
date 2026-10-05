@@ -57,6 +57,18 @@ The active brand is simply the highest activation id, and nothing in the schema 
 
 `app.resolve_public_brand(hostname)` is the public bootstrap. It resolves the hostname through `app.resolve_hostname`, so only active, verified hostnames of active tenants return a row, and joins that tenant's active brand, filtering by the resolved tenant explicitly. The brand columns are NULL until the tenant publishes one. The API validates the stored config against the contract again before serving it, and fails closed if it does not validate.
 
+## Pricing, policies, and quotes
+
+Migration 0005 adds ten tenant-owned tables under rules 1 to 10, described in the [pricing contract](../domain-pricing/README.md): `price_list_versions` and `price_list_items`, `policy_versions`, `tax_rate_versions`, `promotions`, `promotion_versions` and `promotion_version_products`, and `quotes`, `quote_lines`, and `quote_line_taxes`.
+
+- **Append-only for every role.** The runtime holds SELECT and INSERT. UPDATE, DELETE, and TRUNCATE raise for everyone, the owner included. A change is a new version; the highest version is current.
+- **Sealed children.** A price list version, promotion version, or quote records the transaction that created it (`created_txid`, stamped by trigger). Its items, products, lines, or line taxes can be written only by that transaction, savepoints included, so nothing grows after commit.
+- **Checked at commit.** Two deferred constraint triggers, owner-run with explicit tenant filters, refuse a shared-seat price list with no ticket type, a charter price list without its price, and a quote whose header totals differ from its lines, that taxes a non-taxable line, or whose discount line does not match its promotion.
+- **Kinds in keys.** `products` gains `UNIQUE (tenant_id, id, kind)` and `scheduled_trips` gains `UNIQUE (tenant_id, id, product_id)`, so a price list cannot carry the wrong product kind and a quote cannot pair a trip with another product.
+- **Publishing.** A trigger on `products` refuses publishing a product without a price list and a policy, for every writer.
+- **Guests.** Version and promotion rows refuse the guest actor type through their `actor_type` check. A guest may create quotes only.
+- **Numbering.** Commands that append a version take a per-aggregate transaction lock, such as `tidegrid.price_list:<tenant>:<product>`, before reading the current version, as brand publishing does.
+
 ## Tests
 
 - `pnpm test` runs unit tests.
