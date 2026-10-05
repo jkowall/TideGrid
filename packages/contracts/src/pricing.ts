@@ -92,7 +92,7 @@ const TripSnapshot = z.object({
 
 // Offer -----------------------------------------------------------------------------
 
-export const PublicTripParams = z.object({
+export const TripOfferParams = z.object({
   tripId: z.string().describe("Trip UUID; anything else answers 404"),
 });
 

@@ -1,11 +1,11 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   IdempotencyKey,
-  PublicTripParams,
   QuoteCreateRequest,
   QuoteParams,
   QuoteProblemCode,
   QuoteResponse,
+  TripOfferParams,
   TripOfferResponse,
 } from "@tidegrid/contracts";
 import { createQuote, getQuote, getTripOffer, type QuoteProblem } from "@tidegrid/domain-pricing";
@@ -49,7 +49,7 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
     summary: "What the calling site's operator sells for one trip",
     description:
       "Resolves the browser Origin as /v1/public/trips does. For a trip on sale now: its ticket types or charter price, the add-ons offered on its date, mandatory fees, active tax rates, and the cancellation policy, under the current versions. Grants no permission and never reveals another tenant's trips.",
-    request: { params: PublicTripParams },
+    request: { params: TripOfferParams },
     responses: {
       200: {
         content: { "application/json": { schema: TripOfferResponse } },
