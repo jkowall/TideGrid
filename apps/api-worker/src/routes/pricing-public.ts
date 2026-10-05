@@ -42,6 +42,16 @@ function quoteRejected(problems: readonly QuoteProblem[]): ApiError {
 export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
   const now = () => deps.now?.() ?? new Date();
 
+  // Prices feed checkout and differ by calling site, so no answer from these
+  // routes is cached, errors included: they are set after the response exists.
+  for (const path of ["/v1/public/trips/:tripId/offer", quotesPath, "/v1/public/quotes/:quoteId"]) {
+    app.use(path, async (c, next) => {
+      await next();
+      c.header("Cache-Control", "no-store");
+      c.header("Vary", "Origin");
+    });
+  }
+
   const offerRoute = createRoute({
     method: "get",
     path: offerPath,
@@ -77,9 +87,6 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
           throw pricingUnavailable();
       }
     });
-    // Prices feed checkout, so they are never served from a cache.
-    c.header("Cache-Control", "no-store");
-    c.header("Vary", "Origin");
     return c.json(body, 200);
   });
 
@@ -146,8 +153,6 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
     );
     if (result.replayed) c.header("Idempotent-Replayed", "true");
     if (result.status !== 201) throw new Error(`unexpected stored status ${result.status}`);
-    c.header("Cache-Control", "no-store");
-    c.header("Vary", "Origin");
     return c.json(result.body, 201);
   });
 
@@ -175,8 +180,6 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
       if (!quote) throw new ApiError(404, "quote_not_found", "No such quote at this address");
       return { quote };
     });
-    c.header("Cache-Control", "no-store");
-    c.header("Vary", "Origin");
     return c.json(body, 200);
   });
 }

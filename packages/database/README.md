@@ -66,7 +66,7 @@ Migration 0005 adds ten tenant-owned tables under rules 1 to 10, described in th
 - **Checked when written and at commit.** A quote's trip snapshot must equal the trip it names when the row is written. Deferred constraint triggers, owner-run with explicit tenant filters, refuse at commit a shared-seat price list with no ticket type, a charter price list without its price, a quote whose header totals differ from its lines, and a quote its named versions do not produce: lines not copied from the price list version, missing fees, a promotion outside its window or rule, or taxes that do not follow their rates.
 - **Kinds in keys.** `products` gains `UNIQUE (tenant_id, id, kind)` and `scheduled_trips` gains `UNIQUE (tenant_id, id, product_id)`, so a price list cannot carry the wrong product kind and a quote cannot pair a trip with another product.
 - **Publishing.** A trigger on `products` refuses publishing a product without a price list and a policy, for every writer.
-- **Guests.** Version and promotion rows refuse the guest actor type through their `actor_type` check. A guest may create quotes only.
+- **Actors.** A trigger stamps `actor_type`, `actor_id`, and `request_id` from the transaction's context on every version, promotion, and quote row, so no writer can name another actor. Version and promotion rows refuse the guest actor type through their `actor_type` check, so a guest may create quotes only.
 - **Numbering.** Commands that append a version take a per-aggregate transaction lock, such as `tidegrid.price_list:<tenant>:<product>`, before reading the current version, as brand publishing does.
 
 ## Tests

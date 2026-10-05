@@ -100,6 +100,21 @@ BEGIN
 END;
 $$;
 
+-- Who wrote a row comes from the transaction's context, never from the row,
+-- so a writer cannot name another actor. A guest transaction therefore fails
+-- each terms table's actor_type check, however its insert is written.
+CREATE FUNCTION app.stamp_actor() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  NEW.actor_type := coalesce(app.setting_or_null('app.actor_type'), 'system');
+  NEW.actor_id := app.setting_or_null('app.actor_id');
+  NEW.request_id := app.setting_or_null('app.request_id');
+  RETURN NEW;
+END;
+$$;
+
 -- Price lists -------------------------------------------------------------------
 
 -- A product's price list: its ticket types or its charter price, its
@@ -725,10 +740,27 @@ BEGIN
 END
 $$;
 
+-- Every table that records an actor takes it from the transaction.
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'price_list_versions', 'policy_versions', 'tax_rate_versions',
+    'promotions', 'promotion_versions', 'quotes'
+  ] LOOP
+    EXECUTE format(
+      'CREATE TRIGGER %I BEFORE INSERT ON public.%I'
+      ' FOR EACH ROW EXECUTE FUNCTION app.stamp_actor()', t || '_actor', t);
+  END LOOP;
+END
+$$;
+
 -- The runtime keeps the default SELECT and INSERT from 0001 on every table
 -- above and receives nothing more. Trigger functions run as the writer, or as
 -- their owner for the commit-time checks; none is callable directly.
 REVOKE ALL ON FUNCTION app.stamp_created_txid() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.stamp_actor() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_sealed_parent() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_price_list_complete() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_quote_totals() FROM PUBLIC;
