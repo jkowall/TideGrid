@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   Button,
   ButtonLink,
+  Dialog,
   EmptyState,
   Icon,
   iconNames,
   Notice,
+  SelectField,
   Skeleton,
   StatusBadge,
   type StatusTone,
@@ -88,6 +90,76 @@ describe("components expose their state to assistive technology", () => {
     const id = /aria-labelledby="([^"]+)"/.exec(out)?.[1];
     expect(id).toBeTruthy();
     expect(out).toContain(`<h3 id="${id}" class="tg-empty__title">No trips yet</h3>`);
+  });
+
+  it("lets a domain state choose its own icon while the label stays the status", () => {
+    const out = html(
+      <StatusBadge tone="neutral" icon="flag">
+        Completed
+      </StatusBadge>,
+    );
+    const flag = html(<Icon name="flag" />);
+    expect(out).toContain(flag);
+    expect(out).toContain("Completed");
+  });
+
+  it("puts a Next icon after its label and keeps danger a button variant", () => {
+    const next = html(
+      <Button icon="chevron-right" iconPosition="end">
+        Next
+      </Button>,
+    );
+    expect(next.indexOf("<span>Next</span>")).toBeLessThan(next.indexOf("<svg"));
+    const danger = html(
+      <Button variant="danger" busy busyLabel="Canceling…">
+        Cancel trip
+      </Button>,
+    );
+    expect(danger).toContain("tg-button--danger");
+    expect(danger).toContain('aria-busy="true"');
+    expect(danger).toContain("Canceling…");
+  });
+
+  it("ties a select's label, hint, and error to the control", () => {
+    const out = html(
+      <SelectField
+        id="party"
+        label="Party size"
+        hint="Up to 12 guests"
+        error="Choose a party size"
+        options={[
+          { value: "1", label: "1 guest" },
+          { value: "2", label: "2 guests" },
+        ]}
+        defaultValue="2"
+      />,
+    );
+    expect(out).toContain('<label class="tg-field__label" for="party">Party size</label>');
+    expect(out).toContain('aria-describedby="party-hint party-error"');
+    expect(out).toContain('aria-invalid="true"');
+    expect(out).toMatch(/<option value="2" selected="">2 guests<\/option>/);
+    expect(out).toContain('class="tg-icon tg-select__chevron"');
+  });
+
+  it("names a dialog by its heading and marks a final one", () => {
+    const out = html(
+      <Dialog
+        title="Cancel this trip?"
+        tone="danger"
+        describedBy="why"
+        onClose={() => {}}
+        footer={<Button variant="danger">Cancel trip</Button>}
+      >
+        <p id="why">Canceling is final.</p>
+      </Dialog>,
+    );
+    const id = /aria-labelledby="([^"]+)"/.exec(out)?.[1];
+    expect(id).toBeTruthy();
+    expect(out).toContain(`<h2 id="${id}" class="tg-dialog__title">Cancel this trip?</h2>`);
+    expect(out).toContain('aria-describedby="why"');
+    expect(out).toMatch(/^<dialog class="tg-dialog tg-dialog--danger"/);
+    // Closed until it mounts in a browser and calls showModal.
+    expect(out).not.toMatch(/<dialog[^>]*\sopen/);
   });
 
   it("hides decorative skeletons and icons from assistive technology", () => {

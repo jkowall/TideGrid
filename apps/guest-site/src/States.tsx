@@ -1,6 +1,7 @@
 import { Button, Icon, type IconName, Skeleton } from "@tidegrid/design-system/components";
 import { type ReactNode, useEffect, useRef } from "react";
 import type { Tenant } from "./bootstrap.ts";
+import { TripListSkeleton } from "./UpcomingTrips.tsx";
 
 export function useTitle(title: string) {
   useEffect(() => {
@@ -79,9 +80,14 @@ export function LoadingState() {
           <Skeleton variant="text" width="min(22rem, 70%)" />
         </div>
       </div>
+      {/* The shape of the trips section, so the page does not jump when it loads. */}
       <div className="guest-container guest-content" aria-hidden="true">
-        <Skeleton width="10rem" height="1.5rem" />
-        <Skeleton width="100%" height="14rem" />
+        <div className="trips">
+          <Skeleton width="14rem" height="2rem" />
+          <Skeleton width="100%" height="7.5rem" />
+          <Skeleton width="100%" height="5.5rem" />
+          <TripListSkeleton />
+        </div>
       </div>
     </div>
   );
