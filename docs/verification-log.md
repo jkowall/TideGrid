@@ -2,6 +2,17 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-10-05
+
+### G2.6 Capacity and holds verification, October 5, 2026
+
+- Built on branch `build/g2.6-capacity-and-holds` from `a541eab`, in parallel with G2.5. The contract is the [inventory README](../packages/domain-inventory/README.md).
+  - Migration `0005_capacity_and_holds.sql`, renumbered if G2.5 merges first: `capacity_holds` under the tenancy contract, with a trigger that enforces capacity, sales rules, expiry bounds, one-way states, and immutability for every role.
+  - `packages/domain-inventory`: acquire, confirm with reacquisition, release, per-tenant expiry, the cross-tenant sweep, and capacity reads, each transition with audit and an outbox event.
+  - Both trip listings subtract held and confirmed seats. Staff also see `soldOut`, `held`, and `confirmed`, and can read a trip's holds.
+  - The API Worker runs the sweep from a cron trigger every 15 minutes.
+- Verification in progress; results follow.
+
 ## 2026-09-30
 
 ### G2.14a Design system and brand bootstrap verification, September 30, 2026
