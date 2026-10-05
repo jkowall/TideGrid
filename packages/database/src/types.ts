@@ -240,6 +240,33 @@ export interface BlackoutsTable {
   created_at: CreatedAt;
 }
 
+/** Who may publish or activate a brand. Guests never do. */
+export type BrandActorType = "staff" | "system" | "support";
+
+/** Append-only. `config` is the brand contract's BrandConfig, validated by the writer. */
+export interface BrandConfigVersionsTable {
+  tenant_id: TenantColumn;
+  version: ColumnType<number, number, never>;
+  schema_version: ColumnType<number, number, never>;
+  config: ColumnType<JsonObject, JsonObject, never>;
+  created_at: CreatedAt;
+  actor_type: ColumnType<BrandActorType, BrandActorType | undefined, never>;
+  actor_id: ColumnType<string | null, string | null | undefined, never>;
+  request_id: ColumnType<string | null, string | null | undefined, never>;
+}
+
+/** Append-only. The tenant's latest activation (highest id) is its active brand. */
+export interface BrandActivationsTable {
+  tenant_id: TenantColumn;
+  id: BigIntId;
+  version: ColumnType<number, number, never>;
+  activated_at: CreatedAt;
+  actor_type: ColumnType<BrandActorType, BrandActorType | undefined, never>;
+  actor_id: ColumnType<string | null, string | null | undefined, never>;
+  request_id: ColumnType<string | null, string | null | undefined, never>;
+  reason: ColumnType<string, string, never>;
+}
+
 export interface Database {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
@@ -256,6 +283,8 @@ export interface Database {
   schedules: SchedulesTable;
   scheduled_trips: ScheduledTripsTable;
   blackouts: BlackoutsTable;
+  brand_config_versions: BrandConfigVersionsTable;
+  brand_activations: BrandActivationsTable;
 }
 
 export type { Generated, GeneratedAlways };

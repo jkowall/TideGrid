@@ -1,0 +1,504 @@
+/*
+ * Operator console layout. Dark shell: Deep Forest navigation rail, Harbor
+ * content, Mist for grouping, Tide Lime for selected scope, actions, and ready
+ * states. <html class="tg-dark"> switches the semantic tokens.
+ */
+
+/* Wordmark ------------------------------------------------------------------ */
+
+.console-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+}
+.console-wordmark__mark {
+  width: 1.75rem;
+  height: 1.75rem;
+  color: var(--tg-tide-lime);
+  stroke-width: 2.5;
+}
+
+/* Gate: every screen before a signed-in operator ------------------------------ */
+
+.console-gate {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-6);
+  min-height: 100dvh;
+  padding: var(--space-10) var(--space-4);
+  background:
+    radial-gradient(60rem 30rem at 50% -10%, rgb(20 63 46 / 0.55), transparent 70%),
+    var(--surface-page);
+}
+.console-gate:focus {
+  outline: none;
+}
+.console-gate__panel {
+  display: grid;
+  gap: var(--space-5);
+  width: min(100%, 28rem);
+  padding: var(--space-8) var(--space-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.35);
+}
+@media (min-width: 40rem) {
+  .console-gate__panel {
+    padding: var(--space-10);
+  }
+}
+.console-gate__brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.console-gate__product {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+}
+.console-gate__title {
+  margin: 0;
+  font-size: var(--text-2xl);
+}
+.console-gate__title:focus {
+  outline: none;
+}
+.console-gate__lede {
+  margin: 0;
+  color: var(--text-body);
+}
+.console-gate__panel > .tg-muted {
+  margin: 0;
+}
+.console-gate__form {
+  display: grid;
+  gap: var(--space-4);
+}
+.console-gate__dev {
+  display: grid;
+  gap: var(--space-2);
+}
+.console-gate__dev p {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+/* Tide Lime means ready or selected in the console, so gate icons take a
+   status tone instead: info for "no access yet", warning for a failure. */
+.console-gate__icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  color: var(--status-info);
+}
+.console-gate__icon--warning {
+  color: var(--status-warning);
+}
+.console-gate__icon .tg-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.console-gate__checking {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--text-body);
+}
+.console-gate__checking .tg-spinner {
+  color: var(--tg-tide-lime);
+}
+.console-gate__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Signed-in layout -------------------------------------------------------------- */
+
+.console-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 100dvh;
+}
+/* One column: the rail keeps its own height and the page takes the rest, so a
+   short page never stretches the rail. */
+@media (max-width: 63.99rem) {
+  .console-layout {
+    grid-template-rows: auto 1fr;
+  }
+}
+@media (min-width: 64rem) {
+  .console-layout {
+    grid-template-columns: 16.5rem minmax(0, 1fr);
+  }
+}
+
+/* Phone and tablet: the wordmark and Sign out share the top row, then the
+   operator and the navigation. Desktop: one column, with the person and Sign
+   out at the foot of the rail. */
+.console-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "top user"
+    "scope scope"
+    "nav nav";
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background: var(--tg-deep-forest);
+  border-bottom: 1px solid var(--border-subtle);
+}
+@media (min-width: 64rem) {
+  .console-rail {
+    position: sticky;
+    top: 0;
+    align-content: start;
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "top"
+      "scope"
+      "nav"
+      "user";
+    grid-template-rows: auto auto 1fr auto;
+    gap: var(--space-6);
+    height: 100dvh;
+    padding: var(--space-6) var(--space-4);
+    border-bottom: 0;
+    border-right: 1px solid var(--border-subtle);
+  }
+}
+.console-rail__top {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  padding-inline: var(--space-2);
+}
+
+.console-scope {
+  grid-area: scope;
+  display: grid;
+  gap: var(--space-1);
+}
+.console-scope__label {
+  padding-inline: var(--space-2);
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.console-scope__single,
+.console-scope__control select {
+  min-height: var(--tap-min);
+  margin: 0;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-left: 4px solid var(--tg-tide-lime);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+}
+.console-scope__single {
+  display: flex;
+  align-items: center;
+}
+.console-scope__control {
+  position: relative;
+}
+.console-scope__control select {
+  width: 100%;
+  padding-right: var(--space-10);
+  appearance: none;
+  cursor: pointer;
+}
+.console-scope__control select:hover {
+  border-color: var(--text-muted);
+  border-left-color: var(--tg-tide-lime);
+}
+.console-scope__chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--space-3);
+  translate: 0 -50%;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.console-nav {
+  grid-area: nav;
+}
+.console-nav ul {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (min-width: 64rem) {
+  .console-nav ul {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.console-nav a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-body);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+@media (min-width: 64rem) {
+  .console-nav a {
+    justify-content: flex-start;
+    gap: var(--space-3);
+    padding: 0 var(--space-3);
+  }
+}
+.console-nav a .tg-icon {
+  color: var(--text-muted);
+}
+.console-nav a:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+.console-nav a[aria-current="page"] {
+  background: rgb(167 209 41 / 0.14);
+  box-shadow: inset 0 -3px 0 var(--tg-tide-lime);
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+}
+@media (min-width: 64rem) {
+  .console-nav a[aria-current="page"] {
+    box-shadow: inset 3px 0 0 var(--tg-tide-lime);
+  }
+}
+.console-nav a[aria-current="page"] .tg-icon {
+  color: var(--tg-tide-lime);
+}
+
+.console-rail__user {
+  grid-area: user;
+  display: flex;
+  align-items: center;
+}
+@media (min-width: 64rem) {
+  .console-rail__user {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-2) 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+.console-rail__identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+/* Below desktop the top row has room for Sign out only. The name and email
+   stay available to screen readers, and the Overview lists them. */
+@media (max-width: 63.99rem) {
+  .console-rail__identity {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+.console-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--tg-pine-green);
+  color: var(--tg-foam);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+}
+.console-rail__who {
+  display: grid;
+  min-width: 0;
+}
+.console-rail__name {
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+}
+.console-rail__email {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Content ---------------------------------------------------------------------- */
+
+.console-main {
+  min-width: 0;
+  padding: var(--space-6) var(--space-4) var(--space-16);
+}
+.console-main:focus {
+  outline: none;
+}
+@media (min-width: 48rem) {
+  .console-main {
+    padding: var(--space-10) var(--space-10) var(--space-16);
+  }
+}
+.console-page-header {
+  margin-bottom: var(--space-6);
+}
+.console-page-header .tg-eyebrow {
+  margin-bottom: var(--space-1);
+}
+.console-page-header h1 {
+  margin: 0;
+  font-size: var(--text-2xl);
+}
+@media (min-width: 48rem) {
+  .console-page-header h1 {
+    font-size: var(--text-3xl);
+  }
+}
+.console-page-header h1:focus {
+  outline: none;
+}
+
+.console-grid {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 72rem;
+}
+@media (min-width: 80rem) {
+  .console-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
+.console-card {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.console-card h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.console-dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1) var(--space-6);
+  margin: 0;
+}
+@media (min-width: 30rem) {
+  .console-dl {
+    grid-template-columns: max-content minmax(0, 1fr);
+    row-gap: var(--space-3);
+  }
+}
+.console-dl dt {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.console-dl dd {
+  margin: 0 0 var(--space-2);
+  color: var(--text-strong);
+}
+@media (min-width: 30rem) {
+  .console-dl dd {
+    margin: 0;
+  }
+}
+.console-dl__wrap {
+  overflow-wrap: anywhere;
+}
+
+.console-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.console-list__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.console-list__item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+/* The operator in scope: a Tide Lime edge, as in the navigation and the
+   operator picker, and the word "Selected" as text. The Active badge on the
+   right is the membership status, a different fact. */
+.console-list__item[aria-current="true"] {
+  box-shadow: inset 3px 0 0 var(--tg-tide-lime);
+  padding-left: var(--space-3);
+}
+.console-list__selected {
+  margin-left: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tg-tide-lime);
+}
+.console-list__main {
+  display: grid;
+  min-width: 0;
+}
+.console-list__title {
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+}
+.console-list__meta {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.console-main__notice {
+  max-width: 44rem;
+  margin-bottom: var(--space-6);
+}
+.console-main .tg-empty {
+  max-width: 44rem;
+}

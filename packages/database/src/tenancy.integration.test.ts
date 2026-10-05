@@ -642,6 +642,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         schedules: ["INSERT", "SELECT"],
         scheduled_trips: ["INSERT", "SELECT"],
         blackouts: ["INSERT", "SELECT"],
+        brand_config_versions: ["INSERT", "SELECT"],
+        brand_activations: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

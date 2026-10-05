@@ -1,0 +1,374 @@
+/*
+ * Guest shell layout. Light-led: Foam page, Mist separators, Deep Forest text,
+ * and the tenant's primary color for the brand band and the single primary
+ * action. Tenant values arrive only through the --brand-* and --font-*
+ * properties that applyBrandTheme sets on <html>.
+ */
+
+/* Until a brand is applied, and on the neutral screens, the guest site uses
+   the system font, so a phone never downloads a face its operator did not
+   choose. The brand's own stacks, set inline on <html>, take precedence. */
+:root {
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.guest {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+.guest main {
+  flex: 1;
+}
+/* The skip link's target and a heading that takes focus after "Try again"
+   are not interactive; they need focus, not a ring. */
+.guest main:focus,
+.guest h1:focus {
+  outline: none;
+}
+
+.guest-container {
+  width: 100%;
+  max-width: 68rem;
+  margin-inline: auto;
+  padding-inline: var(--space-4);
+}
+@media (min-width: 48rem) {
+  .guest-container {
+    padding-inline: var(--space-8);
+  }
+}
+
+/* Header ------------------------------------------------------------------ */
+
+.guest-header {
+  position: relative;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.guest:not(.guest--neutral) .guest-header::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 3px;
+  background: var(--brand-accent);
+}
+.guest-header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 4.5rem;
+}
+.guest-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: var(--tap-min);
+  border-radius: var(--radius-sm);
+  color: var(--text-strong);
+  text-decoration: none;
+}
+.guest-brand__mark {
+  flex: none;
+  width: auto;
+  height: 2.5rem;
+}
+.guest-brand__lockup {
+  width: auto;
+  height: 2.5rem;
+  max-width: min(60vw, 18rem);
+  object-fit: contain;
+}
+.guest-brand__name {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.01em;
+}
+@media (min-width: 48rem) {
+  .guest-brand__name {
+    font-size: var(--text-xl);
+  }
+}
+.guest-header__call {
+  flex: none;
+  gap: var(--space-2);
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--link);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+.guest-header__call:hover {
+  background: var(--surface-hover);
+  text-decoration: underline;
+}
+.guest-header__call-long {
+  display: none;
+}
+@media (min-width: 40rem) {
+  .guest-header__call-short {
+    display: none;
+  }
+  .guest-header__call-long {
+    display: inline;
+  }
+}
+
+/* Brand band -------------------------------------------------------------- */
+
+.guest-hero {
+  /* Inside the band, text uses the primary's ink and focus uses the accent,
+     which the brand contract holds at 4.5:1 and 3:1 against the primary. */
+  --text-strong: var(--brand-primary-ink);
+  --link: var(--brand-primary-ink);
+  --focus-color: var(--brand-accent);
+  position: relative;
+  overflow: hidden;
+  background: var(--brand-primary);
+  color: var(--brand-primary-ink);
+}
+.guest-hero__inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  padding-block: var(--space-12) var(--space-16);
+}
+@media (min-width: 48rem) {
+  .guest-hero__inner {
+    padding-block: var(--space-16) 5.5rem;
+  }
+}
+.guest-hero__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* A large copy of the tenant's mark balances the band on wide screens. It is
+   decoration: the name is the heading beside it. */
+.guest-hero__mark {
+  display: none;
+  flex: none;
+  width: auto;
+  height: 9rem;
+}
+@media (min-width: 56rem) {
+  .guest-hero__mark {
+    display: block;
+  }
+}
+.guest-hero__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.guest-hero__eyebrow::before {
+  content: "";
+  width: 2rem;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--brand-accent);
+}
+.guest-hero h1 {
+  max-width: 18ch;
+  margin-bottom: var(--space-4);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+}
+@media (min-width: 48rem) {
+  .guest-hero h1 {
+    font-size: var(--text-4xl);
+  }
+}
+.guest-hero__tagline {
+  max-width: var(--measure);
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  text-wrap: pretty;
+}
+.guest-hero__waves {
+  position: absolute;
+  inset: auto 0 0;
+  width: 100%;
+  height: 3rem;
+  fill: none;
+  stroke: var(--brand-accent);
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+.guest-hero__waves path + path {
+  opacity: 0.45;
+}
+/* The loading band is Mist; its placeholders shimmer a step darker so they read. */
+.guest-hero--skeleton {
+  --surface-sunken: #d3dad5;
+  --surface-raised: #e1e6e2;
+  background: var(--tg-mist);
+}
+.guest-hero--skeleton .guest-container {
+  display: grid;
+  gap: var(--space-4);
+  padding-block: var(--space-12) var(--space-16);
+}
+
+/* Content ---------------------------------------------------------------- */
+
+.guest-content {
+  display: grid;
+  gap: var(--space-8);
+  padding-block: var(--space-10) var(--space-16);
+}
+.guest-section > h2 {
+  margin-bottom: var(--space-4);
+  font-size: var(--text-2xl);
+}
+.guest-section .tg-empty {
+  max-width: 46rem;
+}
+.guest-page {
+  justify-items: start;
+  gap: var(--space-4);
+}
+.guest-page h1 {
+  margin: 0;
+  font-size: var(--text-3xl);
+}
+.guest-page p {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+/* Footer ------------------------------------------------------------------ */
+
+.guest-footer {
+  padding-block: var(--space-10) var(--space-6);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-raised);
+  font-size: var(--text-sm);
+}
+.guest-footer__grid {
+  display: grid;
+  gap: var(--space-8);
+}
+@media (min-width: 48rem) {
+  .guest-footer__grid {
+    grid-template-columns: 2fr 1fr 1fr;
+  }
+}
+.guest-footer__name {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+}
+.guest-footer__tagline {
+  margin: 0;
+  color: var(--text-muted);
+}
+.guest-footer__list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.guest-footer__link {
+  gap: var(--space-2);
+  color: var(--text-strong);
+  text-decoration: underline;
+  text-decoration-color: var(--border-control);
+  text-underline-offset: 0.2em;
+}
+.guest-footer__link:hover {
+  text-decoration-color: currentColor;
+}
+.guest-footer__link .tg-icon {
+  color: var(--text-muted);
+}
+/* The rule spans the footer; the sentence keeps the reading measure. */
+.guest-footer__meta {
+  margin-top: var(--space-8);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+.guest-footer__meta p {
+  margin: 0;
+}
+
+/* Neutral states ------------------------------------------------------------ */
+
+.guest-state {
+  display: grid;
+  place-items: center;
+  padding: var(--space-12) var(--space-4);
+}
+.guest-state__panel {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 34rem;
+  padding: var(--space-8) var(--space-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+}
+@media (min-width: 40rem) {
+  .guest-state__panel {
+    padding: var(--space-10);
+  }
+}
+.guest-state__icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+}
+.guest-state__icon .tg-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.guest-state__icon--warning {
+  background: color-mix(in srgb, var(--status-warning) 12%, var(--surface-raised));
+  color: var(--status-warning);
+}
+.guest-state__title {
+  margin: 0;
+  font-size: var(--text-2xl);
+}
+.guest-state__title:focus {
+  outline: none;
+}
+.guest-state__body p {
+  margin: 0;
+  color: var(--text-muted);
+}
+.guest-state__host {
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.guest-state__footer {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.guest-state__footer p {
+  margin: 0 auto;
+}

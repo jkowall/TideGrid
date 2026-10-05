@@ -1,0 +1,382 @@
+/*
+ * Component styles. Components read semantic roles only (see tokens.css), so
+ * one component serves a tenant-branded light surface and the dark console.
+ * Class names carry a tg- prefix; state lives in ARIA attributes where one
+ * exists (aria-busy, aria-disabled, aria-invalid, aria-current) so styling and
+ * accessibility cannot drift apart.
+ */
+
+/* Utilities ---------------------------------------------------------------- */
+
+.tg-visually-hidden:not(:focus):not(:active) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tg-skip-link {
+  position: absolute;
+  left: var(--space-4);
+  top: var(--space-2);
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+  transform: translateY(-200%);
+}
+.tg-skip-link:focus-visible {
+  transform: none;
+}
+
+.tg-eyebrow {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  line-height: var(--leading-snug);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.tg-muted {
+  color: var(--text-muted);
+}
+
+.tg-icon {
+  display: inline-block;
+  flex: none;
+  width: 1.25em;
+  height: 1.25em;
+  vertical-align: -0.2em;
+}
+
+/* Buttons ------------------------------------------------------------------ */
+
+.tg-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  min-width: var(--tap-min);
+  padding: 0 var(--space-5);
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
+}
+.tg-button--primary {
+  background: var(--action-bg);
+  border-color: var(--action-bg);
+  color: var(--action-ink);
+}
+.tg-button--primary:hover {
+  background: var(--action-bg-hover);
+  border-color: var(--action-bg-hover);
+}
+.tg-button--secondary {
+  background: var(--surface-raised);
+  border-color: var(--border-control);
+  color: var(--text-strong);
+}
+.tg-button--secondary:hover {
+  border-color: var(--text-strong);
+}
+.tg-button--ghost {
+  background: transparent;
+  color: var(--link);
+  padding-inline: var(--space-3);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.tg-button--ghost:hover {
+  background: var(--surface-hover);
+}
+.tg-button:active:not([aria-disabled="true"]):not(:disabled) {
+  translate: 0 1px;
+}
+.tg-button--block {
+  width: 100%;
+}
+/* Disabled controls are exempt from contrast minimums, but these stay legible. */
+.tg-button:disabled,
+.tg-button[aria-disabled="true"] {
+  background: var(--surface-sunken);
+  border-color: var(--surface-sunken);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+/* Busy keeps its colors and focus: it is working, not unavailable. */
+.tg-button[aria-busy="true"] {
+  cursor: progress;
+}
+.tg-button--primary[aria-busy="true"] {
+  background: var(--action-bg);
+  border-color: var(--action-bg);
+  color: var(--action-ink);
+}
+
+.tg-spinner {
+  display: inline-block;
+  flex: none;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: tg-spin 0.8s linear infinite;
+}
+@keyframes tg-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tg-spinner {
+    animation: none;
+    border-right-color: currentColor;
+    border-style: dotted;
+  }
+}
+
+/* Text fields ------------------------------------------------------------ */
+
+.tg-field {
+  display: grid;
+  gap: var(--space-2);
+}
+.tg-field__label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+}
+.tg-field__hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.tg-field__input {
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font-size: var(--text-md);
+}
+.tg-dark .tg-field__input {
+  background: var(--surface-sunken);
+}
+.tg-field__input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+.tg-field__input:hover:not(:disabled) {
+  border-color: var(--text-strong);
+}
+.tg-field__input[aria-invalid="true"] {
+  border-color: var(--status-blocked);
+  box-shadow: inset 0 0 0 1px var(--status-blocked);
+}
+.tg-field__input:disabled {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+.tg-field__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--status-blocked);
+}
+
+/* Status badges: icon plus label, never color alone ------------------------ */
+
+.tg-status {
+  --tone: var(--status-neutral);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0.125rem var(--space-2) 0.125rem 0.375rem;
+  border: 1px solid color-mix(in srgb, var(--tone) 55%, var(--surface-raised));
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--tone) 10%, var(--surface-raised));
+  color: var(--text-strong);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  white-space: nowrap;
+}
+.tg-status .tg-icon {
+  width: 1rem;
+  height: 1rem;
+  color: var(--tone);
+}
+.tg-status--ready {
+  --tone: var(--status-ready);
+}
+.tg-status--warning {
+  --tone: var(--status-warning);
+}
+.tg-status--blocked {
+  --tone: var(--status-blocked);
+}
+.tg-status--info {
+  --tone: var(--status-info);
+}
+.tg-status--pending {
+  --tone: var(--status-pending);
+}
+
+/* Notices ------------------------------------------------------------------ */
+
+.tg-notice {
+  --tone: var(--status-info);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--tone) 40%, var(--surface-raised));
+  border-left: 4px solid var(--tone);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--tone) 7%, var(--surface-raised));
+  color: var(--text-body);
+}
+.tg-notice > .tg-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  margin-top: 0.125rem;
+  color: var(--tone);
+}
+.tg-notice__title {
+  margin: 0 0 var(--space-1);
+  font-weight: var(--weight-bold);
+  color: var(--text-strong);
+}
+.tg-notice__body > :last-child {
+  margin-bottom: 0;
+}
+.tg-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.tg-notice--success {
+  --tone: var(--status-ready);
+}
+.tg-notice--warning {
+  --tone: var(--status-warning);
+}
+.tg-notice--error {
+  --tone: var(--status-blocked);
+}
+
+/* Cards and empty states --------------------------------------------------- */
+
+.tg-card {
+  padding: var(--space-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+
+.tg-empty {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+}
+.tg-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--link) 12%, var(--surface-raised));
+  color: var(--link);
+}
+.tg-empty__icon .tg-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.tg-empty__title {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+.tg-empty__body {
+  margin: 0;
+  color: var(--text-muted);
+}
+.tg-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+/* Skeletons ---------------------------------------------------------------- */
+
+.tg-skeleton {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--surface-sunken) 25%,
+    color-mix(in srgb, var(--surface-sunken) 40%, var(--surface-raised)) 50%,
+    var(--surface-sunken) 75%
+  );
+  background-size: 300% 100%;
+  animation: tg-shimmer 1.6s ease-in-out infinite;
+}
+.tg-skeleton--text {
+  height: 1em;
+  margin-block: 0.3em;
+}
+.tg-skeleton--circle {
+  border-radius: 50%;
+}
+@keyframes tg-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tg-skeleton {
+    animation: none;
+    background: var(--surface-sunken);
+  }
+}

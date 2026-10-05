@@ -1,4 +1,7 @@
+// First, so zod never probes for eval under the guest CSP. See zod-jitless.ts.
+import "./zod-jitless.ts";
 import "@tidegrid/design-system/base.css";
+import "./guest.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";

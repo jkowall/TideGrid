@@ -147,11 +147,11 @@
         "tags": [
           "public"
         ],
-        "summary": "Public brand context for the calling site",
-        "description": "Resolves the browser Origin to an active, verified tenant hostname. Selects public context only; grants no permission.",
+        "summary": "Public experience bootstrap for the calling site",
+        "description": "Resolves the browser Origin to an active, verified tenant hostname and returns the tenant's public identity and its active brand. Selects public context only; grants no permission. Unknown, disabled, and unverified hostnames and suspended tenants all answer the same 404.",
         "responses": {
           "200": {
-            "description": "The operator published at this origin",
+            "description": "The operator published at this origin, with its active brand once it has published one",
             "content": {
               "application/json": {
                 "schema": {
@@ -161,28 +161,272 @@
                       "type": "object",
                       "properties": {
                         "slug": {
-                          "type": "string"
+                          "type": "string",
+                          "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$"
                         },
                         "name": {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120,
+                          "pattern": "^[^\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Cs}<>]*$",
+                          "description": "Operator display name"
                         }
                       },
                       "required": [
                         "slug",
                         "name"
-                      ]
+                      ],
+                      "additionalProperties": false
+                    },
+                    "brand": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80,
+                          "pattern": "^[^\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Cs}<>]*$",
+                          "description": "Guest-facing brand name"
+                        },
+                        "tagline": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 140,
+                          "pattern": "^[^\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Cs}<>]*$"
+                        },
+                        "colors": {
+                          "type": "object",
+                          "properties": {
+                            "primary": {
+                              "type": "string",
+                              "pattern": "^#[0-9a-f]{6}$",
+                              "description": "Links and the single primary action; 4.5:1 against the page"
+                            },
+                            "accent": {
+                              "type": "string",
+                              "pattern": "^#[0-9a-f]{6}$",
+                              "description": "Rules, marks, and focus on the primary surface; 3:1 against primary"
+                            }
+                          },
+                          "required": [
+                            "primary",
+                            "accent"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "fonts": {
+                          "type": "object",
+                          "properties": {
+                            "display": {
+                              "type": "string",
+                              "enum": [
+                                "sora",
+                                "fraunces",
+                                "bricolage-grotesque"
+                              ]
+                            },
+                            "body": {
+                              "type": "string",
+                              "enum": [
+                                "inter",
+                                "source-sans-3",
+                                "atkinson-hyperlegible-next"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "display",
+                            "body"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "logo": {
+                          "type": "object",
+                          "properties": {
+                            "src": {
+                              "type": "string",
+                              "maxLength": 44000,
+                              "pattern": "^data:(image\\/svg\\+xml|image\\/png|image\\/webp);base64,([A-Za-z0-9+/]+={0,2})$",
+                              "description": "Base64 data URI, SVG, PNG, or WebP, at most 32 KB decoded. SVG is limited to inert shapes, paint, gradients, clipping, and text. Render only as an image (an <img> element or the tab icon)."
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "mark",
+                                "lockup"
+                              ],
+                              "description": "mark: a symbol, shown beside the brand name set in the display font. lockup: artwork that already contains the name, shown alone."
+                            },
+                            "alt": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[^\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Cs}<>]*$"
+                            },
+                            "width": {
+                              "type": "integer",
+                              "minimum": 16,
+                              "maximum": 4096,
+                              "description": "Intrinsic width; sets the aspect ratio"
+                            },
+                            "height": {
+                              "type": "integer",
+                              "minimum": 16,
+                              "maximum": 4096,
+                              "description": "Intrinsic height; sets the aspect ratio"
+                            }
+                          },
+                          "required": [
+                            "src",
+                            "kind",
+                            "alt",
+                            "width",
+                            "height"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "contact": {
+                          "type": "object",
+                          "properties": {
+                            "email": {
+                              "type": "string",
+                              "maxLength": 254,
+                              "pattern": "^[\\x21-\\x7e]+$"
+                            },
+                            "phone": {
+                              "type": "string",
+                              "pattern": "^\\+[1-9][0-9]{7,14}$"
+                            },
+                            "website": {
+                              "type": "string",
+                              "maxLength": 300,
+                              "pattern": "^https:\\/\\/[^/\\\\]"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "legal": {
+                          "type": "object",
+                          "properties": {
+                            "terms": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 300,
+                                  "pattern": "^https:\\/\\/[^/\\\\]"
+                                },
+                                {
+                                  "type": "string",
+                                  "maxLength": 200,
+                                  "pattern": "^\\/(?!\\/)[A-Za-z0-9\\-._~%!$&'()*+,;=:@/?#]*$"
+                                }
+                              ]
+                            },
+                            "privacy": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "maxLength": 300,
+                                  "pattern": "^https:\\/\\/[^/\\\\]"
+                                },
+                                {
+                                  "type": "string",
+                                  "maxLength": 200,
+                                  "pattern": "^\\/(?!\\/)[A-Za-z0-9\\-._~%!$&'()*+,;=:@/?#]*$"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "terms",
+                            "privacy"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "locale": {
+                          "type": "string",
+                          "enum": [
+                            "en-US"
+                          ]
+                        },
+                        "capabilities": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "transactional_sms",
+                              "pooled_equipment",
+                              "marine_conditions",
+                              "tips",
+                              "trip_cards"
+                            ]
+                          },
+                          "maxItems": 5
+                        },
+                        "version": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "description": "Per-tenant brand configuration version"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "colors",
+                        "fonts",
+                        "contact",
+                        "legal",
+                        "locale",
+                        "capabilities",
+                        "version"
+                      ],
+                      "additionalProperties": false,
+                      "description": "The tenant's active brand. Absent until the tenant publishes one; a guest surface must not render without it."
                     }
                   },
                   "required": [
                     "tenant"
                   ],
-                  "description": "Public brand context for a verified hostname. Grants no permission."
+                  "description": "Public experience bootstrap for a verified hostname: tenant identity and active brand. Grants no permission."
                 }
               }
             }
           },
           "404": {
             "description": "No active tenant hostname matches the origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The operator's stored identity or brand failed validation and is withheld",
             "content": {
               "application/json": {
                 "schema": {

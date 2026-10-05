@@ -44,6 +44,19 @@ A state-changing command follows one shape, all inside one tenant transaction:
 
 Keys are scoped by tenant, operation, and principal. Only successful responses are stored.
 
+## Brand configuration
+
+Migration 0004 adds two tenant-owned, append-only tables under rules 1 to 8:
+
+- `brand_config_versions`: one row per published brand, keyed by tenant and a per-tenant version number, holding the brand contract's `BrandConfig` (`packages/contracts/src/brand.ts`) as bounded JSON with its schema version. Writers validate the config against the contract before insert.
+- `brand_activations`: who made which version live, when, and why. Its foreign key includes `tenant_id`, so an activation can only name its own tenant's version. The tenant's latest activation (highest id) is its active brand.
+
+The runtime holds SELECT and INSERT on both. UPDATE, DELETE, and TRUNCATE raise for every role, the owner included, so an old version never changes; returning to an earlier brand is a new activation. Publishing is one tenant transaction: insert the next version, insert its activation with a reason, and record an audit event.
+
+The active brand is simply the highest activation id, and nothing in the schema serializes two publishes for the same tenant. Any publish command, today's seed or a future staff command, must therefore first take the per-tenant transaction lock the seed takes, `pg_advisory_xact_lock(hashtextextended('tidegrid.brand:' || tenant_id, 0))`, before reading the current version. Without it, two concurrent publishes can compute the same next version number (one fails on the unique key) or activate in the opposite order from the one their callers saw.
+
+`app.resolve_public_brand(hostname)` is the public bootstrap. It resolves the hostname through `app.resolve_hostname`, so only active, verified hostnames of active tenants return a row, and joins that tenant's active brand, filtering by the resolved tenant explicitly. The brand columns are NULL until the tenant publishes one. The API validates the stored config against the contract again before serving it, and fails closed if it does not validate.
+
 ## Tests
 
 - `pnpm test` runs unit tests.

@@ -10,6 +10,7 @@
  * supplied at seed time, so personal addresses never enter the repository.
  */
 import postgres from "postgres";
+import { seedBrands } from "./brands.ts";
 import { seedCatalog } from "./catalog.ts";
 
 const url = process.env.DATABASE_URL;
@@ -103,6 +104,7 @@ try {
         ? ` (${ownerEmails.length} owner address(es) from SEED_OWNER_EMAILS)`
         : ""),
   );
+  await seedBrands(sql, { localHostnames: process.env.SEED_LOCAL_HOSTNAMES === "1" });
 } finally {
   await sql.end();
 }
