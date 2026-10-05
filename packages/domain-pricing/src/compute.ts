@@ -42,8 +42,10 @@ import type {
  * 8. Totals: subtotal is trip price and add-ons before the discount; total is
  *    subtotal − discount + fees + added tax. Included tax is reported only.
  *
- * Every problem in an independent area is reported. Checks that depend on an
- * invalid party size are skipped rather than reported as consequences.
+ * Every problem in an independent area is reported. Checks that need a party
+ * size that could not be counted (per-participant add-on limits, party limits,
+ * capacity) are skipped rather than reported as consequences; a counted party
+ * that is too large is still counted.
  */
 
 /** No line amount or total may exceed $1,000,000. */
@@ -279,33 +281,34 @@ export function priceQuote(input: QuoteInput): QuoteOutcome {
   // 2. Party.
   const priceLines: DraftLine[] = [];
   let partySize = 0;
-  let partyValid = true;
+  // Whether the party could be counted. A counted party may still be too large.
+  let partyCounted = true;
   if (selection.party.kind === "tickets") {
     const chosen = new Map<string, number>();
     const seen = new Set<string>();
     for (const t of selection.party.tickets) {
       if (seen.has(t.code)) {
         problems.push({ code: "duplicate_ticket_type", subject: t.code });
-        partyValid = false;
+        partyCounted = false;
         continue;
       }
       seen.add(t.code);
       if (!isCount(t.quantity)) {
         problems.push({ code: "invalid_quantity", subject: t.code });
-        partyValid = false;
+        partyCounted = false;
         continue;
       }
       if (!priceList.tickets.some((i) => i.code === t.code)) {
         problems.push({ code: "unknown_ticket_type", subject: t.code });
-        partyValid = false;
+        partyCounted = false;
         continue;
       }
       chosen.set(t.code, t.quantity);
       partySize += t.quantity;
     }
-    if (chosen.size === 0 && partyValid) {
+    if (chosen.size === 0 && partyCounted) {
       problems.push({ code: "party_size_out_of_range" });
-      partyValid = false;
+      partyCounted = false;
     }
     for (const item of priceList.tickets) {
       const quantity = chosen.get(item.code);
@@ -323,7 +326,7 @@ export function priceQuote(input: QuoteInput): QuoteOutcome {
   } else {
     if (!isCount(selection.party.guests)) {
       problems.push({ code: "invalid_quantity", subject: "guests" });
-      partyValid = false;
+      partyCounted = false;
     } else {
       partySize = selection.party.guests;
     }
@@ -340,14 +343,12 @@ export function priceQuote(input: QuoteInput): QuoteOutcome {
       });
     }
   }
-  if (partyValid) {
+  if (partyCounted) {
     if (partySize < subject.minPartySize || partySize > subject.maxPartySize) {
       problems.push({ code: "party_size_out_of_range" });
-      partyValid = false;
     }
     if (partySize > subject.capacityRemaining) {
       problems.push({ code: "insufficient_capacity" });
-      partyValid = false;
     }
   }
 
@@ -373,7 +374,9 @@ export function priceQuote(input: QuoteInput): QuoteOutcome {
       problems.push({ code: "add_on_unavailable", subject: a.code });
       continue;
     }
-    if (partyValid) {
+    // A per-booking limit stands alone; a per-participant limit needs the
+    // party counted, and uses its size even when the party is too large.
+    if (item.quantityRule === "per_booking" || partyCounted) {
       const limit =
         item.quantityRule === "per_participant" ? item.maxQuantity * partySize : item.maxQuantity;
       if (a.quantity > limit) {

@@ -713,6 +713,19 @@ describe("eligibility: party", () => {
     ]);
   });
 
+  it("still limits per-participant add-ons by a party that was counted but is too large", () => {
+    // Twelve adults exceed the product's ten; two drinks each allows 24.
+    const outcome = priceQuote(
+      input({
+        selection: { party: tickets(["adult", 12]), addOns: [{ code: "drink", quantity: 25 }] },
+      }),
+    );
+    expect(problems(outcome)).toEqual([
+      { code: "party_size_out_of_range" },
+      { code: "add_on_quantity_exceeded", subject: "drink" },
+    ]);
+  });
+
   it("does not report limits that depend on a party it could not count", () => {
     const outcome = priceQuote(
       input({

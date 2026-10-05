@@ -89,6 +89,6 @@ Public routes resolve the tenant from the verified browser Origin, as `/v1/publi
 
 - Deposits and balances (G2.8), refunds, credits, and applying policy remedies (G2.9 and G2.11), equipment rentals (G3.2), trip cards and credit as tender (G3.5), and tips (G3.4) are not in a quote yet. The order (G2.7) copies a quote's lines.
 - Tax rates are tenant-wide. An operator with locations in different tax jurisdictions needs per-location rates.
-- `POST /v1/public/quotes` writes a row per request and has no per-client rate limit yet; G2.14b adds origin-bound throttling with verified-origin CORS. Expired quotes are kept; a cleanup job arrives with the outbox sweeper.
+- `POST /v1/public/quotes` writes a row per request and has no per-client rate limit yet. It needs one before a public deployment takes real traffic. Expired quotes are kept; nothing cleans them up yet.
 - There are no staff endpoints for terms or quotes yet; the console goal adds them on the commands above.
 - Quote creation reads `scheduled_trips` and `products` directly for a trip's product and local date before asking the catalog's availability query, which owns bookability.

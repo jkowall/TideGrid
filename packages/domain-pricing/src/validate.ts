@@ -30,8 +30,9 @@ export type TermsProblem =
 const ITEM_CODE = /^[a-z][a-z0-9_]{0,31}$/;
 const PROMOTION_CODE = /^[A-Z0-9][A-Z0-9_-]{2,31}$/;
 const LOCAL_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+// C0, DEL, and C1: what PostgreSQL's [[:cntrl:]] refuses in names.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
-const CONTROL = /[\u0000-\u001f\u007f]/;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: newlines are allowed in policy text.
 const CONTROL_EXCEPT_NEWLINE = /[\u0000-\u0009\u000b-\u001f\u007f]/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
