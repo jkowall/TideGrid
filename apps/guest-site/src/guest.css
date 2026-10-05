@@ -320,20 +320,33 @@
     align-items: end;
   }
 }
+/* Phone: the dates on their own line, then Previous and Next side by side.
+   Wider: Previous, the dates, Next. */
 .trips__range {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "label label"
+    "previous next";
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-2) var(--space-3);
+}
+.trips__range > :first-child {
+  grid-area: previous;
+}
+.trips__range > :last-child {
+  grid-area: next;
 }
 @media (min-width: 48rem) {
   .trips__range {
     justify-self: end;
     grid-template-columns: auto minmax(12rem, auto) auto;
+    grid-template-areas: "previous label next";
     gap: var(--space-3);
   }
 }
 .trips__range-label {
+  grid-area: label;
   margin: 0;
   text-align: center;
   font-weight: var(--weight-semibold);

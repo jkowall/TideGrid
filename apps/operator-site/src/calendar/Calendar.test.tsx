@@ -450,6 +450,25 @@ describe("changing a trip", () => {
     expect(within(canceled).queryAllByRole("button")).toEqual([]);
   });
 
+  it("returns focus to the trip's own button, even when a click did not focus it", async () => {
+    api({ [tripsPath()]: [() => json({ trips: week })] });
+    render(<CalendarPage membership={membership("owner")} focusHeading={false} />);
+    await screen.findByRole("region", { name: /^Thursday, November 5/ });
+    // As in Safari: focus sits elsewhere, and clicking a button does not move it.
+    const elsewhere = within(rowOn("Sunday, November 1", /Charter/)).getByRole("heading", {
+      level: 4,
+    });
+    elsewhere.focus();
+    const opener = within(rowOn("Thursday, November 5", /Sunset/)).getByRole("button", {
+      name: /^Close sales/,
+    });
+    fireEvent.click(opener);
+    const dialog = await screen.findByRole("dialog", { name: "Close sales?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep selling" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
   it("closes on Escape without a change", async () => {
     const calls = api({ [tripsPath()]: [() => json({ trips: week })] });
     render(<CalendarPage membership={membership("owner")} focusHeading={false} />);
@@ -490,6 +509,8 @@ describe("changing a trip", () => {
     expect(text(alert)).toContain("Someone changed this trip first");
     expect(text(alert)).toContain("It's closed now, so nothing was changed.");
     expect(text(alert)).not.toMatch(/409|trip_state_conflict/);
+    // The dialog's badge now shows the state the trip is really in.
+    expect(text(dialog.querySelector(".cal-dialog__trip .tg-status"))).toBe("Closed");
     // Nothing left to send: one way out, and it has focus.
     expect(within(dialog).queryByRole("button", { name: "Close sales" })).toBeNull();
     const back = within(dialog).getByRole("button", { name: "Back to calendar" });

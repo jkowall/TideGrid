@@ -47,7 +47,8 @@ export function ActionDialog({
   const sent = useRef<{ key: string; body: string } | null>(null);
   const formId = useId();
   const explainId = useId();
-  const state = salesStates[trip.salesState];
+  // After a conflict, the badge shows the state the trip is in now.
+  const state = salesStates[failed?.current ?? trip.salesState];
   const problem = failed && failureCopy(failed.failure, trip, failed.current);
   const finished = problem !== undefined && !problem.retry;
 
@@ -120,6 +121,8 @@ export function ActionDialog({
       initialFocus={input}
       describedBy={explainId}
       footer={footer}
+      // The calendar puts focus back on this trip itself; see CalendarPage.
+      restoreFocus={false}
       className="cal-dialog"
     >
       <div className="cal-dialog__trip">

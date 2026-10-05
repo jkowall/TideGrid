@@ -21,6 +21,15 @@ export interface DialogProps {
   children: ReactNode;
   /** The dialog's actions: one primary (or danger) action and a way back. */
   footer?: ReactNode;
+  /**
+   * True (the default): on close, focus returns to the element that had it
+   * when the dialog opened. False: the caller moves focus itself, in an effect
+   * that runs after the dialog is gone. Callers that know where the person
+   * belongs, such as a list whose rows change after the action, pass false.
+   * Safari does not focus a button on click, so "the element that had focus"
+   * is not always the button that opened the dialog.
+   */
+  restoreFocus?: boolean;
   className?: string;
 }
 
@@ -30,10 +39,7 @@ export interface DialogProps {
  * sends Escape to `onClose`.
  *
  * Focus: the `initialFocus` element (or the first focusable element) takes
- * focus on open. On close, focus returns to the element that had it before,
- * if it still exists. A caller that knows a better place, because the control
- * that opened the dialog is gone after the action, moves focus there in its
- * own effect, which runs after this one.
+ * focus on open. On close, see `restoreFocus`.
  */
 export function Dialog({
   title,
@@ -44,12 +50,13 @@ export function Dialog({
   describedBy,
   children,
   footer,
+  restoreFocus = true,
   className,
 }: DialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  const latest = useRef({ onClose, dismissible });
-  latest.current = { onClose, dismissible };
+  const latest = useRef({ onClose, dismissible, restoreFocus });
+  latest.current = { onClose, dismissible, restoreFocus };
 
   useLayoutEffect(() => {
     const element = dialog.current;
@@ -73,6 +80,7 @@ export function Dialog({
       const inside = active !== null && element.contains(active);
       if (typeof element.close === "function" && element.open) element.close();
       else element.removeAttribute("open");
+      if (!latest.current.restoreFocus) return;
       // Back to the opener, unless focus already moved somewhere outside.
       const lost = inside || !active || active === document.body || !active.isConnected;
       if (lost && opener?.isConnected) opener.focus();

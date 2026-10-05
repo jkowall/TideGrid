@@ -69,6 +69,8 @@ interface Done {
 
 const tripHeadingId = (tripId: string) => `trip-${tripId}`;
 const dayHeadingId = (date: LocalDate) => `day-${date}`;
+/** Marks each change button, so focus can find it again after the dialog. */
+const actionKey = (tripId: string, kind: ActionKind) => `${tripId}:${kind}`;
 
 export function CalendarPage({
   membership,
@@ -87,11 +89,15 @@ export function CalendarPage({
   const retryRequested = useRef(false);
   const focusRangeOnLoad = useRef(false);
   /**
-   * The trip whose heading takes focus once the dialog is gone: always after
-   * a change (its buttons are different now), and after a dismissal only when
-   * the button that opened the dialog no longer exists.
+   * Where focus goes once the dialog is gone. After a change, the trip's
+   * heading: its buttons are different now. After a dismissal, the button that
+   * opened the dialog, or the heading if that button no longer exists. The
+   * calendar decides this itself rather than trusting "the element focused
+   * before the dialog": Safari does not focus a button on click.
    */
-  const focusTrip = useRef<{ tripId: string; always: boolean } | null>(null);
+  const focusAfterDialog = useRef<{ tripId: string; kind: ActionKind; changed: boolean } | null>(
+    null,
+  );
   const range = useRef<HTMLHeadingElement>(null);
   const week = weekOf(weekStart);
   const today = todayIn(zone);
@@ -154,15 +160,16 @@ export function CalendarPage({
   }, [load]);
 
   // After the dialog closes, the trip it was about keeps the person's place.
-  // The dialog has already returned focus to the button that opened it, if
-  // that button still exists.
   useEffect(() => {
-    const target = focusTrip.current;
+    const target = focusAfterDialog.current;
     if (dialog || !target) return;
-    focusTrip.current = null;
-    const active = document.activeElement;
-    const lost = !active || active === document.body;
-    if (target.always || lost) document.getElementById(tripHeadingId(target.tripId))?.focus();
+    focusAfterDialog.current = null;
+    const opener = target.changed
+      ? null
+      : document.querySelector<HTMLElement>(
+          `[data-trip-action="${actionKey(target.tripId, target.kind)}"]`,
+        );
+    (opener ?? document.getElementById(tripHeadingId(target.tripId)))?.focus();
   }, [dialog]);
 
   /** Reload the week without the loading screen, after a trip changed under the person. */
@@ -184,7 +191,9 @@ export function CalendarPage({
   };
 
   const close = () => {
-    if (dialog) focusTrip.current = { tripId: dialog.trip.tripId, always: false };
+    if (dialog) {
+      focusAfterDialog.current = { tripId: dialog.trip.tripId, kind: dialog.kind, changed: false };
+    }
     setDialog(null);
   };
 
@@ -201,7 +210,7 @@ export function CalendarPage({
       what: copy.done,
       message: `${copy.done}: ${tripLine(trip)}.`,
     });
-    focusTrip.current = { tripId: trip.tripId, always: true };
+    focusAfterDialog.current = { tripId: trip.tripId, kind: dialog.kind, changed: true };
     setDialog(null);
   };
 
@@ -636,6 +645,7 @@ function TripRow({
                 key={kind}
                 icon={copy.icon}
                 className={kind === "cancel" ? "cal-trip__cancel" : undefined}
+                data-trip-action={actionKey(trip.tripId, kind)}
                 onClick={() => onAction(trip, kind)}
               >
                 {copy.button} <VisuallyHidden>{tripLine(trip)}</VisuallyHidden>
