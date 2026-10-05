@@ -1,6 +1,7 @@
 import type { AvailableTrip, PublicBrand } from "@tidegrid/contracts";
 import {
   Button,
+  cx,
   EmptyState,
   Icon,
   Notice,
@@ -13,23 +14,26 @@ import {
   addDays,
   clockChanges,
   describeClockChange,
-  formatClock,
   formatCutoff,
   formatDate,
   formatDateRange,
   formatDuration,
+  formatTripTime,
   type LocalDate,
   todayIn,
   zoneCity,
 } from "@tidegrid/design-system/format";
-import { useEffect, useRef, useState } from "react";
+import { type Ref, useEffect, useRef, useState } from "react";
 import { ContactActions } from "./Contact.tsx";
 import {
+  clampStart,
   groupByDate,
+  lastStart,
   loadTrips,
   partySizes,
   readQuery,
   type TripQuery,
+  type TripsFailure,
   windowDays,
   windowOf,
   writeQuery,
@@ -48,15 +52,16 @@ interface Loaded {
 }
 
 type State =
-  /** `previous`: the same dates for another party size, shown while the new list loads. */
+  /** `previous`: the list shown before this load, kept while the same dates load for another party. */
   | { kind: "loading"; previous?: Loaded | undefined }
   | { kind: "ready"; loaded: Loaded }
   /** `retrying`: "Try again" is working; the notice stays so focus stays on it. */
-  | { kind: "failed"; retrying: boolean; failures: number };
+  | { kind: "failed"; reason: TripsFailure; retrying: boolean; failures: number };
 
 const guests = (n: number) => (n === 1 ? "1 guest" : `${n} guests`);
 const partyOptions = partySizes.map((n) => ({ value: String(n), label: guests(n) }));
 const currentYear = () => new Date().getFullYear();
+const sameQuery = (a: TripQuery, b: TripQuery) => a.start === b.start && a.party === b.party;
 
 export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
   // The guest's own date. Trip dates are the marina's; see windowOf.
@@ -64,9 +69,9 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
   const [query, setQuery] = useState<TripQuery>(() => readQuery(window.location.search, today));
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<State>({ kind: "loading" });
-  const heading = useRef<HTMLHeadingElement>(null);
+  const rangeLabel = useRef<HTMLParagraphElement>(null);
   const retryRequested = useRef(false);
-  const focusHeadingOnLoad = useRef(false);
+  const focusRangeOnLoad = useRef(false);
   const range = windowOf(query.start, today);
 
   useEffect(() => {
@@ -77,13 +82,14 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
     retryRequested.current = false;
     setState((current) => {
       if (retry && current.kind === "failed") return { ...current, retrying: true };
-      if (current.kind === "ready" && current.loaded.query.start === query.start) {
-        return { kind: "loading", previous: current.loaded };
-      }
-      if (current.kind === "loading" && current.previous?.query.start === query.start) {
-        return current;
-      }
-      return { kind: "loading" };
+      const shown =
+        current.kind === "ready"
+          ? current.loaded
+          : current.kind === "loading"
+            ? current.previous
+            : undefined;
+      // The same dates for another party: keep the list while the new one loads.
+      return { kind: "loading", previous: shown?.query.start === query.start ? shown : undefined };
     });
     const { from, to } = windowOf(query.start, today);
     void loadTrips({ from, to, party: query.party }, controller.signal).then((result) => {
@@ -92,9 +98,10 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
         setState({ kind: "ready", loaded: { query, trips: result.trips } });
         return;
       }
-      focusHeadingOnLoad.current = false;
+      focusRangeOnLoad.current = false;
       setState((current) => ({
         kind: "failed",
+        reason: result.reason,
         retrying: false,
         failures: current.kind === "failed" ? current.failures + 1 : 1,
       }));
@@ -111,28 +118,49 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
     }
   }, [query, today]);
 
-  // "Try again" is gone once the list arrives, so the section heading takes focus.
+  // "Try again" is gone once the list arrives, so the dates take focus, as the
+  // week does in the console.
   useEffect(() => {
-    if (state.kind === "ready" && focusHeadingOnLoad.current) {
-      focusHeadingOnLoad.current = false;
-      heading.current?.focus();
+    if (state.kind === "ready" && focusRangeOnLoad.current) {
+      focusRangeOnLoad.current = false;
+      rangeLabel.current?.focus();
     }
   }, [state]);
 
   const retry = () => {
     retryRequested.current = true;
-    focusHeadingOnLoad.current = true;
+    focusRangeOnLoad.current = true;
     setAttempt((n) => n + 1);
   };
 
-  const shown =
-    state.kind === "ready" ? state.loaded : state.kind === "loading" ? state.previous : undefined;
+  /** Show another four weeks. From the foot of the list, the person goes back to the top. */
+  const goTo = (start: LocalDate, fromBottom = false) => {
+    setQuery((q) => ({ ...q, start: clampStart(start, today) }));
+    if (fromBottom) rangeLabel.current?.focus();
+  };
+
+  // What is on screen matches the dates and party asked for, or it is the same
+  // dates for the previous party while the new list loads. Nothing older: a
+  // list for other dates never sits under the new dates, even for one frame.
+  const loaded = state.kind === "ready" ? state.loaded : undefined;
+  const current = loaded && sameQuery(loaded.query, query) ? loaded : undefined;
+  const previous = state.kind === "loading" ? state.previous : loaded;
+  const updating = !current && state.kind !== "failed" && previous?.query.start === query.start;
+  const shown = current ?? (updating ? previous : undefined);
   const failed = state.kind === "failed";
+  const label = formatDateRange(range.start, range.end, "medium", { currentYear: currentYear() });
+  const canPrevious = query.start > today;
+  const canNext = addDays(query.start, windowDays) <= lastStart(today);
+  const status = current
+    ? summary(current, range.start, range.end)
+    : !failed && !updating
+      ? "Loading trips…"
+      : "";
 
   return (
     <section aria-labelledby="trips-title" className="guest-section trips">
       <div className="trips__head">
-        <h2 id="trips-title" ref={heading} tabIndex={-1}>
+        <h2 id="trips-title" tabIndex={-1}>
           Upcoming trips
         </h2>
         {shown && shown.trips.length > 0 && (
@@ -158,39 +186,21 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
           value={String(query.party)}
           onChange={(event) => setQuery((q) => ({ ...q, party: Number(event.target.value) }))}
         />
-        <nav className="trips__range" aria-label="Trip dates">
-          <Button
-            icon="chevron-left"
-            disabled={query.start <= today}
-            onClick={() => {
-              const back = addDays(query.start, -windowDays);
-              setQuery((q) => ({ ...q, start: back < today ? today : back }));
-            }}
-          >
-            Previous <VisuallyHidden>4 weeks</VisuallyHidden>
-          </Button>
-          <p className="trips__range-label">
-            {formatDateRange(range.start, range.end, "medium", { currentYear: currentYear() })}
-          </p>
-          <Button
-            icon="chevron-right"
-            iconPosition="end"
-            onClick={() => setQuery((q) => ({ ...q, start: addDays(q.start, windowDays) }))}
-          >
-            Next <VisuallyHidden>4 weeks</VisuallyHidden>
-          </Button>
-        </nav>
+        <RangeNav
+          label={label}
+          labelRef={rangeLabel}
+          canPrevious={canPrevious}
+          canNext={canNext}
+          onPrevious={() => goTo(addDays(query.start, -windowDays))}
+          onNext={() => goTo(addDays(query.start, windowDays))}
+        />
       </div>
 
       <p className="tg-visually-hidden" role="status">
-        {state.kind === "ready"
-          ? summary(state.loaded, range.start, range.end)
-          : state.kind === "loading" && !state.previous
-            ? "Loading trips…"
-            : ""}
+        {status}
       </p>
 
-      {state.kind === "loading" && state.previous && (
+      {updating && (
         <p className="trips__updating">
           <Spinner />
           Updating for {guests(query.party)}…
@@ -198,41 +208,50 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
       )}
 
       {state.kind === "failed" && (
-        <Notice
-          tone="error"
-          className="trips__error"
-          title={state.failures > 1 ? "Trips still aren't loading" : "We couldn't load trips"}
-          actions={
-            <Button
-              variant="primary"
-              icon="refresh"
-              busy={state.retrying}
-              busyLabel="Trying again…"
-              onClick={retry}
-            >
-              Try again
-            </Button>
-          }
-        >
-          <p>
-            {state.failures > 1
-              ? "The booking site may be briefly unavailable. Wait a moment, then try again."
-              : "Check your connection and try again."}
-          </p>
-        </Notice>
+        <TripsFailed
+          reason={state.reason}
+          failures={state.failures}
+          retrying={state.retrying}
+          onRetry={retry}
+          onFromToday={() => goTo(today)}
+        />
       )}
 
-      {state.kind === "loading" && !state.previous && <TripListSkeleton />}
+      {!failed && !shown && <TripListSkeleton />}
 
       {shown &&
         (shown.trips.length > 0 ? (
-          <TripList trips={shown.trips} busy={state.kind === "loading"} />
+          <>
+            <TripList trips={shown.trips} busy={updating} />
+            <RangeNav
+              bottom
+              label={label}
+              canPrevious={canPrevious}
+              canNext={canNext}
+              onPrevious={() => goTo(addDays(query.start, -windowDays), true)}
+              onNext={() => goTo(addDays(query.start, windowDays), true)}
+            />
+          </>
         ) : (
-          <EmptyState icon="calendar" headingLevel={3} title="No trips in these dates">
+          <EmptyState
+            icon="calendar"
+            headingLevel={3}
+            title="No trips in these dates"
+            actions={
+              canPrevious ? (
+                <Button icon="arrow-left" onClick={() => goTo(today)}>
+                  Show from today
+                </Button>
+              ) : shown.query.party > 1 ? (
+                <Button onClick={() => setQuery((q) => ({ ...q, party: 1 }))}>
+                  Show trips for 1 guest
+                </Button>
+              ) : undefined
+            }
+          >
             <p>
-              Nothing is open for {guests(shown.query.party)} from{" "}
-              {formatDate(range.start, "medium")} to {formatDate(range.end, "medium")}. Try later
-              dates{shown.query.party > 1 ? " or a smaller party" : ""}.
+              Nothing is open for {guests(shown.query.party)} from {label}. Try other dates
+              {shown.query.party > 1 ? " or a smaller party" : ""}.
             </p>
           </EmptyState>
         ))}
@@ -243,7 +262,118 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
 function summary(loaded: Loaded, start: LocalDate, end: LocalDate): string {
   const count = loaded.trips.length;
   const trips = count === 0 ? "No trips" : count === 1 ? "1 trip" : `${count} trips`;
-  return `${trips} from ${formatDateRange(start, end, "full")}, for ${guests(loaded.query.party)}.`;
+  return `${trips} from ${formatDateRange(start, end, "full", { currentYear: currentYear() })}, for ${guests(loaded.query.party)}.`;
+}
+
+/**
+ * Previous, the dates shown, and Next. The list ends with a second copy, so a
+ * guest at the foot of a long list need not scroll back to page on.
+ */
+function RangeNav({
+  label,
+  labelRef,
+  bottom = false,
+  canPrevious,
+  canNext,
+  onPrevious,
+  onNext,
+}: {
+  label: string;
+  /** The top copy's dates take focus after paging from the bottom, or after "Try again". */
+  labelRef?: Ref<HTMLParagraphElement>;
+  bottom?: boolean;
+  canPrevious: boolean;
+  canNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <nav
+      className={cx("trips__range", bottom && "trips__range--bottom")}
+      aria-label={bottom ? "Trip dates, after the list" : "Trip dates"}
+    >
+      <Button icon="chevron-left" disabled={!canPrevious} onClick={onPrevious}>
+        Previous <VisuallyHidden>4 weeks</VisuallyHidden>
+      </Button>
+      <p className="trips__range-label" ref={labelRef} tabIndex={labelRef ? -1 : undefined}>
+        {label}
+      </p>
+      <Button icon="chevron-right" iconPosition="end" disabled={!canNext} onClick={onNext}>
+        Next <VisuallyHidden>4 weeks</VisuallyHidden>
+      </Button>
+    </nav>
+  );
+}
+
+const failureCopy: Record<TripsFailure, { title: string; body: string }> = {
+  unreachable: {
+    title: "We couldn't load trips",
+    body: "Check your connection and try again.",
+  },
+  rejected: {
+    title: "These dates can't be shown",
+    body: "Trips are listed from today to a year ahead.",
+  },
+  unavailable: {
+    title: "We couldn't load trips",
+    body: "The booking site may be briefly unavailable. Wait a moment, then try again.",
+  },
+  unreadable: {
+    title: "We couldn't show these trips",
+    body: "The booking site sent something this page can't read. Wait a moment, then try again.",
+  },
+};
+
+function TripsFailed({
+  reason,
+  failures,
+  retrying,
+  onRetry,
+  onFromToday,
+}: {
+  reason: TripsFailure;
+  failures: number;
+  retrying: boolean;
+  onRetry: () => void;
+  onFromToday: () => void;
+}) {
+  const copy = failureCopy[reason];
+  if (reason === "rejected") {
+    return (
+      <Notice
+        tone="error"
+        className="trips__error"
+        title={copy.title}
+        actions={
+          <Button variant="primary" icon="arrow-left" onClick={onFromToday}>
+            Show from today
+          </Button>
+        }
+      >
+        <p>{copy.body}</p>
+      </Notice>
+    );
+  }
+  return (
+    <Notice
+      tone="error"
+      className="trips__error"
+      title={failures > 1 ? "Trips still aren't loading" : copy.title}
+      actions={
+        <Button
+          variant="primary"
+          icon="refresh"
+          busy={retrying}
+          busyLabel="Trying again…"
+          onClick={onRetry}
+        >
+          Try again
+        </Button>
+      }
+    >
+      <p>{failures > 1 ? failureCopy.unavailable.body : copy.body}</p>
+    </Notice>
+  );
 }
 
 /**
@@ -342,8 +472,8 @@ function bookBy(trip: AvailableTrip): string {
 
 function TripCard({ trip, showZone }: { trip: AvailableTrip; showZone: boolean }) {
   // The stored local start, never recomputed from the instant with the
-  // browser's zone data.
-  const start = formatClock(trip.localStartTime);
+  // browser's zone data. In the hour clocks go back, it names its zone.
+  const start = formatTripTime(trip.localStartTime, trip.startsAt, trip.timeZone);
   const place = showZone ? ` ${zoneCity(trip.timeZone)} time` : "";
   return (
     <li className="trip-card">

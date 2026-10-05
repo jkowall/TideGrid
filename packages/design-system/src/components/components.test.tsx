@@ -160,6 +160,14 @@ describe("components expose their state to assistive technology", () => {
     expect(out).toMatch(/^<dialog class="tg-dialog tg-dialog--danger"/);
     // Closed until it mounts in a browser and calls showModal.
     expect(out).not.toMatch(/<dialog[^>]*\sopen/);
+    // Escape closes it, unless the caller is busy.
+    expect(out).toContain('closedby="closerequest"');
+    const busy = html(
+      <Dialog title="Saving" dismissible={false} onClose={() => {}}>
+        <p>Working</p>
+      </Dialog>,
+    );
+    expect(busy).toContain('closedby="none"');
   });
 
   it("hides decorative skeletons and icons from assistive technology", () => {

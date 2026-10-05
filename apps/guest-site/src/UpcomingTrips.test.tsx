@@ -195,8 +195,12 @@ describe("upcoming trips on a branded site", () => {
         .getAllByRole("heading", { level: 4 })
         .map((h) => text(h)),
     ).toEqual(["8:00 AM, Private Half-Day Charter", "6:00 PM, Sunset Harbor Cruise"]);
+    // Times keep "AM" with the hour: a no-break space, U+00A0.
     expect(
-      within(nov1).getByRole("heading", { level: 4, name: "8:00 AM, Private Half-Day Charter" }),
+      within(nov1).getByRole("heading", {
+        level: 4,
+        name: "8:00 AM, Private Half-Day Charter",
+      }),
     ).toBeTruthy();
 
     expect(screen.getByText("Times are local to Harbor Marina, Dock C (New York).")).toBeTruthy();
@@ -205,7 +209,8 @@ describe("upcoming trips on a branded site", () => {
     expect(queries[0]?.get("from")).toBe("2026-10-05");
     expect(queries[0]?.get("to")).toBe("2026-11-02");
     expect(queries[0]?.get("party")).toBe("1");
-    expect(screen.getByText("Tue, Oct 6 to Mon, Nov 2")).toBeTruthy();
+    // The dates show above the list and again after it.
+    expect(screen.getAllByText("Tue, Oct 6 to Mon, Nov 2")).toHaveLength(2);
   });
 
   it("labels the marina's today, even when the guest's calendar is a day ahead", async () => {
@@ -281,18 +286,39 @@ describe("upcoming trips on a branded site", () => {
     expect(window.location.search).toBe("");
   });
 
-  it("says plainly when no trips match, naming the party and the dates", async () => {
+  it("says plainly when no trips match, naming the party and the dates, with a way out", async () => {
     window.history.replaceState(null, "", "/?party=12");
-    tripsApi(() => json({ trips: [] }));
+    const queries = tripsApi(
+      () => json({ trips: [] }),
+      () => json({ trips: [] }),
+    );
     render(<UpcomingTrips brand={brand} />);
     const empty = await screen.findByRole("region", { name: "No trips in these dates" });
     expect(text(empty)).toContain(
-      "Nothing is open for 12 guests from Tue, Oct 6 to Mon, Nov 2. Try later dates or a smaller party.",
+      "Nothing is open for 12 guests from Tue, Oct 6 to Mon, Nov 2. Try other dates or a smaller party.",
     );
     expect(screen.queryByText(/Times are local/)).toBeNull();
+    fireEvent.click(within(empty).getByRole("button", { name: "Show trips for 1 guest" }));
+    await waitFor(() => expect(queries).toHaveLength(2));
+    expect(queries[1]?.get("party")).toBe("1");
   });
 
-  it("shows an error with Try again, keeps focus there while it works, then focuses the list", async () => {
+  it("names the year in an empty later window as the dates above do, and offers today", async () => {
+    window.history.replaceState(null, "", "/?from=2027-06-07&party=4");
+    const queries = tripsApi(
+      () => json({ trips: [] }),
+      () => json({ trips: [] }),
+    );
+    render(<UpcomingTrips brand={brand} />);
+    const empty = await screen.findByRole("region", { name: "No trips in these dates" });
+    expect(screen.getByText("Mon, Jun 7 to Sun, Jul 4, 2027")).toBeTruthy();
+    expect(text(empty)).toContain("from Mon, Jun 7 to Sun, Jul 4, 2027.");
+    fireEvent.click(within(empty).getByRole("button", { name: "Show from today" }));
+    await waitFor(() => expect(queries).toHaveLength(2));
+    expect(queries[1]?.get("from")).toBe("2026-10-05");
+  });
+
+  it("shows an error with Try again, keeps focus there while it works, then focuses the dates", async () => {
     const retry = deferred();
     tripsApi(() => {
       throw new TypeError("Failed to fetch");
@@ -311,8 +337,11 @@ describe("upcoming trips on a branded site", () => {
     expect(document.activeElement).toBe(button);
 
     retry.release(json({ trips: [oct31Sunset] }));
-    const heading = screen.getByRole("heading", { level: 2, name: "Upcoming trips" });
-    await waitFor(() => expect(document.activeElement).toBe(heading));
+    // As in the console: the dates shown take focus.
+    const dates = within(screen.getByRole("navigation", { name: "Trip dates" })).getByText(
+      "Tue, Oct 6 to Mon, Nov 2",
+    );
+    await waitFor(() => expect(document.activeElement).toBe(dates));
     expect(screen.queryByRole("alert")).toBeNull();
     expect([...document.querySelectorAll(".tg-button--primary")].map((p) => text(p))).toEqual([
       "Call (305) 555-0142",
@@ -333,8 +362,128 @@ describe("upcoming trips on a branded site", () => {
   it("treats a response that breaks the contract as an error, not an empty list", async () => {
     tripsApi(() => json({ trips: [{ ...oct31Sunset, salesCloseAt: "soon" }] }));
     render(<UpcomingTrips brand={brand} />);
-    expect(text(await screen.findByRole("alert"))).toContain("We couldn't load trips");
+    expect(text(await screen.findByRole("alert"))).toContain("We couldn't show these trips");
     expect(screen.queryByText("No trips in these dates")).toBeNull();
+  });
+
+  it("treats a time zone this browser can't show as unreadable, not as a crash", async () => {
+    tripsApi(() => json({ trips: [{ ...oct31Sunset, timeZone: "Mars/Olympus_Mons" }] }));
+    render(<UpcomingTrips brand={brand} />);
+    expect(text(await screen.findByRole("alert"))).toContain("We couldn't show these trips");
+  });
+
+  it("says when the API refuses the dates, and offers today instead of a connection check", async () => {
+    const queries = tripsApi(
+      () => json({ error: { code: "range_too_large", message: "x", requestId: "r" } }, 400),
+      () => json({ trips: [oct31Sunset] }),
+    );
+    render(<UpcomingTrips brand={brand} />);
+    const alert = await screen.findByRole("alert");
+    expect(text(alert)).toContain("These dates can't be shown");
+    expect(text(alert)).not.toMatch(/connection/);
+    fireEvent.click(within(alert).getByRole("button", { name: "Show from today" }));
+    await screen.findByRole("region", { name: "Saturday, October 31" });
+    expect(queries).toHaveLength(2);
+  });
+
+  it("keeps the address's dates within a year, so a far-off date cannot break the page", async () => {
+    window.history.replaceState(null, "", "/?from=9999-12-31");
+    const queries = tripsApi(() => json({ trips: [] }));
+    render(<UpcomingTrips brand={brand} />);
+    await screen.findByRole("heading", { name: "No trips in these dates" });
+    // The last page starts 364 days after the guest's Oct 6.
+    expect(queries[0]?.get("from")).toBe("2027-10-05");
+    expect(queries[0]?.get("to")).toBe("2027-11-01");
+    expect(screen.getByRole("button", { name: "Next 4 weeks" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+  });
+
+  it("never shows the old list under the new dates, even for a frame", async () => {
+    const second = deferred();
+    tripsApi(() => json({ trips: [oct31Sunset, nov1Sunset] }), second.answer);
+    render(<UpcomingTrips brand={brand} />);
+    await screen.findByRole("region", { name: "Sunday, November 1" });
+    const top = screen.getByRole("navigation", { name: "Trip dates" });
+    fireEvent.click(within(top).getByRole("button", { name: "Next 4 weeks" }));
+    // Straight after the click: the new dates, no old trips, and no old count.
+    expect(within(top).getByText("Tue, Nov 3 to Mon, Nov 30")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Sunday, November 1" })).toBeNull();
+    expect(text(screen.getByRole("status"))).toBe("Loading trips…");
+    second.release(json({ trips: [] }));
+    await screen.findByRole("heading", { name: "No trips in these dates" });
+  });
+
+  it("pages from the foot of a long list and takes the guest back to the dates at the top", async () => {
+    const queries = tripsApi(
+      () => json({ trips: [oct31Sunset, nov1Charter, nov1Sunset] }),
+      () => json({ trips: [] }),
+    );
+    render(<UpcomingTrips brand={brand} />);
+    await screen.findByRole("region", { name: "Sunday, November 1" });
+    const bottom = screen.getByRole("navigation", { name: "Trip dates, after the list" });
+    expect(within(bottom).getByText("Tue, Oct 6 to Mon, Nov 2")).toBeTruthy();
+    fireEvent.click(within(bottom).getByRole("button", { name: "Next 4 weeks" }));
+    await waitFor(() => expect(queries).toHaveLength(2));
+    expect(queries[1]?.get("from")).toBe("2026-11-03");
+    const topDates = within(screen.getByRole("navigation", { name: "Trip dates" })).getByText(
+      "Tue, Nov 3 to Mon, Nov 30",
+    );
+    expect(document.activeElement).toBe(topDates);
+    // No list, no second copy of the paging.
+    await screen.findByRole("heading", { name: "No trips in these dates" });
+    expect(screen.queryByRole("navigation", { name: "Trip dates, after the list" })).toBeNull();
+  });
+
+  it("names each trip's place when the trips are in several zones", async () => {
+    const reefDive: AvailableTrip = {
+      ...oct31Sunset,
+      tripId: "bc5f3492-d330-487d-8078-7221db331699",
+      timeZone: "Pacific/Honolulu",
+      localDate: "2026-10-31",
+      localStartTime: "07:30",
+      startsAt: "2026-10-31T17:30:00.000Z",
+      endsAt: "2026-10-31T21:30:00.000Z",
+      startsAtLocal: "2026-10-31T07:30:00-10:00",
+      endsAtLocal: "2026-10-31T11:30:00-10:00",
+      salesCloseAt: "2026-10-31T05:30:00.000Z",
+      location: { name: "Reef Point Harbor", meetingPoint: "Slip 7" },
+    };
+    tripsApi(() => json({ trips: [reefDive, oct31Sunset] }));
+    render(<UpcomingTrips brand={brand} />);
+    const day = await screen.findByRole("region", { name: "Saturday, October 31" });
+    expect(screen.getByText("Times are local to each trip's departure point.")).toBeTruthy();
+    expect(text(cardTitled(day, /New York time/))).toContain("New York");
+    expect(text(cardTitled(day, /Honolulu time/))).toContain("Honolulu");
+    expect(
+      within(day)
+        .getAllByRole("heading", { level: 4 })
+        .map((h) => text(h)),
+    ).toEqual([
+      "7:30 AM Honolulu time, Sunset Harbor Cruise",
+      "6:00 PM New York time, Sunset Harbor Cruise",
+    ]);
+  });
+
+  it("names the zone of a departure in the hour clocks go back", async () => {
+    const early = trip(9, {
+      localDate: "2026-11-01",
+      localStartTime: "01:30",
+      startsAt: "2026-11-01T06:30:00.000Z",
+      endsAt: "2026-11-01T08:00:00.000Z",
+      startsAtLocal: "2026-11-01T01:30:00-05:00",
+      endsAtLocal: "2026-11-01T03:00:00-05:00",
+      durationMinutes: 90,
+      salesCloseAt: "2026-11-01T05:30:00.000Z",
+      product: sunset,
+      capacity: seats,
+    });
+    tripsApi(() => json({ trips: [early] }));
+    render(<UpcomingTrips brand={brand} />);
+    const day = await screen.findByRole("region", { name: "Sunday, November 1" });
+    // The second 1:30 AM of the night, in EST; its cutoff an hour earlier is the first, in EDT.
+    expect(text(cardTitled(day, /Sunset Harbor Cruise/))).toContain("1:30 AM EST");
+    expect(text(cardTitled(day, /Sunset Harbor Cruise/))).toContain("Book by 1:30 AM EDT");
   });
 
   it("starts from the dates and party in the address", async () => {

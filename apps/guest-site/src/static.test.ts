@@ -19,4 +19,11 @@ describe("static files", () => {
     // A paragraph with no maximum ran to 82 characters in the footer.
     expect(css).not.toMatch(/max-width:\s*none/);
   });
+
+  it("wraps the whole app in an error boundary with the designed failure screen", () => {
+    const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
+    expect(main).toMatch(
+      /<ErrorBoundary fallback=\{<CrashedState \/>\}>\s*<App \/>\s*<\/ErrorBoundary>/,
+    );
+  });
 });

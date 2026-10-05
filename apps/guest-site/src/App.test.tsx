@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ErrorBoundary } from "@tidegrid/design-system/components";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import { loadExperience } from "./bootstrap.ts";
-import { NotReadyState } from "./States.tsx";
+import { CrashedState, NotReadyState } from "./States.tsx";
 
 vi.mock("./bootstrap.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./bootstrap.ts")>();
@@ -122,6 +123,26 @@ describe("guest app", () => {
     await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
     const svgIcon = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
     expect(svgIcon?.getAttribute("href")).toBe("/favicon.svg");
+  });
+
+  it("shows the failure screen, not a blank page, when rendering throws", async () => {
+    // React reports the caught error on the console; keep the test output clean.
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    function Broken(): never {
+      throw new RangeError("not a local date: +010000-01");
+    }
+    render(
+      <ErrorBoundary fallback={<CrashedState />}>
+        <Broken />
+      </ErrorBoundary>,
+    );
+    const heading = await screen.findByRole("heading", {
+      level: 1,
+      name: "Something went wrong on this page",
+    });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    quiet.mockRestore();
   });
 
   it("tells a guest to check back, not to contact an operator it cannot name a way to reach", () => {

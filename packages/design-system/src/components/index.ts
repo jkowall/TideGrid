@@ -23,6 +23,7 @@ export {
 } from "./Button.tsx";
 export { cx } from "./cx.ts";
 export { Dialog, type DialogProps } from "./Dialog.tsx";
+export { ErrorBoundary, type ErrorBoundaryProps } from "./ErrorBoundary.tsx";
 export {
   EmptyState,
   type EmptyStateProps,

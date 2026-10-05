@@ -118,6 +118,35 @@ export function NotReadyState({ tenant }: { tenant: Tenant }) {
   );
 }
 
+/**
+ * Shown by the error boundary when the page itself fails to render. "Try
+ * again" starts the page afresh without its query, so an address that caused
+ * the failure cannot cause it again.
+ */
+export function CrashedState() {
+  useTitle("Booking site unavailable");
+  return (
+    <NeutralFrame>
+      <StatePanel
+        icon="alert-triangle"
+        tone="warning"
+        title="Something went wrong on this page"
+        action={
+          <Button
+            variant="primary"
+            icon="refresh"
+            onClick={() => window.location.assign(window.location.pathname)}
+          >
+            Try again
+          </Button>
+        }
+      >
+        <p>Try again. If it keeps happening, the booking site may be briefly unavailable.</p>
+      </StatePanel>
+    </NeutralFrame>
+  );
+}
+
 export function FailedState({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
   useTitle("Booking site unavailable");
   return (

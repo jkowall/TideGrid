@@ -6,11 +6,15 @@
  *   stored snapshot, so it is formatted as it is, with no zone math.
  * - An instant (such as a booking cutoff) is converted with the trip's zone.
  *
- * Output is plain text with ordinary spaces, assembled from Intl parts so it
- * reads the same in every browser. No DOM and no React: safe in Node.
+ * Output is plain text assembled from Intl parts, so it reads the same in
+ * every browser. A time keeps its parts together with no-break spaces
+ * ("6:00 PM", "9:00 AM EDT"), so it never wraps between them. No DOM and no
+ * React: safe in Node.
  */
 
 const locale = "en-US";
+/** U+00A0: joins a time to AM or PM, and to a zone's short name. */
+const nbsp = " ";
 
 /** A local calendar date, YYYY-MM-DD. */
 export type LocalDate = string;
@@ -26,17 +30,44 @@ function parts(date: LocalDate): [number, number, number] {
 /** Noon UTC on a date: formatting it in UTC can never move it to another day. */
 function noonUtc(date: LocalDate): Date {
   const [y, m, d] = parts(date);
-  return new Date(Date.UTC(y, m - 1, d, 12));
+  const at = new Date(Date.UTC(y, m - 1, d, 12));
+  // Date.UTC maps years 0 to 99 onto 1900 to 1999; put the real year back.
+  at.setUTCFullYear(y, m - 1, d);
+  return at;
 }
 
+/**
+ * Four-digit years only. Past 9999 an ISO string reads "+010000-01-01", which
+ * is not a local date, so arithmetic that leaves the range fails loudly here.
+ */
 function toLocalDate(value: Date): LocalDate {
-  return value.toISOString().slice(0, 10);
+  const year = value.getUTCFullYear();
+  if (Number.isNaN(year) || year < 1 || year > 9999) {
+    throw new RangeError("date outside the years 0001 to 9999");
+  }
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  return `${String(year).padStart(4, "0")}-${month}-${day}`;
 }
 
-/** Whether a string is a real calendar date in YYYY-MM-DD form. */
+/** The earlier of two local dates. */
+export function earlier(a: LocalDate, b: LocalDate): LocalDate {
+  return a <= b ? a : b;
+}
+
+/** The later of two local dates. */
+export function later(a: LocalDate, b: LocalDate): LocalDate {
+  return a >= b ? a : b;
+}
+
+/** Whether a string is a real calendar date in YYYY-MM-DD form, years 0001 to 9999. */
 export function isLocalDate(value: string): boolean {
   if (!datePattern.test(value)) return false;
-  return toLocalDate(noonUtc(value)) === value;
+  try {
+    return toLocalDate(noonUtc(value)) === value;
+  } catch {
+    return false;
+  }
 }
 
 export function addDays(date: LocalDate, days: number): LocalDate {
@@ -96,7 +127,27 @@ function wallClock(instant: Date, timeZone: string | undefined) {
 /** Today's date on a zone's calendar, or on the viewer's own when no zone is given. */
 export function todayIn(timeZone?: string, now: Date = new Date()): LocalDate {
   const c = wallClock(now, timeZone);
-  return `${c.year}-${String(c.month).padStart(2, "0")}-${String(c.day).padStart(2, "0")}`;
+  return `${String(c.year).padStart(4, "0")}-${String(c.month).padStart(2, "0")}-${String(c.day).padStart(2, "0")}`;
+}
+
+const knownZones = new Map<string, boolean>();
+
+/**
+ * Whether this browser's time zone data knows an IANA zone. A zone it does not
+ * know cannot be shown correctly, so callers treat it as unreadable data.
+ */
+export function isKnownZone(timeZone: string): boolean {
+  let known = knownZones.get(timeZone);
+  if (known === undefined) {
+    try {
+      new Intl.DateTimeFormat(locale, { timeZone });
+      known = true;
+    } catch {
+      known = false;
+    }
+    knownZones.set(timeZone, known);
+  }
+  return known;
 }
 
 /** The zone's offset from UTC at an instant, in minutes (New York in winter is -300). */
@@ -145,15 +196,20 @@ export function formatWeekday(date: LocalDate, style: "long" | "short" = "long")
 
 /**
  * A range of local dates with "to", never a dash, so it reads aloud as written.
- * - short: "Nov 1 to 7, 2026", "Oct 25 to Nov 1, 2026", "Dec 27, 2026 to Jan 2, 2027"
- * - medium: "Mon, Oct 5 to Sun, Nov 1" (the year only when the range leaves this year)
+ * - short, always with the year: "Nov 1 to 7, 2026", "Oct 25 to Nov 1, 2026",
+ *   "Dec 27, 2026 to Jan 2, 2027"
+ * - medium: "Mon, Oct 5 to Sun, Nov 1"
  * - full: "Monday, October 5 to Sunday, November 1"
+ *
+ * Medium and full name the year once at the end when the range is in another
+ * year than `currentYear` ("Mon, Jun 7 to Sun, Jul 4, 2027"), or when `year` is
+ * "always", and on both ends when the range spans two years.
  */
 export function formatDateRange(
   from: LocalDate,
   to: LocalDate,
   style: DateStyle = "short",
-  options: { currentYear?: number } = {},
+  options: { currentYear?: number; year?: "auto" | "always" } = {},
 ): string {
   const [fy, fm] = parts(from);
   const [ty, tm, td] = parts(to);
@@ -163,15 +219,18 @@ export function formatDateRange(
     if (fm === tm) return `${formatDate(from, "short")} to ${td}, ${ty}`;
     return `${formatDate(from, "short")} to ${formatDate(to, "short")}, ${ty}`;
   }
-  const year = options.currentYear;
-  const withYear = fy !== ty || (year !== undefined && (fy !== year || ty !== year));
-  return `${formatDate(from, style, { year: withYear })} to ${formatDate(to, style, { year: withYear })}`;
+  if (fy !== ty) {
+    return `${formatDate(from, style, { year: true })} to ${formatDate(to, style, { year: true })}`;
+  }
+  const atEnd =
+    options.year === "always" || (options.currentYear !== undefined && fy !== options.currentYear);
+  return `${formatDate(from, style)} to ${formatDate(to, style, { year: atEnd })}`;
 }
 
 function clock(hour: number, minute: number): string {
   const period = hour < 12 ? "AM" : "PM";
   const h = hour % 12 === 0 ? 12 : hour % 12;
-  return `${h}:${String(minute).padStart(2, "0")} ${period}`;
+  return `${h}:${String(minute).padStart(2, "0")}${nbsp}${period}`;
 }
 
 /** A stored local wall-clock time: "18:00" reads "6:00 PM". */
@@ -218,17 +277,49 @@ export function inZone(
   if (Number.isNaN(at.getTime())) throw new RangeError(`not an instant: ${String(instant)}`);
   const c = wallClock(at, timeZone);
   return {
-    date: `${c.year}-${String(c.month).padStart(2, "0")}-${String(c.day).padStart(2, "0")}`,
+    date: `${String(c.year).padStart(4, "0")}-${String(c.month).padStart(2, "0")}-${String(c.day).padStart(2, "0")}`,
     time: clock(c.hour, c.minute),
     abbreviation: zoneAbbreviation(at, timeZone),
   };
 }
 
 /**
+ * Whether the wall-clock time of an instant happens twice in its zone, as
+ * 1:30 AM does in New York on the night clocks go back: once in EDT, then
+ * again an hour later in EST. Two such departures would otherwise read alike.
+ */
+export function isRepeatedLocalTime(instant: string | Date, timeZone: string): boolean {
+  const at = typeof instant === "string" ? new Date(instant) : instant;
+  if (Number.isNaN(at.getTime())) return false;
+  const own = offsetMinutes(at, timeZone);
+  // Any other offset the zone used within three hours, and the instant that
+  // shows the same wall-clock time under it.
+  for (const shift of [-3, 3]) {
+    const other = offsetMinutes(new Date(at.getTime() + shift * 3_600_000), timeZone);
+    if (other === own) continue;
+    const twin = new Date(at.getTime() + (own - other) * 60_000);
+    if (offsetMinutes(twin, timeZone) === other) return true;
+  }
+  return false;
+}
+
+/**
+ * A trip's stored local time, read as it is: "6:00 PM". When that wall-clock
+ * time happens twice, as in the hour clocks go back, the zone's short name at
+ * the trip's own instant follows: "1:30 AM EDT" or "1:30 AM EST".
+ */
+export function formatTripTime(localTime: string, instant: string, timeZone: string): string {
+  const time = formatClock(localTime);
+  if (!isRepeatedLocalTime(instant, timeZone)) return time;
+  return `${time}${nbsp}${zoneAbbreviation(new Date(instant), timeZone)}`;
+}
+
+/**
  * A trip's booking cutoff on the trip zone's clock: "5:00 PM" on the trip's
  * own day, "Sat, Oct 31, 9:00 AM" on another. When the clock changes between
- * the cutoff and the departure, the zone's short name follows ("9:00 AM EDT"),
- * so a cutoff 24 elapsed hours before an 8:00 AM departure does not look wrong.
+ * the cutoff and the departure, or the cutoff falls in a repeated hour, the
+ * zone's short name follows ("9:00 AM EDT"), so a cutoff 24 elapsed hours
+ * before an 8:00 AM departure does not look wrong.
  */
 export function formatCutoff(
   cutoff: string,
@@ -237,8 +328,8 @@ export function formatCutoff(
   const close = inZone(cutoff, trip.timeZone);
   const departs = zoneAbbreviation(new Date(trip.startsAt), trip.timeZone);
   const day = close.date === trip.localDate ? "" : `${formatDate(close.date, "medium")}, `;
-  const zone = close.abbreviation === departs ? "" : ` ${close.abbreviation}`;
-  return `${day}${close.time}${zone}`;
+  const named = close.abbreviation !== departs || isRepeatedLocalTime(cutoff, trip.timeZone);
+  return `${day}${close.time}${named ? `${nbsp}${close.abbreviation}` : ""}`;
 }
 
 /**

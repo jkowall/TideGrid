@@ -285,6 +285,10 @@
 .trips__notes .tg-icon {
   margin-top: 0.15em;
 }
+/* "Email instead" lines its icon up with the call button's when they stack. */
+.trips__reserve .tg-notice__actions .tg-button--ghost {
+  padding-inline: var(--space-5);
+}
 @media (min-width: 60rem) {
   /* Text on the left, the ways to reach the operator on the right. */
   .trips__reserve > div {
@@ -352,6 +356,16 @@
   font-weight: var(--weight-semibold);
   color: var(--text-strong);
   text-wrap: balance;
+  scroll-margin-top: var(--space-8);
+}
+/* A focus target after paging from the foot of the list or "Try again", not a control. */
+.trips__range-label:focus {
+  outline: none;
+}
+/* The same paging after the list, so a long list need not be scrolled back. */
+.trips__range--bottom {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
 }
 .trips__updating {
   display: flex;
@@ -365,6 +379,11 @@
 .trips__list {
   display: grid;
   gap: var(--space-8);
+  transition: opacity var(--duration-fast) ease;
+}
+/* The list for the previous party size, while the new one loads. */
+.trips__list[aria-busy="true"] {
+  opacity: 0.55;
 }
 .trips-day {
   display: grid;

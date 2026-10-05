@@ -1,9 +1,33 @@
 import { type AvailableTrip, TripAvailabilityResponse } from "@tidegrid/contracts";
-import { addDays, isLocalDate, type LocalDate } from "@tidegrid/design-system/format";
+import {
+  addDays,
+  earlier,
+  isKnownZone,
+  isLocalDate,
+  type LocalDate,
+  later,
+} from "@tidegrid/design-system/format";
 import { apiBase } from "./bootstrap.ts";
 
 /** Four weeks a page, today included. One request may span at most 93 days. */
 export const windowDays = 28;
+
+/**
+ * Guests page up to a year ahead. The API takes dates through 2099-12-30, so
+ * a window must also end by then.
+ */
+export const horizonDays = 364;
+const apiLastDate = "2099-12-30";
+
+/** The first date of the last page a guest can reach. */
+export function lastStart(today: LocalDate): LocalDate {
+  return earlier(addDays(today, horizonDays), addDays(apiLastDate, -(windowDays - 1)));
+}
+
+/** A page start kept between today and the horizon. */
+export function clampStart(start: LocalDate, today: LocalDate): LocalDate {
+  return later(today, earlier(start, lastStart(today)));
+}
 
 /** The party sizes a guest can pick. The API accepts more; the demo offers 1 to 12. */
 export const partySizes: readonly number[] = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -38,13 +62,16 @@ export interface TripQuery {
   party: number;
 }
 
-/** Read `?from=` and `?party=` from the address. Anything out of range falls back. */
+/**
+ * Read `?from=` and `?party=` from the address. A date before today or past
+ * the horizon is pulled back inside it; anything unreadable falls back.
+ */
 export function readQuery(search: string, today: LocalDate): TripQuery {
   const params = new URLSearchParams(search);
   const from = params.get("from") ?? "";
   const party = Number(params.get("party"));
   return {
-    start: isLocalDate(from) && from > today ? from : today,
+    start: isLocalDate(from) ? clampStart(from, today) : today,
     party: partySizes.includes(party) ? party : 1,
   };
 }
@@ -58,7 +85,19 @@ export function writeQuery(query: TripQuery, today: LocalDate): string {
   return text ? `?${text}` : "";
 }
 
-export type TripsResult = { kind: "ok"; trips: AvailableTrip[] } | { kind: "failed" };
+/**
+ * Why trips did not load, so the page can say what to do:
+ * - unreachable: no answer, or no answer in time;
+ * - rejected: the API refused the dates or party (400);
+ * - unavailable: any other answer that is not a list;
+ * - unreadable: a list that breaks the contract, or names a time zone this
+ *   browser cannot show.
+ */
+export type TripsFailure = "unreachable" | "rejected" | "unavailable" | "unreadable";
+
+export type TripsResult =
+  | { kind: "ok"; trips: AvailableTrip[] }
+  | { kind: "failed"; reason: TripsFailure };
 
 /**
  * Ask the API for bookable trips. The browser sends the page's Origin, and the
@@ -91,11 +130,18 @@ export async function loadTrips(
       headers: { accept: "application/json" },
       signal: controller.signal,
     });
-    if (!res.ok) return { kind: "failed" };
-    const parsed = TripAvailabilityResponse.safeParse(await res.json());
-    return parsed.success ? { kind: "ok", trips: parsed.data.trips } : { kind: "failed" };
+    if (res.status === 400) return { kind: "failed", reason: "rejected" };
+    if (!res.ok) return { kind: "failed", reason: "unavailable" };
+    const body: unknown = await res.json().catch(() => undefined);
+    const parsed = TripAvailabilityResponse.safeParse(body);
+    if (!parsed.success) return { kind: "failed", reason: "unreadable" };
+    // A zone this browser does not know cannot be shown on the marina's clock.
+    if (parsed.data.trips.some((t) => !isKnownZone(t.timeZone))) {
+      return { kind: "failed", reason: "unreadable" };
+    }
+    return { kind: "ok", trips: parsed.data.trips };
   } catch {
-    return { kind: "failed" };
+    return { kind: "failed", reason: "unreachable" };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
     stopListening();

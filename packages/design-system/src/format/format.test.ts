@@ -5,19 +5,27 @@ import {
   dayOfWeek,
   daysBetween,
   describeClockChange,
+  earlier,
   formatClock,
   formatCutoff,
   formatDate,
   formatDateRange,
   formatDuration,
+  formatTripTime,
   inZone,
+  isKnownZone,
   isLocalDate,
+  isRepeatedLocalTime,
+  later,
   localPartsOf,
   offsetMinutes,
   startOfWeek,
   todayIn,
   zoneCity,
 } from "./index.ts";
+
+/** Times keep their parts together with U+00A0, so they never wrap. */
+const nb = " ";
 
 describe("local dates", () => {
   it("does calendar arithmetic on plain dates, across months and years", () => {
@@ -28,6 +36,17 @@ describe("local dates", () => {
     expect(isLocalDate("2026-02-29")).toBe(false);
     expect(isLocalDate("2028-02-29")).toBe(true);
     expect(isLocalDate("2026-1-5")).toBe(false);
+    expect(earlier("2026-10-05", "2026-11-01")).toBe("2026-10-05");
+    expect(later("2026-10-05", "2026-11-01")).toBe("2026-11-01");
+  });
+
+  it("stays within four-digit years and says so when arithmetic leaves them", () => {
+    expect(isLocalDate("9999-12-31")).toBe(true);
+    expect(isLocalDate("0000-01-01")).toBe(false);
+    expect(addDays("0099-12-31", 1)).toBe("0100-01-01");
+    // An ISO string past 9999 reads "+010000-01-01", which is not a local date.
+    expect(() => addDays("9999-12-31", 1)).toThrow(RangeError);
+    expect(() => startOfWeek("0001-01-01")).toThrow(RangeError);
   });
 
   it("starts weeks on Sunday, so Nov 1 to 7, 2026 is one week", () => {
@@ -43,7 +62,7 @@ describe("local dates", () => {
     expect(formatDate("2026-11-01", "short", { year: true })).toBe("Nov 1, 2026");
   });
 
-  it("writes ranges with 'to', never a dash", () => {
+  it("writes ranges with 'to', never a dash, naming the year once when it is not this one", () => {
     expect(formatDateRange("2026-11-01", "2026-11-07")).toBe("Nov 1 to 7, 2026");
     expect(formatDateRange("2026-10-25", "2026-10-31")).toBe("Oct 25 to 31, 2026");
     expect(formatDateRange("2026-09-27", "2026-10-03")).toBe("Sep 27 to Oct 3, 2026");
@@ -51,8 +70,14 @@ describe("local dates", () => {
     expect(formatDateRange("2026-10-05", "2026-11-01", "medium", { currentYear: 2026 })).toBe(
       "Mon, Oct 5 to Sun, Nov 1",
     );
+    expect(formatDateRange("2027-06-07", "2027-07-04", "medium", { currentYear: 2026 })).toBe(
+      "Mon, Jun 7 to Sun, Jul 4, 2027",
+    );
     expect(formatDateRange("2026-12-28", "2027-01-24", "medium", { currentYear: 2026 })).toBe(
       "Mon, Dec 28, 2026 to Sun, Jan 24, 2027",
+    );
+    expect(formatDateRange("2026-11-08", "2026-11-14", "medium", { year: "always" })).toBe(
+      "Sun, Nov 8 to Sat, Nov 14, 2026",
     );
   });
 
@@ -63,17 +88,23 @@ describe("local dates", () => {
     expect(todayIn("Pacific/Honolulu", now)).toBe("2026-10-05");
     expect(todayIn("Asia/Tokyo", now)).toBe("2026-10-06");
   });
+
+  it("knows which zones this browser can show", () => {
+    expect(isKnownZone("America/New_York")).toBe(true);
+    expect(isKnownZone("UTC")).toBe(true);
+    expect(isKnownZone("Mars/Olympus_Mons")).toBe(false);
+  });
 });
 
 describe("times", () => {
-  it("reads stored wall-clock times as they are", () => {
-    expect(formatClock("18:00")).toBe("6:00 PM");
-    expect(formatClock("08:00")).toBe("8:00 AM");
-    expect(formatClock("00:30")).toBe("12:30 AM");
-    expect(formatClock("12:05")).toBe("12:05 PM");
+  it("reads stored wall-clock times as they are, never splitting AM or PM off", () => {
+    expect(formatClock("18:00")).toBe(`6:00${nb}PM`);
+    expect(formatClock("08:00")).toBe(`8:00${nb}AM`);
+    expect(formatClock("00:30")).toBe(`12:30${nb}AM`);
+    expect(formatClock("12:05")).toBe(`12:05${nb}PM`);
     expect(localPartsOf("2026-11-01T19:30:00-05:00")).toEqual({
       date: "2026-11-01",
-      time: "7:30 PM",
+      time: `7:30${nb}PM`,
     });
   });
 
@@ -81,16 +112,16 @@ describe("times", () => {
     // The Nov 1 08:00 EST charter closes 24 elapsed hours earlier: 9:00 AM EDT on Oct 31.
     expect(inZone("2026-10-31T13:00:00.000Z", "America/New_York")).toEqual({
       date: "2026-10-31",
-      time: "9:00 AM",
+      time: `9:00${nb}AM`,
       abbreviation: "EDT",
     });
     expect(inZone("2026-11-01T22:00:00.000Z", "America/New_York")).toEqual({
       date: "2026-11-01",
-      time: "5:00 PM",
+      time: `5:00${nb}PM`,
       abbreviation: "EST",
     });
     // Honolulu has no daylight saving time.
-    expect(inZone("2026-11-01T05:30:00.000Z", "Pacific/Honolulu").time).toBe("7:30 PM");
+    expect(inZone("2026-11-01T05:30:00.000Z", "Pacific/Honolulu").time).toBe(`7:30${nb}PM`);
   });
 
   it("names the cutoff's day and, across a clock change, its zone", () => {
@@ -99,19 +130,49 @@ describe("times", () => {
       localDate: "2026-11-01",
       startsAt: "2026-11-01T13:00:00.000Z",
     };
-    expect(formatCutoff("2026-10-31T13:00:00.000Z", nov1Charter)).toBe("Sat, Oct 31, 9:00 AM EDT");
+    expect(formatCutoff("2026-10-31T13:00:00.000Z", nov1Charter)).toBe(
+      `Sat, Oct 31, 9:00${nb}AM${nb}EDT`,
+    );
     const nov1Sunset = {
       timeZone: "America/New_York",
       localDate: "2026-11-01",
       startsAt: "2026-11-01T23:00:00.000Z",
     };
-    expect(formatCutoff("2026-11-01T22:00:00.000Z", nov1Sunset)).toBe("5:00 PM");
+    expect(formatCutoff("2026-11-01T22:00:00.000Z", nov1Sunset)).toBe(`5:00${nb}PM`);
     const oct31Charter = {
       timeZone: "America/New_York",
       localDate: "2026-10-31",
       startsAt: "2026-10-31T12:00:00.000Z",
     };
-    expect(formatCutoff("2026-10-30T12:00:00.000Z", oct31Charter)).toBe("Fri, Oct 30, 8:00 AM");
+    expect(formatCutoff("2026-10-30T12:00:00.000Z", oct31Charter)).toBe(`Fri, Oct 30, 8:00${nb}AM`);
+  });
+
+  it("tells apart the two 1:30 AMs of the night clocks go back", () => {
+    // 1:30 AM EDT is 05:30Z; 1:30 AM EST, an hour later, is 06:30Z.
+    expect(isRepeatedLocalTime("2026-11-01T05:30:00.000Z", "America/New_York")).toBe(true);
+    expect(isRepeatedLocalTime("2026-11-01T06:30:00.000Z", "America/New_York")).toBe(true);
+    // 12:30 AM and 2:30 AM happen once.
+    expect(isRepeatedLocalTime("2026-11-01T04:30:00.000Z", "America/New_York")).toBe(false);
+    expect(isRepeatedLocalTime("2026-11-01T07:30:00.000Z", "America/New_York")).toBe(false);
+    expect(isRepeatedLocalTime("2026-11-01T23:00:00.000Z", "America/New_York")).toBe(false);
+    expect(isRepeatedLocalTime("2026-11-01T11:30:00.000Z", "Pacific/Honolulu")).toBe(false);
+    expect(formatTripTime("01:30", "2026-11-01T05:30:00.000Z", "America/New_York")).toBe(
+      `1:30${nb}AM${nb}EDT`,
+    );
+    expect(formatTripTime("01:30", "2026-11-01T06:30:00.000Z", "America/New_York")).toBe(
+      `1:30${nb}AM${nb}EST`,
+    );
+    expect(formatTripTime("18:00", "2026-11-01T23:00:00.000Z", "America/New_York")).toBe(
+      `6:00${nb}PM`,
+    );
+    // A cutoff in the repeated hour names its zone too.
+    expect(
+      formatCutoff("2026-11-01T05:30:00.000Z", {
+        timeZone: "America/New_York",
+        localDate: "2026-11-01",
+        startsAt: "2026-11-01T06:30:00.000Z",
+      }),
+    ).toBe(`1:30${nb}AM${nb}EDT`);
   });
 
   it("measures offsets on both sides of the change", () => {
