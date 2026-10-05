@@ -26,6 +26,9 @@ importers:
       '@tidegrid/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@tidegrid/domain-catalog':
+        specifier: workspace:*
+        version: link:../../packages/domain-catalog
       '@tidegrid/domain-identity':
         specifier: workspace:*
         version: link:../../packages/domain-identity
@@ -181,6 +184,31 @@ importers:
 
   packages/design-system: {}
 
+  packages/domain-catalog:
+    dependencies:
+      '@tidegrid/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@tidegrid/database':
+        specifier: workspace:*
+        version: link:../database
+      kysely:
+        specifier: ^0.29.0
+        version: 0.29.6
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.6
+      postgres:
+        specifier: ^3.4.0
+        version: 3.4.9
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.11(@types/node@24.13.6)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
   packages/domain-identity:
     dependencies:
       '@tidegrid/contracts':
@@ -217,6 +245,12 @@ importers:
 
   tools/seed:
     dependencies:
+      '@tidegrid/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@tidegrid/domain-catalog':
+        specifier: workspace:*
+        version: link:../../packages/domain-catalog
       postgres:
         specifier: ^3.4.0
         version: 3.4.9

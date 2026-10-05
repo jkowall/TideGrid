@@ -2,6 +2,46 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-09-30
+
+### G2.4 Catalog and schedule verification, September 30, 2026
+
+- Built:
+  - migration 0003: locations, boats, products and the boats each may use, seasonal schedules, scheduled trips, and blackouts;
+  - `packages/domain-catalog`: a local-time resolver, recurrence expansion, trip generation, sales states, product publishing, and the availability query;
+  - public availability by verified origin;
+  - staff catalog, calendar, generation, sales-state, and publish routes;
+  - a seeded 2026-27 season for both demo operators, built through the services.
+- Time follows ADR 0016.
+  - Trips store their zone, local date and time, UTC instants, and offsets, and database triggers refuse any row where they disagree.
+  - A departure in a spring-forward gap is skipped. One in a fall-back overlap needs an explicit earlier or later choice.
+  - A trip's end is its start plus elapsed minutes. The booking cutoff is an exact instant on either side of a clock change.
+- Checks on a fresh throwaway Neon branch:
+  - migrate, then seed: 892 trips, with 5 departures skipped on blackout days;
+  - a second seed: 0 new trips;
+  - integration: 40 database, 23 catalog, and 49 API tests (final commit);
+  - unit: 181 tests across six packages, 24 of them in the Workers runtime, plus 29 prototype tests.
+- A routine implementer wrote recurrence expansion and its 96 tests against the accepted contract. Its mutation run caught 72 of 73 deliberate bugs; the one survivor cannot change output.
+- Independent review (fresh agent) accepted with fixes and found no blocking defect. Applied:
+  - **Zone data disagreed.** The runtime's zone data and PostgreSQL's disagreed about Vancouver, Edmonton, Casablanca, and El Aaiun, which returned an opaque 500. Generation now checks every departure with PostgreSQL and skips a disagreeing one as `zone_data_mismatch`. Blackout creation raises a named error. A drift test compares both sources for every accepted zone.
+  - **Buffers.** The turnaround buffer was stored but never applied. An exclusion constraint now keeps one departure per boat, counting the buffer. Schedule creation refuses departures too close together, generation skips an overlap as `boat_conflict`, and a lost race returns a retryable 409.
+  - **Tests.** Added a cutoff that spans a clock change, the earlier and later overlap choices stored through the trigger, product and boat blackouts, the product filter, and a retired boat or archived location.
+  - **Smaller fixes.**
+    - The contract's generation range now says 92 days.
+    - Publish and sales-state races report the real current state.
+    - The sales-state trigger covers inserts, and a location or product blackout must use its location's zone.
+    - `Etc/GMT` zones are refused, and a no-op generation leaves no audit row.
+    - Date edges return 400, not 500, and the README states what the database enforces and what only the service checks.
+- The reviewer rechecked `32620ae` and confirmed every finding fixed or documented, on its own branch: 40 database, 22 catalog, and 48 API integration tests. It accepted with small follow-ups, all applied:
+  - Zone names are now case-proof, and locations and blackouts must use the exact spelling PostgreSQL lists.
+  - The one-departure-per-boat rule is recorded as a demo narrowing in the demo build plan; the owner confirmed it on 2026-10-01.
+  - An API test holds a conflicting trip uncommitted until the request blocks on it, and proves the retryable 409.
+  - The README now says disagreeing zone data can also surface as gap or overlap skips.
+- Flaky runs:
+  - The reviewer's five 500s came from the parallel G2.14a agent. Through a shared scratch file it rotated the runtime password on the reviewer's branch. Each agent now gets its own scratch folder.
+  - Connect stalls, and one silent hang in integration setup, hit the coordinator's own branches. The cause is not known. Setup now bounds every step and waits until both roles answer, and unhandled errors log their SQLSTATE.
+- Not done: migration 0003 is not applied to the Neon main branch, and nothing is deployed. Known gaps are listed in the [catalog README](../packages/domain-catalog/README.md): no re-check of stored trips after a zone data update, statuses with no runtime write path until the console goal, and routing the cancellation of a trip with bookings through remedies in G2.6 and G2.7.
+
 ## 2026-09-24
 
 ### G2.2 landing review follow-up, September 24, 2026

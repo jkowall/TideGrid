@@ -9,6 +9,8 @@ import { allowedOrigins } from "./env.ts";
 import { ApiError } from "./errors.ts";
 import { requireConsoleGateway } from "./gateway.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
+import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
+import { registerCatalogStaffRoutes } from "./routes/catalog-staff.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
@@ -90,7 +92,14 @@ export function createApp(deps: AppDeps = {}) {
         err.status,
       );
     }
-    c.get("log")?.error("unhandled", { "error.type": err.name });
+    // A database error carries its SQLSTATE; log it so a 500 names its cause.
+    const code = (err as { code?: unknown }).code;
+    c.get("log")?.error("unhandled", {
+      "error.type": err.name,
+      ...(err.name === "PostgresError" && typeof code === "string"
+        ? { "db.response.status_code": code }
+        : {}),
+    });
     return c.json(
       { error: { code: "internal_error", message: "Something went wrong", requestId } },
       500,
@@ -112,8 +121,10 @@ export function createApp(deps: AppDeps = {}) {
 
   registerSystemRoutes(app);
   registerPublicRoutes(app);
+  registerCatalogPublicRoutes(app, deps);
   registerAuthRoutes(app, deps);
   registerStaffRoutes(app, deps);
+  registerCatalogStaffRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",

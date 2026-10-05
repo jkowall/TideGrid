@@ -10,6 +10,7 @@
  * supplied at seed time, so personal addresses never enter the repository.
  */
 import postgres from "postgres";
+import { seedCatalog } from "./catalog.ts";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -89,6 +90,8 @@ try {
       }
     }
   });
+
+  await seedCatalog(url, demoTenants);
 
   const [summary] = await sql<{ tenants: number; staff: number; memberships: number }[]>`
     select (select count(*)::int from public.tenants where id in ${sql(demoTenants.map((t) => t.id))}) as tenants,

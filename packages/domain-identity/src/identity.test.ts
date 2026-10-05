@@ -10,7 +10,21 @@ describe("role permissions", () => {
 
   it("lets owners and finance read audit history, not booking staff", () => {
     expect(StaffRole.options.filter((r) => can(r, "audit.read"))).toEqual(["owner", "finance"]);
-    expect(permissionsFor("booking_staff")).toEqual([]);
+  });
+
+  it("lets every role read the catalog, only owners change it, and owners and booking staff move trips", () => {
+    expect(StaffRole.options.filter((r) => can(r, "catalog.read"))).toEqual([
+      "owner",
+      "booking_staff",
+      "finance",
+    ]);
+    expect(StaffRole.options.filter((r) => can(r, "catalog.manage"))).toEqual(["owner"]);
+    expect(StaffRole.options.filter((r) => can(r, "trips.manage"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
+    expect(permissionsFor("booking_staff")).toEqual(["catalog.read", "trips.manage"]);
+    expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read"]);
   });
 
   it("denies unknown roles", () => {

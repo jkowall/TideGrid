@@ -18,4 +18,6 @@ export type AppEnv = { Bindings: Bindings; Variables: Variables };
 export interface AppDeps {
   accessVerifier?: AccessVerifier;
   loginLinkSender?: LoginLinkSender;
+  /** Wall clock for sales cutoffs and completion checks; tests pin it. */
+  now?: () => Date;
 }
