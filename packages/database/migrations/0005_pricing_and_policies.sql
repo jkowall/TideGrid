@@ -469,12 +469,193 @@ BEGIN
 END;
 $$;
 
+-- Checked when the quote is written, as the writer: its trip snapshot is the
+-- trip's own time, zone, and product, so what a guest is shown is the
+-- departure the quote names.
+CREATE FUNCTION app.check_quote_trip() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  trip record;
+BEGIN
+  SELECT t.time_zone, t.local_date, t.local_start_time, t.starts_at,
+         t.start_utc_offset_minutes, p.name, p.kind
+    INTO trip
+    FROM public.scheduled_trips t
+    JOIN public.products p ON p.tenant_id = t.tenant_id AND p.id = t.product_id
+   WHERE t.tenant_id = NEW.tenant_id AND t.id = NEW.trip_id AND t.product_id = NEW.product_id;
+  IF NOT FOUND
+     OR trip.time_zone <> NEW.trip_time_zone
+     OR trip.local_date <> NEW.trip_local_date
+     OR trip.local_start_time <> NEW.trip_local_start_time
+     OR trip.starts_at <> NEW.trip_starts_at
+     OR trip.start_utc_offset_minutes <> NEW.trip_start_utc_offset_minutes
+     OR trip.name <> NEW.product_name
+     OR trip.kind <> NEW.product_kind THEN
+    RAISE EXCEPTION 'quote does not match the trip it names' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- Checked at commit: the quote is what its versions produce. Each priced line
+-- is an item of the named price list version copied exactly, with a quantity
+-- its rule allows on the trip's date; each item appears once and every
+-- mandatory fee is charged; the tickets are the party. A promotion was
+-- redeemable for the product at the quote instant, and the discount is its
+-- rule on the trip price. Taxes follow their rate versions: every taxable line
+-- carries the same rates on one pre-tax amount, inclusive rates extracted
+-- from the line's net and added rates rounded half up. Integer division of
+-- non-negative values, floor((2a + b) / 2b), is the half-up rounding the
+-- service uses.
+CREATE FUNCTION app.check_quote_terms() RETURNS trigger
+  LANGUAGE plpgsql SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  promo record;
+  eligible bigint;
+  expected_discount bigint;
+BEGIN
+  IF EXISTS (
+       SELECT 1
+         FROM public.quote_lines l
+         LEFT JOIN public.price_list_items i
+           ON i.tenant_id = l.tenant_id AND i.product_id = NEW.product_id
+          AND i.version = NEW.price_list_version AND i.item_kind = l.kind AND i.code = l.code
+        WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id AND l.kind <> 'discount'
+          AND (i.code IS NULL
+               OR i.name <> l.name
+               OR i.unit_amount <> l.unit_amount
+               OR i.taxable <> l.taxable
+               OR i.basis IS DISTINCT FROM l.basis
+               OR (l.kind = 'charter' AND l.quantity <> 1)
+               OR (l.kind = 'fee' AND l.quantity
+                     <> CASE i.basis WHEN 'per_participant' THEN NEW.party_size ELSE 1 END)
+               OR (l.kind = 'add_on' AND (
+                     l.quantity::bigint > i.max_quantity::bigint
+                       * CASE i.basis WHEN 'per_participant' THEN NEW.party_size ELSE 1 END
+                     OR NEW.trip_local_date < coalesce(i.available_from, NEW.trip_local_date)
+                     OR NEW.trip_local_date > coalesce(i.available_until, NEW.trip_local_date)))))
+  THEN
+    RAISE EXCEPTION 'quote % has lines its price list does not allow', NEW.id
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF EXISTS (
+       SELECT 1 FROM public.quote_lines l
+        WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id
+        GROUP BY l.kind, l.code HAVING count(*) > 1)
+     OR EXISTS (
+       SELECT 1 FROM public.price_list_items i
+        WHERE i.tenant_id = NEW.tenant_id AND i.product_id = NEW.product_id
+          AND i.version = NEW.price_list_version AND i.item_kind = 'fee'
+          AND NOT EXISTS (
+            SELECT 1 FROM public.quote_lines l
+             WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id
+               AND l.kind = 'fee' AND l.code = i.code))
+     OR (NEW.product_kind = 'shared_seat' AND NEW.party_size <> (
+           SELECT coalesce(sum(l.quantity), 0) FROM public.quote_lines l
+            WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id AND l.kind = 'ticket'))
+  THEN
+    RAISE EXCEPTION 'quote % does not cover its party and fees', NEW.id USING ERRCODE = '23514';
+  END IF;
+
+  IF NEW.promotion_id IS NOT NULL THEN
+    SELECT p.code, v.discount_kind, v.amount_off, v.percent_off_bp, v.starts_at, v.ends_at,
+           v.active, v.applies_to_all_products,
+           EXISTS (
+             SELECT 1 FROM public.promotion_version_products pp
+              WHERE pp.tenant_id = v.tenant_id AND pp.promotion_id = v.promotion_id
+                AND pp.version = v.version AND pp.product_id = NEW.product_id) AS listed
+      INTO promo
+      FROM public.promotions p
+      JOIN public.promotion_versions v ON v.tenant_id = p.tenant_id AND v.promotion_id = p.id
+     WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.promotion_id
+       AND v.version = NEW.promotion_version;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'quote % names a promotion version that does not exist', NEW.id
+        USING ERRCODE = '23514';
+    END IF;
+    SELECT coalesce(sum(l.amount), 0) INTO eligible
+      FROM public.quote_lines l
+     WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id
+       AND l.kind IN ('ticket', 'charter');
+    expected_discount := CASE promo.discount_kind
+      WHEN 'percent' THEN (2 * eligible * promo.percent_off_bp + 10000) / 20000
+      ELSE least(promo.amount_off::bigint, eligible) END;
+    IF NOT promo.active
+       OR NEW.quoted_at < promo.starts_at
+       OR NEW.quoted_at >= promo.ends_at
+       OR NOT (promo.applies_to_all_products OR promo.listed)
+       OR expected_discount <> NEW.discount_amount
+       OR NOT EXISTS (
+         SELECT 1 FROM public.quote_lines l
+          WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id
+            AND l.kind = 'discount' AND l.code = promo.code) THEN
+      RAISE EXCEPTION 'quote % applies a promotion it may not', NEW.id USING ERRCODE = '23514';
+    END IF;
+  END IF;
+
+  IF EXISTS (
+       WITH rates AS (
+         SELECT DISTINCT t.tax_rate_id, t.tax_rate_version
+           FROM public.quote_line_taxes t
+          WHERE t.tenant_id = NEW.tenant_id AND t.quote_id = NEW.id),
+       per_line AS (
+         SELECT l.line_no,
+                l.amount - l.discount_amount AS net,
+                count(t.tax_rate_id) AS rate_count,
+                count(DISTINCT t.taxable_amount) AS bases,
+                min(t.taxable_amount) AS base,
+                coalesce(sum(t.amount) FILTER (WHERE r.inclusive), 0) AS included,
+                coalesce(sum(r.rate_ppm) FILTER (WHERE r.inclusive), 0) AS included_ppm,
+                count(*) FILTER (
+                  WHERE NOT r.inclusive
+                    AND t.amount <> (2 * t.taxable_amount::bigint * r.rate_ppm + 1000000) / 2000000
+                ) AS wrong_added
+           FROM public.quote_lines l
+           LEFT JOIN public.quote_line_taxes t
+             ON t.tenant_id = l.tenant_id AND t.quote_id = l.quote_id AND t.line_no = l.line_no
+           LEFT JOIN public.tax_rate_versions r
+             ON r.tenant_id = t.tenant_id AND r.tax_rate_id = t.tax_rate_id
+            AND r.version = t.tax_rate_version
+          WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id AND l.taxable
+          GROUP BY l.line_no, l.amount, l.discount_amount)
+     SELECT 1 FROM per_line
+      WHERE rate_count <> (SELECT count(*) FROM rates)
+         OR (rate_count > 0 AND (
+               bases <> 1
+               OR base + included <> net
+               OR base <> (2 * net::bigint * 1000000 + 1000000 + included_ppm)
+                          / (2 * (1000000 + included_ppm))
+               OR wrong_added > 0)))
+     OR (SELECT count(DISTINCT t.tax_rate_id) FROM public.quote_line_taxes t
+          WHERE t.tenant_id = NEW.tenant_id AND t.quote_id = NEW.id)
+        <> (SELECT count(*) FROM (
+              SELECT DISTINCT t.tax_rate_id, t.tax_rate_version FROM public.quote_line_taxes t
+               WHERE t.tenant_id = NEW.tenant_id AND t.quote_id = NEW.id) d)
+  THEN
+    RAISE EXCEPTION 'quote % has taxes that do not follow its rates', NEW.id
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
 CREATE TRIGGER quotes_stamp BEFORE INSERT ON public.quotes
   FOR EACH ROW EXECUTE FUNCTION app.stamp_created_txid();
+CREATE TRIGGER quotes_trip_snapshot BEFORE INSERT ON public.quotes
+  FOR EACH ROW EXECUTE FUNCTION app.check_quote_trip();
 CREATE CONSTRAINT TRIGGER quotes_add_up
   AFTER INSERT ON public.quotes
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION app.check_quote_totals();
+CREATE CONSTRAINT TRIGGER quotes_follow_terms
+  AFTER INSERT ON public.quotes
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION app.check_quote_terms();
 CREATE TRIGGER quote_lines_sealed BEFORE INSERT ON public.quote_lines
   FOR EACH ROW EXECUTE FUNCTION app.check_sealed_parent();
 CREATE TRIGGER quote_line_taxes_sealed BEFORE INSERT ON public.quote_line_taxes
@@ -551,4 +732,6 @@ REVOKE ALL ON FUNCTION app.stamp_created_txid() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_sealed_parent() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_price_list_complete() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_quote_totals() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_quote_trip() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_quote_terms() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_product_sale_terms() FROM PUBLIC;

@@ -859,6 +859,164 @@ describe.skipIf(!env)("pricing services against a real database as the runtime r
       expect(nothingToSell).toBe("23514");
     });
 
+    it("refuses at commit a quote that its trip and versions do not produce", async () => {
+      // A real quote is the template. Each case writes a copy with one change
+      // that keeps the totals consistent, so only the derivation check can
+      // refuse it.
+      const created = await cruiseQuote(A.id, a.cruiseTrips[1] ?? "", {
+        promotionCode: "HARBOR10",
+      });
+      if (created.kind !== "created") throw new Error(JSON.stringify(created));
+      const id = created.quote.quoteId;
+      type Row = Record<string, unknown>;
+      const [head] = await admin<Row[]>`select * from public.quotes where id = ${id}`;
+      const lines = await admin<Row[]>`
+        select * from public.quote_lines where quote_id = ${id} order by line_no`;
+      const taxes = await admin<Row[]>`
+        select * from public.quote_line_taxes where quote_id = ${id} order by line_no, tax_rate_id`;
+      if (!head) throw new Error("no quote");
+      const num = (value: unknown) => Number(value);
+      const copy = (change: (h: Row, l: Row[], t: Row[]) => void) => {
+        const h: Row = { ...head };
+        const l = lines.map((x) => ({ ...x }));
+        const t = taxes.map((x) => ({ ...x }));
+        change(h, l, t);
+        for (const k of [
+          "id",
+          "created_at",
+          "created_txid",
+          "actor_type",
+          "actor_id",
+          "request_id",
+        ]) {
+          delete h[k];
+        }
+        return pgCode(
+          asGuest(A.id, async (trx) => {
+            const { id: copyId } = await trx
+              .insertInto("quotes")
+              .values(h as never)
+              .returning("id")
+              .executeTakeFirstOrThrow();
+            await trx
+              .insertInto("quote_lines")
+              .values(l.map((x) => ({ ...x, quote_id: copyId })) as never)
+              .execute();
+            if (t.length > 0) {
+              await trx
+                .insertInto("quote_line_taxes")
+                .values(t.map((x) => ({ ...x, quote_id: copyId })) as never)
+                .execute();
+            }
+          }),
+        );
+      };
+      const line = (l: Row[], code: string) => {
+        const found = l.find((x) => x.code === code);
+        if (!found) throw new Error(`no ${code} line`);
+        return found;
+      };
+      const shift = (h: Row, field: string, by: number) => {
+        h[field] = num(h[field]) + by;
+      };
+      // The unchanged copy commits: the checks accept what the service writes.
+      expect(await copy(() => {})).toBeUndefined();
+      const cases: Array<[string, (h: Row, l: Row[], t: Row[]) => void]> = [
+        [
+          "a trip time other than the trip's",
+          (h) => {
+            h.trip_starts_at = new Date("2026-11-11T22:00:00Z");
+          },
+        ],
+        [
+          "a product name other than the product's",
+          (h) => {
+            h.product_name = "Renamed cruise";
+          },
+        ],
+        [
+          "a line name other than the price list's",
+          (_h, l) => {
+            line(l, "adult").name = "Grown-up";
+          },
+        ],
+        [
+          "a per-participant fee charged for fewer participants",
+          (h, l) => {
+            const fee = line(l, "harbor");
+            fee.quantity = 2;
+            fee.amount = 2 * num(fee.unit_amount);
+            shift(h, "fee_amount", -num(fee.unit_amount));
+            shift(h, "total_amount", -num(fee.unit_amount));
+          },
+        ],
+        [
+          "a mandatory fee left out",
+          (h, l) => {
+            const fee = line(l, "harbor");
+            l.splice(l.indexOf(fee), 1);
+            shift(h, "fee_amount", -num(fee.amount));
+            shift(h, "total_amount", -num(fee.amount));
+          },
+        ],
+        [
+          "a promotion redeemed after its window",
+          (h) => {
+            h.quoted_at = new Date("2027-06-01T00:00:00Z");
+            h.expires_at = new Date("2027-06-01T00:30:00Z");
+          },
+        ],
+        [
+          "a discount one cent smaller than the rule",
+          (h, l, t) => {
+            const adult = line(l, "adult");
+            adult.discount_amount = num(adult.discount_amount) - 1;
+            const discount = l.find((x) => x.kind === "discount");
+            if (!discount) throw new Error("no discount line");
+            discount.unit_amount = num(discount.unit_amount) - 1;
+            discount.amount = num(discount.amount) + 1;
+            shift(h, "discount_amount", -1);
+            shift(h, "total_amount", 1);
+            // The adult line's pre-tax amount grows by a cent; recompute its taxes.
+            let added = 0;
+            for (const x of t.filter((r) => r.line_no === adult.line_no)) {
+              const before = num(x.amount);
+              x.taxable_amount = num(x.taxable_amount) + 1;
+              const rate = created.quote.taxes.find((r) => r.taxRateId === x.tax_rate_id);
+              x.amount = Math.floor((2 * num(x.taxable_amount) * (rate?.ratePpm ?? 0) + 1e6) / 2e6);
+              added += num(x.amount) - before;
+            }
+            shift(h, "tax_amount", added);
+            shift(h, "total_amount", added);
+          },
+        ],
+        [
+          "an added tax one cent off its rate",
+          (h, _l, t) => {
+            const first = t[0];
+            if (!first) throw new Error("no tax rows");
+            first.amount = num(first.amount) + 1;
+            shift(h, "tax_amount", 1);
+            shift(h, "total_amount", 1);
+          },
+        ],
+        [
+          "a taxable line without its taxes",
+          (h, l, t) => {
+            const photo = line(l, "photo");
+            const dropped = t.filter((x) => x.line_no === photo.line_no);
+            t.splice(0, t.length, ...t.filter((x) => x.line_no !== photo.line_no));
+            const removed = dropped.reduce((sum, x) => sum + num(x.amount), 0);
+            shift(h, "tax_amount", -removed);
+            shift(h, "total_amount", -removed);
+          },
+        ],
+      ];
+      const outcomes: { label: string; code: string | undefined }[] = [];
+      for (const [label, change] of cases) outcomes.push({ label, code: await copy(change) });
+      expect(outcomes).toEqual(cases.map(([label]) => ({ label, code: "23514" })));
+    });
+
     it("keeps guests from writing terms and every row inside its tenant", async () => {
       const guestTerms = await pgCode(
         asGuest(A.id, (trx) =>

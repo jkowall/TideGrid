@@ -53,7 +53,14 @@ Independent problems are all reported, in the order above. Checks that depend on
 - **On sale** means exactly what the public availability query means: the trip is listed by `findAvailableTrips` for the product's smallest party. The quote then checks the real party against the product's limits and the trip's remaining capacity. G2.6 makes that capacity hold-aware; a quote never reserves anything.
 - **Snapshot.** A quote stores the trip it prices (product name, zone, local date and time, start instant, offset), the price list, policy, and promotion versions it used, every line with its code, name, quantity, unit price, amount, discount share, and taxability, one row per taxable line and tax rate, and the totals. Reading a quote uses only the snapshot and the immutable versions it names, so later price, tax, promotion, policy, or catalog changes never alter it.
 - **Validity.** `quotedAt` is the pricing instant; `expiresAt` is 30 minutes later. Checkout (G2.6 and G2.7) must start before then or ask for a new quote.
-- **Immutable.** Quotes, lines, and line taxes are append-only for every role. Lines and taxes can be written only in the quote's own transaction. At commit the database checks that the header totals equal the lines, only taxable lines carry tax, the discount is fully allocated, there is a trip-price line, and a discount line exists exactly when a promotion is named.
+- **Audit classification.** A quote records its actor and request id on its own row and writes no audit event or outbox event: it changes no booking, money, or configuration. Every command that appends terms records an audit event.
+- **Immutable.** Quotes, lines, and line taxes are append-only for every role. Lines and taxes can be written only in the quote's own transaction.
+- **Self-checking.** The database refuses a quote that its trip and versions do not produce, whoever writes it:
+  - when it is written, its trip snapshot must equal the trip and product it names;
+  - at commit, the header totals must equal the lines, only taxable lines carry tax, the discount is fully allocated, there is a trip-price line, and a discount line exists exactly when a promotion is named;
+  - at commit, every priced line must be an item of the named price list version copied exactly, with a quantity its rule allows on the trip's date; each item appears once, every fee is charged, and the tickets are the party;
+  - at commit, a named promotion must have been redeemable for the product at `quotedAt`, and the discount must be its rule applied to the trip price;
+  - at commit, every taxable line carries the same rate versions on one pre-tax amount, with inclusive tax extracted and added tax rounded exactly as above.
 - `getTripOffer` returns what a guest can choose for one trip: ticket types or the charter price, the add-ons offered on its date, fees, active tax rates, and the policy with its cutoff instant.
 
 ## Publishing
