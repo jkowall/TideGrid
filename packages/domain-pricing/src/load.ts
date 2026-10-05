@@ -227,7 +227,10 @@ export interface SaleTrip {
   capacityRemaining: number;
   timeZone: string;
   localDate: string;
+  /** "HH:MM", as the catalog shows it. */
   localStartTime: string;
+  /** "HH:MM:SS", exactly as the trip stores it; quotes snapshot this. */
+  exactLocalStartTime: string;
   startsAt: string;
   startsAtLocal: string;
   startOffsetMinutes: number;
@@ -257,7 +260,13 @@ export async function findTripForSale(
     .innerJoin("products as p", (j) =>
       j.onRef("p.tenant_id", "=", "t.tenant_id").onRef("p.id", "=", "t.product_id"),
     )
-    .select(["t.product_id", "t.local_date", "t.start_utc_offset_minutes", "p.min_party_size"])
+    .select([
+      "t.product_id",
+      "t.local_date",
+      "t.local_start_time",
+      "t.start_utc_offset_minutes",
+      "p.min_party_size",
+    ])
     .where("t.tenant_id", "=", tenantId)
     .where("t.id", "=", tripId)
     .executeTakeFirst();
@@ -285,6 +294,7 @@ export async function findTripForSale(
       timeZone: trip.timeZone,
       localDate: trip.localDate,
       localStartTime: trip.localStartTime,
+      exactLocalStartTime: row.local_start_time,
       startsAt: trip.startsAt,
       startsAtLocal: trip.startsAtLocal,
       startOffsetMinutes: row.start_utc_offset_minutes,

@@ -211,7 +211,7 @@ export async function createQuote(
       product_name: trip.productName,
       trip_time_zone: trip.timeZone,
       trip_local_date: trip.localDate,
-      trip_local_start_time: `${trip.localStartTime}:00`,
+      trip_local_start_time: trip.exactLocalStartTime,
       trip_starts_at: trip.startsAt,
       trip_start_utc_offset_minutes: trip.startOffsetMinutes,
       price_list_version: priceList.version,

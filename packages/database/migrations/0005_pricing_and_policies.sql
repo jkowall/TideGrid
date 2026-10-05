@@ -388,7 +388,8 @@ CREATE TABLE public.quotes (
   CHECK ((promotion_id IS NULL) = (promotion_version IS NULL)),
   CHECK (discount_amount <= subtotal_amount),
   CHECK (total_amount = subtotal_amount - discount_amount + fee_amount + tax_amount),
-  CHECK (expires_at > quoted_at)
+  -- The service holds a price for 30 minutes; no quote may hold one longer than an hour.
+  CHECK (expires_at > quoted_at AND expires_at <= quoted_at + interval '1 hour')
 );
 
 -- Ticket, charter, add-on, and fee lines carry quantity times unit price and,
