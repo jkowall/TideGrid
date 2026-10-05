@@ -116,6 +116,7 @@ Lock order and isolation:
 - A trip's row before any of its hold rows. Acquire, confirm, and release lock the trip first. The sweep locks hold rows only and skips locked ones, so it never waits on a checkout.
 - A command that touches several trips should take them in a stable order, such as by trip id, or two checkouts can deadlock (PostgreSQL then aborts one with 40P01).
 - Never hold a database lock across a provider call. Acquire, commit, then call the payment provider.
+- The trip lock lasts until the caller commits, and every other checkout for that trip waits behind it. Acquire late in the transaction and commit promptly.
 - READ COMMITTED, the default.
 
 ## Audit and events
