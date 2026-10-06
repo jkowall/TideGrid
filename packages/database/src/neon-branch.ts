@@ -37,6 +37,14 @@ interface CreateResponse {
   connection_uris?: { connection_uri: string }[];
 }
 
+/**
+ * The project's default compute is fixed at 0.25 CU (about 1 GB), and the
+ * race suites' 20 to 30 concurrent sessions ran it out of memory (53200).
+ * Throwaway branches may scale up to 1 CU under that load and back down when
+ * idle. The cap bounds what a test run can spend.
+ */
+const branchCompute = { autoscaling_limit_min_cu: 0.25, autoscaling_limit_max_cu: 1 };
+
 export async function createBranch(name: string, ttlSeconds = 6 * 3600) {
   const project = env("NEON_PROJECT_ID");
   const expires = new Date(Date.now() + ttlSeconds * 1000).toISOString();
@@ -44,7 +52,7 @@ export async function createBranch(name: string, ttlSeconds = 6 * 3600) {
     method: "POST",
     body: JSON.stringify({
       branch: { name, expires_at: expires },
-      endpoints: [{ type: "read_write" }],
+      endpoints: [{ type: "read_write", ...branchCompute }],
     }),
   });
   const branchId = created.branch.id;

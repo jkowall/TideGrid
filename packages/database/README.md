@@ -107,3 +107,4 @@ Two more cross-tenant reads join `app.resolve_hostname` and `app.capacity_hold_s
 
 - `pnpm test` runs unit tests.
 - `pnpm test:integration` runs against a throwaway Neon branch. Set `DATABASE_URL` to the branch's admin URL and `TIDEGRID_EPHEMERAL_DB=1`; the shared global setup migrates the branch and rotates the runtime password on it. Never point it at the main branch. In CI a missing database is an error, never a skip.
+- `pnpm --filter @tidegrid/database neon:branch create <name>` makes that throwaway branch. It expires after six hours, and its compute autoscales from 0.25 to 1 CU. The project default is a fixed 0.25 CU, which the race suites ran out of memory.
