@@ -334,7 +334,8 @@ export function formatCutoff(
 
 /**
  * Elapsed time.
- * - short: "45 min", "1 h 30 min", "4 h"
+ * - short: "45 min", "1 h 30 min", "4 h", joined with no-break spaces so it
+ *   never wraps as "1 h" over "30 min"
  * - long, for screen readers: "45 minutes", "1 hour 30 minutes", "4 hours"
  */
 export function formatDuration(minutes: number, style: "short" | "long" = "short"): string {
@@ -342,12 +343,12 @@ export function formatDuration(minutes: number, style: "short" | "long" = "short
   const m = minutes % 60;
   const out: string[] = [];
   if (style === "short") {
-    if (h > 0) out.push(`${h} h`);
-    if (m > 0 || h === 0) out.push(`${m} min`);
-  } else {
-    if (h > 0) out.push(`${h} ${h === 1 ? "hour" : "hours"}`);
-    if (m > 0 || h === 0) out.push(`${m} ${m === 1 ? "minute" : "minutes"}`);
+    if (h > 0) out.push(`${h}${nbsp}h`);
+    if (m > 0 || h === 0) out.push(`${m}${nbsp}min`);
+    return out.join(nbsp);
   }
+  if (h > 0) out.push(`${h} ${h === 1 ? "hour" : "hours"}`);
+  if (m > 0 || h === 0) out.push(`${m} ${m === 1 ? "minute" : "minutes"}`);
   return out.join(" ");
 }
 
@@ -411,3 +412,6 @@ export function describeClockChange(change: ClockChange): string {
       : `${change.minutes} minutes`;
   return `Clocks go ${change.direction} ${amount} on ${formatDate(change.date, "medium")}.`;
 }
+
+// Money, rates, and time left (G2.11b).
+export * from "./money.ts";

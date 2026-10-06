@@ -20,18 +20,23 @@ import {
 import {
   Button,
   ButtonLink,
+  CheckboxField,
   Dialog,
   EmptyState,
   Icon,
   iconNames,
+  Ledger,
   Notice,
+  QuantityField,
   SelectField,
   Skeleton,
   Spinner,
   StatusBadge,
   type StatusTone,
+  Steps,
   TextField,
 } from "../src/components/index.ts";
+import { formatMoney } from "../src/format/index.ts";
 import { comfortableLine, measureReport } from "./line-length.ts";
 
 /** Sample themes: the TideGrid default and the two synthetic tenants' theme inputs. */
@@ -214,6 +219,66 @@ function DialogDemo() {
   );
 }
 
+/** The guest checkout's parts (G2.11b), with live counts and amounts formatted from cents. */
+function CheckoutDemo() {
+  const [adults, setAdults] = useState(2);
+  const [photos, setPhotos] = useState(0);
+  const [accepted, setAccepted] = useState(false);
+  return (
+    <div className="gallery-stack">
+      <Steps steps={["Party", "Details", "Payment"]} current={1} label="Booking steps" />
+      <div className="gallery-grid">
+        <QuantityField
+          label="Adult"
+          hint={`${formatMoney(4500)} each`}
+          value={adults}
+          max={10}
+          onChange={setAdults}
+          decrementLabel="Remove one Adult ticket"
+          incrementLabel="Add one Adult ticket"
+        />
+        <QuantityField
+          label="Souvenir photo"
+          hint={`${formatMoney(1200)} each, up to 2 per booking`}
+          value={photos}
+          max={2}
+          onChange={setPhotos}
+          decrementLabel="Remove one Souvenir photo"
+          incrementLabel="Add one Souvenir photo"
+          error={photos === 2 ? "That's the most this party can take." : undefined}
+        />
+      </div>
+      <CheckboxField
+        label="I accept this cancellation policy"
+        hint="Policy version 1."
+        checked={accepted}
+        onChange={(event) => setAccepted(event.target.checked)}
+      />
+      <Ledger
+        caption="Price in US dollars"
+        rows={[
+          {
+            id: "a",
+            label: "Adult",
+            detail: `2 × ${formatMoney(4500)}`,
+            amount: formatMoney(9000),
+          },
+          { id: "s", label: "Subtotal", amount: formatMoney(9000), kind: "subtotal" },
+          { id: "d", label: "HARBOR10, 10% off", amount: formatMoney(-900), kind: "adjustment" },
+          { id: "t", label: "State sales tax (6%)", amount: formatMoney(486) },
+          { id: "z", label: "Total", amount: formatMoney(8586), kind: "total" },
+          {
+            id: "n",
+            label: "Includes General excise tax (4.712%)",
+            amount: formatMoney(386),
+            kind: "note",
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
 function Components({ dark }: { dark: boolean }) {
   const [busy, setBusy] = useState(false);
   const tones: StatusTone[] = ["ready", "warning", "blocked", "info", "pending", "neutral"];
@@ -315,6 +380,9 @@ function Components({ dark }: { dark: boolean }) {
       </Section>
       <Section id={`dialog-${dark}`} title="Dialog">
         <DialogDemo />
+      </Section>
+      <Section id={`checkout-${dark}`} title="Checkout: counts, a checkbox, steps, and a ledger">
+        <CheckoutDemo />
       </Section>
       <Section id={`notices-${dark}`} title="Notices">
         <div className="gallery-stack">

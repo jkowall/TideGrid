@@ -13,6 +13,9 @@
  *   take the tenant brand on <html> through `applyBrandTheme`.
  * - A final action, such as canceling, is confirmed in a Dialog whose one
  *   action is a `danger` button.
+ * - Money reaches a screen only through `formatMoney` in
+ *   `@tidegrid/design-system/format`, from integer cents; a Ledger shows
+ *   line items and their sums without doing any arithmetic itself.
  */
 export {
   Button,
@@ -21,6 +24,7 @@ export {
   type ButtonProps,
   type ButtonVariant,
 } from "./Button.tsx";
+export { CheckboxField, type CheckboxFieldProps } from "./CheckboxField.tsx";
 export { cx } from "./cx.ts";
 export { Dialog, type DialogProps } from "./Dialog.tsx";
 export { ErrorBoundary, type ErrorBoundaryProps } from "./ErrorBoundary.tsx";
@@ -39,5 +43,8 @@ export {
   VisuallyHidden,
 } from "./Feedback.tsx";
 export { Icon, type IconName, type IconProps, iconNames } from "./Icon.tsx";
+export { Ledger, type LedgerProps, type LedgerRow, type LedgerRowKind } from "./Ledger.tsx";
+export { type QuantityChange, QuantityField, type QuantityFieldProps } from "./QuantityField.tsx";
 export { SelectField, type SelectFieldProps, type SelectOption } from "./SelectField.tsx";
+export { Steps, type StepsProps } from "./Steps.tsx";
 export { TextField, type TextFieldProps } from "./TextField.tsx";

@@ -2,6 +2,7 @@
 import "./zod-jitless.ts";
 import "@tidegrid/design-system/base.css";
 import "./guest.css";
+import "./booking.css";
 import { ErrorBoundary } from "@tidegrid/design-system/components";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

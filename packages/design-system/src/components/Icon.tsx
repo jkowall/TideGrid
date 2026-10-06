@@ -160,6 +160,27 @@ const paths = {
       <path d="M8 11V8a4 4 0 0 1 7.6-1.7" />
     </>
   ),
+  check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
+  tag: (
+    <>
+      <path d="M3.5 12.6V4.5a1 1 0 0 1 1-1h8.1a2 2 0 0 1 1.4.6l6.9 6.9a2 2 0 0 1 0 2.8l-7.1 7.1a2 2 0 0 1-2.8 0L4.1 14a2 2 0 0 1-.6-1.4Z" />
+      <path d="M8.5 8.5h.01" />
+    </>
+  ),
+  "credit-card": (
+    <>
+      <rect x="2.5" y="5" width="19" height="14" rx="2" />
+      <path d="M2.5 10h19M6.5 15h4" />
+    </>
+  ),
+  receipt: (
+    <>
+      <path d="M5.5 3.5h13v17l-2.2-1.5-2.1 1.5-2.2-1.5-2.2 1.5-2.1-1.5-2.2 1.5Z" />
+      <path d="M9 8.5h6M9 12h6M9 15.5h3.5" />
+    </>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof paths;

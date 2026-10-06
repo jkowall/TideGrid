@@ -285,35 +285,9 @@
 .trips__notes .tg-icon {
   margin-top: 0.15em;
 }
-/* "Email instead" lines its icon up with the call button's when they stack. */
-.trips__reserve .tg-notice__actions .tg-button--ghost {
-  padding-inline: var(--space-5);
-}
 /* A phone number reads as one unit: at 320 px it broke after "555-". */
 .guest-phone {
   white-space: nowrap;
-}
-@media (min-width: 60rem) {
-  /* Text on the left, the ways to reach the operator on the right. */
-  .trips__reserve > div {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "title actions"
-      "body actions";
-    column-gap: var(--space-6);
-    align-items: center;
-  }
-  .trips__reserve .tg-notice__title {
-    grid-area: title;
-  }
-  .trips__reserve .tg-notice__body {
-    grid-area: body;
-  }
-  .trips__reserve .tg-notice__actions {
-    grid-area: actions;
-    margin-top: 0;
-  }
 }
 
 .trips__controls {
@@ -430,15 +404,16 @@
   list-style: none;
 }
 
-/* Phone: time, then the trip, then its facts. Tablet: time in a column.
-   Desktop: time, trip, and facts side by side. */
+/* Phone: time, then the trip, its facts, and Book. Tablet: time in a column.
+   Desktop: time, trip, and facts side by side, with Book under the facts. */
 .trip-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
     "when"
     "main"
-    "facts";
+    "facts"
+    "action";
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--border-subtle);
@@ -451,7 +426,8 @@
     grid-template-columns: 7rem minmax(0, 1fr);
     grid-template-areas:
       "when main"
-      "when facts";
+      "when facts"
+      "when action";
     column-gap: var(--space-5);
     padding: var(--space-5);
   }
@@ -459,7 +435,24 @@
 @media (min-width: 60rem) {
   .trip-card {
     grid-template-columns: 7.5rem minmax(0, 1fr) minmax(0, 17.5rem);
-    grid-template-areas: "when main facts";
+    grid-template-areas:
+      "when main facts"
+      "when main action";
+  }
+}
+.trip-card__action {
+  grid-area: action;
+  display: flex;
+  align-items: flex-end;
+}
+/* A full-width target on a phone; beside the facts it keeps its own width. */
+.trip-card__action .tg-button {
+  flex: 1 1 auto;
+}
+@media (min-width: 40rem) {
+  .trip-card__action .tg-button {
+    flex: 0 0 auto;
+    min-width: 8rem;
   }
 }
 .trip-card__when {

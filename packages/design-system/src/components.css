@@ -130,6 +130,10 @@
 .tg-button--block {
   width: 100%;
 }
+/* A busy button keeps its width at rest (set by Button), but never outgrows its row. */
+.tg-button[aria-busy="true"] {
+  max-width: 100%;
+}
 /* Disabled controls are exempt from contrast minimums, but these stay legible. */
 .tg-button:disabled,
 .tg-button[aria-disabled="true"] {
@@ -138,6 +142,13 @@
   color: var(--text-muted);
   cursor: not-allowed;
   text-decoration: none;
+}
+/* A ghost button never had a fill, so an unavailable one does not gain one:
+   it keeps its place and dims its text. */
+.tg-button--ghost:disabled,
+.tg-button--ghost[aria-disabled="true"]:not([aria-busy="true"]) {
+  background: transparent;
+  border-color: transparent;
 }
 /* On the dark console a sunken fill vanished into Harbor; an unavailable
    button keeps its outline, dimmed, so it still reads as a button. */
@@ -160,6 +171,11 @@
   background: var(--action-danger-bg);
   border-color: var(--action-danger-bg);
   color: var(--action-danger-ink);
+}
+.tg-button--ghost[aria-busy="true"] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--link);
 }
 
 .tg-spinner {
@@ -502,4 +518,223 @@
   .tg-dialog__footer > .tg-button {
     flex: 1 1 100%;
   }
+}
+
+/* Quantity fields: minus, the count, plus --------------------------------- */
+
+/* The label and its hint on the left, the control on the right, so a column
+   of counts lines up; an error spans the row. */
+.tg-quantity {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-4);
+}
+.tg-quantity__text {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.tg-quantity > .tg-field__error {
+  grid-column: 1 / -1;
+}
+.tg-quantity__control {
+  display: inline-flex;
+  align-items: stretch;
+}
+/* A ring drawn by one part must not slip under its neighbor. */
+.tg-quantity__control > :focus-visible {
+  position: relative;
+  z-index: 1;
+}
+.tg-quantity__step {
+  display: grid;
+  place-items: center;
+  width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 1px solid var(--border-control);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+.tg-quantity__step:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.tg-quantity__step:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.tg-quantity__step:hover:not([aria-disabled="true"]) {
+  border-color: var(--text-strong);
+  background: var(--surface-hover);
+}
+.tg-quantity__step[aria-disabled="true"] {
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+.tg-quantity__input {
+  width: 3.5rem;
+  padding: 0 var(--space-1);
+  border-inline: 0;
+  border-radius: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+.tg-quantity__input::-webkit-inner-spin-button,
+.tg-quantity__input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+/* Checkboxes: the whole row is the target ----------------------------------- */
+
+.tg-check {
+  display: grid;
+  gap: var(--space-1);
+}
+.tg-check__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--tap-min);
+  padding-block: var(--space-2);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+.tg-check__box {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+  accent-color: var(--action-bg);
+  cursor: pointer;
+}
+.tg-check__box[aria-invalid="true"] {
+  box-shadow: 0 0 0 2px var(--status-blocked);
+}
+.tg-check__label {
+  min-width: 0;
+}
+/* Hints and errors line up with the label, not the box. */
+.tg-check > .tg-field__hint,
+.tg-check > .tg-field__error {
+  padding-left: calc(1.5rem + var(--space-3));
+}
+
+/* Steps: where a person is in a short sequence ------------------------------ */
+
+.tg-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tg-steps__step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+.tg-steps__marker {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--border-control);
+  border-radius: 50%;
+  font-variant-numeric: tabular-nums;
+}
+.tg-steps__marker .tg-icon {
+  width: 1rem;
+  height: 1rem;
+}
+.tg-steps__step--done,
+.tg-steps__step--current {
+  color: var(--text-strong);
+}
+.tg-steps__step--done .tg-steps__marker {
+  border-color: var(--text-strong);
+}
+.tg-steps__step--current .tg-steps__marker {
+  border-color: var(--action-bg);
+  background: var(--action-bg);
+  color: var(--action-ink);
+}
+@media (min-width: 30rem) {
+  .tg-steps__step + .tg-steps__step::before {
+    content: "";
+    width: 1.5rem;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--border-control);
+  }
+}
+
+/* Ledgers: line items and their sums ---------------------------------------- */
+
+/* Money lines up: lining, tabular figures wherever the tenant's font has them. */
+.tg-ledger {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.tg-ledger__caption {
+  margin-bottom: var(--space-2);
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+}
+.tg-ledger__row > th,
+.tg-ledger__row > td {
+  padding-block: var(--space-2);
+  vertical-align: top;
+}
+.tg-ledger__item {
+  padding-right: var(--space-4);
+  color: var(--text-body);
+  font-weight: var(--weight-regular);
+  text-align: left;
+}
+.tg-ledger__label {
+  display: block;
+}
+.tg-ledger__detail {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.tg-ledger__amount {
+  color: var(--text-strong);
+  text-align: right;
+  white-space: nowrap;
+}
+.tg-ledger__row--subtotal > th,
+.tg-ledger__row--subtotal > td {
+  border-top: 1px solid var(--border-subtle);
+  font-weight: var(--weight-semibold);
+}
+.tg-ledger__row--adjustment > th,
+.tg-ledger__row--adjustment > td {
+  font-weight: var(--weight-semibold);
+}
+.tg-ledger__row--total > th,
+.tg-ledger__row--total > td {
+  padding-top: var(--space-3);
+  border-top: 2px solid var(--text-strong);
+  color: var(--text-strong);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+}
+.tg-ledger__row--note > th,
+.tg-ledger__row--note > td {
+  padding-top: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }

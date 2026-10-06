@@ -5,21 +5,10 @@
 process.env.TZ = "Asia/Tokyo";
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { AvailableTrip, PublicBrand } from "@tidegrid/contracts";
+import type { AvailableTrip } from "@tidegrid/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { groupByDate, readQuery, windowOf, writeQuery } from "./trips.ts";
 import { UpcomingTrips } from "./UpcomingTrips.tsx";
-
-const brand: PublicBrand = {
-  version: 1,
-  name: "Demo Harbor Charters",
-  colors: { primary: "#0b3c5d", accent: "#e0a526" },
-  fonts: { display: "fraunces", body: "source-sans-3" },
-  contact: { phone: "+13055550142", email: "hello@demo-harbor.test" },
-  legal: { terms: "/legal/terms", privacy: "/legal/privacy" },
-  locale: "en-US",
-  capabilities: [],
-};
 
 const location = { name: "Harbor Marina, Dock C", meetingPoint: "Dock C, slip 14" };
 const sunset = {
@@ -169,7 +158,7 @@ afterEach(() => {
 describe("upcoming trips on a branded site", () => {
   it("groups trips by the marina's date and keeps its clock across the Nov 1 change", async () => {
     const queries = tripsApi(() => json({ trips: [oct31Sunset, nov1Charter, nov1Sunset] }));
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
 
     const oct31 = await screen.findByRole("region", { name: "Saturday, October 31" });
     const nov1 = screen.getByRole("region", { name: "Sunday, November 1" });
@@ -215,7 +204,7 @@ describe("upcoming trips on a branded site", () => {
 
   it("labels the marina's today, even when the guest's calendar is a day ahead", async () => {
     tripsApi(() => json({ trips: [oct5Sunset] }));
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     const today = await screen.findByRole("heading", { level: 3 });
     expect(text(today)).toBe("Today Monday, October 5");
   });
@@ -226,7 +215,7 @@ describe("upcoming trips on a branded site", () => {
       () => json({ trips: [oct31Sunset, nov1Charter, nov1Sunset] }),
       second.answer,
     );
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     await screen.findByRole("region", { name: "Sunday, November 1" });
 
     const party = screen.getByRole("combobox", { name: "Party size" });
@@ -260,7 +249,7 @@ describe("upcoming trips on a branded site", () => {
       () => json({ trips: [] }),
       () => json({ trips: [] }),
     );
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     await screen.findByRole("heading", { name: "No trips in these dates" });
 
     const previous = screen.getByRole("button", { name: "Previous 4 weeks" });
@@ -292,7 +281,7 @@ describe("upcoming trips on a branded site", () => {
       () => json({ trips: [] }),
       () => json({ trips: [] }),
     );
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     const empty = await screen.findByRole("region", { name: "No trips in these dates" });
     expect(text(empty)).toContain(
       "Nothing is open for 12 guests from Tue, Oct 6 to Mon, Nov 2. Try other dates or a smaller party.",
@@ -314,7 +303,7 @@ describe("upcoming trips on a branded site", () => {
       () => json({ trips: [] }),
       () => json({ trips: [] }),
     );
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     const empty = await screen.findByRole("region", { name: "No trips in these dates" });
     expect(screen.getByText("Mon, Jun 7 to Sun, Jul 4, 2027")).toBeTruthy();
     expect(text(empty)).toContain("from Mon, Jun 7 to Sun, Jul 4, 2027.");
@@ -332,10 +321,10 @@ describe("upcoming trips on a branded site", () => {
     tripsApi(() => {
       throw new TypeError("Failed to fetch");
     }, retry.answer);
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     const alert = await screen.findByRole("alert");
     expect(text(alert)).toContain("We couldn't load trips");
-    // "Try again" is the screen's one primary action; the call link steps down.
+    // "Try again" is the screen's one primary action.
     const primaries = document.querySelectorAll(".tg-button--primary");
     expect([...primaries].map((p) => text(p))).toEqual(["Try again"]);
 
@@ -352,9 +341,11 @@ describe("upcoming trips on a branded site", () => {
     );
     await waitFor(() => expect(document.activeElement).toBe(dates));
     expect(screen.queryByRole("alert")).toBeNull();
-    expect([...document.querySelectorAll(".tg-button--primary")].map((p) => text(p))).toEqual([
-      "Call (305) 555-0142",
-    ]);
+    // A trip's Book link is a secondary button: one per trip, none outranks another.
+    expect(document.querySelectorAll(".tg-button--primary")).toHaveLength(0);
+    expect(
+      screen.getByRole("link", { name: /^Book Sunset Harbor Cruise, Saturday, October 31/ }),
+    ).toBeTruthy();
   });
 
   it("says so when a second try fails too", async () => {
@@ -362,7 +353,7 @@ describe("upcoming trips on a branded site", () => {
       () => json({ error: { code: "internal_error", message: "x", requestId: "r" } }, 500),
       () => json({ error: { code: "internal_error", message: "x", requestId: "r" } }, 500),
     );
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     await screen.findByText("Trips still aren't loading");
     expect(text(screen.getByRole("alert"))).not.toMatch(/\b500\b|internal/);
@@ -370,14 +361,14 @@ describe("upcoming trips on a branded site", () => {
 
   it("treats a response that breaks the contract as an error, not an empty list", async () => {
     tripsApi(() => json({ trips: [{ ...oct31Sunset, salesCloseAt: "soon" }] }));
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     expect(text(await screen.findByRole("alert"))).toContain("We couldn't show these trips");
     expect(screen.queryByText("No trips in these dates")).toBeNull();
   });
 
   it("treats a time zone this browser can't show as unreadable, not as a crash", async () => {
     tripsApi(() => json({ trips: [{ ...oct31Sunset, timeZone: "Mars/Olympus_Mons" }] }));
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     expect(text(await screen.findByRole("alert"))).toContain("We couldn't show these trips");
   });
 
@@ -386,7 +377,7 @@ describe("upcoming trips on a branded site", () => {
       () => json({ error: { code: "range_too_large", message: "x", requestId: "r" } }, 400),
       () => json({ trips: [oct31Sunset] }),
     );
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     const alert = await screen.findByRole("alert");
     expect(text(alert)).toContain("These dates can't be shown");
     expect(text(alert)).not.toMatch(/connection/);
@@ -403,7 +394,7 @@ describe("upcoming trips on a branded site", () => {
   it("keeps the address's dates within a year, so a far-off date cannot break the page", async () => {
     window.history.replaceState(null, "", "/?from=9999-12-31");
     const queries = tripsApi(() => json({ trips: [] }));
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     await screen.findByRole("heading", { name: "No trips in these dates" });
     // The last page starts 364 days after the guest's Oct 6.
     expect(queries[0]?.get("from")).toBe("2027-10-05");
@@ -416,7 +407,7 @@ describe("upcoming trips on a branded site", () => {
   it("never shows the old list under the new dates, even for a frame", async () => {
     const second = deferred();
     tripsApi(() => json({ trips: [oct31Sunset, nov1Sunset] }), second.answer);
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     await screen.findByRole("region", { name: "Sunday, November 1" });
     const top = screen.getByRole("navigation", { name: "Trip dates" });
     fireEvent.click(within(top).getByRole("button", { name: "Next 4 weeks" }));
@@ -433,7 +424,7 @@ describe("upcoming trips on a branded site", () => {
       () => json({ trips: [oct31Sunset, nov1Charter, nov1Sunset] }),
       () => json({ trips: [] }),
     );
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     await screen.findByRole("region", { name: "Sunday, November 1" });
     const bottom = screen.getByRole("navigation", { name: "Trip dates, after the list" });
     expect(within(bottom).getByText("Tue, Oct 6 to Mon, Nov 2")).toBeTruthy();
@@ -464,7 +455,7 @@ describe("upcoming trips on a branded site", () => {
       location: { name: "Reef Point Harbor", meetingPoint: "Slip 7" },
     };
     tripsApi(() => json({ trips: [reefDive, oct31Sunset] }));
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     const day = await screen.findByRole("region", { name: "Saturday, October 31" });
     expect(screen.getByText("Times are local to each trip's departure point.")).toBeTruthy();
     expect(text(cardTitled(day, /New York time/))).toContain("New York");
@@ -493,7 +484,7 @@ describe("upcoming trips on a branded site", () => {
       capacity: seats,
     });
     tripsApi(() => json({ trips: [early] }));
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     const day = await screen.findByRole("region", { name: "Sunday, November 1" });
     // The second 1:30 AM of the night, in EST; its cutoff an hour earlier is the first, in EDT.
     expect(text(cardTitled(day, /Sunset Harbor Cruise/))).toContain("1:30 AM EST");
@@ -503,7 +494,7 @@ describe("upcoming trips on a branded site", () => {
   it("starts from the dates and party in the address", async () => {
     window.history.replaceState(null, "", "/?from=2026-11-03&party=3");
     const queries = tripsApi(() => json({ trips: [] }));
-    render(<UpcomingTrips brand={brand} />);
+    render(<UpcomingTrips />);
     await screen.findByRole("heading", { name: "No trips in these dates" });
     expect(queries[0]?.get("from")).toBe("2026-11-03");
     expect(queries[0]?.get("party")).toBe("3");

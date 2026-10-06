@@ -1,0 +1,579 @@
+/*
+ * The booking page (G2.11b): a band in the operator's color with the trip,
+ * then the steps beside the trip's facts. Tenant values arrive only through
+ * the --brand-* and --font-* properties that applyBrandTheme sets on <html>,
+ * as in guest.css; nothing here names a TideGrid brand color.
+ */
+
+/* Brand band ----------------------------------------------------------------- */
+
+.booking-hero {
+  /* As in the home band: text in the primary's ink, focus in the accent,
+     which the brand contract holds at 4.5:1 and 3:1 against the primary. */
+  --text-strong: var(--brand-primary-ink);
+  --link: var(--brand-primary-ink);
+  --focus-color: var(--brand-accent);
+  background: var(--brand-primary);
+  border-bottom: 3px solid var(--brand-accent);
+  color: var(--brand-primary-ink);
+}
+.booking-hero__inner {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding-block: var(--space-3) var(--space-8);
+}
+@media (min-width: 48rem) {
+  .booking-hero__inner {
+    padding-block: var(--space-4) var(--space-10);
+  }
+}
+.booking-hero__back {
+  gap: var(--space-2);
+  margin-left: calc(-1 * var(--space-2));
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--brand-primary-ink);
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.booking-hero__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.booking-hero__eyebrow::before {
+  content: "";
+  width: 2rem;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--brand-accent);
+}
+.booking-hero h1 {
+  max-width: 24ch;
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+}
+@media (min-width: 48rem) {
+  .booking-hero h1 {
+    font-size: var(--text-3xl);
+  }
+}
+.booking-hero__when {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  text-wrap: pretty;
+}
+/* While the trip loads, the band keeps its color and its placeholders read on it. */
+.booking-hero--skeleton {
+  --surface-sunken: color-mix(in srgb, var(--brand-primary-ink) 22%, var(--brand-primary));
+  --surface-raised: color-mix(in srgb, var(--brand-primary-ink) 36%, var(--brand-primary));
+}
+.booking-hero--skeleton .booking-hero__inner {
+  gap: var(--space-4);
+  padding-block: var(--space-6) var(--space-10);
+}
+
+/* Layout ----------------------------------------------------------------------- */
+
+/* Phone: the trip's facts, then the steps. Desktop: the steps, with the facts
+   beside them. The facts come first in the page in both, as the context. */
+.booking-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "facts"
+    "main";
+  gap: var(--space-6);
+  padding-block: var(--space-6) var(--space-16);
+}
+@media (min-width: 60rem) {
+  .booking-layout {
+    grid-template-columns: minmax(0, 1fr) 20rem;
+    grid-template-areas: "main facts";
+    align-items: start;
+    column-gap: var(--space-10);
+    padding-top: var(--space-8);
+  }
+  .booking-layout__facts {
+    position: sticky;
+    top: var(--space-6);
+  }
+}
+.booking-layout__facts {
+  grid-area: facts;
+  min-width: 0;
+}
+.booking-layout__main {
+  grid-area: main;
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
+  max-width: 44rem;
+}
+/* A page with no trip to show: a failure or a trip that cannot be booked. */
+.booking-alone {
+  max-width: 46rem;
+  padding-block: var(--space-10) var(--space-16);
+}
+
+/* Trip facts ------------------------------------------------------------------- */
+
+.booking-facts {
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.booking-facts__title {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+.booking-facts__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+.booking-facts__list li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.booking-facts__list .tg-icon {
+  margin-top: 0.1em;
+  color: var(--text-muted);
+}
+.booking-facts__list span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Steps ------------------------------------------------------------------------ */
+
+.booking-step {
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
+}
+.booking-step__title {
+  margin: 0;
+  font-size: var(--text-2xl);
+  scroll-margin-top: var(--space-6);
+}
+/* A focus target when a step changes, not a control. */
+.booking-step__title:focus {
+  outline: none;
+}
+.booking-section-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+}
+
+/* A group of fields on a card. The legend floats so it sits inside the card
+   instead of on its border, and lays out like any other row. */
+.booking-group {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.booking-group__legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  color: var(--text-strong);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+}
+.booking-group__optional {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+.booking-group__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.booking-group > .tg-quantity + .tg-quantity {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.booking-group__total {
+  justify-self: end;
+  margin: 0;
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+}
+.booking-charter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--text-strong);
+}
+
+.booking-notes ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  padding-left: var(--space-5);
+}
+.booking-notes p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Policy ----------------------------------------------------------------------- */
+
+.booking-policy {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.booking-policy .booking-section-title {
+  margin: 0;
+}
+.booking-policy__summary {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-5);
+}
+.booking-policy__full summary {
+  width: fit-content;
+  padding-block: var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--link);
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+}
+.booking-policy__full dl {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+.booking-policy__full dt {
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+}
+.booking-policy__full dd {
+  max-width: var(--measure);
+  margin: 0 0 var(--space-3);
+}
+
+/* Price ------------------------------------------------------------------------ */
+
+.booking-price {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.booking-price .booking-section-title {
+  margin: 0;
+}
+.booking-price__expiry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.booking-price__expiry .tg-icon {
+  margin-top: 0.15em;
+}
+.booking-price__loading {
+  display: grid;
+  gap: var(--space-3);
+}
+.booking-price__loading p {
+  margin: 0;
+}
+.booking-promo {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+/* Phone: the code, then Apply below it. Wider: Apply beside the input, level
+   with it whatever the label wraps to, and an error below both. */
+.booking-promo__entry {
+  display: grid;
+  gap: var(--space-3);
+}
+@media (min-width: 30rem) {
+  .booking-promo__entry {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+  .booking-promo__entry > .tg-button {
+    /* The label's line plus the field's gap: the input's top edge. */
+    margin-top: calc(var(--text-sm) * var(--leading-body) + var(--space-2));
+  }
+}
+.booking-promo__applied {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+.booking-promo__applied p {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+/* A focus target once a code applies, not a control. */
+.booking-promo__applied p:focus {
+  outline: none;
+}
+
+.booking-details {
+  display: grid;
+  gap: var(--space-6);
+}
+
+/* Actions ---------------------------------------------------------------------- */
+
+.booking-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+@media (max-width: 29.99rem) {
+  .booking-actions > .tg-button {
+    flex: 1 1 100%;
+  }
+}
+.booking-actions--quiet {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+}
+.booking-actions__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Payment ------------------------------------------------------------------------ */
+
+/* The test provider's area: a tinted panel set apart from the page, where no real card goes. */
+.booking-pay {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-5);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-lg);
+  background: var(--surface-sunken);
+}
+.booking-pay__label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+.booking-pay__amount {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-variant-numeric: lining-nums tabular-nums;
+  font-weight: var(--weight-bold);
+  line-height: var(--leading-tight);
+}
+.booking-pay__currency {
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+.booking-pay__hold {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.booking-pay__hold .tg-icon {
+  margin-top: 0.15em;
+}
+.booking-pay__actions {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+@media (min-width: 40rem) {
+  .booking-pay__actions {
+    grid-auto-flow: column;
+    justify-content: start;
+  }
+}
+
+.booking-waiting__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+}
+.booking-waiting > p {
+  margin: 0;
+}
+
+/* Outcomes ---------------------------------------------------------------------- */
+
+.booking-outcome {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-8) var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+}
+@media (min-width: 40rem) {
+  .booking-outcome {
+    padding: var(--space-10);
+  }
+}
+.booking-outcome__icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+}
+.booking-outcome__icon .tg-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+.booking-outcome__icon--ready {
+  background: color-mix(in srgb, var(--status-ready) 12%, var(--surface-raised));
+  color: var(--status-ready);
+}
+.booking-outcome__icon--blocked {
+  background: color-mix(in srgb, var(--status-blocked) 12%, var(--surface-raised));
+  color: var(--status-blocked);
+}
+.booking-outcome__icon--warning {
+  background: color-mix(in srgb, var(--status-warning) 12%, var(--surface-raised));
+  color: var(--status-warning);
+}
+.booking-outcome__body {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-4);
+  width: 100%;
+  min-width: 0;
+}
+.booking-outcome__body > p {
+  margin: 0;
+}
+.booking-outcome__contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* The booking reference: big, spaced, and in a face that tells 0 from O. */
+.booking-reference {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-5);
+  border-left: 4px solid var(--brand-primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+.booking-reference__label {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+.booking-reference__code {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.12em;
+  overflow-wrap: anywhere;
+}
+.booking-summary {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+  margin: 0;
+}
+.booking-summary > div {
+  display: grid;
+  gap: var(--space-1);
+}
+@media (min-width: 40rem) {
+  .booking-summary > div {
+    grid-template-columns: 8rem minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+}
+.booking-summary dt {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+.booking-summary dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.booking-summary__money {
+  font-variant-numeric: lining-nums tabular-nums;
+}
+/* A checkout's short reference: a face that tells 0 from O, kept on one line. */
+.booking-checkout-ref {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}

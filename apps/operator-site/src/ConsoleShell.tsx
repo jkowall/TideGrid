@@ -235,8 +235,8 @@ export function ConsoleShell({
         selected={selected}
         title="Bookings"
         icon="list"
-        heading="No bookings yet"
-        body={`Bookings for ${selected.tenantName} appear here as guests book, newest first. This demo build does not take bookings yet.`}
+        heading="The booking list isn't here yet"
+        body={`The list of bookings for ${selected.tenantName} comes in a later build. Booked and held seats show on the calendar.`}
         focusHeading={focusPage}
       />
     );

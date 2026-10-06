@@ -1025,4 +1025,35 @@ describe("week rules", () => {
     expect(capacityText(nov5Sunset, true)).toBe("20 seats");
     expect(capacityText(nov2Sunset, false)).toBe("20 seats");
   });
+
+  it("says how taken seats are taken: booked, or held by an open checkout (G2.6 fields)", () => {
+    const taken = (capacity: Partial<StaffTrip["capacity"]>) => ({
+      ...nov5Sunset,
+      capacity: { ...nov5Sunset.capacity, ...capacity },
+    });
+    expect(capacityText(taken({ remaining: 15, held: 2, confirmed: 3 }), false)).toBe(
+      "15 of 20 seats left: 3 booked, 2 held",
+    );
+    expect(capacityText(taken({ remaining: 17, held: 0, confirmed: 3 }), false)).toBe(
+      "17 of 20 seats left: 3 booked",
+    );
+    expect(capacityText(taken({ remaining: 18, held: 2, confirmed: 0 }), false)).toBe(
+      "18 of 20 seats left: 2 held",
+    );
+    // Once the trip has left, a hold means nothing; bookings still do.
+    expect(capacityText(taken({ remaining: 15, held: 2, confirmed: 3 }), true)).toBe(
+      "20 seats: 3 booked",
+    );
+    const boat = (capacity: Partial<StaffTrip["capacity"]>) => ({
+      ...nov5Sunset,
+      capacity: { kind: "whole_boat" as const, total: 12, remaining: 0, ...capacity },
+    });
+    expect(capacityText(boat({ confirmed: 12, held: 0 }), false)).toBe("Whole boat, booked");
+    expect(capacityText(boat({ confirmed: 0, held: 12 }), false)).toBe(
+      "Whole boat, held for a checkout",
+    );
+    expect(capacityText(boat({ remaining: 12, confirmed: 0, held: 0 }), false)).toBe(
+      "Whole boat, up to 12 guests",
+    );
+  });
 });

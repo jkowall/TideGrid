@@ -53,6 +53,33 @@ describe("zod on the guest site", () => {
         ],
       });
       expect(trips.success).toBe(true);
+      // The checkout parses the offer, quotes, checkouts, the test provider's
+      // answers, and error bodies the same way.
+      const contracts = await import("@tidegrid/contracts");
+      const fixtures = await import("./booking/fixtures.ts");
+      const parsed = [
+        contracts.TripOfferResponse.safeParse({ offer: fixtures.offer }),
+        contracts.TripOfferResponse.safeParse({ offer: fixtures.charterOffer }),
+        contracts.QuoteResponse.safeParse({ quote: fixtures.sharedQuote({ promotion: true }) }),
+        contracts.CheckoutSessionCreateResponse.safeParse({
+          checkoutSession: fixtures.checkout("open"),
+          payment: { provider: "fake", paymentRef: "fpay_1", clientSecret: "fpay_1_secret_x" },
+        }),
+        contracts.CheckoutSessionResponse.safeParse({
+          checkoutSession: fixtures.checkout("confirmed"),
+        }),
+        contracts.FakePaymentControlResponse.safeParse({
+          event: { id: "evt_1", type: "payment.succeeded", createdAt: "2026-10-05T16:00:00.000Z" },
+          alreadySettled: false,
+          delivery: { status: 200, outcome: "confirmed", duplicate: false },
+        }),
+        contracts.ErrorResponse.safeParse({
+          error: { code: "quote_expired", message: "x", requestId: "r" },
+        }),
+        contracts.BookerDetails.safeParse({ name: "Ava Guest", email: "ava@example.test" }),
+        contracts.PromotionCodeInput.safeParse("HARBOR10"),
+      ];
+      expect(parsed.map((p) => p.success)).toEqual(parsed.map(() => true));
     } finally {
       globalThis.Function = RealFunction;
     }

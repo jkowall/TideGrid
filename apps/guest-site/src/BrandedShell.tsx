@@ -1,7 +1,10 @@
 import type { PublicBrand } from "@tidegrid/contracts";
 import { ButtonLink, Icon } from "@tidegrid/design-system/components";
 import { type ReactNode, useEffect, useRef } from "react";
+import { tripIdOf } from "./booking/address.ts";
+import { BookingPage } from "./booking/BookingPage.tsx";
 import { formatPhone, type Tenant } from "./bootstrap.ts";
+import { useLinkClick } from "./navigation.tsx";
 import { useTitle } from "./States.tsx";
 import { UpcomingTrips } from "./UpcomingTrips.tsx";
 
@@ -19,12 +22,15 @@ const legalPages: Record<string, { title: string; placeholder: string }> = {
 
 type Page =
   | { kind: "home" }
+  | { kind: "book"; tripId: string }
   | { kind: "legal"; title: string; placeholder: string }
   | { kind: "not-found" };
 
 function pageFor(path: string): Page {
   const clean = path.length > 1 ? path.replace(/\/+$/, "") : path;
   if (clean === "/") return { kind: "home" };
+  const tripId = tripIdOf(clean);
+  if (tripId) return { kind: "book", tripId };
   const legal = Object.hasOwn(legalPages, clean) ? legalPages[clean] : undefined;
   if (legal) return { kind: "legal", ...legal };
   return { kind: "not-found" };
@@ -94,7 +100,7 @@ function Home({ brand }: { brand: PublicBrand }) {
         </svg>
       </section>
       <div className="guest-container guest-content">
-        <UpcomingTrips brand={brand} />
+        <UpcomingTrips />
       </div>
     </>
   );
@@ -119,13 +125,15 @@ function LegalPage({
   placeholder: string;
 }) {
   useTitle(`${title} · ${brand.name}`);
+  const linkClick = useLinkClick();
   return (
     <PageFrame title={title}>
       <p>
         {brand.name} is a synthetic operator in the TideGrid demo build. {placeholder}: no booking
-        made here is real, and no personal information is collected.
+        made here is real, and no money moves. Checkout keeps the name and email typed into it with
+        the test booking, so use made-up details.
       </p>
-      <ButtonLink variant="secondary" icon="arrow-left" href="/">
+      <ButtonLink variant="secondary" icon="arrow-left" href="/" onClick={linkClick}>
         Back to {brand.name}
       </ButtonLink>
     </PageFrame>
@@ -134,20 +142,52 @@ function LegalPage({
 
 function NotFoundPage({ brand }: { brand: PublicBrand }) {
   useTitle(`Page not found · ${brand.name}`);
+  const linkClick = useLinkClick();
   return (
     <PageFrame title="Page not found">
       <p>
         That page isn't part of the booking site for {brand.name}. It may have moved, or the link
         may be mistyped.
       </p>
-      <ButtonLink variant="primary" icon="arrow-left" href="/">
+      <ButtonLink variant="primary" icon="arrow-left" href="/" onClick={linkClick}>
         Back to {brand.name}
       </ButtonLink>
     </PageFrame>
   );
 }
 
-function Footer({ brand }: { brand: PublicBrand }) {
+/**
+ * A footer link away from the page. During a checkout it opens in a new tab,
+ * so reading the terms or the operator's website never leaves the checkout,
+ * and it says so.
+ */
+function FooterLink({
+  href,
+  newTab,
+  children,
+}: {
+  href: string;
+  newTab: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <a
+      className="tap-target guest-footer__link"
+      href={href}
+      {...(newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+    >
+      {children}
+      {newTab && (
+        <>
+          <Icon name="external" />
+          <span className="tg-visually-hidden"> (opens in a new tab)</span>
+        </>
+      )}
+    </a>
+  );
+}
+
+function Footer({ brand, inCheckout }: { brand: PublicBrand; inCheckout: boolean }) {
   const { phone, email, website } = brand.contact;
   return (
     <footer className="guest-footer">
@@ -178,10 +218,10 @@ function Footer({ brand }: { brand: PublicBrand }) {
               )}
               {website && (
                 <li>
-                  <a className="tap-target guest-footer__link" href={website}>
+                  <FooterLink href={website} newTab={inCheckout}>
                     <Icon name="globe" />
                     Website
-                  </a>
+                  </FooterLink>
                 </li>
               )}
             </ul>
@@ -190,14 +230,14 @@ function Footer({ brand }: { brand: PublicBrand }) {
             <h2 className="tg-eyebrow">Policies</h2>
             <ul className="guest-footer__list">
               <li>
-                <a className="tap-target guest-footer__link" href={brand.legal.terms}>
+                <FooterLink href={brand.legal.terms} newTab={inCheckout}>
                   Terms of booking
-                </a>
+                </FooterLink>
               </li>
               <li>
-                <a className="tap-target guest-footer__link" href={brand.legal.privacy}>
+                <FooterLink href={brand.legal.privacy} newTab={inCheckout}>
                   Privacy notice
-                </a>
+                </FooterLink>
               </li>
             </ul>
           </nav>
@@ -225,10 +265,14 @@ export function BrandedShell({
   const page = pageFor(path);
   const phone = brand.contact.phone;
   const main = useRef<HTMLElement>(null);
-  // Mount only: the first render decides. This shell replaces the failure
-  // screen once, after "Try again".
+  const linkClick = useLinkClick();
+  // Mount only: the first render decides. The shell mounts afresh after "Try
+  // again" and after each move between pages. A booking page has no heading
+  // until its trip loads, so it moves focus itself.
   useEffect(() => {
-    if (focusHeading) main.current?.querySelector<HTMLElement>("h1")?.focus();
+    if (focusHeading && page.kind !== "book") {
+      main.current?.querySelector<HTMLElement>("h1")?.focus();
+    }
   }, []);
   return (
     <div className="guest" data-tenant={tenant.slug}>
@@ -237,7 +281,7 @@ export function BrandedShell({
       </a>
       <header className="guest-header">
         <div className="guest-container guest-header__inner">
-          <a className="guest-brand" href="/">
+          <a className="guest-brand" href="/" onClick={linkClick}>
             <BrandLockup brand={brand} />
           </a>
           {phone && (
@@ -255,12 +299,15 @@ export function BrandedShell({
       </header>
       <main id="main" tabIndex={-1} ref={main}>
         {page.kind === "home" && <Home brand={brand} />}
+        {page.kind === "book" && (
+          <BookingPage brand={brand} tripId={page.tripId} focusOnArrival={focusHeading} />
+        )}
         {page.kind === "legal" && (
           <LegalPage brand={brand} title={page.title} placeholder={page.placeholder} />
         )}
         {page.kind === "not-found" && <NotFoundPage brand={brand} />}
       </main>
-      <Footer brand={brand} />
+      <Footer brand={brand} inCheckout={page.kind === "book"} />
     </div>
   );
 }
