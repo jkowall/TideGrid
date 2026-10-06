@@ -14,6 +14,7 @@ import {
 import { sql } from "kysely";
 import { lockBookingForWaivers, requiredSignerFor } from "./assign.ts";
 import { sendWaiverRequest } from "./delivery.ts";
+import { closeRequestAccess } from "./links.ts";
 import type { WaiverDeps } from "./ports.ts";
 
 /** At most this many requests move in one publish; the rest keep their version. */
@@ -71,15 +72,7 @@ export async function supersedeUnsignedRequests(
       values (${replacementId}, ${ctx.tenantId}, ${old.booking_id}, ${old.participant_id},
               ${input.templateId}, ${input.version}, ${target.content_sha256},
               ${requiredSignerFor(participant)})`.execute(trx);
-    await sql`
-      update waiver_access_tokens set revoked_at = now(), revoked_reason = 'superseded'
-       where tenant_id = ${ctx.tenantId} and request_id = ${old.id}
-         and redeemed_at is null and revoked_at is null`.execute(trx);
-    await sql`
-      update waiver_signing_sessions set revoked_at = now(), revoked_reason = 'superseded'
-       where tenant_id = ${ctx.tenantId} and request_id = ${old.id} and revoked_at is null`.execute(
-      trx,
-    );
+    await closeRequestAccess(trx, ctx, old, { link: "withdrawn", session: "superseded" });
     await recordAudit(trx, ctx, {
       action: "waiver_request.superseded",
       subjectType: "waiver_request",

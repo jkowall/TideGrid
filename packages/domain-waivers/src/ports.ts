@@ -1,10 +1,10 @@
 /**
- * What waivers need from the rest of the system, as narrow ports, so this
- * module never writes another module's tables: who a booking's participants
- * are, how a message is queued, and where the guest site lives. The API wires
- * them to the participant model and the transactional email outbox.
+ * What waivers need from the booking module, as a narrow port, so this module
+ * never writes another module's tables: who a booking's participants are. The
+ * API wires it to the participant model (participants.ts). Email and its
+ * links go through the messaging module's declared calls.
  */
-import type { TenantContext, TenantTransaction } from "@tidegrid/database";
+import type { TenantTransaction } from "@tidegrid/database";
 
 /** A participant as waivers see one. */
 export interface WaiverParticipant {
@@ -29,46 +29,6 @@ export interface ParticipantDirectory {
   list(trx: TenantTransaction, tenantId: string, bookingId: string): Promise<WaiverParticipant[]>;
 }
 
-/** Everything a waiver request email says. The link carries the raw entry token. */
-export interface WaiverRequestMessage {
-  /** waiver:<requestId>:<generation>: a retry of one generation never sends twice. */
-  idempotencyKey: string;
-  to: string;
-  requestId: string;
-  generation: number;
-  requiredSigner: "participant" | "guardian";
-  participantName: string;
-  /** Who the email greets: the participant, or a minor's guardian. */
-  recipientName: string;
-  bookingId: string;
-  participantId: string;
-  operatorName: string;
-  trip: { name: string; when: string; place: string; bookingReference: string };
-  /** The guest site's /waiver page with the token in its fragment, which no server receives. */
-  link: string;
-  linkExpiresAt: Date;
-}
-
-export interface WaiverMailer {
-  /**
-   * Queue the message in the caller's transaction, so it exists only if the
-   * request and its delivery commit. Returns the message's id when the
-   * mailer keeps one.
-   */
-  enqueue(
-    trx: TenantTransaction,
-    ctx: TenantContext,
-    message: WaiverRequestMessage,
-  ): Promise<{ messageId: string | null }>;
-}
-
 export interface WaiverDeps {
   participants: ParticipantDirectory;
-  mailer: WaiverMailer;
-  /**
-   * The guest site's origin for a tenant, such as
-   * https://demo-harbor.book.tidegrid.us, or null when it has none; links in
-   * email open there.
-   */
-  guestOrigin(trx: TenantTransaction, tenantId: string): Promise<string | null>;
 }

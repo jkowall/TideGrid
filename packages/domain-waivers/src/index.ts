@@ -1,9 +1,7 @@
 export {
   loadWaiverSession,
   type RedeemResult,
-  type RenewResult,
   redeemWaiverToken,
-  renewWaiverLink,
   SESSION_TTL_MINUTES,
   type WaiverSession,
 } from "./access.ts";
@@ -27,24 +25,31 @@ export {
   waiverContentSha256,
 } from "./content.ts";
 export {
+  LINK_TTL_DAYS,
   lockRequest,
   MAX_GENERATIONS,
   RESEND_INTERVAL_MINUTES,
   type SendInput,
   type SendResult,
   sendWaiverRequest,
-  TOKEN_TTL_DAYS,
 } from "./delivery.ts";
+export {
+  WAIVER_EMAIL_TEMPLATE,
+  WAIVER_EMAIL_VERSION,
+  type WaiverEmailInput,
+  waiverRequestEmail,
+} from "./email.ts";
 export { cleanLine, comparableName, formatInstant } from "./format.ts";
 export { CORRECTED_ADDRESS_REASON, createWaiverHooks, onParticipantUpdated } from "./hooks.ts";
-export { bookingParticipantDirectory } from "./participants.ts";
-export type {
-  ParticipantDirectory,
-  WaiverDeps,
-  WaiverMailer,
-  WaiverParticipant,
-  WaiverRequestMessage,
-} from "./ports.ts";
+export {
+  closeRequestAccess,
+  requestIdOf,
+  WAIVER_LINK_PATH,
+  WAIVER_LINK_PURPOSE,
+  waiverSubject,
+} from "./links.ts";
+export { bookingParticipantDirectory, defaultWaiverDeps } from "./participants.ts";
+export type { ParticipantDirectory, WaiverDeps, WaiverParticipant } from "./ports.ts";
 export {
   maskEmail,
   RENDERING_VERSION,
@@ -52,14 +57,10 @@ export {
   type WaiverDocumentInput,
 } from "./render.ts";
 export { type RevokeResult, revokeBookingWaivers, revokeParticipantWaivers } from "./revoke.ts";
-export {
-  hashWaiverSession,
-  hashWaiverToken,
-  newWaiverSecret,
-  waiverSecretPattern,
-} from "./secrets.ts";
+export { hashWaiverSession, newWaiverSecret, waiverSecretPattern } from "./secrets.ts";
 export {
   ESIGN_CONSENT,
+  expectedSigner,
   getSigningView,
   loadEvidenceDocument,
   type SignedSummary,
@@ -76,7 +77,6 @@ export {
   listTripWaivers,
   type MessageState,
   type MessageStatus,
-  type MessageStatusReader,
   type ParticipantWaiver,
   type TripWaivers,
   type WaiverStatusCode,

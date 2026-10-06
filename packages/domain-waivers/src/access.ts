@@ -1,10 +1,15 @@
 /**
- * Entry tokens and signing sessions. An email link carries an opaque token in
- * its fragment; nothing happens until the guest asks, with a POST, to open it.
- * Redeeming it consumes it, once, in the same transaction that opens a
- * signing session bound to the tenant, booking, participant, request, and
- * purpose. Only hashes of the token and the session secret are stored. The
- * session lasts SESSION_TTL_MINUTES and is revoked when its request ends.
+ * Opening a signing session with a waiver link. The email's link carries an
+ * opaque token in its fragment; nothing happens until the guest asks, with a
+ * POST, to open it. Redemption consumes the link once (the messaging module's
+ * redeemAccessLink) in the same transaction that opens a signing session bound
+ * to the tenant, booking, participant, request, and purpose, for the signer
+ * the request requires. Only hashes of the token and of the session secret
+ * are stored. The session lasts SESSION_TTL_MINUTES and is revoked when its
+ * request ends or its address changes.
+ *
+ * Lock order: the request first, then the link, as everywhere else. The link
+ * row is read once, without a lock, to learn which request it names.
  */
 import {
   recordAudit,
@@ -12,54 +17,26 @@ import {
   type TenantTransaction,
   type WaiverRequestState,
   type WaiverSignerRole,
-  type WaiverTokenRevokedReason,
 } from "@tidegrid/database";
+import { accessTokenPattern, hashLinkToken, redeemAccessLink } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
-import { lockRequest, sendWaiverRequest } from "./delivery.ts";
-import type { WaiverDeps } from "./ports.ts";
-import {
-  hashWaiverSession,
-  hashWaiverToken,
-  newWaiverSecret,
-  waiverSecretPattern,
-} from "./secrets.ts";
+import { lockRequest } from "./delivery.ts";
+import { requestIdOf, WAIVER_LINK_PURPOSE, waiverSubject } from "./links.ts";
+import { hashWaiverSession, newWaiverSecret, waiverSecretPattern } from "./secrets.ts";
 
 export const SESSION_TTL_MINUTES = 60;
 
-interface TokenRow {
-  id: string;
-  request_id: string;
-  expired: boolean;
-  redeemed_at: Date | null;
-  revoked_at: Date | null;
-  revoked_reason: WaiverTokenRevokedReason | null;
-}
-
-async function findToken(
-  trx: TenantTransaction,
-  tenantId: string,
-  token: string,
-): Promise<TokenRow | null> {
-  if (!waiverSecretPattern.test(token)) return null;
-  const hash = await hashWaiverToken(token);
-  const { rows } = await sql<TokenRow>`
-    select id, request_id, expires_at <= now() as expired, redeemed_at, revoked_at, revoked_reason
-      from waiver_access_tokens
-     where tenant_id = ${tenantId} and token_hash = ${hash}`.execute(trx);
-  return rows[0] ?? null;
-}
-
 export type RedeemResult =
   | { kind: "opened"; secret: string; session: WaiverSession }
-  /** No such link at this operator. */
+  /** No such waiver link at this operator. */
   | { kind: "invalid" }
   | { kind: "expired" }
   /** Already opened once; links work once. */
   | { kind: "used" }
-  /** A newer email replaced this link. */
+  /** A newer email replaced this link, or the address changed. */
   | { kind: "replaced" }
-  /** The waiver no longer needs this link: signed, superseded, or no longer required. */
-  | { kind: "closed"; state: Exclude<WaiverRequestState, "pending"> | "pending" };
+  /** The waiver no longer takes a signature: signed, superseded, or no longer needed. */
+  | { kind: "closed"; state: Exclude<WaiverRequestState, "pending"> };
 
 export interface WaiverSession {
   id: string;
@@ -71,39 +48,59 @@ export interface WaiverSession {
 }
 
 /**
- * Open a signing session with an entry token. Locks the request before the
- * token, as every command on a request does.
+ * Open a signing session with a waiver link's token. Only an explicit POST
+ * calls this, never a GET, so a mail scanner that follows the link consumes
+ * nothing.
  */
 export async function redeemWaiverToken(
   trx: TenantTransaction,
   ctx: TenantContext,
   input: { token: string },
 ): Promise<RedeemResult> {
-  const found = await findToken(trx, ctx.tenantId, input.token);
-  if (!found) return { kind: "invalid" };
-  const request = await lockRequest(trx, ctx.tenantId, found.request_id);
+  if (!accessTokenPattern.test(input.token)) return { kind: "invalid" };
+  const { rows: peeked } = await sql<{ subject_ref: string | null }>`
+    select subject_ref from guest_access_links
+     where tenant_id = ${ctx.tenantId} and token_hash = ${await hashLinkToken(input.token)}
+       and purpose = ${WAIVER_LINK_PURPOSE}`.execute(trx);
+  const requestId = requestIdOf(peeked[0]?.subject_ref ?? null);
+  if (!requestId) return { kind: "invalid" };
+  const request = await lockRequest(trx, ctx.tenantId, requestId);
   if (!request) return { kind: "invalid" };
-  if (found.redeemed_at) return { kind: "used" };
-  if (found.revoked_at) {
-    return found.revoked_reason === "replaced"
-      ? { kind: "replaced" }
-      : { kind: "closed", state: request.state };
-  }
-  if (request.state !== "pending") return { kind: "closed", state: request.state };
-  if (found.expired) return { kind: "expired" };
 
-  const { rows: redeemed } = await sql<{ id: string }>`
-    update waiver_access_tokens set redeemed_at = now()
-     where tenant_id = ${ctx.tenantId} and id = ${found.id}
-       and redeemed_at is null and revoked_at is null and expires_at > now()
-    returning id`.execute(trx);
-  if (!redeemed[0]) return { kind: "used" };
+  const redeemed = await redeemAccessLink(trx, ctx, {
+    token: input.token,
+    purpose: WAIVER_LINK_PURPOSE,
+  });
+  switch (redeemed.kind) {
+    case "invalid":
+    case "expired":
+    case "used":
+      return { kind: redeemed.kind };
+    case "superseded":
+      return { kind: "replaced" };
+    case "revoked":
+      if (redeemed.reason === "recipient_changed") return { kind: "replaced" };
+      return request.state === "pending"
+        ? { kind: "replaced" }
+        : { kind: "closed", state: request.state };
+  }
+  const link = redeemed.link;
+  if (
+    link.subjectRef !== waiverSubject(request.id) ||
+    link.bookingId !== request.booking_id ||
+    link.participantId !== request.participant_id
+  ) {
+    throw new Error("a waiver link names another request than its subject");
+  }
+  // The link is spent either way; a request that no longer takes a
+  // signature opens no session.
+  if (request.state !== "pending") return { kind: "closed", state: request.state };
 
   const secret = newWaiverSecret();
   const { rows } = await sql<{ id: string; expires_at: Date }>`
-    insert into waiver_signing_sessions (tenant_id, token_id, request_id, booking_id,
+    insert into waiver_signing_sessions (tenant_id, access_link_id, request_id, booking_id,
       participant_id, purpose, signer_role, secret_hash, expires_at)
-    values (${ctx.tenantId}, ${found.id}, ${request.id}, ${request.booking_id},
+    values (${ctx.tenantId}, ${link.linkId}, ${request.id}, ${request.booking_id},
             ${request.participant_id}, 'sign', ${request.required_signer},
             ${await hashWaiverSession(secret)},
             now() + make_interval(mins => ${SESSION_TTL_MINUTES}))
@@ -114,7 +111,7 @@ export async function redeemWaiverToken(
     action: "waiver_access.redeemed",
     subjectType: "waiver_request",
     subjectId: request.id,
-    after: { tokenId: found.id, sessionId: session.id, signerRole: request.required_signer },
+    after: { linkId: link.linkId, sessionId: session.id, signerRole: request.required_signer },
   });
   return {
     kind: "opened",
@@ -164,42 +161,4 @@ export async function loadWaiverSession(
     signerRole: row.signer_role,
     expiresAt: row.expires_at,
   };
-}
-
-export type RenewResult = { kind: "sent" } | { kind: "not_sent"; reason: string };
-
-/**
- * "Email me a new link": for a link that expired, was used, or was replaced,
- * send the request again to the address the booking has now, as a resend
- * with the usual limits. The caller answers the same whatever happens, so the
- * answer reveals nothing about the link.
- */
-export async function renewWaiverLink(
-  trx: TenantTransaction,
-  ctx: TenantContext,
-  deps: WaiverDeps,
-  input: { token: string },
-): Promise<RenewResult> {
-  const found = await findToken(trx, ctx.tenantId, input.token);
-  if (!found) return { kind: "not_sent", reason: "invalid" };
-  if (found.revoked_at && found.revoked_reason !== "replaced") {
-    return { kind: "not_sent", reason: "closed" };
-  }
-  // Only the newest link can ask for another, so an old or forwarded link can
-  // spend at most one of the request's resends.
-  const latest = await trx
-    .selectFrom("waiver_deliveries")
-    .select("token_id")
-    .where("tenant_id", "=", ctx.tenantId)
-    .where("request_id", "=", found.request_id)
-    .orderBy("generation", "desc")
-    .limit(1)
-    .executeTakeFirst();
-  if (latest?.token_id !== found.id) return { kind: "not_sent", reason: "not_latest" };
-  const sent = await sendWaiverRequest(trx, ctx, deps, {
-    requestId: found.request_id,
-    kind: "resend",
-    reason: "The guest asked for a new link",
-  });
-  return sent.kind === "sent" ? { kind: "sent" } : { kind: "not_sent", reason: sent.kind };
 }

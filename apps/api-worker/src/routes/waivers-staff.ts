@@ -220,7 +220,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     const { tenantId, requestId } = c.req.valid("param");
     const key = c.req.valid("header")["idempotency-key"];
     const input = c.req.valid("json");
-    const wdeps = waiverDeps(c.env, deps);
+    const wdeps = waiverDeps(deps);
     const notFound = () =>
       new ApiError(404, "waiver_request_not_found", "No such waiver request for this tenant");
     const { body, replayed } = await withStaffTenant(
@@ -280,7 +280,6 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
           case "limit_reached":
             throw new ApiError(409, "waiver_resend_limit", "It has been sent 5 times already");
           case "trip_over":
-          case "no_guest_site":
             throw new ApiError(409, "waiver_trip_over", "The trip ends too soon to send a link");
         }
       },

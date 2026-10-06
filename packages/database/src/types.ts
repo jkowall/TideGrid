@@ -894,7 +894,6 @@ export type WaiverRevokedReason =
   | "participant_removed"
   | "participant_changed"
   | "booking_canceled";
-export type WaiverTokenRevokedReason = "replaced" | "signed" | WaiverRevokedReason | "superseded";
 export type WaiverSessionRevokedReason = WaiverRevokedReason | "superseded" | "recipient_changed";
 export type WaiverDeliveryKind = "initial" | "resend";
 export type GuardianRelationship = "parent" | "legal_guardian";
@@ -954,20 +953,6 @@ export interface WaiverRequestsTable {
   updated_at: Stamped;
 }
 
-export interface WaiverAccessTokensTable {
-  id: Generated<string>;
-  tenant_id: TenantColumn;
-  request_id: Fixed<string>;
-  purpose: Fixed<"sign">;
-  token_hash: Fixed<string>;
-  created_at: Stamped;
-  expires_at: ColumnType<Date, Date | string, never>;
-  /** Set to any instant to redeem; the database stamps its own clock. */
-  redeemed_at: ColumnType<Date | null, never, Date | string>;
-  revoked_at: ColumnType<Date | null, never, Date | string>;
-  revoked_reason: ColumnType<WaiverTokenRevokedReason | null, never, WaiverTokenRevokedReason>;
-}
-
 export interface WaiverDeliveriesTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
@@ -975,8 +960,8 @@ export interface WaiverDeliveriesTable {
   generation: Fixed<number>;
   kind: Fixed<WaiverDeliveryKind>;
   recipient_email: Fixed<string>;
-  token_id: Fixed<string>;
-  message_id: FixedDefault<string | null>;
+  /** The waiver message this generation queued (email_messages). */
+  message_id: Fixed<string>;
   created_at: Stamped;
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;
@@ -987,7 +972,8 @@ export interface WaiverDeliveriesTable {
 export interface WaiverSigningSessionsTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
-  token_id: Fixed<string>;
+  /** The waiver link (guest_access_links) whose redemption opened it. */
+  access_link_id: Fixed<string>;
   request_id: Fixed<string>;
   booking_id: Fixed<string>;
   participant_id: Fixed<string>;
@@ -1037,7 +1023,6 @@ interface WaiverTables {
   waiver_templates: WaiverTemplatesTable;
   waiver_template_versions: WaiverTemplateVersionsTable;
   waiver_requests: WaiverRequestsTable;
-  waiver_access_tokens: WaiverAccessTokensTable;
   waiver_deliveries: WaiverDeliveriesTable;
   waiver_signing_sessions: WaiverSigningSessionsTable;
   waiver_evidence: WaiverEvidenceTable;

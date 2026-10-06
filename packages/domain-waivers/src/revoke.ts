@@ -1,9 +1,10 @@
 /**
- * Ending requests that no longer apply: a participant removed from a booking,
- * or a canceled booking. A pending or signed request becomes revoked; its
- * unredeemed tokens and open sessions are revoked with it, so no link or
- * session works afterwards. Signed evidence never changes. Runs in the
- * caller's transaction, beside the removal or cancellation it follows.
+ * Ending requests that no longer apply: a participant removed from a booking
+ * or changed so that a signature no longer covers them, or a canceled
+ * booking. A pending or signed request becomes revoked; its unused links, its
+ * queued emails, and its open sessions end with it, so no link or session
+ * works afterwards. Signed evidence never changes. Runs in the caller's
+ * transaction, beside the change it follows.
  */
 import {
   enqueueOutbox,
@@ -15,6 +16,7 @@ import {
 } from "@tidegrid/database";
 import { sql } from "kysely";
 import { lockBookingForWaivers } from "./assign.ts";
+import { closeRequestAccess } from "./links.ts";
 
 export interface RevokeResult {
   revoked: number;
@@ -31,8 +33,13 @@ async function revoke(
     throw new TypeError("booking and participant ids must be UUIDs");
   }
   await lockBookingForWaivers(trx, ctx.tenantId, bookingId);
-  const { rows } = await sql<{ id: string; state: "pending" | "signed" }>`
-    select id, state from waiver_requests
+  const { rows } = await sql<{
+    id: string;
+    booking_id: string;
+    participant_id: string;
+    state: "pending" | "signed";
+  }>`
+    select id, booking_id, participant_id, state from waiver_requests
      where tenant_id = ${ctx.tenantId} and booking_id = ${bookingId}
        ${participantId === null ? sql`` : sql`and participant_id = ${participantId}`}
        and state in ('pending', 'signed')
@@ -42,14 +49,10 @@ async function revoke(
     await sql`
       update waiver_requests set state = 'revoked', revoked_reason = ${reason}
        where tenant_id = ${ctx.tenantId} and id = ${request.id}`.execute(trx);
-    await sql`
-      update waiver_access_tokens set revoked_at = now(), revoked_reason = ${reason}
-       where tenant_id = ${ctx.tenantId} and request_id = ${request.id}
-         and redeemed_at is null and revoked_at is null`.execute(trx);
-    await sql`
-      update waiver_signing_sessions set revoked_at = now(), revoked_reason = ${reason}
-       where tenant_id = ${ctx.tenantId} and request_id = ${request.id}
-         and revoked_at is null`.execute(trx);
+    await closeRequestAccess(trx, ctx, request, {
+      link: reason === "booking_canceled" ? "booking_canceled" : "withdrawn",
+      session: reason,
+    });
     await recordAudit(trx, ctx, {
       action: "waiver_request.revoked",
       subjectType: "waiver_request",

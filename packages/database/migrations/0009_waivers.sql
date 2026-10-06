@@ -1,13 +1,17 @@
 -- Waiver evidence (G2.15)
 --
 -- Immutable waiver templates; one waiver request per participant of a
--- confirmed booking for the version that applied when it was assigned; the
--- delivery generations that email a request; short-lived access tokens and
--- the signing sessions they open; and append-only signed evidence that keeps
--- the PDF of what was signed. Design authority: docs/v2/04-architecture.md
--- (waivers; the retained invariants), docs/v2/02-product-scope.md (native
--- liability waivers), and the waiver contract in
--- packages/domain-waivers/README.md.
+-- confirmed booking, for the version that applied when it was assigned; the
+-- delivery generations that email a request; the signing sessions that a
+-- waiver link opens; and append-only signed evidence that keeps the PDF of
+-- what was signed. Design authority: docs/v2/04-architecture.md (waivers; the
+-- retained invariants), docs/v2/02-product-scope.md (native liability
+-- waivers), and the waiver contract in packages/domain-waivers/README.md.
+--
+-- The email and its link belong to the messaging module (the email_messages
+-- and guest_access_links tables of the self-service migration): a delivery
+-- generation names the message it queued, and a signing session names the
+-- waiver link whose redemption opened it.
 --
 -- Chain of custody. Nothing here becomes signed on a client's say:
 --
@@ -17,27 +21,27 @@
 --                              request requires, the version's exact hash and
 --                              acknowledgments, and a PDF whose SHA-256 the row
 --                              carries
---   signing session  requires  an access token for that request, redeemed in the
---                              same transaction
---   access token     requires  a pending request; it is redeemed at most once
+--   signing session  requires  a waiver link for that request's booking,
+--                              participant, and subject, consumed in the same
+--                              transaction
 --
 -- State machines, one way, enforced by triggers for every role:
 --
---   request:      pending -> signed | revoked | superseded; signed -> revoked
---   access token: issued -> redeemed | revoked (an unredeemed token only)
---   session:      open -> revoked; it also lapses at its expiry instant
+--   request:  pending -> signed | revoked | superseded; signed -> revoked
+--   session:  open -> revoked; it also lapses at its expiry instant
 --
 -- A late provider callback cannot regress a signed request: nothing moves a
 -- request back to pending, and evidence never changes for any role, the owner
 -- included. Delivery status lives with the message, never on the request.
 --
--- Only hashes of tokens and session secrets are stored. The PDF lives in
+-- Only hashes of link tokens and session secrets are stored. The PDF lives in
 -- Postgres for the demo, in the evidence row, under the same immutability;
 -- the waiver contract records why and how it moves to R2.
 --
 -- Lock order for every command: the booking row (assignment, revocation, and
 -- version moves; inside a booking hook the caller already holds it), then the
--- request (FOR NO KEY UPDATE), then its tokens and sessions.
+-- request (FOR NO KEY UPDATE), then the messaging module's message and link
+-- rows, then the request's sessions.
 --
 -- Tenancy follows packages/database/README.md: tenant_id on every row,
 -- composite tenant foreign keys, forced row-level security with a
@@ -175,44 +179,16 @@ CREATE INDEX waiver_requests_template_pending_idx
   ON public.waiver_requests (tenant_id, template_id, template_version)
   WHERE state = 'pending';
 
--- Access tokens -------------------------------------------------------------------
-
--- An opaque entry token for one request, for one purpose (sign). Only the
--- SHA-256 of the token is stored. It is redeemed at most once, by an explicit
--- POST, never by a GET; a newer delivery, the request's end, or the signature
--- revokes it. It lives at most 14 days and never past its trip's end (the
--- service picks the instant).
-CREATE TABLE public.waiver_access_tokens (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
-  request_id uuid NOT NULL,
-  purpose text NOT NULL CHECK (purpose = 'sign'),
-  token_hash text NOT NULL CHECK (token_hash ~ '^[0-9a-f]{64}$'),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NOT NULL,
-  redeemed_at timestamptz,
-  revoked_at timestamptz,
-  revoked_reason text CHECK (revoked_reason IN (
-    'replaced', 'signed', 'participant_removed', 'participant_changed', 'booking_canceled',
-    'superseded')),
-  UNIQUE (tenant_id, id),
-  CONSTRAINT waiver_access_tokens_hash_key UNIQUE (token_hash),
-  FOREIGN KEY (tenant_id, request_id) REFERENCES public.waiver_requests (tenant_id, id),
-  CHECK ((revoked_at IS NULL) = (revoked_reason IS NULL)),
-  CHECK (redeemed_at IS NULL OR revoked_at IS NULL)
-);
-CREATE INDEX waiver_access_tokens_request_idx ON public.waiver_access_tokens (tenant_id, request_id);
-
 -- Deliveries ----------------------------------------------------------------------
 
 -- One intentional send of a request: generation 1 when it is assigned, and
--- each audited resend after it. A retry of the same generation never adds a
--- row; the message it queued carries the generation's idempotency key
--- (waiver:<request>:<generation>). Resends are rate limited here, for every
--- writer: at most 5 generations per request, and a resend to the same address
--- at least 10 minutes after the previous one. The recipient is the address
--- the request went to; the message records whether it was accepted,
--- delivered, or failed.
+-- each audited resend after it. It names the message it queued, whose
+-- deduplication key is waiver.request:<request>:<generation>, so a retry of
+-- the same generation never queues a second email. Resends are limited here,
+-- for every writer: at most 5 generations per request, and a resend to the
+-- same address at least 10 minutes after the previous one. The recipient is
+-- the address the request went to; the message records whether it was sent or
+-- failed.
 CREATE TABLE public.waiver_deliveries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
@@ -224,8 +200,7 @@ CREATE TABLE public.waiver_deliveries (
            AND recipient_email = lower(recipient_email)
            AND recipient_email ~ '^[\x21-\x7e]+$'
            AND recipient_email ~ '^[^@]+@[^@]+\.[^@]+$'),
-  token_id uuid NOT NULL,
-  message_id uuid,
+  message_id uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   -- Who asked for this generation, from the transaction's context.
   actor_type text NOT NULL CHECK (actor_type IN ('staff', 'guest', 'system', 'support')),
@@ -234,23 +209,25 @@ CREATE TABLE public.waiver_deliveries (
   reason text CHECK (char_length(reason) BETWEEN 1 AND 500 AND reason !~ '[[:cntrl:]]'),
   UNIQUE (tenant_id, id),
   CONSTRAINT waiver_deliveries_generation_key UNIQUE (tenant_id, request_id, generation),
-  UNIQUE (tenant_id, token_id),
+  CONSTRAINT waiver_deliveries_message_key UNIQUE (tenant_id, message_id),
   FOREIGN KEY (tenant_id, request_id) REFERENCES public.waiver_requests (tenant_id, id),
-  FOREIGN KEY (tenant_id, token_id) REFERENCES public.waiver_access_tokens (tenant_id, id),
+  FOREIGN KEY (tenant_id, message_id) REFERENCES public.email_messages (tenant_id, id),
   CHECK ((kind = 'initial') = (generation = 1)),
   CHECK (kind = 'initial' OR reason IS NOT NULL)
 );
 
 -- Signing sessions ----------------------------------------------------------------
 
--- What redeeming a token opens: a restricted session bound to one tenant,
--- booking, participant, request, and purpose, for the signer the request
--- requires. Only the SHA-256 of its secret is stored. It lasts at most two
--- hours (the service gives it one) and is revoked when its request ends.
+-- What redeeming a waiver link opens: a restricted session bound to one
+-- tenant, booking, participant, request, and purpose, for the signer the
+-- request requires. Only the SHA-256 of its secret is stored. It lasts at most
+-- two hours (the service gives it one) and is revoked when its request ends
+-- or its address changes. The signer's own session stays open after signing,
+-- for the signed copy, until it lapses.
 CREATE TABLE public.waiver_signing_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
-  token_id uuid NOT NULL,
+  access_link_id uuid NOT NULL,
   request_id uuid NOT NULL,
   booking_id uuid NOT NULL,
   participant_id uuid NOT NULL,
@@ -264,10 +241,10 @@ CREATE TABLE public.waiver_signing_sessions (
     'participant_removed', 'participant_changed', 'booking_canceled', 'superseded',
     'recipient_changed')),
   UNIQUE (tenant_id, id),
-  -- One session per token: a token opens one session, once.
-  UNIQUE (tenant_id, token_id),
+  -- One session per link: a link opens one session, once.
+  CONSTRAINT waiver_signing_sessions_one_per_link UNIQUE (tenant_id, access_link_id),
   CONSTRAINT waiver_signing_sessions_secret_key UNIQUE (secret_hash),
-  FOREIGN KEY (tenant_id, token_id) REFERENCES public.waiver_access_tokens (tenant_id, id),
+  FOREIGN KEY (tenant_id, access_link_id) REFERENCES public.guest_access_links (tenant_id, id),
   FOREIGN KEY (tenant_id, request_id, booking_id, participant_id)
     REFERENCES public.waiver_requests (tenant_id, id, booking_id, participant_id),
   CHECK ((revoked_at IS NULL) = (revoked_reason IS NULL))
@@ -501,75 +478,10 @@ $$;
 CREATE TRIGGER waiver_requests_check BEFORE INSERT OR UPDATE ON public.waiver_requests
   FOR EACH ROW EXECUTE FUNCTION app.check_waiver_request();
 
--- Access tokens: issued for a pending request; redeemed once while unexpired
--- and unrevoked, or revoked once while unredeemed. Nothing else changes.
-CREATE FUNCTION app.check_waiver_access_token() RETURNS trigger
-  LANGUAGE plpgsql
-  SET search_path = pg_catalog, pg_temp
-  AS $$
-BEGIN
-  IF TG_OP = 'INSERT' THEN
-    NEW.created_at := now();
-    IF NEW.redeemed_at IS NOT NULL OR NEW.revoked_at IS NOT NULL THEN
-      RAISE EXCEPTION 'an access token starts unredeemed and unrevoked'
-        USING ERRCODE = '23514', CONSTRAINT = 'waiver_access_tokens_transition';
-    END IF;
-    IF NEW.expires_at <= now() OR NEW.expires_at > now() + interval '14 days' THEN
-      RAISE EXCEPTION 'an access token lives more than no time and at most 14 days'
-        USING ERRCODE = '23514', CONSTRAINT = 'waiver_access_tokens_lifetime';
-    END IF;
-    IF NOT EXISTS (
-         SELECT 1 FROM public.waiver_requests r
-          WHERE r.tenant_id = NEW.tenant_id AND r.id = NEW.request_id
-            AND r.state = 'pending') THEN
-      RAISE EXCEPTION 'access tokens are issued only for a pending waiver request'
-        USING ERRCODE = '23514', CONSTRAINT = 'waiver_access_tokens_request';
-    END IF;
-    RETURN NEW;
-  END IF;
-
-  IF NEW.id IS DISTINCT FROM OLD.id
-     OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
-     OR NEW.request_id IS DISTINCT FROM OLD.request_id
-     OR NEW.purpose IS DISTINCT FROM OLD.purpose
-     OR NEW.token_hash IS DISTINCT FROM OLD.token_hash
-     OR NEW.created_at IS DISTINCT FROM OLD.created_at
-     OR NEW.expires_at IS DISTINCT FROM OLD.expires_at THEN
-    RAISE EXCEPTION 'an access token never changes; it is only redeemed or revoked'
-      USING ERRCODE = '23514', CONSTRAINT = 'waiver_access_tokens_immutable';
-  END IF;
-  IF OLD.redeemed_at IS NOT NULL OR OLD.revoked_at IS NOT NULL THEN
-    RAISE EXCEPTION 'access token % was already used or revoked', OLD.id
-      USING ERRCODE = '23514', CONSTRAINT = 'waiver_access_tokens_transition';
-  END IF;
-  IF NEW.redeemed_at IS NOT NULL AND NEW.revoked_at IS NULL THEN
-    IF OLD.expires_at <= now() THEN
-      RAISE EXCEPTION 'access token % has expired', OLD.id
-        USING ERRCODE = '23514', CONSTRAINT = 'waiver_access_tokens_expired';
-    END IF;
-    IF NOT EXISTS (
-         SELECT 1 FROM public.waiver_requests r
-          WHERE r.tenant_id = OLD.tenant_id AND r.id = OLD.request_id
-            AND r.state = 'pending') THEN
-      RAISE EXCEPTION 'access token % is for a request that is no longer pending', OLD.id
-        USING ERRCODE = '23514', CONSTRAINT = 'waiver_access_tokens_request';
-    END IF;
-    NEW.redeemed_at := now();
-  ELSIF NEW.revoked_at IS NOT NULL AND NEW.redeemed_at IS NULL THEN
-    NEW.revoked_at := now();
-  ELSE
-    RAISE EXCEPTION 'an access token is either redeemed or revoked, once'
-      USING ERRCODE = '23514', CONSTRAINT = 'waiver_access_tokens_transition';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-CREATE TRIGGER waiver_access_tokens_check BEFORE INSERT OR UPDATE ON public.waiver_access_tokens
-  FOR EACH ROW EXECUTE FUNCTION app.check_waiver_access_token();
-
--- Deliveries: the next generation of a pending request, carrying a token for
--- that request issued in this transaction. A resend follows the previous
--- generation by at least 10 minutes; the generation number caps them at 5.
+-- Deliveries: the next generation of a pending request, naming the waiver
+-- message queued for exactly this request, generation, and address. A resend
+-- to the same address follows the previous generation by at least 10
+-- minutes; the generation number caps them at 5.
 CREATE FUNCTION app.check_waiver_delivery() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -608,13 +520,15 @@ BEGIN
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_rate';
   END IF;
   IF NOT EXISTS (
-       SELECT 1 FROM public.waiver_access_tokens t
-        WHERE t.tenant_id = NEW.tenant_id AND t.id = NEW.token_id
-          AND t.request_id = NEW.request_id
-          AND t.created_at = now()
-          AND t.redeemed_at IS NULL AND t.revoked_at IS NULL) THEN
-    RAISE EXCEPTION 'a delivery carries a fresh token for its own request'
-      USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_token';
+       SELECT 1 FROM public.email_messages m
+        WHERE m.tenant_id = NEW.tenant_id AND m.id = NEW.message_id
+          AND m.dedupe_key = 'waiver.request:' || NEW.request_id::text || ':'
+                             || NEW.generation::text
+          AND m.subject_ref = 'waiver_request:' || NEW.request_id::text
+          AND m.link_purpose = 'waiver_sign'
+          AND m.to_email = NEW.recipient_email) THEN
+    RAISE EXCEPTION 'a delivery names the waiver message queued for its request, generation, and address'
+      USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_message';
   END IF;
   RETURN NEW;
 END;
@@ -622,9 +536,9 @@ $$;
 CREATE TRIGGER waiver_deliveries_check BEFORE INSERT ON public.waiver_deliveries
   FOR EACH ROW EXECUTE FUNCTION app.check_waiver_delivery();
 
--- Signing sessions: opened only by redeeming a token for the same request in
--- the same transaction, for the signer the request requires; afterwards only
--- revoked, once.
+-- Signing sessions: opened only by the redemption that consumed a waiver link
+-- for the same booking, participant, and request, in this transaction, for
+-- the signer the request requires; afterwards only revoked, once.
 CREATE FUNCTION app.check_waiver_signing_session() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -642,23 +556,26 @@ BEGIN
     END IF;
     IF NOT EXISTS (
          SELECT 1
-           FROM public.waiver_access_tokens t
-           JOIN public.waiver_requests r ON r.tenant_id = t.tenant_id AND r.id = t.request_id
-          WHERE t.tenant_id = NEW.tenant_id AND t.id = NEW.token_id
-            AND t.request_id = NEW.request_id
-            AND t.purpose = NEW.purpose
-            AND t.redeemed_at = now()
+           FROM public.guest_access_links l
+           JOIN public.waiver_requests r
+             ON r.tenant_id = l.tenant_id AND r.id = NEW.request_id
+          WHERE l.tenant_id = NEW.tenant_id AND l.id = NEW.access_link_id
+            AND l.purpose = 'waiver_sign'
+            AND l.consumed_at = now()
+            AND l.booking_id = NEW.booking_id
+            AND l.participant_id = NEW.participant_id
+            AND l.subject_ref = 'waiver_request:' || NEW.request_id::text
             AND r.state = 'pending'
             AND r.required_signer = NEW.signer_role) THEN
-      RAISE EXCEPTION 'a signing session needs its token redeemed now, for its pending request and signer'
-        USING ERRCODE = '23514', CONSTRAINT = 'waiver_signing_sessions_token';
+      RAISE EXCEPTION 'a signing session needs its waiver link consumed now, for its pending request and signer'
+        USING ERRCODE = '23514', CONSTRAINT = 'waiver_signing_sessions_link';
     END IF;
     RETURN NEW;
   END IF;
 
   IF NEW.id IS DISTINCT FROM OLD.id
      OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
-     OR NEW.token_id IS DISTINCT FROM OLD.token_id
+     OR NEW.access_link_id IS DISTINCT FROM OLD.access_link_id
      OR NEW.request_id IS DISTINCT FROM OLD.request_id
      OR NEW.booking_id IS DISTINCT FROM OLD.booking_id
      OR NEW.participant_id IS DISTINCT FROM OLD.participant_id
@@ -766,7 +683,7 @@ DECLARE
 BEGIN
   FOREACH t IN ARRAY ARRAY[
     'waiver_templates', 'waiver_template_versions', 'waiver_requests',
-    'waiver_access_tokens', 'waiver_deliveries', 'waiver_signing_sessions', 'waiver_evidence'
+    'waiver_deliveries', 'waiver_signing_sessions', 'waiver_evidence'
   ] LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', t);
@@ -798,14 +715,11 @@ $$;
 -- granted on the columns that carry a transition; the triggers stamp the
 -- times and refuse everything else.
 GRANT UPDATE (state, revoked_reason, superseded_by) ON public.waiver_requests TO tidegrid_app;
-GRANT UPDATE (redeemed_at, revoked_at, revoked_reason)
-  ON public.waiver_access_tokens TO tidegrid_app;
 GRANT UPDATE (revoked_at, revoked_reason) ON public.waiver_signing_sessions TO tidegrid_app;
 
 REVOKE ALL ON FUNCTION app.check_waiver_template() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_waiver_template_version() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_waiver_request() FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.check_waiver_access_token() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_waiver_delivery() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_waiver_signing_session() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_waiver_evidence() FROM PUBLIC;

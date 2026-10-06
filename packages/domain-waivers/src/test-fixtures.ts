@@ -2,11 +2,12 @@
  * Integration-test fixtures for waivers (Node only; exported as
  * `@tidegrid/domain-waivers/testing`). A tenant comes from the checkout
  * fixture, built through the real catalog, pricing, and checkout services, and
- * gains an operator waiver template. Bookings are made the only way the system
- * makes them: a real checkout, the fake provider's payment, and its verified
- * event, with the waiver hooks on. Participants are named through the booking
- * module's own command, which runs the hooks too. Mail goes to a recording
- * port, so a test reads the links that would be emailed.
+ * gains an active guest hostname and an operator waiver template. Bookings are
+ * made the only way the system makes them: a real checkout, the fake
+ * provider's payment, and its verified event, with the waiver hooks on.
+ * Participants are named through the booking module's own command, which
+ * runs the hooks too. Email goes through the messaging module's real delivery
+ * job and fake provider, so a test reads the link a guest would receive.
  */
 import { randomUUID } from "node:crypto";
 import { type createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
@@ -28,11 +29,12 @@ import {
   quoteFor,
   verifiedFakeEvent,
 } from "@tidegrid/domain-booking/testing";
+import { deliverTenantMessages, FakeEmailProvider } from "@tidegrid/domain-messaging";
 import { FAKE_MINIMUM_AMOUNT } from "@tidegrid/domain-payments";
 import type postgres from "postgres";
 import { createWaiverHooks } from "./hooks.ts";
-import { bookingParticipantDirectory } from "./participants.ts";
-import type { WaiverDeps, WaiverMailer, WaiverRequestMessage } from "./ports.ts";
+import { defaultWaiverDeps } from "./participants.ts";
+import type { WaiverDeps } from "./ports.ts";
 import { createWaiverTemplate, publishWaiverTemplateVersion } from "./templates.ts";
 
 type Sql = ReturnType<typeof postgres>;
@@ -48,11 +50,17 @@ export const FIXTURE_TEXT = {
   acknowledgments: ["I have read this waiver.", "I accept the risks."],
 };
 
+/** The guest site a fixture tenant's links open: an active hostname of the tenant. */
+export const FIXTURE_LINK_ORIGIN = "https://{slug}.book.example.test";
+export const FIXTURE_FROM = "waivers@mail.example.test";
+
 export interface WaiverFixture extends CheckoutFixture {
   templateId: string;
+  /** The tenant's active guest hostname. */
+  host: string;
 }
 
-/** A checkout-ready tenant with an operator template at version 1. */
+/** A checkout-ready tenant with a guest hostname and an operator template at version 1. */
 export async function createWaiverFixture(
   admin: Sql,
   db: Db,
@@ -60,6 +68,9 @@ export async function createWaiverFixture(
   options: { days?: number } = {},
 ): Promise<WaiverFixture> {
   const tenant = await createCheckoutFixture(admin, db, label, options);
+  const host = `${tenant.slug}.book.example.test`;
+  await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
+    values (${host}, ${tenant.id}, 'preview', 'active', now())`;
   const ctx = staffContext(tenant.id);
   const templateId = await inTenantTransaction(db, ctx, async (trx) => {
     const created = await createWaiverTemplate(trx, ctx, {
@@ -78,38 +89,16 @@ export async function createWaiverFixture(
     }
     return created.templateId;
   });
-  return { ...tenant, templateId };
+  return { ...tenant, templateId, host };
 }
 
-/** Keeps every message a command queued, including ones whose transaction rolled back. */
-export class RecordingMailer implements WaiverMailer {
-  readonly sent: WaiverRequestMessage[] = [];
-
-  async enqueue(
-    _trx: unknown,
-    _ctx: TenantContext,
-    message: WaiverRequestMessage,
-  ): Promise<{ messageId: string | null }> {
-    this.sent.push(message);
-    return { messageId: null };
-  }
-
-  /** The last message queued for a request. */
-  lastFor(requestId: string): WaiverRequestMessage {
-    const found = [...this.sent].reverse().find((m) => m.requestId === requestId);
-    if (!found) throw new Error(`no message for request ${requestId}`);
-    return found;
-  }
+export function fixtureDeps(): WaiverDeps {
+  return defaultWaiverDeps;
 }
 
-export const FIXTURE_ORIGIN = "https://waivers.book.example.test";
-
-export function fixtureDeps(mailer: RecordingMailer): WaiverDeps {
-  return {
-    participants: bookingParticipantDirectory,
-    mailer,
-    guestOrigin: async () => FIXTURE_ORIGIN,
-  };
+/** The waiver hooks, as the API wires them. */
+export function fixtureHooks(): BookingHooks {
+  return createWaiverHooks(defaultWaiverDeps);
 }
 
 export interface Booked {
@@ -202,9 +191,45 @@ export function minor(name: string, guardian: { name: string; email: string }): 
   return { name, isMinor: true, email: null, guardian };
 }
 
-/** The waiver hooks with the recording mailer, as the API wires them. */
-export function fixtureHooks(mailer: RecordingMailer): BookingHooks {
-  return createWaiverHooks(fixtureDeps(mailer));
+/** Send the tenant's due email through the real delivery job and the fake provider. */
+export async function deliverMail(db: Db, tenantId: string): Promise<void> {
+  await deliverTenantMessages(db, tenantId, {
+    provider: new FakeEmailProvider({ db, environment: "local" }),
+    fromAddress: FIXTURE_FROM,
+    guestLinkOrigin: FIXTURE_LINK_ORIGIN,
+    runId: `run-${randomUUID()}`,
+    limit: 500,
+  });
+}
+
+/**
+ * Deliver the tenant's due email, then read the waiver link in the email that
+ * the request's newest delivery generation sent, as the guest would.
+ */
+export async function linkFor(
+  admin: Sql,
+  db: Db,
+  tenantId: string,
+  requestId: string,
+): Promise<{ link: string; token: string; to: string; subject: string; text: string }> {
+  await deliverMail(db, tenantId);
+  const [row] = await admin<{ state: string; provider_message_id: string | null }[]>`
+    select m.state, m.provider_message_id
+      from public.waiver_deliveries d
+      join public.email_messages m on m.tenant_id = d.tenant_id and m.id = d.message_id
+     where d.request_id = ${requestId}
+     order by d.generation desc limit 1`;
+  if (row?.state !== "sent" || !row.provider_message_id) {
+    throw new Error(`waiver email for ${requestId} was not sent: ${JSON.stringify(row)}`);
+  }
+  const mail = await new FakeEmailProvider({ db, environment: "local" }).getMailboxMessage(
+    tenantId,
+    row.provider_message_id,
+  );
+  if (!mail) throw new Error("the fake mailbox has no such message");
+  const link = /https:\/\/[^\s"<]+\/waiver#t=[A-Za-z0-9_-]{43}/.exec(mail.text)?.[0];
+  if (!link) throw new Error("no waiver link in the email");
+  return { link, token: tokenOf(link), to: mail.to, subject: mail.subject, text: mail.text };
 }
 
 /** The entry token in a link's fragment. */

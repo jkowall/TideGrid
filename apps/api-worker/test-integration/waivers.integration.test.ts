@@ -2,8 +2,9 @@
  * G2.15 waivers through the whole API as tidegrid_app: the guest's link,
  * session, signature, and PDF, and the staff reads and resend. Bookings come
  * from the real checkout with the waiver hooks on; participants are named
- * through the booking module's own command, which runs the hooks; mail goes to
- * a recording port. Every route is tried from both tenants, with each role.
+ * through the booking module's own command, which runs the hooks; the links
+ * come from the messaging module's real delivery job and fake mailbox. Every
+ * route is tried from both tenants, with each role.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { createDb } from "@tidegrid/database";
@@ -14,12 +15,10 @@ import {
   adult,
   bookParty,
   createWaiverFixture,
-  fixtureDeps,
   fixtureHooks,
+  linkFor,
   minor,
   nameParticipant,
-  RecordingMailer,
-  tokenOf,
   type WaiverFixture,
 } from "@tidegrid/domain-waivers/testing";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
@@ -31,7 +30,7 @@ import { createAccessVerifier } from "../src/auth/access.ts";
 type Sql = ReturnType<typeof postgres>;
 type Json = Record<string, unknown> & { error?: { code: string; message: string } };
 type Res = { status: number; headers: Headers; json: Json; bytes: Uint8Array };
-type Tenant = WaiverFixture & { host: string; owner: string; staff: string; finance: string };
+type Tenant = WaiverFixture & { owner: string; staff: string; finance: string };
 
 const env = inject("integrationDb");
 const TEAM = "tidegrid-waivers.cloudflareaccess.com";
@@ -46,7 +45,6 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
   let A: Tenant;
   let B: Tenant;
   const kid = `kid-${randomUUID().slice(0, 8)}`;
-  const mailer = new RecordingMailer();
   let hooks: BookingHooks;
   let tripIndex = 0;
 
@@ -116,20 +114,16 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
 
   async function tenant(label: string): Promise<Tenant> {
     const f = await createWaiverFixture(admin, runtime.db, label, { days: 12 });
-    const host = `${f.slug}.book.example.test`;
-    await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
-      values (${host}, ${f.id}, 'preview', 'active', now())`;
     const mail = (role: string) => `${label}-${role}-${f.id.slice(0, 8)}@example.test`;
     return {
       ...f,
-      host,
       owner: await member(f.id, mail("owner"), "owner"),
       staff: await member(f.id, mail("staff"), "booking_staff"),
       finance: await member(f.id, mail("finance"), "finance"),
     };
   }
 
-  /** A booking with an adult and a minor named; returns their request ids and links. */
+  /** A booking with an adult and a minor named, and the links their emails carry. */
   async function party(t: Tenant) {
     const tripId = t.trips.shared[tripIndex++] ?? "";
     const booked = await bookParty(admin, runtime.db, t, tripId, 2, hooks);
@@ -162,8 +156,8 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
       tripId,
       annRequest,
       kitRequest,
-      annToken: tokenOf(mailer.lastFor(annRequest).link),
-      kitToken: tokenOf(mailer.lastFor(kitRequest).link),
+      annToken: (await linkFor(admin, runtime.db, t.id, annRequest)).token,
+      kitToken: (await linkFor(admin, runtime.db, t.id, kitRequest)).token,
     };
   }
 
@@ -206,15 +200,13 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     const pair = await generateKeyPair("RS256", { extractable: true });
     signingKey = pair.privateKey;
     const jwk = { ...(await exportJWK(pair.publicKey)), kid, alg: "RS256", use: "sig" };
-    hooks = fixtureHooks(mailer);
+    hooks = fixtureHooks();
     app = createApp({
       accessVerifier: createAccessVerifier({
         teamDomain: TEAM,
         audience: AUD,
         keys: createLocalJWKSet({ keys: [jwk] }),
       }),
-      waiverDeps: fixtureDeps(mailer),
-      bookingHooks: hooks,
     });
     A = await tenant("g215-a");
     B = await tenant("g215-b");
@@ -232,6 +224,7 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
       `/v1/public/waiver-sessions?t=${p.annToken}`,
       `/v1/public/waiver-sessions/${p.annToken}`,
       "/v1/public/waiver-sessions/current",
+      `/waiver?t=${p.annToken}`,
     ]) {
       const res = await request("GET", path, { origin: guestOf(A) });
       expect([401, 404, 405]).toContain(res.status);
@@ -286,7 +279,6 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
         { field: "signature", code: "does_not_match" },
       ],
     });
-    // Not signed yet, so no document.
     expect(
       (
         await request("GET", "/v1/public/waiver-sessions/current/document", {
@@ -315,17 +307,6 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
       `attachment; filename="waiver-${p.booked.reference}.pdf"`,
     );
     expect(createHash("sha256").update(pdf.bytes).digest("hex")).toBe(documentSha256);
-    // Asking for a new link answers the same for a signed waiver, and sends nothing.
-    const sentBefore = mailer.sent.length;
-    expect(
-      (
-        await request("POST", "/v1/public/waiver-links/renewal", {
-          origin: guestOf(A),
-          body: { token: p.annToken },
-        })
-      ).status,
-    ).toBe(202);
-    expect(mailer.sent.length).toBe(sentBefore);
   });
 
   it("lets the named guardian sign for a minor, declaring the relationship", async () => {
@@ -359,16 +340,21 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
       const res = await request("GET", path, { as });
       expect(res.status).toBe(200);
       const waivers = res.json.waivers as {
-        participants: { name: string; status: string; request: { signed: unknown } }[];
+        participants: {
+          name: string;
+          status: string;
+          request: { delivery: { message: { state: string } } };
+        }[];
       };
       expect(waivers.participants.map((x) => [x.name, x.status])).toEqual([
         ["Ann Adult", "signed"],
         ["Kit Minor", "waiting"],
       ]);
+      // Delivery is reported apart from the signature.
+      expect(waivers.participants[1]?.request.delivery.message.state).toBe("sent");
       expect(res.headers.get("cache-control")).toBe("no-store");
     }
     expect((await request("GET", path, { as: A.finance })).status).toBe(403);
-    // B's owner on A's tenant, and A's owner on B's booking id under A.
     expect((await request("GET", path, { as: B.owner })).json.error?.code).toBe("tenant_not_found");
     const pb = await party(B);
     const crossed = await request(
@@ -378,18 +364,14 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     );
     expect([crossed.status, crossed.json.error?.code]).toEqual([404, "booking_not_found"]);
 
-    const trip = await request("GET", `${staffBase(A.id)}/trips/${p.tripId}/waivers`, {
-      as: A.staff,
-    });
+    const tripPath = (tenantId: string, tripId: string) =>
+      `${staffBase(tenantId)}/trips/${tripId}/waivers`;
+    const trip = await request("GET", tripPath(A.id, p.tripId), { as: A.staff });
     expect(trip.status).toBe(200);
     expect(trip.json.totals).toMatchObject({ participants: 2, signed: 1, waiting: 1 });
+    expect((await request("GET", tripPath(A.id, p.tripId), { as: A.finance })).status).toBe(403);
     expect(
-      (await request("GET", `${staffBase(A.id)}/trips/${p.tripId}/waivers`, { as: A.finance }))
-        .status,
-    ).toBe(403);
-    expect(
-      (await request("GET", `${staffBase(A.id)}/trips/${pb.tripId}/waivers`, { as: A.owner })).json
-        .error?.code,
+      (await request("GET", tripPath(A.id, pb.tripId), { as: A.owner })).json.error?.code,
     ).toBe("trip_not_found");
 
     // The signed PDF, by evidence id.
@@ -449,7 +431,8 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     expect((await resend(A.staff, key, "Another reason")).json.error?.code).toBe(
       "idempotency_key_reused",
     );
-    // The first link is replaced; the newest one opens.
+    // The newest email's link opens; the first one was replaced when it went out.
+    const newest = await linkFor(admin, runtime.db, A.id, p.annRequest);
     expect(
       (
         await request("POST", "/v1/public/waiver-sessions", {
@@ -458,7 +441,7 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
         })
       ).json.error?.code,
     ).toBe("waiver_link_replaced");
-    await openSession(A, tokenOf(mailer.lastFor(p.annRequest).link));
+    await openSession(A, newest.token);
     // A request from outside the console is refused before anything else.
     const forged = await request("POST", path(A.id, p.annRequest), {
       as: A.owner,

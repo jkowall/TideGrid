@@ -1,12 +1,17 @@
 /**
  * Sending a waiver request: one delivery generation per intentional send.
  * Generation 1 goes out when the request is assigned; each later one is an
- * audited resend, at least RESEND_INTERVAL_MINUTES after the previous one and
- * at most MAX_GENERATIONS in all (the database enforces both for every
- * writer). Each generation issues a fresh entry token, revokes the earlier
- * unredeemed ones, and queues one message whose idempotency key is
- * waiver:<request>:<generation>, all in the caller's transaction. A retry of a
- * command that already sent finds the generation and sends nothing.
+ * audited resend, at most MAX_GENERATIONS in all, and to the same address at
+ * least RESEND_INTERVAL_MINUTES after the previous one (the database enforces
+ * both for every writer; a corrected address goes at once).
+ *
+ * A generation queues one message through the messaging module, in the
+ * caller's transaction, deduplicated by waiver.request:<request>:<generation>,
+ * with a waiver link the delivery job issues when it sends: the token is never
+ * stored in a message, only its hash in the link. Messages of earlier
+ * generations still queued are canceled, so only the newest goes out, and a
+ * new address revokes the old one's links and sessions. A retry of a command
+ * that already sent finds the generation and sends nothing.
  */
 import {
   type JsonObject,
@@ -16,17 +21,25 @@ import {
   type WaiverRequestState,
   type WaiverSignerRole,
 } from "@tidegrid/database";
+import { enqueueMessage } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { type BookingContext, loadBookingContext, tripFacts } from "./booking.ts";
+import { WAIVER_EMAIL_TEMPLATE, WAIVER_EMAIL_VERSION, waiverRequestEmail } from "./email.ts";
+import {
+  cancelQueuedMessages,
+  closeRequestAccess,
+  WAIVER_LINK_PATH,
+  WAIVER_LINK_PURPOSE,
+  waiverSubject,
+} from "./links.ts";
 import type { WaiverDeps, WaiverParticipant } from "./ports.ts";
-import { hashWaiverToken, newWaiverSecret } from "./secrets.ts";
 
 export const RESEND_INTERVAL_MINUTES = 10;
 export const MAX_GENERATIONS = 5;
-/** An emailed link works for 7 days, never past its trip's end. */
-export const TOKEN_TTL_DAYS = 7;
+/** An emailed link lasts 7 days once sent, never past its trip's end. */
+export const LINK_TTL_DAYS = 7;
 /** A link with less time than this left before its trip ends is not worth sending. */
-const MIN_LINK_MINUTES = 15;
+const MIN_LINK_SECONDS = 15 * 60;
 
 export interface LockedRequest {
   id: string;
@@ -57,8 +70,7 @@ export type SendResult =
       kind: "sent";
       deliveryId: string;
       generation: number;
-      messageId: string | null;
-      linkExpiresAt: Date;
+      messageId: string;
       /** When the generation was recorded, by the database clock. */
       queuedAt: Date;
     }
@@ -72,9 +84,7 @@ export type SendResult =
   | { kind: "too_soon"; retryAfter: Date }
   | { kind: "limit_reached" }
   /** The trip ends too soon for a link to be of use. */
-  | { kind: "trip_over" }
-  /** The operator has no guest site to link to. */
-  | { kind: "no_guest_site" };
+  | { kind: "trip_over" };
 
 export interface SendInput {
   requestId: string;
@@ -83,6 +93,11 @@ export interface SendInput {
   reason: string | null;
   booking?: BookingContext;
   participant?: WaiverParticipant;
+}
+
+/** Who the email greets: the participant, or a minor's parent or guardian. */
+function recipientName(participant: WaiverParticipant, role: WaiverSignerRole): string {
+  return role === "guardian" ? (participant.guardianName ?? participant.name) : participant.name;
 }
 
 /**
@@ -143,56 +158,49 @@ export async function sendWaiverRequest(
       if (retryAfter > now) return { kind: "too_soon", retryAfter: new Date(retryAfter) };
     }
   }
-  const expiresAt = new Date(Math.min(now + TOKEN_TTL_DAYS * 86_400_000, booking.endsAt.getTime()));
-  if (expiresAt.getTime() - now < MIN_LINK_MINUTES * 60_000) return { kind: "trip_over" };
-  const origin = await deps.guestOrigin(trx, ctx.tenantId);
-  if (!origin) return { kind: "no_guest_site" };
+  const ttlSeconds = Math.floor(
+    Math.min(LINK_TTL_DAYS * 86_400_000, booking.endsAt.getTime() - now) / 1000,
+  );
+  if (ttlSeconds < MIN_LINK_SECONDS) return { kind: "trip_over" };
 
-  // Replacing a link revokes the earlier ones. A new address also ends any
-  // session the old address opened.
-  await sql`
-    update waiver_access_tokens set revoked_at = now(), revoked_reason = 'replaced'
-     where tenant_id = ${ctx.tenantId} and request_id = ${request.id}
-       and redeemed_at is null and revoked_at is null`.execute(trx);
-  if (facts.latest_recipient !== null && facts.latest_recipient !== recipient) {
-    await sql`
-      update waiver_signing_sessions set revoked_at = now(), revoked_reason = 'recipient_changed'
-       where tenant_id = ${ctx.tenantId} and request_id = ${request.id} and revoked_at is null`.execute(
-      trx,
-    );
+  const recipientChanged = facts.latest_recipient !== null && facts.latest_recipient !== recipient;
+  if (recipientChanged) {
+    // The old address loses its links and any session it opened.
+    await closeRequestAccess(trx, ctx, request, {
+      link: "recipient_changed",
+      session: "recipient_changed",
+    });
+  } else {
+    // Only the newest email goes out; an earlier one still queued is canceled.
+    await cancelQueuedMessages(trx, ctx, request.id);
   }
 
-  const token = newWaiverSecret();
-  const tokenRow = await trx
-    .insertInto("waiver_access_tokens")
-    .values({
-      tenant_id: ctx.tenantId,
-      request_id: request.id,
-      purpose: "sign",
-      token_hash: await hashWaiverToken(token),
-      expires_at: expiresAt,
-    })
-    .returning("id")
-    .executeTakeFirstOrThrow();
   const generation = (facts.latest_generation ?? 0) + 1;
-  const { messageId } = await deps.mailer.enqueue(trx, ctx, {
-    idempotencyKey: `waiver:${request.id}:${generation}`,
-    to: recipient,
-    requestId: request.id,
-    generation,
-    requiredSigner: request.required_signer,
-    participantName: participant.name,
-    recipientName:
-      request.required_signer === "guardian"
-        ? (participant.guardianName ?? participant.name)
-        : participant.name,
+  const queued = await enqueueMessage(trx, ctx, {
+    dedupeKey: `waiver.request:${request.id}:${generation}`,
+    template: WAIVER_EMAIL_TEMPLATE,
+    templateVersion: WAIVER_EMAIL_VERSION,
+    to: { email: recipient, name: recipientName(participant, request.required_signer) },
     bookingId: request.booking_id,
     participantId: request.participant_id,
-    operatorName: booking.operatorName,
-    trip: tripFacts(booking),
-    link: `${origin.replace(/\/+$/, "")}/waiver#t=${token}`,
-    linkExpiresAt: expiresAt,
+    subjectRef: waiverSubject(request.id),
+    content: waiverRequestEmail({
+      requiredSigner: request.required_signer,
+      participantName: participant.name,
+      recipientName: recipientName(participant, request.required_signer),
+      operatorName: booking.operatorName,
+      trip: tripFacts(booking),
+      linkDays: Math.floor(ttlSeconds / 86_400),
+      kind,
+    }),
+    accessLink: { purpose: WAIVER_LINK_PURPOSE, path: WAIVER_LINK_PATH, ttlSeconds },
   });
+  if (queued.kind === "duplicate") {
+    // The generation's key belongs to this request alone, and generations
+    // follow the deliveries, so a duplicate means a message without its
+    // delivery row: refuse rather than send under another generation.
+    throw new Error(`waiver message for ${request.id} generation ${generation} already exists`);
+  }
   const delivery = await trx
     .insertInto("waiver_deliveries")
     .values({
@@ -201,8 +209,7 @@ export async function sendWaiverRequest(
       generation,
       kind,
       recipient_email: recipient,
-      token_id: tokenRow.id,
-      message_id: messageId,
+      message_id: queued.messageId,
       reason: input.reason,
     })
     .returning("id")
@@ -210,9 +217,9 @@ export async function sendWaiverRequest(
   const after: JsonObject = {
     deliveryId: delivery.id,
     generation,
-    messageId,
-    linkExpiresAt: expiresAt.toISOString(),
-    recipientChanged: facts.latest_recipient !== null && facts.latest_recipient !== recipient,
+    messageId: queued.messageId,
+    linkTtlSeconds: ttlSeconds,
+    recipientChanged,
   };
   await recordAudit(trx, ctx, {
     action: kind === "initial" ? "waiver_request.sent" : "waiver_request.resent",
@@ -225,8 +232,7 @@ export async function sendWaiverRequest(
     kind: "sent",
     deliveryId: delivery.id,
     generation,
-    messageId,
-    linkExpiresAt: expiresAt,
+    messageId: queued.messageId,
     queuedAt: facts.now,
   };
 }

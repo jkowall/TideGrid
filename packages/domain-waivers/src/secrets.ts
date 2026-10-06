@@ -1,9 +1,8 @@
 /**
- * Waiver capabilities: the entry token an email link carries and the session
- * secret redeeming it returns. Both are 32 random bytes in base64url (43
- * characters). Only their SHA-256, under a purpose label, is stored or
- * compared, so a token hash can never be presented as a session or the other
- * way round. Runs in Workers and Node.
+ * The signing session's secret: 32 random bytes in base64url (43
+ * characters), returned once when a waiver link is redeemed. Only its SHA-256,
+ * under a purpose label, is stored or compared. The link's own token belongs
+ * to the messaging module. Runs in Workers and Node.
  */
 import { sha256Hex } from "./content.ts";
 
@@ -17,19 +16,10 @@ export function newWaiverSecret(): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-async function hashAs(label: string, secret: string): Promise<string> {
-  if (!waiverSecretPattern.test(secret)) {
-    throw new TypeError("a waiver secret is 43 base64url characters");
-  }
-  return sha256Hex(`${label}:${secret}`);
-}
-
-/** The stored form of an email link's entry token. */
-export function hashWaiverToken(token: string): Promise<string> {
-  return hashAs("waiver-token", token);
-}
-
 /** The stored form of a signing session's secret. */
-export function hashWaiverSession(secret: string): Promise<string> {
-  return hashAs("waiver-session", secret);
+export async function hashWaiverSession(secret: string): Promise<string> {
+  if (!waiverSecretPattern.test(secret)) {
+    throw new TypeError("a waiver session secret is 43 base64url characters");
+  }
+  return sha256Hex(`waiver-session:${secret}`);
 }

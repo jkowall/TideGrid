@@ -15,6 +15,7 @@
   "dependencies": {
     "@tidegrid/database": "workspace:*",
     "@tidegrid/domain-booking": "workspace:*",
+    "@tidegrid/domain-messaging": "workspace:*",
     "kysely": "^0.29.0"
   },
   "devDependencies": {

@@ -6,7 +6,7 @@
  */
 import type { TenantTransaction } from "@tidegrid/database";
 import { listParticipants } from "@tidegrid/domain-booking";
-import type { ParticipantDirectory, WaiverParticipant } from "./ports.ts";
+import type { ParticipantDirectory, WaiverDeps, WaiverParticipant } from "./ports.ts";
 
 export const bookingParticipantDirectory: ParticipantDirectory = {
   async list(trx: TenantTransaction, tenantId: string, bookingId: string) {
@@ -24,3 +24,6 @@ export const bookingParticipantDirectory: ParticipantDirectory = {
     );
   },
 };
+
+/** What the API and the seed pass: the booking module's own participants. */
+export const defaultWaiverDeps: WaiverDeps = { participants: bookingParticipantDirectory };

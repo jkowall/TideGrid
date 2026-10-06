@@ -7,12 +7,7 @@ import {
   validateWaiverText,
   waiverContentSha256,
 } from "./content.ts";
-import {
-  hashWaiverSession,
-  hashWaiverToken,
-  newWaiverSecret,
-  waiverSecretPattern,
-} from "./secrets.ts";
+import { hashWaiverSession, newWaiverSecret, waiverSecretPattern } from "./secrets.ts";
 
 const text = {
   title: "Participation waiver",
@@ -91,11 +86,8 @@ describe("secrets", () => {
     const secret = newWaiverSecret();
     expect(secret).toMatch(waiverSecretPattern);
     expect(newWaiverSecret()).not.toBe(secret);
-    const token = await hashWaiverToken(secret);
     const session = await hashWaiverSession(secret);
-    expect(token).toMatch(/^[0-9a-f]{64}$/);
-    expect(token).not.toBe(session);
-    expect(token).toBe(createHash("sha256").update(`waiver-token:${secret}`).digest("hex"));
-    await expect(hashWaiverToken("short")).rejects.toThrow(TypeError);
+    expect(session).toBe(createHash("sha256").update(`waiver-session:${secret}`).digest("hex"));
+    await expect(hashWaiverSession("short")).rejects.toThrow(TypeError);
   });
 });

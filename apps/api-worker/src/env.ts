@@ -23,11 +23,6 @@ export interface Bindings {
   PAYMENT_PROVIDER?: string;
   /** Secret. Signs and verifies the fake provider's webhooks; at least 32 characters. */
   FAKE_PAYMENT_WEBHOOK_SECRET?: string;
-  /**
-   * The guest site's origin for links in email, with `{slug}` for the tenant's
-   * slug; https://{slug}.book.tidegrid.us when unset (G2.15 waiver links).
-   */
-  GUEST_LINK_ORIGIN?: string;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {

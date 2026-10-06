@@ -1,14 +1,16 @@
 /**
  * G2.15 core: templates, automatic assignment through the booking hooks,
- * delivery generations, token redemption, signing, evidence, participant
+ * delivery generations, link redemption, signing, evidence, participant
  * changes, revocation, and a version change, against PostgreSQL as
- * tidegrid_app. Bookings come from the real checkout and participants from the
- * booking module's own command; mail goes to a recording port.
+ * tidegrid_app. Bookings come from the real checkout, participants from the
+ * booking module's own command, and links from the messaging module's real
+ * delivery job and fake mailbox.
  */
 import { createHash } from "node:crypto";
 import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks } from "@tidegrid/domain-booking";
+import { hashLinkToken } from "@tidegrid/domain-messaging";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
@@ -30,14 +32,14 @@ import {
   type Booked,
   bookParty,
   createWaiverFixture,
+  deliverMail,
   FIXTURE_TEXT,
   fixtureDeps,
   fixtureHooks,
+  linkFor,
   minor,
   nameParticipant,
-  RecordingMailer,
   staffContext,
-  tokenOf,
   type WaiverFixture,
 } from "./test-fixtures.ts";
 
@@ -59,7 +61,6 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
   let runtime: ReturnType<typeof createDb>;
   let A: WaiverFixture;
   let B: WaiverFixture;
-  const mailer = new RecordingMailer();
   let deps: WaiverDeps;
   let hooks: BookingHooks;
   let tripIndex = 0;
@@ -85,6 +86,14 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
         from public.waiver_requests where booking_id = ${bookingId} order by created_at, id`;
   }
 
+  async function messagesOf(requestId: string) {
+    return admin<{ dedupe_key: string; to_email: string; state: string; to_name: string }[]>`
+      select m.dedupe_key, m.to_email, m.state, m.to_name
+        from public.email_messages m
+       where m.subject_ref = ${`waiver_request:${requestId}`}
+       order by m.created_at, m.dedupe_key`;
+  }
+
   async function liveRequest(bookingId: string, participantId: string): Promise<string> {
     const [row] = await admin<{ id: string }[]>`
       select id from public.waiver_requests
@@ -103,7 +112,8 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
     tenantId: string,
     requestId: string,
   ): Promise<{ session: WaiverSession; secret: string }> {
-    const opened = await redeem(tenantId, tokenOf(mailer.lastFor(requestId).link));
+    const { token } = await linkFor(admin, runtime.db, tenantId, requestId);
+    const opened = await redeem(tenantId, token);
     if (opened.kind !== "opened") throw new Error(`redeem: ${JSON.stringify(opened)}`);
     return { session: opened.session, secret: opened.secret };
   }
@@ -135,8 +145,8 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
     if (!env) return;
     admin = postgres(env.adminUrl, { max: 2, onnotice: () => {} });
     runtime = createDb(env.runtimeUrl, { max: 6 });
-    deps = fixtureDeps(mailer);
-    hooks = fixtureHooks(mailer);
+    deps = fixtureDeps();
+    hooks = fixtureHooks();
     A = await createWaiverFixture(admin, runtime.db, "wv-a");
     B = await createWaiverFixture(admin, runtime.db, "wv-b");
   });
@@ -161,11 +171,10 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
     ).toBe("55000");
   });
 
-  it("assigns each participant as they are named, with the signer a minor needs, and sends once", async () => {
+  it("assigns each participant as they are named, with the signer a minor needs, and emails once", async () => {
     const booked = await book(A, 3);
     // Confirmation found nobody named yet.
     expect(await requestsOf(booked.bookingId)).toEqual([]);
-    const sentBefore = mailer.sent.length;
     const ada = await nameParticipant(
       runtime.db,
       A.id,
@@ -196,19 +205,19 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       [milo.participant.id, "guardian", "pending"],
       [nora.participant.id, "participant", "pending"],
     ]);
-    // Two emails: Nora has no address yet.
-    expect(mailer.sent.length - sentBefore).toBe(2);
-    const miloRequest = rows[1]?.id ?? "";
-    expect(mailer.lastFor(miloRequest)).toMatchObject({
-      idempotencyKey: `waiver:${miloRequest}:1`,
-      to: "gail.guardian@example.test",
-      requiredSigner: "guardian",
-      participantName: "Milo Minor",
-      recipientName: "Gail Guardian",
-    });
+    const [adaRequest, miloRequest, noraRequest] = rows.map((r) => r.id);
+    expect(await messagesOf(miloRequest ?? "")).toEqual([
+      {
+        dedupe_key: `waiver.request:${miloRequest}:1`,
+        to_email: "gail.guardian@example.test",
+        state: "queued",
+        to_name: "Gail Guardian",
+      },
+    ]);
+    // Nora has no address yet, so nothing went to her.
+    expect(await messagesOf(noraRequest ?? "")).toEqual([]);
 
-    // The same details again change nothing and send nothing; a retried
-    // assignment creates nothing.
+    // The same details again change nothing; a retried assignment creates nothing.
     await nameParticipant(runtime.db, A.id, booked.bookingId, 1, adult("Ada Adult"), hooks);
     const ctx = staffContext(A.id, "retry");
     const again = await inTenantTransaction(runtime.db, ctx, (trx) =>
@@ -216,7 +225,7 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
     );
     expect(again.created).toEqual([]);
     expect(again.alreadyAssigned).toBe(3);
-    expect(mailer.sent.length - sentBefore).toBe(2);
+    expect(await messagesOf(adaRequest ?? "")).toHaveLength(1);
 
     // Nora's address arrives: her request goes out now.
     await nameParticipant(
@@ -227,18 +236,20 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       adult("Nora Noemail", "nora@example.test"),
       hooks,
     );
-    expect(mailer.lastFor(rows[2]?.id ?? "")).toMatchObject({
-      to: "nora@example.test",
-      idempotencyKey: `waiver:${rows[2]?.id}:1`,
-    });
-
-    // Only the hash of a token is stored.
-    const token = tokenOf(mailer.lastFor(miloRequest).link);
-    const stored = await admin<{ token_hash: string }[]>`
-      select token_hash from public.waiver_access_tokens where request_id = ${miloRequest}`;
-    expect(stored.map((s) => s.token_hash)).toEqual([
-      createHash("sha256").update(`waiver-token:${token}`).digest("hex"),
+    expect((await messagesOf(noraRequest ?? "")).map((m) => [m.dedupe_key, m.to_email])).toEqual([
+      [`waiver.request:${noraRequest}:1`, "nora@example.test"],
     ]);
+
+    // The guardian's email, as sent: the link opens the guest site's /waiver
+    // page with the token in its fragment, and only the token's hash is stored.
+    const sent = await linkFor(admin, runtime.db, A.id, miloRequest ?? "");
+    expect(sent.to).toBe("gail.guardian@example.test");
+    expect(sent.subject).toContain("Milo Minor");
+    expect(sent.link.startsWith(`https://${A.host}/waiver#t=`)).toBe(true);
+    const stored = await admin<{ token_hash: string }[]>`
+      select token_hash from public.guest_access_links
+       where subject_ref = ${`waiver_request:${miloRequest}`}`;
+    expect(stored.map((s) => s.token_hash)).toEqual([await hashLinkToken(sent.token)]);
   });
 
   it("never assigns twice when assignments for one booking race", async () => {
@@ -255,15 +266,17 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       ),
     );
     expect(results.reduce((n, r) => n + r.created.length, 0)).toBe(2);
-    const [row] = await admin<{ requests: number; deliveries: number }[]>`
+    const [row] = await admin<{ requests: number; deliveries: number; messages: number }[]>`
       select (select count(*)::int from public.waiver_requests where booking_id = ${booked.bookingId}) as requests,
              (select count(*)::int from public.waiver_deliveries d
                 join public.waiver_requests r on r.id = d.request_id
-               where r.booking_id = ${booked.bookingId}) as deliveries`;
-    expect(row).toEqual({ requests: 2, deliveries: 2 });
+               where r.booking_id = ${booked.bookingId}) as deliveries,
+             (select count(*)::int from public.email_messages
+               where booking_id = ${booked.bookingId} and template = 'waiver_request') as messages`;
+    expect(row).toEqual({ requests: 2, deliveries: 2, messages: 2 });
   });
 
-  it("redeems a token once, into a session bound to its request, only at its own operator", async () => {
+  it("redeems a link once, into a session bound to its request, only at its own operator", async () => {
     const booked = await book(A, 1);
     const sol = await nameParticipant(
       runtime.db,
@@ -274,7 +287,7 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       hooks,
     );
     const requestId = await liveRequest(booked.bookingId, sol.participant.id);
-    const token = tokenOf(mailer.lastFor(requestId).link);
+    const { token } = await linkFor(admin, runtime.db, A.id, requestId);
 
     expect((await redeem(B.id, token)).kind).toBe("invalid");
     const opened = await redeem(A.id, token);
@@ -296,13 +309,13 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
         loadWaiverSession(trx, B.id, opened.secret),
       ),
     ).toBeNull();
-    // No second session for the token, and none without a redemption now.
+    // No second session for the link, and none without consuming a link now.
     expect(
       await pgError(admin`
-        insert into public.waiver_signing_sessions (tenant_id, token_id, request_id, booking_id,
-          participant_id, purpose, signer_role, secret_hash, expires_at)
-        select tenant_id, token_id, request_id, booking_id, participant_id, purpose, signer_role,
-               repeat('a', 64), now() + interval '5 minutes'
+        insert into public.waiver_signing_sessions (tenant_id, access_link_id, request_id,
+          booking_id, participant_id, purpose, signer_role, secret_hash, expires_at)
+        select tenant_id, access_link_id, request_id, booking_id, participant_id, purpose,
+               signer_role, repeat('a', 64), now() + interval '5 minutes'
           from public.waiver_signing_sessions where id = ${opened.session.id}`),
     ).toMatch(/^23(505|514)/);
   });
@@ -430,7 +443,7 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       hooks,
     );
     const firstRequest = await liveRequest(booked.bookingId, max.participant.id);
-    const oldToken = tokenOf(mailer.lastFor(firstRequest).link);
+    const old = await linkFor(admin, runtime.db, A.id, firstRequest);
     // A corrected address goes out at once, despite the resend interval, and
     // the old link stops working.
     await nameParticipant(
@@ -441,11 +454,11 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       adult("Max Moved", "max.new@example.test"),
       hooks,
     );
-    expect(mailer.lastFor(firstRequest)).toMatchObject({
-      to: "max.new@example.test",
-      idempotencyKey: `waiver:${firstRequest}:2`,
-    });
-    expect((await redeem(A.id, oldToken)).kind).toBe("replaced");
+    expect((await messagesOf(firstRequest)).map((m) => [m.dedupe_key, m.to_email])).toEqual([
+      [`waiver.request:${firstRequest}:1`, "max.old@example.test"],
+      [`waiver.request:${firstRequest}:2`, "max.new@example.test"],
+    ]);
+    expect((await redeem(A.id, old.token)).kind).toBe("replaced");
 
     // Marked a minor after all: the request ends and a guardian's begins.
     await nameParticipant(
@@ -461,6 +474,8 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       ["participant", "revoked"],
       ["guardian", "pending"],
     ]);
+    // The ended request's queued email never goes out.
+    expect((await messagesOf(firstRequest)).map((m) => m.state)).toEqual(["sent", "canceled"]);
 
     // Signed, then renamed: a different person must sign again.
     const lin = await nameParticipant(
@@ -499,7 +514,7 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       hooks,
     );
     const requestId = await liveRequest(booked.bookingId, rex.participant.id);
-    const firstToken = tokenOf(mailer.lastFor(requestId).link);
+    const first = await linkFor(admin, runtime.db, A.id, requestId);
     const ctx = staffContext(A.id, "staff-resend");
     const resend = () =>
       inTenantTransaction(runtime.db, ctx, (trx) =>
@@ -507,17 +522,14 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       );
     expect((await resend()).kind).toBe("too_soon");
     // The database holds the same limit for any writer.
+    const [message] = await admin<{ id: string }[]>`
+      select message_id as id from public.waiver_deliveries where request_id = ${requestId}`;
     expect(
       await pgError(
-        admin.begin(async (tx) => {
-          const [t] = await tx<{ id: string }[]>`
-            insert into public.waiver_access_tokens (tenant_id, request_id, purpose, token_hash, expires_at)
-            values (${A.id}, ${requestId}, 'sign', ${"b".repeat(64)}, now() + interval '1 day')
-            returning id`;
-          await tx`insert into public.waiver_deliveries (tenant_id, request_id, generation, kind,
-                     recipient_email, token_id, reason)
-                   values (${A.id}, ${requestId}, 2, 'resend', 'rex.resend@example.test', ${t?.id ?? ""}, 'x')`;
-        }),
+        admin`insert into public.waiver_deliveries (tenant_id, request_id, generation, kind,
+                recipient_email, message_id, reason)
+              values (${A.id}, ${requestId}, 2, 'resend', 'rex.resend@example.test',
+                      ${message?.id ?? ""}, 'x')`,
       ),
     ).toBe("23514:waiver_deliveries_rate");
     // Ten minutes later (moved back by the owner, with the guard off for that statement only).
@@ -528,11 +540,14 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
     });
     expect(await resend()).toMatchObject({ kind: "sent", generation: 2 });
-    expect((await redeem(A.id, firstToken)).kind).toBe("replaced");
+    const second = await linkFor(admin, runtime.db, A.id, requestId);
+    expect(second.token).not.toBe(first.token);
+    expect((await redeem(A.id, first.token)).kind).toBe("replaced");
+    expect((await redeem(A.id, second.token)).kind).toBe("opened");
   });
 
-  it("ends every request when the booking is canceled, links and sessions with them", async () => {
-    const booked = await book(A, 1);
+  it("ends every request when the booking is canceled, links, sessions, and queued email with them", async () => {
+    const booked = await book(A, 2);
     const cy = await nameParticipant(
       runtime.db,
       A.id,
@@ -543,17 +558,29 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
     );
     const requestId = await liveRequest(booked.bookingId, cy.participant.id);
     const { session, secret } = await open(A.id, requestId);
+    const dee = await nameParticipant(
+      runtime.db,
+      A.id,
+      booked.bookingId,
+      2,
+      adult("Dee Queued"),
+      hooks,
+    );
+    const queuedRequest = await liveRequest(booked.bookingId, dee.participant.id);
     const ctx = staffContext(A.id, "cancellation");
     const revoked = await inTenantTransaction(runtime.db, ctx, (trx) =>
       revokeBookingWaivers(trx, ctx, { bookingId: booked.bookingId }),
     );
-    expect(revoked.revoked).toBe(1);
+    expect(revoked.revoked).toBe(2);
     expect(
       await inTenantTransaction(runtime.db, guest(A.id), (trx) =>
         loadWaiverSession(trx, A.id, secret),
       ),
     ).toBeNull();
     expect((await sign(A.id, session)).kind).toBe("not_pending");
+    expect((await messagesOf(queuedRequest)).map((m) => m.state)).toEqual(["canceled"]);
+    await deliverMail(runtime.db, A.id);
+    expect((await messagesOf(queuedRequest)).map((m) => m.state)).toEqual(["canceled"]);
   });
 
   it("moves unsigned requests to a new version on request and never touches signed evidence", async () => {

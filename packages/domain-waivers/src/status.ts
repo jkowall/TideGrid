@@ -1,11 +1,12 @@
 /**
  * Waiver status for staff: one booking's participants, or a whole trip's,
  * each with its live request (or the last one, when none is live), whether
- * and when it was signed, and its latest delivery. Delivery and signature are
- * reported separately: an email that was sent says nothing about a signature.
- * Read-only, under the caller's tenant transaction, with the tenant named in
- * every query. Participant rows are read with their booking, through the
- * booking module's table contract, in one query per call.
+ * and when it was signed, and its latest delivery with what the email's
+ * delivery reports. Delivery and signature are reported separately: an email
+ * that was sent says nothing about a signature. Read-only, under the caller's
+ * tenant transaction, with the tenant named in every query. The booking's
+ * participants and its messages are read through their modules' table
+ * contracts, in one query per call; nothing here writes them.
  */
 import {
   type GuardianRelationship,
@@ -25,7 +26,7 @@ import { findApplicableVersion } from "./templates.ts";
 export type WaiverStatusCode =
   /** Signed for this booking. */
   | "signed"
-  /** Sent and waiting for the signer. */
+  /** Sent, or about to be, and waiting for the signer. */
   | "waiting"
   /** The latest email could not be delivered. */
   | "email_failed"
@@ -38,23 +39,14 @@ export type WaiverStatusCode =
   /** The booking was canceled; nothing is needed. */
   | "not_needed";
 
-/** What the email's delivery says, when the mailer reports it. */
+/** What the email's delivery reports. */
 export type MessageState = "queued" | "sending" | "sent" | "failed" | "canceled";
 
 export interface MessageStatus {
   state: MessageState;
-  /** When it was sent, or last tried. */
+  /** When it was sent, failed, or was last tried; null while it waits for its first try. */
   at: Date | null;
   failureCode: string | null;
-}
-
-/** Optional: the mailer's report on messages, by id. Without it, a delivery reads as queued. */
-export interface MessageStatusReader {
-  read(
-    trx: TenantTransaction,
-    tenantId: string,
-    messageIds: readonly string[],
-  ): Promise<Map<string, MessageStatus>>;
 }
 
 export interface ParticipantWaiver {
@@ -83,7 +75,7 @@ export interface ParticipantWaiver {
       /** The address it went to, masked: its first character and its domain. */
       recipient: string;
       queuedAt: Date;
-      message: MessageStatus | null;
+      message: MessageStatus;
     };
     /** When staff may send it again; null when it cannot be sent again. */
     resendAvailableAt: Date | null;
@@ -127,7 +119,9 @@ interface Row {
   kind: WaiverDeliveryKind | null;
   recipient_email: string | null;
   queued_at: Date | null;
-  message_id: string | null;
+  message_state: MessageState | null;
+  message_at: Date | null;
+  message_error: string | null;
   now: Date;
 }
 
@@ -146,7 +140,10 @@ async function rows(
            r.id as request_id, r.state, r.revoked_reason, r.required_signer,
            t.name as template_name, r.template_version, r.created_at as assigned_at,
            e.id as evidence_id, e.signed_at, e.signer_name, e.guardian_relationship,
-           d.generation, d.kind, d.recipient_email, d.created_at as queued_at, d.message_id,
+           d.generation, d.kind, d.recipient_email, d.created_at as queued_at,
+           m.state as message_state,
+           coalesce(m.sent_at, m.failed_at, m.canceled_at, m.last_attempt_at) as message_at,
+           m.last_error_code as message_error,
            now() as now
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
@@ -166,19 +163,20 @@ async function rows(
          where y.tenant_id = b.tenant_id and y.request_id = r.id
          order by y.generation desc
          limit 1) d on true
+      left join email_messages m on m.tenant_id = b.tenant_id and m.id = d.message_id
      where b.tenant_id = ${tenantId} and ${where}
      order by b.confirmed_at, b.id, p.position`.execute(trx);
   return found;
 }
 
-function statusOf(row: Row, required: boolean, message: MessageStatus | null): WaiverStatusCode {
+function statusOf(row: Row, required: boolean): WaiverStatusCode {
   if (row.booking_state !== "confirmed") return "not_needed";
   if (!row.request_id || (row.state !== "pending" && row.state !== "signed")) {
     return required ? "not_assigned" : "not_required";
   }
   if (row.state === "signed") return "signed";
   if (row.generation === null) return "no_address";
-  if (message?.state === "failed") return "email_failed";
+  if (row.message_state === "failed") return "email_failed";
   return "waiting";
 }
 
@@ -194,10 +192,7 @@ async function assemble(
   trx: TenantTransaction,
   tenantId: string,
   found: Row[],
-  messages: MessageStatusReader | null,
 ): Promise<BookingWaivers[]> {
-  const ids = found.flatMap((r) => (r.message_id ? [r.message_id] : []));
-  const states = messages && ids.length > 0 ? await messages.read(trx, tenantId, ids) : new Map();
   const required = new Map<string, boolean>();
   const bookings = new Map<string, BookingWaivers>();
   for (const row of found) {
@@ -221,14 +216,13 @@ async function assemble(
       bookings.set(row.booking_id, booking);
     }
     if (!row.participant_id || row.position === null) continue;
-    const message = row.message_id ? (states.get(row.message_id) ?? null) : null;
     booking.unnamedPlaces -= 1;
     booking.participants.push({
       participantId: row.participant_id,
       position: row.position,
       name: row.full_name ?? "",
       minor: row.is_minor ?? false,
-      status: statusOf(row, booking.required, message),
+      status: statusOf(row, booking.required),
       request:
         row.request_id && row.state && row.required_signer && row.template_version !== null
           ? {
@@ -249,13 +243,21 @@ async function assemble(
                     }
                   : null,
               delivery:
-                row.generation !== null && row.kind && row.recipient_email && row.queued_at
+                row.generation !== null &&
+                row.kind &&
+                row.recipient_email &&
+                row.queued_at &&
+                row.message_state
                   ? {
                       generation: row.generation,
                       kind: row.kind,
                       recipient: maskEmail(row.recipient_email),
                       queuedAt: row.queued_at,
-                      message,
+                      message: {
+                        state: row.message_state,
+                        at: row.message_at,
+                        failureCode: row.message_error,
+                      },
                     }
                   : null,
               resendAvailableAt: resendAt(row),
@@ -271,15 +273,9 @@ export async function listBookingWaivers(
   trx: TenantTransaction,
   tenantId: string,
   bookingId: string,
-  messages: MessageStatusReader | null = null,
 ): Promise<BookingWaivers | null> {
   if (!isUuid(bookingId)) return null;
-  const [booking] = await assemble(
-    trx,
-    tenantId,
-    await rows(trx, tenantId, { bookingId }),
-    messages,
-  );
+  const [booking] = await assemble(trx, tenantId, await rows(trx, tenantId, { bookingId }));
   return booking ?? null;
 }
 
@@ -303,7 +299,6 @@ export async function listTripWaivers(
   trx: TenantTransaction,
   tenantId: string,
   tripId: string,
-  messages: MessageStatusReader | null = null,
 ): Promise<TripWaivers | null> {
   if (!isUuid(tripId)) return null;
   const trip = await trx
@@ -313,7 +308,7 @@ export async function listTripWaivers(
     .where("id", "=", tripId)
     .executeTakeFirst();
   if (!trip) return null;
-  const bookings = await assemble(trx, tenantId, await rows(trx, tenantId, { tripId }), messages);
+  const bookings = await assemble(trx, tenantId, await rows(trx, tenantId, { tripId }));
   const all = bookings.flatMap((b) => b.participants);
   return {
     tripId,

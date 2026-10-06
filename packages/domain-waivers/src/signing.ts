@@ -23,6 +23,7 @@ import { type BookingContext, loadBookingContext, tripFacts } from "./booking.ts
 import { sha256Hex } from "./content.ts";
 import { lockRequest } from "./delivery.ts";
 import { cleanLine, comparableName, formatInstant } from "./format.ts";
+import { closeRequestAccess } from "./links.ts";
 import type { WaiverDeps, WaiverParticipant } from "./ports.ts";
 import { maskEmail, RENDERING_VERSION, renderWaiverPdf } from "./render.ts";
 import { loadTemplateVersion, type TemplateVersionText } from "./templates.ts";
@@ -356,10 +357,13 @@ export async function signWaiver(
   const { problems, signature } = validate(input, version, participant, request.required_signer);
   if (problems.length > 0) return { kind: "invalid", problems };
 
+  // The address the session's link was emailed to: the link names its
+  // message, and the message its delivery generation.
   const { rows } = await sql<{ now: Date; recipient_email: string }>`
     select now() as now, d.recipient_email
       from waiver_signing_sessions s
-      join waiver_deliveries d on d.tenant_id = s.tenant_id and d.token_id = s.token_id
+      join guest_access_links l on l.tenant_id = s.tenant_id and l.id = s.access_link_id
+      join waiver_deliveries d on d.tenant_id = s.tenant_id and d.message_id = l.message_id
      where s.tenant_id = ${ctx.tenantId} and s.id = ${session.id}`.execute(trx);
   const facts = rows[0];
   if (!facts) throw new Error("a session's delivery was not found");
@@ -423,10 +427,9 @@ export async function signWaiver(
   await sql`
     update waiver_requests set state = 'signed'
      where tenant_id = ${ctx.tenantId} and id = ${request.id}`.execute(trx);
-  await sql`
-    update waiver_access_tokens set revoked_at = now(), revoked_reason = 'signed'
-     where tenant_id = ${ctx.tenantId} and request_id = ${request.id}
-       and redeemed_at is null and revoked_at is null`.execute(trx);
+  // Every other link to this waiver stops working, and no queued email goes
+  // out; the signer's own session stays open for the signed copy.
+  await closeRequestAccess(trx, ctx, request, { link: "completed", session: null });
   await recordAudit(trx, ctx, {
     action: "waiver_request.signed",
     subjectType: "waiver_request",

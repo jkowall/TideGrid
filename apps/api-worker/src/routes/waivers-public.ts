@@ -1,8 +1,6 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   WaiverLinkRedeemRequest,
-  WaiverLinkRenewRequest,
-  WaiverLinkRenewResponse,
   WaiverSessionOpenResponse,
   WaiverSessionResponse,
   type WaiverSigning,
@@ -16,7 +14,6 @@ import {
   loadWaiverSession,
   type RedeemResult,
   redeemWaiverToken,
-  renewWaiverLink,
   type SigningView,
   signWaiver,
   type WaiverSession,
@@ -33,7 +30,6 @@ const sessionsPath = "/v1/public/waiver-sessions";
 const currentPath = "/v1/public/waiver-sessions/current";
 const signaturePath = "/v1/public/waiver-sessions/current/signature";
 const documentPath = "/v1/public/waiver-sessions/current/document";
-const renewalPath = "/v1/public/waiver-links/renewal";
 
 const bearerSecurity = [{ waiverSession: [] }];
 
@@ -136,7 +132,7 @@ function closedRefusal(state: string): ApiError {
  * /v1/public/trips does, so another operator's token or session finds nothing.
  */
 export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
-  for (const path of [sessionsPath, "/v1/public/waiver-sessions/*", renewalPath]) {
+  for (const path of [sessionsPath, "/v1/public/waiver-sessions/*"]) {
     app.use(path, async (c, next) => {
       await next();
       c.header("Cache-Control", "no-store");
@@ -182,7 +178,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(openRoute, async (c) => {
     const { token } = c.req.valid("json");
-    const wdeps = waiverDeps(c.env, deps);
+    const wdeps = waiverDeps(deps);
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const opened = await redeemWaiverToken(trx, ctx, { token });
       if (opened.kind !== "opened") throw linkRefusal(opened);
@@ -225,7 +221,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(readRoute, async (c) => {
     const secret = sessionSecret(c);
-    const wdeps = waiverDeps(c.env, deps);
+    const wdeps = waiverDeps(deps);
     const { body } = await withPublicTenant(c, {}, async (trx, ctx) => {
       const session = await openSession(trx, ctx.tenantId, secret);
       return { waiver: signingJson(await getSigningView(trx, ctx.tenantId, wdeps, session)) };
@@ -272,7 +268,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
   app.openapi(signRoute, async (c) => {
     const secret = sessionSecret(c);
     const input = c.req.valid("json");
-    const wdeps = waiverDeps(c.env, deps);
+    const wdeps = waiverDeps(deps);
     const meta = signingMeta(c);
     let outcome:
       | { kind: "signed" | "already_signed"; waiver: WaiverSigning }
@@ -356,36 +352,5 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     });
     if (!doc) throw new Error("the document read produced nothing");
     return pdfResponse(c, doc.bytes, `waiver-${doc.reference}.pdf`);
-  });
-
-  const renewRoute = createRoute({
-    method: "post",
-    path: renewalPath,
-    tags: ["public", "waivers"],
-    summary: "Ask for a new waiver link",
-    description:
-      "Resolves the browser Origin. For the newest link of a waiver that still needs a signature (expired, already opened, or replaced), sends a new email to the address the booking has now, within the usual resend limits. Answers 202 whatever happened, so the answer says nothing about the link. Rate limited like other public commands.",
-    request: {
-      body: { required: true, content: { "application/json": { schema: WaiverLinkRenewRequest } } },
-    },
-    responses: {
-      202: {
-        content: { "application/json": { schema: WaiverLinkRenewResponse } },
-        description: "Accepted",
-      },
-      400: errorBody("Request did not match the contract"),
-      404: errorBody("No operator at this address"),
-      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
-    },
-  });
-
-  app.openapi(renewRoute, async (c) => {
-    const { token } = c.req.valid("json");
-    const wdeps = waiverDeps(c.env, deps);
-    await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
-      await renewWaiverLink(trx, ctx, wdeps, { token });
-      return {};
-    });
-    return c.json({ status: "accepted" as const }, 202);
   });
 }

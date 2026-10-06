@@ -161,14 +161,6 @@ export const WaiverSignProblemsResponse = z
   .describe("What to fix before signing, field by field");
 export type WaiverSignProblemsResponse = z.infer<typeof WaiverSignProblemsResponse>;
 
-export const WaiverLinkRenewRequest = WaiverLinkRedeemRequest;
-
-export const WaiverLinkRenewResponse = z
-  .object({ status: z.literal("accepted") })
-  .describe(
-    "The same answer whatever happened, so it says nothing about the link. When the link was the newest for a waiver that still needs a signature, a new email goes to the address the booking has now",
-  );
-
 // Staff ------------------------------------------------------------------------------
 
 export const WaiverStatusCode = z
