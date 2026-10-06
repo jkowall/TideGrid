@@ -26,7 +26,7 @@ The inbox row is written only after the webhook route verifies the provider's si
 - **Refund.** The full amount of a payment that succeeded but could not be honored, one per payment, with its own idempotency key.
 - **Finalization exception.** One per verified success that could not become a booking, for the operator: the reason, and the refund.
 
-The booker's name and email are the only personal data. They are kept on the checkout session for the booking and its later messages, and never enter audit rows, events, logs, URLs, provider calls, or API responses other than the staff bookings read.
+The booker's name and email are the only personal data. They are kept on the checkout session for the booking and its later messages, and never enter audit rows, events, logs, URLs, provider calls, or API responses other than the staff reads for roles that hold `bookings.read` (see [console reads](#console-reads-g212b)).
 
 ### Checkout states
 
@@ -74,7 +74,13 @@ settleRefund(db, provider, ctx, refundId)             // outside any transaction
 expireCheckoutSessions(trx, ctx, { limit })
 sweepCheckouts(db, { runId, provider, ... })          // the cron
 listTripBookings(trx, tenantId, tripId)               // staff
-listFinalizationExceptions(trx, tenantId, { limit })  // staff
+listFinalizationExceptions(trx, tenantId, { limit })  // staff, no personal data
+// Console reads (G2.12b), below
+listDayBookings(trx, tenantId, { date, tripId?, limit, after?, withBooker })
+getBookingDetail(trx, tenantId, bookingId, { withBooker })
+findBookingByReference(trx, tenantId, reference)
+getTripRoster(trx, tenantId, tripId)
+listExceptionsPage(trx, tenantId, { limit, before?, withBooker })
 ```
 
 ### Opening a checkout
@@ -141,6 +147,21 @@ The expiry never waits on a lock. It takes checkouts and then their holds with S
 
 An open checkout whose hold is missing, released, or confirmed cannot commit: the hold's foreign key and owner, and `capacity_holds_checkout`, refuse it. Only a writer that bypassed a trigger could leave one. If one exists, the expiry leaves it open, counts it as `skipped`, and reports it through `onError` as an `InconsistentCheckoutError` with the checkout's id, every run, for an operator. The cron logs it as an error. It never fails the rest of its tenant's batch.
 
+### Console reads (G2.12b)
+
+The operator console's booking views read through `src/console.ts`, under the caller's tenant transaction, with the tenant named in every query. The contract is [packages/contracts/src/bookings.ts](../contracts/src/bookings.ts); the console's side is in the [console README](../../apps/operator-site/README.md#booking-views-g212b).
+
+- **Who sees the booker.** Every read takes `withBooker`, which the API sets from the role: true only with `bookings.read` (owners and booking staff). When it is false the query does not select the booker's name or email at all, so a view for finance never holds them. The roster always names the booker and its route needs `bookings.read`.
+- **What never leaves.** No checkout secret or its hash, client key, idempotency key, payload hash, raw provider payload, or account reference. A provider payment id leaves only masked, `maskProviderReference`: its prefix up to the first underscore and, when at least twelve characters follow, the last four (`fpay_••••a1B2`).
+- **A day.** `listDayBookings` reads the date's trips with their booking and guest counts and a page of bookings ordered by departure, trip, confirmation, and booking id. The cursor is the previous page's last booking id; the position is read in SQL, so the database's own timestamp precision orders the page, and the same cursor always returns the same page while nothing new is booked before it. A cursor that names no booking in the listing (this tenant, this date, and the trip when one is given) answers `cursor_invalid`. The API runs it in one snapshot (`snapshotRead` in the [database contract](../database/README.md#commands-audit-idempotency-and-outbox)), so the counts and the page agree even while bookings confirm; the test specialist's suite caught them disagreeing before that.
+- **Every console read runs in a snapshot** for the same reason, and the routes answer `Cache-Control: no-store` on refusals as well as on success.
+- **Limits.** A day lists its first 200 trips by departure. A booking on a later trip would have no trip to show under; no marina runs that many departures in a day, so the list has no truncation flag yet. A roster holds at most a trip's capacity.
+- **Ids are lowercase.** The contract accepts a UUID in either case, but ids are matched as the API writes them, in lowercase, as everywhere else in the API (`isUuid` in `@tidegrid/database`): an uppercase booking or trip id is not found, and an uppercase cursor is `cursor_invalid`. The console sends ids as it received them.
+- **Party and extras** come from the immutable order: one service line per ticket type on a shared-seat trip, or the charter line and the booking's party size on a charter, and the add-on lines.
+- **A booking** carries its order's lines with each tax line's rate, the payment, any refund, and a timeline: checkout opened, paid, confirmed, and the refund's request and outcome.
+- **By reference.** `findBookingByReference` takes the issued form; the API normalizes what was typed first.
+- **Exceptions.** `listExceptionsPage` adds the trip, the checkout's state and expiry, and what the provider's event reported (when it arrived, the amount, the currency) to G2.7's read, newest first by creation and id, with a `before` cursor. G2.7's `listFinalizationExceptions` now delegates to it with no booker.
+
 ## Lock order
 
 Inbox event, checkout session, payment, trip, hold, then the order and the rest. Opening a checkout takes transaction-scoped advisory locks on the quote and the client address before any row lock, then the trip and its holds. The database's own checks lock the payment row before inserting a booking or a refund for it, so the two can never both be written. Expiring a checkout takes its session and then its hold row with SKIP LOCKED, never waiting and never touching the trip. External calls never run inside a transaction. Every command needs READ COMMITTED, as the inventory commands do.
@@ -180,7 +201,11 @@ Hold transitions keep their own `hold.*` audit rows and `inventory.hold.*` event
 | `POST /v1/public/checkout-sessions/{id}/cancel` | 200 checkout; 401; 404; 409 `checkout_not_cancelable`; 429 |
 | `POST /v1/webhooks/payments/{provider}` | 200 `{ received, duplicate, outcome }`; 400 `signature_invalid`, `payload_invalid`; 403 `origin_not_allowed`; 404; 413 `payload_too_large` |
 | `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/bookings` | owners and booking staff; the trip's bookings with booker contact |
-| `GET /v1/staff/tenants/{tenantId}/finalization-exceptions` | every role; newest first |
+| `GET /v1/staff/tenants/{tenantId}/finalization-exceptions?limit=&before=` | every role; newest first, a page at a time; who paid only with `bookings.read`; 400 `cursor_invalid` |
+| `GET /v1/staff/tenants/{tenantId}/bookings?date=&tripId=&limit=&after=` | every role (G2.12b); a local date's trips and a page of its bookings; 400 `cursor_invalid` |
+| `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}` | every role (G2.12b); 404 `booking_not_found` |
+| `GET /v1/staff/tenants/{tenantId}/booking-references/{reference}` | every role (G2.12b); 404 `booking_not_found` |
+| `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/roster` | owners and booking staff (G2.12b); 403 for finance; 404 `trip_not_found` |
 
 What the guest checkout UI calls:
 
@@ -198,8 +223,8 @@ The checkout secret and the client secret travel in headers and bodies only, nev
 - **A late success gets no priority (owner to decide).** It reacquires only if its seats are still free, and new checkouts queued for the same trip usually take them first: in the test specialist's race with no sweep, 1 of 10 late payments reacquired and 9 were refunded. Every one was handled correctly, but a guest who paid a little late is refunded rather than booked. If that is not acceptable, the remedy is a grace period: hold the seats a few minutes longer than the checkout window the guest is shown, so a payment made at the last moment still finds them.
 - Nothing reconciles a payment whose webhook never arrives, other than the provider's own retries (Stripe retries for days; the fake can redeliver). The adapter's `retrievePayment` is the seam for the reconciliation goal (G2.10).
 - The booker's name and email stay on abandoned checkouts. A retention job should clear them after a set time before real guests use the system.
-- Finalization exceptions have no resolution workflow yet; the console goal adds one.
-- The staff bookings read has no pagination.
+- Finalization exceptions are listed in the console (G2.12b) but have no resolution workflow yet; G2.12 adds one.
+- A trip's bookings read (G2.7) has no pagination; the console's day list pages with a cursor, and a roster is complete because a trip seats at most 500.
 - A Stripe adapter must map Stripe's events onto the neutral kinds: a declined attempt the guest may retry is not `payment.failed`, and Stripe's pending refunds need refund events, which the inbox records as `other` today.
 - Expired checkouts and their orders stay `expired` and `pending`: a late success may still confirm them.
 
