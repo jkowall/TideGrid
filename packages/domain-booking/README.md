@@ -36,15 +36,17 @@ States move one way; triggers refuse anything else, for every role.
 |---|---|---|
 | (new) | open | Created, with an active hold expiring when the session does |
 | open | confirmed | A verified success confirmed the hold and created the booking |
-| open | failed | A verified failure; the hold is released and the order void |
+| open | failed | A verified failure; the hold is released, or stays expired if it already was, and the order void |
 | open | expired | Past its instant (the sweep); the hold is marked expired, not released |
-| open | canceled | The guest abandoned it; the hold is released and the order void |
+| open | canceled | The guest abandoned it; the hold is released, or stays expired if it already was, and the order void |
 | open | unfulfilled | A verified success could not be honored; refund and exception |
 | expired | confirmed | A late success reacquired the capacity |
 | expired | unfulfilled | A late success could not reacquire it; refund and exception |
-| failed, canceled | unfulfilled | A success arrived after the hold was released; refund and exception |
+| failed, canceled | unfulfilled | A success arrived after the checkout failed or was canceled; refund and exception |
 
 `unfulfilled` means "the money arrived and is going back": the guest sees the refund's state. It is never a sale; an order is `paid` only with a booking. An open session past its instant reads as `expired` to the guest at once, before the sweep writes it.
+
+A lapsed checkout's hold can be marked expired before the checkout is: acquisition and late confirmation expire every due hold on their trip, and the cron's hold sweep runs before the checkout sweep. Such a checkout can still fail or be canceled. Its hold stays expired, because an expired hold is never released, and its seats are free either way. The database accepts a released or an expired hold as the evidence for `failed`, `canceled`, and `unfulfilled`.
 
 ## Commands
 
@@ -106,14 +108,14 @@ An event id the inbox already holds with a different body, in this tenant or ano
 | success | failed | refund and exception (`session_failed`): the provider had said it failed | `refund_required` |
 | success | succeeded | nothing | `already_succeeded` |
 | success | amount, currency, account, or provider id differs | exception `payment_mismatch`, no automatic refund, nothing else | `payment_mismatch` |
-| failure | pending; open | hold released, payment failed, order void, checkout failed | `released` |
+| failure | pending; open | hold released (or left expired), payment failed, order void, checkout failed | `released` |
 | failure | pending; expired or canceled | payment failed, order void | `failure_recorded` |
 | failure | succeeded | nothing: a failure delivered after a success | `ignored_after_success` |
 | failure | failed | nothing | `already_failed` |
 | either | no payment of this tenant matches | nothing | `unmatched_payment` |
 | other kinds | | nothing | `ignored_event_type` |
 
-`payment.failed` means the provider will not complete the payment. A success after it is an anomaly and is refunded, never booked: the hold was released, and a released hold is final.
+`payment.failed` means the provider will not complete the payment. A success after it is an anomaly and is refunded, never booked: the checkout closed when the failure arrived, and its hold no longer takes seats.
 
 A late success gets no priority over acquisitions already queued on the trip, as the inventory README notes: it reacquires only if the seats are still free. Otherwise the guest is refunded in full and the operator sees the exception.
 
@@ -125,7 +127,7 @@ The refund row is the intent, committed with the decision. `settleRefund` then c
 
 `cancelCheckoutSession` releases an open checkout's hold at once and voids its order, so the guest can re-quote a changed party without their own hold counting against them (the G2.6 follow-up). Repeating it changes nothing; a closed checkout answers `not_cancelable`. A payment that succeeds afterwards anyway is refunded.
 
-An open checkout past its instant, which the guest already sees as `expired`, can still be canceled until the sweep writes the expiry down, and becomes `canceled`. That respects what the guest asked for: a payment that succeeds afterwards is refunded rather than reacquiring seats the guest gave up.
+An open checkout past its instant, which the guest already sees as `expired`, can still be canceled until the checkout sweep writes its expiry down, and becomes `canceled`. That holds whether its hold is still stored active or has already been marked expired by another checkout on its trip, a late confirmation, or the hold sweep; an expired hold stays expired. That respects what the guest asked for: a payment that succeeds afterwards is refunded rather than reacquiring seats the guest gave up.
 
 ### The sweep
 

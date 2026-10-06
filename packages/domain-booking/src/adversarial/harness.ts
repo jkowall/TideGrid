@@ -754,15 +754,23 @@ export async function auditLedger(admin: Sql, tenantIds: readonly string[]): Pro
         expect(r.refund_exceptions === 1, `${r.refund_exceptions} refund exceptions`);
         expect(r.hold === "released" || r.hold === "expired", `unfulfilled with a ${r.hold} hold`);
         break;
+      // A lapsed checkout's hold may already have been marked expired when it
+      // fails or is canceled; the seats are free either way.
       case "failed":
         expect(r.bookings === 0 && r.refunds === 0, "failed with a booking or refund");
         expect(r.payment === "failed", `failed with a ${r.payment} payment`);
-        expect(r.hold === "released", `failed with a ${r.hold} hold`);
+        expect(
+          r.hold === "released" || (r.lapsed && r.hold === "expired"),
+          `failed with a ${r.hold} hold`,
+        );
         expect(r.order_status === "void", `failed with a ${r.order_status} order`);
         break;
       case "canceled":
         expect(r.bookings === 0 && r.refunds === 0, "canceled with a booking or refund");
-        expect(r.hold === "released", `canceled with a ${r.hold} hold`);
+        expect(
+          r.hold === "released" || (r.lapsed && r.hold === "expired"),
+          `canceled with a ${r.hold} hold`,
+        );
         expect(r.order_status === "void", `canceled with a ${r.order_status} order`);
         expect(r.payment !== "succeeded", "canceled with a succeeded payment");
         break;

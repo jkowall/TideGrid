@@ -533,8 +533,12 @@ CREATE TRIGGER provider_events_rules BEFORE INSERT OR UPDATE ON public.provider_
 -- the database clock, for the quote's trip, party, and policy, with an active
 -- hold this session owns that expires when the session does. Afterwards only
 -- the state moves, one way, and each move needs its evidence: a booking to
--- confirm, a refund exception to close as unfulfilled, a released hold to fail
--- or cancel, an expired hold to expire.
+-- confirm, a refund exception to close as unfulfilled, a hold that no longer
+-- takes seats (released or expired) to fail or cancel, an expired hold to
+-- expire. A lapsed checkout's hold can be marked expired before the checkout
+-- is: acquisition and confirmation expire every due hold on their trip, and
+-- the hold sweep runs before the checkout sweep. Such a checkout can still be
+-- failed or canceled; its seats are free either way.
 CREATE FUNCTION app.check_checkout_session() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -543,6 +547,7 @@ DECLARE
   q record;
   h record;
   hold_state text;
+  seats_free boolean;
   payment_state text;
 BEGIN
   IF TG_OP = 'INSERT' THEN
@@ -638,6 +643,8 @@ BEGIN
   SELECT x.state INTO hold_state
     FROM public.capacity_holds x
    WHERE x.tenant_id = NEW.tenant_id AND x.id = NEW.hold_id;
+  -- False, not null, when the hold is missing.
+  seats_free := coalesce(hold_state IN ('released', 'expired'), false);
   SELECT x.state INTO payment_state
     FROM public.payments x
    WHERE x.tenant_id = NEW.tenant_id AND x.checkout_session_id = NEW.id;
@@ -653,7 +660,7 @@ BEGIN
     NEW.confirmed_at := now();
   ELSIF NEW.state = 'unfulfilled' THEN
     IF payment_state IS DISTINCT FROM 'succeeded'
-       OR hold_state NOT IN ('released', 'expired')
+       OR NOT seats_free
        OR NOT EXISTS (SELECT 1 FROM public.finalization_exceptions e
                        WHERE e.tenant_id = NEW.tenant_id AND e.checkout_session_id = NEW.id
                          AND e.refund_id IS NOT NULL)
@@ -664,8 +671,8 @@ BEGIN
     END IF;
     NEW.unfulfilled_at := now();
   ELSIF NEW.state = 'failed' THEN
-    IF payment_state IS DISTINCT FROM 'failed' OR hold_state IS DISTINCT FROM 'released' THEN
-      RAISE EXCEPTION 'checkout session % fails only on a failed payment with its hold released', NEW.id
+    IF payment_state IS DISTINCT FROM 'failed' OR NOT seats_free THEN
+      RAISE EXCEPTION 'checkout session % fails only on a failed payment with its hold released or expired', NEW.id
         USING ERRCODE = '23514', CONSTRAINT = 'checkout_sessions_evidence';
     END IF;
     NEW.failed_at := now();
@@ -676,8 +683,8 @@ BEGIN
     END IF;
     NEW.expired_at := now();
   ELSE
-    IF hold_state IS DISTINCT FROM 'released' THEN
-      RAISE EXCEPTION 'checkout session % is canceled only with its hold released', NEW.id
+    IF NOT seats_free THEN
+      RAISE EXCEPTION 'checkout session % is canceled only with its hold released or expired', NEW.id
         USING ERRCODE = '23514', CONSTRAINT = 'checkout_sessions_evidence';
     END IF;
     NEW.canceled_at := now();
