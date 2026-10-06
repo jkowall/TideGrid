@@ -2,9 +2,46 @@ import { applyBrandTheme } from "@tidegrid/design-system/brand";
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { BrandedShell } from "./BrandedShell.tsx";
 import { type Experience, loadExperience, settle } from "./bootstrap.ts";
+import { NavigationProvider } from "./navigation.tsx";
 import { FailedState, LoadingState, NotPublishedState, NotReadyState } from "./States.tsx";
 
 type State = { kind: "loading" } | Experience;
+
+/** The page shown, and how many in-page moves led here: 0 for the page the browser loaded. */
+interface Place {
+  pathname: string;
+  moves: number;
+}
+
+/**
+ * The guest site's pages share one brand, so moving between them happens in
+ * place: the address changes through the History API and the shell renders
+ * the new page, with no new load of the operator's brand. Back and Forward
+ * work through popstate.
+ */
+function usePlace(): [Place, (href: string) => void] {
+  const [place, setPlace] = useState<Place>(() => ({
+    pathname: window.location.pathname,
+    moves: 0,
+  }));
+  const navigate = useCallback((href: string) => {
+    const url = new URL(href, window.location.href);
+    if (url.origin !== window.location.origin) {
+      window.location.assign(url.href);
+      return;
+    }
+    window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    window.scrollTo?.(0, 0);
+    setPlace((p) => ({ pathname: url.pathname, moves: p.moves + 1 }));
+  }, []);
+  useEffect(() => {
+    const onPop = () =>
+      setPlace((p) => ({ pathname: window.location.pathname, moves: p.moves + 1 }));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  return [place, navigate];
+}
 
 function setMeta(name: string, content: string) {
   const meta = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
@@ -33,6 +70,7 @@ function setTabIcon(src: string | undefined): () => void {
  */
 export function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const [place, navigate] = usePlace();
   const [retrying, setRetrying] = useState(false);
   // "Try again" disappears when it succeeds, so the page it brings in takes
   // focus. A first load leaves focus at the top of the document.
@@ -82,12 +120,16 @@ export function App() {
       return <LoadingState />;
     case "ready":
       return (
-        <BrandedShell
-          tenant={state.tenant}
-          brand={state.brand}
-          path={window.location.pathname}
-          focusHeading={retried}
-        />
+        <NavigationProvider navigate={navigate}>
+          <BrandedShell
+            // A new page for each move, so no page keeps another's state.
+            key={place.moves}
+            tenant={state.tenant}
+            brand={state.brand}
+            path={place.pathname}
+            focusHeading={retried || place.moves > 0}
+          />
+        </NavigationProvider>
       );
     case "not-published":
       return <NotPublishedState host={window.location.hostname} />;

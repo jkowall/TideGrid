@@ -1,6 +1,7 @@
-import type { AvailableTrip, PublicBrand } from "@tidegrid/contracts";
+import type { AvailableTrip } from "@tidegrid/contracts";
 import {
   Button,
+  ButtonLink,
   cx,
   EmptyState,
   Icon,
@@ -24,7 +25,8 @@ import {
   zoneCity,
 } from "@tidegrid/design-system/format";
 import { type Ref, useEffect, useRef, useState } from "react";
-import { ContactActions } from "./Contact.tsx";
+import { bookingHref } from "./booking/address.ts";
+import { useLinkClick } from "./navigation.tsx";
 import {
   clampStart,
   groupByDate,
@@ -41,9 +43,10 @@ import {
 
 /**
  * Upcoming trips on an operator's branded site: four weeks at a time, for a
- * party size, grouped by the marina's local date. Discovery only. Booking and
- * checkout arrive with later goals, so a trip has no Book button; the one
- * primary action is reaching the operator.
+ * party size, grouped by the marina's local date. Each trip has a Book link
+ * to its checkout (G2.11b), carrying the party size chosen here. The links are
+ * secondary buttons: one per trip, none outranks another, so the list itself
+ * has no primary action unless trips fail to load and "Try again" takes it.
  */
 
 interface Loaded {
@@ -63,7 +66,7 @@ const partyOptions = partySizes.map((n) => ({ value: String(n), label: guests(n)
 const currentYear = () => new Date().getFullYear();
 const sameQuery = (a: TripQuery, b: TripQuery) => a.start === b.start && a.party === b.party;
 
-export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
+export function UpcomingTrips() {
   // The guest's own date. Trip dates are the marina's; see windowOf.
   const [today] = useState(() => todayIn());
   const [query, setQuery] = useState<TripQuery>(() => readQuery(window.location.search, today));
@@ -187,16 +190,6 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
         )}
       </div>
 
-      <Notice
-        tone="info"
-        announce="none"
-        className="trips__reserve"
-        title="Online booking isn't open yet"
-        actions={<ContactActions brand={brand} primary={!failed} />}
-      >
-        <p>Call or email {brand.name} to reserve a spot on any trip below.</p>
-      </Notice>
-
       <div className="trips__controls">
         <SelectField
           className="trips__party"
@@ -241,7 +234,7 @@ export function UpcomingTrips({ brand }: { brand: PublicBrand }) {
       {shown &&
         (shown.trips.length > 0 ? (
           <>
-            <TripList trips={shown.trips} busy={updating} />
+            <TripList trips={shown.trips} busy={updating} party={shown.query.party} />
             <RangeNav
               bottom
               label={label}
@@ -439,7 +432,16 @@ function TimeNote({
   );
 }
 
-function TripList({ trips, busy }: { trips: readonly AvailableTrip[]; busy: boolean }) {
+function TripList({
+  trips,
+  busy,
+  party,
+}: {
+  trips: readonly AvailableTrip[];
+  busy: boolean;
+  /** The party size the list was asked for, carried to the booking page. */
+  party: number;
+}) {
   const days = groupByDate(trips);
   const showZone = new Set(trips.map((t) => t.timeZone)).size > 1;
   return (
@@ -466,7 +468,7 @@ function TripList({ trips, busy }: { trips: readonly AvailableTrip[]; busy: bool
             </h3>
             <ul className="trips-day__list">
               {day.trips.map((trip) => (
-                <TripCard key={trip.tripId} trip={trip} showZone={showZone} />
+                <TripCard key={trip.tripId} trip={trip} showZone={showZone} party={party} />
               ))}
             </ul>
           </section>
@@ -487,7 +489,16 @@ function bookBy(trip: AvailableTrip): string {
   return `Book by ${formatCutoff(trip.salesCloseAt, trip)}`;
 }
 
-function TripCard({ trip, showZone }: { trip: AvailableTrip; showZone: boolean }) {
+function TripCard({
+  trip,
+  showZone,
+  party,
+}: {
+  trip: AvailableTrip;
+  showZone: boolean;
+  party: number;
+}) {
+  const linkClick = useLinkClick();
   // The stored local start, never recomputed from the instant with the
   // browser's zone data. In the hour clocks go back, it names its zone.
   const start = formatTripTime(trip.localStartTime, trip.startsAt, trip.timeZone);
@@ -525,6 +536,20 @@ function TripCard({ trip, showZone }: { trip: AvailableTrip; showZone: boolean }
           <span>{bookBy(trip)}</span>
         </li>
       </ul>
+      <div className="trip-card__action">
+        <ButtonLink
+          href={bookingHref(trip.tripId, party)}
+          onClick={linkClick}
+          icon="chevron-right"
+          iconPosition="end"
+        >
+          Book{" "}
+          <VisuallyHidden>
+            {trip.product.name}, {formatDate(trip.localDate, "full")}, {start}
+            {place}
+          </VisuallyHidden>
+        </ButtonLink>
+      </div>
     </li>
   );
 }
