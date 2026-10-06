@@ -18,6 +18,7 @@ import {
   publishProduct,
   ZoneDataMismatchError,
 } from "./index.ts";
+import { addMinimalSaleTerms } from "./sale-terms.fixture.ts";
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -92,6 +93,8 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
         eligibleBoatIds: [a.smallBoat],
         reason: "fixture",
       });
+      await addMinimalSaleTerms(trx, c, a.product);
+      await addMinimalSaleTerms(trx, c, a.charter);
       expect((await publishProduct(trx, c, { productId: a.product, reason: "fixture" })).kind).toBe(
         "published",
       );
@@ -128,6 +131,7 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
         eligibleBoatIds: [b.boat],
         reason: "fixture",
       });
+      await addMinimalSaleTerms(trx, c, b.product);
       await publishProduct(trx, c, { productId: b.product, reason: "fixture" });
       const schedule = await createSchedule(trx, c, {
         productId: b.product,
@@ -547,6 +551,7 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
           eligibleBoatIds: [a.boat, boat],
           reason: "test",
         });
+        await addMinimalSaleTerms(trx, c, id);
         return [id, boat] as const;
       });
       await admin`update public.boats set status = 'retired' where id = ${spare}`;
@@ -590,13 +595,61 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
       });
       expect(results[0]).toEqual({
         kind: "not_publishable",
-        problems: ["product_missing_eligible_boat"],
+        problems: [
+          "product_missing_eligible_boat",
+          "product_missing_price",
+          "product_missing_policy",
+        ],
       });
       expect(results[1]).toEqual({
         kind: "not_publishable",
-        problems: ["product_party_exceeds_capacity"],
+        problems: [
+          "product_party_exceeds_capacity",
+          "product_missing_price",
+          "product_missing_policy",
+        ],
       });
       expect(results[2]?.kind).toBe("unchanged");
+    });
+
+    it("needs a price list and a policy, and the database holds the rule for every writer", async () => {
+      const productId = await inA((trx) =>
+        createProduct(trx, ctx(A.id), {
+          locationId: a.location,
+          kind: "shared_seat",
+          name: "Unpriced",
+          durationMinutes: 60,
+          maxPartySize: 4,
+          eligibleBoatIds: [a.boat],
+          reason: "test",
+        }),
+      );
+      const attempt = () =>
+        inA((trx) => publishProduct(trx, ctx(A.id), { productId, reason: "test" }));
+      expect(await attempt()).toEqual({
+        kind: "not_publishable",
+        problems: ["product_missing_price", "product_missing_policy"],
+      });
+      // Writing the status directly, as the runtime or as the owner, is refused too.
+      expect(
+        await pgCode(
+          inA((trx) =>
+            trx
+              .updateTable("products")
+              .set({ sales_status: "published" })
+              .where("tenant_id", "=", A.id)
+              .where("id", "=", productId)
+              .execute(),
+          ),
+        ),
+      ).toBe("23514");
+      expect(
+        await pgCode(
+          admin`update public.products set sales_status = 'published' where id = ${productId}`,
+        ),
+      ).toBe("23514");
+      await inA((trx) => addMinimalSaleTerms(trx, ctx(A.id), productId));
+      expect((await attempt()).kind).toBe("published");
     });
   });
 

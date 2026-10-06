@@ -14,6 +14,8 @@ export interface Bindings {
   HYPERDRIVE?: { connectionString: string };
   /** Optional per-IP limiter for the sign-in endpoints. */
   AUTH_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /** Optional limiter for public commands, per client address and tenant. */
+  PUBLIC_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
 export function databaseUrl(env: Bindings): string | undefined {

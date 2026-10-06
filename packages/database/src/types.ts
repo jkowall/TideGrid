@@ -267,7 +267,196 @@ export interface BrandActivationsTable {
   reason: ColumnType<string, string, never>;
 }
 
-export interface Database {
+// Pricing, policies, and quotes (migration 0005) ---------------------------------
+// Every table is append-only for every role: the runtime may insert and read.
+// Money is integer US cents; tax rates are parts per million; discounts and
+// refunds are basis points. `created_txid` is stamped by the database.
+
+/** Who may write terms. Guests never do; they may only create quotes. */
+export type TermsActorType = "staff" | "system" | "support";
+export type PriceItemKind = "ticket" | "charter" | "fee" | "add_on";
+export type ChargeBasis = "per_booking" | "per_participant";
+export type PolicyRemedy = "full_refund" | "percent_refund" | "credit" | "none";
+export type DiscountKind = "fixed_amount" | "percent";
+export type QuoteLineKind = "ticket" | "charter" | "add_on" | "fee" | "discount";
+
+type Insert<T> = ColumnType<T, T, never>;
+type InsertDefault<T> = ColumnType<T, T | undefined, never>;
+/** Stamped by a trigger on insert; never written or read by application code. */
+type CreatedTxid = ColumnType<string, never, never>;
+interface TermsAuthor {
+  created_at: CreatedAt;
+  actor_type: InsertDefault<TermsActorType>;
+  actor_id: InsertDefault<string | null>;
+  request_id: InsertDefault<string | null>;
+}
+
+export interface PriceListVersionsTable extends TermsAuthor {
+  tenant_id: TenantColumn;
+  product_id: Insert<string>;
+  version: Insert<number>;
+  product_kind: Insert<ProductKind>;
+  currency: InsertDefault<"USD">;
+  created_txid: CreatedTxid;
+  reason: Insert<string>;
+}
+
+export interface PriceListItemsTable {
+  tenant_id: TenantColumn;
+  product_id: Insert<string>;
+  version: Insert<number>;
+  product_kind: Insert<ProductKind>;
+  item_kind: Insert<PriceItemKind>;
+  code: Insert<string>;
+  name: Insert<string>;
+  unit_amount: Insert<number>;
+  taxable: Insert<boolean>;
+  basis: InsertDefault<ChargeBasis | null>;
+  max_quantity: InsertDefault<number | null>;
+  /** Local dates; see DateColumn. Add-ons only. */
+  available_from: ColumnType<Date | null, string | null | undefined, never>;
+  available_until: ColumnType<Date | null, string | null | undefined, never>;
+  sort_order: Insert<number>;
+}
+
+export interface PolicyVersionsTable extends TermsAuthor {
+  tenant_id: TenantColumn;
+  product_id: Insert<string>;
+  version: Insert<number>;
+  change_cutoff_minutes: Insert<number>;
+  before_cutoff_remedy: Insert<PolicyRemedy>;
+  before_cutoff_refund_bp: InsertDefault<number | null>;
+  after_cutoff_remedy: Insert<PolicyRemedy>;
+  after_cutoff_refund_bp: InsertDefault<number | null>;
+  no_show_remedy: Insert<PolicyRemedy>;
+  no_show_refund_bp: InsertDefault<number | null>;
+  cancellation_text: Insert<string>;
+  reschedule_text: Insert<string>;
+  no_show_text: Insert<string>;
+  operator_cancellation_text: Insert<string>;
+  weather_text: Insert<string>;
+  reason: Insert<string>;
+}
+
+export interface TaxRateVersionsTable extends TermsAuthor {
+  tenant_id: TenantColumn;
+  tax_rate_id: Insert<string>;
+  version: Insert<number>;
+  name: Insert<string>;
+  rate_ppm: Insert<number>;
+  inclusive: Insert<boolean>;
+  active: Insert<boolean>;
+  reason: Insert<string>;
+}
+
+export interface PromotionsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  /** Upper case; unique per tenant. */
+  code: Insert<string>;
+  created_at: CreatedAt;
+  actor_type: InsertDefault<TermsActorType>;
+  actor_id: InsertDefault<string | null>;
+  request_id: InsertDefault<string | null>;
+}
+
+export interface PromotionVersionsTable extends TermsAuthor {
+  tenant_id: TenantColumn;
+  promotion_id: Insert<string>;
+  version: Insert<number>;
+  discount_kind: Insert<DiscountKind>;
+  amount_off: InsertDefault<number | null>;
+  percent_off_bp: InsertDefault<number | null>;
+  currency: InsertDefault<"USD">;
+  starts_at: Instant;
+  ends_at: Instant;
+  applies_to_all_products: Insert<boolean>;
+  active: Insert<boolean>;
+  created_txid: CreatedTxid;
+  reason: Insert<string>;
+}
+
+export interface PromotionVersionProductsTable {
+  tenant_id: TenantColumn;
+  promotion_id: Insert<string>;
+  version: Insert<number>;
+  product_id: Insert<string>;
+}
+
+export interface QuotesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  trip_id: Insert<string>;
+  product_id: Insert<string>;
+  product_kind: Insert<ProductKind>;
+  product_name: Insert<string>;
+  trip_time_zone: Insert<string>;
+  trip_local_date: DateColumn;
+  /** "HH:MM:SS". */
+  trip_local_start_time: Insert<string>;
+  trip_starts_at: Instant;
+  trip_start_utc_offset_minutes: Insert<number>;
+  price_list_version: Insert<number>;
+  policy_version: Insert<number>;
+  promotion_id: InsertDefault<string | null>;
+  promotion_version: InsertDefault<number | null>;
+  currency: InsertDefault<"USD">;
+  party_size: Insert<number>;
+  subtotal_amount: Insert<number>;
+  discount_amount: Insert<number>;
+  fee_amount: Insert<number>;
+  tax_amount: Insert<number>;
+  included_tax_amount: Insert<number>;
+  total_amount: Insert<number>;
+  quoted_at: Instant;
+  expires_at: Instant;
+  created_at: CreatedAt;
+  created_txid: CreatedTxid;
+  actor_type: InsertDefault<ActorType>;
+  actor_id: InsertDefault<string | null>;
+  request_id: InsertDefault<string | null>;
+}
+
+export interface QuoteLinesTable {
+  tenant_id: TenantColumn;
+  quote_id: Insert<string>;
+  line_no: Insert<number>;
+  kind: Insert<QuoteLineKind>;
+  code: Insert<string>;
+  name: Insert<string>;
+  basis: InsertDefault<ChargeBasis | null>;
+  quantity: Insert<number>;
+  unit_amount: Insert<number>;
+  amount: Insert<number>;
+  discount_amount: InsertDefault<number>;
+  taxable: Insert<boolean>;
+}
+
+export interface QuoteLineTaxesTable {
+  tenant_id: TenantColumn;
+  quote_id: Insert<string>;
+  line_no: Insert<number>;
+  tax_rate_id: Insert<string>;
+  tax_rate_version: Insert<number>;
+  taxable_amount: Insert<number>;
+  amount: Insert<number>;
+}
+
+/** Tables added by migration 0005, merged into Database below. */
+interface PricingTables {
+  price_list_versions: PriceListVersionsTable;
+  price_list_items: PriceListItemsTable;
+  policy_versions: PolicyVersionsTable;
+  tax_rate_versions: TaxRateVersionsTable;
+  promotions: PromotionsTable;
+  promotion_versions: PromotionVersionsTable;
+  promotion_version_products: PromotionVersionProductsTable;
+  quotes: QuotesTable;
+  quote_lines: QuoteLinesTable;
+  quote_line_taxes: QuoteLineTaxesTable;
+}
+
+export interface Database extends PricingTables {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
   tenant_hostnames: TenantHostnamesTable;

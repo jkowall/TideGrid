@@ -22,6 +22,7 @@
     "zod": "^4.1.0",
     "@tidegrid/domain-catalog": "workspace:*",
     "@tidegrid/domain-identity": "workspace:*",
+    "@tidegrid/domain-pricing": "workspace:*",
     "jose": "^6.2.0",
     "kysely": "^0.29.0"
   },

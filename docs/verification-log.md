@@ -60,6 +60,65 @@ This log records each dated verification pass over the throwaway guest workflow 
   - the marina's "today" follows the alphabetically first active location, which matters only for an operator with locations in two zones;
   - if someone else changes a trip between a lost answer and its replay, the change note can disagree with the reloaded badge.
 
+### G2.5 Pricing, add-ons, fees, and policies verification, October 5, 2026
+
+- Built on branch `build/g2.5-pricing-and-policies` from `a541eab`:
+  - migration 0005: per-product price lists (ticket types or a charter price, mandatory fees, and paid add-ons with optional date ranges), per-product policy versions, tenant tax rates (inclusive or exclusive), promotion codes with versioned terms, and immutable quotes with their lines and per-line taxes;
+  - `packages/domain-pricing`: the pure quote computation, commands that append versions, loaders, and the quote and offer services;
+  - `GET /v1/public/trips/{tripId}/offer`, an idempotent `POST /v1/public/quotes`, and `GET /v1/public/quotes/{quoteId}`, each resolved by verified origin;
+  - the publish check: a product needs a price list and a policy, in the service and in a trigger;
+  - seeded terms for both demo operators. Demo Harbor adds a state and a county tax and offers `HARBOR10`. Demo Reef's prices include its tax, and it offers `REEF25`.
+- Money rules, set out in the [pricing contract](../packages/domain-pricing/README.md):
+  - integer cents, rounded half up, per line;
+  - the discount comes off the trip price only and is split by the largest remainder;
+  - tax is charged on discounted amounts, inclusive tax is extracted from the price, and no tax is charged on tax.
+- The database holds the rules for every writer:
+  - every 0005 table is append-only for every role, and child rows can be written only in their parent's transaction;
+  - actors are stamped from the transaction, so a guest cannot write terms;
+  - a price list must be complete at commit;
+  - a quote must add up, and must be what its trip and named versions produce, or it does not commit.
+- Checks on a fresh throwaway Neon branch:
+  - migrate, then seed: 892 trips, 5 price lists with 24 items, 5 policies, 3 tax rates, 2 promotion codes, and 5 published products;
+  - a second seed: nothing added;
+  - integration: 40 database, 25 catalog, 45 pricing, and 90 API tests;
+  - unit: 457 tests across 11 packages, 28 of them in the Workers runtime, plus 29 prototype tests.
+- Workers runtime: on the same branch, `wrangler dev` served the seeded data through the runtime role.
+  - Harbor's sunset cruise, for two adults, a child, and a photo with `HARBOR10`, came to $131.09: $127.00, less $11.50, plus a $7.50 harbor fee and $8.09 in state and county tax.
+  - Reef's dive for two divers with `REEF25` came to $325.00, with $13.72 of excise tax included.
+  - Each retry replayed the same quote with `Idempotent-Replayed: true`, and each read matched.
+  - A trip asked for from the other operator's origin answered 404.
+- Seed backfill: a branch was set up like a database seeded before this goal, with published products and no terms. The seed added 5 price lists and 5 policies, and a rerun added nothing.
+- Mutation checks, each reverted:
+  - half-down rounding turned 5 of the lead's unit tests red;
+  - taxing the amount before the discount turned 5 of them red;
+  - with the two new quote checks neutered, all 9 inconsistent quote copies committed.
+- An independent test specialist wrote 79 adversarial tests: 27 unit, 32 database, and 20 API. They found five defects, each red before its fix and green after:
+  - a per-booking add-on limit was skipped when the party could not be counted;
+  - names with C1 control characters passed validation but failed the insert;
+  - a guest transaction could write terms by naming another actor;
+  - pricing error responses could be cached;
+  - a trip starting at a time with seconds could not be quoted.
+- The specialist also probed what the database self-check cannot see. Current versions, active rates, and the quote instant come from the service and its clock, and the contract lists them. A bound of one hour from `quotedAt` to `expiresAt` was added, but `quotedAt` is the writer's, so the bound holds for honest quotes only. The review fixes below add what checkout can rely on: `created_at` stamped from the database clock.
+- Independent review, October 5, 2026: accept with listed fixes, none blocking. Each fix has a test that failed before it and passes after; on a branch migrated with the unfixed 0005, each new test failed at its first forged case.
+  - `POST /v1/public/quotes` is rate limited. An Origin header is not authentication, and each quote is about 20 round trips plus rows. A second Workers rate limit binding, `PUBLIC_RATE_LIMITER`, allows 30 a minute per client address and tenant, checked before the transaction opens. A limited request answers 429 `rate_limited` and writes nothing; reads are not limited. The API test's third quote was written before the fix and answers 429 after it.
+  - Quote validity no longer rests on the writer's clock alone. The reviewer's copy of a real quote dated 2030, years after its trip, had committed; a quote dated at or after its departure is now refused. A trigger stamps `created_at` from the database clock whatever the writer sends, so checkout (G2.7) can require `now() < least(expires_at, created_at + interval '30 minutes')`.
+  - The discount split is checked line by line. Forged copies that put the whole discount on either trip-price line had committed. The database now requires the exact largest-remainder split the service computes, so moving even one odd cent is refused.
+  - A quote's party must be within its product's limits and its trip's seats. In review, a charter quote re-stored with 500 guests on a 6-seat boat had committed, as had one re-stored with fewer guests and a lower fee. The first is now refused. The second stays possible within the bounds, because the database cannot count a charter's guests; the contract says so, and G2.7 must re-check the party.
+  - A discount line must carry its promotion's label exactly. A name with a control character had committed. `app.discount_label` gives the same label as the service for every percentage and for 217 fixed amounts.
+  - The demo plan lists quotes under `domain-pricing` only. The contract now states the validity guarantee, what checkout must do, what the self-check cannot see, and the review's follow-ups.
+- Checks after the fixes, on a fresh throwaway Neon branch:
+  - migrate, then seed: 892 trips, 5 price lists with 24 items, 5 policies, 3 tax rates, 2 promotion codes, and 5 published products;
+  - a second seed: nothing added;
+  - integration: 40 database, 25 catalog, 50 pricing, and 91 API tests;
+  - `pnpm check`: lint, typecheck, 457 unit tests across 11 packages (28 in the Workers runtime), 29 prototype tests, dry-run deploys of the three Workers (the API's lists `PUBLIC_RATE_LIMITER` at 30 requests per 60 seconds), and doc links;
+  - `pnpm contracts:generate` added the 429 to the OpenAPI document, and a second run changed nothing.
+- Not rerun after the fixes: the Workers-runtime smoke test under `wrangler dev`. The new limiter follows the sign-in limiter's pattern, which the G2.2 review confirmed under `wrangler dev`, and the API test drives it through a stand-in binding.
+- Not done:
+  - 0005 is not applied to the Neon main branch, and nothing is deployed;
+  - no staff endpoints for terms or quotes;
+  - tax rates are tenant-wide, not per location;
+  - the review's follow-ups, listed in the [pricing contract](../packages/domain-pricing/README.md#follow-ups).
+
 ## 2026-09-30
 
 ### G2.14a Design system and brand bootstrap verification, September 30, 2026

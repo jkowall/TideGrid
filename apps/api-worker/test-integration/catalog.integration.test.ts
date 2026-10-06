@@ -14,6 +14,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { createAccessVerifier } from "../src/auth/access.ts";
+import { addSaleTerms } from "./sale-terms.ts";
 
 type Sql = ReturnType<typeof postgres>;
 type Json = Record<string, unknown> & { error?: { code: string; message: string } };
@@ -137,6 +138,7 @@ describe.skipIf(!env)("catalog API against a real database as the runtime role",
           eligibleBoatIds: [boatId],
           reason: "fixture",
         });
+        await addSaleTerms(trx, ctx, productId);
         await publishProduct(trx, ctx, { productId, reason: "fixture" });
         const schedule = await createSchedule(trx, ctx, {
           productId,
