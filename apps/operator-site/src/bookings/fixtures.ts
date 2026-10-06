@@ -699,3 +699,182 @@ export function expectNoPersonalDataInAddresses() {
     }
   }
 }
+
+// Console completion (G2.12c): search, notes, and the day's export ---------------------------
+
+type SearchResult = import("@tidegrid/contracts").BookingSearchResult;
+type SearchResponse = import("@tidegrid/contracts").BookingSearchResponse;
+type Note = import("@tidegrid/contracts").BookingNote;
+
+const tripSummary = (t: BookingDayTrip): SearchResult["trip"] => ({
+  tripId: t.tripId,
+  productName: t.productName,
+  productKind: t.productKind,
+  boatName: t.boatName,
+  timeZone: t.timeZone,
+  localDate: t.localDate,
+  localStartTime: t.localStartTime,
+  startsAt: t.startsAt,
+  salesState: t.salesState,
+});
+
+/** A booking as a search sends it to an owner or booking staff, booker included: Maya's, on the sunset cruise. */
+export function searchResult(over: Partial<SearchResult> = {}): SearchResult {
+  return {
+    id: bookingIds.maya,
+    reference: mayaBooking.reference,
+    state: "confirmed",
+    confirmedAt: mayaBooking.confirmedAt,
+    trip: tripSummary(sunsetTrip),
+    booker: { ...bookers.maya },
+    guests: 3,
+    total: mayaBooking.total,
+    currency: "USD",
+    payment: mayaBooking.payment,
+    ...over,
+  };
+}
+
+/** The day's three bookings, as a search finds them. */
+export const searchResults = {
+  maya: searchResult(),
+  luis: searchResult({
+    id: bookingIds.luis,
+    reference: luisBooking.reference,
+    confirmedAt: luisBooking.confirmedAt,
+    booker: { ...bookers.luis },
+    guests: 2,
+    total: luisBooking.total,
+    payment: luisBooking.payment,
+  }),
+  priya: searchResult({
+    id: bookingIds.priya,
+    reference: priyaBooking.reference,
+    confirmedAt: priyaBooking.confirmedAt,
+    trip: tripSummary(charterTrip),
+    booker: { ...bookers.priya },
+    guests: 6,
+    total: priyaBooking.total,
+    payment: priyaBooking.payment,
+  }),
+};
+
+/**
+ * The API's answer to a search for an owner or booking staff: one page, how
+ * many were found in all, and the next page's cursor. `asSeenBy` takes the
+ * bookers out for finance.
+ */
+export function searchBody(over: Partial<SearchResponse> = {}): SearchResponse {
+  return {
+    results: [searchResults.maya, searchResults.luis],
+    total: 2,
+    nextAfter: null,
+    matchedOn: ["reference", "booker_name", "booker_email"],
+    ...over,
+  };
+}
+
+/** Two staff members, as a note names its author. */
+export const noteAuthors = {
+  ava: { userId: "5f0c3a52-2a55-4f8a-9d7e-5d6f0f1b2a01", name: "Ava Marsh" },
+  sam: { userId: "5f0c3a52-2a55-4f8a-9d7e-5d6f0f1b2a02", name: "Sam Ortiz" },
+} as const;
+
+export const noteIds = {
+  first: "e1f2a3b4-0001-4c5d-8e6f-7a8b9c0d1e01",
+  second: "e1f2a3b4-0002-4c5d-8e6f-7a8b9c0d1e02",
+  third: "e1f2a3b4-0003-4c5d-8e6f-7a8b9c0d1e03",
+} as const;
+
+/** A note on Maya's booking, written by Ava at 2:30 PM at the marina on Oct 6. */
+export function bookingNote(over: Partial<Note> = {}): Note {
+  return {
+    id: noteIds.first,
+    body: "Guest asked for a seat on the port side.",
+    author: { ...noteAuthors.ava },
+    createdAt: "2026-10-06T18:30:00.000Z",
+    ...over,
+  };
+}
+
+/** A booking's notes as the API sends them: newest first, and how many there are in all. */
+export const notesBody = (notes: Note[], total = notes.length) => ({ notes, total });
+
+/** A busy day's control totals that add up: gross, less discounts, plus fees and taxes, is the total; less refunds, the net. */
+export const dayFigures: BookingDayTotals = {
+  bookings: 3,
+  guests: 11,
+  gross: 150000,
+  discounts: 11500,
+  fees: 2250,
+  taxes: 8090,
+  total: 148840,
+  refunds: 9450,
+  net: 139390,
+  includedTax: 5420,
+  pendingRefunds: { count: 0, amount: 0 },
+};
+
+/** The file name the API gives the day's export: the operator's slug, then the date. */
+export const csvFileName = "demo-harbor-bookings-2026-11-04.csv";
+
+/** The day's CSV as the API sends it: an attachment named by operator and date. */
+export function csvAnswer(
+  over: { type?: string; disposition?: string | null; body?: string } = {},
+): Response {
+  const headers = new Headers({ "content-type": over.type ?? "text/csv; charset=utf-8" });
+  const disposition =
+    over.disposition === undefined ? `attachment; filename="${csvFileName}"` : over.disposition;
+  if (disposition !== null) headers.set("content-disposition", disposition);
+  return new Response(over.body ?? "Row,Operator\r\n1,Demo Harbor Charters\r\n", {
+    status: 200,
+    headers,
+  });
+}
+
+/**
+ * What each request to a route carried, in order: its headers, and its body
+ * read as JSON. `api` records the address and query only.
+ */
+export function sentTo(key: string): { headers: Headers; body: unknown }[] {
+  return vi
+    .mocked(fetch)
+    .mock.calls.filter(([input, init]) => {
+      const url = new URL(String(input), "http://localhost:5184");
+      return `${init?.method ?? "GET"} ${url.pathname}` === key;
+    })
+    .map(([, init]) => ({
+      headers: new Headers(init?.headers),
+      body: typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined,
+    }));
+}
+
+/**
+ * Stand in for the browser's download: object URLs are made up, and a click on
+ * a link is recorded where it happens, not followed. `vi.restoreAllMocks()`
+ * puts the real ones back.
+ */
+export function stubDownload() {
+  const blobs: Blob[] = [];
+  const revoked: string[] = [];
+  const clicked: { download: string; href: string | null; hidden: boolean; connected: boolean }[] =
+    [];
+  vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+    blobs.push(blob as Blob);
+    return "blob:tidegrid-test";
+  });
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+    revoked.push(url);
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    clicked.push({
+      download: this.download,
+      href: this.getAttribute("href"),
+      hidden: this.hidden,
+      connected: this.isConnected,
+    });
+  });
+  return { blobs, clicked, revoked };
+}
