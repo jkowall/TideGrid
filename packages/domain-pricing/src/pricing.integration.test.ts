@@ -732,57 +732,62 @@ describe.skipIf(!env)("pricing services against a real database as the runtime r
       const [quote] = await admin<{ id: string }[]>`
         select id from public.quotes where tenant_id = ${A.id} order by created_at limit 1`;
       if (!quote) throw new Error("no quote");
-      const attempts: Array<[string, Promise<unknown>]> = [
+      // Each attempt starts only when the loop awaits it. Started together, a
+      // later refusal could reject before its handler is attached, which
+      // Vitest reports as an unhandled error.
+      const attempts: Array<[string, () => Promise<unknown>]> = [
         [
           "quote line as runtime",
-          asSystem(A.id, (trx) =>
-            trx
-              .insertInto("quote_lines")
-              .values({
-                tenant_id: A.id,
-                quote_id: quote.id,
-                line_no: 99,
-                kind: "fee",
-                code: "sneaky",
-                name: "Sneaky fee",
-                basis: "per_booking",
-                quantity: 1,
-                unit_amount: 0,
-                amount: 0,
-                taxable: false,
-              })
-              .execute(),
-          ),
+          () =>
+            asSystem(A.id, (trx) =>
+              trx
+                .insertInto("quote_lines")
+                .values({
+                  tenant_id: A.id,
+                  quote_id: quote.id,
+                  line_no: 99,
+                  kind: "fee",
+                  code: "sneaky",
+                  name: "Sneaky fee",
+                  basis: "per_booking",
+                  quantity: 1,
+                  unit_amount: 0,
+                  amount: 0,
+                  taxable: false,
+                })
+                .execute(),
+            ),
         ],
         [
           "quote line as owner",
-          admin`insert into public.quote_lines (tenant_id, quote_id, line_no, kind, code, name, basis,
+          () => admin`insert into public.quote_lines (tenant_id, quote_id, line_no, kind, code, name, basis,
               quantity, unit_amount, amount, taxable)
             values (${A.id}, ${quote.id}, 98, 'fee', 'sneaky', 'Sneaky fee', 'per_booking', 1, 0, 0, false)`,
         ],
         [
           "price list item",
-          asSystem(A.id, (trx) =>
-            trx
-              .insertInto("price_list_items")
-              .values({
-                tenant_id: A.id,
-                product_id: a.cruise,
-                version: 1,
-                product_kind: "shared_seat",
-                item_kind: "ticket",
-                code: "stowaway",
-                name: "Stowaway",
-                unit_amount: 1,
-                taxable: false,
-                sort_order: 9,
-              })
-              .execute(),
-          ),
+          () =>
+            asSystem(A.id, (trx) =>
+              trx
+                .insertInto("price_list_items")
+                .values({
+                  tenant_id: A.id,
+                  product_id: a.cruise,
+                  version: 1,
+                  product_kind: "shared_seat",
+                  item_kind: "ticket",
+                  code: "stowaway",
+                  name: "Stowaway",
+                  unit_amount: 1,
+                  taxable: false,
+                  sort_order: 9,
+                })
+                .execute(),
+            ),
         ],
       ];
       for (const [label, attempt] of attempts) {
-        expect({ label, code: await pgCode(attempt) }).toEqual({ label, code: "55000" });
+        expect({ label, code: await pgCode(attempt()) }).toEqual({ label, code: "55000" });
       }
     });
 
