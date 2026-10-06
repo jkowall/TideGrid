@@ -98,6 +98,10 @@
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
+/* The trip on its own line under when, whatever its length. */
+.bs-item__product {
+  flex-basis: 100%;
+}
 .bs-item__meta {
   flex-basis: 100%;
   color: var(--text-muted);

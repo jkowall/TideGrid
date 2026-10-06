@@ -162,6 +162,15 @@ The operator console's booking views read through `src/console.ts`, under the ca
 - **By reference.** `findBookingByReference` takes the issued form; the API normalizes what was typed first.
 - **Exceptions.** `listExceptionsPage` adds the trip, the checkout's state and expiry, and what the provider's event reported (when it arrived, the amount, the currency) to G2.7's read, newest first by creation and id, with a `before` cursor. G2.7's `listFinalizationExceptions` now delegates to it with no booker.
 
+### Console completion (G2.12c)
+
+Search, a day's report and its CSV, and internal notes, in `src/search.ts`, `src/day-report.ts`, `src/csv.ts`, and `src/notes.ts`. The contract is [packages/contracts/src/console.ts](../contracts/src/console.ts); the console's side is in the [console README](../../apps/operator-site/README.md#console-completion-g212c).
+
+- **Search.** `searchBookings` finds bookings by departure date range and by text, a page at a time, ordered and keyed like the day list (departure, trip, confirmation, id), with a count of every match. The text matches a booking reference from its start for every role, read as a guest quotes it (`referencePrefix`: case, spaces, and hyphens ignored; O, I, and L as 0, 1, and 1; two to eight characters). With `withBooker` (owners and booking staff) it also matches a booker whose name holds every word of the text (`ILIKE`, at most six words) or whose email holds the text, and selects the name and email. Without it the query never joins `checkout_sessions`, so finance's results and counts cannot depend on a name or an address. LIKE's own characters are escaped. A cursor must name a booking this same search finds, or it answers `cursor_invalid`. The API runs it in one snapshot, so the count and the page agree.
+- **A day's report.** `buildDayReport` reads every booking on the trips departing one local date, with its order's subtotal (gross), discount, fees, added taxes, included taxes, and total, its payment's state, and its refunds: succeeded refunds count in `refunds` and come off `net`; a refund still requested is reported as pending and counted nowhere else until it settles. The rows come from one statement, so they are one moment even under READ COMMITTED. `totalsOf` sums every column; the totals route and the CSV's total row are that sum, so the two cannot disagree. A day with more than 5,000 bookings is refused (`too_large`) rather than cut short, since control totals must be whole.
+- **The CSV.** `renderDayExport` writes the contract's stable columns (`bookingDayExportColumns`) and, only with `withBooker`, the booker's name and email after them; one row per booking, then a total row equal to the control totals. UTF-8 with a byte order mark, RFC 4180 quoting, CRLF lines. Money is a plain decimal ("123.45"), never negative: discounts and refunds have their own columns. Instants are UTC as "2026-10-06 18:17:00". Text a person typed (and the operator's, trip's, and boat's names) that starts with =, +, -, @, a tab, or a carriage return gets a leading apostrophe, so a spreadsheet shows it rather than running it (CSV injection). `dayExportFileName` names the file by the operator's slug and the date only.
+- **Notes.** `addBookingNote` checks the booking is the tenant's, inserts the note (the database stamps its author, request, and time from the transaction, [migration 0008](../database/README.md#booking-notes)), and records `booking.note_added` with the note's id; the text never enters the audit row. `listBookingNotes` returns the newest 200 with each author's membership name, and how many there are. Both answer an unknown and another tenant's booking alike.
+
 ## Lock order
 
 Inbox event, checkout session, payment, trip, hold, then the order and the rest. Opening a checkout takes transaction-scoped advisory locks on the quote and the client address before any row lock, then the trip and its holds. The database's own checks lock the payment row before inserting a booking or a refund for it, so the two can never both be written. Expiring a checkout takes its session and then its hold row with SKIP LOCKED, never waiting and never touching the trip. External calls never run inside a transaction. Every command needs READ COMMITTED, as the inventory commands do.
@@ -189,6 +198,8 @@ Events carry identifiers only.
 | success not honored | `checkout.session_unfulfilled`, `payment_refund.requested`, `finalization_exception.raised` | `checkout.finalization_exception.raised` |
 | refund settled | `payment_refund.succeeded`, `payment_refund.failed` | `payment.refund.succeeded`, `payment.refund.failed` |
 | provider id recorded | `payment.provider_recorded` | |
+| booking note added (G2.12c) | `booking.note_added`, by the note's id | |
+| a day exported as CSV (G2.12c) | `booking_day.exported`, with the row count and whether guests' details were included | |
 
 Hold transitions keep their own `hold.*` audit rows and `inventory.hold.*` events.
 
@@ -206,6 +217,11 @@ Hold transitions keep their own `hold.*` audit rows and `inventory.hold.*` event
 | `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}` | every role (G2.12b); 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/booking-references/{reference}` | every role (G2.12b); 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/roster` | owners and booking staff (G2.12b); 403 for finance; 404 `trip_not_found` |
+| `POST /v1/staff/tenants/{tenantId}/booking-searches` | every role (G2.12c); `{ q?, from?, to?, limit?, after? }`, at least one of the first three; name and email matching for `bookings.read` only; 400 `validation_failed`, `invalid_range`, `cursor_invalid`; 403 `origin_not_allowed` |
+| `GET /v1/staff/tenants/{tenantId}/booking-day-totals?date=` | every role (G2.12c); the day's control totals; 422 `day_too_large` |
+| `GET /v1/staff/tenants/{tenantId}/booking-day-export?date=` | every role (G2.12c); `text/csv` attachment, booker columns for `bookings.read` only; audited; 422 `day_too_large` |
+| `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes` | every role (`notes.read`, G2.12c); 404 `booking_not_found` |
+| `POST /v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes` | owners and booking staff (`notes.write`, G2.12c); `{ body }` with an `Idempotency-Key`; 201; 403 for finance; 404 `booking_not_found`; 422 `idempotency_key_reused` |
 
 What the guest checkout UI calls:
 
@@ -227,6 +243,7 @@ The checkout secret and the client secret travel in headers and bodies only, nev
 - A trip's bookings read (G2.7) has no pagination; the console's day list pages with a cursor, and a roster is complete because a trip seats at most 500.
 - A Stripe adapter must map Stripe's events onto the neutral kinds: a declined attempt the guest may retry is not `payment.failed`, and Stripe's pending refunds need refund events, which the inbox records as `other` today.
 - Expired checkouts and their orders stay `expired` and `pending`: a late success may still confirm them.
+- **Console completion (G2.12c).** Search scans the tenant's bookings with `ILIKE`; a trigram index on the booker's name and email belongs before a pilot operator's history grows large. A booking reference made only of digits (about one in 7,000) reads as a number in a spreadsheet that guesses types; a spreadsheet's text import keeps it whole. The formula guard's apostrophe is visible in some spreadsheets, and changes the rare email or name that starts with one of those characters. Bookings carry only the `confirmed` state until cancellation lands (lane 1 of wave 2). The report will then need a rule for canceled bookings; the proposed rule keeps their order and refund in the money columns and leaves them out of the bookings and guests counts. Notes return the newest 200.
 
 ## Tests
 
