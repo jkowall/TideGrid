@@ -156,6 +156,15 @@ The sweep is housekeeping and events, not correctness. Fifteen minutes keeps the
 - Holds are never deleted, so expired and released rows accumulate as history. The live indexes cover only active and confirmed rows.
 - Creating a blackout or changing a product's sales status takes no trip lock, so a hold can be acquired at the same moment a blackout lands. It then behaves like any checkout already in progress: it confirms within its time. Sales-state changes on the trip itself do queue on the lock.
 
+## Follow-ups
+
+The independent review on 2026-10-05 accepted this goal with fixes, which are applied. It also noted these, which are not fixed here:
+
+- **A product's kind can change under its holds.** Only the owner role can change `products.kind`; the runtime has no UPDATE on it. Nothing stops the owner from turning a shared-seat product into a charter, or back, while its trips have active or confirmed holds, and those holds keep the kind they were taken with. Reacquisition refuses the mismatch (rule 4); nothing else does. A later migration should refuse a kind change once a product has trips.
+- **The staff holds read has no pagination.** `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/holds` returns every hold of the trip in any state. Holds are never deleted, so a busy trip's list only grows. It needs a page size and a cursor before the console shows it.
+- **Usage per listed trip.** Both trip listings call `app.trip_capacity_usage` once per trip through a lateral join. Each call is an indexed sum over one trip's live holds, but a listing can span 92 days. Watch its cost as tenants and holds grow; one grouped sum over the listed trips could replace the per-trip calls.
+- **Quotes for a trip without room, once G2.5 lands.** Quote creation finds its trip through the availability listing for the product's smallest party. A trip with fewer seats left than that drops out of the listing: sold out, fully held, or any held charter. A quote for it answers 409 `trip_not_bookable`, not `insufficient_capacity`. A larger party on a trip that still has room for the smallest party gets `insufficient_capacity`. Checkout and the guest site should treat both as no longer available.
+
 ## Tests
 
 - `pnpm --filter @tidegrid/domain-inventory test` runs unit tests.
