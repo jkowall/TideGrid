@@ -15,6 +15,7 @@ import { registerCatalogStaffRoutes } from "./routes/catalog-staff.ts";
 import { registerCheckoutPublicRoutes } from "./routes/checkout-public.ts";
 import { registerFakeProviderRoutes } from "./routes/fake-provider.ts";
 import { registerHoldStaffRoutes } from "./routes/holds-staff.ts";
+import { registerParticipantStaffRoutes } from "./routes/participants-staff.ts";
 import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.ts";
 import { registerPricingPublicRoutes } from "./routes/pricing-public.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
@@ -141,6 +142,8 @@ export function createApp(deps: AppDeps = {}) {
   registerPaymentWebhookRoutes(app, deps);
   registerFakeProviderRoutes(app);
   registerBookingStaffRoutes(app, deps);
+  // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
+  registerParticipantStaffRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",

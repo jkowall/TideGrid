@@ -2,6 +2,7 @@ import { createDb } from "@tidegrid/database";
 import { sweepCheckouts } from "@tidegrid/domain-booking";
 import { sweepExpiredHolds } from "@tidegrid/domain-inventory";
 import { createLogger, newRequestId } from "@tidegrid/observability";
+import { bookingHooks } from "./booking-hooks.ts";
 import { type Bindings, databaseUrl } from "./env.ts";
 import { paymentProvider } from "./payments.ts";
 
@@ -73,6 +74,7 @@ export async function runScheduled(
       const report = await sweepCheckouts(handle.db, {
         runId,
         provider: paymentProvider(env, handle.db),
+        hooks: bookingHooks(env),
         onError: (tenantId, item, error) =>
           checkoutLog.error(`checkout_sweep_${item}_failed`, {
             "tidegrid.tenant_id": tenantId,

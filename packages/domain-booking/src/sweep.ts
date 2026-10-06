@@ -37,6 +37,7 @@ import type { PaymentProvider } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
 import { processProviderEvent, settleRefund } from "./finalize.ts";
+import type { BookingHooks } from "./hooks.ts";
 import { record } from "./views.ts";
 
 export type CheckoutSweepItem = "checkouts" | "inbox_event" | "refund";
@@ -46,6 +47,8 @@ export interface CheckoutSweepOptions {
   runId: string;
   /** Sends requested refunds; without one, refunds wait for a run that has it. */
   provider?: PaymentProvider | null;
+  /** Run inside a booking's confirmation when a reprocessed event confirms one (lane 1 contract). */
+  hooks?: BookingHooks | undefined;
   tenantLimit?: number;
   batchSize?: number;
   /** Inbox events and refunds younger than this (0 to 3,600 seconds) are left to the request that made them. */
@@ -278,7 +281,7 @@ export async function sweepCheckouts(
       }
       try {
         const processed = await inTenantTransaction(db, ctx, (trx) =>
-          processProviderEvent(trx, ctx, inboxId, { skipLocked: true }),
+          processProviderEvent(trx, ctx, inboxId, { skipLocked: true, hooks: options.hooks }),
         );
         if (!processed) continue;
         report.reprocessed += 1;

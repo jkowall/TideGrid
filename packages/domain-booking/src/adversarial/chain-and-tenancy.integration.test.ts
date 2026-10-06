@@ -531,7 +531,14 @@ describe.skipIf(!env).concurrent("G2.7 adversarial: chain of custody and tenancy
         "change a booking",
         () => admin`update public.bookings set party_size = party_size + 1
                where checkout_session_id = ${confirmed.sessionId}`,
-        { code: "55000" },
+        { code: "23514", constraint: "bookings_immutable" },
+      ],
+      [
+        // Lane 1 (G2.11c): a booking is canceled only with its cancellation row.
+        "cancel a booking without its cancellation",
+        () => admin`update public.bookings set state = 'canceled'
+               where checkout_session_id = ${confirmed.sessionId}`,
+        { code: "23514", constraint: "bookings_evidence" },
       ],
       [
         "truncate the inbox",

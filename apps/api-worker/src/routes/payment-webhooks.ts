@@ -1,6 +1,7 @@
 import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
 import { PaymentWebhookParams, PaymentWebhookResponse } from "@tidegrid/contracts";
 import { handleVerifiedEvent } from "@tidegrid/domain-booking";
+import { bookingHooksFor } from "../booking-hooks.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
@@ -82,6 +83,7 @@ export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: App
     const handled = await handleVerifiedEvent(getDb(c), provider, verified.event, {
       requestId: c.get("requestId"),
       sourceIp: c.req.header("cf-connecting-ip") ?? null,
+      hooks: bookingHooksFor(c.env, deps),
     });
     if (handled.kind === "unknown_account") {
       // Not an account any operator here owns, so not a payment TideGrid made.
