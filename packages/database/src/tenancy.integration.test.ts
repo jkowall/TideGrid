@@ -678,6 +678,13 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         guest_access_links: ["INSERT", "SELECT"],
         guest_sessions: ["INSERT", "SELECT"],
         fake_email_deliveries: ["INSERT", "SELECT"],
+        // Waiver evidence (G2.15).
+        waiver_templates: ["INSERT", "SELECT"],
+        waiver_template_versions: ["INSERT", "SELECT"],
+        waiver_requests: ["INSERT", "SELECT"],
+        waiver_deliveries: ["INSERT", "SELECT"],
+        waiver_signing_sessions: ["INSERT", "SELECT"],
+        waiver_evidence: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -724,6 +731,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         ],
         guest_access_links: ["consumed_at", "revoked_at", "revoked_reason"],
         guest_sessions: ["revoked_at"],
+        // Waiver evidence (G2.15): a request's state moves one way, and a
+        // signing session is revoked once. Triggers stamp every time.
+        waiver_requests: ["revoked_reason", "state", "superseded_by"],
+        waiver_signing_sessions: ["revoked_at", "revoked_reason"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

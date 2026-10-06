@@ -114,6 +114,18 @@ The self-service and email migration (`0008_self_service_and_email.sql`, renumbe
 - `bookings` gains `canceled_at`, and the runtime may UPDATE `state`, from `confirmed` to `canceled` only, with its cancellation; the 0007 append-only trigger is replaced by `bookings_lifecycle`, which keeps every other column fixed for every role.
 - `payment_refunds` gains the reason `booking_canceled`, for exactly what the booking's cancellation computed.
 
+## Waiver evidence (G2.15)
+
+The waiver migration (`*_waivers.sql`, numbered after the self-service migration at merge) adds six tenant-owned tables under rules 1 to 10, described in the [waiver contract](../domain-waivers/README.md):
+
+- `waiver_templates` and `waiver_template_versions`: append-only for every role. A trigger numbers each version after the template's highest, keeps its effective start no earlier than now, and computes its content hash from the canonical text, so no writer chooses it.
+- `waiver_requests`: one per participant and version, live (pending or signed) at most once per participant and booking. Its participant is named with the booking in a composite key to `booking_participants`, so a request cannot pair one booking with another's guest. The runtime may UPDATE `state`, `revoked_reason`, and `superseded_by` only; a trigger enforces the one-way states and stamps their times, and a request becomes signed only with its evidence.
+- `waiver_deliveries`: append-only. A trigger numbers generations, holds the resend limits (5 per request; 10 minutes between sends to one address), and requires the generation's own waiver message in `email_messages`.
+- `waiver_signing_sessions`: opened only by the redemption that consumed a waiver link in `guest_access_links` in the same transaction; afterwards the runtime may only revoke one (`revoked_at`, `revoked_reason`).
+- `waiver_evidence`: append-only for every role, the owner included. A trigger checks the request, session, signer, version, hash, and acknowledgments; a CHECK holds the PDF to its SHA-256; and at commit evidence stands only beside a signed request.
+
+No new function in schema `app` is callable by the runtime: the waiver triggers run as the writer, under its row-level security, and filter by tenant explicitly.
+
 ## Tests
 
 - `pnpm test` runs unit tests.
