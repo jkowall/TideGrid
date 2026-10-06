@@ -92,7 +92,7 @@ The prototype was built to test workflow comprehension, not to be good. The demo
 
 ## Goal sequence
 
-Goal identifiers keep the [goal map](10-build-execution-and-agent-plan.md#goal-map) numbering so the demo work maps onto the Core live gate later. Each goal starts from a recorded integration commit, has an owner-set token budget, and ends with a handoff and an independent review. Routes name the roles in the [Claude Code execution route](10-build-execution-and-agent-plan.md#claude-code-execution-route).
+Goal identifiers keep the [goal map](10-build-execution-and-agent-plan.md#goal-map) numbering so the demo work maps onto the Core live gate later. Each goal starts from a recorded integration commit, has an owner-set token budget, and ends with a handoff and an independent review. Routes name the roles in the active execution route of the [build execution and agent plan](10-build-execution-and-agent-plan.md#claude-code-execution-route).
 
 | Order | Goal | Outcome for the demo | Route | Proof |
 |---|---|---|---|---|
