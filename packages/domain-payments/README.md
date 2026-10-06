@@ -59,6 +59,7 @@ Stripe's scheme: a header `t=<unix seconds>,v1=<hex>`, where v1 is HMAC-SHA256 o
 `FakePaymentProvider` keeps its own append-only tables, tenant-owned under the tenancy contract like everything else: `fake_provider_payments`, `fake_provider_events` (one outcome per payment, stored as the exact text delivered), and `fake_provider_refunds`. It never reads or writes TideGrid's checkout tables.
 
 - **Exists only under `PAYMENT_PROVIDER=fake`.** Its constructor refuses `ENVIRONMENT=production` and a secret shorter than 32 characters, and the API's configuration refuses the fake in production before it is ever built.
+- **Confirms bookings without money.** Anyone who opens a checkout holds the client secret and can "pay". That is the point of a demo shim, and the reason it belongs only on synthetic tenants: never turn it on where a real guest could reach it.
 - **Creating** is idempotent by key per tenant. The client secret is derived, `<paymentRef>_secret_<HMAC>`, never stored, and checked in constant time.
 - **Settling** (the demo's pay page) moves a pending payment to succeeded or failed, once; a second attempt keeps the first outcome. Its event is stored first, then delivered, or held back for a later, late, duplicate, or reordered delivery.
 - **Refunding** is idempotent by key, refuses an unpaid payment and more than was paid, and succeeds at once.

@@ -100,17 +100,23 @@ async function open(tripId: string, party: number, charter: boolean): Promise<Ch
   const tickets = ((offer.json.offer as Json)?.tickets ?? []) as { code: string }[];
   // One add-on when the trip offers any, so the order carries every kind of line.
   const addOns = ((offer.json.offer as Json)?.addOns ?? []) as { code: string }[];
-  const quoted = await call("POST", "/v1/public/quotes", {
-    headers: { "idempotency-key": `shim-q-${randomUUID()}` },
-    body: {
-      tripId,
-      party: charter
-        ? { kind: "charter", guests: party }
-        : { kind: "tickets", tickets: [{ code: tickets[0]?.code ?? "adult", quantity: party }] },
-      addOns: addOns[0] ? [{ code: addOns[0].code, quantity: 1 }] : [],
-      ...(process.env.PROMOTION_CODE ? { promotionCode: process.env.PROMOTION_CODE } : {}),
-    },
-  });
+  const quote1 = (promotionCode: string | undefined) =>
+    call("POST", "/v1/public/quotes", {
+      headers: { "idempotency-key": `shim-q-${randomUUID()}` },
+      body: {
+        tripId,
+        party: charter
+          ? { kind: "charter", guests: party }
+          : { kind: "tickets", tickets: [{ code: tickets[0]?.code ?? "adult", quantity: party }] },
+        addOns: addOns[0] ? [{ code: addOns[0].code, quantity: 1 }] : [],
+        ...(promotionCode ? { promotionCode } : {}),
+      },
+    });
+  let quoted = await quote1(process.env.PROMOTION_CODE);
+  // A code that does not cover this product: quote without it.
+  if ((quoted.json.error as Json | undefined)?.code === "promotion_not_applicable") {
+    quoted = await quote1(undefined);
+  }
   if (quoted.status !== 201)
     throw new Error(`quote ${quoted.status} ${JSON.stringify(quoted.json)}`);
   const quote = quoted.json.quote as { quoteId: string; policy: { version: number } };
