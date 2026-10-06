@@ -231,6 +231,8 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
       `events/${eventId}/redeliver`,
     );
     expect(again.json.delivery).toEqual({ status: 200, outcome: "confirmed", duplicate: true });
+    // A stored event is a settlement, so the payment had settled before the redelivery.
+    expect(again.json.alreadySettled).toBe(true);
     const [stored] = await admin<{ body: string }[]>`
       select body from public.fake_provider_events where id = ${eventId}`;
     const signature = await signatureHeaderValue(TEST_FAKE_SECRET, Date.now(), stored?.body ?? "");

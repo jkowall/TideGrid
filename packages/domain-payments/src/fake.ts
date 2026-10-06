@@ -577,15 +577,19 @@ export class FakePaymentProvider implements PaymentProvider {
     });
   }
 
-  /** One stored event of one payment, for redelivery. */
+  /**
+   * One stored event of one payment, for redelivery, with the payment as it
+   * stands now. A payment has an event only once it has settled.
+   */
   async findEvent(
     tenantId: string,
     paymentRef: string,
     eventId: string,
-  ): Promise<FakeEvent | null> {
+  ): Promise<{ event: FakeEvent; payment: FakePaymentView } | null> {
     if (!fakeEventIdPattern.test(eventId)) return null;
-    const view = await this.getPayment(tenantId, paymentRef);
-    return view?.events.find((e) => e.id === eventId) ?? null;
+    const payment = await this.getPayment(tenantId, paymentRef);
+    const event = payment?.events.find((e) => e.id === eventId);
+    return payment && event ? { event, payment } : null;
   }
 
   /** The signature header for delivering a body now. Each delivery is signed afresh. */
