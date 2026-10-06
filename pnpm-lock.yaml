@@ -44,6 +44,9 @@ importers:
       '@tidegrid/domain-pricing':
         specifier: workspace:*
         version: link:../../packages/domain-pricing
+      '@tidegrid/domain-waivers':
+        specifier: workspace:*
+        version: link:../../packages/domain-waivers
       '@tidegrid/observability':
         specifier: workspace:*
         version: link:../../packages/observability

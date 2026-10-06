@@ -21,6 +21,8 @@ import { registerPricingPublicRoutes } from "./routes/pricing-public.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
+import { registerWaiverPublicRoutes } from "./routes/waivers-public.ts";
+import { registerWaiverStaffRoutes } from "./routes/waivers-staff.ts";
 
 export type { AppDeps, AppEnv } from "./context.ts";
 
@@ -144,6 +146,9 @@ export function createApp(deps: AppDeps = {}) {
   registerBookingStaffRoutes(app, deps);
   // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
   registerParticipantStaffRoutes(app, deps);
+  // Waiver evidence (G2.15).
+  registerWaiverPublicRoutes(app, deps);
+  registerWaiverStaffRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",

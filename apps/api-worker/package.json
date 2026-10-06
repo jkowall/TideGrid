@@ -26,6 +26,7 @@
     "@tidegrid/domain-inventory": "workspace:*",
     "@tidegrid/domain-booking": "workspace:*",
     "@tidegrid/domain-payments": "workspace:*",
+    "@tidegrid/domain-waivers": "workspace:*",
     "jose": "^6.2.0",
     "kysely": "^0.29.0"
   },

@@ -188,3 +188,5 @@ export * from "./inventory.ts";
 export * from "./participants.ts";
 export * from "./pricing.ts";
 export * from "./references.ts";
+// Waiver evidence (G2.15).
+export * from "./waivers.ts";

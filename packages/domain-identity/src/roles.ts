@@ -21,7 +21,9 @@ export type Permission =
   | "catalog.manage"
   | "trips.manage"
   | "bookings.read"
-  | "payments.read";
+  | "payments.read"
+  // Waivers (G2.15): send a participant's waiver request again.
+  | "waivers.manage";
 
 const matrix: Record<StaffRole, readonly Permission[]> = {
   owner: [
@@ -33,8 +35,15 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "trips.manage",
     "bookings.read",
     "payments.read",
+    "waivers.manage",
   ],
-  booking_staff: ["catalog.read", "trips.manage", "bookings.read", "payments.read"],
+  booking_staff: [
+    "catalog.read",
+    "trips.manage",
+    "bookings.read",
+    "payments.read",
+    "waivers.manage",
+  ],
   finance: ["audit.read", "catalog.read", "payments.read"],
 };
 

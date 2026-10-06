@@ -2,6 +2,7 @@ import type { Principal } from "@tidegrid/contracts";
 import type { createDb, Database } from "@tidegrid/database";
 import type { BookingHooks } from "@tidegrid/domain-booking";
 import type { PaymentProvider } from "@tidegrid/domain-payments";
+import type { WaiverDeps } from "@tidegrid/domain-waivers";
 import type { createLogger } from "@tidegrid/observability";
 import type { Kysely } from "kysely";
 import type { AccessVerifier } from "./auth/access.ts";
@@ -34,4 +35,9 @@ export interface AppDeps {
    * every path that confirms a booking or changes its party, for tests.
    */
   bookingHooks?: BookingHooks;
+  /**
+   * Replaces the waiver module's collaborators (src/waivers.ts): the
+   * participant directory, the mailer, and the guest site's origin (G2.15).
+   */
+  waiverDeps?: WaiverDeps;
 }

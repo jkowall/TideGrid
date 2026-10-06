@@ -28,6 +28,7 @@ describe("role permissions", () => {
       "trips.manage",
       "bookings.read",
       "payments.read",
+      "waivers.manage",
     ]);
     expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read", "payments.read"]);
   });
@@ -41,6 +42,13 @@ describe("role permissions", () => {
       "owner",
       "booking_staff",
       "finance",
+    ]);
+  });
+
+  it("lets owners and booking staff send a waiver request again, not finance (G2.15)", () => {
+    expect(StaffRole.options.filter((r) => can(r, "waivers.manage"))).toEqual([
+      "owner",
+      "booking_staff",
     ]);
   });
 

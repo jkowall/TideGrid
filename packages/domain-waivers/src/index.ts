@@ -70,6 +70,17 @@ export {
   type SignResult,
   signWaiver,
 } from "./signing.ts";
+export {
+  type BookingWaivers,
+  listBookingWaivers,
+  listTripWaivers,
+  type MessageState,
+  type MessageStatus,
+  type MessageStatusReader,
+  type ParticipantWaiver,
+  type TripWaivers,
+  type WaiverStatusCode,
+} from "./status.ts";
 export { SUPERSEDE_LIMIT, supersedeUnsignedRequests } from "./supersede.ts";
 export {
   type ApplicableVersion,

@@ -59,6 +59,8 @@ export type SendResult =
       generation: number;
       messageId: string | null;
       linkExpiresAt: Date;
+      /** When the generation was recorded, by the database clock. */
+      queuedAt: Date;
     }
   /** An initial send found the request already sent; nothing new was sent. */
   | { kind: "already_sent" }
@@ -225,5 +227,6 @@ export async function sendWaiverRequest(
     generation,
     messageId,
     linkExpiresAt: expiresAt,
+    queuedAt: facts.now,
   };
 }
