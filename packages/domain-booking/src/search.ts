@@ -209,7 +209,13 @@ export async function searchBookings(
       join boats bt on bt.tenant_id = t.tenant_id and bt.id = t.boat_id
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
-      left join payment_refunds r on r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
+      -- The latest refund only, so a payment refunded in parts never repeats its booking.
+      left join lateral (
+        select r1.state, r1.amount from payment_refunds r1
+         where r1.tenant_id = b.tenant_id and r1.payment_id = b.payment_id
+         order by r1.created_at desc, r1.id desc
+         limit 1
+      ) r on true
      where ${where}
        ${cursor}
      order by t.starts_at, t.id, b.confirmed_at, b.id
