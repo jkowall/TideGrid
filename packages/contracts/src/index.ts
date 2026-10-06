@@ -182,6 +182,8 @@ export * from "./brand.ts";
 export * from "./catalog.ts";
 // Checkout and confirmation (G2.7).
 export * from "./checkout.ts";
+// Console completion (G2.12c): search, day totals and export, booking notes.
+export * from "./console.ts";
 // Capacity and holds (G2.6).
 export * from "./inventory.ts";
 export * from "./pricing.ts";
