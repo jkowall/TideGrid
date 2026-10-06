@@ -38,7 +38,7 @@ The database enforces these for every role, the table owner included, in the cap
 7. Trip, owner, kind, party size, seats, and creation time never change. The expiry instant can move earlier, never later, so it stays within the hour after acquisition and no later than the departure rule 3 checked it against. The trigger sets the kind, the seats, and every timestamp but the expiry instant, which the writer gives at insert.
 8. No role deletes or truncates holds. The runtime may update `state` only.
 9. Tenancy: forced row-level security, a composite foreign key to the trip, and explicit tenant filters.
-10. The trip side of rule 1: no role can shrink a trip below the seats its holds take, change the product its holds came from, or resize a charter that a whole-boat hold has taken. The runtime cannot change either column at all.
+10. The trip side of rule 1: no role can shrink a trip below the seats its holds take, change the product its holds came from, or resize a charter that a whole-boat hold has taken. The runtime cannot change either column at all. Nor can any role change a product's kind once it has a price list, because G2.5's price lists carry the kind in a foreign key; a product publishes only with a price list, so every product that can take a hold has one.
 
 The service adds what availability checks and the database does not: an active location and boat, and no blackout over the trip.
 
@@ -158,12 +158,11 @@ The sweep is housekeeping and events, not correctness. Fifteen minutes keeps the
 
 ## Follow-ups
 
-The independent review on 2026-10-05 accepted this goal with fixes, which are applied. It also noted these, which are not fixed here:
+The independent review on 2026-10-05 accepted this goal with fixes, which are applied. It also noted these, which are not fixed here. A fifth, that the owner role could change a product's kind under its holds, was closed when G2.5 merged first (rule 10).
 
-- **A product's kind can change under its holds.** Only the owner role can change `products.kind`; the runtime has no UPDATE on it. Nothing stops the owner from turning a shared-seat product into a charter, or back, while its trips have active or confirmed holds, and those holds keep the kind they were taken with. Reacquisition refuses the mismatch (rule 4); nothing else does. A later migration should refuse a kind change once a product has trips.
 - **The staff holds read has no pagination.** `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/holds` returns every hold of the trip in any state. Holds are never deleted, so a busy trip's list only grows. It needs a page size and a cursor before the console shows it.
 - **Usage per listed trip.** Both trip listings call `app.trip_capacity_usage` once per trip through a lateral join. Each call is an indexed sum over one trip's live holds, but a listing can span 92 days. Watch its cost as tenants and holds grow; one grouped sum over the listed trips could replace the per-trip calls.
-- **Quotes for a trip without room, once G2.5 lands.** Quote creation finds its trip through the availability listing for the product's smallest party. A trip with fewer seats left than that drops out of the listing: sold out, fully held, or any held charter. A quote for it answers 409 `trip_not_bookable`, not `insufficient_capacity`. A larger party on a trip that still has room for the smallest party gets `insufficient_capacity`. Checkout and the guest site should treat both as no longer available.
+- **Quotes for a trip without room.** Quote creation finds its trip through the availability listing for the product's smallest party. A trip with fewer seats left than that drops out of the listing: sold out, fully held, or any held charter. A quote for it answers 409 `trip_not_bookable`, not `insufficient_capacity`. A larger party on a trip that still has room for the smallest party gets `insufficient_capacity`. Checkout and the guest site should treat both as no longer available.
 
 ## Tests
 

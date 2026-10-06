@@ -1,12 +1,17 @@
 /**
  * Integration-test fixtures (Node only; not exported from the package). Builds
- * one synthetic tenant through the real catalog services so trips pass every
- * catalog rule, then hands out unused trips so tests never share capacity.
- * Times are in UTC and relative to the database clock, so trips are always in
- * the future when the suite runs.
+ * one synthetic tenant through the real catalog and pricing services so trips
+ * pass every catalog rule, then hands out unused trips so tests never share
+ * capacity. Times are in UTC and relative to the database clock, so trips are
+ * always in the future when the suite runs.
  */
 import { randomUUID } from "node:crypto";
-import { type createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
+import {
+  type createDb,
+  inTenantTransaction,
+  type TenantContext,
+  type TenantTransaction,
+} from "@tidegrid/database";
 import {
   addDays,
   createBoat,
@@ -16,6 +21,7 @@ import {
   generateTrips,
   publishProduct,
 } from "@tidegrid/domain-catalog";
+import { createPolicyVersion, createPriceListVersion } from "@tidegrid/domain-pricing";
 import type postgres from "postgres";
 
 type Sql = ReturnType<typeof postgres>;
@@ -43,6 +49,48 @@ export interface TenantFixture {
 
 export function systemContext(tenantId: string, actorId = "inventory-test"): TenantContext {
   return { tenantId, actorType: "system", actorId, requestId: `req-${randomUUID()}` };
+}
+
+/**
+ * The least a product needs to publish since G2.5, through the real pricing
+ * commands: one price list (an adult ticket or the charter price) and one
+ * policy version.
+ */
+export async function addSaleTerms(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  productId: string,
+): Promise<void> {
+  const { kind } = await trx
+    .selectFrom("products")
+    .select("kind")
+    .where("tenant_id", "=", ctx.tenantId)
+    .where("id", "=", productId)
+    .executeTakeFirstOrThrow();
+  const price = await createPriceListVersion(trx, ctx, {
+    productId,
+    ...(kind === "shared_seat"
+      ? { tickets: [{ code: "adult", name: "Adult", unitAmount: 5000, taxable: true }] }
+      : { charter: { name: "Whole boat", amount: 100000, taxable: true } }),
+    reason: "fixture",
+  });
+  if (price.kind !== "created") throw new Error(`fixture price list: ${JSON.stringify(price)}`);
+  const policy = await createPolicyVersion(trx, ctx, {
+    productId,
+    changeCutoffMinutes: 1440,
+    beforeCutoff: { remedy: "full_refund" },
+    afterCutoff: { remedy: "none" },
+    noShow: { remedy: "none" },
+    text: {
+      cancellation: "Fixture cancellation terms.",
+      reschedule: "Fixture reschedule terms.",
+      noShow: "Fixture no-show terms.",
+      operatorCancellation: "Fixture operator cancellation terms.",
+      weather: "Fixture weather terms.",
+    },
+    reason: "fixture",
+  });
+  if (policy.kind !== "created") throw new Error(`fixture policy: ${JSON.stringify(policy)}`);
 }
 
 /** Today's UTC date by the database clock. */
@@ -115,6 +163,7 @@ export async function createTenantFixture(
       ["late", late, tern, lateDays],
     ] as const) {
       const last = addDays(from, count - 1);
+      await addSaleTerms(trx, ctx, productId);
       const published = await publishProduct(trx, ctx, { productId, reason });
       if (published.kind !== "published") throw new Error(`fixture product ${key} did not publish`);
       const schedule = await createSchedule(trx, ctx, {
