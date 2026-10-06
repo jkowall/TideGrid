@@ -826,7 +826,13 @@ describe.skipIf(!env)("capacity holds against a real database as the runtime rol
           code: "55000",
         },
       );
-      expect(await failure(admin`truncate public.capacity_holds`)).toEqual({ code: "55000" });
+      // Since G2.7, checkout sessions and bookings reference holds, so
+      // PostgreSQL refuses a plain TRUNCATE (0A000) before the trigger can;
+      // with CASCADE the trigger refuses it on the referencing tables (55000).
+      expect(await failure(admin`truncate public.capacity_holds`)).toEqual({ code: "0A000" });
+      expect(await failure(admin`truncate public.capacity_holds cascade`)).toEqual({
+        code: "55000",
+      });
     });
 
     it("never moves a hold's expiry later, so it never outlasts departure", async () => {
