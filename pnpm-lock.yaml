@@ -437,13 +437,13 @@ importers:
       '@tidegrid/database':
         specifier: workspace:*
         version: link:../database
+      '@tidegrid/domain-booking':
+        specifier: workspace:*
+        version: link:../domain-booking
       kysely:
         specifier: ^0.29.0
         version: 0.29.6
     devDependencies:
-      '@tidegrid/domain-booking':
-        specifier: workspace:*
-        version: link:../domain-booking
       '@tidegrid/domain-inventory':
         specifier: workspace:*
         version: link:../domain-inventory

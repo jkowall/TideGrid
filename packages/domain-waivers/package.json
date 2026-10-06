@@ -14,10 +14,10 @@
   },
   "dependencies": {
     "@tidegrid/database": "workspace:*",
+    "@tidegrid/domain-booking": "workspace:*",
     "kysely": "^0.29.0"
   },
   "devDependencies": {
-    "@tidegrid/domain-booking": "workspace:*",
     "@tidegrid/domain-inventory": "workspace:*",
     "@tidegrid/domain-payments": "workspace:*",
     "@tidegrid/domain-pricing": "workspace:*",

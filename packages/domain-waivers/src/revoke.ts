@@ -14,7 +14,7 @@ import {
   type WaiverRevokedReason,
 } from "@tidegrid/database";
 import { sql } from "kysely";
-import { lockBookingWaivers } from "./assign.ts";
+import { lockBookingForWaivers } from "./assign.ts";
 
 export interface RevokeResult {
   revoked: number;
@@ -30,7 +30,7 @@ async function revoke(
   if (!isUuid(bookingId) || (participantId !== null && !isUuid(participantId))) {
     throw new TypeError("booking and participant ids must be UUIDs");
   }
-  await lockBookingWaivers(trx, ctx.tenantId, bookingId);
+  await lockBookingForWaivers(trx, ctx.tenantId, bookingId);
   const { rows } = await sql<{ id: string; state: "pending" | "signed" }>`
     select id, state from waiver_requests
      where tenant_id = ${ctx.tenantId} and booking_id = ${bookingId}
@@ -67,13 +67,26 @@ async function revoke(
   return { revoked: rows.length };
 }
 
-/** A participant left the booking: their requests end. */
+/**
+ * A participant's requests end: they left the booking, or their details
+ * changed who must sign or who they are, so a signature no longer covers them.
+ */
 export function revokeParticipantWaivers(
   trx: TenantTransaction,
   ctx: TenantContext,
-  input: { bookingId: string; participantId: string },
+  input: {
+    bookingId: string;
+    participantId: string;
+    reason?: "participant_removed" | "participant_changed";
+  },
 ): Promise<RevokeResult> {
-  return revoke(trx, ctx, input.bookingId, input.participantId, "participant_removed");
+  return revoke(
+    trx,
+    ctx,
+    input.bookingId,
+    input.participantId,
+    input.reason ?? "participant_removed",
+  );
 }
 
 /** The booking was canceled: every request on it ends. */

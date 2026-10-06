@@ -785,18 +785,12 @@ interface SelfServiceTables {
 export type WaiverTemplateScope = "operator" | "product";
 export type WaiverSignerRole = "participant" | "guardian";
 export type WaiverRequestState = "pending" | "signed" | "revoked" | "superseded";
-export type WaiverRevokedReason = "participant_removed" | "booking_canceled";
-export type WaiverTokenRevokedReason =
-  | "replaced"
-  | "signed"
+export type WaiverRevokedReason =
   | "participant_removed"
-  | "booking_canceled"
-  | "superseded";
-export type WaiverSessionRevokedReason =
-  | "participant_removed"
-  | "booking_canceled"
-  | "superseded"
-  | "recipient_changed";
+  | "participant_changed"
+  | "booking_canceled";
+export type WaiverTokenRevokedReason = "replaced" | "signed" | WaiverRevokedReason | "superseded";
+export type WaiverSessionRevokedReason = WaiverRevokedReason | "superseded" | "recipient_changed";
 export type WaiverDeliveryKind = "initial" | "resend";
 export type GuardianRelationship = "parent" | "legal_guardian";
 

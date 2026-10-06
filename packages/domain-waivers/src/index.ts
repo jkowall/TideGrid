@@ -11,7 +11,7 @@ export {
   type AssignedRequest,
   type AssignResult,
   assignBookingWaivers,
-  lockBookingWaivers,
+  lockBookingForWaivers,
   requiredSignerFor,
 } from "./assign.ts";
 export { type BookingContext, loadBookingContext, tripFacts } from "./booking.ts";
@@ -36,6 +36,8 @@ export {
   TOKEN_TTL_DAYS,
 } from "./delivery.ts";
 export { cleanLine, comparableName, formatInstant } from "./format.ts";
+export { CORRECTED_ADDRESS_REASON, createWaiverHooks, onParticipantUpdated } from "./hooks.ts";
+export { bookingParticipantDirectory } from "./participants.ts";
 export type {
   ParticipantDirectory,
   WaiverDeps,

@@ -35,8 +35,9 @@
 -- Postgres for the demo, in the evidence row, under the same immutability;
 -- the waiver contract records why and how it moves to R2.
 --
--- Lock order for every command: the booking's advisory lock (assignment
--- only), then the request (FOR NO KEY UPDATE), then its tokens and sessions.
+-- Lock order for every command: the booking row (assignment, revocation, and
+-- version moves; inside a booking hook the caller already holds it), then the
+-- request (FOR NO KEY UPDATE), then its tokens and sessions.
 --
 -- Tenancy follows packages/database/README.md: tenant_id on every row,
 -- composite tenant foreign keys, forced row-level security with a
@@ -118,10 +119,12 @@ CREATE TABLE public.waiver_template_versions (
 -- The assignment: one participant of one confirmed booking must sign one
 -- version. Created atomically with the booking's confirmation or the
 -- participant's addition. The assignment key (tenant, booking, participant,
--- version) makes a retry find the first request instead of adding another,
--- and at most one request per participant and booking is live (pending or
--- signed). required_signer is participant for an adult and guardian for a
--- minor, from the version's signer rules.
+-- version) over live requests (pending or signed) makes a retry find the
+-- first request instead of adding another, and at most one request per
+-- participant and booking is live. A request that ended (revoked or
+-- superseded) never blocks the next one, so a participant whose details
+-- changed who must sign gets a new request. required_signer is participant
+-- for an adult and guardian for a minor, from the version's signer rules.
 CREATE TABLE public.waiver_requests (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
@@ -133,7 +136,8 @@ CREATE TABLE public.waiver_requests (
   required_signer text NOT NULL CHECK (required_signer IN ('participant', 'guardian')),
   state text NOT NULL DEFAULT 'pending'
     CHECK (state IN ('pending', 'signed', 'revoked', 'superseded')),
-  revoked_reason text CHECK (revoked_reason IN ('participant_removed', 'booking_canceled')),
+  revoked_reason text CHECK (revoked_reason IN (
+    'participant_removed', 'participant_changed', 'booking_canceled')),
   superseded_by uuid,
   created_at timestamptz NOT NULL DEFAULT now(),
   signed_at timestamptz,
@@ -142,9 +146,10 @@ CREATE TABLE public.waiver_requests (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, id),
   UNIQUE (tenant_id, id, booking_id, participant_id),
-  CONSTRAINT waiver_requests_assignment_key
-    UNIQUE (tenant_id, booking_id, participant_id, template_id, template_version),
   FOREIGN KEY (tenant_id, booking_id) REFERENCES public.bookings (tenant_id, id),
+  -- The participant belongs to this booking.
+  FOREIGN KEY (tenant_id, booking_id, participant_id)
+    REFERENCES public.booking_participants (tenant_id, booking_id, id),
   FOREIGN KEY (tenant_id, template_id, template_version, content_sha256)
     REFERENCES public.waiver_template_versions (tenant_id, template_id, version, content_sha256),
   -- A replacement is a request for the same booking and participant. Checked
@@ -160,6 +165,9 @@ CREATE TABLE public.waiver_requests (
   CHECK (state <> 'signed' OR signed_at IS NOT NULL),
   CHECK (state <> 'pending' OR signed_at IS NULL)
 );
+CREATE UNIQUE INDEX waiver_requests_assignment_key
+  ON public.waiver_requests (tenant_id, booking_id, participant_id, template_id, template_version)
+  WHERE state IN ('pending', 'signed');
 CREATE UNIQUE INDEX waiver_requests_one_live
   ON public.waiver_requests (tenant_id, booking_id, participant_id)
   WHERE state IN ('pending', 'signed');
@@ -185,7 +193,8 @@ CREATE TABLE public.waiver_access_tokens (
   redeemed_at timestamptz,
   revoked_at timestamptz,
   revoked_reason text CHECK (revoked_reason IN (
-    'replaced', 'signed', 'participant_removed', 'booking_canceled', 'superseded')),
+    'replaced', 'signed', 'participant_removed', 'participant_changed', 'booking_canceled',
+    'superseded')),
   UNIQUE (tenant_id, id),
   CONSTRAINT waiver_access_tokens_hash_key UNIQUE (token_hash),
   FOREIGN KEY (tenant_id, request_id) REFERENCES public.waiver_requests (tenant_id, id),
@@ -200,9 +209,10 @@ CREATE INDEX waiver_access_tokens_request_idx ON public.waiver_access_tokens (te
 -- each audited resend after it. A retry of the same generation never adds a
 -- row; the message it queued carries the generation's idempotency key
 -- (waiver:<request>:<generation>). Resends are rate limited here, for every
--- writer: at least 10 minutes apart and at most 5 generations per request.
--- The recipient is the address the request went to; the message records
--- whether it was accepted, delivered, or failed.
+-- writer: at most 5 generations per request, and a resend to the same address
+-- at least 10 minutes after the previous one. The recipient is the address
+-- the request went to; the message records whether it was accepted,
+-- delivered, or failed.
 CREATE TABLE public.waiver_deliveries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
@@ -251,7 +261,8 @@ CREATE TABLE public.waiver_signing_sessions (
   expires_at timestamptz NOT NULL,
   revoked_at timestamptz,
   revoked_reason text CHECK (revoked_reason IN (
-    'participant_removed', 'booking_canceled', 'superseded', 'recipient_changed')),
+    'participant_removed', 'participant_changed', 'booking_canceled', 'superseded',
+    'recipient_changed')),
   UNIQUE (tenant_id, id),
   -- One session per token: a token opens one session, once.
   UNIQUE (tenant_id, token_id),
@@ -578,7 +589,7 @@ BEGIN
     RAISE EXCEPTION 'waiver request % is not pending; nothing to send', NEW.request_id
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_request';
   END IF;
-  SELECT d.generation, d.created_at INTO latest
+  SELECT d.generation, d.created_at, d.recipient_email INTO latest
     FROM public.waiver_deliveries d
    WHERE d.tenant_id = NEW.tenant_id AND d.request_id = NEW.request_id
    ORDER BY d.generation DESC
@@ -588,8 +599,12 @@ BEGIN
       NEW.request_id, coalesce(latest.generation, 0) + 1, NEW.generation
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_sequence';
   END IF;
-  IF latest.created_at IS NOT NULL AND latest.created_at > now() - interval '10 minutes' THEN
-    RAISE EXCEPTION 'waiver request % was sent less than 10 minutes ago', NEW.request_id
+  -- The interval protects one mailbox from repeats; a corrected address gets
+  -- its request at once, still within the cap on generations.
+  IF latest.created_at IS NOT NULL AND latest.created_at > now() - interval '10 minutes'
+     AND latest.recipient_email = NEW.recipient_email THEN
+    RAISE EXCEPTION 'waiver request % was sent to this address less than 10 minutes ago',
+      NEW.request_id
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_rate';
   END IF;
   IF NOT EXISTS (

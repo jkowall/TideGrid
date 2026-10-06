@@ -12,7 +12,7 @@ import {
   type TenantTransaction,
 } from "@tidegrid/database";
 import { sql } from "kysely";
-import { lockBookingWaivers, requiredSignerFor } from "./assign.ts";
+import { lockBookingForWaivers, requiredSignerFor } from "./assign.ts";
 import { sendWaiverRequest } from "./delivery.ts";
 import type { WaiverDeps } from "./ports.ts";
 
@@ -47,7 +47,7 @@ export async function supersedeUnsignedRequests(
   let lockedBooking: string | null = null;
   for (const candidate of candidates) {
     if (candidate.booking_id !== lockedBooking) {
-      await lockBookingWaivers(trx, ctx.tenantId, candidate.booking_id);
+      await lockBookingForWaivers(trx, ctx.tenantId, candidate.booking_id);
       lockedBooking = candidate.booking_id;
     }
     const { rows } = await sql<{ id: string; booking_id: string; participant_id: string }>`

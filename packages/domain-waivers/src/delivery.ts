@@ -134,7 +134,9 @@ export async function sendWaiverRequest(
     if (facts.latest_generation !== null && facts.latest_generation >= MAX_GENERATIONS) {
       return { kind: "limit_reached" };
     }
-    if (facts.latest_at !== null) {
+    // The interval protects one mailbox from repeats; a corrected address
+    // gets the request at once, within the cap on generations.
+    if (facts.latest_at !== null && facts.latest_recipient === recipient) {
       const retryAfter = facts.latest_at.getTime() + RESEND_INTERVAL_MINUTES * 60_000;
       if (retryAfter > now) return { kind: "too_soon", retryAfter: new Date(retryAfter) };
     }
@@ -178,6 +180,12 @@ export async function sendWaiverRequest(
     generation,
     requiredSigner: request.required_signer,
     participantName: participant.name,
+    recipientName:
+      request.required_signer === "guardian"
+        ? (participant.guardianName ?? participant.name)
+        : participant.name,
+    bookingId: request.booking_id,
+    participantId: request.participant_id,
     operatorName: booking.operatorName,
     trip: tripFacts(booking),
     link: `${origin.replace(/\/+$/, "")}/waiver#t=${token}`,

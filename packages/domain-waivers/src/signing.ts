@@ -49,8 +49,12 @@ export interface SigningView {
   state: WaiverRequestState;
   operatorName: string;
   trip: ReturnType<typeof tripFacts>;
-  /** Null once the participant has left the booking. */
-  participant: { name: string; minor: boolean } | null;
+  /**
+   * Who the waiver is for, and the name the signer types: the participant's
+   * own, or a minor's parent or guardian's, as the booking gives them. Null
+   * once the participant has left the booking.
+   */
+  participant: { name: string; minor: boolean; signerName: string | null } | null;
   signerRole: WaiverSignerRole;
   waiver: {
     title: string;
@@ -117,7 +121,7 @@ function viewOf(
   session: WaiverSession,
   booking: BookingContext,
   version: TemplateVersionText,
-  participant: { name: string; minor: boolean } | null,
+  participant: SigningView["participant"],
   signed: SignedSummary | null,
 ): SigningView {
   return {
@@ -162,17 +166,30 @@ export async function getSigningView(
   );
   if (!version) throw new Error("a request's version was not found");
   const signed = await loadSigned(trx, tenantId, session.requestId);
-  const participant = signed
-    ? { name: signed.participantName, minor: signed.minor }
-    : await findParticipant(trx, tenantId, deps, session.bookingId, session.participantId);
-  return viewOf(
-    request.state,
-    session,
-    booking,
-    version,
-    participant ? { name: participant.name, minor: participant.minor } : null,
-    signed,
-  );
+  let participant: SigningView["participant"] = null;
+  if (signed) {
+    participant = {
+      name: signed.participantName,
+      minor: signed.minor,
+      signerName: signed.signerName,
+    };
+  } else {
+    const current = await findParticipant(
+      trx,
+      tenantId,
+      deps,
+      session.bookingId,
+      session.participantId,
+    );
+    if (current) {
+      participant = {
+        name: current.name,
+        minor: current.minor,
+        signerName: expectedSigner(current, session.signerRole),
+      };
+    }
+  }
+  return viewOf(request.state, session, booking, version, participant, signed);
 }
 
 export interface SignInput {
@@ -215,6 +232,17 @@ export type SignResult =
   | { kind: "participant_changed" }
   | { kind: "invalid"; problems: SignProblem[] };
 
+/**
+ * The name the booking gives the person who signs: the participant, or a
+ * minor's parent or guardian. A typed signature must match it.
+ */
+export function expectedSigner(
+  participant: WaiverParticipant,
+  role: WaiverSignerRole,
+): string | null {
+  return role === "guardian" ? participant.guardianName : participant.name;
+}
+
 function validate(
   input: SignInput,
   version: TemplateVersionText,
@@ -250,18 +278,16 @@ function validate(
     });
   }
   const signature = cleanLine(input.signature);
+  const expected = expectedSigner(participant, role);
   if (signature.length < 2 || signature.length > 120 || !/\p{L}/u.test(signature)) {
     problems.push({ field: "signature", code: "required", message: "Type your full name to sign" });
   } else if (controlChars.test(signature)) {
     problems.push({ field: "signature", code: "invalid", message: "Type your name as plain text" });
-  } else if (
-    role === "participant" &&
-    comparableName(signature) !== comparableName(participant.name)
-  ) {
+  } else if (expected !== null && comparableName(signature) !== comparableName(expected)) {
     problems.push({
       field: "signature",
       code: "does_not_match",
-      message: `Type your name as it appears on this booking: ${participant.name}`,
+      message: `Type your name as it appears on this booking: ${expected}`,
     });
   }
   if (role === "guardian" && input.relationship === null) {
@@ -339,7 +365,7 @@ export async function signWaiver(
   if (!facts) throw new Error("a session's delivery was not found");
   const signedAt = facts.now;
   const evidenceId = crypto.randomUUID();
-  const signerName = request.required_signer === "guardian" ? signature : participant.name;
+  const signerName = expectedSigner(participant, request.required_signer) ?? signature;
   const relationship = request.required_signer === "guardian" ? input.relationship : null;
   const document = renderWaiverPdf({
     operatorName: booking.operatorName,
@@ -432,14 +458,21 @@ export async function signWaiver(
   });
   return {
     kind: "signed",
-    view: viewOf("signed", session, booking, version, participant, {
-      evidenceId,
-      signedAt,
-      signerName,
-      signerRole: request.required_signer,
-      relationship,
-      documentSha256,
-    }),
+    view: viewOf(
+      "signed",
+      session,
+      booking,
+      version,
+      { name: participant.name, minor: participant.minor, signerName },
+      {
+        evidenceId,
+        signedAt,
+        signerName,
+        signerRole: request.required_signer,
+        relationship,
+        documentSha256,
+      },
+    ),
   };
 }
 

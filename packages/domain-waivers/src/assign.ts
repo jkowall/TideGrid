@@ -5,11 +5,11 @@
  * queued. Everything runs in the caller's transaction, so the requests exist
  * only if the confirmation or the addition commits.
  *
- * Idempotent: a per-booking transaction lock serializes assignment for one
- * booking, a participant with a pending or signed request is skipped, and the
- * assignment key (tenant, booking, participant, version) refuses a duplicate
- * at the database. A retried confirmation or addition creates nothing new and
- * sends nothing.
+ * Idempotent: the booking's row lock serializes assignment for one booking, a
+ * participant with a pending or signed request is skipped, and the assignment
+ * key (tenant, booking, participant, version, over live requests) refuses a
+ * duplicate at the database. A retried confirmation or addition creates
+ * nothing new and sends nothing.
  */
 import {
   enqueueOutbox,
@@ -42,15 +42,22 @@ export interface AssignResult {
   alreadyAssigned: number;
 }
 
-/** Serializes waiver assignment for one booking. */
-export async function lockBookingWaivers(
+/**
+ * Lock the booking row for a waiver change, and read its state. Every command
+ * that assigns, revokes, or moves a booking's requests takes it first, so they
+ * serialize with each other and with the booking's own changes (a participant
+ * added or corrected, a cancellation), which lock the same row first. Inside a
+ * booking hook the caller already holds it, so this waits for nothing.
+ */
+export async function lockBookingForWaivers(
   trx: TenantTransaction,
   tenantId: string,
   bookingId: string,
-): Promise<void> {
-  await sql`select pg_advisory_xact_lock(hashtextextended(${`tidegrid.waivers:${tenantId}:${bookingId}`}, 0))`.execute(
-    trx,
-  );
+): Promise<{ state: string } | null> {
+  const { rows } = await sql<{ state: string }>`
+    select state from bookings where tenant_id = ${tenantId} and id = ${bookingId}
+       for no key update`.execute(trx);
+  return rows[0] ?? null;
 }
 
 export function requiredSignerFor(participant: WaiverParticipant): WaiverSignerRole {
@@ -68,7 +75,7 @@ export async function assignBookingWaivers(
   input: { bookingId: string; participantIds?: readonly string[] },
 ): Promise<AssignResult> {
   if (!isUuid(input.bookingId)) throw new TypeError("booking id must be a UUID");
-  await lockBookingWaivers(trx, ctx.tenantId, input.bookingId);
+  await lockBookingForWaivers(trx, ctx.tenantId, input.bookingId);
   const booking = await loadBookingContext(trx, ctx.tenantId, input.bookingId);
   if (!booking) throw new Error("booking not found in this tenant");
   if (booking.state !== "confirmed") {

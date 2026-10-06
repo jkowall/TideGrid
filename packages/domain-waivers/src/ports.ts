@@ -20,6 +20,8 @@ export interface WaiverParticipant {
   email: string | null;
   /** A minor never signs; a parent or legal guardian signs for them. */
   minor: boolean;
+  /** A minor's parent or guardian, as the booking names them; their signature must match it. */
+  guardianName: string | null;
 }
 
 export interface ParticipantDirectory {
@@ -36,6 +38,10 @@ export interface WaiverRequestMessage {
   generation: number;
   requiredSigner: "participant" | "guardian";
   participantName: string;
+  /** Who the email greets: the participant, or a minor's guardian. */
+  recipientName: string;
+  bookingId: string;
+  participantId: string;
   operatorName: string;
   trip: { name: string; when: string; place: string; bookingReference: string };
   /** The guest site's /waiver page with the token in its fragment, which no server receives. */

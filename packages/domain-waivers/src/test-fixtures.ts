@@ -4,15 +4,20 @@
  * fixture, built through the real catalog, pricing, and checkout services, and
  * gains an operator waiver template. Bookings are made the only way the system
  * makes them: a real checkout, the fake provider's payment, and its verified
- * event. Participants and mail go through in-memory ports, so a test controls
- * who is on a booking and reads the links that would be emailed.
+ * event, with the waiver hooks on. Participants are named through the booking
+ * module's own command, which runs the hooks too. Mail goes to a recording
+ * port, so a test reads the links that would be emailed.
  */
 import { randomUUID } from "node:crypto";
 import { type createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import {
+  type BookingHooks,
   createCheckoutSession,
   ensureProviderPayment,
   handleVerifiedEvent,
+  type ParticipantDetails,
+  type PutParticipantResult,
+  putParticipant,
 } from "@tidegrid/domain-booking";
 import {
   type CheckoutFixture,
@@ -25,13 +30,9 @@ import {
 } from "@tidegrid/domain-booking/testing";
 import { FAKE_MINIMUM_AMOUNT } from "@tidegrid/domain-payments";
 import type postgres from "postgres";
-import type {
-  ParticipantDirectory,
-  WaiverDeps,
-  WaiverMailer,
-  WaiverParticipant,
-  WaiverRequestMessage,
-} from "./ports.ts";
+import { createWaiverHooks } from "./hooks.ts";
+import { bookingParticipantDirectory } from "./participants.ts";
+import type { WaiverDeps, WaiverMailer, WaiverRequestMessage } from "./ports.ts";
 import { createWaiverTemplate, publishWaiverTemplateVersion } from "./templates.ts";
 
 type Sql = ReturnType<typeof postgres>;
@@ -80,6 +81,37 @@ export async function createWaiverFixture(
   return { ...tenant, templateId };
 }
 
+/** Keeps every message a command queued, including ones whose transaction rolled back. */
+export class RecordingMailer implements WaiverMailer {
+  readonly sent: WaiverRequestMessage[] = [];
+
+  async enqueue(
+    _trx: unknown,
+    _ctx: TenantContext,
+    message: WaiverRequestMessage,
+  ): Promise<{ messageId: string | null }> {
+    this.sent.push(message);
+    return { messageId: null };
+  }
+
+  /** The last message queued for a request. */
+  lastFor(requestId: string): WaiverRequestMessage {
+    const found = [...this.sent].reverse().find((m) => m.requestId === requestId);
+    if (!found) throw new Error(`no message for request ${requestId}`);
+    return found;
+  }
+}
+
+export const FIXTURE_ORIGIN = "https://waivers.book.example.test";
+
+export function fixtureDeps(mailer: RecordingMailer): WaiverDeps {
+  return {
+    participants: bookingParticipantDirectory,
+    mailer,
+    guestOrigin: async () => FIXTURE_ORIGIN,
+  };
+}
+
 export interface Booked {
   bookingId: string;
   reference: string;
@@ -94,6 +126,7 @@ export async function bookParty(
   tenant: CheckoutFixture,
   tripId: string,
   party: number,
+  hooks: BookingHooks,
 ): Promise<Booked> {
   const provider = fakeProvider(db);
   const quote = await quoteFor(db, tenant.id, tripId, party);
@@ -122,6 +155,7 @@ export async function bookParty(
   const event = await verifiedFakeEvent(provider, settled.event.body);
   const handled = await handleVerifiedEvent(db, provider, event, {
     requestId: `wh-${randomUUID()}`,
+    hooks,
   });
   if (handled.kind !== "processed" || handled.outcome !== "confirmed") {
     throw new Error(`fixture booking: ${JSON.stringify(handled)}`);
@@ -137,71 +171,40 @@ export async function bookParty(
   };
 }
 
-/** Who is on each booking, as a test says. */
-export class MemoryDirectory implements ParticipantDirectory {
-  private readonly byBooking = new Map<string, WaiverParticipant[]>();
-
-  set(
-    bookingId: string,
-    participants: Omit<WaiverParticipant, "bookingId">[],
-  ): WaiverParticipant[] {
-    const list = participants.map((p) => ({ ...p, bookingId }));
-    this.byBooking.set(bookingId, list);
-    return list;
-  }
-
-  add(bookingId: string, participant: Omit<WaiverParticipant, "bookingId">): WaiverParticipant {
-    const full = { ...participant, bookingId };
-    this.byBooking.set(bookingId, [...(this.byBooking.get(bookingId) ?? []), full]);
-    return full;
-  }
-
-  remove(bookingId: string, participantId: string): void {
-    this.byBooking.set(
-      bookingId,
-      (this.byBooking.get(bookingId) ?? []).filter((p) => p.id !== participantId),
-    );
-  }
-
-  update(bookingId: string, participantId: string, change: Partial<WaiverParticipant>): void {
-    this.byBooking.set(
-      bookingId,
-      (this.byBooking.get(bookingId) ?? []).map((p) =>
-        p.id === participantId ? { ...p, ...change } : p,
-      ),
-    );
-  }
-
-  async list(_trx: unknown, _tenantId: string, bookingId: string): Promise<WaiverParticipant[]> {
-    return [...(this.byBooking.get(bookingId) ?? [])];
-  }
+/** Name or correct the participant at one place, as the guest's management link does. */
+export async function nameParticipant(
+  db: Db,
+  tenantId: string,
+  bookingId: string,
+  position: number,
+  details: ParticipantDetails,
+  hooks: BookingHooks,
+): Promise<Extract<PutParticipantResult, { participant: unknown }>> {
+  const ctx = guestContext(tenantId);
+  const put = await inTenantTransaction(db, ctx, (trx) =>
+    putParticipant(trx, ctx, { bookingId, position, details }, hooks),
+  );
+  if (!("participant" in put)) throw new Error(`fixture participant: ${JSON.stringify(put)}`);
+  return put;
 }
 
-/** Keeps every message a command queued, including ones whose transaction rolled back. */
-export class RecordingMailer implements WaiverMailer {
-  readonly sent: WaiverRequestMessage[] = [];
-
-  async enqueue(
-    _trx: unknown,
-    _ctx: TenantContext,
-    message: WaiverRequestMessage,
-  ): Promise<{ messageId: string | null }> {
-    this.sent.push(message);
-    return { messageId: null };
-  }
-
-  /** The last link queued for a request. */
-  lastFor(requestId: string): WaiverRequestMessage {
-    const found = [...this.sent].reverse().find((m) => m.requestId === requestId);
-    if (!found) throw new Error(`no message for request ${requestId}`);
-    return found;
-  }
+/** An adult with their own address, or a minor with a guardian. */
+export function adult(name: string, email?: string | null): ParticipantDetails {
+  return {
+    name,
+    isMinor: false,
+    email:
+      email === undefined ? `${name.toLowerCase().replace(/[^a-z]+/g, ".")}@example.test` : email,
+  };
 }
 
-export const FIXTURE_ORIGIN = "https://waivers.book.example.test";
+export function minor(name: string, guardian: { name: string; email: string }): ParticipantDetails {
+  return { name, isMinor: true, email: null, guardian };
+}
 
-export function fixtureDeps(directory: MemoryDirectory, mailer: RecordingMailer): WaiverDeps {
-  return { participants: directory, mailer, guestOrigin: async () => FIXTURE_ORIGIN };
+/** The waiver hooks with the recording mailer, as the API wires them. */
+export function fixtureHooks(mailer: RecordingMailer): BookingHooks {
+  return createWaiverHooks(fixtureDeps(mailer));
 }
 
 /** The entry token in a link's fragment. */
@@ -209,19 +212,4 @@ export function tokenOf(link: string): string {
   const token = new URL(link).hash.match(/^#t=([A-Za-z0-9_-]{43})$/)?.[1];
   if (!token) throw new Error(`no token in ${link}`);
   return token;
-}
-
-export function participant(
-  name: string,
-  options: { minor?: boolean; email?: string | null } = {},
-): Omit<WaiverParticipant, "bookingId"> {
-  return {
-    id: randomUUID(),
-    name,
-    email:
-      options.email === undefined
-        ? `${name.toLowerCase().replace(/[^a-z]+/g, ".")}@example.test`
-        : options.email,
-    minor: options.minor ?? false,
-  };
 }
