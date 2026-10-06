@@ -9,7 +9,8 @@
     "./components.css": "./src/components.css",
     "./base.css": "./src/base.css",
     "./brand": "./src/brand/index.ts",
-    "./components": "./src/components/index.ts"
+    "./components": "./src/components/index.ts",
+    "./format": "./src/format/index.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
