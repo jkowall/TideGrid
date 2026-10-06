@@ -138,10 +138,41 @@ export function paymentCopy(payment: BookingPaymentStatus): StatusCopy {
   }
 }
 
-/** Booking states. Confirmed is the only one until cancellation arrives. */
-export const bookingStates: Record<"confirmed", StatusCopy> = {
+/** Booking states. A guest may cancel within policy since lane 1 (G2.11c). */
+export const bookingStates: Record<BookingDetail["state"], StatusCopy> = {
   confirmed: { label: "Confirmed", tone: "ready", icon: "check" },
+  canceled: { label: "Canceled", tone: "warning", icon: "x-octagon" },
 };
+
+/**
+ * What a cancellation's policy gave, in words: "Before the cutoff: full
+ * refund", "After the cutoff: 50% refund", "After the cutoff: no refund".
+ */
+export function cancellationRemedyText(c: NonNullable<BookingDetail["cancellation"]>): string {
+  const side = c.beforeCutoff ? "Before the cutoff" : "After the cutoff";
+  switch (c.remedy) {
+    case "full_refund":
+      return `${side}: full refund`;
+    case "percent_refund":
+      return `${side}: ${Number((c.refundBp / 100).toFixed(2))}% refund`;
+    case "none":
+      return `${side}: no refund`;
+  }
+}
+
+/** Who canceled, as the console says it. */
+export function cancelledByText(by: NonNullable<BookingDetail["cancellation"]>["by"]): string {
+  switch (by) {
+    case "guest":
+      return "the guest, online";
+    case "staff":
+      return "staff";
+    case "support":
+      return "TideGrid support";
+    case "system":
+      return "TideGrid";
+  }
+}
 
 export function providerName(provider: "fake" | "stripe"): string {
   return provider === "fake" ? "Test payment (demo provider)" : "Stripe";
@@ -178,6 +209,7 @@ const timelineLabels: Record<BookingTimelineEvent["kind"], string> = {
   checkout_opened: "Checkout opened",
   paid: "Payment received",
   confirmed: "Booking confirmed",
+  canceled: "Booking canceled",
   refund_requested: "Refund requested",
   refunded: "Refunded",
   refund_failed: "Refund failed",

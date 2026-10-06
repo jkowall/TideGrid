@@ -16,6 +16,12 @@
 --   bookings                 confirmed -> canceled, with its cancellation
 --   payment_refunds          a second reason, booking_canceled, for any amount
 --                            the cancellation computed, up to what was paid
+--   email_messages           transactional email, enqueued with the change that
+--                            causes it and sent after commit by a delivery job
+--   guest_access_links       accountless, single-use, expiring access tokens,
+--                            stored only as hashes and issued when an email is sent
+--   guest_sessions           the restricted session a redeemed link opens
+--   fake_email_deliveries    what the fake email provider "sent" (demo shim)
 --
 -- Chain of custody for a cancellation, enforced for every role, the owner
 -- included:
@@ -38,6 +44,18 @@
 -- tenant_isolation policy, SELECT and INSERT from the default privileges,
 -- UPDATE only on the columns that carry a change, and no DELETE or TRUNCATE
 -- for any role.
+
+-- The delivery job's tenant list below is a SECURITY DEFINER function that
+-- reads a table with forced row-level security; its owner must bypass it.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = current_user AND (rolsuper OR rolbypassrls)
+  ) THEN
+    RAISE EXCEPTION 'this migration must run as a role that bypasses row-level security';
+  END IF;
+END
+$$;
 
 -- Participants --------------------------------------------------------------------
 
@@ -449,13 +467,531 @@ BEGIN
 END;
 $$;
 
+-- Email messages -------------------------------------------------------------------
+
+-- One transactional email, enqueued in the same transaction as the change
+-- that causes it (a booking confirmed or canceled, a link requested, a waiver
+-- request), so it exists only if the change commits. It is rendered when it
+-- is enqueued, with the tenant's brand, and kept with its template and
+-- version. A delivery job sends it after commit with the message id as the
+-- provider's idempotency key and records the outcome; states move one way.
+-- dedupe_key names the logical message, once per tenant for ever, so a
+-- retried command or a replayed event enqueues nothing new.
+--
+-- A message that carries an access link records where and why, never the
+-- link: the delivery job issues the token when it sends and writes the URL
+-- into the bodies in place of the marker that link_slot names, so a raw token
+-- is never stored. Personal data: the recipient and the bodies stay here and
+-- in the provider call, never in audit rows, events, or logs.
+CREATE TABLE public.email_messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
+  dedupe_key text NOT NULL CHECK (dedupe_key ~ '^[a-z][a-z0-9_.]*:[A-Za-z0-9_.:-]{1,200}$'),
+  template text NOT NULL CHECK (template ~ '^[a-z][a-z0-9_]{0,63}$'),
+  template_version integer NOT NULL CHECK (template_version BETWEEN 1 AND 1000),
+  booking_id uuid,
+  participant_id uuid,
+  -- What else the message is about, such as 'waiver_request:<uuid>'.
+  subject_ref text CHECK (subject_ref ~ '^[a-z][a-z0-9_]{0,63}:[0-9a-f-]{36}$'),
+  to_email text NOT NULL
+    CHECK (char_length(to_email) <= 254
+           AND to_email = lower(to_email)
+           AND to_email ~ '^[\x21-\x7e]+$'
+           AND to_email ~ '^[^@]+@[^@]+\.[^@]+$'),
+  to_name text CHECK (to_name IS NULL
+                      OR (char_length(to_name) BETWEEN 1 AND 120 AND to_name !~ '[[:cntrl:]]')),
+  from_name text NOT NULL
+    CHECK (char_length(from_name) BETWEEN 1 AND 120 AND from_name !~ '[[:cntrl:]]'),
+  reply_to text CHECK (reply_to IS NULL OR (char_length(reply_to) <= 254
+                                            AND reply_to ~ '^[\x21-\x7e]+$'
+                                            AND reply_to ~ '^[^@]+@[^@]+\.[^@]+$')),
+  subject text NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 200 AND subject !~ '[[:cntrl:]]'),
+  html_body text NOT NULL CHECK (char_length(html_body) BETWEEN 1 AND 200000),
+  text_body text NOT NULL CHECK (char_length(text_body) BETWEEN 1 AND 100000),
+  link_purpose text CHECK (link_purpose IN ('booking_manage', 'waiver_sign')),
+  link_path text CHECK (link_path ~ '^/[a-z0-9/_-]{0,100}$'),
+  link_ttl_seconds integer CHECK (link_ttl_seconds BETWEEN 300 AND 1209600),
+  link_slot text CHECK (link_slot ~ '^[0-9a-f]{32}$'),
+  state text NOT NULL DEFAULT 'queued'
+    CHECK (state IN ('queued', 'sending', 'sent', 'failed', 'canceled')),
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 100),
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  -- When the latest attempt was claimed; stamped by the trigger.
+  last_attempt_at timestamptz,
+  lease_expires_at timestamptz,
+  provider text CHECK (provider IN ('fake', 'cloudflare')),
+  provider_message_id text CHECK (provider_message_id ~ '^[A-Za-z0-9_.@<>:+=-]{3,255}$'),
+  last_error_code text CHECK (last_error_code ~ '^[a-z][a-z0-9_]{0,63}$'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz,
+  failed_at timestamptz,
+  canceled_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, id),
+  CONSTRAINT email_messages_once UNIQUE (tenant_id, dedupe_key),
+  FOREIGN KEY (tenant_id, booking_id) REFERENCES public.bookings (tenant_id, id),
+  FOREIGN KEY (tenant_id, booking_id, participant_id)
+    REFERENCES public.booking_participants (tenant_id, booking_id, id),
+  CHECK (participant_id IS NULL OR booking_id IS NOT NULL),
+  CONSTRAINT email_messages_link CHECK (
+    (link_purpose IS NULL) = (link_slot IS NULL)
+    AND (link_purpose IS NULL) = (link_path IS NULL)
+    AND (link_purpose IS NULL) = (link_ttl_seconds IS NULL)
+    AND (link_purpose IS NULL OR booking_id IS NOT NULL)
+    AND (link_purpose IS DISTINCT FROM 'waiver_sign' OR participant_id IS NOT NULL)),
+  CHECK ((state = 'sending') = (lease_expires_at IS NOT NULL)),
+  CHECK ((attempts = 0) = (last_attempt_at IS NULL)),
+  CHECK ((state = 'sent') = (sent_at IS NOT NULL)),
+  CHECK (state <> 'sent' OR (provider IS NOT NULL AND provider_message_id IS NOT NULL)),
+  CHECK (state = 'sent' OR provider_message_id IS NULL),
+  CHECK ((state = 'failed') = (failed_at IS NOT NULL)),
+  CHECK (state <> 'failed' OR last_error_code IS NOT NULL),
+  CHECK ((state = 'canceled') = (canceled_at IS NOT NULL))
+);
+-- Due work, per tenant and across tenants (the delivery job).
+CREATE INDEX email_messages_due_idx ON public.email_messages (tenant_id, next_attempt_at)
+  WHERE state = 'queued';
+CREATE INDEX email_messages_due_any_tenant_idx ON public.email_messages (next_attempt_at)
+  INCLUDE (tenant_id)
+  WHERE state = 'queued';
+CREATE INDEX email_messages_leased_idx ON public.email_messages (lease_expires_at)
+  INCLUDE (tenant_id)
+  WHERE state = 'sending';
+CREATE INDEX email_messages_booking_idx ON public.email_messages (tenant_id, booking_id, created_at)
+  WHERE booking_id IS NOT NULL;
+
+-- A message's content never changes. Its delivery moves one way: claimed for
+-- a short lease (each claim one more attempt, only when due or when the last
+-- attempt's lease has lapsed), then sent with the provider's id, back to
+-- queued for a later attempt after a temporary failure, or failed; a queued
+-- message may be canceled. Times come from the database clock.
+CREATE FUNCTION app.check_email_message() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.state IS DISTINCT FROM 'queued' OR NEW.attempts IS DISTINCT FROM 0
+       OR NEW.lease_expires_at IS NOT NULL OR NEW.provider IS NOT NULL
+       OR NEW.provider_message_id IS NOT NULL OR NEW.last_error_code IS NOT NULL THEN
+      RAISE EXCEPTION 'a message starts queued and unsent'
+        USING ERRCODE = '23514', CONSTRAINT = 'email_messages_transition';
+    END IF;
+    NEW.created_at := now();
+    NEW.updated_at := now();
+    NEW.last_attempt_at := NULL;
+    NEW.sent_at := NULL;
+    NEW.failed_at := NULL;
+    NEW.canceled_at := NULL;
+    -- A message may wait to be sent (a reminder); it never jumps the queue.
+    NEW.next_attempt_at := greatest(coalesce(NEW.next_attempt_at, now()), now());
+    RETURN NEW;
+  END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+     OR NEW.dedupe_key IS DISTINCT FROM OLD.dedupe_key
+     OR NEW.template IS DISTINCT FROM OLD.template
+     OR NEW.template_version IS DISTINCT FROM OLD.template_version
+     OR NEW.booking_id IS DISTINCT FROM OLD.booking_id
+     OR NEW.participant_id IS DISTINCT FROM OLD.participant_id
+     OR NEW.subject_ref IS DISTINCT FROM OLD.subject_ref
+     OR NEW.to_email IS DISTINCT FROM OLD.to_email
+     OR NEW.to_name IS DISTINCT FROM OLD.to_name
+     OR NEW.from_name IS DISTINCT FROM OLD.from_name
+     OR NEW.reply_to IS DISTINCT FROM OLD.reply_to
+     OR NEW.subject IS DISTINCT FROM OLD.subject
+     OR NEW.html_body IS DISTINCT FROM OLD.html_body
+     OR NEW.text_body IS DISTINCT FROM OLD.text_body
+     OR NEW.link_purpose IS DISTINCT FROM OLD.link_purpose
+     OR NEW.link_path IS DISTINCT FROM OLD.link_path
+     OR NEW.link_ttl_seconds IS DISTINCT FROM OLD.link_ttl_seconds
+     OR NEW.link_slot IS DISTINCT FROM OLD.link_slot
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'a message''s recipient and content never change'
+      USING ERRCODE = '23514', CONSTRAINT = 'email_messages_immutable';
+  END IF;
+  NEW.last_attempt_at := OLD.last_attempt_at;
+  NEW.sent_at := OLD.sent_at;
+  NEW.failed_at := OLD.failed_at;
+  NEW.canceled_at := OLD.canceled_at;
+  NEW.updated_at := now();
+  IF OLD.state IN ('sent', 'failed', 'canceled') THEN
+    IF NEW.state IS DISTINCT FROM OLD.state OR NEW.attempts IS DISTINCT FROM OLD.attempts
+       OR NEW.next_attempt_at IS DISTINCT FROM OLD.next_attempt_at
+       OR NEW.lease_expires_at IS DISTINCT FROM OLD.lease_expires_at
+       OR NEW.provider IS DISTINCT FROM OLD.provider
+       OR NEW.provider_message_id IS DISTINCT FROM OLD.provider_message_id
+       OR NEW.last_error_code IS DISTINCT FROM OLD.last_error_code THEN
+      RAISE EXCEPTION 'message % is %; it no longer changes', OLD.id, OLD.state
+        USING ERRCODE = '23514', CONSTRAINT = 'email_messages_transition';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- A claim: one more attempt, under a fresh lease of at most ten minutes.
+  IF NEW.state = 'sending' AND (OLD.state = 'queued' OR NEW.attempts IS DISTINCT FROM OLD.attempts) THEN
+    IF (OLD.state = 'queued' AND OLD.next_attempt_at > now())
+       OR (OLD.state = 'sending' AND OLD.lease_expires_at > now()) THEN
+      RAISE EXCEPTION 'message % is not due', OLD.id
+        USING ERRCODE = '23514', CONSTRAINT = 'email_messages_claim';
+    END IF;
+    IF NEW.attempts IS DISTINCT FROM OLD.attempts + 1
+       OR NEW.lease_expires_at IS NULL OR NEW.lease_expires_at <= now()
+       OR NEW.lease_expires_at > now() + interval '10 minutes'
+       OR NEW.provider IS NULL OR NEW.provider_message_id IS NOT NULL THEN
+      RAISE EXCEPTION 'a claim is one more attempt at one provider, under a lease of at most ten minutes'
+        USING ERRCODE = '23514', CONSTRAINT = 'email_messages_claim';
+    END IF;
+    NEW.next_attempt_at := OLD.next_attempt_at;
+    NEW.last_error_code := OLD.last_error_code;
+    NEW.last_attempt_at := now();
+    RETURN NEW;
+  END IF;
+  IF NEW.attempts IS DISTINCT FROM OLD.attempts THEN
+    RAISE EXCEPTION 'attempts count claims only'
+      USING ERRCODE = '23514', CONSTRAINT = 'email_messages_transition';
+  END IF;
+  IF NEW.state = OLD.state THEN
+    -- Without a transition only time moves, and only earlier: a queued message
+    -- due sooner, or a lease ended sooner (tests make time pass this way).
+    IF NEW.provider IS DISTINCT FROM OLD.provider
+       OR NEW.provider_message_id IS DISTINCT FROM OLD.provider_message_id
+       OR NEW.last_error_code IS DISTINCT FROM OLD.last_error_code
+       OR NEW.next_attempt_at > OLD.next_attempt_at
+       OR (OLD.state = 'queued' AND NEW.lease_expires_at IS NOT NULL)
+       OR (OLD.state = 'sending'
+           AND (NEW.next_attempt_at IS DISTINCT FROM OLD.next_attempt_at
+                OR NEW.lease_expires_at IS NULL
+                OR NEW.lease_expires_at > OLD.lease_expires_at)) THEN
+      RAISE EXCEPTION 'a message''s delivery changes only with a transition; its times move only earlier'
+        USING ERRCODE = '23514', CONSTRAINT = 'email_messages_transition';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF OLD.state = 'sending' AND NEW.state = 'sent' THEN
+    IF NEW.provider_message_id IS NULL OR NEW.provider IS DISTINCT FROM OLD.provider THEN
+      RAISE EXCEPTION 'a sent message names the provider''s id for it'
+        USING ERRCODE = '23514', CONSTRAINT = 'email_messages_transition';
+    END IF;
+    NEW.lease_expires_at := NULL;
+    NEW.next_attempt_at := OLD.next_attempt_at;
+    NEW.sent_at := now();
+    RETURN NEW;
+  END IF;
+  IF OLD.state = 'sending' AND NEW.state IN ('queued', 'failed') THEN
+    IF NEW.last_error_code IS NULL OR NEW.provider_message_id IS NOT NULL
+       OR NEW.provider IS DISTINCT FROM OLD.provider
+       OR (NEW.state = 'queued' AND NEW.next_attempt_at <= now()) THEN
+      RAISE EXCEPTION 'a failed attempt records its error, and a retry waits'
+        USING ERRCODE = '23514', CONSTRAINT = 'email_messages_transition';
+    END IF;
+    NEW.lease_expires_at := NULL;
+    IF NEW.state = 'failed' THEN
+      NEW.next_attempt_at := OLD.next_attempt_at;
+      NEW.failed_at := now();
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF OLD.state = 'queued' AND NEW.state = 'canceled' THEN
+    NEW.next_attempt_at := OLD.next_attempt_at;
+    NEW.lease_expires_at := NULL;
+    NEW.provider := OLD.provider;
+    NEW.provider_message_id := NULL;
+    NEW.last_error_code := OLD.last_error_code;
+    NEW.canceled_at := now();
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'a message cannot move from % to %', OLD.state, NEW.state
+    USING ERRCODE = '23514', CONSTRAINT = 'email_messages_transition';
+END;
+$$;
+CREATE TRIGGER email_messages_rules BEFORE INSERT OR UPDATE ON public.email_messages
+  FOR EACH ROW EXECUTE FUNCTION app.check_email_message();
+
+-- The delivery job's tenant list: tenants with a queued message that is due,
+-- or a message whose sending lease has lapsed (an attempt that crashed). The
+-- same argument as app.capacity_hold_sweep_tenants and app.checkout_sweep_tenants:
+-- tenant ids only, at most 1,000, read-only and STABLE; every read and write
+-- that follows runs inside that tenant's own transaction under row-level
+-- security. It reveals that some tenant has mail to send, a weaker signal
+-- than the shared audit and outbox id sequences already give.
+CREATE FUNCTION app.email_delivery_tenants(p_limit integer)
+  RETURNS TABLE (tenant_id uuid)
+  LANGUAGE sql STABLE SECURITY DEFINER
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+    SELECT x.tenant_id FROM (
+      SELECT m.tenant_id FROM public.email_messages m
+       WHERE m.state = 'queued' AND m.next_attempt_at <= pg_catalog.now()
+      UNION
+      SELECT m.tenant_id FROM public.email_messages m
+       WHERE m.state = 'sending' AND m.lease_expires_at <= pg_catalog.now()
+    ) x
+     ORDER BY x.tenant_id
+     LIMIT greatest(1, least(coalesce(p_limit, 100), 1000))
+  $$;
+
+-- Guest access links ----------------------------------------------------------------
+
+-- An accountless entry to one booking for one purpose: the booking's
+-- management (booking_manage) or, from G2.15, a participant's waiver
+-- (waiver_sign). The raw token is 32 random bytes that travel only in an
+-- email, in the URL's fragment; only its SHA-256 is stored. A link is
+-- short-lived (at most 14 days), used once (consumed atomically by an
+-- explicit redemption, a POST, never by a GET or a link preview), and
+-- revocable. Issued by the delivery job when it sends the email that carries
+-- it (message_id), so retries never need a stored token.
+CREATE TABLE public.guest_access_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
+  booking_id uuid NOT NULL,
+  participant_id uuid,
+  purpose text NOT NULL CHECK (purpose IN ('booking_manage', 'waiver_sign')),
+  subject_ref text CHECK (subject_ref ~ '^[a-z][a-z0-9_]{0,63}:[0-9a-f-]{36}$'),
+  message_id uuid,
+  token_hash text NOT NULL CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  revoked_at timestamptz,
+  -- superseded: a newer email's link replaced it. completed: its purpose is
+  -- done (a waiver signed). withdrawn: no longer needed (a participant or
+  -- requirement removed). recipient_changed, booking_canceled, staff: as named.
+  revoked_reason text
+    CHECK (revoked_reason IN ('superseded', 'completed', 'withdrawn', 'recipient_changed',
+                              'booking_canceled', 'staff')),
+  UNIQUE (tenant_id, id),
+  CONSTRAINT guest_access_links_token_key UNIQUE (token_hash),
+  FOREIGN KEY (tenant_id, booking_id) REFERENCES public.bookings (tenant_id, id),
+  FOREIGN KEY (tenant_id, booking_id, participant_id)
+    REFERENCES public.booking_participants (tenant_id, booking_id, id),
+  FOREIGN KEY (tenant_id, message_id) REFERENCES public.email_messages (tenant_id, id),
+  CHECK (purpose <> 'waiver_sign' OR participant_id IS NOT NULL),
+  CHECK ((revoked_at IS NULL) = (revoked_reason IS NULL)),
+  CHECK (consumed_at IS NULL OR revoked_at IS NULL)
+);
+-- Live links of one booking and purpose, for superseding and revoking.
+CREATE INDEX guest_access_links_live_idx
+  ON public.guest_access_links (tenant_id, booking_id, purpose)
+  WHERE consumed_at IS NULL AND revoked_at IS NULL;
+
+-- A link is written unused, expiring within 14 days; afterwards only its use
+-- or its revocation is recorded, once, on the database clock, and a link used
+-- or revoked never changes again. Using it needs it unexpired.
+CREATE FUNCTION app.check_guest_access_link() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.consumed_at IS NOT NULL OR NEW.revoked_at IS NOT NULL OR NEW.revoked_reason IS NOT NULL THEN
+      RAISE EXCEPTION 'a link starts unused'
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_access_links_transition';
+    END IF;
+    NEW.created_at := now();
+    IF NEW.expires_at <= now() OR NEW.expires_at > now() + interval '14 days' THEN
+      RAISE EXCEPTION 'a link expires within 14 days, not at %', NEW.expires_at
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_access_links_expiry';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+     OR NEW.booking_id IS DISTINCT FROM OLD.booking_id
+     OR NEW.participant_id IS DISTINCT FROM OLD.participant_id
+     OR NEW.purpose IS DISTINCT FROM OLD.purpose
+     OR NEW.subject_ref IS DISTINCT FROM OLD.subject_ref
+     OR NEW.message_id IS DISTINCT FROM OLD.message_id
+     OR NEW.token_hash IS DISTINCT FROM OLD.token_hash
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at
+     OR NEW.expires_at > OLD.expires_at THEN
+    RAISE EXCEPTION 'a link keeps its booking, purpose, and token; its expiry moves only earlier'
+      USING ERRCODE = '23514', CONSTRAINT = 'guest_access_links_immutable';
+  END IF;
+  IF OLD.consumed_at IS NOT NULL OR OLD.revoked_at IS NOT NULL THEN
+    IF NEW.expires_at IS DISTINCT FROM OLD.expires_at
+       OR NEW.consumed_at IS DISTINCT FROM OLD.consumed_at
+       OR NEW.revoked_at IS DISTINCT FROM OLD.revoked_at
+       OR NEW.revoked_reason IS DISTINCT FROM OLD.revoked_reason THEN
+      RAISE EXCEPTION 'link % was already used or revoked', OLD.id
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_access_links_transition';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.consumed_at IS NOT NULL THEN
+    IF NEW.revoked_at IS NOT NULL OR NEW.revoked_reason IS NOT NULL THEN
+      RAISE EXCEPTION 'a link is used or revoked, not both'
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_access_links_transition';
+    END IF;
+    IF OLD.expires_at <= now() THEN
+      RAISE EXCEPTION 'link % expired at %', OLD.id, OLD.expires_at
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_access_links_expiry';
+    END IF;
+    NEW.consumed_at := now();
+  ELSIF NEW.revoked_at IS NOT NULL OR NEW.revoked_reason IS NOT NULL THEN
+    IF NEW.revoked_at IS NULL OR NEW.revoked_reason IS NULL THEN
+      RAISE EXCEPTION 'a revocation records its reason'
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_access_links_transition';
+    END IF;
+    NEW.revoked_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER guest_access_links_rules BEFORE INSERT OR UPDATE ON public.guest_access_links
+  FOR EACH ROW EXECUTE FUNCTION app.check_guest_access_link();
+
+-- Guest sessions ----------------------------------------------------------------------
+
+-- The restricted session a guest holds after redeeming a link: bound to one
+-- tenant, one booking, one purpose (and, for a waiver, one participant and
+-- subject), for at most 12 hours, revocable. Its raw token goes back once in
+-- the redemption's response body and is sent as a bearer token; only its
+-- SHA-256 is stored. It is opened only by the redemption that consumed its
+-- link, in that transaction, or by the checkout that made the booking within
+-- an hour of confirmation (the guest names the party right after paying).
+CREATE TABLE public.guest_sessions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
+  booking_id uuid NOT NULL,
+  participant_id uuid,
+  purpose text NOT NULL CHECK (purpose IN ('booking_manage', 'waiver_sign')),
+  subject_ref text CHECK (subject_ref ~ '^[a-z][a-z0-9_]{0,63}:[0-9a-f-]{36}$'),
+  link_id uuid,
+  checkout_session_id uuid,
+  token_hash text NOT NULL CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  revoked_at timestamptz,
+  UNIQUE (tenant_id, id),
+  CONSTRAINT guest_sessions_token_key UNIQUE (token_hash),
+  -- One session per redeemed link.
+  CONSTRAINT guest_sessions_one_per_link UNIQUE (tenant_id, link_id),
+  FOREIGN KEY (tenant_id, booking_id) REFERENCES public.bookings (tenant_id, id),
+  FOREIGN KEY (tenant_id, booking_id, participant_id)
+    REFERENCES public.booking_participants (tenant_id, booking_id, id),
+  FOREIGN KEY (tenant_id, link_id) REFERENCES public.guest_access_links (tenant_id, id),
+  FOREIGN KEY (tenant_id, checkout_session_id) REFERENCES public.checkout_sessions (tenant_id, id),
+  CHECK ((link_id IS NULL) <> (checkout_session_id IS NULL))
+);
+
+CREATE FUNCTION app.check_guest_session() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  l record;
+  b record;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.revoked_at IS NOT NULL THEN
+      RAISE EXCEPTION 'a session starts unrevoked'
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_sessions_transition';
+    END IF;
+    NEW.created_at := now();
+    IF NEW.expires_at <= now() OR NEW.expires_at > now() + interval '12 hours' THEN
+      RAISE EXCEPTION 'a guest session lasts at most 12 hours'
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_sessions_expiry';
+    END IF;
+    IF NEW.link_id IS NOT NULL THEN
+      -- The link's own trigger stamped its use with now(), this transaction's
+      -- start: a link used in an earlier transaction opens nothing.
+      SELECT x.booking_id, x.participant_id, x.purpose, x.subject_ref, x.consumed_at
+        INTO l
+        FROM public.guest_access_links x
+       WHERE x.tenant_id = NEW.tenant_id AND x.id = NEW.link_id;
+      IF NOT FOUND OR l.consumed_at IS DISTINCT FROM now()
+         OR l.booking_id <> NEW.booking_id
+         OR l.participant_id IS DISTINCT FROM NEW.participant_id
+         OR l.purpose <> NEW.purpose
+         OR l.subject_ref IS DISTINCT FROM NEW.subject_ref THEN
+        RAISE EXCEPTION 'a session is opened only by the redemption that used its link'
+          USING ERRCODE = '23514', CONSTRAINT = 'guest_sessions_evidence';
+      END IF;
+    ELSE
+      SELECT x.id, x.confirmed_at INTO b
+        FROM public.bookings x
+       WHERE x.tenant_id = NEW.tenant_id AND x.checkout_session_id = NEW.checkout_session_id;
+      IF NOT FOUND OR b.id <> NEW.booking_id OR NEW.purpose <> 'booking_manage'
+         OR NEW.participant_id IS NOT NULL OR NEW.subject_ref IS NOT NULL
+         OR now() > b.confirmed_at + interval '1 hour' THEN
+        RAISE EXCEPTION 'a checkout opens a session for its own booking, within an hour of confirmation'
+          USING ERRCODE = '23514', CONSTRAINT = 'guest_sessions_evidence';
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+     OR NEW.booking_id IS DISTINCT FROM OLD.booking_id
+     OR NEW.participant_id IS DISTINCT FROM OLD.participant_id
+     OR NEW.purpose IS DISTINCT FROM OLD.purpose
+     OR NEW.subject_ref IS DISTINCT FROM OLD.subject_ref
+     OR NEW.link_id IS DISTINCT FROM OLD.link_id
+     OR NEW.checkout_session_id IS DISTINCT FROM OLD.checkout_session_id
+     OR NEW.token_hash IS DISTINCT FROM OLD.token_hash
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at
+     OR NEW.expires_at > OLD.expires_at THEN
+    RAISE EXCEPTION 'a session keeps its booking, purpose, and token; its expiry moves only earlier'
+      USING ERRCODE = '23514', CONSTRAINT = 'guest_sessions_immutable';
+  END IF;
+  IF OLD.revoked_at IS NOT NULL THEN
+    IF NEW.revoked_at IS DISTINCT FROM OLD.revoked_at
+       OR NEW.expires_at IS DISTINCT FROM OLD.expires_at THEN
+      RAISE EXCEPTION 'session % was already revoked', OLD.id
+        USING ERRCODE = '23514', CONSTRAINT = 'guest_sessions_transition';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF NEW.revoked_at IS NOT NULL THEN
+    NEW.revoked_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER guest_sessions_rules BEFORE INSERT OR UPDATE ON public.guest_sessions
+  FOR EACH ROW EXECUTE FUNCTION app.check_guest_session();
+
+-- The fake email provider -----------------------------------------------------------
+
+-- A demo stand-in for an email provider behind the neutral adapter (the
+-- owner's 2026-10-05 decision to shim providers): every send it answers, as
+-- it answered it, append-only. A key is accepted once; a repeat answers with
+-- the first. It never reads or writes TideGrid's own message table. The API
+-- refuses the fake provider in a production configuration.
+CREATE TABLE public.fake_email_deliveries (
+  id text PRIMARY KEY CHECK (id ~ '^fmsg_[A-Za-z0-9]{24}$'),
+  tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
+  idempotency_key text NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+  result text NOT NULL CHECK (result IN ('accepted', 'unavailable', 'rejected')),
+  from_address text NOT NULL CHECK (char_length(from_address) BETWEEN 3 AND 254),
+  from_name text NOT NULL CHECK (char_length(from_name) BETWEEN 1 AND 120),
+  reply_to text CHECK (reply_to IS NULL OR char_length(reply_to) BETWEEN 3 AND 254),
+  to_address text NOT NULL CHECK (char_length(to_address) BETWEEN 3 AND 254),
+  to_name text CHECK (to_name IS NULL OR char_length(to_name) BETWEEN 1 AND 120),
+  subject text NOT NULL CHECK (char_length(subject) BETWEEN 1 AND 200),
+  html_body text NOT NULL CHECK (char_length(html_body) BETWEEN 1 AND 210000),
+  text_body text NOT NULL CHECK (char_length(text_body) BETWEEN 1 AND 110000),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, id)
+);
+CREATE UNIQUE INDEX fake_email_deliveries_accepted_once
+  ON public.fake_email_deliveries (tenant_id, idempotency_key) WHERE result = 'accepted';
+CREATE INDEX fake_email_deliveries_key_idx
+  ON public.fake_email_deliveries (tenant_id, idempotency_key);
+CREATE INDEX fake_email_deliveries_recent_idx
+  ON public.fake_email_deliveries (tenant_id, created_at DESC);
+
 -- Row-level security, append-only guards, and privileges ---------------------------
 
 DO $$
 DECLARE
   t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['booking_participants', 'booking_cancellations'] LOOP
+  FOREACH t IN ARRAY ARRAY[
+    'booking_participants', 'booking_cancellations', 'email_messages', 'guest_access_links',
+    'guest_sessions', 'fake_email_deliveries'
+  ] LOOP
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY', t);
     EXECUTE format(
@@ -473,19 +1009,32 @@ BEGIN
 END
 $$;
 
--- A cancellation never changes once written, for any role.
+-- These never change once written, for any role.
 CREATE TRIGGER booking_cancellations_append_only BEFORE UPDATE ON public.booking_cancellations
+  FOR EACH ROW EXECUTE FUNCTION app.reject_mutation();
+CREATE TRIGGER fake_email_deliveries_append_only BEFORE UPDATE ON public.fake_email_deliveries
   FOR EACH ROW EXECUTE FUNCTION app.reject_mutation();
 
 -- SELECT and INSERT come from the default privileges in 0001. A participant's
--- details may be corrected; a booking's state may move to canceled; the
--- triggers stamp the times and check the evidence.
+-- details may be corrected; a booking's state may move to canceled; a
+-- message's delivery moves; a link is used or revoked; a session is revoked.
+-- The triggers stamp the times and check every move.
 GRANT UPDATE (full_name, is_minor, email, guardian_name, guardian_email)
   ON public.booking_participants TO tidegrid_app;
 GRANT UPDATE (state) ON public.bookings TO tidegrid_app;
+GRANT UPDATE (state, attempts, next_attempt_at, lease_expires_at, provider, provider_message_id,
+              last_error_code)
+  ON public.email_messages TO tidegrid_app;
+GRANT UPDATE (consumed_at, revoked_at, revoked_reason) ON public.guest_access_links TO tidegrid_app;
+GRANT UPDATE (revoked_at) ON public.guest_sessions TO tidegrid_app;
 
 REVOKE ALL ON FUNCTION app.check_booking_participant() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_booking_cancellation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_booking_lifecycle() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_canceled_booking_released() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_payment_refund() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_email_message() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_guest_access_link() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_guest_session() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.email_delivery_tenants(integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.email_delivery_tenants(integer) TO tidegrid_app;

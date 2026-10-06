@@ -35,6 +35,34 @@ export const BookingReference = z
 
 const PaymentState = z.enum(["pending", "succeeded", "failed"]);
 
+/** Lane 1 (G2.11c): a booking may be canceled by its guest within its policy. */
+export const BookingState = z
+  .enum(["confirmed", "canceled"])
+  .describe("confirmed: booked and holding its seats. canceled: given back, with any refund");
+export type BookingState = z.infer<typeof BookingState>;
+
+export const BookingCancellation = z
+  .object({
+    canceledAt: Instant,
+    by: z.enum(["guest", "staff", "system", "support"]).describe("Who canceled: the guest, today"),
+    remedy: z
+      .enum(["full_refund", "percent_refund", "none"])
+      .describe("What the booking's policy version gave on the side of its cutoff it fell"),
+    refundBp: z
+      .number()
+      .int()
+      .min(0)
+      .max(10000)
+      .describe("Basis points of what was paid: 10000 for a full refund, 0 for none"),
+    refundAmount: Cents,
+    paidAmount: Cents,
+    cutoffAt: Instant.describe("The policy's change cutoff for this trip"),
+    beforeCutoff: z.boolean(),
+    policyVersion: z.number().int().min(1),
+  })
+  .describe("The terms the cancellation applied; the refund's state is in refund");
+export type BookingCancellation = z.infer<typeof BookingCancellation>;
+
 // Shared pieces ------------------------------------------------------------------
 
 export const BookingTicketCount = z.object({
@@ -112,7 +140,11 @@ export const BookingListQuery = z.object({
 export type BookingListQuery = z.infer<typeof BookingListQuery>;
 
 export const BookingDayTrip = TripSummary.extend({
-  bookings: z.number().int().min(0).describe("Bookings on the trip"),
+  bookings: z
+    .number()
+    .int()
+    .min(0)
+    .describe("Confirmed bookings on the trip; canceled ones gave their seats back"),
   guests: z.number().int().min(0).describe("Guests across those bookings"),
 });
 export type BookingDayTrip = z.infer<typeof BookingDayTrip>;
@@ -121,7 +153,7 @@ export const BookingListItem = z.object({
   id: Uuid,
   reference: BookingReference,
   tripId: Uuid.describe("One of the response's trips"),
-  state: z.literal("confirmed"),
+  state: BookingState,
   source: z.literal("direct").describe("direct: booked by the guest online"),
   confirmedAt: Instant,
   booker: BookerName,
@@ -231,6 +263,7 @@ export const BookingTimelineEvent = z.object({
     "checkout_opened",
     "paid",
     "confirmed",
+    "canceled",
     "refund_requested",
     "refunded",
     "refund_failed",
@@ -242,12 +275,14 @@ export type BookingTimelineEvent = z.infer<typeof BookingTimelineEvent>;
 export const BookingDetail = z.object({
   id: Uuid,
   reference: BookingReference,
-  state: z.literal("confirmed"),
+  state: BookingState,
   source: z.literal("direct"),
   reacquired: z
     .boolean()
     .describe("Confirmed after its hold had expired, by taking the seats again"),
   confirmedAt: Instant,
+  canceledAt: Instant.nullable(),
+  cancellation: BookingCancellation.nullable().describe("Present once the booking is canceled"),
   trip: TripSummary.extend({
     endsAt: Instant,
     endsAtLocal: OffsetDateTime,
@@ -267,7 +302,7 @@ export const BookingDetail = z.object({
   refund: BookingRefund.nullable(),
   timeline: z
     .array(BookingTimelineEvent)
-    .describe("Checkout opened, paid, confirmed, and any refund, oldest first"),
+    .describe("Checkout opened, paid, confirmed, any cancellation, and any refund, oldest first"),
 });
 export type BookingDetail = z.infer<typeof BookingDetail>;
 
@@ -329,7 +364,9 @@ export const TripRoster = z
     }),
     bookings: z
       .array(RosterBooking)
-      .describe("Every booking on the trip, oldest first. Complete: a trip seats at most 500"),
+      .describe(
+        "Every confirmed booking on the trip, oldest first; canceled ones are not on it. Complete: a trip seats at most 500",
+      ),
   })
   .describe(
     "A booking-management roster for one trip. Not a passenger manifest: participants and waivers are not collected yet",

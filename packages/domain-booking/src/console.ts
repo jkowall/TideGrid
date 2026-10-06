@@ -11,6 +11,9 @@
  * or a provider's raw payload, and provider payment ids leave masked.
  */
 import {
+  type ActorType,
+  type BookingState,
+  type CancellationRemedy,
   type ChargeBasis,
   type CheckoutSessionState,
   type FinalizationReason,
@@ -71,7 +74,8 @@ export interface DayBookingView {
   id: string;
   reference: string;
   tripId: string;
-  state: "confirmed";
+  /** Canceled bookings stay in the list (lane 1, G2.11c) and out of the trip's counts. */
+  state: BookingState;
   source: "direct";
   confirmedAt: string;
   booker?: { name: string };
@@ -111,17 +115,35 @@ export type TimelineKind =
   | "checkout_opened"
   | "paid"
   | "confirmed"
+  | "canceled"
   | "refund_requested"
   | "refunded"
   | "refund_failed";
 
+/** A guest's cancellation within policy (lane 1, G2.11c): the terms as applied. */
+export interface CancellationView {
+  canceledAt: string;
+  /** Who canceled: the guest, through the management link. */
+  by: "guest" | "staff" | "system" | "support";
+  remedy: CancellationRemedy;
+  /** Basis points of what was paid: 10000 for a full refund, 0 for none. */
+  refundBp: number;
+  refundAmount: number;
+  paidAmount: number;
+  cutoffAt: string;
+  beforeCutoff: boolean;
+  policyVersion: number;
+}
+
 export interface BookingDetailView {
   id: string;
   reference: string;
-  state: "confirmed";
+  state: BookingState;
   source: "direct";
   reacquired: boolean;
   confirmedAt: string;
+  canceledAt: string | null;
+  cancellation: CancellationView | null;
   trip: TripTimingView;
   location: LocationView;
   booker?: { name: string; email: string };
@@ -418,12 +440,14 @@ export async function listDayBookings(
          ${tripFilter}`.execute(trx);
     if (!found[0]) return { kind: "cursor_invalid" };
   }
+  // A trip's counts are its confirmed bookings: a canceled one gave its seats back.
   const { rows: tripRows } = await sql<TripRow & { bookings: number; guests: number }>`
     select ${tripColumns},
            count(b.id)::int as bookings, coalesce(sum(b.party_size), 0)::int as guests
       from scheduled_trips t
       ${tripJoins}
-      left join bookings b on b.tenant_id = t.tenant_id and b.trip_id = t.id
+      left join bookings b
+        on b.tenant_id = t.tenant_id and b.trip_id = t.id and b.state = 'confirmed'
      where t.tenant_id = ${tenantId} and t.local_date = ${query.date}::date
      group by t.id, p.name, p.kind, bt.name
      order by t.starts_at, t.id
@@ -445,6 +469,7 @@ export async function listDayBookings(
     id: string;
     reference: string;
     trip_id: string;
+    state: BookingState;
     party_size: number;
     confirmed_at: Date | string;
     product_kind: ProductKind;
@@ -455,7 +480,8 @@ export async function listDayBookings(
     refund_amount: number | null;
     booker_name?: string;
   }>`
-    select b.id, b.reference, b.trip_id, b.party_size, b.confirmed_at, p.kind as product_kind,
+    select b.id, b.reference, b.trip_id, b.state, b.party_size, b.confirmed_at,
+           p.kind as product_kind,
            o.id as order_id, o.total_amount,
            pay.state as payment_state, r.state as refund_state, r.amount as refund_amount
            ${bookerColumn}
@@ -484,7 +510,7 @@ export async function listDayBookings(
       id: r.id,
       reference: r.reference,
       tripId: r.trip_id,
-      state: "confirmed",
+      state: r.state,
       source: "direct",
       confirmedAt: iso(r.confirmed_at),
       ...(query.withBooker && r.booker_name !== undefined
@@ -526,8 +552,18 @@ export async function getBookingDetail(
     TimingRow & {
       id: string;
       reference: string;
+      state: BookingState;
       reacquired: boolean;
       confirmed_at: Date | string;
+      canceled_at: Date | string | null;
+      c_remedy: CancellationRemedy | null;
+      c_refund_bp: number | null;
+      c_refund_amount: number | null;
+      c_paid_amount: number | null;
+      c_cutoff_at: Date | string | null;
+      c_before_cutoff: boolean | null;
+      c_policy_version: number | null;
+      c_actor_type: ActorType | null;
       party_size: number;
       location_name: string;
       meeting_point: string;
@@ -557,7 +593,11 @@ export async function getBookingDetail(
       refund_settled_at: Date | string | null;
     }
   >`
-    select b.id, b.reference, b.reacquired, b.confirmed_at, b.party_size,
+    select b.id, b.reference, b.state, b.reacquired, b.confirmed_at, b.canceled_at, b.party_size,
+           c.remedy as c_remedy, c.refund_bp as c_refund_bp, c.refund_amount as c_refund_amount,
+           c.paid_amount as c_paid_amount, c.cutoff_at as c_cutoff_at,
+           c.before_cutoff as c_before_cutoff, c.policy_version as c_policy_version,
+           c.actor_type as c_actor_type,
            ${tripColumns},
            t.ends_at, t.end_utc_offset_minutes, t.duration_minutes,
            l.name as location_name, l.meeting_point, l.meeting_instructions,
@@ -577,6 +617,7 @@ export async function getBookingDetail(
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       left join payment_refunds r on r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
+      left join booking_cancellations c on c.tenant_id = b.tenant_id and c.booking_id = b.id
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}::uuid`.execute(trx);
   const row = rows[0];
   if (!row) return null;
@@ -618,6 +659,29 @@ export async function getBookingDetail(
   ];
   if (row.succeeded_at !== null) timeline.push({ kind: "paid", at: iso(row.succeeded_at) });
   timeline.push({ kind: "confirmed", at: iso(row.confirmed_at) });
+  if (row.canceled_at !== null) timeline.push({ kind: "canceled", at: iso(row.canceled_at) });
+  const cancellation: CancellationView | null =
+    row.canceled_at !== null &&
+    row.c_remedy !== null &&
+    row.c_refund_bp !== null &&
+    row.c_refund_amount !== null &&
+    row.c_paid_amount !== null &&
+    row.c_cutoff_at !== null &&
+    row.c_before_cutoff !== null &&
+    row.c_policy_version !== null &&
+    row.c_actor_type !== null
+      ? {
+          canceledAt: iso(row.canceled_at),
+          by: row.c_actor_type,
+          remedy: row.c_remedy,
+          refundBp: row.c_refund_bp,
+          refundAmount: row.c_refund_amount,
+          paidAmount: row.c_paid_amount,
+          cutoffAt: iso(row.c_cutoff_at),
+          beforeCutoff: row.c_before_cutoff,
+          policyVersion: row.c_policy_version,
+        }
+      : null;
   if (refund) {
     timeline.push({ kind: "refund_requested", at: refund.requestedAt });
     if (refund.settledAt && refund.state !== "requested") {
@@ -630,10 +694,12 @@ export async function getBookingDetail(
   return {
     id: row.id,
     reference: row.reference,
-    state: "confirmed",
+    state: row.state,
     source: "direct",
     reacquired: row.reacquired,
     confirmedAt: iso(row.confirmed_at),
+    canceledAt: isoOrNull(row.canceled_at),
+    cancellation,
     trip: tripTiming(row),
     location: {
       name: row.location_name,
@@ -712,10 +778,11 @@ export async function findBookingByReference(
 // A trip's roster ------------------------------------------------------------------------------
 
 /**
- * Every booking on one trip with its party, extras, and payment state, and
- * the trip's time, place, and totals. Complete, not paged: a trip seats at
- * most 500, and each booking takes at least one seat. Null when the trip is
- * not this tenant's. Callers must hold bookings.read: it names the bookers.
+ * Every confirmed booking on one trip with its party, extras, and payment
+ * state, and the trip's time, place, and totals; a canceled booking is not on
+ * the roster (lane 1, G2.11c). Complete, not paged: a trip seats at most 500,
+ * and each booking takes at least one seat. Null when the trip is not this
+ * tenant's. Callers must hold bookings.read: it names the bookers.
  */
 export async function getTripRoster(
   trx: TenantTransaction,
@@ -759,6 +826,7 @@ export async function getTripRoster(
       join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       left join payment_refunds r on r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
      where b.tenant_id = ${tenantId} and b.trip_id = ${tripId}::uuid
+       and b.state = 'confirmed'
      order by b.confirmed_at, b.id`.execute(trx);
   const lines = await partyLines(
     trx,

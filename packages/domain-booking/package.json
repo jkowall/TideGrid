@@ -15,6 +15,7 @@
   "dependencies": {
     "@tidegrid/database": "workspace:*",
     "@tidegrid/domain-inventory": "workspace:*",
+    "@tidegrid/domain-messaging": "workspace:*",
     "@tidegrid/domain-payments": "workspace:*",
     "kysely": "^0.29.0"
   },

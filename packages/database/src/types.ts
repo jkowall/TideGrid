@@ -774,9 +774,114 @@ export interface BookingCancellationsTable {
   request_id: ColumnType<string | null, never, never>;
 }
 
+export type EmailMessageState = "queued" | "sending" | "sent" | "failed" | "canceled";
+export type EmailProviderName = "fake" | "cloudflare";
+export type AccessPurpose = "booking_manage" | "waiver_sign";
+export type AccessRevocationReason =
+  | "superseded"
+  | "completed"
+  | "withdrawn"
+  | "recipient_changed"
+  | "booking_canceled"
+  | "staff";
+
+/**
+ * One transactional email (lane 1, G2.16 shim). Content is fixed at insert;
+ * only the delivery columns move, as the trigger allows.
+ */
+export interface EmailMessagesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  dedupe_key: Fixed<string>;
+  template: Fixed<string>;
+  template_version: Fixed<number>;
+  booking_id: FixedDefault<string | null>;
+  participant_id: FixedDefault<string | null>;
+  subject_ref: FixedDefault<string | null>;
+  to_email: Fixed<string>;
+  to_name: FixedDefault<string | null>;
+  from_name: Fixed<string>;
+  reply_to: FixedDefault<string | null>;
+  subject: Fixed<string>;
+  html_body: Fixed<string>;
+  text_body: Fixed<string>;
+  link_purpose: FixedDefault<AccessPurpose | null>;
+  link_path: FixedDefault<string | null>;
+  link_ttl_seconds: FixedDefault<number | null>;
+  link_slot: FixedDefault<string | null>;
+  state: ColumnType<EmailMessageState, "queued" | undefined, EmailMessageState>;
+  attempts: ColumnType<number, 0 | undefined, number>;
+  next_attempt_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  /** When the latest attempt was claimed; stamped by the trigger. */
+  last_attempt_at: Stamp;
+  lease_expires_at: ColumnType<Date | null, never, Date | string | null>;
+  provider: ColumnType<EmailProviderName | null, never, EmailProviderName | null>;
+  provider_message_id: ColumnType<string | null, never, string | null>;
+  last_error_code: ColumnType<string | null, never, string | null>;
+  created_at: Stamped;
+  sent_at: Stamp;
+  failed_at: Stamp;
+  canceled_at: Stamp;
+  updated_at: Stamped;
+}
+
+/** An accountless access link; only the token's SHA-256 is stored. */
+export interface GuestAccessLinksTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  participant_id: FixedDefault<string | null>;
+  purpose: Fixed<AccessPurpose>;
+  subject_ref: FixedDefault<string | null>;
+  message_id: FixedDefault<string | null>;
+  token_hash: Fixed<string>;
+  created_at: Stamped;
+  expires_at: Instant;
+  consumed_at: ColumnType<Date | null, never, Date | string>;
+  revoked_at: ColumnType<Date | null, never, Date | string>;
+  revoked_reason: ColumnType<AccessRevocationReason | null, never, AccessRevocationReason>;
+}
+
+/** The restricted session a redeemed link opens; only the token's SHA-256 is stored. */
+export interface GuestSessionsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  participant_id: FixedDefault<string | null>;
+  purpose: Fixed<AccessPurpose>;
+  subject_ref: FixedDefault<string | null>;
+  link_id: FixedDefault<string | null>;
+  checkout_session_id: FixedDefault<string | null>;
+  token_hash: Fixed<string>;
+  created_at: Stamped;
+  expires_at: Instant;
+  revoked_at: ColumnType<Date | null, never, Date | string>;
+}
+
+/** The fake email provider's record of every send it answered; append-only. */
+export interface FakeEmailDeliveriesTable {
+  id: Fixed<string>;
+  tenant_id: TenantColumn;
+  idempotency_key: Fixed<string>;
+  result: Fixed<"accepted" | "unavailable" | "rejected">;
+  from_address: Fixed<string>;
+  from_name: Fixed<string>;
+  reply_to: FixedDefault<string | null>;
+  to_address: Fixed<string>;
+  to_name: FixedDefault<string | null>;
+  subject: Fixed<string>;
+  html_body: Fixed<string>;
+  text_body: Fixed<string>;
+  created_at: CreatedAt;
+}
+
 interface SelfServiceTables {
   booking_participants: BookingParticipantsTable;
   booking_cancellations: BookingCancellationsTable;
+  email_messages: EmailMessagesTable;
+  guest_access_links: GuestAccessLinksTable;
+  guest_sessions: GuestSessionsTable;
+  fake_email_deliveries: FakeEmailDeliveriesTable;
 }
 
 // Waiver evidence (G2.15). Triggers stamp every time and enforce the one-way

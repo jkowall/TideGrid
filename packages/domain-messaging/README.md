@@ -41,7 +41,53 @@ type EmailBlock =
 A link that grants access (the booking's management link, and a waiver signing link for G2.15) is never stored in a message. The message names its purpose and path; the delivery job issues the link when it sends, stores only the token's SHA-256, and writes the URL into the body at that moment, in the action's `href` and as visible text. The raw token travels only in the email, in the URL's fragment (`https://<operator site><path>#t=<token>`), so it never reaches a server log, a `Referer` header, or a link scanner's GET. The guest page exchanges it for a restricted session with an explicit POST (the [booking contract](../domain-booking/README.md#guest-self-service-lane-1-g211c)).
 
 - The link's origin is the operator's guest site, from `GUEST_LINK_ORIGIN` (default `https://{slug}.book.tidegrid.us`; locally `http://{slug}.book.localhost:<port>`), and the delivery job checks that its hostname is an active, verified hostname of the message's tenant before sending. A message whose link host does not resolve to its tenant fails as `link_host_unmapped`.
-- Issuing a link for a message revokes, as `superseded`, the unused links of the same booking, purpose, and participant that earlier messages carried, so only the newest email's link works. Retries of one message reuse nothing and revoke nothing of their own: the provider's idempotency key keeps the first accepted email, and a token issued for an attempt the provider never accepted is never delivered and expires.
+- The issued link keeps the message's booking, participant, and `subjectRef`, and the message's id.
+- Issuing a link for a message revokes, as `superseded`, the unused links of the same booking, purpose, participant, and subject that other messages carried, so only the newest email's link works. Retries of one message revoke nothing of their own: the provider's idempotency key keeps the first accepted email, and a token issued for an attempt the provider never accepted is never delivered and expires.
+
+## Access links and guest sessions
+
+Every function takes the caller's tenant transaction, so it commits or rolls back with the caller's change. Tokens are 32 random bytes, base64url (43 characters); only SHA-256 hashes with a purpose prefix are stored. Purposes are `booking_manage` (the booking's management page, lane 1) and `waiver_sign` (a participant's waiver, G2.15, which needs a participant).
+
+```ts
+redeemAccessLink(trx, ctx, { token, purpose }): Promise<
+  | { kind: "redeemed"; link: { linkId, bookingId, participantId, messageId, subjectRef, purpose } }
+  | { kind: "invalid" }    // malformed, unknown, another tenant's, or another purpose's
+  | { kind: "expired" } | { kind: "used" }
+  | { kind: "superseded" } // a newer email's link replaced it
+  | { kind: "revoked"; reason: "completed" | "withdrawn" | "recipient_changed" | "booking_canceled" | "staff" }
+>
+revokeAccessLinks(trx, ctx, { bookingId, purpose, participantId?, subjectRef?, reason }): Promise<number>
+openGuestSession(trx, ctx, { link, ttlSeconds? } | { checkout: { checkoutSessionId, bookingId }, ttlSeconds? }):
+  Promise<{ sessionId, token, bookingId, participantId, purpose, subjectRef, expiresAt }>
+resolveGuestSession(trx, tenantId, token, purpose): Promise<GuestSession | null>
+revokeGuestSession(trx, ctx, sessionId): Promise<boolean>
+revokeGuestSessions(trx, ctx, { bookingId, purpose, participantId?, subjectRef? }): Promise<number>
+issueAccessLink(trx, ctx, { bookingId, participantId?, purpose, subjectRef?, messageId?, ttlSeconds }) // the delivery job's
+```
+
+- **Redeem only on an explicit POST.** A link is consumed once, atomically: concurrent redemptions of one token serialize on its row, one wins and the rest answer `used`. A page that receives a link reads the token from its URL fragment and redeems it only when the guest acts, so an email scanner's GET or a link preview consumes nothing.
+- **Open the session in the same transaction.** The database opens a session only from a link consumed in that very transaction (`guest_sessions_evidence`), or, for the guest who just paid, from the checkout that made the booking within an hour of confirmation. A session lasts at most 12 hours (one hour by default) and returns its raw token once.
+- **Revocation reasons.** `completed`: the purpose is done (a waiver signed). `withdrawn`: no longer needed (a participant or requirement removed). `recipient_changed`, `booking_canceled`, `staff`: as named. `superseded` is set by issuing a newer link. Without `participantId` or `subjectRef`, every participant's or subject's links of that booking and purpose are revoked; pass `null` to mean "the booking-level ones".
+- **Times.** The database clock decides expiry. A link's or session's expiry can move earlier, never later, as holds' can; tests make time pass that way.
+
+## Message status
+
+```ts
+cancelMessage(trx, ctx, messageId): Promise<
+  { kind: "canceled" } | { kind: "not_cancelable"; state } | { kind: "not_found" }>
+getMessageStatus(trx, tenantId, messageId): Promise<MessageStatus | null>
+listBookingMessages(trx, tenantId, bookingId): Promise<MessageStatus[]>
+
+interface MessageStatus {
+  id; template; templateVersion;
+  state: "queued" | "sending" | "sent" | "failed" | "canceled";
+  attempts; lastAttemptAt; nextAttemptAt; sentAt; failedAt; canceledAt;
+  failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error
+  provider; createdAt;
+}
+```
+
+`cancelMessage` cancels only a queued message. A message the delivery job is claiming right now answers `not_cancelable` with state `sending`: it goes out. Status reads carry no recipient or content. Provider acceptance is not proof that a guest read a message or used its link.
 
 ## Delivery
 
