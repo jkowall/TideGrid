@@ -2,6 +2,73 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-10-06
+
+### G2.7 Charge to confirmation verification, October 6, 2026
+
+- Built on branch `build/g2.7-charge-to-confirmation` from `a0d8b8d` on the local branch `integrate/g2.5-g2.6` (main plus G2.5 and G2.6), with G2.5's test fix `b4108b2` cherry-picked. The contracts are the [checkout README](../packages/domain-booking/README.md) and the [payments README](../packages/domain-payments/README.md).
+- The owner decided on 2026-10-05 to shim the payment provider. The [demo build plan](v2/12-demo-build-plan.md#goal-sequence) records the narrowing: a fake provider behind a provider-neutral adapter, a Stripe adapter in its place before any live booking, and shim replay evidence in place of Stripe CLI replay evidence.
+- What was built:
+  - Migration 0007 adds checkout sessions, orders and their lines, payments, refunds, the provider-event inbox, bookings, finalization exceptions, connected accounts, and the fake provider's three tables, under the tenancy contract. Triggers hold the one-way states and the chain of custody for every role, the owner included. A checkout confirms only with a booking. A booking needs a succeeded payment and a confirmed hold. An order is paid only with a booking. A payment succeeds only with a verified inbox event for its provider id, account, amount, and currency. An order must equal its quote at commit, and a checkout must end inside its quote's validity. A payment is booked or refunded, never both. A hold behind a booking keeps its seats, and a trip with bookings cannot be canceled.
+  - `packages/domain-payments`: the adapter, Stripe-style signatures (HMAC-SHA256 over the timestamp and the raw body, 300 seconds either way), the inbox, account resolution, and the fake provider with its own append-only storage.
+  - `packages/domain-booking`: opening a checkout, the order copied from the quote, the provider payment created after commit with an idempotency key, verified-event processing with reacquisition or a full refund, guest cancellation, refunds settled outside transactions, the checkout sweep, and two staff reads.
+  - The API: open, read, and cancel a checkout; the webhook; the fake provider's four demo controls, which exist only under `PAYMENT_PROVIDER=fake` and are refused in production; and the staff reads. The cron runs the checkout sweep after the hold sweep. The seed adds `acct_fake_demo-harbor` and `acct_fake_demo-reef`.
+  - Follow-ups closed: from G2.6, the per-guest hold limit (three open checkouts per client address), canceling a trip with confirmed holds, and re-quoting a held party (cancel first); from G2.5, a quote id as authority.
+- Decisions, in the contracts:
+  - The packages are `domain-booking` and `domain-payments`, the names the demo plan's repository shape gives. The adapter knows nothing about bookings, so the Stripe adapter replaces it alone.
+  - The inbox commits each verified event on its own, then a second transaction processes it under the inbox row's lock. A failed processing attempt leaves the event received for the provider's retry and the sweep.
+  - Expiry marks a hold expired rather than released. The seats are free either way, but only an expired hold can be reacquired by a late payment.
+  - A success the system cannot honor is recorded as succeeded, refunded in full, and raised as a finalization exception; the checkout closes as `unfulfilled`. That state was first named `paid`, which collided with an order's `paid`, and was renamed during the goal.
+  - A success after the provider reported the payment failed, or after the guest canceled, is refunded, never booked.
+  - A checkout past its instant can still be canceled until the sweep runs; a later success is then refunded.
+
+- Shim replay evidence. `apps/api-worker/scripts/shim-replay.ts` ran against `wrangler dev` (the `dev` environment, `PAYMENT_PROVIDER=fake`) on a fresh throwaway branch, migrated and seeded, through the runtime role. It drives the API over HTTP, settles fake payments with the demo controls, posts signed events to the real webhook route, and reads the state before and after each step through the admin connection. Demo Harbor's run, with `HARBOR10` and an add-on, step by step; "state" is checkout, hold, order, payment, bookings, and the trip's held and confirmed seats:
+
+  | Step | Answer | Before | After |
+  |---|---|---|---|
+  | The guest pays; the event is held back | 200 | open, active, pending, pending, 0; 2 held | the same; only the fake's payment changed |
+  | The fake delivers the signed event | 200 `confirmed` | open, active, pending, pending, 0; 2 held | confirmed, confirmed, paid, succeeded, 1; 2 confirmed |
+  | It delivers the same event again | 200 `confirmed`, duplicate | confirmed, 1 booking | unchanged |
+  | The identical signed request, twice more | 200 duplicate, twice | confirmed, 1 booking | unchanged |
+  | The event signed ten minutes ago | 400 `signature_invalid` | confirmed, 1 booking | unchanged; nothing recorded |
+  | One byte changed, under the captured signature | 400 `signature_invalid` | confirmed, 1 booking | unchanged; nothing recorded |
+  | A failure for the payment, after the success | 200 `ignored_after_success` | confirmed, 1 booking | unchanged; the inbox records both |
+  | Another checkout pays; the event is held back; time passes | the guest sees `expired` | open, active; 2 held | still open and active in storage, but 0 seats held: a lapsed hold stops counting at once |
+  | The delayed event arrives, seats still free | 200 `confirmed_reacquired` | open, active; 0 held | confirmed, confirmed, paid, succeeded, 1; 2 confirmed |
+  | A charter checkout pays; the event is held back; time passes; a second guest takes the boat | the second checkout is open | open, active; 12 held | open, expired (the second checkout expired the hold as it took the boat); 12 held by the second guest |
+  | The first guest's delayed success arrives | 200 `refund_required` | open, expired, pending, pending, 0 | `unfulfilled`, expired, void, succeeded, 0; refund succeeded; exception `no_capacity`; the second guest's 12 seats untouched |
+  | It arrives once more | 200 `refund_required`, duplicate | as above | unchanged; one refund |
+  | The second guest pays | 200 `confirmed` | open, active; 12 held | confirmed; 12 confirmed |
+  | A payment fails | 200 `released` | open, active; 1 held | failed, released, void, failed, 0; 0 held |
+  | A success for it arrives afterwards | 200 `refund_required` | failed, released, void, failed | `unfulfilled`; refund failed; exception `session_failed`; never booked |
+
+  - The charter order carried a service line, an add-on, a fee, the discount, and two added taxes; the charge equaled the order total, $1,262.60.
+  - In the last step the fake refused the refund, because it had settled that payment as failed. The refund stays `failed` and visible as an exception, as product scope requires of a failed refund.
+  - Demo Reef's run, with `REEF25` and prices that include tax, gave the same answers at every step; its orders carried an included tax line and were charged their totals ($360.00 and $1,920.00).
+  - Totals after both runs: 14 inbox events, 6 bookings, 4 refunds, and 4 exceptions. The server log carried no booker name or email.
+
+- Adversarial evidence. An independent test specialist wrote 56 tests in six files against the contract: duplicate, replayed, and out-of-order webhooks; bad signatures and timestamps; success after expiry with and without capacity; success racing the sweep and a guest's cancel; a crash between the provider call and recording its reference; last-seat and whole-boat races through the services and over HTTP; quote reuse; the per-client limit; refunds whose answer is lost; the chain of custody refused to the runtime (29 attempts) and the owner (13); and two-tenant escape on every new route. Every test ends with a ledger audit and an oversell check. Races ran 2 rounds of 10 sessions released from a barrier; every race had 0 oversell.
+- Defect found by the specialist and fixed: **the checkout sweep could deadlock.** It locked a batch of checkouts, then waited for each hold row, while acquisition and late confirmation lock a trip and then expire its due holds in their own scan order. Two tests failed in 4 of 4 runs (PostgreSQL 40P01); the victim was usually a guest's new checkout. The control race without the sweep had no errors. The sweep now takes holds with SKIP LOCKED and leaves a busy checkout for the next run. Both tests pass; the deterministic reproduction now checks that the sweep finishes while a row is held, skips that checkout, and expires it on the next run.
+- Also acted on from the specialist's observations and the lead's review:
+  - an event or refund that keeps failing is reported and skipped, so it cannot block its tenant's sweep;
+  - the sweep's grace period reaches the tenant list, so it can be below a minute;
+  - nothing is recorded from an event, the provider's payment id included, until its account, amount, and currency match the payment;
+  - an event id held by another tenant answers `payload_mismatch` instead of a 500 the provider would retry forever;
+  - the database refuses a refund for a booked payment and a booking for a refunded one, locking the payment row so the two cannot race;
+  - a hold behind a booking cannot be released, and a checkout's hold stays in step with its checkout at commit;
+  - a checkout's hold lasts 15 minutes or what its quote has left, whichever is sooner, and the database refuses a checkout that would outlive its quote;
+  - a duplicate delivery of an alarming event logs at info, not error.
+- The lead changed three of the specialist's tests after the fixes, each marked in a comment: the deterministic reproduction (above), the cross-tenant event id (now `payload_mismatch`), and the owner-role shortcuts test, which now runs alone because a concurrent `TRUNCATE ... CASCADE` was once refused by the deadlock detector instead of its trigger.
+- Observations not acted on, in the [checkout contract](../packages/domain-booking/README.md#deferred-and-known-gaps): a late payment gets no priority over new checkouts for the same seats (1 of 10 reacquired in the specialist's race), so the owner should decide whether to add a grace period; a lapsed checkout can still be canceled until the sweep runs, by design.
+- Checks:
+  - `pnpm check` is green: Biome on 262 files, 493 unit tests across 14 packages (39 in the Workers runtime), three dry-run deploys, doc links across 87 Markdown files, and 29 prototype tests. `pnpm build` and a frozen install are clean, and `pnpm contracts:generate` changed nothing.
+  - On a fresh throwaway Neon branch, as the packet asks: migrate, 0003 to 0007; seed, 892 trips and both fake connected accounts; a second seed, nothing new; then 386 integration tests in 34 minutes, all passing. That is 40 database, 25 catalog, 50 pricing, 89 inventory, 5 payments, 59 booking (14 by the lead, 45 adversarial), and 118 API tests (18 of them checkout).
+- Not done:
+  - The independent review, on a second model, which the coordinator arranges.
+  - No Stripe adapter; nothing is deployed; payments stay off on deployed environments.
+  - The guest checkout UI, deposits, cancellation and its refunds, participants, and email are later goals.
+  - Not covered: Workers with Hyperdrive pooling, the webhook over a real network, `runScheduled` under concurrency, and long stress runs.
+
 ## 2026-10-05
 
 ### G2.6 Capacity and holds verification, October 5, 2026

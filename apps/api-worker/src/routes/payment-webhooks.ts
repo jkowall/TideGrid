@@ -98,9 +98,10 @@ export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: App
       return c.json({ received: true as const, duplicate: true, outcome: "payload_mismatch" }, 200);
     }
     // Money that moved without a booking, or an event that matches no payment
-    // or does not match its payment, needs a person; everything else is routine.
+    // or does not match its payment, needs a person, once: a redelivery of an
+    // event already handled is routine. A refund that did not settle always is.
     const attention =
-      needsAttention.has(handled.outcome) ||
+      (needsAttention.has(handled.outcome) && !handled.duplicate) ||
       (handled.refund !== null && handled.refund.kind !== "succeeded");
     (attention ? log.error : log.info)("payment_webhook", {
       "event.name": "payment_webhook",
