@@ -376,11 +376,16 @@ export async function holdsOfTenants(
      order by created_at, id`;
 }
 
-/** Move a hold's expiry `seconds` into the past (admin only), as time passing would. */
+/**
+ * Move a hold's expiry `seconds` into the past (admin only), as time passing
+ * would. Never later: the database refuses that, and the storm backdates one
+ * hold more than once.
+ */
 export async function expireByClock(admin: Sql, holdIds: readonly string[], seconds = 5) {
   if (holdIds.length === 0) return;
   const rows = await admin`
-    update public.capacity_holds set expires_at = now() - make_interval(secs => ${seconds})
+    update public.capacity_holds
+       set expires_at = least(expires_at, now() - make_interval(secs => ${seconds}))
      where id in ${admin(holdIds as string[])} returning id`;
   if (rows.length !== holdIds.length) throw new Error("not every hold was backdated");
 }

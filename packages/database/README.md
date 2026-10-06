@@ -61,7 +61,7 @@ The active brand is simply the highest activation id, and nothing in the schema 
 
 The capacity and holds migration adds `capacity_holds` under rules 1 to 10. The contract, the concurrency design, and the clock decision are in the [inventory README](../domain-inventory/README.md); what matters for tenancy:
 
-- The runtime keeps the default SELECT and INSERT and may UPDATE `state` only. A trigger sets the kind, the seats taken, and every timestamp, enforces the one-way states and the capacity rule for every role, and refuses DELETE and TRUNCATE for every role, the owner included. A second trigger, on `scheduled_trips`, keeps a trip's capacity and product from changing under its holds.
+- The runtime keeps the default SELECT and INSERT and may UPDATE `state` only. A trigger sets the kind, the seats taken, and every timestamp but the expiry instant, which can only move earlier. It enforces the one-way states and the capacity rule for every role, and refuses DELETE and TRUNCATE for every role, the owner included. A second trigger, on `scheduled_trips`, keeps a trip's capacity and product from changing under its holds.
 - The trigger runs as the caller. It reads the trip under the caller's row-level security and filters by the hold's tenant, so a hold can never name another tenant's trip; the composite foreign key backs that up.
 - `app.trip_capacity_usage(tenant, trip)` is an invoker function. Row-level security applies inside it, and it filters by tenant explicitly.
 

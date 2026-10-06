@@ -42,8 +42,10 @@
 -- Tenancy follows packages/database/README.md: tenant_id with forced
 -- row-level security and a tenant_isolation policy, a composite foreign key to
 -- the trip, SELECT and INSERT from the default privileges, UPDATE on state
--- only, and no DELETE or TRUNCATE for any role. The trigger sets every
--- timestamp, so the runtime needs no other column.
+-- only, and no DELETE or TRUNCATE for any role. The trigger sets the kind, the
+-- seats, and every timestamp but the expiry instant, which the writer gives at
+-- insert and which can only move earlier, so the runtime needs no other
+-- column.
 
 -- The sweep helper below is a SECURITY DEFINER function that reads a table
 -- with forced row-level security; its owner must bypass row-level security,
@@ -162,6 +164,15 @@ BEGIN
        OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
       RAISE EXCEPTION 'a capacity hold keeps its trip, owner, kind, size, and creation time'
         USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_immutable';
+    END IF;
+    -- The expiry instant moves earlier, never later, so the bounds checked at
+    -- insert hold for the life of the hold: within an hour of acquisition and
+    -- no later than the departure. No service moves it; tests make time pass
+    -- by moving it earlier through the owner role.
+    IF NEW.expires_at > OLD.expires_at THEN
+      RAISE EXCEPTION 'hold % expires at %; its expiry can move earlier, never later',
+        OLD.id, OLD.expires_at
+        USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_expiry';
     END IF;
     -- Timestamps move only with a transition, and only here.
     NEW.confirmed_at := OLD.confirmed_at;
@@ -407,7 +418,7 @@ CREATE FUNCTION app.capacity_hold_sweep_tenants(p_limit integer)
 -- Privileges ----------------------------------------------------------------------
 
 -- SELECT and INSERT come from the default privileges in 0001. State is the
--- only column the runtime may update; the trigger sets the timestamps.
+-- only column the runtime may update; the trigger sets the transition times.
 GRANT UPDATE (state) ON public.capacity_holds TO tidegrid_app;
 
 REVOKE ALL ON FUNCTION app.check_capacity_hold() FROM PUBLIC;

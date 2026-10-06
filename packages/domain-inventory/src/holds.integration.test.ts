@@ -831,6 +831,34 @@ describe.skipIf(!env)("capacity holds against a real database as the runtime rol
       expect(await failure(admin`truncate public.capacity_holds`)).toEqual({ code: "55000" });
     });
 
+    it("never moves a hold's expiry later, so it never outlasts departure", async () => {
+      const trip = tripsA.shared();
+      const hold = await acquired(A.id, trip, 2);
+      const refused = { code: "23514", constraint: "capacity_holds_expiry" };
+      // The review's reproduction: a day past departure, while the hold kept counting.
+      expect(
+        await failure(admin`
+          update public.capacity_holds h set expires_at = t.starts_at + interval '1 day'
+            from public.scheduled_trips t
+           where t.id = h.trip_id and h.id = ${hold.id}`),
+      ).toEqual(refused);
+      expect(
+        await failure(admin`
+          update public.capacity_holds set expires_at = expires_at + interval '1 millisecond'
+           where id = ${hold.id}`),
+      ).toEqual(refused);
+      expect(await as(A.id, (trx) => getHold(trx, A.id, hold.id))).toEqual(hold);
+      // Earlier is allowed: tests make time pass that way. A hold past its
+      // instant cannot be brought back.
+      await backdateHold(admin, hold.id);
+      expect(
+        await failure(admin`
+          update public.capacity_holds set expires_at = now() + interval '10 minutes'
+           where id = ${hold.id}`),
+      ).toEqual(refused);
+      expect(await capacity(A.id, trip)).toMatchObject({ held: 0, remaining: 10 });
+    });
+
     it("keeps a trip's capacity and product from changing under its holds", async () => {
       const shared = tripsA.shared();
       const charter = tripsA.charter();

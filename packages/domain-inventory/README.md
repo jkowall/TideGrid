@@ -35,7 +35,7 @@ The database enforces these for every role, the table owner included, in the cap
 4. A reacquired hold (expired to confirmed) passes rule 3's sales checks again, still has the kind and seats a new hold on the trip would take, and passes rule 1. A hold whose charter was resized, or whose trip's product or product kind changed, while it was expired is refused, because its seats never change.
 5. Nothing moves into a counted state on a canceled trip.
 6. A hold is marked expired only once its expiry instant has passed. An active hold past its instant is never confirmed directly; it is reacquired.
-7. Trip, owner, kind, party size, seats, and creation time never change. The trigger sets every timestamp.
+7. Trip, owner, kind, party size, seats, and creation time never change. The expiry instant can move earlier, never later, so it stays within the hour after acquisition and no later than the departure rule 3 checked it against. The trigger sets the kind, the seats, and every timestamp but the expiry instant, which the writer gives at insert.
 8. No role deletes or truncates holds. The runtime may update `state` only.
 9. Tenancy: forced row-level security, a composite foreign key to the trip, and explicit tenant filters.
 10. The trip side of rule 1: no role can shrink a trip below the seats its holds take, change the product its holds came from, or resize a charter that a whole-boat hold has taken. The runtime cannot change either column at all.
@@ -60,7 +60,7 @@ Rules the choice depends on:
 
 ## Clock
 
-The database clock decides every expiry question: `now()`, the start of the transaction. Every statement in one command, and the trigger, read the same instant, so a check and the write it guards never straddle the expiry instant. Worker isolates never compare their own clocks. A transaction that waited for the lock reads an earlier instant, which only makes it slower to expire someone else's hold, never faster. Tests make time pass by moving a hold's `expires_at` back through the admin connection.
+The database clock decides every expiry question: `now()`, the start of the transaction. Every statement in one command, and the trigger, read the same instant, so a check and the write it guards never straddle the expiry instant. Worker isolates never compare their own clocks. A transaction that waited for the lock reads an earlier instant, which only makes it slower to expire someone else's hold, never faster. Tests make time pass by moving a hold's `expires_at` earlier through the admin connection; the database refuses to move it later.
 
 The availability listing keeps the request clock for its booking cutoff, as G2.4 built it, and the database clock for holds. They can disagree by the skew between a Worker and the database at the cutoff instant; acquisition, which uses the database clock for both, decides.
 

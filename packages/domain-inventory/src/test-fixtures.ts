@@ -166,11 +166,15 @@ export function tripAllocator(fixture: TenantFixture) {
   };
 }
 
-/** Move a hold's expiry into the past, as time passing would. Admin only. */
+/**
+ * Move a hold's expiry into the past, as time passing would. Admin only. Never
+ * later: the database refuses to move an expiry later, so a hold already
+ * further in the past stays where it is.
+ */
 export async function backdateHold(admin: Sql, holdId: string, seconds = 1): Promise<void> {
   const rows = await admin`
     update public.capacity_holds
-       set expires_at = now() - make_interval(secs => ${seconds})
+       set expires_at = least(expires_at, now() - make_interval(secs => ${seconds}))
      where id = ${holdId}
     returning id`;
   if (rows.length !== 1) throw new Error(`no hold ${holdId} to backdate`);
