@@ -960,10 +960,11 @@ describe.skipIf(!env)("pricing services against a real database as the runtime r
           },
         ],
         [
-          "a promotion redeemed after its window",
+          // Before the trip departs, so only the promotion's window refuses it.
+          "a promotion redeemed before its window",
           (h) => {
-            h.quoted_at = new Date("2027-06-01T00:00:00Z");
-            h.expires_at = new Date("2027-06-01T00:30:00Z");
+            h.quoted_at = new Date("2026-08-31T23:00:00Z");
+            h.expires_at = new Date("2026-08-31T23:30:00Z");
           },
         ],
         [

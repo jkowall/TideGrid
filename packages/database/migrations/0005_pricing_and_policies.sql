@@ -48,16 +48,18 @@ ALTER TABLE public.scheduled_trips
 
 -- Sealed parents ----------------------------------------------------------------
 
--- A version or quote records the transaction that created it. Its child rows
--- must be written by that same transaction. pg_current_xact_id() is the
--- top-level transaction id, also inside a savepoint. The stamp is set by
--- trigger, so no writer can choose it.
-CREATE FUNCTION app.stamp_created_txid() RETURNS trigger
+-- A version or quote records the transaction that created it and the database
+-- time it was written. Its child rows must be written by that same
+-- transaction. pg_current_xact_id() is the top-level transaction id, also
+-- inside a savepoint. Both stamps are set by trigger, so no writer can choose
+-- them; checkout bounds a quote's age by created_at, the database's own clock.
+CREATE FUNCTION app.stamp_creation() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
   NEW.created_txid := pg_catalog.pg_current_xact_id();
+  NEW.created_at := pg_catalog.clock_timestamp();
   RETURN NEW;
 END;
 $$;
@@ -198,7 +200,7 @@ END;
 $$;
 
 CREATE TRIGGER price_list_versions_stamp BEFORE INSERT ON public.price_list_versions
-  FOR EACH ROW EXECUTE FUNCTION app.stamp_created_txid();
+  FOR EACH ROW EXECUTE FUNCTION app.stamp_creation();
 CREATE CONSTRAINT TRIGGER price_list_versions_complete
   AFTER INSERT ON public.price_list_versions
   DEFERRABLE INITIALLY DEFERRED
@@ -332,7 +334,7 @@ CREATE TABLE public.promotion_version_products (
 );
 
 CREATE TRIGGER promotion_versions_stamp BEFORE INSERT ON public.promotion_versions
-  FOR EACH ROW EXECUTE FUNCTION app.stamp_created_txid();
+  FOR EACH ROW EXECUTE FUNCTION app.stamp_creation();
 CREATE TRIGGER promotion_version_products_sealed BEFORE INSERT ON public.promotion_version_products
   FOR EACH ROW EXECUTE FUNCTION app.check_sealed_parent();
 
@@ -388,7 +390,12 @@ CREATE TABLE public.quotes (
   CHECK ((promotion_id IS NULL) = (promotion_version IS NULL)),
   CHECK (discount_amount <= subtotal_amount),
   CHECK (total_amount = subtotal_amount - discount_amount + fee_amount + tax_amount),
-  -- The service holds a price for 30 minutes; no quote may hold one longer than an hour.
+  -- quoted_at and expires_at come from the writer's clock. A quote is priced
+  -- before its trip leaves, and the service holds a price for 30 minutes, so
+  -- no quote may hold one longer than an hour. These bound an honest quote
+  -- only: checkout also requires now() < created_at + 30 minutes, where
+  -- created_at is stamped from the database clock.
+  CONSTRAINT quotes_quoted_before_departure CHECK (quoted_at < trip_starts_at),
   CHECK (expires_at > quoted_at AND expires_at <= quoted_at + interval '1 hour')
 );
 
@@ -487,7 +494,11 @@ $$;
 
 -- Checked when the quote is written, as the writer: its trip snapshot is the
 -- trip's own time, zone, and product, so what a guest is shown is the
--- departure the quote names.
+-- departure the quote names; and its party is within the product's limits
+-- and the trip's seats. Per-participant fees and add-on limits follow the
+-- party size. A shared-seat party must also equal its tickets (checked at
+-- commit), but a charter's guest count is the writer's word within these
+-- bounds; checkout re-checks the party against its participants.
 CREATE FUNCTION app.check_quote_trip() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -496,7 +507,8 @@ DECLARE
   trip record;
 BEGIN
   SELECT t.time_zone, t.local_date, t.local_start_time, t.starts_at,
-         t.start_utc_offset_minutes, p.name, p.kind
+         t.start_utc_offset_minutes, t.seat_capacity, p.name, p.kind,
+         p.min_party_size, p.max_party_size
     INTO trip
     FROM public.scheduled_trips t
     JOIN public.products p ON p.tenant_id = t.tenant_id AND p.id = t.product_id
@@ -511,20 +523,49 @@ BEGIN
      OR trip.kind <> NEW.product_kind THEN
     RAISE EXCEPTION 'quote does not match the trip it names' USING ERRCODE = '23514';
   END IF;
+  IF NEW.party_size < trip.min_party_size
+     OR NEW.party_size > trip.max_party_size
+     OR NEW.party_size > trip.seat_capacity THEN
+    RAISE EXCEPTION 'quote party of % is outside its product''s limits or its trip''s seats',
+      NEW.party_size USING ERRCODE = '23514';
+  END IF;
   RETURN NEW;
 END;
+$$;
+
+-- A discount line's label, exactly as the service writes it: "HARBOR10, 10%
+-- off", "TIDE, 12.5% off", or "REEF25, $1,025.00 off". Whole percents drop
+-- the decimals, a percent keeps at most two decimals and drops one trailing
+-- zero, and dollars are grouped by thousands.
+CREATE FUNCTION app.discount_label(code text, discount_kind text, amount_off integer,
+                                   percent_off_bp integer) RETURNS text
+  LANGUAGE sql IMMUTABLE
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+  SELECT code || ', ' || CASE discount_kind
+    WHEN 'percent' THEN
+      (percent_off_bp / 100)::text
+      || CASE WHEN percent_off_bp % 100 = 0 THEN ''
+              WHEN percent_off_bp % 10 = 0 THEN '.' || (percent_off_bp % 100 / 10)::text
+              ELSE '.' || lpad((percent_off_bp % 100)::text, 2, '0') END
+      || '% off'
+    ELSE
+      '$' || regexp_replace((amount_off / 100)::text, '([0-9])(?=([0-9]{3})+$)', '\1,', 'g')
+      || '.' || lpad((amount_off % 100)::text, 2, '0') || ' off'
+  END
 $$;
 
 -- Checked at commit: the quote is what its versions produce. Each priced line
 -- is an item of the named price list version copied exactly, with a quantity
 -- its rule allows on the trip's date; each item appears once and every
 -- mandatory fee is charged; the tickets are the party. A promotion was
--- redeemable for the product at the quote instant, and the discount is its
--- rule on the trip price. Taxes follow their rate versions: every taxable line
--- carries the same rates on one pre-tax amount, inclusive rates extracted
--- from the line's net and added rates rounded half up. Integer division of
--- non-negative values, floor((2a + b) / 2b), is the half-up rounding the
--- service uses.
+-- redeemable for the product at the quote instant, the discount is its rule
+-- on the trip price, and the discount line carries its label. The discount is
+-- split across the trip-price lines by the largest remainder, as the service
+-- splits it. Taxes follow their rate versions: every taxable line carries the
+-- same rates on one pre-tax amount, inclusive rates extracted from the line's
+-- net and added rates rounded half up. Integer division of non-negative
+-- values, floor((2a + b) / 2b), is the half-up rounding the service uses.
 CREATE FUNCTION app.check_quote_terms() RETURNS trigger
   LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
@@ -609,9 +650,42 @@ BEGIN
        OR NOT EXISTS (
          SELECT 1 FROM public.quote_lines l
           WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id
-            AND l.kind = 'discount' AND l.code = promo.code) THEN
+            AND l.kind = 'discount' AND l.code = promo.code
+            AND l.name = app.discount_label(promo.code, promo.discount_kind, promo.amount_off,
+                                            promo.percent_off_bp)) THEN
       RAISE EXCEPTION 'quote % applies a promotion it may not', NEW.id USING ERRCODE = '23514';
     END IF;
+  END IF;
+
+  -- The discount D off a trip price E is split as the service splits it: each
+  -- trip-price line of amount a takes floor(D * a / E), and the cents left
+  -- over go one each to the lines with the largest remainders, ties to the
+  -- lower line number. With no promotion, D is 0 and every share is 0. sum()
+  -- of bigint is numeric, so the sums are cast back for integer division.
+  IF EXISTS (
+       WITH price_lines AS (
+         SELECT l.line_no, l.amount::bigint AS amount, l.discount_amount AS share,
+                (sum(l.amount::bigint) OVER ())::bigint AS trip_price
+           FROM public.quote_lines l
+          WHERE l.tenant_id = NEW.tenant_id AND l.quote_id = NEW.id
+            AND l.kind IN ('ticket', 'charter')),
+       floors AS (
+         SELECT p.line_no, p.share,
+                CASE WHEN p.trip_price = 0 THEN 0
+                     ELSE NEW.discount_amount::bigint * p.amount / p.trip_price END AS floor_share,
+                CASE WHEN p.trip_price = 0 THEN 0
+                     ELSE NEW.discount_amount::bigint * p.amount % p.trip_price END AS remainder
+           FROM price_lines p),
+       ranked AS (
+         SELECT f.share, f.floor_share,
+                row_number() OVER (ORDER BY f.remainder DESC, f.line_no) AS rank,
+                NEW.discount_amount - (sum(f.floor_share) OVER ())::bigint AS left_over
+           FROM floors f)
+     SELECT 1 FROM ranked
+      WHERE share <> floor_share + CASE WHEN rank <= left_over THEN 1 ELSE 0 END)
+  THEN
+    RAISE EXCEPTION 'quote % does not split its discount by the largest remainder', NEW.id
+      USING ERRCODE = '23514';
   END IF;
 
   IF EXISTS (
@@ -661,7 +735,7 @@ END;
 $$;
 
 CREATE TRIGGER quotes_stamp BEFORE INSERT ON public.quotes
-  FOR EACH ROW EXECUTE FUNCTION app.stamp_created_txid();
+  FOR EACH ROW EXECUTE FUNCTION app.stamp_creation();
 CREATE TRIGGER quotes_trip_snapshot BEFORE INSERT ON public.quotes
   FOR EACH ROW EXECUTE FUNCTION app.check_quote_trip();
 CREATE CONSTRAINT TRIGGER quotes_add_up
@@ -759,12 +833,14 @@ $$;
 
 -- The runtime keeps the default SELECT and INSERT from 0001 on every table
 -- above and receives nothing more. Trigger functions run as the writer, or as
--- their owner for the commit-time checks; none is callable directly.
-REVOKE ALL ON FUNCTION app.stamp_created_txid() FROM PUBLIC;
+-- their owner for the commit-time checks, and discount_label serves only the
+-- commit-time check; none is callable directly.
+REVOKE ALL ON FUNCTION app.stamp_creation() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.stamp_actor() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_sealed_parent() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_price_list_complete() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_quote_totals() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_quote_trip() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.discount_label(text, text, integer, integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_quote_terms() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_product_sale_terms() FROM PUBLIC;

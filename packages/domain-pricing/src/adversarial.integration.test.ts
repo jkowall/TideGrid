@@ -23,6 +23,7 @@ import { type Insertable, sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
+  allocateLargestRemainder,
   type CreateQuoteInput,
   createPolicyVersion,
   createPriceListVersion,
@@ -31,6 +32,7 @@ import {
   createQuote,
   createTaxRate,
   createTaxRateVersion,
+  discountLabel,
   findPromotion,
   findTripForSale,
   getQuote,
@@ -38,13 +40,16 @@ import {
   loadPolicy,
   loadPriceList,
   loadTaxRates,
+  mulDivHalfUp,
   normalizePromotionCode,
   type PartySelection,
   type PolicyInput,
+  PPM,
   type PricedQuote,
   type PriceList,
   type PromotionTerms,
   priceQuote,
+  type QuoteSubject,
   type SaleTrip,
   type TaxRate,
 } from "./index.ts";
@@ -1363,6 +1368,8 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
       promotionCode?: string | null;
       /** The pricing instant the forger computes with; quoted_at stays NOW unless rows change it. */
       nowMs?: number;
+      /** Party limits and capacity the forger prices against instead of the trip's own. */
+      subject?: (subject: QuoteSubject) => QuoteSubject;
       list?: (list: PriceList) => PriceList;
       rates?: (rates: TaxRate[]) => TaxRate[];
       promotion?: (terms: PromotionTerms | null) => PromotionTerms | null;
@@ -1388,16 +1395,17 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
           const code = f.promotionCode === undefined ? "TIDE15" : f.promotionCode;
           const terms =
             code === null ? null : await findPromotion(trx, A.id, normalizePromotionCode(code));
+          const subject: QuoteSubject = {
+            productId: t.productId,
+            productKind: t.productKind,
+            localDate: t.localDate,
+            minPartySize: t.minPartySize,
+            maxPartySize: t.maxPartySize,
+            capacityRemaining: t.capacityRemaining,
+          };
           const outcome = priceQuote({
             nowMs: f.nowMs ?? NOW.getTime(),
-            subject: {
-              productId: t.productId,
-              productKind: t.productKind,
-              localDate: t.localDate,
-              minPartySize: t.minPartySize,
-              maxPartySize: t.maxPartySize,
-              capacityRemaining: t.capacityRemaining,
-            },
+            subject: f.subject ? f.subject(subject) : subject,
             priceList: f.list ? f.list(list) : list,
             taxRates: f.rates
               ? f.rates(await loadTaxRates(trx, A.id))
@@ -1488,7 +1496,7 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
           line_no: q.discount.lineNo,
           kind: "discount",
           code: q.discount.code,
-          name: `${q.discount.code} discount`,
+          name: discountLabel(q.discount.code, q.discount.discount),
           basis: null,
           quantity: 1,
           unit_amount: q.discount.amount,
@@ -1520,6 +1528,51 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
     const PROMO = /applies a promotion it may not/;
     const TAXES = /has taxes that do not follow its rates/;
     const SUMS = /does not add up to its lines/;
+    const DEPARTED = /quotes_quoted_before_departure/;
+    const SPLIT = /does not split its discount by the largest remainder/;
+    const PARTY = /party of \d+ is outside its product's limits or its trip's seats/;
+
+    /**
+     * Rewrites every taxable line's taxes from its net after its discount
+     * share, and the header totals that follow, exactly as the service would,
+     * so a forgery that moves the discount keeps its taxes consistent.
+     */
+    function retax(r: Rows, rates: readonly TaxRate[]): void {
+      const inclusive = rates.filter((x) => x.inclusive);
+      const inclusivePpm = inclusive.reduce((acc, x) => acc + x.ratePpm, 0);
+      r.taxes = r.lines
+        .filter((l) => l.taxable)
+        .flatMap((l) => {
+          const net = Number(l.amount) - Number(l.discount_amount ?? 0);
+          const base = inclusive.length > 0 ? mulDivHalfUp(net, PPM, PPM + inclusivePpm) : net;
+          const included = allocateLargestRemainder(
+            net - base,
+            inclusive.map((x) => x.ratePpm),
+          );
+          let next = 0;
+          return rates.map((x) => ({
+            tenant_id: A.id,
+            line_no: l.line_no,
+            tax_rate_id: x.taxRateId,
+            tax_rate_version: x.version,
+            taxable_amount: base,
+            amount: x.inclusive ? (included[next++] ?? 0) : mulDivHalfUp(base, x.ratePpm, PPM),
+          }));
+        });
+      const inclusiveIds = new Set(inclusive.map((x) => x.taxRateId));
+      const total = (included: boolean) =>
+        r.taxes
+          .filter((x) => inclusiveIds.has(x.tax_rate_id) === included)
+          .reduce((acc, x) => acc + Number(x.amount), 0);
+      r.header.tax_amount = total(false);
+      r.header.included_tax_amount = total(true);
+      r.header.total_amount =
+        Number(r.header.subtotal_amount) -
+        Number(r.header.discount_amount) +
+        Number(r.header.fee_amount) +
+        Number(r.header.tax_amount);
+    }
+
     const withTicket =
       (code: string, change: Partial<PriceList["tickets"][number]>) => (l: PriceList) => ({
         ...l,
@@ -1704,6 +1757,222 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
           },
         }),
       ).toEqual(refused(SUMS));
+    });
+
+    it("refuses a quote dated at or after its departure, and stamps its creation time itself", async () => {
+      // The reef trip of 2026-11-10 leaves at 21:00 in New York: 2026-11-11T02:00:00Z.
+      const datedAt = (iso: string) => (r: Rows) => {
+        r.header.quoted_at = new Date(iso);
+        r.header.expires_at = new Date(Date.parse(iso) + 30 * 60_000);
+      };
+      expect(await forge({ promotionCode: null, rows: datedAt("2030-01-01T00:00:00Z") })).toEqual(
+        refused(DEPARTED),
+      );
+      expect(await forge({ promotionCode: null, rows: datedAt("2026-11-11T02:00:00Z") })).toEqual(
+        refused(DEPARTED),
+      );
+      expect(
+        await forge({ promotionCode: null, rows: datedAt("2026-11-11T01:59:59Z") }),
+      ).toBeNull();
+      // created_at is the database's clock when the row was written, whatever
+      // the writer sends, so checkout can bound a quote's age without trusting
+      // quoted_at.
+      const [before] = await admin<{ now: Date }[]>`select now()`;
+      expect(
+        await forge({
+          promotionCode: null,
+          rows: (r) => {
+            Object.assign(r.header, { created_at: new Date("2020-01-01T00:00:00Z") });
+          },
+        }),
+      ).toBeNull();
+      const [stamps] = await admin<{ backdated: number; latest: Date }[]>`
+        select count(*) filter (where created_at < '2021-01-01')::int as backdated,
+               max(created_at) as latest
+          from public.quotes where tenant_id = ${A.id}`;
+      expect(stamps?.backdated).toBe(0);
+      expect(stamps?.latest.getTime()).toBeGreaterThanOrEqual(before?.now.getTime() ?? Infinity);
+    });
+
+    it("refuses a discount split across trip-price lines other than by the largest remainder", async () => {
+      const rates = await as(A.id, (trx) => loadTaxRates(trx, A.id));
+      const split = (shares: Record<string, number>) => (r: Rows) => {
+        r.lines = r.lines.map((l) =>
+          l.kind === "ticket" && l.code in shares
+            ? { ...l, discount_amount: shares[l.code] ?? 0 }
+            : l,
+        );
+        retax(r, rates);
+      };
+      // TIDE15 on an untaxed and a taxed $100,000 berth is $30,000 off, $15,000 each.
+      const berths = {
+        tripId: trip(a.yachtTrips, "2026-11-10"),
+        party: party(["berth", 1], ["berth_taxed", 1]),
+        addOns: [],
+      };
+      expect(
+        await forge({ ...berths, rows: split({ berth: 1_500_000, berth_taxed: 1_500_000 }) }),
+      ).toBeNull();
+      expect(await forge({ ...berths, rows: split({ berth: 3_000_000, berth_taxed: 0 }) })).toEqual(
+        refused(SPLIT),
+      );
+      expect(await forge({ ...berths, rows: split({ berth: 0, berth_taxed: 3_000_000 }) })).toEqual(
+        refused(SPLIT),
+      );
+      // TIDE15 on an adult, a child, and a senior ($59.99, $29.99, $29.99) is
+      // $18.00 off. The floors are 900, 449, and 449 cents; the two cents left
+      // go to the child and the senior, whose remainders are larger.
+      const three = { party: party(["adult", 1], ["child", 1], ["senior", 1]), addOns: [] };
+      expect(
+        await forge({ ...three, rows: split({ adult: 900, child: 450, senior: 450 }) }),
+      ).toBeNull();
+      expect(
+        await forge({ ...three, rows: split({ adult: 901, child: 449, senior: 450 }) }),
+      ).toEqual(refused(SPLIT));
+      expect(
+        await forge({ ...three, rows: split({ adult: 900, child: 451, senior: 449 }) }),
+      ).toEqual(refused(SPLIT));
+    });
+
+    it("refuses a party outside its product's limits or its trip's seats", async () => {
+      // A charter for two to ten guests, sold on the 8-guest cutter and the 12-guest yacht.
+      const [dock] = await admin<{ id: string }[]>`
+        select id from public.locations where tenant_id = ${A.id} and name = 'Dock A'`;
+      const boats = new Map(
+        (
+          await admin<{ id: string; name: string }[]>`
+          select id, name from public.boats where tenant_id = ${A.id}`
+        ).map((x) => [x.name, x.id]),
+      );
+      const cutter = boats.get("Cutter") ?? "";
+      const yacht = boats.get("Yacht") ?? "";
+      const bounded = await as(A.id, async (trx) => {
+        const c = ctx(A.id);
+        const productId = await createProduct(trx, c, {
+          locationId: dock?.id ?? "",
+          kind: "private_charter",
+          name: "Party Charter",
+          durationMinutes: 90,
+          bookingCutoffMinutes: 60,
+          minPartySize: 2,
+          maxPartySize: 10,
+          eligibleBoatIds: [cutter, yacht],
+          reason: "fixture",
+        });
+        const price = await createPriceListVersion(trx, c, {
+          productId,
+          charter: { name: "Whole boat", amount: 90_000, taxable: true },
+          fees: [
+            {
+              code: "crew",
+              name: "Crew fee",
+              unitAmount: 500,
+              basis: "per_participant",
+              taxable: false,
+            },
+          ],
+          reason: "fixture",
+        });
+        if (price.kind !== "created") throw new Error(JSON.stringify(price));
+        const policy = await createPolicyVersion(trx, c, {
+          ...policyInput(1440, "Party"),
+          productId,
+          reason: "fixture",
+        });
+        if (policy.kind !== "created") throw new Error(JSON.stringify(policy));
+        await publish(trx, c, productId);
+        const on = async (boatId: string) =>
+          trip(
+            await scheduleTrips(trx, c, productId, boatId, "13:00", "2026-12-05", "2026-12-05"),
+            "2026-12-05",
+          );
+        return { cutter: await on(cutter), yacht: await on(yacht) };
+      });
+      // The forger prices against limits of its own choosing, so every line
+      // and total is consistent with the party it stores.
+      const anyParty = (s: QuoteSubject): QuoteSubject => ({
+        ...s,
+        minPartySize: 1,
+        maxPartySize: 500,
+        capacityRemaining: 500,
+      });
+      const guests = (tripId: string, n: number) =>
+        forge({
+          tripId,
+          party: { kind: "charter", guests: n },
+          addOns: [],
+          promotionCode: null,
+          subject: anyParty,
+        });
+      expect(await guests(bounded.cutter, 2)).toBeNull();
+      expect(await guests(bounded.cutter, 8)).toBeNull();
+      expect(await guests(bounded.yacht, 10)).toBeNull();
+      // Below the product's minimum.
+      expect(await guests(bounded.cutter, 1)).toEqual(refused(PARTY));
+      // Within the product's limits, but more guests than the cutter seats.
+      expect(await guests(bounded.cutter, 9)).toEqual(refused(PARTY));
+      // Within the yacht's seats, but more than the product allows.
+      expect(await guests(bounded.yacht, 11)).toEqual(refused(PARTY));
+      // A real charter quote for six re-stored with 500 aboard an 8-guest boat.
+      expect(
+        await forge({
+          tripId: trip(a.charterTrips, "2026-11-10"),
+          party: { kind: "charter", guests: 6 },
+          addOns: [],
+          promotionCode: null,
+          rows: (r) => {
+            r.header.party_size = 500;
+          },
+        }),
+      ).toEqual(refused(PARTY));
+      // Nine tickets on a reef trip that seats twelve, for a product of at most eight.
+      expect(
+        await forge({
+          party: party(["adult", 9]),
+          addOns: [],
+          promotionCode: null,
+          subject: anyParty,
+        }),
+      ).toEqual(refused(PARTY));
+    });
+
+    it("refuses a discount line named anything but its promotion's label", async () => {
+      const named = (name: string) => (r: Rows) => {
+        r.lines = r.lines.map((l) => (l.kind === "discount" ? { ...l, name } : l));
+      };
+      for (const name of ["\u0007FREE: you owe nothing", "TIDE15, 50% off", "TIDE15 discount"]) {
+        expect({ name, result: await forge({ rows: named(name) }) }).toEqual({
+          name,
+          result: refused(PROMO),
+        });
+      }
+    });
+
+    it("labels every discount in the database exactly as the service does", async () => {
+      const percents = await admin<{ bp: number; label: string }[]>`
+        select bp, app.discount_label('TIDE15', 'percent', null, bp) as label
+          from generate_series(1, 10000) as bp`;
+      const amounts = [
+        1, 5, 10, 99, 100, 101, 999, 1_000, 1_001, 99_999, 100_000, 123_456, 999_999, 1_000_000,
+        1_234_567, 9_999_999, 10_000_000,
+      ];
+      const random = generator(25);
+      for (let i = 0; i < 200; i++) amounts.push(1 + random(10_000_000));
+      const fixed = await admin<{ cents: number; label: string }[]>`
+        select cents, app.discount_label('REEF25', 'fixed_amount', cents, null) as label
+          from unnest(${admin.array(amounts)}::int[]) as cents`;
+      const mismatches = [
+        ...percents.filter(
+          (r) => r.label !== discountLabel("TIDE15", { kind: "percent", percentOffBp: r.bp }),
+        ),
+        ...fixed.filter(
+          (r) => r.label !== discountLabel("REEF25", { kind: "fixed_amount", amountOff: r.cents }),
+        ),
+      ];
+      expect({ checked: percents.length + fixed.length, mismatches }).toEqual({
+        checked: 10_000 + amounts.length,
+        mismatches: [],
+      });
     });
   });
 
