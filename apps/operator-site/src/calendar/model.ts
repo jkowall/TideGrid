@@ -256,16 +256,24 @@ export function tripLine(
 /**
  * Seats for the calendar. Seats left only mean something while the trip can
  * still sell, so a trip that has left, or is final, shows its size instead.
+ * Taken seats say how they are taken (G2.6): booked, or held by a checkout
+ * that has not ended yet.
  */
 export function capacityText(trip: Pick<StaffTrip, "capacity" | "salesState">, departed: boolean) {
-  const { kind, total, remaining } = trip.capacity;
+  const { kind, total, remaining, held = 0, confirmed = 0 } = trip.capacity;
   const settled = departed || trip.salesState === "canceled" || trip.salesState === "completed";
   if (kind === "whole_boat") {
-    if (settled) return `Whole boat, up to ${total} guests`;
-    return remaining > 0 ? `Whole boat, up to ${total} guests` : "Whole boat, booked";
+    if (confirmed > 0) return "Whole boat, booked";
+    if (settled || remaining > 0) return `Whole boat, up to ${total} guests`;
+    return held > 0 ? "Whole boat, held for a checkout" : "Whole boat, booked";
   }
-  if (settled) return `${total} ${total === 1 ? "seat" : "seats"}`;
-  return `${remaining} of ${total} seats left`;
+  const taken = [confirmed > 0 && `${confirmed} booked`, !settled && held > 0 && `${held} held`]
+    .filter(Boolean)
+    .join(", ");
+  const size = settled
+    ? `${total} ${total === 1 ? "seat" : "seats"}`
+    : `${remaining} of ${total} seats left`;
+  return taken ? `${size}: ${taken}` : size;
 }
 
 /** Why a change did not happen, from the API's answer. */
