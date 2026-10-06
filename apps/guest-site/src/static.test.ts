@@ -51,7 +51,10 @@ describe("static files", () => {
     expect(policy).not.toMatch(/unsafe-inline|unsafe-eval|unsafe-hashes|\*/);
     expect(directives.get("style-src")).toBe("'self'");
     expect(directives.get("script-src")).toBe("'self' https://static.cloudflareinsights.com");
-    // The checkout talks to the API and nothing else (the beacon is Cloudflare's).
+    // The page fetches only from the API. 'self' is for Cloudflare Web Analytics:
+    // its automatically injected beacon reports to this site's own /cdn-cgi/rum,
+    // as https://developers.cloudflare.com/web-analytics/faq/ says;
+    // cloudflareinsights.com takes the manually added beacon's reports.
     expect(directives.get("connect-src")).toBe(
       "'self' https://api.tidegrid.us https://cloudflareinsights.com",
     );
@@ -69,7 +72,7 @@ describe("static files", () => {
       // Any use in code, not a mention in a comment.
       const local = /\b(localStorage|indexedDB)\s*[.[]|document\.cookie/.test(source);
       expect({ name, local }).toEqual({ name, local: false });
-      // Only the resume record touches sessionStorage, and it is scoped to one checkout.
+      // Only resume.ts touches sessionStorage: one open checkout, and the last confirmation.
       if (name !== join("booking", "resume.ts")) {
         const session = /\bsessionStorage\s*[.[]/.test(source);
         expect({ name, session }).toEqual({ name, session: false });

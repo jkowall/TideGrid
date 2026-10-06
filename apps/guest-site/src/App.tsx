@@ -17,7 +17,8 @@ interface Place {
  * The guest site's pages share one brand, so moving between them happens in
  * place: the address changes through the History API and the shell renders
  * the new page, with no new load of the operator's brand. Back and Forward
- * work through popstate.
+ * work through popstate. A Back or Forward within one page, such as between a
+ * checkout's steps, keeps that page: the page follows its own history.
  */
 function usePlace(): [Place, (href: string) => void] {
   const [place, setPlace] = useState<Place>(() => ({
@@ -36,7 +37,11 @@ function usePlace(): [Place, (href: string) => void] {
   }, []);
   useEffect(() => {
     const onPop = () =>
-      setPlace((p) => ({ pathname: window.location.pathname, moves: p.moves + 1 }));
+      setPlace((p) =>
+        window.location.pathname === p.pathname
+          ? p
+          : { pathname: window.location.pathname, moves: p.moves + 1 },
+      );
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);

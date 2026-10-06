@@ -2,7 +2,15 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { charterTripId, testNow, tripId } from "./fixtures.ts";
-import { clearResume, type ResumeRecord, readResume, saveResume } from "./resume.ts";
+import {
+  type BookedRecord,
+  clearResume,
+  type ResumeRecord,
+  readBooked,
+  readResume,
+  saveBooked,
+  saveResume,
+} from "./resume.ts";
 
 const storageKey = "tidegrid.checkout";
 const sessionId = "5d0c4a1e-2b3c-4d5e-8f60-000000000001";
@@ -19,7 +27,9 @@ const record: ResumeRecord = {
   quoteId,
   secret,
   paymentSent: false,
+  paymentTried: false,
   expiresAt: new Date(expiry).toISOString(),
+  clockOffsetMs: null,
 };
 
 const stored = () => window.sessionStorage.getItem(storageKey);
@@ -50,8 +60,24 @@ describe("saveResume and readResume", () => {
   });
 
   it("keeps whether a payment was sent", () => {
-    saveResume({ ...record, paymentSent: true });
+    saveResume({ ...record, paymentSent: true, paymentTried: true });
     expect(readResume(tripId, now)?.paymentSent).toBe(true);
+  });
+
+  it("keeps whether a payment was tried, and counts a sent one as tried", () => {
+    saveResume({ ...record, paymentTried: true });
+    expect(readResume(tripId, now)).toMatchObject({ paymentSent: false, paymentTried: true });
+    saveResume({ ...record, paymentSent: true, paymentTried: false });
+    expect(readResume(tripId, now)?.paymentTried).toBe(true);
+  });
+
+  it("keeps the server clock's offset, and drops one no device could have", () => {
+    saveResume({ ...record, clockOffsetMs: -45 * minute });
+    expect(readResume(tripId, now)?.clockOffsetMs).toBe(-45 * minute);
+    store({ ...record, clockOffsetMs: 30 * 24 * 60 * minute });
+    expect(readResume(tripId, now)?.clockOffsetMs).toBeNull();
+    store({ ...record, clockOffsetMs: "fast" });
+    expect(readResume(tripId, now)?.clockOffsetMs).toBeNull();
   });
 
   it("matches the trip whatever the case of its id", () => {
@@ -79,11 +105,13 @@ describe("saveResume and readResume", () => {
     expect(readResume(tripId, now)).toEqual(next);
   });
 
-  it("stores the ids, the secret, and two flags in this tab's session storage, and no more", () => {
+  it("stores the ids, the secret, two flags, and the clock in this tab's session storage, and no more", () => {
     saveResume(record);
     expect(Object.keys(JSON.parse(stored() ?? "{}")).sort()).toEqual([
+      "clockOffsetMs",
       "expiresAt",
       "paymentSent",
+      "paymentTried",
       "quoteId",
       "secret",
       "sessionId",
@@ -112,6 +140,8 @@ describe("a record that cannot be trusted", () => {
     ["a missing secret", without("secret")],
     ["a payment flag that is not a boolean", { ...record, paymentSent: "no" }],
     ["a missing payment flag", without("paymentSent")],
+    ["a tried flag that is not a boolean", { ...record, paymentTried: 1 }],
+    ["a missing tried flag", without("paymentTried")],
     ["an expiry that is not a date", { ...record, expiresAt: "soon" }],
     ["an expiry that is not a string", { ...record, expiresAt: expiry }],
   ];
@@ -235,5 +265,75 @@ describe("storage that fails", () => {
       throw new DOMException("denied", "SecurityError");
     });
     expect(() => clearResume()).not.toThrow();
+  });
+});
+
+describe("the last confirmation", () => {
+  const booked: BookedRecord = {
+    tripId,
+    reference: "C03G4ZFJ",
+    productName: "Sunset Harbor Cruise",
+    when: "Wednesday, October 7, 2026 at 6:00 PM",
+    where: "Harbor Marina, Dock C",
+    meetAt: "Dock C, slip 14",
+    party: "3 guests: 2 Adult, 1 Child (3 to 12)",
+    extras: "Souvenir photo × 1, Drink voucher × 2",
+    total: 14_821,
+  };
+  const bookedText = () => window.sessionStorage.getItem("tidegrid.booked");
+
+  it("reads back what the confirmation said, for its own trip only", () => {
+    saveBooked(booked);
+    expect(readBooked(tripId)).toEqual(booked);
+    expect(readBooked(tripId.toUpperCase())).toEqual(booked);
+    expect(readBooked(charterTripId)).toBeNull();
+  });
+
+  it("holds no secret and no name or email: only what the screen showed", () => {
+    saveBooked(booked);
+    expect(Object.keys(JSON.parse(bookedText() ?? "{}")).sort()).toEqual([
+      "extras",
+      "meetAt",
+      "party",
+      "productName",
+      "reference",
+      "total",
+      "tripId",
+      "when",
+      "where",
+    ]);
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it("lives beside an open checkout's record without touching it", () => {
+    saveResume(record);
+    saveBooked(booked);
+    clearResume();
+    expect(readBooked(tripId)).toEqual(booked);
+  });
+
+  const bad: Array<[string, Partial<Record<keyof BookedRecord, unknown>>]> = [
+    ["a reference of the wrong shape", { reference: "c03g4zfj" }],
+    ["a reference with a letter the alphabet leaves out", { reference: "C03G4ZFI" }],
+    ["a total that is not whole cents", { total: 148.21 }],
+    ["a total below zero", { total: -1 }],
+    ["an empty party", { party: "" }],
+    ["a trip name that is far too long", { productName: "x".repeat(201) }],
+    ["a meeting point that is not text", { meetAt: 7 }],
+    ["a trip id that is not a UUID", { tripId: "trip" }],
+  ];
+  it.each(bad)("is not shown when it holds %s", (_name, change) => {
+    window.sessionStorage.setItem("tidegrid.booked", JSON.stringify({ ...booked, ...change }));
+    expect(readBooked(tripId)).toBeNull();
+  });
+
+  it("takes no extras, place, or meeting point as none", () => {
+    saveBooked({ ...booked, extras: null, where: null, meetAt: null });
+    expect(readBooked(tripId)).toMatchObject({ extras: null, where: null, meetAt: null });
+  });
+
+  it("reads nothing from text that is not a record", () => {
+    window.sessionStorage.setItem("tidegrid.booked", "{not json");
+    expect(readBooked(tripId)).toBeNull();
   });
 });

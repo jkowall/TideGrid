@@ -7,7 +7,7 @@ import {
   formatTripTime,
   zoneCity,
 } from "@tidegrid/design-system/format";
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { useLinkClick } from "../navigation.tsx";
 import type { TripContext } from "./model.ts";
 
@@ -30,6 +30,44 @@ export function TripHeader({
   listing: AvailableTrip | null;
   titleRef: Ref<HTMLHeadingElement>;
 }) {
+  return (
+    <Hero name={context.productName} when={tripWhen(context.trip)} titleRef={titleRef}>
+      {listing && (
+        <>
+          <span aria-hidden="true"> · {formatDuration(listing.durationMinutes)}</span>
+          <span className="tg-visually-hidden">
+            , for {formatDuration(listing.durationMinutes, "long")}
+          </span>
+        </>
+      )}
+    </Hero>
+  );
+}
+
+/** The band for a booking already made, shown again from what the confirmation said. */
+export function BookedHeader({
+  name,
+  when,
+  titleRef,
+}: {
+  name: string;
+  when: string;
+  titleRef: Ref<HTMLHeadingElement>;
+}) {
+  return <Hero name={name} when={when} titleRef={titleRef} />;
+}
+
+function Hero({
+  name,
+  when,
+  titleRef,
+  children,
+}: {
+  name: string;
+  when: string;
+  titleRef: Ref<HTMLHeadingElement>;
+  children?: ReactNode;
+}) {
   const linkClick = useLinkClick();
   return (
     <section className="booking-hero" aria-labelledby="booking-title">
@@ -40,18 +78,11 @@ export function TripHeader({
         </a>
         <p className="booking-hero__eyebrow">Book a trip</p>
         <h1 id="booking-title" ref={titleRef} tabIndex={-1}>
-          {context.productName}
+          {name}
         </h1>
         <p className="booking-hero__when">
-          {tripWhen(context.trip)}
-          {listing && (
-            <>
-              <span aria-hidden="true"> · {formatDuration(listing.durationMinutes)}</span>
-              <span className="tg-visually-hidden">
-                , for {formatDuration(listing.durationMinutes, "long")}
-              </span>
-            </>
-          )}
+          {when}
+          {children}
         </p>
       </div>
     </section>
@@ -64,13 +95,22 @@ function capacityText(listing: AvailableTrip): string {
   return `Shared trip, ${remaining} ${remaining === 1 ? "seat" : "seats"} left`;
 }
 
+/** What an open checkout holds for this guest: "Your 3 seats are held", "The boat is held for you". */
+export function heldText(held: { charter: boolean; seats: number }): string {
+  if (held.charter) return "The boat is held for you";
+  return held.seats === 1 ? "Your seat is held" : `Your ${held.seats} seats are held`;
+}
+
 /** The trip's facts beside the steps: where to meet, seats, the booking cutoff, and whose clock. */
 export function TripFacts({
   context,
   listing,
+  held = null,
 }: {
   context: TripContext;
   listing: AvailableTrip | null;
+  /** An open checkout's hold, said beside the seats left, which already count it. */
+  held?: { charter: boolean; seats: number } | null;
 }) {
   const zone = zoneCity(context.trip.timeZone);
   return (
@@ -89,11 +129,19 @@ export function TripFacts({
               <Icon name={listing.capacity.kind === "seats" ? "users" : "boat"} />
               <span>{capacityText(listing)}</span>
             </li>
-            <li>
-              <Icon name="hourglass" />
-              <span>Book by {formatCutoff(listing.salesCloseAt, listing)}</span>
-            </li>
           </>
+        )}
+        {held && (
+          <li>
+            <Icon name="lock" />
+            <span>{heldText(held)}</span>
+          </li>
+        )}
+        {listing && (
+          <li>
+            <Icon name="hourglass" />
+            <span>Book by {formatCutoff(listing.salesCloseAt, listing)}</span>
+          </li>
         )}
         <li>
           <Icon name="clock" />

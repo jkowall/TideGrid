@@ -131,6 +131,29 @@ describe("guest app", () => {
     window.history.replaceState(null, "", "/");
   });
 
+  it("keeps a page through Back and Forward within it, such as a checkout's steps", async () => {
+    window.history.replaceState(null, "", `/book/${tripId}`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/v1/public/tenant") return ready();
+        if (url.pathname.endsWith("/offer")) return json({ offer });
+        if (url.pathname === "/v1/public/trips") return json({ trips: [listing] });
+        throw new Error(`unexpected ${url}`);
+      }),
+    );
+    render(<App />);
+    const title = await screen.findByRole("heading", { level: 1, name: "Sunset Harbor Cruise" });
+    window.history.pushState(null, "", `/book/${tripId}#main`);
+    window.history.back();
+    await waitFor(() => expect(window.location.hash).toBe(""));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The same page, not a new one: its heading is the very same element.
+    expect(screen.getByRole("heading", { level: 1, name: "Sunset Harbor Cruise" })).toBe(title);
+    window.history.replaceState(null, "", "/");
+  });
+
   it("moves focus to the page heading when Try again brings the site in", async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

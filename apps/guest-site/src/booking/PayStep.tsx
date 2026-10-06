@@ -29,6 +29,7 @@ export function PayStep({
   timeZone: string;
   /** A private charter holds the whole boat; shared trips hold seats. */
   charter: boolean;
+  /** The server's time, as the page estimates it. */
   now: number;
   busy: PayBusy | null;
   trouble: Trouble | null;
@@ -70,7 +71,7 @@ export function PayStep({
           <Icon name="hourglass" />
           <span>
             {left > 0
-              ? `${charter ? "The boat is" : "Your seats are"} held for you until ${deadlineText(session.expiresAt, timeZone)}, ${formatTimeLeft(left)} from now.`
+              ? `${charter ? "The boat is" : "Your seats are"} held for you until ${deadlineText(session.expiresAt, timeZone, new Date(now))}, ${formatTimeLeft(left)} from now.`
               : "The hold has run out. The page is checking what happened."}
           </span>
         </p>
@@ -106,7 +107,6 @@ export function PayStep({
       <div className="booking-actions booking-actions--quiet">
         <Button
           variant="ghost"
-          icon="arrow-left"
           busy={busy === "cancel"}
           busyLabel="Canceling…"
           disabled={working && busy !== "cancel"}

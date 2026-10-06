@@ -234,6 +234,7 @@
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--surface-sunken);
+  font-variant-numeric: lining-nums tabular-nums;
   color: var(--text-strong);
 }
 
@@ -392,14 +393,14 @@
 
 /* Payment ------------------------------------------------------------------------ */
 
-/* A dashed edge marks the test provider's area: no real card goes here. */
+/* The test provider's area: a tinted panel set apart from the page, where no real card goes. */
 .booking-pay {
   display: grid;
   gap: var(--space-3);
   padding: var(--space-6) var(--space-5);
-  border: 2px dashed var(--border-control);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-lg);
-  background: var(--surface-raised);
+  background: var(--surface-sunken);
 }
 .booking-pay__label {
   margin: 0;
@@ -412,7 +413,7 @@
   color: var(--text-strong);
   font-family: var(--font-display);
   font-size: var(--text-3xl);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: lining-nums tabular-nums;
   font-weight: var(--weight-bold);
   line-height: var(--leading-tight);
 }
@@ -566,4 +567,13 @@
   margin: 0;
   color: var(--text-strong);
   overflow-wrap: anywhere;
+}
+.booking-summary__money {
+  font-variant-numeric: lining-nums tabular-nums;
+}
+/* A checkout's short reference: a face that tells 0 from O, kept on one line. */
+.booking-checkout-ref {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
 }

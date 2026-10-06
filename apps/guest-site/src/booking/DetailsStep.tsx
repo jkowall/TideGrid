@@ -56,6 +56,7 @@ export function DetailsStep({
   offer: TripOffer;
   /** Null while the page restores a quote after a reload. */
   quote: Quote | null;
+  /** The server's time, as the page estimates it, so a device clock that is off can't expire a price. */
   now: number;
   busy: DetailsBusy | null;
   trouble: Trouble | null;
@@ -85,6 +86,9 @@ export function DetailsStep({
   };
 }) {
   const expired = quote ? now >= Date.parse(quote.expiresAt) : false;
+  // While a checkout may exist, only the same request may go again, even for
+  // an expired price: the server answers it either way.
+  const reprice = expired && !inDoubt;
   const applied = quote?.promotion?.code ?? null;
   const working = busy !== null;
   const policy = quote?.policy ?? offer.policy;
@@ -103,14 +107,17 @@ export function DetailsStep({
           <>
             <Ledger caption="Price in US dollars" hideCaption rows={quoteRows(quote)} />
             {expired ? (
-              <Notice tone="warning" title="This price has expired" announce="status">
-                <p>Prices are held for 30 minutes. Get the current price to continue.</p>
-              </Notice>
+              !inDoubt && (
+                <Notice tone="warning" title="This price has expired" announce="status">
+                  <p>Prices are held for 30 minutes. Get the current price to continue.</p>
+                </Notice>
+              )
             ) : (
               <p className="booking-price__expiry">
                 <Icon name="clock" />
                 <span>
-                  This price is good until {deadlineText(quote.expiresAt, quote.trip.timeZone)},{" "}
+                  This price is good until{" "}
+                  {deadlineText(quote.expiresAt, quote.trip.timeZone, new Date(now))},{" "}
                   {formatTimeLeft(Date.parse(quote.expiresAt) - now)} from now.{" "}
                   {isCharter(offer) ? "The boat is" : "Seats are"} held for you once you continue to
                   payment.
@@ -146,7 +153,8 @@ export function DetailsStep({
                 onClick={onRemovePromo}
                 busy={busy === "promo"}
                 busyLabel="Removing…"
-                disabled={working && busy !== "promo"}
+                // While a checkout may exist, a new price would start a second one.
+                disabled={inDoubt || (working && busy !== "promo")}
               >
                 Remove code
               </Button>
@@ -184,7 +192,7 @@ export function DetailsStep({
         noValidate
         onSubmit={(event) => {
           event.preventDefault();
-          if (expired) onRefresh();
+          if (reprice) onRefresh();
           else onContinue();
         }}
       >
@@ -232,7 +240,8 @@ export function DetailsStep({
           <Notice tone="warning" title="We couldn't confirm that your checkout started">
             <p>
               The connection dropped before the payment step answered. Press Try again: it sends the
-              same request, so you can't end up with two checkouts.
+              same request, so you can't end up with two checkouts. Until it answers, the price, the
+              code, and the party stay as they are.
             </p>
           </Notice>
         )}
@@ -246,14 +255,19 @@ export function DetailsStep({
           <Button
             type="submit"
             variant="primary"
-            icon={expired ? "refresh" : "lock"}
+            icon={reprice ? "refresh" : "lock"}
             busy={busy === "checkout" || busy === "refresh"}
             busyLabel={busy === "refresh" ? "Getting the current price…" : "Starting checkout…"}
             disabled={!quote || (working && busy !== "checkout" && busy !== "refresh")}
           >
-            {expired ? "Get the current price" : inDoubt ? "Try again" : "Continue to payment"}
+            {reprice ? "Get the current price" : inDoubt ? "Try again" : "Continue to payment"}
           </Button>
-          <Button variant="ghost" icon="arrow-left" onClick={onChangeParty} disabled={working}>
+          <Button
+            variant="ghost"
+            icon="arrow-left"
+            onClick={onChangeParty}
+            disabled={working || inDoubt}
+          >
             Change party or extras
           </Button>
         </div>

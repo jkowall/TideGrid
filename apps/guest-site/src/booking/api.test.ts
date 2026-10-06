@@ -284,12 +284,12 @@ describe("openCheckout", () => {
   });
 
   it("passes on a checkout that has no payment to make", async () => {
-    stubFetch(() =>
-      json({ checkoutSession: checkout("expired", { quoteId }), payment: null }, 201),
-    );
+    // One snapshot: a second would read the clock again and could differ by a millisecond.
+    const session = checkout("expired", { quoteId });
+    stubFetch(() => json({ checkoutSession: session, payment: null }, 201));
     expect(await openCheckout(checkoutRequest, newIdempotencyKey())).toEqual({
       kind: "ok",
-      value: { session: checkout("expired", { quoteId }), payment: null },
+      value: { session, payment: null },
       replayed: false,
     });
   });

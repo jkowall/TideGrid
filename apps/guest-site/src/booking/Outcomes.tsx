@@ -1,4 +1,4 @@
-import type { AvailableTrip, CheckoutSession, PublicBrand, Quote } from "@tidegrid/contracts";
+import type { CheckoutSession, PublicBrand } from "@tidegrid/contracts";
 import {
   Button,
   ButtonLink,
@@ -12,8 +12,7 @@ import { formatMoney } from "@tidegrid/design-system/format";
 import type { ReactNode, Ref } from "react";
 import { ContactActions } from "../Contact.tsx";
 import { useLinkClick } from "../navigation.tsx";
-import { deadlineText, describeParty, heldThing, type Stop, type TripContext } from "./model.ts";
-import { tripWhen } from "./TripHeader.tsx";
+import { deadlineText, heldThing, type Stop, shortReference } from "./model.ts";
 
 type Tone = "ready" | "blocked" | "warning" | "neutral";
 
@@ -70,10 +69,21 @@ function BackToTrips({ primary = false }: { primary?: boolean }) {
   );
 }
 
+/** A code read one character at a time by screen readers, which would read it as a word. */
+function SpelledOut({ code }: { code: string }) {
+  return (
+    <>
+      <span aria-hidden="true">{code}</span>
+      <span className="tg-visually-hidden">{code.split("").join(" ")}</span>
+    </>
+  );
+}
+
 /** After a payment button: the page reads the checkout's state until it is final. */
 export function Waiting({
   expiresAt,
   timeZone,
+  now,
   slow,
   unreachable,
   headingRef,
@@ -81,6 +91,8 @@ export function Waiting({
   /** The checkout's expiry: the latest its state can stay open. */
   expiresAt: string;
   timeZone: string;
+  /** The server's time, as the page estimates it. */
+  now: number;
   /** The payment has taken longer than a few seconds. */
   slow: boolean;
   /** The last reads got no answer. */
@@ -100,7 +112,7 @@ export function Waiting({
       {slow && (
         <p>
           This is taking longer than usual. The page keeps checking until{" "}
-          {deadlineText(expiresAt, timeZone)}; nothing more is needed from you.
+          {deadlineText(expiresAt, timeZone, new Date(now))}; nothing more is needed from you.
         </p>
       )}
       {unreachable && (
@@ -112,35 +124,43 @@ export function Waiting({
   );
 }
 
-/** The booking reference, spelled out for screen readers, which would read it as a word. */
+/** The booking reference, big and spelled out for screen readers. */
 function Reference({ code }: { code: string }) {
   return (
     <div className="booking-reference">
       <p className="booking-reference__label">Booking reference</p>
       <p className="booking-reference__code">
-        <span aria-hidden="true">{code}</span>
-        <span className="tg-visually-hidden">{code.split("").join(" ")}</span>
+        <SpelledOut code={code} />
       </p>
     </div>
   );
 }
 
+/** What a confirmation says, as text and cents, so a reload can say it again. */
+export interface BookingSummary {
+  reference: string;
+  productName: string;
+  /** When the trip leaves, on the marina's clock. */
+  when: string;
+  where: string | null;
+  meetAt: string | null;
+  /** "3 guests: 2 Adult, 1 Child (3 to 12)". */
+  party: string;
+  /** "Souvenir photo × 1, Drink voucher × 2", or null when none. */
+  extras: string | null;
+  /** The total paid, in cents. */
+  total: number;
+}
+
 export function Confirmed({
-  session,
-  context,
-  listing,
-  quote,
+  summary,
   brand,
   headingRef,
 }: {
-  session: CheckoutSession;
-  context: TripContext;
-  listing: AvailableTrip | null;
-  quote: Quote | null;
+  summary: BookingSummary;
   brand: PublicBrand;
   headingRef: Ref<HTMLHeadingElement>;
 }) {
-  const reference = session.booking?.reference ?? "";
   return (
     <OutcomePanel
       icon="check-circle"
@@ -150,35 +170,41 @@ export function Confirmed({
       actions={<BackToTrips primary />}
     >
       <StatusBadge tone="ready">Confirmed</StatusBadge>
-      <Reference code={reference} />
+      <Reference code={summary.reference} />
       <dl className="booking-summary">
         <div>
           <dt>Trip</dt>
-          <dd>{context.productName}</dd>
+          <dd>{summary.productName}</dd>
         </div>
         <div>
           <dt>When</dt>
-          <dd>{tripWhen(context.trip)}</dd>
+          <dd>{summary.when}</dd>
         </div>
-        {listing && (
-          <>
-            <div>
-              <dt>Where</dt>
-              <dd>{listing.location.name}</dd>
-            </div>
-            <div>
-              <dt>Meet at</dt>
-              <dd>{listing.location.meetingPoint}</dd>
-            </div>
-          </>
+        {summary.where && (
+          <div>
+            <dt>Where</dt>
+            <dd>{summary.where}</dd>
+          </div>
+        )}
+        {summary.meetAt && (
+          <div>
+            <dt>Meet at</dt>
+            <dd>{summary.meetAt}</dd>
+          </div>
         )}
         <div>
           <dt>Party</dt>
-          <dd>{describeParty(session.partySize, quote)}</dd>
+          <dd>{summary.party}</dd>
         </div>
+        {summary.extras && (
+          <div>
+            <dt>Extras</dt>
+            <dd>{summary.extras}</dd>
+          </div>
+        )}
         <div>
           <dt>Total paid</dt>
-          <dd>{formatMoney(session.amount)}</dd>
+          <dd className="booking-summary__money">{formatMoney(summary.total)}</dd>
         </div>
       </dl>
       <p>
@@ -236,13 +262,19 @@ export function Declined({
 
 export function Expired({
   charter,
+  paymentTried,
+  brand,
   onStartOver,
   headingRef,
 }: {
   charter: boolean;
+  /** A payment was sent, or may have been, so it can still arrive late. */
+  paymentTried: boolean;
+  brand: PublicBrand;
   onStartOver: () => void;
   headingRef: Ref<HTMLHeadingElement>;
 }) {
+  const released = `${heldThing(charter)} ${charter ? "was" : "were"} released`;
   return (
     <OutcomePanel
       icon="hourglass"
@@ -255,26 +287,38 @@ export function Expired({
         </Button>
       }
     >
-      <p>
-        Time ran out before a payment arrived. Nothing was charged, and {heldThing(charter)}{" "}
-        {charter ? "was" : "were"} released. Start over to book again: your party is kept.
-      </p>
+      {paymentTried ? (
+        <p>
+          Time ran out before your payment was confirmed, and {released}. If your test payment still
+          goes through, it is booked if {charter ? "the boat is" : "the seats are"} still free, or
+          refunded in full. Contact {brand.name} before you book again.
+        </p>
+      ) : (
+        <p>
+          Time ran out before a payment arrived. Nothing was charged, and {released}. Start over to
+          book again: your party is kept.
+        </p>
+      )}
     </OutcomePanel>
   );
 }
 
 export function Canceled({
   charter,
+  paymentTried,
   onStartOver,
   headingRef,
 }: {
   charter: boolean;
+  /** A payment was sent, or may have been, before the checkout was canceled. */
+  paymentTried: boolean;
   onStartOver: () => void;
   headingRef: Ref<HTMLHeadingElement>;
 }) {
+  const released = `${heldThing(charter)} ${charter ? "was" : "were"} released`;
   return (
     <OutcomePanel
-      icon="x-octagon"
+      icon="info"
       tone="neutral"
       title="This checkout was canceled"
       headingRef={headingRef}
@@ -285,19 +329,28 @@ export function Canceled({
       }
     >
       <p>
-        Nothing was charged, and {heldThing(charter)} {charter ? "was" : "were"} released.
+        {paymentTried
+          ? `Your checkout was canceled, and ${released}. If your test payment went through, it is refunded in full.`
+          : `Nothing was charged, and ${released}.`}
       </p>
     </OutcomePanel>
   );
 }
 
-/** A payment arrived after the seats were gone: it is refunded in full, never booked. */
+/**
+ * A payment arrived when its checkout could no longer become a booking: the
+ * seats or the boat were taken first, the checkout had been canceled or had
+ * ended, or the trip had stopped taking bookings. It is refunded in full,
+ * never booked.
+ */
 export function Unfulfilled({
   session,
+  charter,
   brand,
   headingRef,
 }: {
   session: CheckoutSession;
+  charter: boolean;
   brand: PublicBrand;
   headingRef: Ref<HTMLHeadingElement>;
 }) {
@@ -312,11 +365,16 @@ export function Unfulfilled({
       actions={<BackToTrips primary />}
     >
       <p>
-        Your payment arrived after the last seats were taken, so no booking was made.{" "}
-        {refund === "succeeded" && `It has been refunded in full: ${amount}.`}
+        Your payment arrived after this checkout could no longer become a booking, so no booking was
+        made. {refund === "succeeded" && `It has been refunded in full: ${amount}.`}
         {refund === "requested" && `It is being refunded in full: ${amount}.`}
         {refund === "failed" &&
           `The refund of ${amount} hasn't gone through yet. Contact ${brand.name} to put it right.`}
+      </p>
+      <p>
+        That happens when {charter ? "the boat was booked" : "the last seats were taken"} first,
+        when the checkout had already been canceled or had ended, or when the trip stopped taking
+        bookings.
       </p>
       <StatusBadge
         tone={refund === "succeeded" ? "ready" : refund === "failed" ? "blocked" : "pending"}
@@ -327,7 +385,13 @@ export function Unfulfilled({
             ? "Refund not completed"
             : "Refund in progress"}
       </StatusBadge>
-      <p>Questions? Contact {brand.name}.</p>
+      <p>
+        Questions? Contact {brand.name} and give this checkout reference:{" "}
+        <strong className="booking-checkout-ref">
+          <SpelledOut code={shortReference(session.id)} />
+        </strong>
+        .
+      </p>
       <div className="booking-outcome__contact">
         <ContactActions brand={brand} primary={false} />
       </div>
@@ -337,17 +401,22 @@ export function Unfulfilled({
 
 export function Interrupted({
   charter,
+  paymentTried,
   busy,
   trouble,
   onStartOver,
   headingRef,
 }: {
   charter: boolean;
+  /** A payment button was pressed before the reload, and its answer never arrived. */
+  paymentTried: boolean;
   busy: boolean;
   trouble: string | null;
   onStartOver: () => void;
   headingRef: Ref<HTMLHeadingElement>;
 }) {
+  const held = charter ? "the boat" : "the seats";
+  const released = `${held} this checkout held ${charter ? "is" : "are"} released first`;
   return (
     <OutcomePanel
       icon="alert-triangle"
@@ -359,19 +428,25 @@ export function Interrupted({
           variant="primary"
           icon="refresh"
           busy={busy}
-          busyLabel="Releasing your seats…"
+          busyLabel={charter ? "Releasing the boat…" : "Releasing your seats…"}
           onClick={onStartOver}
         >
           Start over
         </Button>
       }
     >
-      <p>
-        The page reloaded before you paid. The page doesn't keep payment details through a reload,
-        so this checkout can't be paid here, and nothing was charged. Start over:{" "}
-        {charter ? "the boat" : "the seats"} this checkout held {charter ? "is" : "are"} released
-        first.
-      </p>
+      {paymentTried ? (
+        <p>
+          The page reloaded before your test payment was confirmed. The page doesn't keep payment
+          details through a reload, so this checkout can't be paid here. Start over: {released}, and
+          if your test payment went through, it is refunded in full.
+        </p>
+      ) : (
+        <p>
+          The page reloaded before you paid. The page doesn't keep payment details through a reload,
+          so this checkout can't be paid here, and nothing was charged. Start over: {released}.
+        </p>
+      )}
       {trouble && (
         <Notice
           tone="error"

@@ -52,6 +52,8 @@ interface RequestOptions<S extends z.ZodType> {
   schema: S;
   signal?: AbortSignal | undefined;
   timeoutMs?: number;
+  /** Let the request finish after the page has gone, as a release on leaving does. */
+  keepalive?: boolean;
 }
 
 /**
@@ -62,7 +64,16 @@ async function call<S extends z.ZodType>(
   path: string,
   options: RequestOptions<S>,
 ): Promise<Result<z.infer<S>>> {
-  const { method = "GET", body, key, bearer, schema, signal, timeoutMs = readTimeoutMs } = options;
+  const {
+    method = "GET",
+    body,
+    key,
+    bearer,
+    schema,
+    signal,
+    timeoutMs = readTimeoutMs,
+    keepalive = false,
+  } = options;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopListening = () => {};
   try {
@@ -84,6 +95,7 @@ async function call<S extends z.ZodType>(
       // Nothing about a checkout belongs in a referrer or a cache.
       cache: "no-store",
       referrerPolicy: "no-referrer",
+      ...(keepalive ? { keepalive: true } : {}),
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: controller.signal,
@@ -150,12 +162,17 @@ export async function getListing(
 
 export type QuoteBody = z.input<typeof QuoteCreateRequest>;
 
-export async function createQuote(body: QuoteBody, key: string): Promise<Result<Quote>> {
+export async function createQuote(
+  body: QuoteBody,
+  key: string,
+  signal?: AbortSignal,
+): Promise<Result<Quote>> {
   const result = await call("/v1/public/quotes", {
     method: "POST",
     body,
     key,
     schema: QuoteResponse,
+    signal,
     timeoutMs: commandTimeoutMs,
   });
   return mapOk(result, (r) => r.quote);
@@ -185,12 +202,14 @@ export interface OpenedCheckout {
 export async function openCheckout(
   body: CheckoutBody,
   key: string,
+  signal?: AbortSignal,
 ): Promise<Result<OpenedCheckout>> {
   const result = await call("/v1/public/checkout-sessions", {
     method: "POST",
     body,
     key,
     schema: CheckoutSessionCreateResponse,
+    signal,
     timeoutMs: commandTimeoutMs,
   });
   return mapOk(result, (r) => ({ session: r.checkoutSession, payment: r.payment }));
@@ -212,11 +231,13 @@ export async function readCheckout(
 /**
  * Abandon an open checkout: the seats are released at once. The API takes no
  * Idempotency-Key here; canceling is idempotent by checkout, so a retry sends
- * the same request again.
+ * the same request again. `keepalive` lets the request outlive the page, for
+ * a checkout left behind.
  */
 export async function cancelCheckout(
   sessionId: string,
   secret: string,
+  options: { signal?: AbortSignal | undefined; keepalive?: boolean } = {},
 ): Promise<Result<CheckoutSession>> {
   const result = await call(
     `/v1/public/checkout-sessions/${encodeURIComponent(sessionId)}/cancel`,
@@ -224,6 +245,8 @@ export async function cancelCheckout(
       method: "POST",
       bearer: secret,
       schema: CheckoutSessionResponse,
+      signal: options.signal,
+      keepalive: options.keepalive ?? false,
       timeoutMs: commandTimeoutMs,
     },
   );
@@ -242,12 +265,14 @@ export type TestPaymentOutcome = "succeed" | "fail";
 export async function settleTestPayment(
   payment: Pick<CheckoutPayment, "paymentRef" | "clientSecret">,
   outcome: TestPaymentOutcome,
+  signal?: AbortSignal,
 ): Promise<Result<z.infer<typeof FakePaymentControlResponse>>> {
   return call(`/v1/fake-provider/payments/${encodeURIComponent(payment.paymentRef)}/${outcome}`, {
     method: "POST",
     body: {},
     bearer: payment.clientSecret,
     schema: FakePaymentControlResponse,
+    signal,
     timeoutMs: commandTimeoutMs,
   });
 }

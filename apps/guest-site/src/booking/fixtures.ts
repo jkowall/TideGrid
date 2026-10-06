@@ -451,6 +451,8 @@ export interface Call {
   search: URLSearchParams;
   headers: Headers;
   body: unknown;
+  /** Sent to outlive the page, as a release on leaving is. */
+  keepalive: boolean;
 }
 
 export type Route =
@@ -560,6 +562,7 @@ export function stubApi(routes: Partial<Record<Route, Answer>> = {}): Call[] {
       search: url.searchParams,
       headers: new Headers(init?.headers),
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      keepalive: init?.keepalive === true,
     };
     calls.push(call);
     if (init?.credentials !== "omit") throw new Error("credentials must be omitted");

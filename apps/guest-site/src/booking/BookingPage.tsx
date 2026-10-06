@@ -10,8 +10,16 @@ import {
 } from "@tidegrid/contracts";
 import { Notice, Skeleton, Steps } from "@tidegrid/design-system/components";
 import { formatMoney, isKnownZone } from "@tidegrid/design-system/format";
-import { type ReactNode, type Ref, useEffect, useRef, useState } from "react";
-import { useNavigate } from "../navigation.tsx";
+import {
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { type LeaveGuard, useLeaveGuard, useNavigate } from "../navigation.tsx";
 import { useTitle } from "../States.tsx";
 import { type BookingStep, readAddress, restartHref, writeAddress } from "./address.ts";
 import {
@@ -23,12 +31,15 @@ import {
   getListing,
   getOffer,
   getQuote,
+  newIdempotencyKey,
   openCheckout,
   outcomeUnknown,
   readCheckout,
   settleTestPayment,
   type TestPaymentOutcome,
 } from "./api.ts";
+import { ConfirmDialog } from "./ConfirmDialog.tsx";
+import { ServerClock } from "./clock.ts";
 import {
   type BookerDraft,
   type DetailsBusy,
@@ -36,12 +47,17 @@ import {
   DetailsStep,
 } from "./DetailsStep.tsx";
 import {
+  addOnProblems,
   checkoutTrouble,
   contextOfOffer,
   contextOfQuote,
+  describeExtras,
+  describeParty,
+  heldThing,
   initialSelection,
   isCharter,
   isFinal,
+  keepSelection,
   type PartyLimits,
   partyLimits,
   partyProblem,
@@ -56,6 +72,7 @@ import {
   timing,
 } from "./model.ts";
 import {
+  type BookingSummary,
   Canceled,
   Confirmed,
   Declined,
@@ -68,10 +85,18 @@ import {
   Unfulfilled,
   Waiting,
 } from "./Outcomes.tsx";
-import { PartyStep } from "./PartyStep.tsx";
+import { PartyStep, partyFieldId } from "./PartyStep.tsx";
 import { type PayBusy, PayStep } from "./PayStep.tsx";
-import { clearResume, readResume, saveResume } from "./resume.ts";
-import { TripFacts, TripHeader } from "./TripHeader.tsx";
+import {
+  type BookedRecord,
+  clearResume,
+  type ResumeRecord,
+  readBooked,
+  readResume,
+  saveBooked,
+  saveResume,
+} from "./resume.ts";
+import { BookedHeader, TripFacts, TripHeader, tripWhen } from "./TripHeader.tsx";
 
 /**
  * The guest checkout (G2.11b): party, details, payment, outcome. The page
@@ -83,6 +108,11 @@ import { TripFacts, TripHeader } from "./TripHeader.tsx";
  * component's memory. The checkout secret and id also go to sessionStorage
  * while the checkout is open (see resume.ts). The booker's name and email
  * live only in memory and in the POST that opens the checkout.
+ *
+ * History: moving on from the party and from the details adds a history
+ * entry, so Back returns one step. Back from the payment asks to cancel the
+ * checkout first, as Cancel checkout does; Back while a payment is being
+ * confirmed, or while a checkout may have started, stays.
  */
 
 type Load =
@@ -91,6 +121,8 @@ type Load =
   | { kind: "stopped"; stop: Stop }
   /** A reload asked for a checkout this tab no longer has, and the trip is off sale. */
   | { kind: "gone" }
+  /** A reload of a confirmation: shown again from what it said. */
+  | { kind: "booked"; record: BookedRecord }
   | { kind: "ready"; offer: TripOffer; listing: AvailableTrip | null }
   /**
    * A reload during a checkout whose trip is off sale, often because the
@@ -109,6 +141,8 @@ interface Live {
   session: CheckoutSession | null;
   /** What pays it. Never stored, so null after a reload. */
   payment: CheckoutPayment | null;
+  /** A payment button was pressed for it, and the payment may have gone through. */
+  paymentTried: boolean;
 }
 
 type Stage =
@@ -123,6 +157,43 @@ type Stage =
   | { kind: "stopped"; stop: Stop };
 
 type Busy = "quote" | DetailsBusy | PayBusy | "retry" | "release";
+
+/** A question before a final step, asked in a dialog. */
+type Confirm =
+  /** Cancel the open checkout: Cancel checkout, or Back from the payment. */
+  | { kind: "cancel" }
+  /** Release an interrupted checkout and start over. */
+  | { kind: "release" }
+  /** Leave the page with an open, unpaid checkout. */
+  | { kind: "leave"; proceed: () => void }
+  /** Leave while a checkout may have started. */
+  | { kind: "leave-in-doubt"; proceed: () => void };
+
+/** The history entries this page made, so Back and Forward move between its steps. */
+interface Trail {
+  /** Marks this page's entries apart from any a reload left behind. */
+  mount: string;
+  steps: BookingStep[];
+  pos: number;
+}
+
+interface EntryState {
+  tidegrid: "booking";
+  mount: string;
+  pos: number;
+}
+
+const entryState = (trail: Trail): EntryState => ({
+  tidegrid: "booking",
+  mount: trail.mount,
+  pos: trail.pos,
+});
+
+function isEntry(state: unknown, mount: string): state is EntryState {
+  if (typeof state !== "object" || state === null) return false;
+  const entry = state as Partial<EntryState>;
+  return entry.tidegrid === "booking" && entry.mount === mount && typeof entry.pos === "number";
+}
 
 const stepNames = ["Party", "Details", "Payment"] as const;
 
@@ -172,7 +243,7 @@ function stageTitle(stage: Stage): string {
   }
 }
 
-/** Re-renders every few seconds while a deadline is on screen. */
+/** Re-renders every few seconds while a deadline is on screen; the device's time. */
 function useClock(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -189,6 +260,12 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const isProviderUnavailable = (result: { kind: string; code?: string }) =>
   result.kind === "refused" && result.code === "payment_provider_unavailable";
 
+const capitalized = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
+/** "your seats were released", "the boat was released". */
+const releasedText = (charter: boolean) =>
+  `${heldThing(charter)} ${charter ? "was" : "were"} released`;
+
 export function BookingPage({
   brand,
   tripId,
@@ -200,6 +277,7 @@ export function BookingPage({
   focusOnArrival: boolean;
 }) {
   const [address] = useState(() => readAddress(tripId, window.location.search));
+  const [arrivalUrl] = useState(() => `${window.location.pathname}${window.location.search}`);
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [stage, setStage] = useState<Stage>({ kind: "restoring" });
@@ -214,18 +292,48 @@ export function BookingPage({
   const [booker, setBooker] = useState<BookerDraft>({ name: "", email: "" });
   const [errors, setErrors] = useState<DetailsErrors>({});
   const [accepted, setAccepted] = useState<number | null>(null);
-  const [live, setLive] = useState<Live | null>(null);
-  const [inDoubt, setInDoubt] = useState(false);
+  const [live, setLiveState] = useState<Live | null>(null);
+  const [inDoubt, setInDoubtState] = useState(false);
   const [priceChange, setPriceChange] = useState<string | null>(null);
   const [slow, setSlow] = useState(false);
   const [unreachable, setUnreachable] = useState(false);
   const [releaseTrouble, setReleaseTrouble] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
+
+  // The stage, the checkout, and the doubt as they are now, for work that
+  // resumes after an answer: it goes on only if the page is still there.
+  const stageRef = useRef<Stage>(stage);
+  const liveRef = useRef<Live | null>(live);
+  const inDoubtRef = useRef(false);
+  const go = (next: Stage) => {
+    stageRef.current = next;
+    setStage(next);
+  };
+  const setLive = (next: Live | null) => {
+    liveRef.current = next;
+    setLiveState(next);
+  };
+  const setInDoubt = (value: boolean) => {
+    inDoubtRef.current = value;
+    setInDoubtState(value);
+  };
 
   const quoteKey = useRef(new CommandKey());
   const checkoutAttempt = useRef(new CheckoutAttempt());
+  const clock = useRef(new ServerClock());
+  /** Aborted when the page goes, so no answer acts on a page that is gone. */
+  const page = useRef<AbortController | null>(null);
   const lock = useRef(false);
   const initialized = useRef(false);
+  /** The offer the selection was last fitted to; a new listing alone changes nothing. */
+  const fittedOffer = useRef<TripOffer | null>(null);
+  /** The ticket type the guest changed last, which takes focus if the party needs attention. */
+  const lastTicket = useRef<string | null>(null);
+  const trail = useRef<Trail>({ mount: newIdempotencyKey(), steps: [], pos: 0 });
+  /** The step whose arrival adds a history entry instead of replacing this one. */
+  const pendingPush = useRef<BookingStep | null>(null);
+  const historyHandler = useRef<(target: BookingStep) => void>(() => {});
   const titleRef = useRef<HTMLHeadingElement>(null);
   const stepRef = useRef<HTMLHeadingElement>(null);
   const partyFieldRef = useRef<HTMLInputElement>(null);
@@ -254,19 +362,63 @@ export function BookingPage({
       : load.kind === "checkout"
         ? contextOfQuote(load.quote)
         : null;
-  const now = useClock(stage.kind === "details" || stage.kind === "pay" || stage.kind === "party");
+  const tick = useClock(stage.kind === "details" || stage.kind === "pay" || stage.kind === "party");
+  /** The server's time, as the page estimates it. */
+  const now = clock.current.now(tick);
 
-  useTitle(
-    context
-      ? `${stageTitle(stage)} · ${context.productName} · ${brand.name}`
-      : load.kind === "gone"
-        ? `Checkout not open · ${brand.name}`
-        : load.kind === "stopped"
-          ? `${stopTitle(load.stop, brand.name)} · ${brand.name}`
-          : load.kind === "failed"
-            ? `Trip unavailable · ${brand.name}`
-            : `Book a trip · ${brand.name}`,
-  );
+  // What answers read when they arrive, which may be renders later.
+  const latest = useRef({ load, quote, context });
+  useLayoutEffect(() => {
+    latest.current = { load, quote, context };
+  });
+
+  const signal = () => page.current?.signal;
+  const alive = () => page.current !== null && !page.current.signal.aborted;
+
+  const pageTitle =
+    load.kind === "booked"
+      ? `Booking confirmed · ${load.record.productName} · ${brand.name}`
+      : context
+        ? `${stageTitle(stage)} · ${context.productName} · ${brand.name}`
+        : load.kind === "gone"
+          ? `Checkout not open · ${brand.name}`
+          : load.kind === "stopped"
+            ? `${stopTitle(load.stop, brand.name)} · ${brand.name}`
+            : load.kind === "failed"
+              ? `Trip unavailable · ${brand.name}`
+              : `Book a trip · ${brand.name}`;
+
+  // The page's life: commands stop when it goes, and a checkout left open and
+  // unpaid is released at once rather than when its hold runs out.
+  useEffect(() => {
+    const controller = new AbortController();
+    page.current = controller;
+    return () => {
+      controller.abort();
+      const left = liveRef.current;
+      const at = stageRef.current.kind;
+      if (left && !left.paymentTried && (at === "pay" || at === "interrupted")) {
+        void cancelCheckout(left.sessionId, left.secret, { keepalive: true });
+        clearResume();
+      }
+    };
+  }, []);
+
+  // A link away from an open checkout, or from one that may have started, asks first.
+  const leaveGuard = useCallback<LeaveGuard>((proceed) => {
+    const at = stageRef.current.kind;
+    const open = liveRef.current;
+    if (open && !open.paymentTried && (at === "pay" || at === "interrupted")) {
+      setConfirm({ kind: "leave", proceed });
+      return true;
+    }
+    if (at === "details" && inDoubtRef.current) {
+      setConfirm({ kind: "leave-in-doubt", proceed });
+      return true;
+    }
+    return false;
+  }, []);
+  useLeaveGuard(leaveGuard);
 
   // Focus moves to each new step's heading, once it is on screen. Not while
   // the trip is loading again: the place asked for is not drawn yet.
@@ -291,6 +443,14 @@ export function BookingPage({
   // Load the offer, then the trip's listing for its facts and seats left.
   useEffect(() => {
     void loadAttempt;
+    // A reload of a confirmation shows it again, from what it said.
+    if (!initialized.current && address.step === "status" && !readResume(tripId)) {
+      const record = readBooked(tripId);
+      if (record) {
+        setLoad({ kind: "booked", record });
+        return;
+      }
+    }
     const controller = new AbortController();
     void (async () => {
       const result = await getOffer(tripId, controller.signal);
@@ -312,7 +472,11 @@ export function BookingPage({
           const stored = await getQuote(record.quoteId, controller.signal);
           if (controller.signal.aborted) return;
           if (stored.kind === "ok" && stored.value.tripId === tripId) {
-            setLoad({ kind: "checkout", quote: stored.value });
+            setLoad(
+              isKnownZone(stored.value.trip.timeZone)
+                ? { kind: "checkout", quote: stored.value }
+                : { kind: "failed", retrying: false },
+            );
             return;
           }
         }
@@ -343,30 +507,36 @@ export function BookingPage({
       return;
     }
     if (load.kind !== "ready") return;
-    const fitted = partyLimits(load.offer, load.listing);
+    const productLimits = partyLimits(load.offer, null);
     if (initialized.current) {
-      // The options were loaded again: keep the guest's choices that still fit.
+      // A fresh listing alone changes no choice: a party past the seats left
+      // stays, and the party step says so beside it.
+      if (fittedOffer.current === load.offer) return;
+      // The options were loaded again: keep the guest's choices it still sells.
+      fittedOffer.current = load.offer;
       setSelection((current) =>
         current
-          ? initialSelection(load.offer, { party: null, ...current }, fitted)
-          : initialSelection(load.offer, address, fitted),
+          ? keepSelection(load.offer, current)
+          : initialSelection(load.offer, address, productLimits),
       );
       return;
     }
     initialized.current = true;
-    const first = initialSelection(load.offer, address, fitted);
+    fittedOffer.current = load.offer;
+    // Within the product's own limits only, so a restored checkout keeps its
+    // party even when its hold left fewer seats on the list.
+    const first = initialSelection(load.offer, address, productLimits);
     setSelection(first);
-    if (address.step === "details") void restoreDetails(load.offer, fitted, first);
-    else if (address.step === "pay" || address.step === "status") void restoreCheckout();
-    else setStage({ kind: "party" });
+    if (address.step === "details") {
+      void restoreDetails(load.offer, partyLimits(load.offer, load.listing), first);
+    } else if (address.step === "pay" || address.step === "status") void restoreCheckout();
+    else go({ kind: "party" });
     // Runs when the trip loads; the handlers it starts read the state they need.
   }, [load]);
 
-  // The address follows the page, so a reload comes back to the same place.
-  useEffect(() => {
-    if (!offer || !selection) return;
-    const step = stepOf(stage);
-    if (!step) return;
+  /** The address for a step of this page, with the guest's choices. */
+  const urlFor = (step: BookingStep): string => {
+    if (!offer || !selection) return arrivalUrl;
     const search = writeAddress({
       kind: isCharter(offer) ? "charter" : "tickets",
       tickets: selection.tickets,
@@ -375,10 +545,62 @@ export function BookingPage({
       step,
       quoteId: quote?.quoteId ?? null,
     });
-    if (search !== window.location.search) {
-      window.history.replaceState(window.history.state, "", `${window.location.pathname}${search}`);
+    return `${window.location.pathname}${search}`;
+  };
+
+  // The address follows the page, so a reload comes back to the same place.
+  // Moving on to the details or the payment adds an entry; anything else
+  // replaces this one.
+  useEffect(() => {
+    if (!offer || !selection) return;
+    const step = stepOf(stage);
+    if (!step) return;
+    const url = urlFor(step);
+    const t = trail.current;
+    if (pendingPush.current === step && t.steps.length > 0) {
+      pendingPush.current = null;
+      t.steps = [...t.steps.slice(0, t.pos + 1), step];
+      t.pos += 1;
+      window.history.pushState(entryState(t), "", url);
+      return;
+    }
+    if (t.steps.length === 0) t.steps = [step];
+    t.steps[t.pos] = step;
+    const here = `${window.location.pathname}${window.location.search}`;
+    if (url !== here || !isEntry(window.history.state, t.mount)) {
+      window.history.replaceState(entryState(t), "", url);
     }
   }, [offer, selection, stage, quote]);
+
+  // After the address: a browser names each history entry by the title it
+  // had while current, so a new step's entry must exist before its title is set.
+  useTitle(pageTitle);
+
+  // Back and Forward within this page move between its steps.
+  useLayoutEffect(() => {
+    historyHandler.current = onHistory;
+  });
+  useEffect(() => {
+    const path = window.location.pathname;
+    const onPop = (event: PopStateEvent) => {
+      if (window.location.pathname !== path) return;
+      const t = trail.current;
+      const target = readAddress(tripId, window.location.search).step;
+      if (isEntry(event.state, t.mount)) {
+        t.pos = Math.max(0, Math.min(event.state.pos, t.steps.length - 1));
+      } else {
+        // An entry this page did not make: one from before a reload, or the
+        // skip link's. Start this page's own entries from it.
+        if (target === stepOf(stageRef.current)) return;
+        t.steps = [target];
+        t.pos = 0;
+        window.history.replaceState(entryState(t), "", window.location.href);
+      }
+      historyHandler.current(target);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [tripId]);
 
   /** Show a quote, and remember the code it applied. */
   const adopt = (next: Quote) => {
@@ -386,13 +608,44 @@ export function BookingPage({
     setCode(next.promotion?.code ?? null);
   };
 
-  const finish = (session: CheckoutSession) => {
+  /** What the confirmation says, from what the page knows when the answer arrives. */
+  function summaryNow(session: CheckoutSession): BookingSummary | null {
+    const { load: current, quote: priced, context: trip } = latest.current;
+    return summarize(session, trip, current.kind === "ready" ? current.listing : null, priced);
+  }
+
+  const recordOf = (open: Live, paymentSent: boolean): ResumeRecord => ({
+    tripId,
+    sessionId: open.sessionId,
+    quoteId: open.quoteId,
+    secret: open.secret,
+    paymentSent,
+    paymentTried: open.paymentTried || paymentSent,
+    expiresAt: open.expiresAt,
+    clockOffsetMs: clock.current.offset,
+  });
+
+  /** A final state: show it. An expiry after a payment may still turn into a booking. */
+  const finish = (session: CheckoutSession, options: { focus?: boolean } = {}) => {
+    const open = liveRef.current;
+    if (session.state === "expired" && open?.paymentTried && stageRef.current.kind !== "waiting") {
+      // A payment was sent, or may have been: a late success can still book
+      // or refund this checkout, so watch it a little longer first.
+      setLive({ ...open, session });
+      go({ kind: "waiting" });
+      if (options.focus !== false) focusStep();
+      return;
+    }
     clearResume();
-    setLive((current) => (current ? { ...current, session } : current));
-    setStage({ kind: "outcome", session });
+    if (open) setLive({ ...open, session });
+    go({ kind: "outcome", session });
     setSlow(false);
     setUnreachable(false);
-    focusStep();
+    if (options.focus !== false) focusStep();
+    if (session.state === "confirmed") {
+      const summary = summaryNow(session);
+      if (summary) saveBooked({ tripId, ...summary });
+    }
     // The seats left beside the outcome include this checkout's own now.
     void refreshListing();
   };
@@ -402,6 +655,7 @@ export function BookingPage({
     if (stage.kind !== "waiting" || !live) return;
     const controller = new AbortController();
     const started = Date.now();
+    let expiredSince: number | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let misses = 0;
@@ -412,13 +666,19 @@ export function BookingPage({
         misses = 0;
         setUnreachable(false);
         if (isFinal(result.value)) {
-          finish(result.value);
-          return;
+          // Expired while a payment was on its way: a late success still books
+          // or refunds it, so keep reading for a short grace.
+          const late = result.value.state === "expired" && liveRef.current?.paymentTried;
+          if (late) expiredSince ??= Date.now();
+          if (!late || Date.now() - (expiredSince ?? 0) >= timing.lateSuccessGraceMs) {
+            finish(result.value);
+            return;
+          }
         }
         if (Date.now() - started > timing.slowAfterMs) setSlow(true);
       } else if (result.kind === "refused" && (result.status === 401 || result.status === 404)) {
         clearResume();
-        setStage({ kind: "gone" });
+        go({ kind: "gone" });
         focusStep();
         return;
       } else {
@@ -448,7 +708,7 @@ export function BookingPage({
       const result = await readCheckout(live.sessionId, live.secret, controller.signal);
       if (controller.signal.aborted) return;
       if (result.kind === "ok" && result.value.refund?.state !== "requested") {
-        setStage({ kind: "outcome", session: result.value });
+        go({ kind: "outcome", session: result.value });
         setAnnouncement(
           result.value.refund?.state === "succeeded"
             ? "Your refund has gone through."
@@ -465,7 +725,8 @@ export function BookingPage({
     };
   }, [refundPending, live?.sessionId, live?.secret]);
 
-  // On the payment step, the hold's expiry ends the checkout: read it then.
+  // On the payment step, the hold's expiry on the server's clock ends the
+  // checkout: read it then.
   useEffect(() => {
     if (stage.kind !== "pay" || !live) return;
     const controller = new AbortController();
@@ -479,7 +740,7 @@ export function BookingPage({
       }
       timer = setTimeout(() => void check(), 5000);
     };
-    const due = Date.parse(live.expiresAt) - Date.now();
+    const due = Date.parse(live.expiresAt) - clock.current.now();
     timer = setTimeout(() => void check(), Math.max(0, due) + timing.expiryGraceMs);
     return () => {
       controller.abort();
@@ -511,22 +772,27 @@ export function BookingPage({
     trip: TripOffer,
     fit: PartyLimits,
     chosen: Selection,
-    code: string | null,
+    promotion: string | null,
     fallback: boolean,
   ): Promise<{ quote: Quote; note?: string } | { trouble: Trouble }> {
-    const body = quoteBody(trip, chosen, code);
-    const result = await createQuote(body, quoteKey.current.for(JSON.stringify(body)));
+    const body = quoteBody(trip, chosen, promotion);
+    const result = await createQuote(body, quoteKey.current.for(JSON.stringify(body)), signal());
     if (result.kind === "ok") {
       quoteKey.current.done();
+      // A new quote says when the server wrote it; a replay is old news.
+      if (!result.replayed) clock.current.learn(result.value.quotedAt);
       return { quote: result.value };
     }
     const found = quoteTrouble(result, trip, fit);
     const onlyPromo =
       found.promo && !found.party && !found.addOns && !found.stale && !found.stop && !found.notice;
-    if (code && fallback && onlyPromo) {
+    if (promotion && fallback && onlyPromo && alive()) {
       const again = await price(trip, fit, chosen, null, false);
       if ("quote" in again) {
-        return { quote: again.quote, note: `${code} can't be used anymore, so it was removed.` };
+        return {
+          quote: again.quote,
+          note: `${promotion} can't be used anymore, so it was removed.`,
+        };
       }
       return again;
     }
@@ -536,19 +802,21 @@ export function BookingPage({
   /** Show a quote trouble where it belongs. */
   function showQuoteTrouble(found: Trouble, where: "party" | "details") {
     if (found.stop) {
-      setStage({ kind: "stopped", stop: found.stop });
+      go({ kind: "stopped", stop: found.stop });
       focusStep();
       return;
     }
     setTrouble(found);
     if (found.party || found.addOns || found.stale) {
       if (where === "details") {
-        setStage({ kind: "party" });
         setQuote(null);
+        go({ kind: "party" });
         focusStep();
+        returnTo("party");
       } else if (found.party) {
         focusTarget.current = partyFieldRef.current;
       }
+      // The guest's party stays as it is; the fresh seats left say why it can't go.
       if (found.party) void refreshListing();
     }
   }
@@ -558,26 +826,50 @@ export function BookingPage({
    * it is full, keeps the facts it had: the meeting point and cutoff still hold.
    */
   async function refreshListing() {
-    if (!ready) return;
-    const listing = await getListing(ready.offer);
+    const current = latest.current.load;
+    if (current.kind !== "ready") return;
+    const listing = await getListing(current.offer, signal());
+    if (!alive()) return;
     if (listing.kind === "ok" && listing.value) {
       const fresh = listing.value;
-      setLoad((current) => (current.kind === "ready" ? { ...current, listing: fresh } : current));
+      setLoad((was) => (was.kind === "ready" ? { ...was, listing: fresh } : was));
     }
   }
 
-  const continueFromParty = exclusive(async () => {
-    if (!ready || !selection || !limits) return;
-    const problem = partyProblem(ready.offer, selection, limits);
-    if (problem) {
-      setTrouble({ party: problem });
-      focusTarget.current = partyFieldRef.current;
+  /** The count that needs attention for a party problem: the one the guest changed last. */
+  function partyFieldFor(trip: TripOffer, chosen: Selection): string {
+    if (isCharter(trip)) return partyFieldId.guests;
+    const counted = trip.tickets
+      .filter((t) => (chosen.tickets[t.code] ?? 0) > 0)
+      .map((t) => t.code);
+    const last = lastTicket.current;
+    const pick = last && counted.includes(last) ? last : (counted[0] ?? trip.tickets[0]?.code);
+    return pick ? partyFieldId.ticket(pick) : partyFieldId.guests;
+  }
+
+  const continueFromParty = exclusive(async (committed: Selection) => {
+    if (!ready || !limits) return;
+    // The counts as the form held them, even one still being typed.
+    setSelection(committed);
+    const problem = partyProblem(ready.offer, committed, limits);
+    const addOnTrouble = addOnProblems(ready.offer, committed);
+    const firstAddOn = Object.keys(addOnTrouble)[0];
+    if (problem || firstAddOn) {
+      setTrouble({
+        ...(problem ? { party: problem } : {}),
+        ...(firstAddOn ? { addOns: addOnTrouble } : {}),
+      });
+      const field = document.getElementById(
+        problem ? partyFieldFor(ready.offer, committed) : partyFieldId.addOn(firstAddOn ?? ""),
+      );
+      if (field) focusTarget.current = field;
       return;
     }
     setTrouble(null);
     setPartyNotice(null);
     setBusy("quote");
-    const priced = await price(ready.offer, limits, selection, code, true);
+    const priced = await price(ready.offer, limits, committed, code, true);
+    if (!alive()) return;
     setBusy(null);
     if ("trouble" in priced) {
       showQuoteTrouble(priced.trouble, "party");
@@ -585,20 +877,22 @@ export function BookingPage({
     }
     adopt(priced.quote);
     if (priced.note) setTrouble({ promo: priced.note });
-    setStage({ kind: "details" });
+    pendingPush.current = "details";
+    go({ kind: "details" });
     focusStep();
   });
 
   async function restoreDetails(trip: TripOffer, fit: PartyLimits, chosen: Selection) {
-    setStage({ kind: "details" });
+    go({ kind: "details" });
     setBusy("restore");
     let storedCode: string | null = null;
     if (address.quoteId) {
-      const stored = await getQuote(address.quoteId);
+      const stored = await getQuote(address.quoteId, signal());
+      if (!alive()) return;
       if (stored.kind === "ok" && stored.value.tripId === trip.tripId) {
         // Only a quote that still prices this party, within its validity.
         if (
-          Date.parse(stored.value.expiresAt) > Date.now() &&
+          Date.parse(stored.value.expiresAt) > clock.current.now() &&
           quoteMatches(trip, chosen, stored.value)
         ) {
           adopt(stored.value);
@@ -609,6 +903,7 @@ export function BookingPage({
       }
     }
     const priced = await price(trip, fit, chosen, storedCode, true);
+    if (!alive()) return;
     setBusy(null);
     if ("trouble" in priced) {
       showQuoteTrouble(priced.trouble, "details");
@@ -619,7 +914,8 @@ export function BookingPage({
   }
 
   const changePromo = exclusive(async (entered: string | null) => {
-    if (!ready || !selection || !limits) return;
+    // A new price while a checkout may exist would start a second one.
+    if (!ready || !selection || !limits || inDoubtRef.current) return;
     let next = entered;
     if (next !== null) {
       const parsed = PromotionCodeInput.safeParse(next);
@@ -633,6 +929,7 @@ export function BookingPage({
     setTrouble(null);
     setBusy("promo");
     const priced = await price(ready.offer, limits, selection, next, false);
+    if (!alive()) return;
     setBusy(null);
     if ("trouble" in priced) {
       if (priced.trouble.promo) {
@@ -657,10 +954,11 @@ export function BookingPage({
 
   /** Price the same party again, as a new command: the old price has expired. */
   async function repriceNow() {
-    if (!ready || !selection || !limits) return;
+    if (!ready || !selection || !limits || inDoubtRef.current) return;
     setTrouble(null);
     setBusy("refresh");
     const priced = await price(ready.offer, limits, selection, code, true);
+    if (!alive()) return;
     setBusy(null);
     if ("trouble" in priced) {
       showQuoteTrouble(priced.trouble, "details");
@@ -681,9 +979,12 @@ export function BookingPage({
       for (const issue of parsed.error.issues) {
         const field = issue.path[0];
         if (field === "name" && !next.name) {
-          next.name = booker.name.trim()
-            ? "Use letters and spaces only, up to 120 characters."
-            : "Enter the name of the person booking.";
+          // As the contract has it: 1 to 120 characters, with no control characters.
+          next.name = !booker.name.trim()
+            ? "Enter the name of the person booking."
+            : issue.code === "too_big"
+              ? "Use 120 characters or fewer."
+              : "Remove tabs and other hidden characters from the name.";
         }
         if (field === "email" && !next.email) {
           next.email = booker.email.trim()
@@ -720,6 +1021,7 @@ export function BookingPage({
     who: { name: string; email: string },
   ): Promise<CheckoutSession | null> {
     if (!ready) return null;
+    const from = stageRef.current.kind;
     const fingerprint = JSON.stringify([forQuote.quoteId, forQuote.policy.version, who]);
     const { key, secret } = checkoutAttempt.current.for(fingerprint);
     const body = {
@@ -728,16 +1030,19 @@ export function BookingPage({
       booker: who,
       checkoutSecret: secret,
     };
-    let result = await openCheckout(body, key);
+    let result = await openCheckout(body, key, signal());
     for (const delay of timing.providerRetryDelaysMs) {
-      if (!isProviderUnavailable(result)) break;
+      if (!alive() || !isProviderUnavailable(result)) break;
       await wait(delay);
-      result = await openCheckout(body, key);
+      if (!alive()) break;
+      result = await openCheckout(body, key, signal());
     }
+    if (!alive()) return null;
     if (result.kind === "ok") {
       checkoutAttempt.current.done();
       setInDoubt(false);
       const { session, payment } = result.value;
+      if (!result.replayed) clock.current.learn(session.createdAt);
       const opened: Live = {
         sessionId: session.id,
         quoteId: forQuote.quoteId,
@@ -745,11 +1050,13 @@ export function BookingPage({
         expiresAt: session.expiresAt,
         session,
         payment,
+        paymentTried: false,
       };
       setLive(opened);
       if (session.state !== "open" || !payment) {
         // No longer payable: show what the checkout's own state says.
-        const current = await readCheckout(session.id, secret);
+        const current = await readCheckout(session.id, secret, signal());
+        if (!alive()) return null;
         if (current.kind === "ok" && isFinal(current.value)) {
           finish(current.value);
           return null;
@@ -760,43 +1067,43 @@ export function BookingPage({
             body: "Wait a moment, then continue again.",
           },
         });
-        setStage({ kind: "details" });
+        go({ kind: "details" });
         return null;
       }
-      saveResume({
-        tripId: ready.offer.tripId,
-        sessionId: session.id,
-        quoteId: forQuote.quoteId,
-        secret,
-        paymentSent: false,
-        expiresAt: session.expiresAt,
-      });
-      setStage({ kind: "pay" });
+      saveResume(recordOf(opened, false));
+      // From the details, the payment is a new step in the history; a retry
+      // after a decline takes the outcome's place.
+      pendingPush.current = from === "details" ? "pay" : null;
+      go({ kind: "pay" });
       focusStep();
+      // The seats left now count this checkout's own hold.
+      void refreshListing();
       return session;
     }
     if (outcomeUnknown(result) || isProviderUnavailable(result)) {
       setInDoubt(true);
-      setStage({ kind: "details" });
+      go({ kind: "details" });
       return null;
     }
     checkoutAttempt.current.done();
-    const found = checkoutTrouble(result, brand.name);
+    const found = checkoutTrouble(result, brand.name, isCharter(ready.offer));
     if (result.kind === "refused" && result.code === "idempotency_key_reused") {
       setTrouble(found);
-      setStage({ kind: "details" });
+      go({ kind: "details" });
       return null;
     }
     if (found.stop) {
-      setStage({ kind: "stopped", stop: found.stop });
+      go({ kind: "stopped", stop: found.stop });
       focusStep();
       return null;
     }
     if (found.party) {
+      // The party stays as chosen, with the seats left beside it.
       setTrouble({ party: found.party });
       setQuote(null);
-      setStage({ kind: "party" });
+      go({ kind: "party" });
       focusStep();
+      returnTo("party");
       void refreshListing();
       return null;
     }
@@ -808,12 +1115,13 @@ export function BookingPage({
         forQuote.promotion?.code ?? null,
         true,
       );
+      if (!alive()) return null;
       if ("trouble" in priced) {
         showQuoteTrouble(priced.trouble, "details");
         return null;
       }
       adopt(priced.quote);
-      setStage({ kind: "details" });
+      go({ kind: "details" });
       setTrouble({
         notice: {
           title: "Your price was updated",
@@ -824,13 +1132,15 @@ export function BookingPage({
       return null;
     }
     setTrouble(found);
-    setStage({ kind: "details" });
+    go({ kind: "details" });
     return null;
   }
 
   const startCheckout = exclusive(async () => {
     if (!quote) return;
-    if (Date.now() >= Date.parse(quote.expiresAt)) {
+    // An expired price is fetched again, except while a checkout may exist:
+    // then only the same request may go, and the server answers it.
+    if (!inDoubtRef.current && clock.current.now() >= Date.parse(quote.expiresAt)) {
       await repriceNow();
       return;
     }
@@ -839,71 +1149,124 @@ export function BookingPage({
     setTrouble(null);
     setBusy("checkout");
     await open(quote, who);
-    setBusy(null);
+    if (alive()) setBusy(null);
   });
 
   const pay = exclusive(async (outcome: TestPaymentOutcome) => {
-    if (!live?.payment || !ready) return;
+    const current = liveRef.current;
+    if (!current?.payment || stageRef.current.kind !== "pay") return;
+    const { sessionId } = current;
     setTrouble(null);
     setBusy(outcome);
-    const result = await settleTestPayment(live.payment, outcome);
+    // From here the payment may go through, even if its answer never arrives.
+    const tried: Live = { ...current, paymentTried: true };
+    setLive(tried);
+    saveResume(recordOf(tried, false));
+    const result = await settleTestPayment(current.payment, outcome, signal());
+    if (!alive()) return;
     setBusy(null);
+    // The checkout may have ended while the provider answered: leave it be.
+    const still = () => stageRef.current.kind === "pay" && liveRef.current?.sessionId === sessionId;
+    if (!still()) return;
     if (result.kind === "ok") {
       // Sent. A reload from here waits for the outcome instead of offering to pay.
-      saveResume({
-        tripId: ready.offer.tripId,
-        sessionId: live.sessionId,
-        quoteId: live.quoteId,
-        secret: live.secret,
-        paymentSent: true,
-        expiresAt: live.expiresAt,
-      });
-      setStage({ kind: "waiting" });
+      saveResume(recordOf(tried, true));
+      go({ kind: "waiting" });
       focusStep();
       return;
     }
     // The provider did not say. The checkout's own state may: read it once.
-    const current = await readCheckout(live.sessionId, live.secret);
-    if (current.kind === "ok" && isFinal(current.value)) {
-      finish(current.value);
+    const read = await readCheckout(sessionId, tried.secret, signal());
+    if (!alive() || !still()) return;
+    if (read.kind === "ok" && isFinal(read.value)) {
+      finish(read.value);
       return;
     }
     setTrouble({ notice: payNotice(result) });
   });
 
-  const cancel = exclusive(async () => {
-    if (!live) return;
-    setTrouble(null);
-    setBusy("cancel");
-    const result = await cancelCheckout(live.sessionId, live.secret);
-    setBusy(null);
+  /**
+   * Cancel the open checkout. "canceled": released. "ended": it had ended
+   * first, and the page now shows how. "limited" or "failed": still open.
+   * "gone": the page went meanwhile.
+   */
+  async function cancelOpen(): Promise<"canceled" | "ended" | "limited" | "failed" | "gone"> {
+    const open = liveRef.current;
+    if (!open) return "canceled";
+    const result = await cancelCheckout(open.sessionId, open.secret, { signal: signal() });
+    if (!alive()) return "gone";
     if (result.kind === "ok" || (result.kind === "refused" && [401, 404].includes(result.status))) {
       clearResume();
       setLive(null);
-      toParty(
-        <Notice tone="success" title="Checkout canceled">
-          <p>Nothing was charged, and your seats were released. Change anything, then continue.</p>
-        </Notice>,
-      );
-      return;
+      return "canceled";
     }
     if (result.kind === "refused" && result.code === "checkout_not_cancelable") {
       // It ended first, perhaps paid: show how.
-      const current = await readCheckout(live.sessionId, live.secret);
+      const current = await readCheckout(open.sessionId, open.secret, signal());
+      if (!alive()) return "gone";
       if (current.kind === "ok") {
         finish(current.value);
-        return;
+        return "ended";
       }
     }
+    return result.kind === "refused" && result.status === 429 ? "limited" : "failed";
+  }
+
+  const confirmCancel = exclusive(async () => {
+    const open = liveRef.current;
+    if (!open) {
+      setConfirm(null);
+      return;
+    }
+    const charter = latest.current.context?.charter ?? false;
+    setTrouble(null);
+    setBusy("cancel");
+    const outcome = await cancelOpen();
+    if (outcome === "gone") return;
+    if (outcome === "canceled") {
+      // The released seats are free again before the party step counts them.
+      await refreshListing();
+      if (!alive()) return;
+    }
+    setBusy(null);
+    setConfirm(null);
+    if (outcome === "canceled") {
+      toParty(
+        <Notice tone="success" title="Checkout canceled">
+          <p>
+            {open.paymentTried
+              ? `Your checkout was canceled, and ${releasedText(charter)}. If your test payment went through, it is refunded in full.`
+              : `Nothing was charged, and ${releasedText(charter)}.`}{" "}
+            Change anything, then continue.
+          </p>
+        </Notice>,
+      );
+      returnTo("party");
+      return;
+    }
+    if (outcome === "ended") return;
     setTrouble({
       notice:
-        result.kind === "refused" && result.status === 429
+        outcome === "limited"
           ? { title: "Too many tries in a short time", body: "Wait a minute, then try again." }
           : {
               title: "We couldn't cancel the checkout",
-              body: "Check your connection, then try again. If you leave it, the seats are released when the hold runs out.",
+              body: `Check your connection, then try again. If you leave it, ${heldThing(charter)} ${charter ? "is" : "are"} released when the hold runs out.`,
             },
     });
+  });
+
+  /** Leave the page: cancel the open checkout first, if there is one. */
+  const confirmLeave = exclusive(async (proceed: () => void) => {
+    setBusy("cancel");
+    const outcome = await cancelOpen();
+    if (outcome === "gone") return;
+    setBusy(null);
+    setConfirm(null);
+    // It ended first, perhaps paid: the page shows how instead of leaving.
+    if (outcome === "ended") return;
+    // Not released: the page releases it once more as it goes.
+    proceed();
   });
 
   function toParty(notice: ReactNode = null) {
@@ -911,21 +1274,36 @@ export function BookingPage({
     setTrouble(null);
     setPriceChange(null);
     setPartyNotice(notice);
-    setStage({ kind: "party" });
+    go({ kind: "party" });
     focusStep();
+  }
+
+  /**
+   * Back to an earlier step through the history, when this page made that
+   * entry, so Back then leaves the checkout instead of stepping through
+   * entries for steps that are gone. Otherwise the address effect replaces
+   * this entry.
+   */
+  function returnTo(step: BookingStep) {
+    const t = trail.current;
+    if (t.pos === 0) return;
+    const back = t.steps.lastIndexOf(step, t.pos - 1);
+    if (back < 0) return;
+    window.history.go(back - t.pos);
   }
 
   const retryAfterDecline = exclusive(async () => {
     if (!ready || !selection || !limits) return;
-    const before = live?.session?.amount ?? null;
+    const before = liveRef.current?.session?.amount ?? null;
     setTrouble(null);
     setBusy("retry");
     const priced = await price(ready.offer, limits, selection, code, true);
+    if (!alive()) return;
     if ("trouble" in priced) {
       setBusy(null);
       showQuoteTrouble(priced.trouble, "details");
       if (!priced.trouble.stop && !priced.trouble.party) {
-        setStage({ kind: "details" });
+        go({ kind: "details" });
         focusStep();
       }
       return;
@@ -936,11 +1314,12 @@ export function BookingPage({
     if (accepted !== priced.quote.policy.version || !who.success) {
       // Something needs the guest's eyes first.
       setBusy(null);
-      setStage({ kind: "details" });
+      go({ kind: "details" });
       focusStep();
       return;
     }
     const opened = await open(priced.quote, who.data);
+    if (!alive()) return;
     setBusy(null);
     if (opened && before !== null && opened.amount !== before) {
       setPriceChange(
@@ -960,39 +1339,44 @@ export function BookingPage({
   const startOver = () => {
     setLive(null);
     clearResume();
-    if (load.kind === "ready") toParty();
-    else navigate(restartHref(address));
+    if (latest.current.load.kind === "ready") {
+      toParty();
+      returnTo("party");
+    } else navigate(restartHref(address));
   };
 
   const releaseAndStartOver = exclusive(async () => {
-    if (!live) {
+    if (!liveRef.current) {
+      setConfirm(null);
       startOver();
       return;
     }
     setReleaseTrouble(null);
     setBusy("release");
-    const result = await cancelCheckout(live.sessionId, live.secret);
+    const outcome = await cancelOpen();
+    if (outcome === "gone") return;
+    if (outcome === "canceled") {
+      // Count the seats this checkout held as free again before the party step.
+      await refreshListing();
+      if (!alive()) return;
+    }
     setBusy(null);
-    if (result.kind === "ok" || (result.kind === "refused" && [401, 404].includes(result.status))) {
+    setConfirm(null);
+    if (outcome === "canceled") {
       startOver();
       return;
     }
-    if (result.kind === "refused" && result.code === "checkout_not_cancelable") {
-      const current = await readCheckout(live.sessionId, live.secret);
-      if (current.kind === "ok") {
-        finish(current.value);
-        return;
-      }
-    }
+    if (outcome === "ended") return;
     setReleaseTrouble("Check your connection, then try again.");
   });
 
   async function restoreCheckout() {
     const record = readResume(tripId);
     if (!record) {
-      setStage({ kind: "gone" });
+      go({ kind: "gone" });
       return;
     }
+    clock.current.adopt(record.clockOffsetMs);
     const restored: Live = {
       sessionId: record.sessionId,
       quoteId: record.quoteId,
@@ -1000,27 +1384,127 @@ export function BookingPage({
       expiresAt: record.expiresAt,
       session: null,
       payment: null,
+      paymentTried: record.paymentTried,
     };
     setLive(restored);
-    const result = await readCheckout(record.sessionId, record.secret);
+    // The quote says who is coming and what extras, for the outcome. A page
+    // restored from its quote has it already.
+    if (latest.current.load.kind !== "checkout" && !latest.current.quote) {
+      const stored = await getQuote(record.quoteId, signal());
+      if (!alive()) return;
+      if (stored.kind === "ok" && stored.value.tripId === tripId) setQuote(stored.value);
+    }
+    const result = await readCheckout(record.sessionId, record.secret, signal());
+    if (!alive()) return;
     if (result.kind === "ok") {
       setLive({ ...restored, session: result.value, expiresAt: result.value.expiresAt });
       if (isFinal(result.value)) {
-        clearResume();
-        setStage({ kind: "outcome", session: result.value });
+        finish(result.value, { focus: false });
         return;
       }
-      setStage({ kind: record.paymentSent ? "waiting" : "interrupted" });
+      go({ kind: record.paymentSent ? "waiting" : "interrupted" });
       return;
     }
     if (result.kind === "refused" && (result.status === 401 || result.status === 404)) {
       clearResume();
       setLive(null);
-      setStage({ kind: "gone" });
+      go({ kind: "gone" });
       return;
     }
     // No answer yet: keep waiting for a payment that was sent; otherwise offer to start over.
-    setStage({ kind: record.paymentSent ? "waiting" : "interrupted" });
+    go({ kind: record.paymentSent ? "waiting" : "interrupted" });
+  }
+
+  /**
+   * Back or Forward arrived at another of this page's entries. Steps that can
+   * be shown are; a step that is gone keeps the page where it is.
+   */
+  function onHistory(target: BookingStep) {
+    const at = stageRef.current;
+    const here = stepOf(at);
+    if (!here || target === here) return;
+    const t = trail.current;
+    // A browser names an entry by the title it last had, so an entry this
+    // page puts back or renames takes the page's title again.
+    const retitle = () => {
+      const title = document.title;
+      document.title = "";
+      document.title = title;
+    };
+    /** Put this step's entry back after the one Back reached, and say why when it helps. */
+    const stay = (message?: string) => {
+      t.steps = [...t.steps.slice(0, t.pos + 1), here];
+      t.pos += 1;
+      window.history.pushState(entryState(t), "", urlFor(here));
+      retitle();
+      if (message) setAnnouncement(message);
+    };
+    /** The entry names a step the page can't show now: it names this one instead. */
+    const settle = () => {
+      t.steps[t.pos] = here;
+      window.history.replaceState(entryState(t), "", urlFor(here));
+      retitle();
+    };
+    if (lock.current) {
+      stay("Wait a moment: the page is still working.");
+      return;
+    }
+    switch (at.kind) {
+      case "party": {
+        const current = latest.current.quote;
+        if (
+          target === "details" &&
+          current &&
+          offer &&
+          selection &&
+          quoteMatches(offer, selection, current) &&
+          clock.current.now() < Date.parse(current.expiresAt)
+        ) {
+          go({ kind: "details" });
+          focusStep();
+          return;
+        }
+        settle();
+        return;
+      }
+      case "details":
+        if (inDoubtRef.current) {
+          stay("Your checkout may have started. Press Try again to find out.");
+          return;
+        }
+        if (target === "party") {
+          setTrouble(null);
+          go({ kind: "party" });
+          focusStep();
+          return;
+        }
+        settle();
+        return;
+      case "pay":
+        // As Cancel checkout does: ask first, then release the seats.
+        stay();
+        setConfirm({ kind: "cancel" });
+        return;
+      case "waiting":
+        stay("Your payment is being confirmed. Keep this page open until it finishes.");
+        return;
+      case "interrupted":
+        stay();
+        setConfirm({ kind: "release" });
+        return;
+      case "outcome":
+        if ((target === "party" || target === "details") && latest.current.load.kind === "ready") {
+          setLive(null);
+          clearResume();
+          toParty();
+          if (target !== "party") returnTo("party");
+          return;
+        }
+        settle();
+        return;
+      default:
+        settle();
+    }
   }
 
   // Render ---------------------------------------------------------------------------
@@ -1069,6 +1553,17 @@ export function BookingPage({
       </div>
     );
   }
+  if (load.kind === "booked") {
+    return (
+      <>
+        {announcer}
+        <BookedHeader name={load.record.productName} when={load.record.when} titleRef={titleRef} />
+        <div className="guest-container booking-alone">
+          <Confirmed summary={load.record} brand={brand} headingRef={stepRef} />
+        </div>
+      </>
+    );
+  }
 
   const listing = load.kind === "ready" ? load.listing : null;
   const trip = load.kind === "ready" ? contextOfOffer(load.offer) : contextOfQuote(load.quote);
@@ -1078,6 +1573,10 @@ export function BookingPage({
     stage.kind === "details" ||
     stage.kind === "pay" ||
     stage.kind === "waiting";
+  const held =
+    (stage.kind === "pay" || stage.kind === "waiting") && live?.session
+      ? { charter: trip.charter, seats: live.session.partySize }
+      : null;
 
   return (
     <>
@@ -1085,7 +1584,7 @@ export function BookingPage({
       <TripHeader context={trip} listing={listing} titleRef={titleRef} />
       <div className="guest-container booking-layout">
         <aside className="booking-layout__facts" aria-label="Trip details">
-          <TripFacts context={trip} listing={listing} />
+          <TripFacts context={trip} listing={listing} held={held} />
         </aside>
         <div className="booking-layout__main">
           {showSteps && (
@@ -1108,14 +1607,19 @@ export function BookingPage({
               limits={limits}
               selection={selection}
               onSelection={(next) => {
+                const changed = offer.tickets.find(
+                  (t) => (next.tickets[t.code] ?? 0) !== (selection.tickets[t.code] ?? 0),
+                );
+                if (changed) lastTicket.current = changed.code;
                 setSelection(next);
                 if (trouble?.party || trouble?.addOns) setTrouble(null);
               }}
+              onAnnounce={setAnnouncement}
               trouble={trouble}
               notice={partyNotice}
               busy={busy === "quote"}
               now={now}
-              onContinue={() => void continueFromParty()}
+              onContinue={(committed) => void continueFromParty(committed)}
               onReloadOptions={() => {
                 setTrouble(null);
                 setLoadAttempt((n) => n + 1);
@@ -1159,9 +1663,10 @@ export function BookingPage({
               onContinue={() => void startCheckout()}
               onRefresh={() => void refreshPrice()}
               onChangeParty={() => {
-                setInDoubt(false);
-                checkoutAttempt.current.done();
+                // Unavailable while a checkout may have started.
+                if (inDoubtRef.current) return;
                 toParty();
+                returnTo("party");
               }}
               headingRef={stepRef}
               fieldRefs={fieldRefs}
@@ -1177,7 +1682,7 @@ export function BookingPage({
               trouble={trouble}
               priceChange={priceChange}
               onPay={(outcome) => void pay(outcome)}
-              onCancel={() => void cancel()}
+              onCancel={() => setConfirm({ kind: "cancel" })}
               headingRef={stepRef}
             />
           )}
@@ -1185,6 +1690,7 @@ export function BookingPage({
             <Waiting
               expiresAt={live.expiresAt}
               timeZone={trip.trip.timeZone}
+              now={now}
               slow={slow}
               unreachable={unreachable}
               headingRef={stepRef}
@@ -1193,9 +1699,9 @@ export function BookingPage({
           {stage.kind === "outcome" && (
             <OutcomeFor
               session={stage.session}
-              context={trip}
-              listing={listing}
-              quote={quote}
+              summary={summarize(stage.session, trip, listing, quote)}
+              charter={trip.charter}
+              paymentTried={live?.paymentTried ?? false}
               brand={brand}
               busy={busy === "retry"}
               onRetry={() => {
@@ -1209,6 +1715,7 @@ export function BookingPage({
                 }
                 setLive(null);
                 toParty();
+                returnTo("party");
               }}
               onStartOver={startOver}
               headingRef={stepRef}
@@ -1217,9 +1724,10 @@ export function BookingPage({
           {stage.kind === "interrupted" && (
             <Interrupted
               charter={trip.charter}
+              paymentTried={live?.paymentTried ?? false}
               busy={busy === "release"}
               trouble={releaseTrouble}
-              onStartOver={() => void releaseAndStartOver()}
+              onStartOver={() => setConfirm({ kind: "release" })}
               headingRef={stepRef}
             />
           )}
@@ -1229,15 +1737,124 @@ export function BookingPage({
           )}
         </div>
       </div>
+      {confirm && (
+        <ConfirmQuestion
+          confirm={confirm}
+          charter={trip.charter}
+          paymentTried={live?.paymentTried ?? false}
+          busy={busy === "cancel" || busy === "release"}
+          onCancelCheckout={() => void confirmCancel()}
+          onRelease={() => void releaseAndStartOver()}
+          onLeave={(proceed) => void confirmLeave(proceed)}
+          onKeep={() => setConfirm(null)}
+        />
+      )}
     </>
   );
 }
 
+/** The question each final step asks before it goes ahead. */
+function ConfirmQuestion({
+  confirm,
+  charter,
+  paymentTried,
+  busy,
+  onCancelCheckout,
+  onRelease,
+  onLeave,
+  onKeep,
+}: {
+  confirm: Confirm;
+  charter: boolean;
+  paymentTried: boolean;
+  busy: boolean;
+  onCancelCheckout: () => void;
+  onRelease: () => void;
+  onLeave: (proceed: () => void) => void;
+  onKeep: () => void;
+}) {
+  const held = heldThing(charter);
+  const are = charter ? "is" : "are";
+  const refunded = paymentTried
+    ? " If your test payment went through, it is refunded in full."
+    : "";
+  switch (confirm.kind) {
+    case "cancel":
+      return (
+        <ConfirmDialog
+          title="Cancel this checkout?"
+          confirmLabel="Cancel checkout"
+          busyLabel="Canceling…"
+          keepLabel="Keep my checkout"
+          busy={busy}
+          onConfirm={onCancelCheckout}
+          onKeep={onKeep}
+        >
+          <p>
+            {capitalized(held)} {are} released at once, and you go back to choose your party.
+            {refunded}
+          </p>
+        </ConfirmDialog>
+      );
+    case "release":
+      return (
+        <ConfirmDialog
+          title="Release and start over?"
+          confirmLabel="Release and start over"
+          busyLabel="Releasing…"
+          keepLabel="Not now"
+          busy={busy}
+          onConfirm={onRelease}
+          onKeep={onKeep}
+        >
+          <p>
+            This checkout can't be paid after the reload. Starting over releases {held} at once.
+            {refunded}
+          </p>
+        </ConfirmDialog>
+      );
+    case "leave":
+      return (
+        <ConfirmDialog
+          title="Leave this checkout?"
+          confirmLabel="Cancel checkout and leave"
+          busyLabel="Canceling…"
+          keepLabel="Stay"
+          busy={busy}
+          onConfirm={() => onLeave(confirm.proceed)}
+          onKeep={onKeep}
+        >
+          <p>Leaving cancels this checkout and releases {held} at once.</p>
+        </ConfirmDialog>
+      );
+    case "leave-in-doubt":
+      return (
+        <ConfirmDialog
+          title="Leave before your checkout is confirmed?"
+          confirmLabel="Leave anyway"
+          busyLabel="Leaving…"
+          keepLabel="Stay"
+          busy={false}
+          onConfirm={() => {
+            onKeep();
+            confirm.proceed();
+          }}
+          onKeep={onKeep}
+        >
+          <p>
+            We don't know yet whether your checkout started. If it did, it holds {held} until it
+            runs out, up to 15 minutes. Stay and press Try again to find out.
+          </p>
+        </ConfirmDialog>
+      );
+  }
+}
+
 function OutcomeFor({
   session,
-  context,
-  listing,
-  quote,
+  summary,
+  charter,
+  paymentTried,
   brand,
   busy,
   onRetry,
@@ -1246,9 +1863,9 @@ function OutcomeFor({
   headingRef,
 }: {
   session: CheckoutSession;
-  context: TripContext;
-  listing: AvailableTrip | null;
-  quote: Quote | null;
+  summary: BookingSummary | null;
+  charter: boolean;
+  paymentTried: boolean;
   brand: PublicBrand;
   busy: boolean;
   onRetry: () => void;
@@ -1258,20 +1875,11 @@ function OutcomeFor({
 }) {
   switch (session.state) {
     case "confirmed":
-      return (
-        <Confirmed
-          session={session}
-          context={context}
-          listing={listing}
-          quote={quote}
-          brand={brand}
-          headingRef={headingRef}
-        />
-      );
+      return summary ? <Confirmed summary={summary} brand={brand} headingRef={headingRef} /> : null;
     case "failed":
       return (
         <Declined
-          charter={context.charter}
+          charter={charter}
           busy={busy}
           onRetry={onRetry}
           onChangeParty={onChangeParty}
@@ -1280,18 +1888,52 @@ function OutcomeFor({
       );
     case "expired":
       return (
-        <Expired charter={context.charter} onStartOver={onStartOver} headingRef={headingRef} />
+        <Expired
+          charter={charter}
+          paymentTried={paymentTried}
+          brand={brand}
+          onStartOver={onStartOver}
+          headingRef={headingRef}
+        />
       );
     case "unfulfilled":
-      return <Unfulfilled session={session} brand={brand} headingRef={headingRef} />;
+      return (
+        <Unfulfilled session={session} charter={charter} brand={brand} headingRef={headingRef} />
+      );
     case "canceled":
       return (
-        <Canceled charter={context.charter} onStartOver={onStartOver} headingRef={headingRef} />
+        <Canceled
+          charter={charter}
+          paymentTried={paymentTried}
+          onStartOver={onStartOver}
+          headingRef={headingRef}
+        />
       );
     case "open":
       // Not an outcome; never shown.
       return null;
   }
+}
+
+/** What a confirmation says: the reference, the trip, the party, the extras, and the total. */
+function summarize(
+  session: CheckoutSession,
+  trip: TripContext | null,
+  listing: AvailableTrip | null,
+  priced: Quote | null,
+): BookingSummary | null {
+  const reference = session.booking?.reference;
+  if (!reference || !trip) return null;
+  return {
+    reference,
+    productName: trip.productName,
+    when: tripWhen(trip.trip),
+    where: listing?.location.name ?? null,
+    meetAt: listing?.location.meetingPoint ?? null,
+    party: describeParty(session.partySize, priced),
+    extras: describeExtras(priced),
+    total: session.amount,
+  };
 }
 
 function offerFailure(failure: Failure): Load {
@@ -1313,9 +1955,10 @@ function payNotice(failure: Failure): { title: string; body: string } {
       body: "Cancel this checkout and start again.",
     };
   }
+  // The request may have reached the provider: say nothing about whether it paid.
   return {
-    title: "We couldn't reach the payment service",
-    body: "Nothing has changed yet. Check your connection, then choose again.",
+    title: "We couldn't confirm your test payment",
+    body: "The connection dropped before the payment service answered, so it may have gone through. Press the same button again: a payment that went through stands, and nothing is paid twice.",
   };
 }
 

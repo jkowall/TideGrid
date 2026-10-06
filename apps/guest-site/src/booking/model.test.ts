@@ -24,12 +24,16 @@ import {
   testNow,
 } from "./fixtures.ts";
 import {
+  addOnChangeText,
   addOnHint,
   addOnLimit,
+  addOnProblems,
   checkoutTrouble,
+  committedSelection,
   contextOfOffer,
   contextOfQuote,
   deadlineText,
+  describeExtras,
   describeParty,
   eachPrice,
   feeText,
@@ -39,6 +43,7 @@ import {
   initialSelection,
   isCharter,
   isFinal,
+  keepSelection,
   type PartyLimits,
   partyLimits,
   partyProblem,
@@ -52,6 +57,7 @@ import {
   quoteTrouble,
   remedyText,
   type Selection,
+  shortReference,
   type Trouble,
   taxText,
   timing,
@@ -428,33 +434,137 @@ describe("partyProblem", () => {
     );
   });
 
-  it("says how many seats are left when fewer than the product's most are", () => {
+  it("says how many seats are left when fewer than the product's most are, beside the party", () => {
     const three: PartyLimits = { min: 1, max: 3, seatsLeft: 3 };
     expect(partyProblem(offer, seatsFor({ adult: 4 }), three)).toBe(
-      "Only 3 seats are left. Choose fewer.",
+      "Only 3 seats are left, and your party is 4. Choose fewer guests.",
     );
     const one: PartyLimits = { min: 1, max: 1, seatsLeft: 1 };
     expect(partyProblem(offer, seatsFor({ adult: 2 }), one)).toBe(
-      "Only 1 seat is left. Choose fewer.",
+      "Only 1 seat is left, and your party is 2. Choose fewer guests.",
+    );
+  });
+
+  it("says a trip with no seats left is full, never 'only 0 seats'", () => {
+    const none: PartyLimits = { min: 1, max: 0, seatsLeft: 0 };
+    expect(partyProblem(offer, seatsFor({ adult: 2 }), none)).toBe(
+      "No seats are left on this trip.",
     );
   });
 
   it("names the trip's most when the product's limit is the one exceeded", () => {
     const eleven = seatsFor({ adult: 11 });
     const plenty: PartyLimits = { min: 1, max: 10, seatsLeft: 20 };
-    expect(partyProblem(offer, eleven, plenty)).toBe("This trip takes up to 10 guests.");
+    const most = "This trip takes up to 10 guests, and your party is 11.";
+    expect(partyProblem(offer, eleven, plenty)).toBe(most);
     // Seats left equal to the product's most is not "few seats left".
     const justEnough: PartyLimits = { min: 1, max: 10, seatsLeft: 10 };
-    expect(partyProblem(offer, eleven, justEnough)).toBe("This trip takes up to 10 guests.");
+    expect(partyProblem(offer, eleven, justEnough)).toBe(most);
     const unknown: PartyLimits = { min: 1, max: 10, seatsLeft: null };
-    expect(partyProblem(offer, eleven, unknown)).toBe("This trip takes up to 10 guests.");
-    expect(partyProblem(charterOffer, aboard(13), boat)).toBe("This trip takes up to 12 guests.");
+    expect(partyProblem(offer, eleven, unknown)).toBe(most);
+    expect(partyProblem(charterOffer, aboard(13), boat)).toBe(
+      "The boat takes up to 12 guests, and your party is 13.",
+    );
   });
 
   it("finds no problem in a party from the smallest to the largest", () => {
     expect(partyProblem(offer, seatsFor({ adult: 1 }), harbor)).toBeNull();
     expect(partyProblem(offer, seatsFor({ adult: 6, child: 4 }), harbor)).toBeNull();
     expect(partyProblem(charterOffer, aboard(12), boat)).toBeNull();
+  });
+});
+
+describe("addOnProblems", () => {
+  it("names each add-on typed past what the party may take", () => {
+    // Drink vouchers: up to 2 per guest. Souvenir photo: up to 2 per booking.
+    expect(addOnProblems(offer, seatsFor({ adult: 1 }, { drinks: 3, photo: 5 }))).toEqual({
+      drinks: "Up to 2 per guest: 2 for 1 guest.",
+      photo: "Up to 2 per booking.",
+    });
+  });
+
+  it("finds none within the limits", () => {
+    expect(addOnProblems(offer, seatsFor({ adult: 2 }, { drinks: 4, photo: 2 }))).toEqual({});
+  });
+});
+
+describe("addOnChangeText", () => {
+  it("says which add-ons a smaller party lowered, and to how many", () => {
+    const before = seatsFor({ adult: 2 }, { drinks: 4, photo: 1 });
+    const after = fitAddOns(offer, { ...before, tickets: { adult: 1 } });
+    expect(addOnChangeText(offer, before, after)).toBe(
+      "Drink voucher lowered to 2, the most for 1 guest.",
+    );
+  });
+
+  it("says nothing when nothing was lowered", () => {
+    const same = seatsFor({ adult: 2 }, { drinks: 2 });
+    expect(addOnChangeText(offer, same, fitAddOns(offer, same))).toBeNull();
+  });
+});
+
+describe("committedSelection", () => {
+  const form = (fields: Record<string, string>) => {
+    const data = new FormData();
+    for (const [name, value] of Object.entries(fields)) data.set(name, value);
+    return data;
+  };
+
+  it("takes the counts as the form holds them, even past a limit", () => {
+    const shown = seatsFor({ adult: 2, child: 0, infant: 0 }, { photo: 0, drinks: 0 });
+    expect(
+      committedSelection(
+        offer,
+        shown,
+        form({ "t.adult": "8", "t.child": "1", "t.infant": "0", "a.photo": "2", "a.drinks": "0" }),
+      ),
+    ).toEqual({
+      tickets: { adult: 8, child: 1, infant: 0 },
+      guests: 1,
+      addOns: { photo: 2, drinks: 0 },
+    });
+  });
+
+  it("counts an emptied field as none", () => {
+    const shown = seatsFor({ adult: 2 });
+    expect(committedSelection(offer, shown, form({ "t.adult": "" })).tickets.adult).toBe(0);
+  });
+
+  it("keeps the count it had for a field the form does not hold, or holds as words", () => {
+    const shown = seatsFor({ adult: 2 }, { photo: 1 });
+    const committed = committedSelection(offer, shown, form({ "t.adult": "two" }));
+    expect(committed.tickets.adult).toBe(2);
+    expect(committed.addOns.photo).toBe(1);
+  });
+
+  it("reads a charter's guests aboard", () => {
+    expect(committedSelection(charterOffer, aboard(4), form({ guests: "9" })).guests).toBe(9);
+  });
+});
+
+describe("keepSelection", () => {
+  it("keeps a party past the seats left, within the product's own limits", () => {
+    const kept = keepSelection(offer, seatsFor({ adult: 6, child: 2 }, { drinks: 4 }));
+    expect(kept.tickets).toEqual({ adult: 6, child: 2, infant: 0 });
+    expect(kept.addOns).toEqual({ photo: 0, drinks: 4 });
+  });
+
+  it("drops what the offer no longer sells", () => {
+    const kept = keepSelection(offer, seatsFor({ adult: 2, kayak: 1 }, { lunch: 1 }));
+    expect(kept.tickets).not.toHaveProperty("kayak");
+    expect(kept.addOns).not.toHaveProperty("lunch");
+  });
+});
+
+describe("describeExtras and shortReference", () => {
+  it("lists the paid extras from the quote, or nothing", () => {
+    expect(describeExtras(sharedQuote())).toBe("Souvenir photo × 1, Drink voucher × 2");
+    expect(describeExtras(charterQuote())).toBeNull();
+    expect(describeExtras(null)).toBeNull();
+  });
+
+  it("makes a short checkout reference from its id", () => {
+    expect(shortReference("3ba66e4f-2b3c-4d5e-8f60-000000000001")).toBe("3BA66E4F");
   });
 });
 
@@ -590,6 +700,8 @@ describe("quoteRows", () => {
       {
         id: "line-6",
         label: "HARBOR10, 10% off",
+        // 10% of $115.00, the trip price, not of the $143.00 subtotal: the row says so.
+        detail: "On the trip price, not extras",
         amount: `${minus}$11.50`,
         kind: "adjustment",
       },
@@ -608,7 +720,7 @@ describe("quoteRows", () => {
       },
       { id: "total", label: "Total", amount: "$148.21", kind: "total" },
     ]);
-    expect(rows.find((r) => r.kind === "adjustment")).not.toHaveProperty("detail");
+    expect(rows.find((r) => r.kind === "adjustment")?.detail).toBe("On the trip price, not extras");
   });
 
   it("gives a charter line no detail, and its fee a quantity", () => {
@@ -830,6 +942,29 @@ describe("quoteProblems", () => {
     expect(quoteProblems("")).toEqual([]);
     expect(quoteProblems("This quote cannot be priced: ")).toEqual([]);
   });
+
+  it("takes only the contract's problem codes, never other words of prose", () => {
+    expect(
+      quoteProblems("This quote cannot be priced: promotion_not_applicable because reasons"),
+    ).toEqual([{ code: "promotion_not_applicable", subject: null }]);
+    expect(quoteProblems("idempotency key was already used with a different request")).toEqual([]);
+    expect(quoteProblems("Refused: something new happened")).toEqual([]);
+  });
+
+  it("falls back to the error's own code when the message lists nothing it knows", () => {
+    expect(quoteProblems("The code cannot be used", "promotion_not_applicable")).toEqual([
+      { code: "promotion_not_applicable", subject: null },
+    ]);
+    expect(quoteProblems("", "party_size_out_of_range")).toEqual([
+      { code: "party_size_out_of_range", subject: null },
+    ]);
+    // A code that is not a problem code stands for nothing.
+    expect(quoteProblems("", "validation_failed")).toEqual([]);
+    // When the message lists problems, they win over the code.
+    expect(
+      quoteProblems("Cannot be priced: add_on_unavailable (photo)", "promotion_not_applicable"),
+    ).toEqual([{ code: "add_on_unavailable", subject: "photo" }]);
+  });
 });
 
 const noReach: Trouble = {
@@ -910,6 +1045,21 @@ describe("quoteTrouble", () => {
       serverSide,
     ],
     [
+      "422 whose message lists nothing, by its own code",
+      refused(422, "promotion_not_applicable", "The code can't be used"),
+      { promo: "This code can't be used for this trip. Check it, or book without it." },
+    ],
+    [
+      "422 pricing_unavailable, listed as a problem",
+      cannotPrice("pricing_unavailable"),
+      { stop: "pricing" },
+    ],
+    [
+      "422 insufficient_capacity, listed as a problem",
+      cannotPrice("insufficient_capacity"),
+      { party: "There aren't enough seats left for this party. Choose fewer guests." },
+    ],
+    [
       "422 listing two problems",
       cannotPrice("add_on_quantity_exceeded (drinks)", "promotion_not_applicable"),
       {
@@ -957,6 +1107,17 @@ describe("quoteTrouble", () => {
       party: "This trip takes 2 to 10 guests.",
     });
   });
+
+  it("stops, rather than asking for fewer guests, when the boat is taken or no seat is left", () => {
+    const capacity = refused(409, "insufficient_capacity", "No room");
+    expect(quoteTrouble(capacity, charterOffer, boat)).toEqual({ stop: "not_bookable" });
+    expect(quoteTrouble(capacity, offer, { min: 1, max: 0, seatsLeft: 0 })).toEqual({
+      stop: "not_bookable",
+    });
+    expect(quoteTrouble(cannotPrice("insufficient_capacity"), charterOffer, boat)).toEqual({
+      stop: "not_bookable",
+    });
+  });
 });
 
 describe("checkoutTrouble", () => {
@@ -988,6 +1149,11 @@ describe("checkoutTrouble", () => {
       "409 insufficient_capacity, with no count",
       refused(409, "insufficient_capacity", "No seats"),
       { party: "There aren't enough seats left for this party now. Choose fewer guests." },
+    ],
+    [
+      "409 insufficient_capacity, with no seat left: the trip is full, not 'only 0'",
+      refused(409, "insufficient_capacity", "Only 0 seat(s) are left on this trip"),
+      { stop: "not_bookable" },
     ],
     [
       "409 party_size_out_of_range",
@@ -1026,6 +1192,14 @@ describe("checkoutTrouble", () => {
 
   it.each(cases)("answers %s", (_name, failure, expected) => {
     expect(checkoutTrouble(failure, operator)).toEqual(expected);
+  });
+
+  it("stops on a charter whose boat was taken, whatever the message counts", () => {
+    for (const message of ["Only 0 seat(s) are left on this trip", "Only 3 seat(s) left", "No"]) {
+      expect(
+        checkoutTrouble(refused(409, "insufficient_capacity", message), operator, true),
+      ).toEqual({ stop: "not_bookable" });
+    }
   });
 
   it("names the operator the guest can call or email when the total is too small", () => {

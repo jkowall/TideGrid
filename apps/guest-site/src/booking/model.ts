@@ -1,10 +1,11 @@
-import type {
-  AvailableTrip,
-  CheckoutSession,
-  PolicyOutcome,
-  PolicyTerms,
-  Quote,
-  TripOffer,
+import {
+  type AvailableTrip,
+  type CheckoutSession,
+  type PolicyOutcome,
+  type PolicyTerms,
+  type Quote,
+  QuoteProblemCode,
+  type TripOffer,
 } from "@tidegrid/contracts";
 import type { LedgerRow } from "@tidegrid/design-system/components";
 import {
@@ -202,18 +203,103 @@ function sameCounts(counts: Record<string, number>): string {
   return JSON.stringify(Object.entries(counts).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-/** A problem with the party, before anything is sent. */
+/**
+ * A problem with the party, before anything is sent. A party past a limit is
+ * never cut down here: the guest's own count stays on screen beside the words.
+ */
 export function partyProblem(offer: TripOffer, selection: Selection, limits: PartyLimits) {
   const size = partySize(offer, selection);
-  const guestWord = isCharter(offer) ? "guest" : "ticket";
-  if (size < 1) return `Choose at least 1 ${guestWord}.`;
+  const charter = isCharter(offer);
+  if (size < 1) return `Choose at least 1 ${charter ? "guest" : "ticket"}.`;
   if (size < limits.min) return `This trip needs at least ${limits.min} guests.`;
   if (size > limits.max) {
-    return limits.seatsLeft !== null && limits.seatsLeft < offer.product.maxPartySize
-      ? `Only ${limits.seatsLeft} ${limits.seatsLeft === 1 ? "seat is" : "seats are"} left. Choose fewer.`
-      : `This trip takes up to ${limits.max} guests.`;
+    if (limits.seatsLeft === 0) return "No seats are left on this trip.";
+    const yours = `your party is ${size}`;
+    if (limits.seatsLeft !== null && limits.seatsLeft < offer.product.maxPartySize) {
+      const left = limits.seatsLeft === 1 ? "1 seat is" : `${limits.seatsLeft} seats are`;
+      return `Only ${left} left, and ${yours}. Choose fewer guests.`;
+    }
+    return `${charter ? "The boat" : "This trip"} takes up to ${limits.max} guests, and ${yours}.`;
   }
   return null;
+}
+
+/** Add-ons past what this party may take, by code, in words for each field. */
+export function addOnProblems(offer: TripOffer, selection: Selection): Record<string, string> {
+  const party = partySize(offer, selection);
+  const problems: Record<string, string> = {};
+  for (const addOn of offer.addOns) {
+    const count = selection.addOns[addOn.code] ?? 0;
+    const most = addOnLimit(addOn, party);
+    if (count <= most) continue;
+    problems[addOn.code] =
+      addOn.quantityRule === "per_participant"
+        ? `Up to ${addOn.maxQuantity} per guest: ${most} for ${guests(party)}.`
+        : `Up to ${most} per booking.`;
+  }
+  return problems;
+}
+
+/**
+ * What changed when a smaller party lowered its add-ons, for the page to say
+ * aloud: "Drink voucher lowered to 2, the most for 1 guest." Null when
+ * nothing was lowered.
+ */
+export function addOnChangeText(offer: TripOffer, before: Selection, after: Selection) {
+  const party = partySize(offer, after);
+  const lowered = offer.addOns.filter(
+    (a) => (after.addOns[a.code] ?? 0) < (before.addOns[a.code] ?? 0),
+  );
+  if (lowered.length === 0) return null;
+  return lowered
+    .map((a) => `${a.name} lowered to ${after.addOns[a.code] ?? 0}, the most for ${guests(party)}.`)
+    .join(" ");
+}
+
+/** A count as a form holds it: an empty field is none, a typed number is that number. */
+function formCount(data: FormData, name: string, fallback: number): number {
+  const raw = data.get(name);
+  if (typeof raw !== "string") return fallback;
+  const text = raw.trim();
+  if (text === "") return 0;
+  return /^\d{1,4}$/.test(text) ? Number(text) : fallback;
+}
+
+/**
+ * The selection as the party form holds it when it is sent, so what is priced
+ * is exactly what the fields show, including a count still being typed.
+ * Fields are named as the address names them: t.<code>, guests, a.<code>.
+ */
+export function committedSelection(
+  offer: TripOffer,
+  selection: Selection,
+  data: FormData,
+): Selection {
+  const tickets: Record<string, number> = { ...selection.tickets };
+  for (const ticket of offer.tickets) {
+    tickets[ticket.code] = formCount(data, `t.${ticket.code}`, tickets[ticket.code] ?? 0);
+  }
+  const addOns: Record<string, number> = { ...selection.addOns };
+  for (const addOn of offer.addOns) {
+    addOns[addOn.code] = formCount(data, `a.${addOn.code}`, addOns[addOn.code] ?? 0);
+  }
+  const guestsAboard = isCharter(offer)
+    ? formCount(data, "guests", selection.guests)
+    : selection.guests;
+  return { tickets, guests: guestsAboard, addOns };
+}
+
+/**
+ * Keep a guest's choices when the trip's options load again: only what the
+ * offer still sells, within the product's own limits. The seats left are not
+ * applied here; a party past them stays, with the reason beside it.
+ */
+export function keepSelection(offer: TripOffer, current: Selection): Selection {
+  return initialSelection(
+    offer,
+    { party: null, tickets: current.tickets, guests: current.guests, addOns: current.addOns },
+    partyLimits(offer, null),
+  );
 }
 
 export const guests = (n: number) => (n === 1 ? "1 guest" : `${n} guests`);
@@ -226,6 +312,21 @@ export function describeParty(partySizeValue: number, quote: Quote | null): stri
   const tickets = quote?.lines.filter((l) => l.kind === "ticket") ?? [];
   if (tickets.length === 0) return guests(partySizeValue);
   return `${guests(partySizeValue)}: ${tickets.map((l) => `${l.quantity} ${l.name}`).join(", ")}`;
+}
+
+/** The paid extras, in words: "Souvenir photo × 1, Drink voucher × 2". Null when none. */
+export function describeExtras(quote: Quote | null): string | null {
+  const extras = quote?.lines.filter((l) => l.kind === "add_on" && l.quantity > 0) ?? [];
+  if (extras.length === 0) return null;
+  return extras.map((l) => `${l.name} × ${l.quantity}`).join(", ");
+}
+
+/**
+ * A checkout's short reference for support, from its id: "3BA66E4F". Shown
+ * where no booking reference exists, such as a refunded payment.
+ */
+export function shortReference(sessionId: string): string {
+  return sessionId.replace(/-/g, "").slice(0, 8).toUpperCase();
 }
 
 // Prices ------------------------------------------------------------------------------
@@ -297,6 +398,8 @@ export function quoteRows(quote: Quote): LedgerRow[] {
       rows.push({
         id: `line-${l.lineNo}`,
         label: l.name,
+        // A code comes off the trip price only, never extras, fees, or tax.
+        detail: "On the trip price, not extras",
         amount: formatMoney(l.amount),
         kind: "adjustment",
       });
@@ -416,6 +519,11 @@ export const timing = {
   slowAfterMs: 15_000,
   /** How long after a hold's expiry the payment step reads the checkout's state. */
   expiryGraceMs: 1_000,
+  /**
+   * After a payment was sent, how long the page keeps reading a checkout that
+   * reads expired: a late success can still book it, or refund it.
+   */
+  lateSuccessGraceMs: 30_000,
 };
 
 export function pollDelay(attempt: number): number {
@@ -445,13 +553,28 @@ export interface Trouble {
   requote?: true;
 }
 
-/** "This quote cannot be priced: add_on_quantity_exceeded (drinks), promotion_not_applicable" */
-export function quoteProblems(message: string): { code: string; subject: string | null }[] {
-  const detail = message.slice(message.indexOf(":") + 1);
-  return [...detail.matchAll(/([a-z_]+)(?: \(([a-z][a-z0-9_]*)\))?/g)].map((m) => ({
-    code: m[1] as string,
-    subject: m[2] ?? null,
-  }));
+const problemCodes: ReadonlySet<string> = new Set(QuoteProblemCode.options);
+
+/**
+ * The problems a 422 lists: "This quote cannot be priced:
+ * add_on_quantity_exceeded (drinks), promotion_not_applicable". Only the
+ * contract's problem codes count, so no word of other prose is taken for one.
+ * When nothing in the message parses, the error's own code stands for the
+ * problem, if it is one.
+ */
+export function quoteProblems(
+  message: string,
+  fallbackCode?: string,
+): { code: string; subject: string | null }[] {
+  const colon = message.indexOf(":");
+  const detail = colon >= 0 ? message.slice(colon + 1) : "";
+  const found = [...detail.matchAll(/([a-z_]+)(?: \(([a-z][a-z0-9_]*)\))?/g)]
+    .filter((m) => problemCodes.has(m[1] as string))
+    .map((m) => ({ code: m[1] as string, subject: m[2] ?? null }));
+  if (found.length === 0 && fallbackCode && problemCodes.has(fallbackCode)) {
+    return [{ code: fallbackCode, subject: null }];
+  }
+  return found;
 }
 
 const tryAgainNotice = {
@@ -476,25 +599,43 @@ function commonTrouble(failure: Failure): Trouble | null {
   return null;
 }
 
+/**
+ * Too few seats for the party. A charter whose boat is taken, or a trip with
+ * no seats left, cannot be booked at all; "choose fewer guests" would mislead.
+ */
+function capacityTrouble(charter: boolean, seatsLeft: number | null, party: string): Trouble {
+  if (charter || seatsLeft === 0) return { stop: "not_bookable" };
+  return { party };
+}
+
 /** What a failed quote means for the page. */
 export function quoteTrouble(failure: Failure, offer: TripOffer, limits: PartyLimits): Trouble {
   const common = commonTrouble(failure);
   if (common || failure.kind !== "refused") return common ?? { notice: serverNotice };
   const { status, code, message } = failure;
+  const fewer = "There aren't enough seats left for this party. Choose fewer guests.";
   if (status === 404) return { stop: "not_found" };
   if (code === "trip_not_bookable") return { stop: "not_bookable" };
   if (code === "pricing_unavailable") return { stop: "pricing" };
   if (code === "insufficient_capacity") {
-    return { party: "There aren't enough seats left for this party. Choose fewer guests." };
+    return capacityTrouble(isCharter(offer), limits.seatsLeft, fewer);
   }
   if (status !== 422) return { notice: serverNotice };
   // The page always sends a fresh key with a new body, so a reused key is ours
   // to fix, not the guest's. Its message is prose, not a problem list.
   if (code === "idempotency_key_reused") return { notice: serverNotice };
   const trouble: Trouble = {};
-  for (const problem of quoteProblems(message)) {
+  for (const problem of quoteProblems(message, code)) {
     const addOn = offer.addOns.find((a) => a.code === problem.subject);
     switch (problem.code) {
+      case "pricing_unavailable":
+        return { stop: "pricing" };
+      case "insufficient_capacity": {
+        const found = capacityTrouble(isCharter(offer), limits.seatsLeft, fewer);
+        if (found.stop) return found;
+        trouble.party = fewer;
+        break;
+      }
       case "promotion_not_applicable":
         trouble.promo = "This code can't be used for this trip. Check it, or book without it.";
         break;
@@ -520,12 +661,10 @@ export function quoteTrouble(failure: Failure, offer: TripOffer, limits: PartyLi
       case "quote_amount_too_large":
         trouble.party = "This booking is too large to pay online. Call or email to book it.";
         break;
-      case "idempotency_key_reused":
-        trouble.notice = serverNotice;
-        break;
       default:
-        // Unknown types, duplicates, a party of the wrong kind: the page's
-        // options are out of date.
+        // A ticket type or add-on the server no longer knows, a duplicate, a
+        // party of the wrong kind, a bad quantity: the page's options are out
+        // of date.
         trouble.stale = true;
     }
   }
@@ -535,8 +674,11 @@ export function quoteTrouble(failure: Failure, offer: TripOffer, limits: PartyLi
   return trouble;
 }
 
-/** What a refused checkout means for the page. The 503 retry is the caller's. */
-export function checkoutTrouble(failure: Failure, operator: string): Trouble {
+/**
+ * What a refused checkout means for the page. The 503 retry is the caller's.
+ * `charter`: the trip is a private charter, so too few seats means the boat is taken.
+ */
+export function checkoutTrouble(failure: Failure, operator: string, charter = false): Trouble {
   // Payments not configured: 409 from the operator's account, 503 from the API.
   if (failure.kind === "refused" && failure.code === "payments_unavailable") {
     return { stop: "payments" };
@@ -555,11 +697,13 @@ export function checkoutTrouble(failure: Failure, operator: string): Trouble {
       return { stop: "payments" };
     case "insufficient_capacity": {
       const seats = /Only (\d+) seat/.exec(message)?.[1];
-      return {
-        party: seats
+      return capacityTrouble(
+        charter,
+        seats === undefined ? null : Number(seats),
+        seats
           ? `Only ${seats} ${seats === "1" ? "seat is" : "seats are"} left now. Choose fewer guests.`
           : "There aren't enough seats left for this party now. Choose fewer guests.",
-      };
+      );
     }
     case "party_size_out_of_range":
       return { party: "This trip no longer takes a party of this size." };
