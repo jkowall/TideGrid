@@ -4,6 +4,30 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-10-06
 
+### G2.12c Console completion verification, October 6, 2026
+
+- Built on branch `build/g2.12c-console-completion` from `c6dbfcd` (main with G2.1 through G2.12b), as lane 3 of wave 2, beside lane 1 (email and guest self-service) and lane 2 (waivers) on disjoint paths; main's `e87ace9` (PR #13, Neon branch autoscaling) is merged in. One migration, `0008_console_completion.sql`, which the coordinator renumbers at merge. Demo acceptance items 5 and 7: the operator finds a booking, exports the day, and the totals match; one operator never reaches another's results or export.
+- API, in [packages/contracts/src/console.ts](../packages/contracts/src/console.ts) and the [checkout contract](../packages/domain-booking/README.md#console-completion-g212c):
+  - `POST /v1/staff/tenants/{tenantId}/booking-searches`: bookings across every day by the start of a reference (read as a guest quotes it), by every word of the booker's name, by part of the email, and by departure dates, 25 at a time with a keyset cursor and a count. A POST, so names and emails never enter a URL. For finance the text matches references only and the query never joins the table holding the booker;
+  - `GET .../booking-day-totals?date=`: the day's control totals from the ledger (bookings, guests, gross, discounts, fees, taxes, total charged, refunds, net, included taxes, and pending refunds);
+  - `GET .../booking-day-export?date=`: the same day as a CSV attachment with stable columns, the booker's name and email for owners and booking staff only, and a total row equal to the control totals; `no-store`, named by the operator's slug and the date only, and audited (`booking_day.exported`, with the row count);
+  - `GET` and `POST .../bookings/{bookingId}/notes`: every role reads a booking's notes (`notes.read`); owners and booking staff add them (`notes.write`), idempotent by key and audited by the note's id, never its text;
+  - the calendar's trips query refuses year 0000 in the contract, as the day list's does.
+- Migration 0008 adds `booking_notes` under tenancy rules 1 to 10 ([database README](../packages/database/README.md#booking-notes)): append-only for every role, the author, request, and time stamped from the transaction by a trigger that refuses any actor but staff, and composite keys to the booking and to a membership of the same tenant.
+- Console ([console README](../apps/operator-site/README.md#console-completion-g212c)):
+  - Search at `/bookings/search`, with designed idle, loading, no-match, error, and field-error states, Show more bookings, and the last search kept in the tab's memory so Back returns to it; finance's field reads "Booking reference" and says why;
+  - the day's totals above its trips, and Export CSV, which fetches the file same-origin and hands it to the browser under the server's file name;
+  - a Notes card on each booking, newest first, with author and the marina's time; a 500-character form for owners and booking staff whose idempotency key survives a retry of the same note;
+  - the G2.12b follow-ups: the rail shows the whole email; signing in from a deep link returns to it; the roster's scroll region is a tab stop only while it scrolls; a day beyond two years says which day it opened; and every "Sign in again" reloads its own page;
+  - the roster's party is one cell, ready for participants' names; design system: a `download` icon.
+- Decisions:
+  - Search terms travel in a POST body, never a URL, and the console keeps them in memory only, never in the address, history, or storage.
+  - A day is the marina's departure date, as on the Bookings page. Gross is trip prices and extras before discounts; total is what guests were charged; refunds count once they succeed; a refund still requested is reported as pending and counted nowhere else.
+  - The export's money is a plain decimal, never negative, with discounts and refunds in their own columns. Text a person typed is kept from running as a formula with a leading apostrophe. A day over 5,000 bookings is refused rather than cut short.
+  - Each export is audited, since it carries guests' details out of the console for two roles. Notes are read by finance too, which the form says before anyone writes.
+  - Not merged: lane 1's branch. By the coordinator's direction this pull request stays unstacked; participants' names on the roster are a small follow-up once lane 1 is on main.
+- Not done: participants and waiver status on the roster (lanes 1 and 2), staff manual booking (a later goal), screen reader and physical device tests.
+
 ### G2.12b Console booking views verification, October 6, 2026
 
 - Built on branch `build/g2.12b-console-bookings` from `632d80b` on `prep/g2.11b` (main with G2.5, G2.6, G2.7, the trips slice, and G2.11b). The owner pulled this thin piece of G2.12 forward on 2026-10-06 so the bookings they made as a guest show on the operator side; the step is recorded in the [demo build plan](v2/12-demo-build-plan.md#goal-sequence). No migration: every read uses tables G2.7 created.
