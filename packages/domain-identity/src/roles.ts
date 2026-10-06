@@ -6,9 +6,12 @@ import type { StaffRole } from "@tidegrid/contracts";
  * booking staff manage bookings and messages but not people or billing, and
  * finance reads financial records and history without changing anything.
  * Everyone reads the catalog and calendar; only owners change the catalog, and
- * owners and booking staff open, close, cancel, and complete trips. Owners and
- * booking staff read bookings with the booker's contact details; every role
- * reads payment exceptions, which carry no personal data (G2.7).
+ * owners and booking staff open, close, cancel, and complete trips. Every role
+ * reads bookings as money: references, parties, totals, payments, refunds,
+ * and payment exceptions (`payments.read`). Only owners and booking staff
+ * (`bookings.read`) also receive the booker's name and email, which the API
+ * leaves out of every response for anyone else, and read trip rosters (G2.7,
+ * G2.12b).
  */
 export type Permission =
   | "members.read"

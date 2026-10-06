@@ -16,8 +16,9 @@ import {
  * Operator console shell. It hosts the G2.2 sign-in flows unchanged: Cloudflare
  * Access on deployed environments and the magic link locally. Both reach the
  * same session and the same `/api/v1/me`, and every call stays same-origin
- * under /api, forwarded to the API's ConsoleGateway. Calendar and bookings
- * arrive in G2.12; the shell gives them their place and designed empty states.
+ * under /api, forwarded to the API's ConsoleGateway. The shell (ConsoleShell)
+ * routes the signed-in pages: the overview, the calendar (G2.12a), and the
+ * booking views (G2.12b).
  */
 
 type State =

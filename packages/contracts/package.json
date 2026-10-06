@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./references": "./src/references.ts",
     "./openapi.json": "./generated/openapi.json"
   },
   "scripts": {

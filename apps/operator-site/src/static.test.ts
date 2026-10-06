@@ -83,6 +83,53 @@ describe("calendar styles", () => {
   });
 });
 
+describe("booking view styles (G2.12b)", () => {
+  const bookingsCss = readFileSync(new URL("./bookings/bookings.css", import.meta.url), "utf8");
+
+  it("keeps the list's Today pill as legible as the calendar's", () => {
+    const pill = rule(bookingsCss, ".bk-today");
+    expect(pill).toMatch(/color:\s*var\(--tg-tide-lime\);/);
+    const tint = /background:\s*(rgb\([^)]*\));/.exec(pill)?.[1] ?? "";
+    const ground = over(tint, token("--tg-harbor"));
+    expect(contrastRatio(token("--tg-tide-lime"), ground)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("uses !important only inside the print rules, where paper must beat the dark console", () => {
+    const code = bookingsCss.replace(/\/\*[\s\S]*?\*\//g, "");
+    const start = code.indexOf("@media print {");
+    expect(start).toBeGreaterThan(0);
+    expect(code.slice(0, start)).not.toContain("!important");
+  });
+
+  it("prints the roster alone: no navigation rail, tools, or page header on paper", () => {
+    const print = bookingsCss.slice(bookingsCss.indexOf("@media print {"));
+    for (const hidden of [".console-rail", ".roster-tools"]) {
+      expect(print).toContain(hidden);
+    }
+    // The roster has its own heading; every other page keeps the page's, and its reference.
+    expect(print).toContain(".console-main:has(.roster) .console-page-header");
+    expect(print).not.toMatch(/^\s*\.console-page-header,?\s*$/m);
+    expect(print).toMatch(/\.roster-table thead \{\s*display: table-header-group;/);
+  });
+
+  it("prints every page with paper colors, not the dark console's light text", () => {
+    const print = bookingsCss.slice(bookingsCss.indexOf("@media print {"));
+    const paper = rule(print, "html.tg-dark");
+    expect(paper).toContain("color-scheme: light;");
+    for (const [name, value] of [
+      ["--surface-raised", "#fff"],
+      ["--text-strong", "#000"],
+      ["--text-body", "#000"],
+      ["--text-muted", "#333"],
+      ["--link", "#000"],
+      ["--status-ready", "var(--tg-status-ready)"],
+      ["--status-blocked", "var(--tg-status-blocked)"],
+    ]) {
+      expect(paper).toContain(`${name}: ${value};`);
+    }
+  });
+});
+
 describe("static files", () => {
   it("allows no inline styles: the console styles only from its files and the CSSOM", () => {
     const headers = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");

@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@tidegrid/database": "workspace:*",
+    "@tidegrid/domain-booking": "workspace:*",
     "@tidegrid/domain-catalog": "workspace:*",
+    "@tidegrid/domain-payments": "workspace:*",
     "@tidegrid/domain-pricing": "workspace:*",
     "@tidegrid/tenant-config": "workspace:*",
     "postgres": "^3.4.0"

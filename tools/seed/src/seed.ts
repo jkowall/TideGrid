@@ -8,8 +8,15 @@
  *
  * SEED_OWNER_EMAILS grants owner access to both demo operators to addresses
  * supplied at seed time, so personal addresses never enter the repository.
+ *
+ *   DATABASE_URL=... SEED_DEMO_BOOKINGS=1 pnpm db:seed
+ *
+ * SEED_DEMO_BOOKINGS=1 also books a few synthetic guests through the real
+ * checkout and the fake provider (bookings.ts). It takes about a minute the
+ * first time, because one payment must arrive after its checkout ran out.
  */
 import postgres from "postgres";
+import { seedDemoBookings } from "./bookings.ts";
 import { seedBrands } from "./brands.ts";
 import { seedCatalog } from "./catalog.ts";
 import { seedPaymentAccounts } from "./payments.ts";
@@ -112,6 +119,10 @@ try {
         : ""),
   );
   await seedBrands(sql, { localHostnames: process.env.SEED_LOCAL_HOSTNAMES === "1" });
+  // Off by default: bookings made through the real checkout and verified
+  // fake-provider events, so the console's booking views have something to
+  // show (G2.12b).
+  if (process.env.SEED_DEMO_BOOKINGS === "1") await seedDemoBookings(url, sql, demoTenants);
 } finally {
   await sql.end();
 }

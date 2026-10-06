@@ -20,3 +20,13 @@ export const roleNames: Record<StaffRole, string> = {
 export function canChangeTrips(role: StaffRole): boolean {
   return role === "owner" || role === "booking_staff";
 }
+
+/**
+ * Who receives the booker's name and email, and reads trip rosters (G2.12b).
+ * This mirrors the API's `bookings.read` permission for display only. The API
+ * leaves the details out of every answer to anyone else, so the console never
+ * relies on hiding them.
+ */
+export function canSeeGuests(role: StaffRole): boolean {
+  return role === "owner" || role === "booking_staff";
+}

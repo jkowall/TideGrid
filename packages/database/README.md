@@ -44,6 +44,8 @@ A state-changing command follows one shape, all inside one tenant transaction:
 
 Keys are scoped by tenant, operation, and principal. Only successful responses are stored.
 
+A read whose statements must agree with each other, such as a page and the counts beside it, passes `snapshotRead` as `inTenantTransaction`'s last argument (G2.12b): the transaction runs REPEATABLE READ and READ ONLY, so every statement sees the moment of the first and nothing can be written. The level is set before the tenant context, because PostgreSQL fixes it at the first statement. Commands keep the default READ COMMITTED, which their locking needs. `src/snapshot.integration.test.ts` holds this.
+
 ## Brand configuration
 
 Migration 0004 adds two tenant-owned, append-only tables under rules 1 to 8:

@@ -5,6 +5,16 @@ async function errorCode(res: Response): Promise<string> {
   return ((await res.json()) as { error: { code: string } }).error.code;
 }
 
+const tenant = "11111111-1111-4111-8111-111111111111";
+const someId = "22222222-2222-4222-8222-222222222222";
+/** The console's booking reads (G2.12b), one address each. */
+const bookingViews = [
+  `/v1/staff/tenants/${tenant}/bookings?date=2026-10-06`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}`,
+  `/v1/staff/tenants/${tenant}/booking-references/QKG6ERBF`,
+  `/v1/staff/tenants/${tenant}/trips/${someId}/roster`,
+];
+
 describe("the public entry hides staff and sign-in routes", () => {
   for (const [method, path] of [
     ["GET", "/v1/me"],
@@ -12,6 +22,8 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["POST", "/v1/auth/sessions"],
     ["DELETE", "/v1/auth/sessions/current"],
     ["GET", "/v1/staff/tenants/11111111-1111-4111-8111-111111111111/members"],
+    // Console booking views (G2.12b).
+    ...bookingViews.map((path) => ["GET", path] as const),
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -51,6 +63,12 @@ describe("staff authentication fails closed before touching the database", () =>
   it("authenticates before revealing whether a tenant id is valid", async () => {
     const res = await SELF.fetch("http://localhost/v1/staff/tenants/not-a-uuid/members");
     expect(res.status).toBe(401);
+  });
+
+  it.each(bookingViews)("asks for a session before any booking read: %s", async (path) => {
+    const res = await SELF.fetch(`http://localhost${path}`);
+    expect(res.status).toBe(401);
+    expect(await errorCode(res)).toBe("unauthenticated");
   });
 });
 
@@ -133,6 +151,11 @@ describe("contract", () => {
         "/v1/fake-provider/payments/{paymentRef}/events/{eventId}/redeliver",
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/bookings",
         "/v1/staff/tenants/{tenantId}/finalization-exceptions",
+        // Console booking views (G2.12b).
+        "/v1/staff/tenants/{tenantId}/bookings",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}",
+        "/v1/staff/tenants/{tenantId}/booking-references/{reference}",
+        "/v1/staff/tenants/{tenantId}/trips/{tripId}/roster",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are

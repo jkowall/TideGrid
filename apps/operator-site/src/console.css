@@ -248,13 +248,21 @@
 .console-nav {
   grid-area: nav;
 }
+/* Four sections (G2.12b added Exceptions): two by two on a phone, where a
+   quarter of the row is too narrow for "Exceptions" and its icon; one row on
+   a tablet; one column in the desktop rail. */
 .console-nav ul {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
+}
+@media (min-width: 40rem) {
+  .console-nav ul {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 @media (min-width: 64rem) {
   .console-nav ul {
@@ -283,30 +291,27 @@
 .console-nav a .tg-icon {
   color: var(--text-muted);
 }
-/* Below 26rem a label and its icon no longer fit a third of the row with room
-   to spare (at 390 px "Overview" filled its link exactly); the labels stay,
-   the decorative icons go. */
-@media (max-width: 25.99rem) {
-  .console-nav a .tg-icon {
-    display: none;
-  }
-}
 .console-nav a:hover {
   background: var(--surface-hover);
   color: var(--text-strong);
 }
-.console-nav a[aria-current="page"] {
+/* "page" is the section's own page; "true" is a page inside it, such as one
+   booking or a roster. Both mark the section the person is in. */
+.console-nav a[aria-current="page"],
+.console-nav a[aria-current="true"] {
   background: rgb(167 209 41 / 0.14);
   box-shadow: inset 0 -3px 0 var(--tg-tide-lime);
   color: var(--text-strong);
   font-weight: var(--weight-semibold);
 }
 @media (min-width: 64rem) {
-  .console-nav a[aria-current="page"] {
+  .console-nav a[aria-current="page"],
+  .console-nav a[aria-current="true"] {
     box-shadow: inset 3px 0 0 var(--tg-tide-lime);
   }
 }
-.console-nav a[aria-current="page"] .tg-icon {
+.console-nav a[aria-current="page"] .tg-icon,
+.console-nav a[aria-current="true"] .tg-icon {
   color: var(--tg-tide-lime);
 }
 

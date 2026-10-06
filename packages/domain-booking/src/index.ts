@@ -12,6 +12,29 @@ export {
   MAX_OPEN_CHECKOUTS_PER_CLIENT,
   ownerRefFor,
 } from "./checkout.ts";
+// Console reads (G2.12b).
+export {
+  type BookingDetailView,
+  type ConsoleExceptionView,
+  DAY_TRIPS_LIMIT,
+  type DayBookingsResult,
+  type DayBookingView,
+  type DayTripView,
+  type ExceptionsPageResult,
+  type ExtraView,
+  extrasOf,
+  findBookingByReference,
+  getBookingDetail,
+  getTripRoster,
+  listDayBookings,
+  listExceptionsPage,
+  maskProviderReference,
+  offsetDateTime,
+  type PartyView,
+  partyOf,
+  type RosterView,
+  sumByCode,
+} from "./console.ts";
 export {
   type HandledEvent,
   handleVerifiedEvent,
