@@ -114,6 +114,9 @@ const description = (element: Element) =>
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
+  // The shell remembers the chosen operator; every test starts with none.
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {

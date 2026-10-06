@@ -103,10 +103,30 @@ describe("booking view styles (G2.12b)", () => {
 
   it("prints the roster alone: no navigation rail, tools, or page header on paper", () => {
     const print = bookingsCss.slice(bookingsCss.indexOf("@media print {"));
-    for (const hidden of [".console-rail", ".roster-tools", ".console-page-header"]) {
+    for (const hidden of [".console-rail", ".roster-tools"]) {
       expect(print).toContain(hidden);
     }
+    // The roster has its own heading; every other page keeps the page's, and its reference.
+    expect(print).toContain(".console-main:has(.roster) .console-page-header");
+    expect(print).not.toMatch(/^\s*\.console-page-header,?\s*$/m);
     expect(print).toMatch(/\.roster-table thead \{\s*display: table-header-group;/);
+  });
+
+  it("prints every page with paper colors, not the dark console's light text", () => {
+    const print = bookingsCss.slice(bookingsCss.indexOf("@media print {"));
+    const paper = rule(print, "html.tg-dark");
+    expect(paper).toContain("color-scheme: light;");
+    for (const [name, value] of [
+      ["--surface-raised", "#fff"],
+      ["--text-strong", "#000"],
+      ["--text-body", "#000"],
+      ["--text-muted", "#333"],
+      ["--link", "#000"],
+      ["--status-ready", "var(--tg-status-ready)"],
+      ["--status-blocked", "var(--tg-status-blocked)"],
+    ]) {
+      expect(paper).toContain(`${name}: ${value};`);
+    }
   });
 });
 

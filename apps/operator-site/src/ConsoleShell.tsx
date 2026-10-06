@@ -102,6 +102,48 @@ function usePath(): {
   return { path: at.path, visit: at.visit, moved, navigate };
 }
 
+/**
+ * The operator a person chose last, so a reload or a link opened in a new tab
+ * shows the operator a booking or roster address belongs to. This tab's own
+ * choice comes first, then the last choice in any tab. It is an operator id,
+ * nothing personal; storage that is blocked or empty means the first operator.
+ */
+const scopeKey = "tidegrid.console.operator";
+
+function storages(): Storage[] {
+  const found: Storage[] = [];
+  for (const get of [() => window.sessionStorage, () => window.localStorage]) {
+    try {
+      found.push(get());
+    } catch {
+      // Storage is blocked for this page.
+    }
+  }
+  return found;
+}
+
+function rememberedScope(memberships: Membership[]): string | undefined {
+  for (const storage of storages()) {
+    try {
+      const id = storage.getItem(scopeKey);
+      if (id && memberships.some((m) => m.tenantId === id)) return id;
+    } catch {
+      // Unreadable storage is no choice.
+    }
+  }
+  return memberships[0]?.tenantId;
+}
+
+function rememberScope(tenantId: string): void {
+  for (const storage of storages()) {
+    try {
+      storage.setItem(scopeKey, tenantId);
+    } catch {
+      // Full or blocked storage: the choice lasts until the page reloads.
+    }
+  }
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
   return (
@@ -251,7 +293,7 @@ export function ConsoleShell({
 }) {
   const { path, visit, moved, navigate } = usePath();
   const { principal, memberships } = me;
-  const [scopeId, setScopeId] = useState(memberships[0]?.tenantId);
+  const [scopeId, setScopeId] = useState(() => rememberedScope(memberships));
   // Switching operators on a page restarts pages keyed on the operator. Their
   // headings must not take focus then: the person is still in the picker, and
   // moving them away on a change of value would be a surprise.
@@ -262,11 +304,12 @@ export function ConsoleShell({
   }, [visit]);
   const focusPage = switchedOn !== visit && (focusHeading || moved);
   const selectScope = (tenantId: string) => {
-    // A trip filter names one operator's trip; the next operator's list starts
-    // from every trip.
+    // A trip filter names one operator's trip, and a day is one marina's: the
+    // next operator's list starts from its own today and every trip.
     const params = new URLSearchParams(window.location.search);
-    if (params.has("trip")) {
+    if (params.has("trip") || params.has("day")) {
       params.delete("trip");
+      params.delete("day");
       const search = params.toString() ? `?${params}` : "";
       window.history.replaceState(
         window.history.state,
@@ -275,6 +318,7 @@ export function ConsoleShell({
       );
     }
     setScopeId(tenantId);
+    rememberScope(tenantId);
     setSwitchedOn(visit);
   };
   const selected = memberships.find((m) => m.tenantId === scopeId) ?? memberships[0];

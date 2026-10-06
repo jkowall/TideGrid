@@ -7,14 +7,23 @@ import {
   Skeleton,
   StatusBadge,
 } from "@tidegrid/design-system/components";
-import { formatDate, formatMoney, formatTripTime } from "@tidegrid/design-system/format";
+import { formatMoney, formatTripTime, todayIn } from "@tidegrid/design-system/format";
 import { useEffect, useRef, useState } from "react";
+import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, roleNames } from "../roles.ts";
 import { loadExceptions, type ExceptionsPage as Page } from "./api.ts";
-import { bookingsHref, exceptionRefund, exceptionTitle, guestsText, instantText } from "./model.ts";
+import { MaskedReference } from "./MaskedReference.tsx";
+import {
+  bookingsHref,
+  dayText,
+  exceptionRefund,
+  exceptionTitle,
+  guestsText,
+  instantText,
+} from "./model.ts";
 import { canRetry, ReadFailed } from "./States.tsx";
 
 /**
@@ -69,18 +78,20 @@ export function ExceptionsPage({
     return () => controller.abort();
   }, [tenantId, attempt]);
 
+  // Focus moves on only from a control that went away with the change, never
+  // from where the person has moved it while the page loaded.
   useEffect(() => {
     if (load.kind === "loading") return;
-    if (focusHeadingOnLoad.current) {
-      focusHeadingOnLoad.current = false;
-      heading.current?.focus();
-      return;
-    }
-    const first = focusExceptionId.current;
-    if (load.kind === "ready" && first) {
+    const toHeading = focusHeadingOnLoad.current;
+    focusHeadingOnLoad.current = false;
+    let first: string | null = null;
+    if (load.kind === "ready") {
+      first = focusExceptionId.current;
       focusExceptionId.current = null;
-      (document.getElementById(exceptionHeadingId(first)) ?? heading.current)?.focus();
     }
+    if ((!toHeading && first === null) || !focusIsLost()) return;
+    const older = !toHeading && first ? document.getElementById(exceptionHeadingId(first)) : null;
+    (older ?? heading.current)?.focus();
   }, [load]);
 
   const loadOlder = () => {
@@ -215,8 +226,11 @@ function ExceptionItem({
         <dt>Trip</dt>
         <dd>
           {/* The trip's bookings, to see who has the seats now. */}
-          <ConsoleLink href={bookingsHref(e.trip.localDate, e.trip.tripId)}>
-            {e.trip.productName}, {formatDate(e.trip.localDate, "medium")}, {time}
+          <ConsoleLink
+            href={bookingsHref(e.trip.localDate, e.trip.tripId)}
+            className="tap-target ex-item__trip"
+          >
+            {e.trip.productName}, {dayText(e.trip.localDate, "medium", todayIn(zone))}, {time}
           </ConsoleLink>
         </dd>
         <dt>Party</dt>
@@ -244,7 +258,7 @@ function ExceptionItem({
         <dt>Provider reference</dt>
         <dd>
           {e.payment.providerReference ? (
-            <span className="bd-code">{e.payment.providerReference}</span>
+            <MaskedReference value={e.payment.providerReference} />
           ) : (
             "Not recorded"
           )}

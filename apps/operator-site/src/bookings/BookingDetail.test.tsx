@@ -136,6 +136,26 @@ describe("one booking", () => {
     expectNoPersonalDataInAddresses();
   });
 
+  it("names the year of a trip in another year than this one at the marina", async () => {
+    const nextYear = bookingDetail();
+    nextYear.trip = {
+      ...nextYear.trip,
+      localDate: "2027-11-04",
+      startsAt: "2027-11-04T22:00:00.000Z",
+      endsAtLocal: "2027-11-04T19:30:00-04:00",
+    };
+    api({ [route.booking(bookingId)]: answer("owner", nextYear) });
+    const { container } = renderDetail("owner");
+    await loaded();
+    expect(terms(card("Trip")).When).toBe(
+      "Thursday, November 4, 2027, 6:00 PM to 7:30 PM (1 h 30 min, New York time)",
+    );
+    expect(screen.getByRole("link", { name: "Bookings on Thu, Nov 4, 2027" })).toBeTruthy();
+    expect(text(container.querySelector('p[role="status"]'))).toBe(
+      "Booking QKG6ERBF, Sunset Harbor Cruise, Thursday, November 4, 2027.",
+    );
+  });
+
   it("loads the booking while React runs effects twice in development", async () => {
     // The console's entry point wraps everything in StrictMode, which starts every load twice.
     api({ [route.booking(bookingId)]: answer("owner") });
@@ -290,10 +310,15 @@ describe("the payment", () => {
     expect(facts.Status).toBe("Paid");
     expect(facts.Amount).toBe("$131.09");
     expect(facts.Method).toBe("Test payment (demo provider)");
-    // Masked by the API; the console shows what it was given, and says what it is.
-    expect(text(payment.querySelector(".bd-code"))).toBe("fpay_••••a1B2");
-    expect(facts["Provider reference"]).toBe(
-      "fpay_••••a1B2Shortened: the start and the last four characters.",
+    // Masked by the API; the console shows what it was given, and says what it is. A screen
+    // reader hears the ending rather than four bullets.
+    const code = payment.querySelector(".bd-code");
+    expect(text(code)).toBe("fpay_••••a1B2");
+    expect(code?.getAttribute("aria-hidden")).toBe("true");
+    expect(code?.nextElementSibling?.className).toBe("tg-visually-hidden");
+    expect(text(code?.nextElementSibling)).toBe("fpay, ending in a1B2");
+    expect(text(code?.parentElement?.querySelector(".bd-block"))).toBe(
+      "Shortened: the start and the last four characters.",
     );
     // Received on the marina's clock: 2:16 PM there.
     expect(facts.Received).toBe("Tue, Oct 6, 2:16 PM EDT");
@@ -309,6 +334,9 @@ describe("the payment", () => {
     await loaded();
     expect(terms(card("Payment")).Method).toBe("Stripe");
     expect(text(card("Payment").querySelector(".bd-code"))).toBe("pi_••••9zXy");
+    expect(text(card("Payment").querySelector(".bd-code + .tg-visually-hidden"))).toBe(
+      "pi, ending in 9zXy",
+    );
   });
 
   it("says when a payment has no reference or time yet", async () => {
@@ -558,6 +586,25 @@ describe("when the booking does not load", () => {
     const heading = await loaded();
     expect(screen.queryByRole("alert")).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(heading));
+  });
+
+  it("leaves focus where the person moved it while Try again worked", async () => {
+    const retry = deferred();
+    api({ [route.booking(bookingId)]: [dropped, retry.answer] });
+    renderDetail("owner");
+    const button = within(await screen.findByRole("alert")).getByRole("button", {
+      name: "Try again",
+    });
+    button.focus();
+    fireEvent.click(button);
+    // Somewhere else on the page, such as the console's navigation.
+    const elsewhere = document.body.appendChild(document.createElement("button"));
+    elsewhere.focus();
+    retry.release(json(bookingBody()));
+    await loaded();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
   });
 
   it("hands focus to the page's heading when Try again ends with nothing left to try", async () => {

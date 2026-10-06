@@ -10,7 +10,7 @@ import type {
 } from "@tidegrid/contracts";
 import { iconNames } from "@tidegrid/design-system/components";
 import { formatMoney } from "@tidegrid/design-system/format";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { capacityParts, capacityText } from "../calendar/model.ts";
 import { call, errorCode, failureOf, tenantPath } from "../http.ts";
 import { canSeeGuests, roleNames } from "../roles.ts";
@@ -33,7 +33,9 @@ import {
   bookingHref,
   bookingsHref,
   clampDay,
+  countText,
   dayBounds,
+  dayText,
   exceptionRefund,
   exceptionTitle,
   extrasText,
@@ -47,6 +49,7 @@ import {
   readDay,
   readTrip,
   rosterHref,
+  spokenReference,
   timelineLabel,
 } from "./model.ts";
 
@@ -169,21 +172,32 @@ describe("parties and extras", () => {
   });
 
   it("names a ticket party by its counts, in the order sold, and a charter as sold", () => {
-    expect(partyDetail(mayaBooking.party)).toBe("2 Adult, 1 Child (3 to 12)");
+    // A count is held to what it counts, and a range stays whole, wherever a line breaks.
+    expect(partyDetail(mayaBooking.party)).toBe(
+      `2${nbsp}Adult, 1${nbsp}Child (3${nbsp}to${nbsp}12)`,
+    );
     expect(
       partyDetail({
         kind: "tickets",
         guests: 1,
         tickets: [{ code: "a", name: "Adult", quantity: 1 }],
       }),
-    ).toBe("1 Adult");
+    ).toBe(`1${nbsp}Adult`);
     expect(partyDetail(priyaBooking.party)).toBe("Whole boat, up to 12 guests");
+  });
+
+  it("keeps a count with its name and a bracketed range whole, and nothing else", () => {
+    expect(countText(2, "Snorkel set rental")).toBe(`2${nbsp}Snorkel set rental`);
+    expect(countText(1, "Child (5 to 12)")).toBe(`1${nbsp}Child (5${nbsp}to${nbsp}12)`);
+    expect(countText(3, "Seat (upper deck) (no view)")).toBe(
+      `3${nbsp}Seat (upper${nbsp}deck) (no${nbsp}view)`,
+    );
   });
 
   it("lists extras with their quantities, or says None", () => {
     expect(extrasText([])).toBe("None");
-    expect(extrasText(mayaBooking.extras)).toBe("1 Souvenir photo");
-    expect(extrasText(luisBooking.extras)).toBe("1 Souvenir photo, 2 Drink voucher");
+    expect(extrasText(mayaBooking.extras)).toBe(`1${nbsp}Souvenir photo`);
+    expect(extrasText(luisBooking.extras)).toBe(`1${nbsp}Souvenir photo, 2${nbsp}Drink voucher`);
   });
 });
 
@@ -259,9 +273,49 @@ describe("a payment in words", () => {
     expect(providerName("fake")).toBe("Test payment (demo provider)");
     expect(providerName("stripe")).toBe("Stripe");
   });
+
+  it("says a masked provider reference without its bullets", () => {
+    expect(spokenReference("fpay_••••hGvm")).toBe("fpay, ending in hGvm");
+    expect(spokenReference("pi_••••9zXy")).toBe("pi, ending in 9zXy");
+    expect(spokenReference("fpay_••••")).toBe("fpay, the rest hidden");
+    expect(spokenReference("••••a1B2")).toBe("ending in a1B2");
+    expect(spokenReference("••••")).toBe("the rest hidden");
+    // Anything not masked is said as it is.
+    expect(spokenReference("Not recorded")).toBe("Not recorded");
+  });
+});
+
+describe("days in words", () => {
+  it("names the year only when it is not this year at the marina", () => {
+    expect(dayText("2026-11-04", "full", "2026-11-04")).toBe("Wednesday, November 4");
+    expect(dayText("2026-01-01", "medium", "2026-12-31")).toBe("Thu, Jan 1");
+    expect(dayText("2027-10-06", "full", "2026-11-04")).toBe("Wednesday, October 6, 2027");
+    expect(dayText("2025-12-31", "medium", "2026-01-01")).toBe("Wed, Dec 31, 2025");
+  });
 });
 
 describe("instants on the marina's clock", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-04T17:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("names the year of an instant in another year there", () => {
+    expect(instantText("2025-12-31T23:30:00.000Z", marinaZone)).toBe(
+      `Wed, Dec 31, 2025, 6:30${nbsp}PM${nbsp}EST`,
+    );
+    // Already January 1, 2026 in Tokyo, but still December 31, 2025 at the marina.
+    expect(instantText("2026-01-01T04:30:00.000Z", marinaZone)).toBe(
+      `Wed, Dec 31, 2025, 11:30${nbsp}PM${nbsp}EST`,
+    );
+    expect(instantText("2026-01-01T05:30:00.000Z", marinaZone)).toBe(
+      `Thu, Jan 1, 12:30${nbsp}AM${nbsp}EST`,
+    );
+  });
+
   it("names the zone and reads the marina's clock, not the viewer's", () => {
     expect(instantText("2026-10-06T12:17:00.000Z", marinaZone)).toBe(
       `Tue, Oct 6, 8:17${nbsp}AM${nbsp}EDT`,

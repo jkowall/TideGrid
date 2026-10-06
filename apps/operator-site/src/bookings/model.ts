@@ -17,6 +17,7 @@ import {
   isLocalDate,
   type LocalDate,
   later,
+  todayIn,
 } from "@tidegrid/design-system/format";
 import { horizonDays } from "../calendar/model.ts";
 
@@ -27,6 +28,12 @@ import { horizonDays } from "../calendar/model.ts";
  */
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * U+00A0, as the format module joins a time to its zone's name. It also keeps
+ * a quantity on the same line as what it counts.
+ */
+const nbsp = String.fromCharCode(0x00a0);
 
 export function isUuid(value: string): boolean {
   return uuidPattern.test(value);
@@ -42,6 +49,14 @@ export function dayBounds(today: LocalDate): { first: LocalDate; last: LocalDate
 export function clampDay(day: LocalDate, today: LocalDate): LocalDate {
   const { first, last } = dayBounds(today);
   return later(first, earlier(day, last));
+}
+
+/**
+ * A day in words, with its year when that is not this year on the marina's
+ * clock: "Saturday, October 10", "Wednesday, October 6, 2027".
+ */
+export function dayText(day: LocalDate, style: "full" | "medium", today: LocalDate): string {
+  return formatDate(day, style, { year: day.slice(0, 4) !== today.slice(0, 4) });
 }
 
 /** `?day=` from the address, kept within two years of today, or today when missing or unreadable. */
@@ -72,15 +87,25 @@ export function guestsText(guests: number): string {
   return guests === 1 ? "1 guest" : `${guests} guests`;
 }
 
+/**
+ * A count and what it counts, "2 Adult" or "1 Child (3 to 12)", kept together
+ * where a line breaks: the count stays with its name, and a bracketed range
+ * stays whole.
+ */
+export function countText(quantity: number, name: string): string {
+  const whole = name.replace(/\([^)]*\)/g, (range) => range.replaceAll(" ", nbsp));
+  return `${quantity}${nbsp}${whole}`;
+}
+
 /** "2 Adult, 1 Child (3 to 12)", or the charter as sold. */
 export function partyDetail(party: BookingParty): string {
   if (party.kind === "charter") return party.charter;
-  return party.tickets.map((t) => `${t.quantity} ${t.name}`).join(", ");
+  return party.tickets.map((t) => countText(t.quantity, t.name)).join(", ");
 }
 
 /** "1 Souvenir photo, 2 Drink voucher", or "None". */
 export function extrasText(extras: readonly BookingExtra[]): string {
-  return extras.length === 0 ? "None" : extras.map((e) => `${e.quantity} ${e.name}`).join(", ");
+  return extras.length === 0 ? "None" : extras.map((e) => countText(e.quantity, e.name)).join(", ");
 }
 
 export interface StatusCopy {
@@ -122,18 +147,31 @@ export function providerName(provider: "fake" | "stripe"): string {
   return provider === "fake" ? "Test payment (demo provider)" : "Stripe";
 }
 
-// Times -------------------------------------------------------------------------------
+const mask = "••••";
 
-/** U+00A0, as the format module joins a time to its zone's name. */
-const nbsp = String.fromCharCode(0x00a0);
+/**
+ * A masked provider reference as a screen reader should say it, without the
+ * bullets: "fpay_••••hGvm" is "fpay, ending in hGvm".
+ */
+export function spokenReference(masked: string): string {
+  const at = masked.indexOf(mask);
+  if (at < 0) return masked;
+  const prefix = masked.slice(0, at).replace(/_$/, "");
+  const end = masked.slice(at + mask.length);
+  const rest = end ? `ending in ${end}` : "the rest hidden";
+  return prefix ? `${prefix}, ${rest}` : rest;
+}
+
+// Times -------------------------------------------------------------------------------
 
 /**
  * An instant on the marina's clock, named with the zone's short name, since
- * an instant is not a trip's stored wall clock: "Tue, Oct 6, 8:17 AM EDT".
+ * an instant is not a trip's stored wall clock: "Tue, Oct 6, 8:17 AM EDT",
+ * with the year when it is not this year there.
  */
 export function instantText(instant: string, timeZone: string): string {
   const at = inZone(instant, timeZone);
-  return `${formatDate(at.date, "medium")}, ${at.time}${nbsp}${at.abbreviation}`;
+  return `${dayText(at.date, "medium", todayIn(timeZone))}, ${at.time}${nbsp}${at.abbreviation}`;
 }
 
 const timelineLabels: Record<BookingTimelineEvent["kind"], string> = {

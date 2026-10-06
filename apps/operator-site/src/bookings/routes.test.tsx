@@ -11,6 +11,7 @@ import { ConsoleButtonLink, ConsoleLink, NavigationProvider } from "../navigatio
 import {
   type Answer,
   api,
+  asSeenBy,
   bookingDetail,
   bookingIds,
   type Call,
@@ -143,6 +144,9 @@ beforeEach(() => {
   // Wednesday noon in New York, which is already Thursday 2 AM in Tokyo.
   vi.setSystemTime(new Date("2026-11-04T17:00:00Z"));
   window.history.replaceState(null, "", "/");
+  // The shell remembers the chosen operator; every test starts with none.
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 afterEach(() => {
@@ -372,8 +376,8 @@ describe("following a link with a query string", () => {
     fireEvent.click(screen.getByRole("link", { name: "Bookings on this trip" }));
     await tripSection(/Sunset Harbor Cruise/);
     expect(dayRequests(calls)).toEqual([`date=2026-11-04&tripId=${sunset}`]);
-    // Today at the marina is left out of the address once the catalog has said where it is.
-    await waitFor(() => expect(params()).toEqual({ trip: sunset }));
+    // A trip travels with its day in the address, so the address still works tomorrow.
+    await waitFor(() => expect(params()).toEqual({ day: "2026-11-04", trip: sunset }));
     expect(window.location.pathname).toBe("/bookings");
   });
 
@@ -390,7 +394,7 @@ describe("following a link with a query string", () => {
     fireEvent.click(screen.getByRole("link", { name: "Bookings on Wed, Nov 4" }));
     await tripSection(/Sunset Harbor Cruise/);
     expect(dayRequests(calls)).toEqual(["date=2026-11-04", `date=2026-11-04&tripId=${sunset}`]);
-    await waitFor(() => expect(params()).toEqual({ trip: sunset }));
+    await waitFor(() => expect(params()).toEqual({ day: "2026-11-04", trip: sunset }));
   });
 
   it("opens a trip's bookings from a payment exception", async () => {
@@ -517,14 +521,15 @@ describe("one operator's page never carries over to another", () => {
     expect(document.activeElement).toBe(picker);
   });
 
-  // A trip filter names one operator's trip, and lives in the address. An operator switch drops
-  // it, so the next operator's list does not ask for a trip that is not its own.
-  it("drops the first operator's trip filter when another operator is chosen", async () => {
+  // A trip filter names one operator's trip, and its day is one marina's; both live in the address.
+  // An operator switch drops them, so the next operator's list does not ask for a trip that is
+  // not its own, or for a day that is another marina's today.
+  it("drops the first operator's trip filter and its day when another operator is chosen", async () => {
     const { reefDays } = twoOperators();
     renderShell("/bookings", both());
     await tripSection(/Sunset Harbor Cruise/);
     fireEvent.change(screen.getByRole("combobox", { name: "Trip" }), { target: { value: sunset } });
-    await waitFor(() => expect(window.location.search).toBe(`?trip=${sunset}`));
+    await waitFor(() => expect(params()).toEqual({ day: "2026-11-04", trip: sunset }));
 
     fireEvent.change(screen.getByRole("combobox", { name: "Operator" }), {
       target: { value: reef },
@@ -536,6 +541,66 @@ describe("one operator's page never carries over to another", () => {
     expect(screen.queryByText(/doesn't depart on/)).toBeNull();
     expect((screen.getByRole("combobox", { name: "Trip" }) as HTMLSelectElement).value).toBe("");
     expect(window.location.search).toBe("");
+  });
+
+  it("remembers the operator chosen, so a reload opens a booking's address with it", async () => {
+    twoOperators({
+      [route.booking(booking, reef)]: () => json({ booking: asSeenBy("finance", bookingDetail()) }),
+    });
+    const first = renderShell("/bookings", both());
+    await tripSection(/Sunset Harbor Cruise/);
+    fireEvent.change(screen.getByRole("combobox", { name: "Operator" }), {
+      target: { value: reef },
+    });
+    await screen.findByRole("heading", { level: 2, name: /^Tuesday, November 3/ });
+    first.unmount();
+
+    // The same tab, loaded again at a Reef booking's address.
+    renderShell(`/bookings/${booking}`, both());
+    await h1("Booking QKG6ERBF");
+    expect((screen.getByRole("combobox", { name: "Operator" }) as HTMLSelectElement).value).toBe(
+      reef,
+    );
+    expect(screen.queryByText("This booking isn't here")).toBeNull();
+  });
+
+  it("opens a new tab with the operator chosen last in any tab", async () => {
+    twoOperators();
+    window.localStorage.setItem("tidegrid.console.operator", reef);
+    renderShell("/bookings", both());
+    await screen.findByRole("heading", { level: 2, name: /^Tuesday, November 3/ });
+    expect((screen.getByRole("combobox", { name: "Operator" }) as HTMLSelectElement).value).toBe(
+      reef,
+    );
+  });
+
+  it("starts with the first operator when the one remembered is not the person's", async () => {
+    const { harborDays } = twoOperators();
+    window.sessionStorage.setItem(
+      "tidegrid.console.operator",
+      "7d1e5b3a-1c2f-4a8e-9b61-0a1c2e3f4a99",
+    );
+    renderShell("/bookings", both());
+    await tripSection(/Sunset Harbor Cruise/);
+    expect(harborDays).toEqual(["date=2026-11-04"]);
+    expect((screen.getByRole("combobox", { name: "Operator" }) as HTMLSelectElement).value).toBe(
+      membership("owner").tenantId,
+    );
+  });
+
+  it("still switches operators when the browser blocks storage", async () => {
+    const { reefDays } = twoOperators();
+    const blocked = () => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    };
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(blocked);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(blocked);
+    renderShell("/bookings", both());
+    await tripSection(/Sunset Harbor Cruise/);
+    fireEvent.change(screen.getByRole("combobox", { name: "Operator" }), {
+      target: { value: reef },
+    });
+    await waitFor(() => expect(reefDays).toEqual(["date=2026-11-03"]));
   });
 
   it("lets the next page change take focus again after an operator switch", async () => {

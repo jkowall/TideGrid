@@ -42,6 +42,12 @@ import {
 } from "./fixtures.ts";
 
 const wednesday = "2026-11-04";
+/** The quiet trip, moved to 8 PM: still to come at this noon. */
+const eveningQuietTrip = {
+  ...quietTrip,
+  localStartTime: "20:00",
+  startsAt: "2026-11-05T01:00:00.000Z",
+};
 
 /** The page in a navigation provider, so a link's destination is recorded. */
 function renderPage(role: StaffRole = "owner", options: { strict?: boolean } = {}) {
@@ -81,7 +87,11 @@ const factsOf = (row: Element): Record<string, string> => ({
 /** The texts of an element's children, for lines made of flex items with no space between. */
 const parts = (element: Element | null) =>
   [...(element?.children ?? [])].map((child) => text(child));
-const liveText = () => text(document.querySelector('p[role="status"]'));
+const liveText = () => text(document.querySelector('.bk > p[role="status"]'));
+/** Quick find's live region, apart from the list's. */
+const findLiveText = () => text(document.querySelector('search p[role="status"]'));
+/** A problem with a find, as shown under the field. */
+const problemText = ".bk-find .tg-field__error span";
 const dayRequests = (calls: ReturnType<typeof api>) =>
   callsTo(calls, route.day()).map((c) => c.query.toString());
 
@@ -207,7 +217,10 @@ describe("which day the list opens on", () => {
     renderPage();
     await screen.findByRole("heading", { name: /^No trips on / });
     expect(dayRequests(calls)).toEqual(["date=2028-11-03"]);
-    expect(window.location.search).toBe("?day=2028-11-03");
+    // The address is written once the catalog has said where the marina is.
+    await waitFor(() => expect(window.location.search).toBe("?day=2028-11-03"));
+    // Another year is named.
+    expect(text(document.querySelector(".bk-bar__day"))).toBe("Friday, November 3, 2028");
     expect(screen.getByRole("button", { name: "Next day" }).getAttribute("aria-disabled")).toBe(
       "true",
     );
@@ -326,14 +339,15 @@ describe("the day's trips and bookings", () => {
     expect(within(dive).queryByRole("link", { name: /^Roster/ })).toBeNull();
   });
 
-  it("says a trip with nothing booked has no bookings yet in its own line, with no table or roster", async () => {
+  it("says a trip with nothing booked has no bookings in its own line, with no table or roster", async () => {
     api({
       [route.day()]: () =>
         json(dayBody({ trips: [quietTrip, charterTrip], bookings: [priyaBooking] })),
     });
     renderPage();
     const quiet = await tripSection(/Early Harbor Tour/);
-    expect(parts(quiet.querySelector(".bk-trip__meta"))).toEqual(["Boat: Gull", "No bookings yet"]);
+    // It left at 7 AM, before this noon, so it takes no more: not "yet".
+    expect(parts(quiet.querySelector(".bk-trip__meta"))).toEqual(["Boat: Gull", "No bookings"]);
     expect(quiet.textContent).not.toContain("0 bookings");
     expect(quiet.textContent).not.toContain("0 guests");
     expect(quiet.querySelector(".bk-trip__none")).toBeNull();
@@ -355,10 +369,44 @@ describe("the day's trips and bookings", () => {
     });
     renderPage();
     const quiet = await tripSection(/Early Harbor Tour/);
-    expect(parts(quiet.querySelector(".bk-trip__meta"))).toEqual(["Boat: Gull", "No bookings yet"]);
+    expect(parts(quiet.querySelector(".bk-trip__meta"))).toEqual(["Boat: Gull", "No bookings"]);
     expect(quiet.textContent).not.toContain("Not loaded yet");
     expect(quiet.querySelector(".bk-trip__none")).toBeNull();
   });
+
+  it("says no bookings yet for a trip with nothing booked that has not left", async () => {
+    api({
+      [route.day()]: () =>
+        json(dayBody({ trips: [charterTrip, eveningQuietTrip], bookings: [priyaBooking] })),
+    });
+    renderPage();
+    const quiet = await tripSection(/Early Harbor Tour/);
+    expect(parts(quiet.querySelector(".bk-trip__meta"))).toEqual(["Boat: Gull", "No bookings yet"]);
+    // Among other trips, its line says it all.
+    expect(quiet.querySelector(".tg-empty")).toBeNull();
+  });
+
+  it.each([
+    [
+      "has not left",
+      () => eveningQuietTrip,
+      "No bookings on this trip yet",
+      "Bookings appear here",
+    ],
+    ["has left", () => quietTrip, "No one booked this trip", "The trip has departed."],
+  ])(
+    "shows a designed empty state for a trip chosen alone that %s with nothing booked",
+    async (_when, trip, title, body) => {
+      window.history.replaceState(null, "", `/bookings?day=${wednesday}&trip=${tripIds.quiet}`);
+      api({ [route.day()]: () => json(dayBody({ trips: [charterTrip, trip()], bookings: [] })) });
+      renderPage();
+      const quiet = await tripSection(/Early Harbor Tour/);
+      const heading = within(quiet).getByRole("heading", { level: 4, name: title });
+      expect(text(heading.closest(".tg-empty"))).toContain(body);
+      expect(quiet.querySelector(".bk-table")).toBeNull();
+      expect(text(document.querySelector(".bk-filters__totals"))).toBe("0 bookings, 0 guests");
+    },
+  );
 
   it("names the place of each trip when a day's trips are in several zones", async () => {
     api({
@@ -419,11 +467,7 @@ describe("the day's trips and bookings", () => {
       within(select)
         .getAllByRole("option")
         .map((option) => text(option)),
-    ).toEqual([
-      "All trips (2)",
-      "1:30 AM EDT, Moonlight Cruise (0 bookings)",
-      "1:30 AM EST, Late Moonlight Cruise (0 bookings)",
-    ]);
+    ).toEqual(["All trips", "1:30 AM EDT, Moonlight Cruise", "1:30 AM EST, Late Moonlight Cruise"]);
   });
 });
 
@@ -622,11 +666,9 @@ describe("choosing a trip", () => {
       within(select)
         .getAllByRole("option")
         .map((o) => text(o)),
-    ).toEqual([
-      "All trips (2)",
-      "8:00 AM, Private Half-Day Charter (1 booking)",
-      "6:00 PM, Sunset Harbor Cruise (2 bookings)",
-    ]);
+    ).toEqual(["All trips", "8:00 AM, Private Half-Day Charter", "6:00 PM, Sunset Harbor Cruise"]);
+    // No count in an option: on a phone it would cut the trip's name short. The totals beside
+    // the control give it.
     expect(select.value).toBe("");
 
     select.focus();
@@ -636,7 +678,8 @@ describe("choosing a trip", () => {
     await waitFor(() => expect(callsTo(calls, route.day())).toHaveLength(2));
     expect(callsTo(calls, route.day())[1]?.query.get("tripId")).toBe(tripIds.sunset);
     expect(callsTo(calls, route.day())[1]?.query.get("date")).toBe(wednesday);
-    expect(window.location.search).toBe(`?trip=${tripIds.sunset}`);
+    // A trip travels with its day, so the address still names this list tomorrow.
+    expect(window.location.search).toBe(`?day=${wednesday}&trip=${tripIds.sunset}`);
 
     // While it works: the list stays, marked busy, and the control keeps its place.
     await waitFor(() =>
@@ -681,6 +724,23 @@ describe("choosing a trip", () => {
     // The control they were on went with the list, so the day's heading keeps their place.
     const heading = screen.getByRole("heading", { level: 2, name: /^Wednesday, November 4/ });
     await waitFor(() => expect(document.activeElement).toBe(heading));
+  });
+
+  it("leaves focus where the person moved it while a trip's list was on its way", async () => {
+    const refresh = deferred();
+    api({ [route.day()]: [() => json(dayBody()), refresh.answer] });
+    renderPage();
+    await tripSection(/Sunset Harbor Cruise/);
+    fireEvent.change(screen.getByRole("combobox", { name: "Trip" }), {
+      target: { value: tripIds.sunset },
+    });
+    // The person goes on to find a booking while the trip's list loads; then it fails.
+    const field = screen.getByRole("textbox", { name: "Find by booking reference" });
+    field.focus();
+    refresh.release(apiError(500, "internal_error"));
+    await screen.findByRole("alert");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(document.activeElement).toBe(field);
   });
 
   it("hands focus on to the day's heading once Try again works after a failed refresh", async () => {
@@ -737,6 +797,16 @@ describe("choosing a trip", () => {
     // No trip is shown for it, and the control reads all trips.
     expect(screen.queryByRole("region", { name: /Sunset Harbor Cruise/ })).toBeNull();
     expect((screen.getByRole("combobox", { name: "Trip" }) as HTMLSelectElement).value).toBe("");
+    // Nothing is listed, so no count says otherwise, on screen or aloud.
+    expect(document.querySelector(".bk-filters__totals")).toBeNull();
+    expect(liveText()).toBe("That trip doesn't depart on Wednesday, November 4.");
+    // A trip always travels with its day in the address.
+    await waitFor(() =>
+      expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({
+        trip: tripIds.honolulu,
+        day: wednesday,
+      }),
+    );
     expect(callsTo(calls, route.day())[0]?.query.get("tripId")).toBe(tripIds.honolulu);
 
     const showAll = within(warning).getByRole("button", { name: "Show all trips" });
@@ -1216,6 +1286,11 @@ describe("find a booking by its reference", () => {
     fireEvent.click(find());
     const error = await screen.findByText(
       "Enter the 8 letters and numbers of a booking reference, such as QKG6ERBF.",
+      { selector: problemText },
+    );
+    // Focus stays in the field, so the problem is also said aloud.
+    expect(findLiveText()).toBe(
+      "Enter the 8 letters and numbers of a booking reference, such as QKG6ERBF.",
     );
     expect(document.activeElement).toBe(field());
     expect(field().getAttribute("aria-invalid")).toBe("true");
@@ -1227,6 +1302,7 @@ describe("find a booking by its reference", () => {
     // Typing again clears it.
     type("QKG6ERB");
     expect(screen.queryByText(/Enter the 8 letters/)).toBeNull();
+    expect(findLiveText()).toBe("");
     expect(field().getAttribute("aria-invalid")).toBeNull();
   });
 
@@ -1300,6 +1376,27 @@ describe("find a booking by its reference", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it("says aloud that it is finding, then what it found, while focus stays in the field", async () => {
+    const lookup = deferred();
+    api({
+      [route.day()]: () => json(dayBody()),
+      [route.reference("QKG6ERB0")]: [lookup.answer],
+    });
+    renderPage();
+    await tripSection(/Sunset Harbor Cruise/);
+    expect(findLiveText()).toBe("");
+    type("qkg6 erbo");
+    field().focus();
+    fireEvent.submit(field().closest("form") as HTMLFormElement);
+    await waitFor(() => expect(findLiveText()).toBe("Finding the booking…"));
+    lookup.release(apiError(404, "not_found"));
+    const message = `No booking QKG6ERB0 at ${tenantName}. Check the reference with the guest.`;
+    await waitFor(() => expect(findLiveText()).toBe(message));
+    expect(document.activeElement).toBe(field());
+    // The list's own live region is left alone.
+    expect(liveText()).toBe("3 bookings, 11 guests on Wednesday, November 4.");
+  });
+
   it("shows Finding… and ignores a second press while it asks", async () => {
     const lookup = deferred();
     const calls = api({
@@ -1332,7 +1429,7 @@ describe("find a booking by its reference", () => {
     fireEvent.click(find());
     // The reference is read back the way it was asked, not as typed.
     const message = `No booking QKG6ERB0 at ${tenantName}. Check the reference with the guest.`;
-    expect(await screen.findByText(message)).toBeTruthy();
+    expect(await screen.findByText(message, { selector: problemText })).toBeTruthy();
     expect(document.activeElement).toBe(field());
     expect(field().getAttribute("aria-invalid")).toBe("true");
     expect(navigate).not.toHaveBeenCalled();
@@ -1354,6 +1451,7 @@ describe("find a booking by its reference", () => {
     expect(
       await screen.findByText(
         "The console can't reach TideGrid. Check your connection, then try again.",
+        { selector: problemText },
       ),
     ).toBeTruthy();
     expect(document.activeElement).toBe(field());
@@ -1375,7 +1473,7 @@ describe("find a booking by its reference", () => {
     await tripSection(/Sunset Harbor Cruise/);
     type("QKG6ERBF");
     fireEvent.click(find());
-    expect(await screen.findByText(message)).toBeTruthy();
+    expect(await screen.findByText(message, { selector: problemText })).toBeTruthy();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -1391,6 +1489,7 @@ describe("find a booking by its reference", () => {
     expect(
       await screen.findByText(
         "TideGrid sent an answer this console can't read. Try again in a moment.",
+        { selector: problemText },
       ),
     ).toBeTruthy();
     expect(navigate).not.toHaveBeenCalled();

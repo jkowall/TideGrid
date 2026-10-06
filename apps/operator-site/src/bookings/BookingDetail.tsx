@@ -8,22 +8,26 @@ import {
   VisuallyHidden,
 } from "@tidegrid/design-system/components";
 import {
-  formatDate,
   formatDuration,
   formatMoney,
   formatTripTime,
   localPartsOf,
+  todayIn,
   zoneCity,
 } from "@tidegrid/design-system/format";
 import { useEffect, useRef, useState } from "react";
+import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, roleNames } from "../roles.ts";
 import { loadBooking } from "./api.ts";
+import { MaskedReference } from "./MaskedReference.tsx";
 import {
   bookingStates,
   bookingsHref,
+  countText,
+  dayText,
   extrasText,
   guestsText,
   instantText,
@@ -85,11 +89,12 @@ export function BookingDetailPage({
     return () => controller.abort();
   }, [tenantId, bookingId, attempt]);
 
+  // Try again went with its notice: the heading takes focus, unless the person
+  // has moved it elsewhere while the page loaded.
   useEffect(() => {
-    if (load.kind !== "loading" && focusHeadingOnLoad.current) {
-      focusHeadingOnLoad.current = false;
-      heading.current?.focus();
-    }
+    if (load.kind === "loading" || !focusHeadingOnLoad.current) return;
+    focusHeadingOnLoad.current = false;
+    if (focusIsLost()) heading.current?.focus();
   }, [load]);
 
   const retry = () => {
@@ -110,7 +115,11 @@ export function BookingDetailPage({
         {load.kind === "loading"
           ? "Loading the booking…"
           : booking
-            ? `Booking ${booking.reference}, ${booking.trip.productName}, ${formatDate(booking.trip.localDate, "full")}.`
+            ? `Booking ${booking.reference}, ${booking.trip.productName}, ${dayText(
+                booking.trip.localDate,
+                "full",
+                todayIn(booking.trip.timeZone),
+              )}.`
             : ""}
       </p>
       {load.kind === "loading" && <DetailSkeleton />}
@@ -159,6 +168,7 @@ function Detail({
 }) {
   const { trip, location } = booking;
   const zone = trip.timeZone;
+  const today = todayIn(zone);
   const start = formatTripTime(trip.localStartTime, trip.startsAt, zone);
   const end = localPartsOf(trip.endsAtLocal);
   const endText = end.date === trip.localDate ? end.time : `${end.time} next day`;
@@ -172,7 +182,7 @@ function Detail({
       <div className="bd-top">
         <ConsoleLink href={bookingsHref(trip.localDate)} className="bd-back tap-target">
           <Icon name="arrow-left" />
-          <span>Bookings on {formatDate(trip.localDate, "medium")}</span>
+          <span>Bookings on {dayText(trip.localDate, "medium", today)}</span>
         </ConsoleLink>
         <div className="bd-badges">
           <StatusBadge tone={state.tone} icon={state.icon}>
@@ -196,7 +206,7 @@ function Detail({
           <dl className="console-dl">
             <dt>When</dt>
             <dd>
-              {formatDate(trip.localDate, "full")}, {start} to {endText}
+              {dayText(trip.localDate, "full", today)}, {start} to {endText}
               <span className="bd-muted">
                 {" "}
                 ({formatDuration(trip.durationMinutes)}, {zoneCity(zone)} time)
@@ -252,9 +262,7 @@ function Detail({
               ) : (
                 <ul className="bd-tickets">
                   {booking.party.tickets.map((t) => (
-                    <li key={t.code}>
-                      {t.quantity} {t.name}
-                    </li>
+                    <li key={t.code}>{countText(t.quantity, t.name)}</li>
                   ))}
                 </ul>
               )}
@@ -292,7 +300,7 @@ function Detail({
             <dd>
               {booking.payment.providerReference ? (
                 <>
-                  <span className="bd-code">{booking.payment.providerReference}</span>
+                  <MaskedReference value={booking.payment.providerReference} />
                   <span className="bd-block bd-muted bd-small">
                     Shortened: the start and the last four characters.
                   </span>

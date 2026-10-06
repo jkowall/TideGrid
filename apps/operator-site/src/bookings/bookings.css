@@ -163,8 +163,10 @@
   gap: var(--space-5);
   transition: opacity var(--duration-fast) ease;
 }
+/* Dimmed while another trip's list loads, and still legible: muted text stays
+   above 4.5:1. */
 .bk-day[aria-busy="true"] {
-  opacity: 0.6;
+  opacity: 0.75;
 }
 .bk-filters {
   display: flex;
@@ -275,6 +277,9 @@
   margin: 0;
   color: var(--text-muted);
   font-size: var(--text-sm);
+}
+.bk-trip__empty {
+  padding: var(--space-6) var(--space-5);
 }
 
 /*
@@ -579,6 +584,14 @@
   color: var(--text-body);
   font-size: var(--text-sm);
 }
+/* The trip link is a 44 px target (.tap-target); its label sits on the same
+   baseline rather than at the top of the taller row. */
+.ex-item__facts {
+  align-items: baseline;
+}
+.ex-item__trip {
+  font-weight: var(--weight-medium);
+}
 
 /* A trip's roster ---------------------------------------------------------- */
 
@@ -645,7 +658,9 @@
 .roster-table {
   width: 100%;
   min-width: 36rem;
-  border-collapse: collapse;
+  /* Separate borders, so a pinned cell's rule moves with it. */
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: var(--text-sm);
 }
 .roster-table th,
@@ -678,6 +693,15 @@
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
+/* A phone scrolls the table inside its region; the reference stays at the
+   left edge, so every row keeps its name. */
+.roster-table__pin {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  box-shadow: 1px 0 0 var(--border-subtle);
+}
 .roster-table__detail {
   color: var(--text-body);
 }
@@ -688,9 +712,10 @@
   font-size: var(--text-sm);
 }
 
-/* Paper: the roster alone, black on white, the table's head on every page.
-   Paper must beat every surface, text, and status color the dark console sets,
-   whatever their selectors, so these declarations take !important. */
+/* Paper: black on white, without the rail. The roster prints alone, under its
+   own heading, with the table's head on every page. Paper must beat every
+   surface, text, and status color the dark console sets, whatever their
+   selectors, so these declarations take !important. */
 /* biome-ignore-start lint/complexity/noImportantStyles: print must override the dark console's colors and layout. */
 @media print {
   @page {
@@ -703,9 +728,25 @@
     background: #fff !important;
     color: #000 !important;
   }
-  /* The console's dark scheme would also darken the page's margins. */
+  /* The console's dark scheme would also darken the page's margins, and its
+     light text would vanish on white: every page prints with paper values. */
   html.tg-dark {
     color-scheme: light;
+    --surface-page: #fff;
+    --surface-raised: #fff;
+    --surface-sunken: #fff;
+    --surface-hover: transparent;
+    --text-strong: #000;
+    --text-body: #000;
+    --text-muted: #333;
+    --border-subtle: #999;
+    --border-control: #555;
+    --link: #000;
+    --status-ready: var(--tg-status-ready);
+    --status-warning: var(--tg-status-warning);
+    --status-blocked: var(--tg-status-blocked);
+    --status-info: var(--tg-status-info);
+    --status-pending: var(--tg-status-pending);
   }
   .console-layout {
     display: block;
@@ -715,9 +756,12 @@
   }
   .console-rail,
   .tg-skip-link,
-  .console-page-header,
   .console-main__notice,
+  .console-main:has(.roster) .console-page-header,
   .roster-tools,
+  .bk-find,
+  .bk-bar__nav,
+  .bk-more,
   .tg-visually-hidden {
     display: none !important;
   }
@@ -754,7 +798,12 @@
   }
   .roster-table {
     min-width: 0;
+    border-collapse: collapse;
     font-size: 10pt;
+  }
+  .roster-table__pin {
+    position: static;
+    box-shadow: none !important;
   }
   .roster-table thead {
     display: table-header-group;

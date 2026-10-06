@@ -182,6 +182,8 @@ describe("payment exceptions", () => {
       name: /^Sunset Harbor Cruise, Wed, Nov 4, 6:00\sPM$/,
     });
     expect(trip.getAttribute("href")).toBe(`/bookings?day=2026-11-04&trip=${tripIds.sunset}`);
+    // A whole 44 px target, not a line of text.
+    expect(trip.classList.contains("tap-target")).toBe(true);
 
     const facts = factsOf(element);
     expect(Object.keys(facts)).toEqual([
@@ -198,8 +200,11 @@ describe("payment exceptions", () => {
     // The checkout's hold ran out at 2:25 PM at the marina, 3:25 AM the next day in Tokyo.
     expect(facts["Checkout ran out"]).toBe("Tue, Oct 6, 2:25 PM EDT");
     expect(facts["Payment received"]).toBe("Tue, Oct 6, 2:40 PM EDT");
-    expect(facts["Provider reference"]).toBe("fpay_••••c3D4");
-    expect(text(element.querySelector(".bd-code"))).toBe("fpay_••••c3D4");
+    // Masked by the API: the eye sees the bullets, a screen reader hears the ending.
+    const code = element.querySelector(".bd-code");
+    expect(text(code)).toBe("fpay_••••c3D4");
+    expect(code?.getAttribute("aria-hidden")).toBe("true");
+    expect(text(code?.nextElementSibling)).toBe("fpay, ending in c3D4");
     // Who paid, for following up with them.
     const paidBy = element.querySelector(".console-dl__wrap") as HTMLElement;
     expect(paidBy.firstChild?.textContent).toBe("Maya Okonkwo");

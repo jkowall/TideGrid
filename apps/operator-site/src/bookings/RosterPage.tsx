@@ -13,9 +13,11 @@ import {
   formatDuration,
   formatTripTime,
   localPartsOf,
+  todayIn,
   zoneAbbreviation,
 } from "@tidegrid/design-system/format";
 import { useEffect, useRef, useState } from "react";
+import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
@@ -23,6 +25,8 @@ import { canSeeGuests, roleNames } from "../roles.ts";
 import { loadRoster } from "./api.ts";
 import {
   bookingsHref,
+  countText,
+  dayText,
   extrasText,
   guestsText,
   instantText,
@@ -112,11 +116,12 @@ function Roster({
     return () => controller.abort();
   }, [tenantId, tripId, attempt]);
 
+  // Try again went with its notice: the heading takes focus, unless the person
+  // has moved it elsewhere while the page loaded.
   useEffect(() => {
-    if (load.kind !== "loading" && focusHeadingOnLoad.current) {
-      focusHeadingOnLoad.current = false;
-      heading.current?.focus();
-    }
+    if (load.kind === "loading" || !focusHeadingOnLoad.current) return;
+    focusHeadingOnLoad.current = false;
+    if (focusIsLost()) heading.current?.focus();
   }, [load]);
 
   const roster = load.kind === "ready" ? load.roster : null;
@@ -132,7 +137,11 @@ function Roster({
         {load.kind === "loading"
           ? "Loading the roster…"
           : roster
-            ? `Roster for ${roster.trip.productName}, ${formatDate(roster.trip.localDate, "full")}: ${
+            ? `Roster for ${roster.trip.productName}, ${dayText(
+                roster.trip.localDate,
+                "full",
+                todayIn(roster.trip.timeZone),
+              )}: ${
                 roster.totals.bookings === 1 ? "1 booking" : `${roster.totals.bookings} bookings`
               }, ${guestsText(roster.totals.guests)}.`
             : ""}
@@ -176,6 +185,7 @@ function Roster({
 function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: string }) {
   const { trip, location, totals } = roster;
   const zone = trip.timeZone;
+  const today = todayIn(zone);
   const start = formatTripTime(trip.localStartTime, trip.startsAt, zone);
   const end = localPartsOf(trip.endsAtLocal);
   const endText = end.date === trip.localDate ? end.time : `${end.time} next day`;
@@ -188,7 +198,7 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
           className="bd-back tap-target"
         >
           <Icon name="arrow-left" />
-          <span>Bookings on {formatDate(trip.localDate, "medium")}</span>
+          <span>Bookings on {dayText(trip.localDate, "medium", today)}</span>
         </ConsoleLink>
         <Button variant="primary" icon="printer" onClick={() => window.print()}>
           Print roster
@@ -229,7 +239,7 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
                 : `, private charter for up to ${trip.seats}`}
               {totals.tickets.length > 0 && (
                 <span className="bd-block">
-                  {totals.tickets.map((t) => `${t.quantity} ${t.name}`).join(", ")}
+                  {totals.tickets.map((t) => countText(t.quantity, t.name)).join(", ")}
                 </span>
               )}
             </dd>
@@ -268,7 +278,7 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
         >
           <table className="roster-table">
             <caption className="tg-visually-hidden">
-              Bookings on {trip.productName}, {formatDate(trip.localDate, "full")}, {start}
+              Bookings on {trip.productName}, {dayText(trip.localDate, "full", today)}, {start}
             </caption>
             <thead>
               <tr>
@@ -276,7 +286,9 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
                   <VisuallyHidden>Number</VisuallyHidden>
                   <span aria-hidden="true">#</span>
                 </th>
-                <th scope="col">Reference</th>
+                <th scope="col" className="roster-table__pin">
+                  Reference
+                </th>
                 <th scope="col">Booker</th>
                 <th scope="col">Party</th>
                 <th scope="col">Extras</th>
@@ -289,7 +301,7 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
                 return (
                   <tr key={b.id}>
                     <td className="roster-table__n">{i + 1}</td>
-                    <th scope="row" className="roster-table__ref">
+                    <th scope="row" className="roster-table__ref roster-table__pin">
                       {b.reference}
                     </th>
                     <td>{b.booker.name}</td>
