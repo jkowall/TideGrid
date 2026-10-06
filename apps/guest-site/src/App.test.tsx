@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { ErrorBoundary } from "@tidegrid/design-system/components";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import { loadExperience } from "./bootstrap.ts";
-import { NotReadyState } from "./States.tsx";
+import { CrashedState, NotReadyState } from "./States.tsx";
 
 vi.mock("./bootstrap.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./bootstrap.ts")>();
@@ -32,6 +33,18 @@ const ready = () =>
     headers: { "content-type": "application/json" },
   });
 
+const noTrips = () =>
+  new Response(JSON.stringify({ trips: [] }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+
+/** The bootstrap answers `tenant`; the trips list answers `trips`. */
+const site =
+  (tenantAnswer: () => Response = ready, trips: () => Response = noTrips) =>
+  async (input: RequestInfo | URL) =>
+    String(input).includes("/v1/public/trips") ? trips() : tenantAnswer();
+
 beforeEach(() => {
   document.head.innerHTML =
     '<meta name="theme-color" content="#f6f7f6"><link rel="icon" href="/favicon.ico" sizes="32x32"><link rel="icon" href="/favicon.svg" type="image/svg+xml">';
@@ -44,28 +57,40 @@ afterEach(() => {
 });
 
 describe("guest app", () => {
-  it("leaves focus alone on a first load", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ready()),
-    );
+  it("leaves focus alone on a first load, trips included", async () => {
+    vi.stubGlobal("fetch", vi.fn(site()));
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
+    await screen.findByRole("heading", { name: "No trips in these dates" });
     // Let any pending effects run before checking that nothing moved focus.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(document.activeElement).toBe(document.body);
+  });
+
+  it("lists upcoming trips on the home page in place of the old empty state", async () => {
+    vi.stubGlobal("fetch", vi.fn(site()));
+    render(<App />);
+    const trips = await screen.findByRole("region", { name: "Upcoming trips" });
+    expect(await screen.findByRole("combobox", { name: "Party size" })).toBeTruthy();
+    expect(trips.textContent).not.toContain("No trips are open for online booking yet");
+    // Discovery only: nothing on the page books or checks out. ("Terms of booking" is a policy link.)
+    expect(screen.queryByRole("button", { name: /^(book|checkout|check out)/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^(book|checkout|check out)/i })).toBeNull();
   });
 
   it("moves focus to the page heading when Try again brings the site in", async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce(ready());
+      .mockImplementation(site());
     vi.stubGlobal("fetch", fetch);
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     const heading = await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
     await waitFor(() => expect(document.activeElement).toBe(heading));
+    // The trips list arriving afterwards leaves focus where the shell put it.
+    await screen.findByRole("heading", { name: "No trips in these dates" });
+    expect(document.activeElement).toBe(heading);
   });
 
   it("shows the failure screen when the loader itself throws", async () => {
@@ -79,10 +104,7 @@ describe("guest app", () => {
   });
 
   it("shows the operator's mark as the tab icon and restores the neutral icon", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ready()),
-    );
+    vi.stubGlobal("fetch", vi.fn(site()));
     const { unmount } = render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
     const svgIcon = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
@@ -95,12 +117,32 @@ describe("guest app", () => {
     const lockup = { ...brand, logo: { ...brand.logo, kind: "lockup", width: 160, height: 40 } };
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => new Response(JSON.stringify({ tenant, brand: lockup }), { status: 200 })),
+      vi.fn(site(() => new Response(JSON.stringify({ tenant, brand: lockup }), { status: 200 }))),
     );
     render(<App />);
     await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
     const svgIcon = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
     expect(svgIcon?.getAttribute("href")).toBe("/favicon.svg");
+  });
+
+  it("shows the failure screen, not a blank page, when rendering throws", async () => {
+    // React reports the caught error on the console; keep the test output clean.
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    function Broken(): never {
+      throw new RangeError("not a local date: +010000-01");
+    }
+    render(
+      <ErrorBoundary fallback={<CrashedState />}>
+        <Broken />
+      </ErrorBoundary>,
+    );
+    const heading = await screen.findByRole("heading", {
+      level: 1,
+      name: "Something went wrong on this page",
+    });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    quiet.mockRestore();
   });
 
   it("tells a guest to check back, not to contact an operator it cannot name a way to reach", () => {

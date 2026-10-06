@@ -1,6 +1,7 @@
 import { Button, Icon, type IconName, Skeleton } from "@tidegrid/design-system/components";
 import { type ReactNode, useEffect, useRef } from "react";
 import type { Tenant } from "./bootstrap.ts";
+import { TripListSkeleton } from "./UpcomingTrips.tsx";
 
 export function useTitle(title: string) {
   useEffect(() => {
@@ -79,9 +80,14 @@ export function LoadingState() {
           <Skeleton variant="text" width="min(22rem, 70%)" />
         </div>
       </div>
+      {/* The shape of the trips section, so the page does not jump when it loads. */}
       <div className="guest-container guest-content" aria-hidden="true">
-        <Skeleton width="10rem" height="1.5rem" />
-        <Skeleton width="100%" height="14rem" />
+        <div className="trips">
+          <Skeleton width="14rem" height="2rem" />
+          <Skeleton width="100%" height="7.5rem" />
+          <Skeleton width="100%" height="5.5rem" />
+          <TripListSkeleton />
+        </div>
       </div>
     </div>
   );
@@ -107,6 +113,35 @@ export function NotReadyState({ tenant }: { tenant: Tenant }) {
     <NeutralFrame>
       <StatePanel icon="clock" title="This booking site isn't open yet">
         <p>{tenant.name} hasn't opened online booking yet. Check back soon.</p>
+      </StatePanel>
+    </NeutralFrame>
+  );
+}
+
+/**
+ * Shown by the error boundary when the page itself fails to render. "Try
+ * again" starts the page afresh without its query, so an address that caused
+ * the failure cannot cause it again.
+ */
+export function CrashedState() {
+  useTitle("Booking site unavailable");
+  return (
+    <NeutralFrame>
+      <StatePanel
+        icon="alert-triangle"
+        tone="warning"
+        title="Something went wrong on this page"
+        action={
+          <Button
+            variant="primary"
+            icon="refresh"
+            onClick={() => window.location.assign(window.location.pathname)}
+          >
+            Try again
+          </Button>
+        }
+      >
+        <p>Try again. If it keeps happening, the booking site may be briefly unavailable.</p>
       </StatePanel>
     </NeutralFrame>
   );

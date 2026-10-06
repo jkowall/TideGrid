@@ -71,7 +71,9 @@
   gap: var(--space-2);
   min-height: var(--tap-min);
   min-width: var(--tap-min);
-  padding: 0 var(--space-5);
+  /* One line stays at the 44 px minimum; a label that wraps on a narrow
+     screen keeps room above and below instead of touching the edges. */
+  padding: var(--space-2) var(--space-5);
   border: 2px solid transparent;
   border-radius: var(--radius-sm);
   font: inherit;
@@ -113,6 +115,15 @@
 .tg-button--ghost:hover {
   background: var(--surface-hover);
 }
+.tg-button--danger {
+  background: var(--action-danger-bg);
+  border-color: var(--action-danger-bg);
+  color: var(--action-danger-ink);
+}
+.tg-button--danger:hover {
+  background: var(--action-danger-bg-hover);
+  border-color: var(--action-danger-bg-hover);
+}
 .tg-button:active:not([aria-disabled="true"]):not(:disabled) {
   translate: 0 1px;
 }
@@ -128,6 +139,14 @@
   cursor: not-allowed;
   text-decoration: none;
 }
+/* On the dark console a sunken fill vanished into Harbor; an unavailable
+   button keeps its outline, dimmed, so it still reads as a button. */
+.tg-dark .tg-button:disabled,
+.tg-dark .tg-button[aria-disabled="true"]:not([aria-busy="true"]) {
+  background: transparent;
+  border-color: var(--border-subtle);
+  color: var(--text-muted);
+}
 /* Busy keeps its colors and focus: it is working, not unavailable. */
 .tg-button[aria-busy="true"] {
   cursor: progress;
@@ -136,6 +155,11 @@
   background: var(--action-bg);
   border-color: var(--action-bg);
   color: var(--action-ink);
+}
+.tg-button--danger[aria-busy="true"] {
+  background: var(--action-danger-bg);
+  border-color: var(--action-danger-bg);
+  color: var(--action-danger-ink);
 }
 
 .tg-spinner {
@@ -214,6 +238,43 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--status-blocked);
+}
+
+/* Select fields: a native select with the design system's chevron ---------- */
+
+.tg-select {
+  position: relative;
+}
+.tg-select__control {
+  width: 100%;
+  min-height: var(--tap-min);
+  margin: 0;
+  padding: 0 var(--space-10) 0 var(--space-3);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font-size: var(--text-md);
+  appearance: none;
+  cursor: pointer;
+}
+.tg-dark .tg-select__control {
+  background: var(--surface-sunken);
+}
+.tg-select__control:hover:not(:disabled) {
+  border-color: var(--text-strong);
+}
+.tg-select__control[aria-invalid="true"] {
+  border-color: var(--status-blocked);
+  box-shadow: inset 0 0 0 1px var(--status-blocked);
+}
+.tg-select__chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--space-3);
+  translate: 0 -50%;
+  color: var(--text-muted);
+  pointer-events: none;
 }
 
 /* Status badges: icon plus label, never color alone ------------------------ */
@@ -378,5 +439,67 @@
   .tg-skeleton {
     animation: none;
     background: var(--surface-sunken);
+  }
+}
+
+/* Dialogs ------------------------------------------------------------------ */
+
+/* A native modal <dialog>. It sits in the top layer but keeps its place in the
+   document, so it takes the light or dark tokens of the page around it. */
+.tg-dialog {
+  width: min(100% - 2 * var(--space-4), 32rem);
+  max-width: none;
+  max-height: calc(100dvh - 2 * var(--space-4));
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  color: var(--text-body);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.35);
+}
+/* Literal colors: older engines do not pass custom properties to ::backdrop. */
+.tg-dialog::backdrop {
+  background: rgb(14 43 31 / 0.55);
+}
+.tg-dark .tg-dialog::backdrop {
+  background: rgb(0 0 0 / 0.62);
+}
+/* A final action: a blocked-red rule across the top, with the danger button
+   and the dialog's own words saying why. */
+.tg-dialog--danger {
+  border-top: 4px solid var(--status-blocked);
+}
+.tg-dialog__panel {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-6) var(--space-5);
+}
+@media (min-width: 30rem) {
+  .tg-dialog__panel {
+    padding: var(--space-6);
+  }
+}
+.tg-dialog__title {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+.tg-dialog__body {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.tg-dialog__body > * {
+  margin: 0;
+}
+.tg-dialog__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+@media (max-width: 29.99rem) {
+  .tg-dialog__footer > .tg-button {
+    flex: 1 1 100%;
   }
 }
