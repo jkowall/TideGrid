@@ -2,6 +2,7 @@ import type { BookingNote } from "@tidegrid/contracts";
 import { Button, Icon, Notice, Skeleton } from "@tidegrid/design-system/components";
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { newIdempotencyKey } from "../calendar/api.ts";
+import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { instantText } from "./model.ts";
 import { addNote, loadNotes, type NoteFailure, type NotesPage } from "./notes-api.ts";
@@ -41,6 +42,9 @@ export function Notes({
   const [attempt, setAttempt] = useState(0);
   const retrying = useRef(false);
   const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  /** Try again went with its notice: the card's heading takes focus. */
+  const focusHeadingOnLoad = useRef(false);
 
   useEffect(() => {
     void attempt;
@@ -52,6 +56,7 @@ export function Notes({
     );
     void loadNotes(tenantId, bookingId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
+      focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetry(result.reason));
       setLoad(
         result.kind === "ok"
           ? { kind: "ready", page: result.value }
@@ -60,6 +65,13 @@ export function Notes({
     });
     return () => controller.abort();
   }, [tenantId, bookingId, attempt]);
+
+  // Only when focus went with the button, never from where the person moved it.
+  useEffect(() => {
+    if (load.kind === "loading" || !focusHeadingOnLoad.current) return;
+    focusHeadingOnLoad.current = false;
+    if (focusIsLost()) heading.current?.focus();
+  }, [load]);
 
   const added = (note: BookingNote) =>
     setLoad((current) =>
@@ -73,7 +85,9 @@ export function Notes({
 
   return (
     <section className="console-card bd-card bd-notes" aria-labelledby={headingId}>
-      <h2 id={headingId}>Notes</h2>
+      <h2 id={headingId} ref={heading} tabIndex={-1}>
+        Notes
+      </h2>
       {canWrite ? (
         <NoteForm
           tenantId={tenantId}
@@ -251,7 +265,9 @@ function NoteForm({
           className={left < 0 ? "bd-notes__count bd-notes__count--over" : "bd-notes__count"}
           id={`${inputId}-count`}
         >
-          {left < 0 ? `${-left} characters over the limit` : `${left} characters left`}
+          {left < 0
+            ? `${-left} ${-left === 1 ? "character" : "characters"} over the limit`
+            : `${left} ${left === 1 ? "character" : "characters"} left`}
         </p>
         <Button type="submit" variant="primary" icon="plus" busy={busy} busyLabel="Adding…">
           Add note

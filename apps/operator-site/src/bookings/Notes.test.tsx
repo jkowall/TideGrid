@@ -217,8 +217,7 @@ describe("when the notes do not load", () => {
     expect(document.activeElement).toBe(button);
   });
 
-  // Skipped, suspected bug: nothing takes focus when Try again works, so it falls to the body (Notes.tsx:101).
-  it.skip("hands focus on when Try again works and its button goes away", async () => {
+  it("hands focus to the card's heading when Try again works and its button goes away", async () => {
     const retry = deferred();
     api({ [route.notes(bookingId)]: [dropped, retry.answer] });
     renderNotes();

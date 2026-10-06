@@ -67,6 +67,7 @@ export function SearchPage({
   const fromField = useRef<HTMLInputElement>(null);
   const toField = useRef<HTMLInputElement>(null);
   const resultsHeading = useRef<HTMLHeadingElement>(null);
+  const pageHeading = useRef<HTMLHeadingElement>(null);
   /** The last page took Show more bookings with it: its first booking takes focus. */
   const focusResultId = useRef<string | null>(null);
   const focusResultsOnLoad = useRef(false);
@@ -106,7 +107,8 @@ export function SearchPage({
   }, [tenantId, criteria, attempt]);
 
   // A control that went away with the change hands focus on: to the first
-  // booking of a last page, or to the results' heading after Try again.
+  // booking of a last page, or after Try again to the results' heading, or
+  // to the page's heading when nothing matched.
   useEffect(() => {
     if (load.kind === "loading" || load.kind === "idle") return;
     if (load.kind === "failed" && load.retrying) return;
@@ -116,7 +118,7 @@ export function SearchPage({
     focusResultsOnLoad.current = false;
     if ((first === null && !toHeading) || !focusIsLost()) return;
     const link = first ? document.querySelector<HTMLElement>(`[data-result="${first}"]`) : null;
-    (link ?? resultsHeading.current)?.focus();
+    (link ?? resultsHeading.current ?? pageHeading.current)?.focus();
   }, [load]);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -180,7 +182,12 @@ export function SearchPage({
 
   return (
     <>
-      <PageHeader eyebrow={tenantName} title="Search bookings" focusHeading={focusHeading} />
+      <PageHeader
+        eyebrow={tenantName}
+        title="Search bookings"
+        focusHeading={focusHeading}
+        headingRef={pageHeading}
+      />
       <div className="bs">
         <ConsoleLink href="/bookings" className="bd-back tap-target">
           <Icon name="arrow-left" />
@@ -276,7 +283,13 @@ export function SearchPage({
           </EmptyState>
         )}
         {load.kind === "loading" && <ResultsSkeleton />}
-        {load.kind === "failed" && (
+        {/* The API refused the search as asked: the form is right above. */}
+        {load.kind === "failed" && load.reason === "rejected" && (
+          <Notice tone="error" className="bk-notice" title="The search couldn't be run">
+            <p>Check the text and the dates above, then search again.</p>
+          </Notice>
+        )}
+        {load.kind === "failed" && load.reason !== "rejected" && (
           <ReadFailed
             className="bk-notice"
             reason={load.reason}

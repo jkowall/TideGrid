@@ -49,6 +49,7 @@ function isResult(r: Partial<BookingSearchResult> | null | undefined): boolean {
     isBooker(r.booker, true) &&
     isInt(r.guests) &&
     isInt(r.total) &&
+    r.currency === "USD" &&
     isPaymentStatus(r.payment)
   );
 }

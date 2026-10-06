@@ -551,8 +551,7 @@ describe("when the search does not run", () => {
     expect(document.activeElement).toBe(button);
   });
 
-  // Skipped, suspected bug: the empty state has no heading for the hand-off, so focus falls to the body (SearchPage.tsx:119).
-  it.skip("hands focus on when Try again finds nothing and its button goes away", async () => {
+  it("hands focus to the page's heading when Try again finds nothing and its button goes away", async () => {
     const retry = deferred();
     api({ [route.search()]: [dropped, retry.answer] });
     renderPage();
@@ -700,8 +699,7 @@ describe("when the search does not run", () => {
     },
   );
 
-  // Skipped, suspected bug: isResult (search/api.ts:39) does not check currency, so formatMoney throws while rendering.
-  it.skip("treats a currency other than US dollars as an answer it can't show, not a crash", async () => {
+  it("treats a currency other than US dollars as an answer it can't show, not a crash", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     api({
       [route.search()]: () =>

@@ -2,6 +2,7 @@ import type { BookingDayTotals } from "@tidegrid/contracts";
 import { Button, Icon, Notice, Skeleton } from "@tidegrid/design-system/components";
 import { formatMoney, type LocalDate } from "@tidegrid/design-system/format";
 import { useEffect, useId, useRef, useState } from "react";
+import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { exportDay, loadDayTotals, type DayTotals as Totals } from "./day-api.ts";
 import { guestsText, instantText } from "./model.ts";
@@ -44,6 +45,9 @@ export function DayTotals({
   const [exported, setExported] = useState<Export>({ kind: "idle" });
   const retrying = useRef(false);
   const headingId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  /** Try again went with its notice: the panel's heading takes focus. */
+  const focusHeadingOnLoad = useRef(false);
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
@@ -63,6 +67,7 @@ export function DayTotals({
     setExported({ kind: "idle" });
     void loadDayTotals(tenantId, day, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
+      focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetry(result.reason));
       setLoad(
         result.kind === "ok"
           ? { kind: "ready", value: result.value }
@@ -71,6 +76,13 @@ export function DayTotals({
     });
     return () => controller.abort();
   }, [tenantId, day, attempt]);
+
+  // Only when focus went with the button, never from where the person moved it.
+  useEffect(() => {
+    if (load.kind === "loading" || !focusHeadingOnLoad.current) return;
+    focusHeadingOnLoad.current = false;
+    if (focusIsLost()) heading.current?.focus();
+  }, [load]);
 
   const message: { tone: "done" | "failed"; text: string } | null =
     exported.kind === "saved"
@@ -108,7 +120,7 @@ export function DayTotals({
   return (
     <section className="bk-totals" aria-labelledby={headingId} aria-busy={load.kind === "loading"}>
       <div className="bk-totals__head">
-        <h3 className="bk-totals__title" id={headingId}>
+        <h3 className="bk-totals__title" id={headingId} ref={heading} tabIndex={-1}>
           Day totals
         </h3>
         <Button

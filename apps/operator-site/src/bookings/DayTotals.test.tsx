@@ -313,8 +313,7 @@ describe("when the totals do not load", () => {
     expect(document.activeElement).toBe(button);
   });
 
-  // Skipped, suspected bug: nothing takes focus when Try again works, so it falls to the body (DayTotals.tsx:129).
-  it.skip("hands focus on when Try again works and its button goes away", async () => {
+  it("hands focus to the panel's heading when Try again works and its button goes away", async () => {
     const retry = deferred();
     api({ [route.dayTotals()]: [dropped, retry.answer] });
     renderTotals();

@@ -753,6 +753,12 @@
   margin: 0;
   font-size: var(--text-lg);
 }
+/* Headings take focus only from code, after Try again; like the page's own
+   heading, they show no ring for it. */
+.bk-totals__title:focus,
+.bd-notes h2:focus {
+  outline: none;
+}
 @media (max-width: 29.99rem) {
   .bk-totals__head > .tg-button {
     flex: 1 1 100%;

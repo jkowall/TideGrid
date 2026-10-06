@@ -37,7 +37,10 @@ export function criteriaOf(
   seesGuests: boolean,
 ): { kind: "ok"; criteria: SearchCriteria } | { kind: "invalid"; problems: FieldProblems } {
   const problems: FieldProblems = {};
-  const text = form.text.trim();
+  // A tab or a line break pasted into the field is a space: the API refuses
+  // control characters, and no name, email, or reference holds one.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to replace them.
+  const text = form.text.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
   const from = form.from.trim();
   const to = form.to.trim();
   if (!text && !from && !to) {
