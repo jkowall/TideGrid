@@ -20,6 +20,7 @@ import {
 import {
   acquireHold,
   DEFAULT_HOLD_TTL_SECONDS,
+  MIN_HOLD_TTL_SECONDS,
   type NotBookableReason,
   releaseHold,
 } from "@tidegrid/domain-inventory";
@@ -89,7 +90,8 @@ interface QuoteRow {
   party_size: number;
   policy_version: number;
   total_amount: number;
-  fresh: boolean;
+  /** Whole seconds the quote still holds its price, by the database clock; negative once lapsed. */
+  remaining: number;
 }
 
 function normalizeBooker(booker: BookerDetails): BookerDetails {
@@ -126,9 +128,13 @@ export async function createCheckoutSession(
   await sql`select pg_advisory_xact_lock(hashtextextended(${`tidegrid.checkout_quote:${ctx.tenantId}:${input.quoteId}`}, 0))`.execute(
     trx,
   );
+  // A quote holds its price until the earlier of its own expiry and 30 minutes
+  // after the database wrote it. The checkout must end by then too, so its
+  // hold lasts the shorter of the checkout window and what is left.
   const { rows: quotes } = await sql<QuoteRow>`
     select id, trip_id, product_id, party_size, policy_version, total_amount,
-           now() < least(expires_at, created_at + interval '30 minutes') as fresh
+           floor(extract(epoch from
+             least(expires_at, created_at + interval '30 minutes') - now()))::int as remaining
       from quotes
      where tenant_id = ${ctx.tenantId} and id = ${input.quoteId}`.execute(trx);
   const quote = quotes[0];
@@ -140,7 +146,9 @@ export async function createCheckoutSession(
     .where("quote_id", "=", quote.id)
     .executeTakeFirst();
   if (used) return { kind: "quote_already_used" };
-  if (!quote.fresh) return { kind: "quote_expired" };
+  const ttlSeconds = Math.min(input.ttlSeconds ?? CHECKOUT_TTL_SECONDS, quote.remaining);
+  // Less than a minute left is too little to pay in: ask for a new quote.
+  if (ttlSeconds < MIN_HOLD_TTL_SECONDS) return { kind: "quote_expired" };
   if (input.acceptedPolicyVersion !== quote.policy_version) {
     return { kind: "policy_not_accepted", policyVersion: quote.policy_version };
   }
@@ -171,7 +179,7 @@ export async function createCheckoutSession(
     ownerRef,
     tripId: quote.trip_id,
     partySize: quote.party_size,
-    ttlSeconds: input.ttlSeconds ?? CHECKOUT_TTL_SECONDS,
+    ttlSeconds,
   });
   switch (held.kind) {
     case "acquired":

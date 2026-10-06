@@ -95,11 +95,13 @@ The checkout migration (0007) adds twelve tenant-owned tables under rules 1 to 1
 - **Sealed and self-checking orders.** Order lines can be written only in their order's transaction, and a deferred check refuses at commit an order that does not equal its quote, line for line and tax rate for tax rate.
 - **Composite keys.** Every reference carries `tenant_id`, including the inbox's reference to the connected account, so an event can be recorded only in the tenant that owns the account it names.
 - **Trips with bookings.** A trigger on `scheduled_trips` refuses canceling a trip that has confirmed holds, under READ COMMITTED only, until cancellation with remedies exists.
+- **Holds behind checkouts.** Two triggers on `capacity_holds` keep holds and checkouts in step: a hold that backs a confirmed booking cannot be released while the booking stands, and, at commit, a checkout's hold is confirmed only with its booking and is not released while its checkout is open.
+- **Booked or refunded, never both.** Inserting a booking or a refund locks the payment's row and refuses the one when the other exists.
 
 Two more cross-tenant reads join `app.resolve_hostname` and `app.capacity_hold_sweep_tenants`. Both are read-only, STABLE, SECURITY DEFINER with `search_path` pinned, every relation qualified, and EXECUTE granted to `tidegrid_app` only:
 
 - `app.resolve_payment_account(provider, account_ref)` returns the tenant id and the account's status for a connected account. A provider callback names an account, not a tenant, and the webhook must record the event inside the owning tenant's transaction. It runs only after the provider's signature verifies, an id grants nothing, and everything that follows runs under row-level security. It returns accounts whatever their status, because money that moved must be recorded.
-- `app.checkout_sweep_tenants(limit)` returns, at most 1,000, the tenant ids with an open checkout past its instant, a refund requested a minute ago or more, or an inbox event received a minute ago or more and never processed. It reveals that some tenant has such work, a weaker signal than the shared id sequences already give, and the sweep then works inside each tenant's own transaction, for the reasons the hold sweep's argument gives.
+- `app.checkout_sweep_tenants(limit, grace_seconds)` returns, at most 1,000, the tenant ids with an open checkout past its instant, or a refund requested or an inbox event received at least the grace period ago (0 to 3,600 seconds) and never settled or processed. It reveals that some tenant has such work, a weaker signal than the shared id sequences already give, and the sweep then works inside each tenant's own transaction, for the reasons the hold sweep's argument gives.
 
 ## Tests
 

@@ -29,6 +29,7 @@ import {
 } from "@tidegrid/database";
 import { confirmHold, releaseHold } from "@tidegrid/domain-inventory";
 import {
+  InboxConflictError,
   type InboxEvent,
   lockInboxEvent,
   markInboxProcessed,
@@ -189,7 +190,14 @@ async function lockCheckout(
        for update`.execute(trx);
   const payment = payments[0];
   if (!payment) throw new Error("payment vanished inside its own transaction");
-  if (event.paymentRef === null || event.accountRef !== payment.account_ref) {
+  // Everything the event says about the payment must be the payment's before
+  // anything is recorded from it, the provider's payment id included.
+  if (
+    event.paymentRef === null ||
+    event.accountRef !== payment.account_ref ||
+    event.amount !== payment.amount ||
+    event.currency !== payment.currency
+  ) {
     return { kind: "mismatch", payment };
   }
   if (payment.provider_payment_id === null) {
@@ -225,13 +233,6 @@ async function onSuccess(
   if (locked.kind === "unmatched") return result("unmatched_payment");
   if (locked.kind === "mismatch") return mismatch(trx, ctx, event, locked.payment);
   const { session, payment } = locked;
-  if (
-    event.amount !== payment.amount ||
-    event.currency !== payment.currency ||
-    event.accountRef !== payment.account_ref
-  ) {
-    return mismatch(trx, ctx, event, payment);
-  }
   const ids = { checkoutSessionId: session.id };
   if (payment.state === "succeeded") return result("already_succeeded", ids);
   // A success after the provider declared the payment failed: its hold is
@@ -680,9 +681,18 @@ export async function handleVerifiedEvent(
     requestId: meta.requestId,
     sourceIp: meta.sourceIp ?? null,
   };
-  const recorded = await inTenantTransaction(db, ctx, (trx) =>
-    recordProviderEvent(trx, ctx, event),
-  );
+  let recorded: Awaited<ReturnType<typeof recordProviderEvent>>;
+  try {
+    recorded = await inTenantTransaction(db, ctx, (trx) => recordProviderEvent(trx, ctx, event));
+  } catch (err) {
+    // The event id is recorded for another tenant, so this body differs from
+    // the first delivery: the same answer as a changed body in one tenant.
+    // Retrying cannot help, so the caller answers it and raises an alarm.
+    if (err instanceof InboxConflictError) {
+      return { kind: "payload_mismatch", tenantId: account.tenantId };
+    }
+    throw err;
+  }
   if (recorded.duplicate && !recorded.samePayload) {
     return { kind: "payload_mismatch", tenantId: account.tenantId };
   }

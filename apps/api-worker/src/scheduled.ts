@@ -73,8 +73,8 @@ export async function runScheduled(
       const report = await sweepCheckouts(handle.db, {
         runId,
         provider: paymentProvider(env, handle.db),
-        onTenantError: (tenantId, error) =>
-          checkoutLog.error("checkout_sweep_tenant_failed", {
+        onError: (tenantId, item, error) =>
+          checkoutLog.error(`checkout_sweep_${item}_failed`, {
             "tidegrid.tenant_id": tenantId,
             ...errorAttributes(error),
           }),
@@ -82,10 +82,13 @@ export async function runScheduled(
       checkoutLog.info("checkout_sweep", {
         "tidegrid.checkout_sweep.tenant_count": report.tenants,
         "tidegrid.checkout_sweep.expired_count": report.expired,
+        "tidegrid.checkout_sweep.skipped_count": report.skipped,
         "tidegrid.checkout_sweep.reprocessed_count": report.reprocessed,
         "tidegrid.checkout_sweep.refunds_settled_count": report.refundsSettled,
         "tidegrid.checkout_sweep.refunds_pending_count": report.refundsPending,
         "tidegrid.checkout_sweep.failed_tenant_count": report.failedTenants,
+        "tidegrid.checkout_sweep.failed_event_count": report.failedEvents,
+        "tidegrid.checkout_sweep.failed_refund_count": report.failedRefunds,
         "tidegrid.checkout_sweep.complete": report.complete,
         duration_ms: Date.now() - started,
       });

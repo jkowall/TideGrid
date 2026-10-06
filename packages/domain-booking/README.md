@@ -85,7 +85,7 @@ In one transaction, in this order:
 4. **The amount.** At least the provider's minimum (50 cents, Stripe's USD floor; the fake keeps it).
 5. **The account.** The operator's active connected account at the configured provider.
 6. **The per-client limit.** At most `MAX_OPEN_CHECKOUTS_PER_CLIENT` (3) open, unexpired checkouts per client address and tenant, serialized by an advisory lock on a SHA-256 of the tenant and the address; the address itself is not stored. With the per-minute rate limit on public commands, this bounds how many seats one address can hold. No limit applies when the request carries no address (Cloudflare always sets one on a deployed Worker).
-7. **The hold.** `acquireHold` for the quote's party with a 15-minute life (never past departure). This is the party re-check: it refuses a party the product no longer allows (`party_size_out_of_range`) and one the trip cannot seat with every live hold counted (`insufficient_capacity`). Checkout collects no participants in this goal; participant records arrive with the guest journey and waivers.
+7. **The hold.** `acquireHold` for the quote's party, for 15 minutes or until the quote stops holding its price, whichever is sooner, and never past departure. The checkout expires with its hold, so a checkout always ends inside its quote's validity; with less than a minute left the answer is `quote_expired`. The insert trigger refuses a checkout that would outlive its quote, for every writer. The hold is also the party re-check: it refuses a party the product no longer allows (`party_size_out_of_range`) and one the trip cannot seat with every live hold counted (`insufficient_capacity`). Checkout collects no participants in this goal; participant records arrive with the guest journey and waivers.
 8. **The writes.** The session (its expiry copied from the hold in SQL, at full precision), the order and its lines (copied from the quote in SQL), and the pending payment; audit `checkout.session_opened` and event `checkout.session.opened`.
 
 Then, after commit and outside any transaction, `ensureProviderPayment` asks the provider for the payment with the row's idempotency key and records the provider's payment id once. A crash anywhere in between is repaired by calling it again: the same key returns the same provider payment. It offers no payment for a checkout that is no longer open or has passed its expiry.
@@ -94,7 +94,9 @@ Then, after commit and outside any transaction, `ensureProviderPayment` asks the
 
 `handleVerifiedEvent` finds the tenant by the event's connected account (`app.resolve_payment_account`, a definer function that returns the tenant and the account's status only), records the event in that tenant's inbox and commits, then processes it in a second transaction, then sends any refund it requested.
 
-Processing locks the inbox row first (an event already processed returns its recorded outcome and changes nothing), then the checkout session, then, inside the inventory calls, the trip and the hold, then the payment. It finds the payment by the id TideGrid gave the provider (the client reference) or by the provider's payment id, records a missing provider payment id (the webhook may beat the request that created the payment), and checks that the event's account, amount, and currency are the payment's.
+Processing locks the inbox row first (an event already processed returns its recorded outcome and changes nothing), then the checkout session, then the payment, then, inside the inventory calls, the trip and the hold. It finds the payment by the id TideGrid gave the provider (the client reference) or by the provider's payment id, and checks that the event's account, amount, and currency are the payment's before it records anything from the event. Only then does it record a missing provider payment id (the webhook may beat the request that created the payment).
+
+An event id the inbox already holds with a different body, in this tenant or another, answers `payload_mismatch`: nothing is recorded or processed, the route acknowledges it (a retry cannot help), and the log raises an error.
 
 | Event | Payment, checkout | Result | Outcome |
 |---|---|---|---|
@@ -123,19 +125,31 @@ The refund row is the intent, committed with the decision. `settleRefund` then c
 
 `cancelCheckoutSession` releases an open checkout's hold at once and voids its order, so the guest can re-quote a changed party without their own hold counting against them (the G2.6 follow-up). Repeating it changes nothing; a closed checkout answers `not_cancelable`. A payment that succeeds afterwards anyway is refunded.
 
+An open checkout past its instant, which the guest already sees as `expired`, can still be canceled until the sweep writes the expiry down, and becomes `canceled`. That respects what the guest asked for: a payment that succeeds afterwards is refunded rather than reacquiring seats the guest gave up.
+
 ### The sweep
 
-The API Worker's cron runs `sweepCheckouts` after the hold sweep, every 15 minutes. Correctness never waits for it. For each tenant `app.checkout_sweep_tenants` names (tenant ids only, the same argument as the hold sweep's):
+The API Worker's cron runs `sweepCheckouts` after the hold sweep, every 15 minutes. Correctness never waits for it. For each tenant `app.checkout_sweep_tenants(limit, graceSeconds)` names (tenant ids only, the same argument as the hold sweep's):
 
-1. open checkouts past their instant expire, each hold first (`expireHold`, which locks the hold row only), idempotently;
-2. inbox events received a minute ago or more and never processed (the request that recorded them failed) are processed;
-3. refunds requested a minute ago or more and never settled are sent again with their keys.
+1. open checkouts past their instant expire, each hold first (`expireHold`), idempotently;
+2. inbox events received at least the grace period ago (60 seconds by default) and never processed (the request that recorded them failed) are processed;
+3. refunds requested at least the grace period ago and never settled are sent again with their keys.
 
-Rows another transaction holds are skipped, so the sweep never waits on a request.
+The expiry never waits on a lock. It takes checkouts and then their holds with SKIP LOCKED, and leaves a checkout whose row or hold another transaction holds for the next run (reported as `skipped`). Acquisition and late confirmation lock a trip and then expire its due holds in their own scan order, so a sweep that waited for one hold while holding another could deadlock with them; the test specialist found exactly that (PostgreSQL 40P01) before this rule. Each batch either expires something or ends, so skipped checkouts cannot keep it turning. Steps 2 and 3 take the same locks in the same order as the request that would have done the work, one event or refund per transaction. An event or a refund that keeps failing is reported (`failedEvents`, `failedRefunds`) and skipped, so it never blocks the rest of its tenant's work.
 
 ## Lock order
 
-Inbox event, checkout session, trip, hold, then the payment and the rest. The quote and the client address are serialized by transaction-scoped advisory locks taken before any row lock. Expiring a checkout locks its session and then its hold row only, never the trip. External calls never run inside a transaction. Every command needs READ COMMITTED, as the inventory commands do.
+Inbox event, checkout session, payment, trip, hold, then the order and the rest. Opening a checkout takes transaction-scoped advisory locks on the quote and the client address before any row lock, then the trip and its holds. The database's own checks lock the payment row before inserting a booking or a refund for it, so the two can never both be written. Expiring a checkout takes its session and then its hold row with SKIP LOCKED, never waiting and never touching the trip. External calls never run inside a transaction. Every command needs READ COMMITTED, as the inventory commands do.
+
+## What the database adds
+
+Beyond the chain of custody above, triggers in the checkout migration hold these for every role:
+
+- A hold that backs a confirmed booking keeps its seats: releasing it is refused while the booking stands (`capacity_holds_booked`).
+- At commit, a hold a checkout owns is confirmed only with its booking, and is not released while its checkout is open (`capacity_holds_checkout`).
+- A payment is booked or refunded, never both: a refund is refused for a payment with a booking, and a booking for a payment with a refund.
+- A checkout cannot outlive its quote's validity.
+- A trip with confirmed bookings cannot be canceled.
 
 ## Audit and events
 
@@ -177,7 +191,8 @@ The checkout secret and the client secret travel in headers and bodies only, nev
 ## Deferred and known gaps
 
 - Deposits and balances (G2.8), refunds beyond this compensation and booking cancellation (G2.9, G2.11), participants (G2.11, G2.15), and the guest UI are not here.
-- A late success gets no priority over acquisitions queued for the same seats.
+- **A late success gets no priority (owner to decide).** It reacquires only if its seats are still free, and new checkouts queued for the same trip usually take them first: in the test specialist's race with no sweep, 1 of 10 late payments reacquired and 9 were refunded. Every one was handled correctly, but a guest who paid a little late is refunded rather than booked. If that is not acceptable, the remedy is a grace period: hold the seats a few minutes longer than the checkout window the guest is shown, so a payment made at the last moment still finds them.
+- Nothing reconciles a payment whose webhook never arrives, other than the provider's own retries (Stripe retries for days; the fake can redeliver). The adapter's `retrievePayment` is the seam for the reconciliation goal (G2.10).
 - The booker's name and email stay on abandoned checkouts. A retention job should clear them after a set time before real guests use the system.
 - Finalization exceptions have no resolution workflow yet; the console goal adds one.
 - The staff bookings read has no pagination.

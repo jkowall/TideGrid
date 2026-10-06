@@ -101,7 +101,7 @@ expireHold(trx, ctx, { holdId, ownerRef }) // one hold, for checkout's expiry (G
 sweepExpiredHolds(db, { runId, ... })    // every tenant, for the cron
 ```
 
-`expireHold` marks one owner's hold expired once its instant has passed and answers `expired`, `unchanged` (already expired, released, or confirmed), `not_due`, or `not_found`. Like the sweep it locks the hold row only, never the trip, so a caller may already hold its own row locks, such as a checkout session's.
+`expireHold` marks one owner's hold expired once its instant has passed and answers `expired`, `unchanged` (already expired, released, or confirmed), `not_due`, `busy`, or `not_found`. Like the sweep it never waits: it takes the hold's row with SKIP LOCKED and answers `busy` when another transaction has it, and it never touches the trip. Acquisition and confirmation lock a trip and then expire its due holds in their own scan order, so a caller that waited on one hold while holding another could deadlock with them; the G2.7 test specialist found that deadlock in the checkout sweep's first version.
 
 `Hold` is `{ id, tripId, ownerRef, kind, partySize, seats, state, expiresAt, createdAt, confirmedAt, releasedAt, expiredAt }`, with instants as RFC 3339 strings.
 

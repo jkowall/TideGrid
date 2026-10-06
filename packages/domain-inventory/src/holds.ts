@@ -665,14 +665,21 @@ export type ExpireHoldResult =
   | { kind: "unchanged"; hold: Hold }
   /** Active and not yet past its expiry instant by the database clock. */
   | { kind: "not_due"; hold: Hold }
+  /** Another transaction holds the hold's row; nothing was waited for or changed. */
+  | { kind: "busy" }
   | { kind: "not_found" };
 
 /**
  * Mark one owner's hold expired once its instant has passed, for checkout's
- * own expiry (G2.7). Like the sweep it locks the hold row only, never the
- * trip, because an expiry takes no capacity; a caller may already hold its
- * own row locks, such as the checkout session's. Idempotent, and writes the
- * same audit row and event as every other expiry, under the caller's actor.
+ * sweep (G2.7). Like the hold sweep it never waits: it takes the hold's row
+ * with SKIP LOCKED and answers `busy` when another transaction has it, and it
+ * never touches the trip, because an expiry takes no capacity. Acquisition and
+ * confirmation lock a trip and then expire its due holds in whatever order
+ * their scan meets them; a sweep that waited for one hold while holding
+ * another could deadlock with them (found by the G2.7 test specialist). A busy
+ * hold is left for the next pass, or for the command that holds it, which
+ * expires it lazily anyway. Idempotent, and writes the same audit row and
+ * event as every other expiry, under the caller's actor.
  */
 export async function expireHold(
   trx: TenantTransaction,
@@ -681,8 +688,17 @@ export async function expireHold(
 ): Promise<ExpireHoldResult> {
   if (!isUuid(input.holdId) || !isOwnerRef(input.ownerRef)) return { kind: "not_found" };
   await requireReadCommitted(trx);
-  const held = await selectHold(trx, ctx.tenantId, input.holdId, { lock: true });
-  if (!held || held.owner_ref !== input.ownerRef) return { kind: "not_found" };
+  const { rows: free } = await sql<HoldRow & { unexpired: boolean }>`
+    select ${holdColumns}, expires_at > now() as unexpired
+      from capacity_holds
+     where tenant_id = ${ctx.tenantId} and id = ${input.holdId}
+       for update skip locked`.execute(trx);
+  const held = free[0];
+  if (!held) {
+    const seen = await selectHold(trx, ctx.tenantId, input.holdId, { lock: false });
+    return seen && seen.owner_ref === input.ownerRef ? { kind: "busy" } : { kind: "not_found" };
+  }
+  if (held.owner_ref !== input.ownerRef) return { kind: "not_found" };
   if (held.state !== "active") return { kind: "unchanged", hold: toHold(held) };
   if (held.unexpired) return { kind: "not_due", hold: toHold(held) };
   const { rows } = await sql<HoldRow>`

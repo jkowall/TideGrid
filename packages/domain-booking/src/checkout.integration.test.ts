@@ -7,8 +7,14 @@ import {
 } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import { changeTripSalesState } from "@tidegrid/domain-catalog";
+import { releaseHold } from "@tidegrid/domain-inventory";
 import { systemContext, tripAllocator } from "@tidegrid/domain-inventory/testing";
-import { FAKE_MINIMUM_AMOUNT, type FakePaymentProvider } from "@tidegrid/domain-payments";
+import {
+  FAKE_MINIMUM_AMOUNT,
+  type FakePaymentProvider,
+  type PaymentProvider,
+  ProviderUnavailableError,
+} from "@tidegrid/domain-payments";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
@@ -531,5 +537,198 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
         admin`update public.scheduled_trips set sales_state = 'canceled' where id = ${tripId}`,
       ),
     ).toMatchObject({ code: "23514", constraint: "scheduled_trips_cancel_with_bookings" });
+  });
+
+  it("keeps a booked hold's seats, and a checkout's hold in step with its checkout", async () => {
+    const booked = await checkout(A, tripsA.shared(), 2);
+    await pay(A, booked.paymentRef, "succeeded");
+    const holdOf = async (sessionId: string) => {
+      const [row] = await admin<{ hold: string }[]>`
+        select hold_id as hold from public.checkout_sessions where id = ${sessionId}`;
+      if (!row) throw new Error("no hold");
+      return row.hold;
+    };
+    const bookedHold = await holdOf(booked.session.id);
+    // The inventory service would release it, as for a canceled booking; while
+    // the booking stands, the database refuses, for the runtime and the owner.
+    const ctx = systemContext(A.id);
+    expect(
+      await failure(
+        inTenantTransaction(runtime.db, ctx, (trx) =>
+          releaseHold(trx, ctx, {
+            holdId: bookedHold,
+            ownerRef: `checkout_session:${booked.session.id}`,
+            reason: "test",
+          }),
+        ),
+      ),
+    ).toMatchObject({ code: "23514", constraint: "capacity_holds_booked" });
+    expect(
+      await failure(
+        admin`update public.capacity_holds set state = 'released' where id = ${bookedHold}`,
+      ),
+    ).toMatchObject({ code: "23514", constraint: "capacity_holds_booked" });
+
+    // An open checkout's hold cannot be released, or confirmed without a
+    // booking, without the checkout following, by the time it commits.
+    const open = await checkout(A, tripsA.shared(), 1);
+    const openHold = await holdOf(open.session.id);
+    for (const to of ["released", "confirmed"]) {
+      expect(
+        await failure(admin`update public.capacity_holds set state = ${to} where id = ${openHold}`),
+      ).toMatchObject({ code: "23514", constraint: "capacity_holds_checkout" });
+    }
+    expect(await stateOf(open.session.id)).toMatchObject({ session: "open", hold: "active" });
+  });
+
+  it("ends a checkout by the time its quote stops holding the price", async () => {
+    const open = async (quoteNow: Date) => {
+      const quote = await quoteFor(runtime.db, A.id, tripsA.shared(), 1, { now: quoteNow });
+      return {
+        quote,
+        created: await asGuest(A.id, (trx, ctx) =>
+          createCheckoutSession(trx, ctx, {
+            quoteId: quote.quoteId,
+            acceptedPolicyVersion: quote.policy.version,
+            booker: { name: "Slow Guest", email: "slow@example.test" },
+            secret: newSecret(),
+            clientAddress: null,
+            provider: "fake",
+            minimumAmount: FAKE_MINIMUM_AMOUNT,
+          }),
+        ),
+      };
+    };
+    // Quoted 25 minutes ago: its price holds 5 more minutes, so does the checkout.
+    const late = await open(new Date(Date.now() - 25 * 60_000));
+    if (late.created.kind !== "created") throw new Error(late.created.kind);
+    const [bounds] = await admin<{ session: string; hold: string; valid_until: string }[]>`
+      select s.expires_at::text as session, h.expires_at::text as hold,
+             least(q.expires_at, q.created_at + interval '30 minutes')::text as valid_until
+        from public.checkout_sessions s
+        join public.capacity_holds h on h.id = s.hold_id
+        join public.quotes q on q.id = s.quote_id
+       where s.id = ${late.created.session.id}`;
+    expect(bounds?.session).toBe(bounds?.hold);
+    expect(Date.parse(bounds?.session ?? "")).toBeLessThanOrEqual(
+      Date.parse(bounds?.valid_until ?? ""),
+    );
+    expect(Date.parse(late.created.session.expiresAt) - Date.now()).toBeLessThan(
+      5 * 60_000 + 5_000,
+    );
+    // Quoted 29 and a half minutes ago: too little time left to pay.
+    const tooLate = await open(new Date(Date.now() - 29.5 * 60_000));
+    expect(tooLate.created).toEqual({ kind: "quote_expired" });
+    // The database refuses a checkout that outlives its quote, for every
+    // writer: the owner forges a 10-minute hold and session on a quote with
+    // five minutes left. Both roll back together.
+    const tripId = tripsA.shared();
+    const quote = await quoteFor(runtime.db, A.id, tripId, 1, {
+      now: new Date(Date.now() - 25 * 60_000),
+    });
+    const sessionId = randomUUID();
+    expect(
+      await failure(
+        admin.begin(async (tx) => {
+          const [hold] = await tx<{ id: string; expires_at: Date }[]>`
+            insert into public.capacity_holds (tenant_id, trip_id, owner_ref, party_size, expires_at)
+            values (${A.id}, ${tripId}, ${`checkout_session:${sessionId}`}, 1,
+                    now() + interval '10 minutes')
+            returning id, expires_at`;
+          await tx`
+            insert into public.checkout_sessions (id, tenant_id, quote_id, trip_id, party_size,
+              hold_id, policy_version, expires_at, secret_hash, booker_name, booker_email)
+            values (${sessionId}, ${A.id}, ${quote.quoteId}, ${tripId}, 1, ${hold?.id ?? null},
+                    ${quote.policy.version}, ${hold?.expires_at ?? null}, ${"0".repeat(64)},
+                    'Forger', 'forger@example.test')`;
+        }),
+      ),
+    ).toMatchObject({ code: "23514", constraint: "checkout_sessions_quote_fresh" });
+  });
+
+  it("never books and refunds one payment, for any role", async () => {
+    const booked = await checkout(A, tripsA.shared(), 1);
+    await pay(A, booked.paymentRef, "succeeded");
+    const [p] = await admin<{ id: string; amount: number }[]>`
+      select id, amount from public.payments where checkout_session_id = ${booked.session.id}`;
+    if (!p) throw new Error("no payment");
+    expect(
+      await failure(admin`
+        insert into public.payment_refunds (tenant_id, payment_id, amount, reason, idempotency_key)
+        values (${A.id}, ${p.id}, ${p.amount}, 'unfulfilled_payment', ${`forged:${randomUUID()}`})`),
+    ).toMatchObject({ code: "23514", constraint: "payment_refunds_payment" });
+  });
+
+  it("isolates a refund that keeps failing, so the sweep still settles the rest", async () => {
+    // The fake behind a stand-in whose refunds can be made to fail. Refunds
+    // whose provider call never answered stay requested.
+    const withRefunds = (refundPayment: PaymentProvider["refundPayment"]): PaymentProvider => ({
+      name: provider.name,
+      signatureHeader: provider.signatureHeader,
+      minimumAmount: (c) => provider.minimumAmount(c),
+      createPayment: (i) => provider.createPayment(i),
+      retrievePayment: (i) => provider.retrievePayment(i),
+      verifyWebhook: (i) => provider.verifyWebhook(i),
+      refundPayment,
+    });
+    const silent = withRefunds(async () => {
+      throw new ProviderUnavailableError("no answer");
+    });
+    const refunds: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const { session, paymentRef, secret } = await checkout(A, tripsA.shared(), 1);
+      await asGuest(A.id, (trx, ctx) =>
+        cancelCheckoutSession(trx, ctx, { sessionId: session.id, secret }),
+      );
+      const settled = await provider.settlePayment(A.id, paymentRef, "succeeded", Date.now());
+      if (settled.kind === "not_found") throw new Error("no fake payment");
+      const handled = await handleVerifiedEvent(
+        runtime.db,
+        silent,
+        await verifiedFakeEvent(provider, settled.event.body),
+        { requestId: `wh-${randomUUID()}` },
+      );
+      expect(handled).toMatchObject({ outcome: "refund_required", refund: { kind: "unknown" } });
+      const [r] = await admin<{ id: string }[]>`
+        select r.id from public.payment_refunds r
+          join public.payments p on p.id = r.payment_id
+         where p.checkout_session_id = ${session.id}`;
+      if (!r) throw new Error("no refund");
+      refunds.push(r.id);
+    }
+    // The first refund fails in a way the provider does not explain; the
+    // second must still be settled in the same run.
+    const [first, second] = refunds;
+    const [firstPayment] = await admin<{ provider_payment_id: string }[]>`
+      select p.provider_payment_id from public.payment_refunds r
+        join public.payments p on p.id = r.payment_id where r.id = ${first ?? ""}`;
+    const failing = withRefunds(async (input) => {
+      if (input.paymentRef === firstPayment?.provider_payment_id) throw new Error("bug");
+      return provider.refundPayment(input);
+    });
+    const errors: string[] = [];
+    const report = await sweepCheckouts(runtime.db, {
+      runId: `sweep-${randomUUID()}`,
+      provider: failing,
+      graceSeconds: 0,
+      onError: (_tenant, item, _error, id) => errors.push(`${item}:${id}`),
+    });
+    expect(report.failedRefunds).toBeGreaterThanOrEqual(1);
+    expect(errors).toContain(`refund:${first}`);
+    const states = await admin<{ id: string; state: string }[]>`
+      select id, state from public.payment_refunds where id in ${admin(refunds)}`;
+    expect(Object.fromEntries(states.map((s) => [s.id, s.state]))).toEqual({
+      [first ?? ""]: "requested",
+      [second ?? ""]: "succeeded",
+    });
+    // The next run, with a working provider, settles the first with its own key.
+    await sweepCheckouts(runtime.db, {
+      runId: `sweep-${randomUUID()}`,
+      provider,
+      graceSeconds: 0,
+    });
+    const [settledFirst] = await admin<{ state: string }[]>`
+      select state from public.payment_refunds where id = ${first ?? ""}`;
+    expect(settledFirst?.state).toBe("succeeded");
   });
 });

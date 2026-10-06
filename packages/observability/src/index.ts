@@ -32,10 +32,13 @@ export interface RequestAttributes {
   /** Checkout sweep counters (G2.7). */
   "tidegrid.checkout_sweep.tenant_count"?: number;
   "tidegrid.checkout_sweep.expired_count"?: number;
+  "tidegrid.checkout_sweep.skipped_count"?: number;
   "tidegrid.checkout_sweep.reprocessed_count"?: number;
   "tidegrid.checkout_sweep.refunds_settled_count"?: number;
   "tidegrid.checkout_sweep.refunds_pending_count"?: number;
   "tidegrid.checkout_sweep.failed_tenant_count"?: number;
+  "tidegrid.checkout_sweep.failed_event_count"?: number;
+  "tidegrid.checkout_sweep.failed_refund_count"?: number;
   "tidegrid.checkout_sweep.complete"?: boolean;
 }
 
@@ -60,10 +63,13 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.payment_event.duplicate",
   "tidegrid.checkout_sweep.tenant_count",
   "tidegrid.checkout_sweep.expired_count",
+  "tidegrid.checkout_sweep.skipped_count",
   "tidegrid.checkout_sweep.reprocessed_count",
   "tidegrid.checkout_sweep.refunds_settled_count",
   "tidegrid.checkout_sweep.refunds_pending_count",
   "tidegrid.checkout_sweep.failed_tenant_count",
+  "tidegrid.checkout_sweep.failed_event_count",
+  "tidegrid.checkout_sweep.failed_refund_count",
   "tidegrid.checkout_sweep.complete",
 ]);
 

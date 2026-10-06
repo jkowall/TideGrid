@@ -35,6 +35,7 @@ export {
   newBookingReference,
 } from "./secrets.ts";
 export {
+  type CheckoutSweepItem,
   type CheckoutSweepOptions,
   type CheckoutSweepReport,
   DEFAULT_CHECKOUT_SWEEP_BATCH,

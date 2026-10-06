@@ -558,8 +558,11 @@ BEGIN
     NEW.expired_at := NULL;
     NEW.canceled_at := NULL;
 
+    -- A quote holds its price until the earlier of its own expiry and 30
+    -- minutes after the database wrote it. The checkout must start, and must
+    -- end, inside that time.
     SELECT x.trip_id, x.party_size, x.policy_version,
-           now() < least(x.expires_at, x.created_at + interval '30 minutes') AS fresh
+           least(x.expires_at, x.created_at + interval '30 minutes') AS valid_until
       INTO q
       FROM public.quotes x
      WHERE x.tenant_id = NEW.tenant_id AND x.id = NEW.quote_id;
@@ -567,8 +570,8 @@ BEGIN
       RAISE EXCEPTION 'no quote % for this tenant', NEW.quote_id
         USING ERRCODE = '23503', CONSTRAINT = 'checkout_sessions_quote';
     END IF;
-    IF NOT q.fresh THEN
-      RAISE EXCEPTION 'quote % is no longer valid for checkout', NEW.quote_id
+    IF now() >= q.valid_until OR NEW.expires_at > q.valid_until THEN
+      RAISE EXCEPTION 'quote % is not valid for a checkout ending at %', NEW.quote_id, NEW.expires_at
         USING ERRCODE = '23514', CONSTRAINT = 'checkout_sessions_quote_fresh';
     END IF;
     IF q.trip_id <> NEW.trip_id OR q.party_size <> NEW.party_size
@@ -1004,12 +1007,25 @@ BEGIN
     NEW.created_at := now();
     NEW.updated_at := now();
     NEW.settled_at := NULL;
+    -- The payment's row lock orders this against a booking for the same
+    -- payment (check_booking takes it too), so one of them sees the other.
+    PERFORM 1 FROM public.payments p
+      WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.payment_id
+        FOR NO KEY UPDATE;
     IF NOT EXISTS (
       SELECT 1 FROM public.payments p
        WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.payment_id
          AND p.state = 'succeeded' AND p.amount = NEW.amount AND p.currency = NEW.currency
     ) THEN
       RAISE EXCEPTION 'a refund returns the full amount of a succeeded payment'
+        USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_payment';
+    END IF;
+    -- G2.7 refunds only a payment that could not become a booking.
+    IF EXISTS (
+      SELECT 1 FROM public.bookings b
+       WHERE b.tenant_id = NEW.tenant_id AND b.payment_id = NEW.payment_id
+    ) THEN
+      RAISE EXCEPTION 'payment % has a booking; it is not an unfulfilled payment', NEW.payment_id
         USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_payment';
     END IF;
     RETURN NEW;
@@ -1057,6 +1073,17 @@ CREATE FUNCTION app.check_booking() RETURNS trigger
 BEGIN
   NEW.created_at := now();
   NEW.confirmed_at := now();
+  -- Ordered against a refund of the same payment by the payment's row lock,
+  -- as in check_payment_refund: a payment is booked or refunded, never both.
+  PERFORM 1 FROM public.payments p
+    WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.payment_id
+      FOR NO KEY UPDATE;
+  IF EXISTS (
+       SELECT 1 FROM public.payment_refunds r
+        WHERE r.tenant_id = NEW.tenant_id AND r.payment_id = NEW.payment_id) THEN
+    RAISE EXCEPTION 'payment % is being refunded; it cannot back a booking', NEW.payment_id
+      USING ERRCODE = '23514', CONSTRAINT = 'bookings_evidence';
+  END IF;
   IF NOT EXISTS (
        SELECT 1
          FROM public.checkout_sessions s
@@ -1147,6 +1174,66 @@ CREATE TRIGGER scheduled_trips_cancel_with_bookings
   BEFORE UPDATE OF sales_state ON public.scheduled_trips
   FOR EACH ROW EXECUTE FUNCTION app.check_trip_cancel_bookings();
 
+-- A hold that backs a confirmed booking keeps its seats: no role releases it
+-- while the booking stands, or they could be sold twice. Cancellation (G2.11)
+-- ends the booking first, in the same transaction, then releases the hold.
+CREATE FUNCTION app.check_booked_hold() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF OLD.state = 'confirmed' AND NEW.state IS DISTINCT FROM 'confirmed'
+     AND EXISTS (SELECT 1 FROM public.bookings b
+                  WHERE b.tenant_id = OLD.tenant_id AND b.hold_id = OLD.id
+                    AND b.state = 'confirmed') THEN
+    RAISE EXCEPTION 'hold % backs a confirmed booking and keeps its seats', OLD.id
+      USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_booked';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER capacity_holds_booked BEFORE UPDATE OF state ON public.capacity_holds
+  FOR EACH ROW EXECUTE FUNCTION app.check_booked_hold();
+
+-- Checked at commit, for a hold a checkout session owns: a confirmed hold has
+-- its booking, and an open checkout's hold is not released. The states are
+-- read again at commit, so a command that moves both in one transaction is
+-- judged by where they end. Holds no checkout owns are not affected.
+CREATE FUNCTION app.check_checkout_hold() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  session_state text;
+  hold_state text;
+BEGIN
+  SELECT s.state INTO session_state
+    FROM public.checkout_sessions s
+   WHERE s.tenant_id = NEW.tenant_id AND s.hold_id = NEW.id;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  SELECT h.state INTO hold_state
+    FROM public.capacity_holds h
+   WHERE h.tenant_id = NEW.tenant_id AND h.id = NEW.id;
+  IF hold_state = 'confirmed' AND NOT EXISTS (
+       SELECT 1 FROM public.bookings b
+        WHERE b.tenant_id = NEW.tenant_id AND b.hold_id = NEW.id) THEN
+    RAISE EXCEPTION 'hold % is confirmed without its checkout''s booking', NEW.id
+      USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_checkout';
+  END IF;
+  IF hold_state = 'released' AND session_state = 'open' THEN
+    RAISE EXCEPTION 'hold % is released while its checkout is open', NEW.id
+      USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_checkout';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER capacity_holds_checkout
+  AFTER UPDATE OF state ON public.capacity_holds
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION app.check_checkout_hold();
+
 -- Cross-tenant lookups ------------------------------------------------------------
 
 -- A provider callback names a connected account, not a tenant. This returns
@@ -1168,11 +1255,12 @@ CREATE FUNCTION app.resolve_payment_account(p_provider text, p_account_ref text)
   $$;
 
 -- The checkout sweep's tenant list: tenants with an open checkout past its
--- instant, a refund requested a minute ago or more and not settled, or an
--- inbox event received a minute ago or more and not processed. Tenant ids
--- only, at most 1,000, as app.capacity_hold_sweep_tenants returns; the sweep
--- then works inside each tenant's own transaction.
-CREATE FUNCTION app.checkout_sweep_tenants(p_limit integer)
+-- instant, or a refund requested, or an inbox event received and not
+-- processed, at least the grace period ago (0 to 3,600 seconds; 60 when
+-- null), so the sweep leaves work to the request that is still doing it.
+-- Tenant ids only, at most 1,000, as app.capacity_hold_sweep_tenants returns;
+-- the sweep then works inside each tenant's own transaction.
+CREATE FUNCTION app.checkout_sweep_tenants(p_limit integer, p_grace_seconds integer)
   RETURNS TABLE (tenant_id uuid)
   LANGUAGE sql STABLE SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
@@ -1182,11 +1270,14 @@ CREATE FUNCTION app.checkout_sweep_tenants(p_limit integer)
        WHERE s.state = 'open' AND s.expires_at <= pg_catalog.now()
       UNION
       SELECT r.tenant_id FROM public.payment_refunds r
-       WHERE r.state = 'requested' AND r.created_at <= pg_catalog.now() - interval '1 minute'
+       WHERE r.state = 'requested'
+         AND r.created_at <= pg_catalog.now() - pg_catalog.make_interval(
+               secs => greatest(0, least(coalesce(p_grace_seconds, 60), 3600)))
       UNION
       SELECT e.tenant_id FROM public.provider_events e
        WHERE e.processing_state = 'received'
-         AND e.verified_at <= pg_catalog.now() - interval '1 minute'
+         AND e.verified_at <= pg_catalog.now() - pg_catalog.make_interval(
+               secs => greatest(0, least(coalesce(p_grace_seconds, 60), 3600)))
     ) x
      ORDER BY x.tenant_id
      LIMIT greatest(1, least(coalesce(p_limit, 100), 1000))
@@ -1252,7 +1343,9 @@ REVOKE ALL ON FUNCTION app.check_payment_refund() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_booking() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_finalization_exception() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_trip_cancel_bookings() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_booked_hold() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_checkout_hold() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.resolve_payment_account(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app.checkout_sweep_tenants(integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.checkout_sweep_tenants(integer, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.resolve_payment_account(text, text) TO tidegrid_app;
-GRANT EXECUTE ON FUNCTION app.checkout_sweep_tenants(integer) TO tidegrid_app;
+GRANT EXECUTE ON FUNCTION app.checkout_sweep_tenants(integer, integer) TO tidegrid_app;
