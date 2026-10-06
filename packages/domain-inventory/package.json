@@ -18,6 +18,7 @@
   },
   "devDependencies": {
     "@tidegrid/domain-catalog": "workspace:*",
+    "@tidegrid/domain-pricing": "workspace:*",
     "@types/node": "^24.0.0",
     "postgres": "^3.4.0",
     "typescript": "^5.9.0",

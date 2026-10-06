@@ -185,6 +185,43 @@ describe.skipIf(!env)("capacity in the trip listings and the hold sweep", () => 
     });
   });
 
+  it("quotes against held seats: a trip without room is not bookable, a large party lacks capacity", async () => {
+    // A quote finds its trip through the guest listing for the product's
+    // smallest party (G2.5), then checks the party against the seats left.
+    const quote = async (tripId: string, party: unknown) => {
+      const headers = new Headers({
+        origin: `https://${A.host}`,
+        "content-type": "application/json",
+        "idempotency-key": randomUUID(),
+      });
+      const res = await app.request(
+        "http://localhost/v1/public/quotes",
+        { method: "POST", headers, body: JSON.stringify({ tripId, party }) },
+        bindings(),
+        executionCtx,
+      );
+      const json = (await res.json()) as Json;
+      return [res.status, json.error?.code ?? "quoted"];
+    };
+    const adults = (quantity: number) => ({
+      kind: "tickets",
+      tickets: [{ code: "adult", quantity }],
+    });
+    const shared = tripsA.shared();
+    await hold(A, shared, 8);
+    expect(await quote(shared, adults(2))).toEqual([201, "quoted"]);
+    expect(await quote(shared, adults(3))).toEqual([409, "insufficient_capacity"]);
+    await hold(A, shared, 2);
+    expect(await quote(shared, adults(1))).toEqual([409, "trip_not_bookable"]);
+    const charter = tripsA.charter();
+    expect(await quote(charter, { kind: "charter", guests: 2 })).toEqual([201, "quoted"]);
+    await hold(A, charter, 2);
+    expect(await quote(charter, { kind: "charter", guests: 2 })).toEqual([
+      409,
+      "trip_not_bookable",
+    ]);
+  });
+
   it("hides a held charter from guests, shows it sold out to staff, and frees it at expiry", async () => {
     const trip = tripsA.charter();
     const held = await hold(A, trip, 2);

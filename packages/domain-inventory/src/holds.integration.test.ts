@@ -32,6 +32,7 @@ import {
   sweepExpiredHolds,
 } from "./index.ts";
 import {
+  addSaleTerms,
   backdateHold,
   createTenantFixture,
   systemContext,
@@ -320,7 +321,9 @@ describe.skipIf(!env)("capacity holds against a real database as the runtime rol
           eligibleBoatIds: [boat],
           reason: "test",
         });
-        await publishProduct(trx, ctx, { productId: product, reason: "test" });
+        await addSaleTerms(trx, ctx, product);
+        const published = await publishProduct(trx, ctx, { productId: product, reason: "test" });
+        if (published.kind !== "published") throw new Error("product did not publish");
         const schedule = await createSchedule(trx, ctx, {
           productId: product,
           boatId: boat,
@@ -494,34 +497,29 @@ describe.skipIf(!env)("capacity holds against a real database as the runtime rol
       expect(await acquired(A.id, trip, 2)).toMatchObject({ kind: "whole_boat", seats: 8 });
     });
 
-    it("does not reacquire a hold whose trip's product changed kind while it had expired", async () => {
+    it("keeps a held product's kind, because its price lists carry the kind", async () => {
+      // Since G2.5 a price list names its product's kind in a foreign key, a
+      // product publishes only with a price list, and price lists are never
+      // deleted. So no role can change the kind of a product that could take a
+      // hold, and a reacquired hold can stop matching its trip only through a
+      // resize, as above.
       const trip = tripsA.charter();
       const hold = await acquired(A.id, trip, 3);
       await backdateHold(admin, hold.id);
       await admin`update public.capacity_holds set state = 'expired' where id = ${hold.id}`;
-      // Only the owner role can change a product's kind. Put it back afterwards,
-      // because every charter trip of this tenant shares the product.
-      await admin`update public.products set kind = 'shared_seat' where id = ${A.products.charter}`;
-      try {
-        expect(await confirm(A.id, hold)).toMatchObject({
-          kind: "capacity_lost",
-          reason: "trip_unavailable",
-          hold: { state: "expired", kind: "whole_boat" },
-        });
-        expect(
-          await failure(
-            raw(
-              A.id,
-              (tx) =>
-                tx`update public.capacity_holds set state = 'confirmed' where id = ${hold.id}`,
-            ),
-          ),
-        ).toEqual({ code: "23514", constraint: "capacity_holds_kind" });
-      } finally {
-        await admin`update public.products set kind = 'private_charter'
-                     where id = ${A.products.charter}`;
-      }
-      expect(await holdState(A.id, hold.id)).toBe("expired");
+      expect(
+        await failure(
+          admin`update public.products set kind = 'shared_seat' where id = ${A.products.charter}`,
+        ),
+      ).toEqual({
+        code: "23503",
+        constraint: "price_list_versions_tenant_id_product_id_product_kind_fkey",
+      });
+      expect(await confirm(A.id, hold)).toMatchObject({
+        kind: "confirmed",
+        reacquired: true,
+        hold: { kind: "whole_boat", seats: 6 },
+      });
     });
 
     it("refuses other owners, malformed ids, and released holds", async () => {

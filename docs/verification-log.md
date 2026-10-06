@@ -7,7 +7,7 @@ This log records each dated verification pass over the throwaway guest workflow 
 ### G2.6 Capacity and holds verification, October 5, 2026
 
 - Built on branch `build/g2.6-capacity-and-holds` from `a541eab`, in parallel with G2.5. The contract is the [inventory README](../packages/domain-inventory/README.md).
-  - The capacity and holds migration, renumbered if G2.5 merges first, adds `capacity_holds` under the tenancy contract. One trigger locks the trip's row, counts active and confirmed holds, and refuses any insert or reacquisition that does not fit, for every role. It also enforces sales rules, expiry bounds, one-way states, and immutability.
+  - Migration 0006 (0005 until G2.5 merged first) adds `capacity_holds` under the tenancy contract. One trigger locks the trip's row, counts active and confirmed holds, and refuses any insert or reacquisition that does not fit, for every role. It also enforces sales rules, expiry bounds, one-way states, and immutability.
   - A second trigger stops any role from shrinking a trip below its held seats, changing its product, or resizing a held charter. A partial unique index backs the whole-boat rule. The runtime may update `state` only, and no role may delete or truncate.
   - `packages/domain-inventory` acquires (idempotent per owner and trip), confirms (reacquiring after expiry, or reporting lost capacity), releases, expires per tenant, sweeps across tenants, and reads capacity. Each transition writes one audit row and one `inventory.hold.*` event.
   - Both trip listings subtract held and confirmed seats. Staff also see `soldOut`, `held`, and `confirmed`, and can read a trip's holds. The new contract fields are optional, so the trips slice's fixtures keep validating.
@@ -56,6 +56,12 @@ This log records each dated verification pass over the throwaway guest workflow 
 - Checks after the fixes:
   - `pnpm check` is green: Biome on 190 files, 371 unit tests across 11 packages (31 in the Workers runtime), three dry-run deploys, doc links, and 29 prototype tests.
   - On a fresh throwaway Neon branch, as CI runs it: migrate; seed, 892 trips; a second seed, 0 new trips; then 222 integration tests. That is 40 database, 24 catalog, 89 inventory, and 69 API tests.
+- After G2.5 merged first. On the local branch `integrate/g2.5-g2.6`, both goals were merged onto `a541eab`, and one commit adapted G2.6:
+  - the migration became 0006, and the fixtures give each product a price list and a policy before publishing it, through the pricing commands;
+  - G2.5's price lists carry their product's kind in a foreign key, so no role can change the kind of a product that could take a hold. That follow-up is closed, and its test now expects the refusal (23503);
+  - a new API test quotes against held seats. A trip without room for the product's smallest party answers 409 `trip_not_bookable`, and a party larger than the seats left answers 409 `insufficient_capacity`.
+  - Checks: `pnpm check` is green, with Biome on 217 files, 467 unit tests across 12 packages (31 in the Workers runtime), three dry-run deploys, doc links, and 29 prototype tests. A frozen install is clean, and `pnpm contracts:generate` changed nothing.
+  - On a fresh throwaway Neon branch: migrate, 0003 to 0006; seed, 892 trips, 5 price lists with 24 items, 5 policies, 3 tax rates, 2 promotion codes, 5 published products, and no holds; a second seed, nothing new; then 304 integration tests. That is 40 database, 25 catalog, 50 pricing, 89 inventory, and 100 API tests.
 - Not done, and follow-ups for G2.7:
   - No route acquires, confirms, or releases a hold.
   - Canceling a trip with confirmed holds still succeeds.
