@@ -25,9 +25,9 @@ export interface ParticipantDetails {
   name: string;
   isMinor: boolean;
   /** Optional; null or absent means none. */
-  email?: string | null;
+  email?: string | null | undefined;
   /** Required for a minor; null or absent for an adult. */
-  guardian?: { name: string; email: string } | null;
+  guardian?: { name: string; email: string } | null | undefined;
 }
 
 export interface ParticipantView {

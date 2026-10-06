@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { tripIdOf } from "./booking/address.ts";
 import { BookingPage } from "./booking/BookingPage.tsx";
 import { formatPhone, type Tenant } from "./bootstrap.ts";
+import { ManagePage } from "./manage/ManagePage.tsx";
 import { useLinkClick } from "./navigation.tsx";
 import { useTitle } from "./States.tsx";
 import { UpcomingTrips } from "./UpcomingTrips.tsx";
@@ -24,6 +25,8 @@ const legalPages: Record<string, { title: string; placeholder: string }> = {
 type Page =
   | { kind: "home" }
   | { kind: "book"; tripId: string }
+  // The booking's management page (lane 1, G2.11c).
+  | { kind: "manage" }
   | { kind: "legal"; title: string; placeholder: string }
   // Waiver signing (G2.15): the email link's page.
   | { kind: "waiver" }
@@ -32,6 +35,7 @@ type Page =
 function pageFor(path: string): Page {
   const clean = path.length > 1 ? path.replace(/\/+$/, "") : path;
   if (clean === "/") return { kind: "home" };
+  if (clean === "/manage") return { kind: "manage" };
   if (clean === "/waiver") return { kind: "waiver" };
   const tripId = tripIdOf(clean);
   if (tripId) return { kind: "book", tripId };
@@ -274,7 +278,7 @@ export function BrandedShell({
   // again" and after each move between pages. A booking page has no heading
   // until its trip loads, so it moves focus itself.
   useEffect(() => {
-    if (focusHeading && page.kind !== "book" && page.kind !== "waiver") {
+    if (focusHeading && page.kind !== "book" && page.kind !== "manage" && page.kind !== "waiver") {
       main.current?.querySelector<HTMLElement>("h1")?.focus();
     }
   }, []);
@@ -306,6 +310,7 @@ export function BrandedShell({
         {page.kind === "book" && (
           <BookingPage brand={brand} tripId={page.tripId} focusOnArrival={focusHeading} />
         )}
+        {page.kind === "manage" && <ManagePage brand={brand} focusOnArrival={focusHeading} />}
         {page.kind === "legal" && (
           <LegalPage brand={brand} title={page.title} placeholder={page.placeholder} />
         )}

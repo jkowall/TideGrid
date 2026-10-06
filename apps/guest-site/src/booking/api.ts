@@ -42,7 +42,7 @@ export const readTimeoutMs = 10_000;
 export const commandTimeoutMs = 20_000;
 
 interface RequestOptions<S extends z.ZodType> {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PUT";
   /** Sent as JSON. Personal data goes here, never in the path. */
   body?: unknown;
   /** Idempotency-Key for a command that takes one. */
@@ -58,9 +58,10 @@ interface RequestOptions<S extends z.ZodType> {
 
 /**
  * One call. Uses one AbortController and setTimeout, as the bootstrap does,
- * not AbortSignal.any or AbortSignal.timeout. Never throws.
+ * not AbortSignal.any or AbortSignal.timeout. Never throws. The booking's
+ * management page (src/manage) calls through it too.
  */
-async function call<S extends z.ZodType>(
+export async function call<S extends z.ZodType>(
   path: string,
   options: RequestOptions<S>,
 ): Promise<Result<z.infer<S>>> {

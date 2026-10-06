@@ -23,6 +23,20 @@ export interface Bindings {
   PAYMENT_PROVIDER?: string;
   /** Secret. Signs and verifies the fake provider's webhooks; at least 32 characters. */
   FAKE_PAYMENT_WEBHOOK_SECRET?: string;
+  /**
+   * The email provider transactional email uses (lane 1, the G2.16 shim).
+   * "fake" is the demo shim, refused in a production configuration; unset
+   * means email stays queued and nothing is sent.
+   */
+  EMAIL_PROVIDER?: string;
+  /** The sender address; the display name is the operator's brand. */
+  EMAIL_FROM_ADDRESS?: string;
+  /**
+   * The guest site's origin for links in email, with {slug} for the tenant's
+   * slug; default https://{slug}.book.tidegrid.us. Its hostname must be an
+   * active, verified hostname of the tenant.
+   */
+  GUEST_LINK_ORIGIN?: string;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {
