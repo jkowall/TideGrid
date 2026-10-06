@@ -268,7 +268,8 @@ export interface BrandActivationsTable {
 }
 
 // Capacity and holds (G2.6). The trigger sets kind, seats, and every
-// timestamp; the runtime may update state only.
+// timestamp but expires_at, which the writer gives at insert and which can
+// only move earlier; the runtime may update state only.
 
 export type HoldState = "active" | "confirmed" | "released" | "expired";
 export type HoldKind = "seats" | "whole_boat";

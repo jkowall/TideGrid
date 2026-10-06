@@ -667,7 +667,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         idempotency_keys: ["completed_at", "response_body", "response_status", "status"],
         products: ["sales_status", "updated_at"],
         scheduled_trips: ["sales_state", "sales_state_changed_at", "updated_at"],
-        // Capacity and holds (G2.6): the trigger sets every timestamp.
+        // Capacity and holds (G2.6): the trigger sets the transition timestamps.
         capacity_holds: ["state"],
       });
       const [identity] = await admin`
