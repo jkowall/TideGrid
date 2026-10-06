@@ -16,6 +16,13 @@ export interface Bindings {
   AUTH_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   /** Optional limiter for public commands, per client address and tenant. */
   PUBLIC_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  /**
+   * The payment provider checkout uses (G2.7). "fake" is the demo shim and is
+   * refused in a production configuration; unset means payments are off.
+   */
+  PAYMENT_PROVIDER?: string;
+  /** Secret. Signs and verifies the fake provider's webhooks; at least 32 characters. */
+  FAKE_PAYMENT_WEBHOOK_SECRET?: string;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {

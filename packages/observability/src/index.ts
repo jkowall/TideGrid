@@ -26,6 +26,17 @@ export interface RequestAttributes {
   "tidegrid.hold_sweep.expired_count"?: number;
   "tidegrid.hold_sweep.failed_tenant_count"?: number;
   "tidegrid.hold_sweep.complete"?: boolean;
+  /** Payment webhooks (G2.7): what processing did. Never an event body, id, or secret. */
+  "tidegrid.payment_event.outcome"?: string;
+  "tidegrid.payment_event.duplicate"?: boolean;
+  /** Checkout sweep counters (G2.7). */
+  "tidegrid.checkout_sweep.tenant_count"?: number;
+  "tidegrid.checkout_sweep.expired_count"?: number;
+  "tidegrid.checkout_sweep.reprocessed_count"?: number;
+  "tidegrid.checkout_sweep.refunds_settled_count"?: number;
+  "tidegrid.checkout_sweep.refunds_pending_count"?: number;
+  "tidegrid.checkout_sweep.failed_tenant_count"?: number;
+  "tidegrid.checkout_sweep.complete"?: boolean;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -45,6 +56,15 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.hold_sweep.expired_count",
   "tidegrid.hold_sweep.failed_tenant_count",
   "tidegrid.hold_sweep.complete",
+  "tidegrid.payment_event.outcome",
+  "tidegrid.payment_event.duplicate",
+  "tidegrid.checkout_sweep.tenant_count",
+  "tidegrid.checkout_sweep.expired_count",
+  "tidegrid.checkout_sweep.reprocessed_count",
+  "tidegrid.checkout_sweep.refunds_settled_count",
+  "tidegrid.checkout_sweep.refunds_pending_count",
+  "tidegrid.checkout_sweep.failed_tenant_count",
+  "tidegrid.checkout_sweep.complete",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

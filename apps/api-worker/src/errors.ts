@@ -1,4 +1,4 @@
-export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 503;
+export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 503;
 
 /**
  * A failure the client can act on. Handlers throw it; the app's error handler

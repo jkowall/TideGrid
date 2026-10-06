@@ -17,6 +17,16 @@
         "in": "cookie",
         "name": "__Host-tg_session",
         "description": "Magic-link session; HttpOnly, Secure, SameSite=Strict"
+      },
+      "checkoutSecret": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The guest's checkout secret: 43 base64url characters the guest's client generated and sent when it opened the checkout"
+      },
+      "fakeClientSecret": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The payment's client secret from the checkout response (fake provider only)"
       }
     },
     "schemas": {},
@@ -3776,7 +3786,7 @@
             }
           },
           "409": {
-            "description": "The trip cannot move to that state now",
+            "description": "The trip cannot move to that state now (trip_state_conflict, trip_not_departed), or canceling it would strand confirmed bookings (trip_has_bookings)",
             "content": {
               "application/json": {
                 "schema": {
@@ -6368,6 +6378,2543 @@
           },
           "404": {
             "description": "No such tenant or trip",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/checkout-sessions": {
+      "post": {
+        "tags": [
+          "public",
+          "checkout"
+        ],
+        "summary": "Open a checkout for a quote",
+        "description": "Resolves the browser Origin as /v1/public/trips does. Takes a quote by id and charges its stored total, never an amount the client sends. The quote must be this operator's, unused, and still valid by the database clock; the guest must have accepted its policy version. Holds the quote's party on the trip, which checks the party against the product and the seats left, holds included; writes the immutable order copied from the quote and a pending payment on the operator's connected account; then creates the provider payment and returns what the guest needs to pay.\n\nThe guest's client generates `checkoutSecret` and keeps it; TideGrid stores only its hash. Idempotent by key: a retry with the same key and body returns the same checkout with `Idempotent-Replayed: true`, and creates the provider payment if an earlier attempt could not; the same key with another body answers 422. A 503 `payment_provider_unavailable` means the checkout exists and the provider did not answer: retry the same request.\n\nRate limited per client address and operator like quotes, and at most 3 open checkouts per client address at a time. A limited request answers 429 and writes nothing.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quoteId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "A quote from POST /v1/public/quotes, still within its validity"
+                  },
+                  "acceptedPolicyVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The policy version the guest was shown and accepted; must be the quote's"
+                  },
+                  "booker": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+                      },
+                      "email": {
+                        "type": "string",
+                        "maxLength": 254,
+                        "pattern": "^[\\x21-\\x7e]+$"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "email"
+                    ],
+                    "description": "The person booking. Personal data: stored once for the booking and its messages, never in URLs, events, or logs"
+                  },
+                  "checkoutSecret": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$",
+                    "description": "The guest's capability for this checkout: 32 random bytes, base64url without padding, generated by the guest's client and sent once at creation. TideGrid stores only its SHA-256. Send it as `Authorization: Bearer <secret>` to read or cancel the checkout. Never put it in a URL."
+                  }
+                },
+                "required": [
+                  "quoteId",
+                  "acceptedPolicyVersion",
+                  "booker",
+                  "checkoutSecret"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The open checkout and what the guest needs to pay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkoutSession": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "confirmed",
+                            "paid",
+                            "failed",
+                            "expired",
+                            "canceled"
+                          ],
+                          "description": "open: awaiting payment. confirmed: paid and booked. paid: the payment arrived but the trip could not be confirmed; it is refunded in full. failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                        },
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "What the payment charges: the quote's total"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Pay before this instant. The seats are held until then; a later payment is booked only if they are still free, and refunded otherwise"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "booking": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "reference": {
+                              "type": "string",
+                              "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                              "description": "What the guest and the operator quote to each other"
+                            }
+                          },
+                          "required": [
+                            "reference"
+                          ],
+                          "description": "Present once confirmed"
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "succeeded",
+                                "failed"
+                              ],
+                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "amount"
+                          ],
+                          "description": "Present when a payment could not be honored"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "state",
+                        "quoteId",
+                        "tripId",
+                        "partySize",
+                        "amount",
+                        "currency",
+                        "expiresAt",
+                        "createdAt",
+                        "booking",
+                        "refund"
+                      ],
+                      "description": "The checkout as it was opened. A replay returns this same snapshot; read the current state with GET"
+                    },
+                    "payment": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "enum": [
+                            "fake",
+                            "stripe"
+                          ],
+                          "description": "fake is the demo provider; stripe replaces it before any live booking"
+                        },
+                        "paymentRef": {
+                          "type": "string",
+                          "description": "The provider's payment id"
+                        },
+                        "clientSecret": {
+                          "type": "string",
+                          "description": "What the guest's browser passes to the provider to pay. Not stored by TideGrid; keep it out of URLs and logs"
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "paymentRef",
+                        "clientSecret"
+                      ],
+                      "description": "Null when the checkout is no longer open or has passed its expiry"
+                    }
+                  },
+                  "required": [
+                    "checkoutSession",
+                    "payment"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin, or no such quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The quote is no longer valid (quote_expired) or already has a checkout (quote_already_used); the trip is not on sale (trip_not_bookable), has too few seats left (insufficient_capacity), or no longer takes this party (party_size_out_of_range); or the operator cannot take payments (payments_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The accepted policy is not the quote's (policy_not_accepted), the total is below what the provider charges (payment_amount_too_small), or idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address for this operator (rate_limited), or too many open checkouts (too_many_checkouts); nothing was written",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Payments are not configured (payments_unavailable), or the provider did not answer (payment_provider_unavailable); for the latter, retry the same request with the same Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/checkout-sessions/{checkoutSessionId}": {
+      "get": {
+        "tags": [
+          "public",
+          "checkout"
+        ],
+        "summary": "A checkout's state, for the guest who opened it",
+        "description": "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token. Shows the state, the amount, the expiry, the booking reference once confirmed, and the refund when a payment could not be honored. An open checkout past its expiry reads as expired. A wrong secret, another operator's checkout, and an unknown id answer the same 404.",
+        "security": [
+          {
+            "checkoutSecret": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Checkout session UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Checkout session UUID; anything else answers 404",
+            "name": "checkoutSessionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkoutSession": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "confirmed",
+                            "paid",
+                            "failed",
+                            "expired",
+                            "canceled"
+                          ],
+                          "description": "open: awaiting payment. confirmed: paid and booked. paid: the payment arrived but the trip could not be confirmed; it is refunded in full. failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                        },
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "What the payment charges: the quote's total"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Pay before this instant. The seats are held until then; a later payment is booked only if they are still free, and refunded otherwise"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "booking": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "reference": {
+                              "type": "string",
+                              "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                              "description": "What the guest and the operator quote to each other"
+                            }
+                          },
+                          "required": [
+                            "reference"
+                          ],
+                          "description": "Present once confirmed"
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "succeeded",
+                                "failed"
+                              ],
+                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "amount"
+                          ],
+                          "description": "Present when a payment could not be honored"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "state",
+                        "quoteId",
+                        "tripId",
+                        "partySize",
+                        "amount",
+                        "currency",
+                        "expiresAt",
+                        "createdAt",
+                        "booking",
+                        "refund"
+                      ],
+                      "description": "A guest's checkout, as the guest may see it: no personal or provider detail"
+                    }
+                  },
+                  "required": [
+                    "checkoutSession"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No checkout secret, or a malformed one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin, or no such checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/checkout-sessions/{checkoutSessionId}/cancel": {
+      "post": {
+        "tags": [
+          "public",
+          "checkout"
+        ],
+        "summary": "Abandon an open checkout",
+        "description": "Resolves the browser Origin and needs the checkout's secret as a bearer token. Releases the held seats at once and voids the order, so the party can be quoted again without its own hold counting against it. Repeating it changes nothing. A payment that succeeds afterwards anyway is refunded in full. Rate limited like other public commands.",
+        "security": [
+          {
+            "checkoutSecret": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Checkout session UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Checkout session UUID; anything else answers 404",
+            "name": "checkoutSessionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The canceled checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkoutSession": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "confirmed",
+                            "paid",
+                            "failed",
+                            "expired",
+                            "canceled"
+                          ],
+                          "description": "open: awaiting payment. confirmed: paid and booked. paid: the payment arrived but the trip could not be confirmed; it is refunded in full. failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                        },
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "What the payment charges: the quote's total"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Pay before this instant. The seats are held until then; a later payment is booked only if they are still free, and refunded otherwise"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "booking": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "reference": {
+                              "type": "string",
+                              "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                              "description": "What the guest and the operator quote to each other"
+                            }
+                          },
+                          "required": [
+                            "reference"
+                          ],
+                          "description": "Present once confirmed"
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "succeeded",
+                                "failed"
+                              ],
+                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "amount"
+                          ],
+                          "description": "Present when a payment could not be honored"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "state",
+                        "quoteId",
+                        "tripId",
+                        "partySize",
+                        "amount",
+                        "currency",
+                        "expiresAt",
+                        "createdAt",
+                        "booking",
+                        "refund"
+                      ],
+                      "description": "A guest's checkout, as the guest may see it: no personal or provider detail"
+                    }
+                  },
+                  "required": [
+                    "checkoutSession"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No checkout secret, or a malformed one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin, or no such checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The checkout is no longer open (checkout_not_cancelable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address for this operator (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/payments/{provider}": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Receive a signed payment provider event",
+        "description": "For the payment provider only. The body is the provider's event, signed over its raw bytes with a timestamp (the fake provider's `Fake-Signature: t=<unix>,v1=<hex HMAC-SHA256>`). A signature outside the tolerance window, or for another body, answers 400 and nothing is recorded. A verified event is recorded once per event id; a duplicate changes nothing. A booking is confirmed only here, from a verified success. A 500 leaves the event recorded and unprocessed for the provider's retry and the sweep.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "The configured payment provider; anything else answers 404"
+            },
+            "required": true,
+            "description": "The configured payment provider; anything else answers 404",
+            "name": "provider",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Verified and recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "duplicate": {
+                      "type": "boolean",
+                      "description": "The event id was already in the inbox"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "description": "What processing did, for the provider's delivery log"
+                    }
+                  },
+                  "required": [
+                    "received",
+                    "duplicate",
+                    "outcome"
+                  ],
+                  "description": "The event was verified and recorded"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing, malformed, stale, or wrong signature (signature_invalid), or an unreadable event (payload_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request came from a browser (origin_not_allowed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "This deployment does not use that provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body is larger than any provider event (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fake-provider/payments/{paymentRef}": {
+      "get": {
+        "tags": [
+          "fake-provider"
+        ],
+        "summary": "A fake payment and its events (fake provider only)",
+        "description": "Exists only when PAYMENT_PROVIDER=fake; refused in production. Resolves the browser Origin and needs the payment's client secret as a bearer token.",
+        "security": [
+          {
+            "fakeClientSecret": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "The fake payment id; anything else answers 404"
+            },
+            "required": true,
+            "description": "The fake payment id; anything else answers 404",
+            "name": "paymentRef",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "payment": {
+                      "type": "object",
+                      "properties": {
+                        "paymentRef": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "succeeded",
+                            "failed"
+                          ]
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "Integer US cents"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "amountRefunded": {
+                          "type": "integer",
+                          "description": "Integer US cents"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "payment.succeeded",
+                                  "payment.failed"
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "type",
+                              "createdAt"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "paymentRef",
+                        "status",
+                        "amount",
+                        "currency",
+                        "amountRefunded",
+                        "createdAt",
+                        "events"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "payment"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No client secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the fake provider, no such tenant hostname, or no such payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fake-provider/payments/{paymentRef}/succeed": {
+      "post": {
+        "tags": [
+          "fake-provider"
+        ],
+        "summary": "Pay a fake payment (fake provider only)",
+        "description": "Exists only when PAYMENT_PROVIDER=fake; refused in production. Settles the payment as succeeded, once: a payment that already settled keeps its first outcome. Then, unless deliver is false, posts the signed event to the real webhook route and reports what it answered. Holding the event back lets a demo deliver it later, late, twice, or out of order with redeliver.",
+        "security": [
+          {
+            "fakeClientSecret": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "The fake payment id; anything else answers 404"
+            },
+            "required": true,
+            "description": "The fake payment id; anything else answers 404",
+            "name": "paymentRef",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deliver": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Deliver the signed event now. False records it for a later, late, or duplicate redelivery"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The payment's outcome event and its delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "event": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "payment.succeeded",
+                            "payment.failed"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "createdAt"
+                      ]
+                    },
+                    "alreadySettled": {
+                      "type": "boolean",
+                      "description": "The payment had settled before; this is its first event"
+                    },
+                    "delivery": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "description": "The webhook route's HTTP status"
+                        },
+                        "outcome": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "What processing did, or null when it failed"
+                        },
+                        "duplicate": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "outcome",
+                        "duplicate"
+                      ],
+                      "description": "Null when delivery was held back"
+                    }
+                  },
+                  "required": [
+                    "event",
+                    "alreadySettled",
+                    "delivery"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No client secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the fake provider, no such tenant hostname, or no such payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fake-provider/payments/{paymentRef}/fail": {
+      "post": {
+        "tags": [
+          "fake-provider"
+        ],
+        "summary": "Decline a fake payment (fake provider only)",
+        "description": "Exists only when PAYMENT_PROVIDER=fake; refused in production. Settles the payment as failed, once: a payment that already settled keeps its first outcome. Then, unless deliver is false, posts the signed event to the real webhook route and reports what it answered. Holding the event back lets a demo deliver it later, late, twice, or out of order with redeliver.",
+        "security": [
+          {
+            "fakeClientSecret": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "The fake payment id; anything else answers 404"
+            },
+            "required": true,
+            "description": "The fake payment id; anything else answers 404",
+            "name": "paymentRef",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deliver": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Deliver the signed event now. False records it for a later, late, or duplicate redelivery"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The payment's outcome event and its delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "event": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "payment.succeeded",
+                            "payment.failed"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "createdAt"
+                      ]
+                    },
+                    "alreadySettled": {
+                      "type": "boolean",
+                      "description": "The payment had settled before; this is its first event"
+                    },
+                    "delivery": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "description": "The webhook route's HTTP status"
+                        },
+                        "outcome": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "What processing did, or null when it failed"
+                        },
+                        "duplicate": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "outcome",
+                        "duplicate"
+                      ],
+                      "description": "Null when delivery was held back"
+                    }
+                  },
+                  "required": [
+                    "event",
+                    "alreadySettled",
+                    "delivery"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No client secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the fake provider, no such tenant hostname, or no such payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/fake-provider/payments/{paymentRef}/events/{eventId}/redeliver": {
+      "post": {
+        "tags": [
+          "fake-provider"
+        ],
+        "summary": "Deliver a stored fake event again (fake provider only)",
+        "description": "Exists only when PAYMENT_PROVIDER=fake; refused in production. Posts the stored event, byte for byte, with a fresh signature, as a provider's retry would: a duplicate, a late delivery, or one out of order.",
+        "security": [
+          {
+            "fakeClientSecret": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "paymentRef",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "A stored event of this payment; anything else answers 404"
+            },
+            "required": true,
+            "description": "A stored event of this payment; anything else answers 404",
+            "name": "eventId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event and its delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "event": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "payment.succeeded",
+                            "payment.failed"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "createdAt"
+                      ]
+                    },
+                    "alreadySettled": {
+                      "type": "boolean",
+                      "description": "The payment had settled before; this is its first event"
+                    },
+                    "delivery": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "description": "The webhook route's HTTP status"
+                        },
+                        "outcome": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "What processing did, or null when it failed"
+                        },
+                        "duplicate": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "outcome",
+                        "duplicate"
+                      ],
+                      "description": "Null when delivery was held back"
+                    }
+                  },
+                  "required": [
+                    "event",
+                    "alreadySettled",
+                    "delivery"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No client secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the fake provider, no such tenant hostname, payment, or event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/trips/{tripId}/bookings": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "A trip's bookings",
+        "description": "Owners and booking staff. Every booking on the trip, oldest first, with the booker's name and email, the order, and the payment.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tripId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trip's bookings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "bookings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "reference": {
+                            "type": "string"
+                          },
+                          "tripId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "partySize": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "confirmed"
+                            ]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "direct"
+                            ]
+                          },
+                          "reacquired": {
+                            "type": "boolean",
+                            "description": "Confirmed after its hold had expired, by taking the seats again"
+                          },
+                          "confirmedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "booker": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "email": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "email"
+                            ]
+                          },
+                          "order": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "paid",
+                                  "void"
+                                ]
+                              },
+                              "total": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "currency": {
+                                "type": "string",
+                                "enum": [
+                                  "USD"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "status",
+                              "total",
+                              "currency"
+                            ]
+                          },
+                          "payment": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "fake",
+                                  "stripe"
+                                ],
+                                "description": "fake is the demo provider; stripe replaces it before any live booking"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "succeeded",
+                                  "failed"
+                                ]
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "provider",
+                              "state",
+                              "amount"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reference",
+                          "tripId",
+                          "partySize",
+                          "state",
+                          "source",
+                          "reacquired",
+                          "confirmedAt",
+                          "booker",
+                          "order",
+                          "payment"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "bookings"
+                  ],
+                  "description": "Every booking on the trip, oldest first"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or trip",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/finalization-exceptions": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Payments that could not become bookings",
+        "description": "Every role. Verified payments whose capacity was gone, whose trip changed, or whose checkout had already failed or been canceled, newest first, with the state of the automatic full refund. A payment_mismatch is not refunded automatically.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The exceptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exceptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "no_capacity",
+                              "trip_canceled",
+                              "trip_unavailable",
+                              "sales_closed",
+                              "party_size_out_of_range",
+                              "session_failed",
+                              "session_canceled",
+                              "payment_mismatch"
+                            ],
+                            "description": "Why a verified payment could not become a booking. payment_mismatch is not refunded automatically; investigate it at the provider"
+                          },
+                          "checkoutSessionId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "tripId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "paymentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "amount": {
+                            "type": "integer",
+                            "description": "Integer US cents"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "refund": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "requested",
+                                  "succeeded",
+                                  "failed"
+                                ],
+                                "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "failureCode": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "settledAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "state",
+                              "amount",
+                              "failureCode",
+                              "settledAt"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason",
+                          "checkoutSessionId",
+                          "tripId",
+                          "paymentId",
+                          "amount",
+                          "createdAt",
+                          "refund"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "exceptions"
+                  ],
+                  "description": "Payments that could not become bookings, newest first, for operator follow-up"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
             "content": {
               "application/json": {
                 "schema": {

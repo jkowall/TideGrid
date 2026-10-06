@@ -1,6 +1,8 @@
 import type { Principal } from "@tidegrid/contracts";
-import type { createDb } from "@tidegrid/database";
+import type { createDb, Database } from "@tidegrid/database";
+import type { PaymentProvider } from "@tidegrid/domain-payments";
 import type { createLogger } from "@tidegrid/observability";
+import type { Kysely } from "kysely";
 import type { AccessVerifier } from "./auth/access.ts";
 import type { LoginLinkSender } from "./auth/login-links.ts";
 import type { Bindings } from "./env.ts";
@@ -20,4 +22,10 @@ export interface AppDeps {
   loginLinkSender?: LoginLinkSender;
   /** Wall clock for sales cutoffs and completion checks; tests pin it. */
   now?: () => Date;
+  /**
+   * Replaces the configured payment provider for checkout and webhooks, so
+   * tests can make the provider fail or answer late. The fake provider's demo
+   * controls always use the configured fake.
+   */
+  paymentProvider?: (db: Kysely<Database>, env: Bindings) => PaymentProvider | null;
 }

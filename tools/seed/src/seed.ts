@@ -12,6 +12,7 @@
 import postgres from "postgres";
 import { seedBrands } from "./brands.ts";
 import { seedCatalog } from "./catalog.ts";
+import { seedPaymentAccounts } from "./payments.ts";
 import { seedPricing } from "./pricing.ts";
 
 const url = process.env.DATABASE_URL;
@@ -95,6 +96,10 @@ try {
 
   await seedCatalog(url, demoTenants);
   await seedPricing(url, demoTenants);
+  const accounts = await seedPaymentAccounts(sql, demoTenants);
+  console.log(
+    `seeded fake payment accounts: ${accounts.created} new, ${accounts.existing} already present`,
+  );
 
   const [summary] = await sql<{ tenants: number; staff: number; memberships: number }[]>`
     select (select count(*)::int from public.tenants where id in ${sql(demoTenants.map((t) => t.id))}) as tenants,

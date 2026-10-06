@@ -14,7 +14,7 @@ async function sha256Hex(text: string): Promise<string> {
 }
 
 /** Only this hash of the guest's secret is stored or compared. */
-export function hashCheckoutSecret(secret: string): Promise<string> {
+export async function hashCheckoutSecret(secret: string): Promise<string> {
   if (!checkoutSecretPattern.test(secret)) {
     throw new TypeError("a checkout secret is 43 base64url characters");
   }

@@ -78,7 +78,11 @@ export interface FakePaymentView {
 }
 
 export interface FakeProviderOptions {
-  db: Kysely<Database>;
+  /**
+   * The fake's storage, or a function that opens it on first use, so that
+   * checking a webhook signature never needs a database.
+   */
+  db: Kysely<Database> | (() => Kysely<Database>);
   /** Signs webhooks and derives client secrets. At least 32 characters. */
   secret: string;
   /** The deployment's ENVIRONMENT; "production" is refused. */
@@ -205,9 +209,13 @@ interface PaymentRow {
 export class FakePaymentProvider implements PaymentProvider {
   readonly name = "fake" as const;
   readonly signatureHeader = FAKE_SIGNATURE_HEADER;
-  private readonly db: Kysely<Database>;
+  private readonly openDb: () => Kysely<Database>;
   private readonly secret: string;
   private readonly toleranceSeconds: number;
+
+  private get db(): Kysely<Database> {
+    return this.openDb();
+  }
 
   constructor(options: FakeProviderOptions) {
     if (options.environment === "production") {
@@ -218,7 +226,8 @@ export class FakePaymentProvider implements PaymentProvider {
         `the fake provider's secret must be at least ${FAKE_SECRET_MIN_LENGTH} characters`,
       );
     }
-    this.db = options.db;
+    const db = options.db;
+    this.openDb = typeof db === "function" ? db : () => db;
     this.secret = options.secret;
     this.toleranceSeconds = options.toleranceSeconds ?? DEFAULT_TOLERANCE_SECONDS;
   }
@@ -257,7 +266,8 @@ export class FakePaymentProvider implements PaymentProvider {
     }
   }
 
-  private async clientSecretFor(paymentRef: string): Promise<string> {
+  /** The client secret for a payment, derived, never stored: what the guest pays with. */
+  async clientSecretFor(paymentRef: string): Promise<string> {
     const key = await crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(this.secret),

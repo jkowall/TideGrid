@@ -9,9 +9,13 @@ import { allowedOrigins } from "./env.ts";
 import { ApiError } from "./errors.ts";
 import { requireConsoleGateway } from "./gateway.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
+import { registerBookingStaffRoutes } from "./routes/bookings-staff.ts";
 import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
 import { registerCatalogStaffRoutes } from "./routes/catalog-staff.ts";
+import { registerCheckoutPublicRoutes } from "./routes/checkout-public.ts";
+import { registerFakeProviderRoutes } from "./routes/fake-provider.ts";
 import { registerHoldStaffRoutes } from "./routes/holds-staff.ts";
+import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.ts";
 import { registerPricingPublicRoutes } from "./routes/pricing-public.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
@@ -72,7 +76,9 @@ export function createApp(deps: AppDeps = {}) {
     return cors({
       origin: (origin) => (origins.includes(origin) ? origin : null),
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["Content-Type", "Idempotency-Key", "X-Request-Id"],
+      // Authorization carries a guest's checkout secret (G2.7); staff routes
+      // authenticate with Access or the session cookie, never with it.
+      allowHeaders: ["Content-Type", "Idempotency-Key", "X-Request-Id", "Authorization"],
       exposeHeaders: ["X-Request-Id", "Idempotent-Replayed"],
       maxAge: 600,
     })(c, next);
@@ -130,6 +136,11 @@ export function createApp(deps: AppDeps = {}) {
   registerPricingPublicRoutes(app, deps);
   // Capacity and holds (G2.6).
   registerHoldStaffRoutes(app, deps);
+  // Checkout to confirmation (G2.7).
+  registerCheckoutPublicRoutes(app, deps);
+  registerPaymentWebhookRoutes(app, deps);
+  registerFakeProviderRoutes(app);
+  registerBookingStaffRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",
