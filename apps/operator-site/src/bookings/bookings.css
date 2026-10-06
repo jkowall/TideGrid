@@ -1,0 +1,827 @@
+/*
+ * Booking views (G2.12b): the day's bookings, one booking, the payment
+ * exceptions, and a trip's roster, on the dark console tokens. Status is a
+ * badge with an icon and a label, never color alone. The roster prints on
+ * white paper in black, with nothing of the console around it.
+ */
+
+/* Shared ---------------------------------------------------------------------- */
+
+.bk,
+.ex,
+.bd,
+.roster {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  max-width: 72rem;
+}
+.bk-notice {
+  max-width: 44rem;
+}
+.bk-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: var(--measure);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.bk-note .tg-icon {
+  flex: none;
+  margin-top: 0.15em;
+  color: var(--status-info);
+}
+.bk-money {
+  font-variant-numeric: lining-nums tabular-nums;
+  white-space: nowrap;
+}
+.bk-more {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+}
+.bd-block {
+  display: block;
+}
+.bd-muted {
+  color: var(--text-muted);
+}
+.bd-small {
+  font-size: var(--text-sm);
+}
+/* A masked provider id: its characters kept apart so it reads by eye. */
+.bd-code {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+/* A back link: a full 44 px target that hugs its text. */
+.bd-back {
+  gap: var(--space-2);
+  justify-self: start;
+  color: var(--link);
+  font-weight: var(--weight-medium);
+}
+.bd-back .tg-icon {
+  flex: none;
+}
+
+/* Quick find ---------------------------------------------------------------- */
+
+.bk-find__form {
+  max-width: 30rem;
+}
+.bk-find__row {
+  display: flex;
+  gap: var(--space-2);
+}
+.bk-find__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.bk-find__input::placeholder {
+  text-transform: none;
+}
+
+/* The day bar --------------------------------------------------------------- */
+
+.bk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.bk-bar__day {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-xl);
+}
+.bk-bar__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+@media (max-width: 29.99rem) {
+  .bk-bar__nav {
+    width: 100%;
+  }
+  .bk-bar__nav > .tg-button {
+    flex: 1 1 auto;
+    padding-inline: var(--space-2);
+  }
+}
+@media (max-width: 22.49rem) {
+  .bk-bar__nav {
+    display: grid;
+    grid-template-columns: var(--tap-min) minmax(0, 1fr) var(--tap-min);
+  }
+  .bk-bar__word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+/* "Today", as the calendar marks it: Tide Lime on its tint, in words. */
+.bk-today {
+  display: inline-block;
+  padding: 0.125rem var(--space-2);
+  border-radius: var(--radius-pill);
+  background: rgb(167 209 41 / 0.16);
+  color: var(--tg-tide-lime);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  line-height: var(--leading-snug);
+  text-transform: uppercase;
+}
+
+/* Filters and notes ----------------------------------------------------------- */
+
+.bk-day {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  transition: opacity var(--duration-fast) ease;
+}
+/* Dimmed while another trip's list loads, and still legible: muted text stays
+   above 4.5:1. */
+.bk-day[aria-busy="true"] {
+  opacity: 0.75;
+}
+.bk-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+}
+.bk-filters__trip {
+  flex: 0 1 30rem;
+  min-width: min(100%, 16rem);
+  margin: 0;
+}
+.bk-filters__totals {
+  margin: 0;
+  padding-bottom: var(--space-3);
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+}
+.bk-zone {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.bk-zone .tg-icon {
+  flex: none;
+  margin-top: 0.15em;
+}
+
+/* A trip and its bookings -------------------------------------------------- */
+
+.bk-trip {
+  display: grid;
+  gap: var(--space-3);
+}
+.bk-trip__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title side"
+    "meta side";
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+@media (max-width: 39.99rem) {
+  .bk-trip__head {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "title"
+      "meta"
+      "side";
+  }
+}
+.bk-trip__title {
+  grid-area: title;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-3);
+  margin: 0;
+  font-size: var(--text-lg);
+}
+.bk-trip__time {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bk-trip__meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.bk-trip__meta > span {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+.bk-trip__meta .tg-icon {
+  margin-top: 0.1em;
+  color: var(--text-muted);
+}
+.bk-trip__side {
+  grid-area: side;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+@media (max-width: 39.99rem) {
+  .bk-trip__side {
+    justify-content: flex-start;
+  }
+}
+.bk-trip__roster {
+  padding-inline: var(--space-3);
+  font-size: var(--text-sm);
+}
+.bk-trip__none {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.bk-trip__empty {
+  padding: var(--space-6) var(--space-5);
+}
+
+/*
+ * Booking rows. Phone: a card per booking, each fact with its label. Wide:
+ * one row per booking under column names, which are for the eye only; each
+ * fact keeps its label for the ear. Every row uses the same columns, so they
+ * line up.
+ */
+.bk-table {
+  --bk-columns: 7.5rem minmax(0, 1.2fr) minmax(0, 1.5fr) minmax(0, 1.2fr) 6.5rem 9.5rem;
+}
+.bk-table--no-booker {
+  --bk-columns: 7.5rem minmax(0, 1.6fr) minmax(0, 1.3fr) 6.5rem 9.5rem;
+}
+.bk-cols {
+  display: none;
+}
+.bk-rows {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bk-row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.bk-row__ref {
+  justify-self: start;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--link);
+}
+.bk-row__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+.bk-fact {
+  display: grid;
+  align-content: start;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.bk-fact dd {
+  margin: 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+.bk-fact__label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.bk-fact__strong {
+  font-weight: var(--weight-semibold);
+}
+.bk-fact__detail {
+  display: block;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.bk-fact--status {
+  grid-column: 1 / -1;
+}
+.bk-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+@media (min-width: 64rem) {
+  .bk-cols {
+    display: grid;
+    grid-template-columns: var(--bk-columns);
+    gap: var(--space-4);
+    padding: 0 var(--space-4) var(--space-2);
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-semibold);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .bk-cols__money {
+    text-align: right;
+  }
+  .bk-rows {
+    gap: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+  }
+  .bk-row {
+    grid-template-columns: var(--bk-columns);
+    align-items: start;
+    gap: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    border: 0;
+    border-top: 1px solid var(--border-subtle);
+    border-radius: 0;
+    background: none;
+  }
+  .bk-row:first-child {
+    border-top: 0;
+  }
+  .bk-row__ref {
+    margin-block: calc((var(--tap-min) - 1.5rem) / -2);
+  }
+  /* The facts take the row's remaining columns as its own. */
+  .bk-row__facts {
+    grid-column: 2 / -1;
+    grid-template-columns: subgrid;
+    gap: var(--space-4);
+  }
+  .bk-fact--status {
+    grid-column: auto;
+  }
+  .bk-fact--money dd {
+    text-align: right;
+  }
+  /* Labels stay for screen readers; the column names say them for the eye. */
+  .bk-fact__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+.bk-skeleton {
+  display: grid;
+  gap: var(--space-5);
+}
+.bk-skeleton .tg-skeleton,
+.bd--skeleton .tg-skeleton,
+.ex-list--skeleton .tg-skeleton,
+.roster--skeleton .tg-skeleton {
+  --surface-sunken: #34403b;
+  --surface-raised: #4a5852;
+}
+.bk-row--skeleton {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* One booking -------------------------------------------------------------- */
+
+.bd-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+.bd-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.bd-lede {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-body);
+}
+.bd-grid {
+  display: grid;
+  gap: var(--space-5);
+  align-items: start;
+}
+@media (min-width: 72rem) {
+  .bd-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.bd-card {
+  align-content: start;
+}
+.bd-trip__name {
+  margin: calc(var(--space-2) * -1) 0 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+}
+.bd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.bd-hidden {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.bd-hidden .tg-icon {
+  flex: none;
+  margin-top: 0.15em;
+  color: var(--status-info);
+}
+.bd-tickets {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
+  color: var(--text-body);
+}
+.bd-refund {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.bd-refund h3 {
+  margin: 0;
+  font-size: var(--text-md);
+}
+.bd-timeline {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bd-timeline li {
+  display: grid;
+  gap: 0.125rem;
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--border-control);
+}
+.bd-timeline__what {
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+}
+.bd-timeline__when {
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+
+/* Payment exceptions ----------------------------------------------------- */
+
+.ex-lede {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-body);
+}
+.ex-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ex-item {
+  --tone: var(--border-control);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--tone);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.ex-item[data-tone="info"] {
+  --tone: var(--status-info);
+}
+.ex-item[data-tone="pending"] {
+  --tone: var(--status-pending);
+}
+.ex-item[data-tone="warning"] {
+  --tone: var(--status-warning);
+}
+.ex-item[data-tone="blocked"] {
+  --tone: var(--status-blocked);
+}
+.ex-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+.ex-item__title {
+  flex: 1 1 18rem;
+  margin: 0;
+  font-size: var(--text-md);
+}
+.ex-item__detail {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+/* The trip link is a 44 px target (.tap-target); its label sits on the same
+   baseline rather than at the top of the taller row. */
+.ex-item__facts {
+  align-items: baseline;
+}
+.ex-item__trip {
+  font-weight: var(--weight-medium);
+}
+
+/* A trip's roster ---------------------------------------------------------- */
+
+.roster-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+}
+.roster-head {
+  display: grid;
+  gap: var(--space-2);
+}
+/* The operator's name heads the paper; on screen the page header says it. */
+.roster-head__operator {
+  display: none;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+.roster-head__trip {
+  margin: 0;
+  font-size: var(--text-2xl);
+}
+.roster-head__when {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-lg);
+}
+.roster-head__zone {
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+.roster-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--space-3) var(--space-6);
+  margin: var(--space-2) 0 0;
+}
+.roster-facts dt {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.roster-facts dd {
+  margin: 0;
+  color: var(--text-strong);
+}
+.roster-notice {
+  max-width: 44rem;
+}
+/* On a phone the table may be wider than the screen: it scrolls in here. */
+.roster-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.roster-table {
+  width: 100%;
+  min-width: 36rem;
+  /* Separate borders, so a pinned cell's rule moves with it. */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-sm);
+}
+.roster-table th,
+.roster-table td {
+  padding: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+.roster-table thead th {
+  border-top: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.roster-table tbody td,
+.roster-table tbody th {
+  color: var(--text-strong);
+}
+.roster-table__n {
+  width: 2.5rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.roster-table__ref {
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+/* A phone scrolls the table inside its region; the reference stays at the
+   left edge, so every row keeps its name. */
+.roster-table__pin {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  box-shadow: 1px 0 0 var(--border-subtle);
+}
+.roster-table__detail {
+  color: var(--text-body);
+}
+.roster-foot {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Paper: black on white, without the rail. The roster prints alone, under its
+   own heading, with the table's head on every page. Paper must beat every
+   surface, text, and status color the dark console sets, whatever their
+   selectors, so these declarations take !important. */
+/* biome-ignore-start lint/complexity/noImportantStyles: print must override the dark console's colors and layout. */
+@media print {
+  @page {
+    margin: 12mm;
+  }
+  html,
+  body,
+  .console-layout,
+  .console-main {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  /* The console's dark scheme would also darken the page's margins, and its
+     light text would vanish on white: every page prints with paper values. */
+  html.tg-dark {
+    color-scheme: light;
+    --surface-page: #fff;
+    --surface-raised: #fff;
+    --surface-sunken: #fff;
+    --surface-hover: transparent;
+    --text-strong: #000;
+    --text-body: #000;
+    --text-muted: #333;
+    --border-subtle: #999;
+    --border-control: #555;
+    --link: #000;
+    --status-ready: var(--tg-status-ready);
+    --status-warning: var(--tg-status-warning);
+    --status-blocked: var(--tg-status-blocked);
+    --status-info: var(--tg-status-info);
+    --status-pending: var(--tg-status-pending);
+  }
+  .console-layout {
+    display: block;
+  }
+  .console-main {
+    padding: 0;
+  }
+  .console-rail,
+  .tg-skip-link,
+  .console-main__notice,
+  .console-main:has(.roster) .console-page-header,
+  .roster-tools,
+  .bk-find,
+  .bk-bar__nav,
+  .bk-more,
+  .tg-visually-hidden {
+    display: none !important;
+  }
+  .roster {
+    gap: 10pt;
+    max-width: none;
+  }
+  .roster *,
+  .roster *::before,
+  .roster *::after {
+    color: #000 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+  .roster-head__operator {
+    display: block;
+  }
+  .roster-head__trip {
+    font-size: 18pt;
+  }
+  .roster-head__when {
+    font-size: 12pt;
+  }
+  .roster-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .roster .tg-notice {
+    border: 1px solid #000;
+  }
+  .roster-table-wrap {
+    overflow: visible;
+    border: 0;
+  }
+  .roster-table {
+    min-width: 0;
+    border-collapse: collapse;
+    font-size: 10pt;
+  }
+  .roster-table__pin {
+    position: static;
+    box-shadow: none !important;
+  }
+  .roster-table thead {
+    display: table-header-group;
+  }
+  .roster-table tr {
+    break-inside: avoid;
+  }
+  .roster-table th,
+  .roster-table td {
+    padding: 4pt 6pt;
+    border: 1px solid #000;
+  }
+  .roster .tg-status {
+    padding: 0;
+    border: 0;
+  }
+  .roster-foot {
+    font-size: 9pt;
+  }
+}
+/* biome-ignore-end lint/complexity/noImportantStyles: end of the print rules. */

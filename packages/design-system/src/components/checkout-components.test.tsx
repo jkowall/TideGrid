@@ -480,8 +480,17 @@ describe("Ledger", () => {
 
 // Icons -----------------------------------------------------------------------------------------
 
-describe("the icons the checkout added", () => {
-  const added = ["check", "plus", "minus", "tag", "credit-card", "receipt"] as const;
+describe("the icons the checkout and the console's booking views added", () => {
+  const added = [
+    "check",
+    "plus",
+    "minus",
+    "tag",
+    "credit-card",
+    "receipt",
+    "search",
+    "printer",
+  ] as const;
 
   it("lists them in iconNames", () => {
     expect(iconNames).toEqual(expect.arrayContaining([...added]));

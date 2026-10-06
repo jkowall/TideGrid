@@ -6,9 +6,15 @@ import {
   Notice,
   StatusBadge,
 } from "@tidegrid/design-system/components";
-import { Fragment, type MouseEvent, type ReactNode, useCallback, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useState } from "react";
+import { BookingDetailPage } from "./bookings/BookingDetail.tsx";
+import { BookingsPage } from "./bookings/BookingsPage.tsx";
+import { ExceptionsPage } from "./bookings/ExceptionsPage.tsx";
+import { isUuid } from "./bookings/model.ts";
+import { RosterPage } from "./bookings/RosterPage.tsx";
 import { CalendarPage } from "./calendar/Calendar.tsx";
 import { Wordmark } from "./Gate.tsx";
+import { ConsoleLink, NavigationProvider } from "./navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "./PageHeader.tsx";
 import { roleLabels } from "./roles.ts";
 
@@ -18,30 +24,124 @@ const sections: ReadonlyArray<{ path: string; label: string; icon: IconName }> =
   { path: "/", label: "Overview", icon: "home" },
   { path: "/calendar", label: "Calendar", icon: "calendar" },
   { path: "/bookings", label: "Bookings", icon: "list" },
+  { path: "/exceptions", label: "Exceptions", icon: "alert-triangle" },
 ];
+
+/** The console's pages, by address. Ids in an address are UUIDs; anything else is not a page. */
+export type Route =
+  | { kind: "overview" }
+  | { kind: "calendar" }
+  | { kind: "bookings" }
+  | { kind: "booking"; bookingId: string }
+  | { kind: "exceptions" }
+  | { kind: "roster"; tripId: string }
+  | { kind: "not_found" };
+
+const bookingPath = /^\/bookings\/([^/]+)$/;
+const rosterPath = /^\/trips\/([^/]+)\/roster$/;
+
+export function routeOf(path: string): Route {
+  if (path === "/") return { kind: "overview" };
+  if (path === "/calendar") return { kind: "calendar" };
+  if (path === "/bookings") return { kind: "bookings" };
+  if (path === "/exceptions") return { kind: "exceptions" };
+  const booking = bookingPath.exec(path)?.[1];
+  if (booking && isUuid(booking)) return { kind: "booking", bookingId: booking.toLowerCase() };
+  const roster = rosterPath.exec(path)?.[1];
+  if (roster && isUuid(roster)) return { kind: "roster", tripId: roster.toLowerCase() };
+  return { kind: "not_found" };
+}
+
+/** The navigation section a page belongs to, and its title. */
+const placeOf: Record<Route["kind"], { section: string | null; title: string }> = {
+  overview: { section: "/", title: "Overview" },
+  calendar: { section: "/calendar", title: "Calendar" },
+  bookings: { section: "/bookings", title: "Bookings" },
+  booking: { section: "/bookings", title: "Booking" },
+  roster: { section: "/bookings", title: "Roster" },
+  exceptions: { section: "/exceptions", title: "Payment exceptions" },
+  not_found: { section: null, title: "Not found" },
+};
 
 /**
  * Pathname routing for the shell. The console Worker serves the app for any
- * path. `moved` turns true once the person changes page, by the navigation or
- * the browser's back and forward buttons.
+ * path. `moved` turns true once the person changes page, by the navigation, a
+ * link, or the browser's back and forward buttons. `visit` counts those
+ * changes, so every one opens its page afresh: a page may move its own
+ * address within itself (the list's day, the calendar's week), and a link to
+ * the address it was opened at must still open it anew. A link to the very
+ * address already showing changes nothing.
  */
-function usePath(): { path: string; moved: boolean; navigate: (to: string) => void } {
-  const [path, setPath] = useState(() => window.location.pathname);
+function usePath(): {
+  path: string;
+  visit: number;
+  moved: boolean;
+  navigate: (to: string) => void;
+} {
+  const [at, setAt] = useState(() => ({ path: window.location.pathname, visit: 0 }));
   const [moved, setMoved] = useState(false);
   useEffect(() => {
     const onPop = () => {
-      setPath(window.location.pathname);
+      setAt((current) => ({ path: window.location.pathname, visit: current.visit + 1 }));
       setMoved(true);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
   const navigate = useCallback((to: string) => {
-    window.history.pushState(null, "", to);
-    setPath(to);
+    const url = new URL(to, window.location.origin);
+    const address = `${url.pathname}${url.search}`;
+    if (address === `${window.location.pathname}${window.location.search}`) return;
+    window.history.pushState(null, "", `${address}${url.hash}`);
+    setAt((current) => ({ path: url.pathname, visit: current.visit + 1 }));
     setMoved(true);
+    // A new page starts at its top, as a page load would. Back and Forward
+    // keep the browser's own scroll restoration.
+    (document.scrollingElement ?? document.documentElement).scrollTop = 0;
   }, []);
-  return { path, moved, navigate };
+  return { path: at.path, visit: at.visit, moved, navigate };
+}
+
+/**
+ * The operator a person chose last, so a reload or a link opened in a new tab
+ * shows the operator a booking or roster address belongs to. This tab's own
+ * choice comes first, then the last choice in any tab. It is an operator id,
+ * nothing personal; storage that is blocked or empty means the first operator.
+ */
+const scopeKey = "tidegrid.console.operator";
+
+function storages(): Storage[] {
+  const found: Storage[] = [];
+  for (const get of [() => window.sessionStorage, () => window.localStorage]) {
+    try {
+      found.push(get());
+    } catch {
+      // Storage is blocked for this page.
+    }
+  }
+  return found;
+}
+
+function rememberedScope(memberships: Membership[]): string | undefined {
+  for (const storage of storages()) {
+    try {
+      const id = storage.getItem(scopeKey);
+      if (id && memberships.some((m) => m.tenantId === id)) return id;
+    } catch {
+      // Unreadable storage is no choice.
+    }
+  }
+  return memberships[0]?.tenantId;
+}
+
+function rememberScope(tenantId: string): void {
+  for (const storage of storages()) {
+    try {
+      storage.setItem(scopeKey, tenantId);
+    } catch {
+      // Full or blocked storage: the choice lasts until the page reloads.
+    }
+  }
 }
 
 function initials(name: string): string {
@@ -191,118 +291,154 @@ export function ConsoleShell({
   /** The shell replaced a screen the person acted on, so the first page's heading takes focus. */
   focusHeading?: boolean;
 }) {
-  const { path, moved, navigate } = usePath();
+  const { path, visit, moved, navigate } = usePath();
   const { principal, memberships } = me;
-  const [scopeId, setScopeId] = useState(memberships[0]?.tenantId);
+  const [scopeId, setScopeId] = useState(() => rememberedScope(memberships));
   // Switching operators on a page restarts pages keyed on the operator. Their
   // headings must not take focus then: the person is still in the picker, and
   // moving them away on a change of value would be a surprise.
-  const [switchedOn, setSwitchedOn] = useState<string | null>(null);
+  const [switchedOn, setSwitchedOn] = useState<number | null>(null);
   useEffect(() => {
-    void path;
+    void visit;
     setSwitchedOn(null);
-  }, [path]);
-  const focusPage = switchedOn !== path && (focusHeading || moved);
+  }, [visit]);
+  const focusPage = switchedOn !== visit && (focusHeading || moved);
   const selectScope = (tenantId: string) => {
+    // A trip filter names one operator's trip, and a day is one marina's: the
+    // next operator's list starts from its own today and every trip.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("trip") || params.has("day")) {
+      params.delete("trip");
+      params.delete("day");
+      const search = params.toString() ? `?${params}` : "";
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${search}${window.location.hash}`,
+      );
+    }
     setScopeId(tenantId);
-    setSwitchedOn(path);
+    rememberScope(tenantId);
+    setSwitchedOn(visit);
   };
   const selected = memberships.find((m) => m.tenantId === scopeId) ?? memberships[0];
-  const current = sections.find((s) => s.path === path);
-  useDocumentTitle(
-    `${current?.label ?? "Not found"} · ${selected?.tenantName ?? "Operator console"} · TideGrid`,
-  );
+  const route = routeOf(path);
+  const place = placeOf[route.kind];
+  useDocumentTitle(`${place.title} · ${selected?.tenantName ?? "Operator console"} · TideGrid`);
   // The app routes a person with no active membership to the not-provisioned screen.
   if (!selected) return null;
 
-  const follow = (event: MouseEvent<HTMLAnchorElement>, to: string) => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    if (to !== path) navigate(to);
-  };
-
+  // Every page but the overview is keyed on the operator: another operator's
+  // week, list, booking, or roster starts from nothing.
   let page: ReactNode;
-  if (path === "/") {
-    page = <Overview me={me} selected={selected} focusHeading={focusPage} />;
-  } else if (path === "/calendar") {
-    // Keyed on the operator: another operator's week starts from nothing.
-    page = <CalendarPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />;
-  } else if (path === "/bookings") {
-    page = (
-      <Placeholder
-        selected={selected}
-        title="Bookings"
-        icon="list"
-        heading="The booking list isn't here yet"
-        body={`The list of bookings for ${selected.tenantName} comes in a later build. Booked and held seats show on the calendar.`}
-        focusHeading={focusPage}
-      />
-    );
-  } else {
-    page = (
-      <Placeholder
-        selected={selected}
-        title="Page not found"
-        icon="compass"
-        heading="This page isn't part of the console"
-        body="Choose a section from the navigation to continue."
-        focusHeading={focusPage}
-      />
-    );
+  switch (route.kind) {
+    case "overview":
+      page = <Overview me={me} selected={selected} focusHeading={focusPage} />;
+      break;
+    case "calendar":
+      page = (
+        <CalendarPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />
+      );
+      break;
+    case "bookings":
+      page = (
+        <BookingsPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />
+      );
+      break;
+    case "booking":
+      page = (
+        <BookingDetailPage
+          key={selected.tenantId}
+          membership={selected}
+          bookingId={route.bookingId}
+          focusHeading={focusPage}
+        />
+      );
+      break;
+    case "exceptions":
+      page = (
+        <ExceptionsPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />
+      );
+      break;
+    case "roster":
+      page = (
+        <RosterPage
+          key={selected.tenantId}
+          membership={selected}
+          tripId={route.tripId}
+          focusHeading={focusPage}
+        />
+      );
+      break;
+    case "not_found":
+      page = (
+        <Placeholder
+          selected={selected}
+          title="Page not found"
+          icon="compass"
+          heading="This page isn't part of the console"
+          body="Choose a section from the navigation to continue."
+          focusHeading={focusPage}
+        />
+      );
+      break;
   }
 
   return (
-    <div className="console-layout">
-      <a className="tg-skip-link" href="#console-main">
-        Skip to content
-      </a>
-      <aside className="console-rail">
-        <div className="console-rail__top">
-          <Wordmark />
-        </div>
-        <ScopePicker memberships={memberships} selected={selected} onSelect={selectScope} />
-        <nav className="console-nav" aria-label="Console">
-          <ul>
-            {sections.map((s) => (
-              <li key={s.path}>
-                <a
-                  href={s.path}
-                  aria-current={s.path === path ? "page" : undefined}
-                  onClick={(e) => follow(e, s.path)}
-                >
-                  <Icon name={s.icon} />
-                  {s.label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </nav>
-        <div className="console-rail__user">
-          <div className="console-rail__identity">
-            <span className="console-avatar" aria-hidden="true">
-              {initials(principal.displayName)}
-            </span>
-            <span className="console-rail__who">
-              <span className="console-rail__name">{principal.displayName}</span>
-              <span className="console-rail__email">{principal.email}</span>
-            </span>
+    <NavigationProvider navigate={navigate}>
+      <div className="console-layout">
+        <a className="tg-skip-link" href="#console-main">
+          Skip to content
+        </a>
+        <aside className="console-rail">
+          <div className="console-rail__top">
+            <Wordmark />
           </div>
-          {signOut}
-        </div>
-      </aside>
-      <main id="console-main" className="console-main" tabIndex={-1}>
-        {signOutFailed && (
-          <Notice tone="error" title="Sign-out didn't finish" className="console-main__notice">
-            <p>You're still signed in. Check your connection, then choose Sign out again.</p>
-          </Notice>
-        )}
-        {/* Keyed on the path: every page change mounts a new page, so its
+          <ScopePicker memberships={memberships} selected={selected} onSelect={selectScope} />
+          <nav className="console-nav" aria-label="Console">
+            <ul>
+              {sections.map((s) => (
+                <li key={s.path}>
+                  <ConsoleLink
+                    href={s.path}
+                    // The page itself is "page"; a page inside the section, such
+                    // as one booking, marks the section "true".
+                    aria-current={
+                      s.path === path ? "page" : s.path === place.section ? "true" : undefined
+                    }
+                  >
+                    <Icon name={s.icon} />
+                    {s.label}
+                  </ConsoleLink>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <div className="console-rail__user">
+            <div className="console-rail__identity">
+              <span className="console-avatar" aria-hidden="true">
+                {initials(principal.displayName)}
+              </span>
+              <span className="console-rail__who">
+                <span className="console-rail__name">{principal.displayName}</span>
+                <span className="console-rail__email">{principal.email}</span>
+              </span>
+            </div>
+            {signOut}
+          </div>
+        </aside>
+        <main id="console-main" className="console-main" tabIndex={-1}>
+          {signOutFailed && (
+            <Notice tone="error" title="Sign-out didn't finish" className="console-main__notice">
+              <p>You're still signed in. Check your connection, then choose Sign out again.</p>
+            </Notice>
+          )}
+          {/* Keyed on the visit: every page change mounts a new page, so its
             heading takes focus even between two pages built alike. */}
-        <Fragment key={path}>{page}</Fragment>
-      </main>
-    </div>
+          <Fragment key={visit}>{page}</Fragment>
+        </main>
+      </div>
+    </NavigationProvider>
   );
 }
 

@@ -181,6 +181,20 @@ const paths = {
       <path d="M9 8.5h6M9 12h6M9 15.5h3.5" />
     </>
   ),
+  // Console booking views (G2.12b).
+  search: (
+    <>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m15.5 15.5 5 5" />
+    </>
+  ),
+  printer: (
+    <>
+      <path d="M7 8.5V3.5h10v5" />
+      <rect x="3" y="8.5" width="18" height="8" rx="2" />
+      <path d="M7 14h10v6.5H7Z" />
+    </>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof paths;

@@ -276,6 +276,29 @@ export function capacityText(trip: Pick<StaffTrip, "capacity" | "salesState">, d
   return taken ? `${size}: ${taken}` : size;
 }
 
+/**
+ * capacityText in three parts, so the calendar can link the booked count to
+ * the trip's bookings (G2.12b): `before + booked + after` is the same text.
+ * `booked` is null when nothing is booked, and then there is no link.
+ */
+export function capacityParts(
+  trip: Pick<StaffTrip, "capacity" | "salesState">,
+  departed: boolean,
+): { before: string; booked: string | null; after: string } {
+  const { kind, total, remaining, held = 0, confirmed = 0 } = trip.capacity;
+  if (confirmed === 0) return { before: capacityText(trip, departed), booked: null, after: "" };
+  if (kind === "whole_boat") return { before: "Whole boat, ", booked: "booked", after: "" };
+  const settled = departed || trip.salesState === "canceled" || trip.salesState === "completed";
+  const size = settled
+    ? `${total} ${total === 1 ? "seat" : "seats"}`
+    : `${remaining} of ${total} seats left`;
+  return {
+    before: `${size}: `,
+    booked: `${confirmed} booked`,
+    after: !settled && held > 0 ? `, ${held} held` : "",
+  };
+}
+
 /** Why a change did not happen, from the API's answer. */
 export type ActionFailure =
   | { kind: "conflict" }

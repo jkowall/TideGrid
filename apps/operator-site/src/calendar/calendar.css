@@ -430,3 +430,13 @@
   gap: var(--space-2);
   margin-top: var(--space-2);
 }
+
+/* The booked count links to the trip's bookings (G2.12b): a 44 px target
+   whose extra height overhangs the line, so the facts stay compact. */
+.cal-trip__booked {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  margin-block: calc((var(--tap-min) - 1lh) / -2);
+  font-weight: var(--weight-semibold);
+}

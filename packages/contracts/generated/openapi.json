@@ -8695,7 +8695,7 @@
           "bookings"
         ],
         "summary": "Payments that could not become bookings",
-        "description": "Every role. Verified payments whose capacity was gone, whose trip changed, or whose checkout had already failed or been canceled, newest first, with the state of the automatic full refund. A payment_mismatch is not refunded automatically.",
+        "description": "Every role. Verified payments whose capacity was gone, whose trip changed, or whose checkout had already failed or been canceled, newest first, with the trip, the checkout, the masked provider reference, and the state of the automatic full refund. A payment_mismatch is not refunded automatically. The booker's name and email, for following up, go only to roles that hold bookings.read.",
         "security": [
           {
             "accessJwt": []
@@ -8724,6 +8724,17 @@
             },
             "required": false,
             "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Cursor: the last exception id of the previous page (nextBefore). One that names no exception of this operator answers 400 cursor_invalid"
+            },
+            "required": false,
+            "description": "Cursor: the last exception id of the previous page (nextBefore). One that names no exception of this operator answers 400 cursor_invalid",
+            "name": "before",
             "in": "query"
           }
         ],
@@ -8772,11 +8783,12 @@
                           },
                           "amount": {
                             "type": "integer",
-                            "description": "Integer US cents"
+                            "description": "What the checkout charged: its order's total"
                           },
                           "createdAt": {
                             "type": "string",
-                            "format": "date-time"
+                            "format": "date-time",
+                            "description": "When the payment was found unable to become a booking"
                           },
                           "refund": {
                             "type": [
@@ -8822,6 +8834,159 @@
                               "failureCode",
                               "settledAt"
                             ]
+                          },
+                          "trip": {
+                            "type": "object",
+                            "properties": {
+                              "tripId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "productName": {
+                                "type": "string"
+                              },
+                              "productKind": {
+                                "type": "string",
+                                "enum": [
+                                  "shared_seat",
+                                  "private_charter"
+                                ]
+                              },
+                              "boatName": {
+                                "type": "string"
+                              },
+                              "timeZone": {
+                                "type": "string",
+                                "description": "IANA time zone name, such as America/New_York"
+                              },
+                              "localDate": {
+                                "type": "string",
+                                "format": "date",
+                                "description": "Local calendar date, YYYY-MM-DD"
+                              },
+                              "localStartTime": {
+                                "type": "string",
+                                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                                "description": "Local wall-clock time, HH:MM, 24-hour"
+                              },
+                              "startsAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "salesState": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "published",
+                                  "closed",
+                                  "canceled",
+                                  "completed"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "tripId",
+                              "productName",
+                              "productKind",
+                              "boatName",
+                              "timeZone",
+                              "localDate",
+                              "localStartTime",
+                              "startsAt",
+                              "salesState"
+                            ],
+                            "description": "The trip the checkout was for"
+                          },
+                          "partySize": {
+                            "type": "integer",
+                            "minimum": 1
+                          },
+                          "checkout": {
+                            "type": "object",
+                            "properties": {
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "open",
+                                  "confirmed",
+                                  "unfulfilled",
+                                  "failed",
+                                  "expired",
+                                  "canceled"
+                                ],
+                                "description": "open: awaiting payment. confirmed: paid and booked. unfulfilled: the payment arrived but the trip could not be confirmed; it is refunded in full (see refund). failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                              },
+                              "expiresAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "When the checkout's hold ran out, or would have"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "expiresAt"
+                            ]
+                          },
+                          "payment": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "fake",
+                                  "stripe"
+                                ],
+                                "description": "fake is the demo provider; stripe replaces it before any live booking"
+                              },
+                              "providerReference": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The provider's payment id, masked: its prefix and last four characters"
+                              },
+                              "receivedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "When TideGrid verified the provider's event"
+                              },
+                              "reportedAmount": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "description": "The amount the provider's event reported; differs from amount on a payment_mismatch"
+                              },
+                              "reportedCurrency": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "providerReference",
+                              "receivedAt",
+                              "reportedAmount",
+                              "reportedCurrency"
+                            ]
+                          },
+                          "booker": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "email": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "email"
+                            ],
+                            "description": "Personal data, for following up with the guest. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise"
                           }
                         },
                         "required": [
@@ -8832,15 +8997,62 @@
                           "paymentId",
                           "amount",
                           "createdAt",
-                          "refund"
+                          "refund",
+                          "trip",
+                          "partySize",
+                          "checkout",
+                          "payment"
                         ]
                       }
+                    },
+                    "nextBefore": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid",
+                      "description": "Pass as before for the next page; null on the last page"
                     }
                   },
                   "required": [
-                    "exceptions"
+                    "exceptions",
+                    "nextBefore"
                   ],
                   "description": "Payments that could not become bookings, newest first, for operator follow-up"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The cursor names no exception of this tenant (cursor_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -8915,6 +9127,1966 @@
           },
           "404": {
             "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Bookings on trips departing on one local date",
+        "description": "Every role. The date's trips with their booking and guest counts, and a page of its bookings by departure, trip, and confirmation: reference, party, extras, total, and payment state. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "The marina's local date: bookings on trips departing that day"
+            },
+            "required": true,
+            "description": "The marina's local date: bookings on trips departing that day",
+            "name": "date",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Only this trip's bookings. A trip of another operator, or on another date, matches nothing"
+            },
+            "required": false,
+            "description": "Only this trip's bookings. A trip of another operator, or on another date, matches nothing",
+            "name": "tripId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid"
+            },
+            "required": false,
+            "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid",
+            "name": "after",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The day's bookings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "format": "date",
+                      "description": "Local calendar date at the marina, YYYY-MM-DD"
+                    },
+                    "trips": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tripId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "productName": {
+                            "type": "string"
+                          },
+                          "productKind": {
+                            "type": "string",
+                            "enum": [
+                              "shared_seat",
+                              "private_charter"
+                            ]
+                          },
+                          "boatName": {
+                            "type": "string"
+                          },
+                          "timeZone": {
+                            "type": "string",
+                            "description": "IANA time zone name, such as America/New_York"
+                          },
+                          "localDate": {
+                            "type": "string",
+                            "format": "date",
+                            "description": "Local calendar date, YYYY-MM-DD"
+                          },
+                          "localStartTime": {
+                            "type": "string",
+                            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                            "description": "Local wall-clock time, HH:MM, 24-hour"
+                          },
+                          "startsAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "salesState": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "published",
+                              "closed",
+                              "canceled",
+                              "completed"
+                            ]
+                          },
+                          "bookings": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Bookings on the trip"
+                          },
+                          "guests": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Guests across those bookings"
+                          }
+                        },
+                        "required": [
+                          "tripId",
+                          "productName",
+                          "productKind",
+                          "boatName",
+                          "timeZone",
+                          "localDate",
+                          "localStartTime",
+                          "startsAt",
+                          "salesState",
+                          "bookings",
+                          "guests"
+                        ]
+                      },
+                      "description": "Every trip departing on the date, in any sales state, with its booking and guest counts across all pages; sorted by departure; at most 200"
+                    },
+                    "bookings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "reference": {
+                            "type": "string",
+                            "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                            "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                          },
+                          "tripId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "One of the response's trips"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "confirmed"
+                            ]
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "direct"
+                            ],
+                            "description": "direct: booked by the guest online"
+                          },
+                          "confirmedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "booker": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ],
+                            "description": "Personal data. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise"
+                          },
+                          "party": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "tickets"
+                                    ]
+                                  },
+                                  "guests": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "description": "Seats booked: the sum of the tickets"
+                                  },
+                                  "tickets": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "code": {
+                                          "type": "string",
+                                          "description": "The ticket type's code, such as adult"
+                                        },
+                                        "name": {
+                                          "type": "string",
+                                          "description": "The ticket type as sold, such as Child (3 to 12)"
+                                        },
+                                        "quantity": {
+                                          "type": "integer",
+                                          "minimum": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "code",
+                                        "name",
+                                        "quantity"
+                                      ]
+                                    },
+                                    "description": "Counts by ticket type, in the order sold"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "guests",
+                                  "tickets"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "charter"
+                                    ]
+                                  },
+                                  "guests": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "description": "Guests aboard, as the booker gave them"
+                                  },
+                                  "charter": {
+                                    "type": "string",
+                                    "description": "The charter as sold, such as Whole boat, up to 12 guests"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "guests",
+                                  "charter"
+                                ]
+                              }
+                            ],
+                            "description": "Who is coming, from the order: counts by ticket type, or a charter's guests"
+                          },
+                          "extras": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "quantity": {
+                                  "type": "integer",
+                                  "minimum": 1
+                                }
+                              },
+                              "required": [
+                                "code",
+                                "name",
+                                "quantity"
+                              ],
+                              "description": "A paid add-on on the order"
+                            }
+                          },
+                          "total": {
+                            "type": "integer",
+                            "description": "The order's total"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "enum": [
+                              "USD"
+                            ]
+                          },
+                          "payment": {
+                            "type": "object",
+                            "properties": {
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "succeeded",
+                                  "failed"
+                                ],
+                                "description": "The charge: succeeded once a verified provider event says so"
+                              },
+                              "refund": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "requested",
+                                      "succeeded",
+                                      "failed"
+                                    ],
+                                    "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                                  },
+                                  "amount": {
+                                    "type": "integer",
+                                    "description": "Integer US cents"
+                                  }
+                                },
+                                "required": [
+                                  "state",
+                                  "amount"
+                                ],
+                                "description": "A refund of the charge, when there is one"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "refund"
+                            ],
+                            "description": "Paid is a succeeded charge with no refund"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reference",
+                          "tripId",
+                          "state",
+                          "source",
+                          "confirmedAt",
+                          "party",
+                          "extras",
+                          "total",
+                          "currency",
+                          "payment"
+                        ]
+                      },
+                      "description": "This page, sorted by departure, then by trip, then by confirmation"
+                    },
+                    "nextAfter": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid",
+                      "description": "Pass as after for the next page; null on the last page. The same cursor always returns the same page while nothing is booked in between"
+                    }
+                  },
+                  "required": [
+                    "date",
+                    "trips",
+                    "bookings",
+                    "nextAfter"
+                  ],
+                  "description": "Bookings on trips departing on one local date"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed date, trip id, or limit (validation_failed), or a cursor that names no booking of this tenant (cursor_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "One booking in detail",
+        "description": "Every role. The trip, where to meet, the party and extras, the immutable order's lines and totals, the payment with its provider reference masked, any refund, and a short timeline. The booker's name and email go only to roles that hold bookings.read; for any other role the field is absent. An unknown id and another tenant's id answer the same 404.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The booking",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "booking": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                          "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "confirmed"
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "direct"
+                          ]
+                        },
+                        "reacquired": {
+                          "type": "boolean",
+                          "description": "Confirmed after its hold had expired, by taking the seats again"
+                        },
+                        "confirmedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "tripId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "productName": {
+                              "type": "string"
+                            },
+                            "productKind": {
+                              "type": "string",
+                              "enum": [
+                                "shared_seat",
+                                "private_charter"
+                              ]
+                            },
+                            "boatName": {
+                              "type": "string"
+                            },
+                            "timeZone": {
+                              "type": "string",
+                              "description": "IANA time zone name, such as America/New_York"
+                            },
+                            "localDate": {
+                              "type": "string",
+                              "format": "date",
+                              "description": "Local calendar date, YYYY-MM-DD"
+                            },
+                            "localStartTime": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            },
+                            "startsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "salesState": {
+                              "type": "string",
+                              "enum": [
+                                "draft",
+                                "published",
+                                "closed",
+                                "canceled",
+                                "completed"
+                              ]
+                            },
+                            "endsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "endsAtLocal": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The same instant with the zone's offset, for display"
+                            },
+                            "durationMinutes": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "tripId",
+                            "productName",
+                            "productKind",
+                            "boatName",
+                            "timeZone",
+                            "localDate",
+                            "localStartTime",
+                            "startsAt",
+                            "salesState",
+                            "endsAt",
+                            "endsAtLocal",
+                            "durationMinutes"
+                          ]
+                        },
+                        "location": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "meetingPoint": {
+                              "type": "string"
+                            },
+                            "meetingInstructions": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "meetingPoint",
+                            "meetingInstructions"
+                          ]
+                        },
+                        "booker": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "email": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "email"
+                          ],
+                          "description": "Personal data. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise"
+                        },
+                        "party": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "tickets"
+                                  ]
+                                },
+                                "guests": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "description": "Seats booked: the sum of the tickets"
+                                },
+                                "tickets": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "description": "The ticket type's code, such as adult"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "description": "The ticket type as sold, such as Child (3 to 12)"
+                                      },
+                                      "quantity": {
+                                        "type": "integer",
+                                        "minimum": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "code",
+                                      "name",
+                                      "quantity"
+                                    ]
+                                  },
+                                  "description": "Counts by ticket type, in the order sold"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "guests",
+                                "tickets"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "charter"
+                                  ]
+                                },
+                                "guests": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "description": "Guests aboard, as the booker gave them"
+                                },
+                                "charter": {
+                                  "type": "string",
+                                  "description": "The charter as sold, such as Whole boat, up to 12 guests"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "guests",
+                                "charter"
+                              ]
+                            }
+                          ],
+                          "description": "Who is coming, from the order: counts by ticket type, or a charter's guests"
+                        },
+                        "extras": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "name",
+                              "quantity"
+                            ],
+                            "description": "A paid add-on on the order"
+                          }
+                        },
+                        "policyVersion": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "The policy version the guest accepted"
+                        },
+                        "order": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "pending",
+                                "paid",
+                                "void"
+                              ]
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "lines": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "lineNo": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "service",
+                                      "add_on",
+                                      "fee",
+                                      "discount",
+                                      "tax"
+                                    ],
+                                    "description": "service: tickets or the charter price"
+                                  },
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "basis": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "enum": [
+                                      "per_booking",
+                                      "per_participant",
+                                      null
+                                    ],
+                                    "description": "Fees and add-ons only"
+                                  },
+                                  "quantity": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  "unitAmount": {
+                                    "type": "integer",
+                                    "description": "Integer US cents"
+                                  },
+                                  "amount": {
+                                    "type": "integer",
+                                    "description": "Negative on the discount line"
+                                  },
+                                  "taxInclusive": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ],
+                                    "description": "Tax lines only: true when the tax is inside the prices and reported, not added"
+                                  },
+                                  "taxRatePpm": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "description": "Tax lines only: the rate the order used, in parts per million"
+                                  }
+                                },
+                                "required": [
+                                  "lineNo",
+                                  "kind",
+                                  "code",
+                                  "name",
+                                  "basis",
+                                  "quantity",
+                                  "unitAmount",
+                                  "amount",
+                                  "taxInclusive",
+                                  "taxRatePpm"
+                                ]
+                              },
+                              "description": "In order: trip price, add-ons, fees, discount, taxes"
+                            },
+                            "totals": {
+                              "type": "object",
+                              "properties": {
+                                "subtotal": {
+                                  "type": "integer",
+                                  "description": "Trip price and add-ons, before the discount"
+                                },
+                                "discount": {
+                                  "type": "integer",
+                                  "description": "Integer US cents"
+                                },
+                                "fees": {
+                                  "type": "integer",
+                                  "description": "Integer US cents"
+                                },
+                                "tax": {
+                                  "type": "integer",
+                                  "description": "Taxes added on top of prices"
+                                },
+                                "includedTax": {
+                                  "type": "integer",
+                                  "description": "Taxes already inside prices; informational"
+                                },
+                                "total": {
+                                  "type": "integer",
+                                  "description": "subtotal - discount + fees + tax"
+                                }
+                              },
+                              "required": [
+                                "subtotal",
+                                "discount",
+                                "fees",
+                                "tax",
+                                "includedTax",
+                                "total"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "status",
+                            "currency",
+                            "lines",
+                            "totals"
+                          ],
+                          "description": "The immutable order, copied from the quote the guest accepted"
+                        },
+                        "payment": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "enum": [
+                                "fake",
+                                "stripe"
+                              ],
+                              "description": "fake is the demo provider; stripe replaces it before any live booking"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "pending",
+                                "succeeded",
+                                "failed"
+                              ]
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "providerReference": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "description": "The provider's payment id, masked: its prefix and last four characters, such as fpay_••••a1B2"
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "succeededAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "state",
+                            "amount",
+                            "currency",
+                            "providerReference",
+                            "createdAt",
+                            "succeededAt"
+                          ]
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "succeeded",
+                                "failed"
+                              ],
+                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "failureCode": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "requestedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "settledAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "amount",
+                            "failureCode",
+                            "requestedAt",
+                            "settledAt"
+                          ]
+                        },
+                        "timeline": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "checkout_opened",
+                                  "paid",
+                                  "confirmed",
+                                  "refund_requested",
+                                  "refunded",
+                                  "refund_failed"
+                                ]
+                              },
+                              "at": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "at"
+                            ]
+                          },
+                          "description": "Checkout opened, paid, confirmed, and any refund, oldest first"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "reference",
+                        "state",
+                        "source",
+                        "reacquired",
+                        "confirmedAt",
+                        "trip",
+                        "location",
+                        "party",
+                        "extras",
+                        "policyVersion",
+                        "order",
+                        "payment",
+                        "refund",
+                        "timeline"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "booking"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such booking for it (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/booking-references/{reference}": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Find a booking by its reference",
+        "description": "Every role. The booking a reference names, as a guest quotes it: case, spaces, and hyphens are ignored, and O, I, and L read as 0, 1, and 1. Anything that cannot be a reference, an unknown reference, and another tenant's answer the same 404.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "A booking reference as typed: case, spaces, and hyphens are ignored, and O, I, and L read as 0, 1, and 1. Anything that cannot be a reference answers 404"
+            },
+            "required": true,
+            "description": "A booking reference as typed: case, spaces, and hyphens are ignored, and O, I, and L read as 0, 1, and 1. Anything that cannot be a reference answers 404",
+            "name": "reference",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The booking's id, reference, trip, and local date",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "booking": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                          "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "localDate": {
+                          "type": "string",
+                          "format": "date",
+                          "description": "The trip's local date at the marina"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "reference",
+                        "tripId",
+                        "localDate"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "booking"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such booking for it (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/trips/{tripId}/roster": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "A trip's roster",
+        "description": "Owners and booking staff. Every booking on the trip, oldest first, with the booker's name, the party, extras, and payment state, and the trip's time, meeting point, and totals. A booking-management view, not a passenger manifest: participants and waivers are not collected yet.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tripId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The roster",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "roster": {
+                      "type": "object",
+                      "properties": {
+                        "generatedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the roster was read; it lists the bookings as of then"
+                        },
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "tripId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "productName": {
+                              "type": "string"
+                            },
+                            "productKind": {
+                              "type": "string",
+                              "enum": [
+                                "shared_seat",
+                                "private_charter"
+                              ]
+                            },
+                            "boatName": {
+                              "type": "string"
+                            },
+                            "timeZone": {
+                              "type": "string",
+                              "description": "IANA time zone name, such as America/New_York"
+                            },
+                            "localDate": {
+                              "type": "string",
+                              "format": "date",
+                              "description": "Local calendar date, YYYY-MM-DD"
+                            },
+                            "localStartTime": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            },
+                            "startsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "salesState": {
+                              "type": "string",
+                              "enum": [
+                                "draft",
+                                "published",
+                                "closed",
+                                "canceled",
+                                "completed"
+                              ]
+                            },
+                            "endsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "endsAtLocal": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The same instant with the zone's offset, for display"
+                            },
+                            "durationMinutes": {
+                              "type": "integer"
+                            },
+                            "seats": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "description": "Seats sold per trip, or guests aboard a charter"
+                            }
+                          },
+                          "required": [
+                            "tripId",
+                            "productName",
+                            "productKind",
+                            "boatName",
+                            "timeZone",
+                            "localDate",
+                            "localStartTime",
+                            "startsAt",
+                            "salesState",
+                            "endsAt",
+                            "endsAtLocal",
+                            "durationMinutes",
+                            "seats"
+                          ]
+                        },
+                        "location": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "meetingPoint": {
+                              "type": "string"
+                            },
+                            "meetingInstructions": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "meetingPoint",
+                            "meetingInstructions"
+                          ]
+                        },
+                        "totals": {
+                          "type": "object",
+                          "properties": {
+                            "bookings": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "guests": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "tickets": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "code": {
+                                    "type": "string",
+                                    "description": "The ticket type's code, such as adult"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "description": "The ticket type as sold, such as Child (3 to 12)"
+                                  },
+                                  "quantity": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  }
+                                },
+                                "required": [
+                                  "code",
+                                  "name",
+                                  "quantity"
+                                ]
+                              },
+                              "description": "Shared seats: counts by ticket type"
+                            },
+                            "extras": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "quantity": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  }
+                                },
+                                "required": [
+                                  "code",
+                                  "name",
+                                  "quantity"
+                                ],
+                                "description": "A paid add-on on the order"
+                              },
+                              "description": "Every add-on to prepare, summed"
+                            }
+                          },
+                          "required": [
+                            "bookings",
+                            "guests",
+                            "tickets",
+                            "extras"
+                          ]
+                        },
+                        "bookings": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "reference": {
+                                "type": "string",
+                                "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                                "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                              },
+                              "booker": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ],
+                                "description": "Personal data; the roster needs bookings.read"
+                              },
+                              "party": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "tickets"
+                                        ]
+                                      },
+                                      "guests": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "description": "Seats booked: the sum of the tickets"
+                                      },
+                                      "tickets": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "code": {
+                                              "type": "string",
+                                              "description": "The ticket type's code, such as adult"
+                                            },
+                                            "name": {
+                                              "type": "string",
+                                              "description": "The ticket type as sold, such as Child (3 to 12)"
+                                            },
+                                            "quantity": {
+                                              "type": "integer",
+                                              "minimum": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "code",
+                                            "name",
+                                            "quantity"
+                                          ]
+                                        },
+                                        "description": "Counts by ticket type, in the order sold"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "guests",
+                                      "tickets"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "charter"
+                                        ]
+                                      },
+                                      "guests": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "description": "Guests aboard, as the booker gave them"
+                                      },
+                                      "charter": {
+                                        "type": "string",
+                                        "description": "The charter as sold, such as Whole boat, up to 12 guests"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "guests",
+                                      "charter"
+                                    ]
+                                  }
+                                ],
+                                "description": "Who is coming, from the order: counts by ticket type, or a charter's guests"
+                              },
+                              "extras": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "code": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "quantity": {
+                                      "type": "integer",
+                                      "minimum": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "code",
+                                    "name",
+                                    "quantity"
+                                  ],
+                                  "description": "A paid add-on on the order"
+                                }
+                              },
+                              "payment": {
+                                "type": "object",
+                                "properties": {
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "pending",
+                                      "succeeded",
+                                      "failed"
+                                    ],
+                                    "description": "The charge: succeeded once a verified provider event says so"
+                                  },
+                                  "refund": {
+                                    "type": [
+                                      "object",
+                                      "null"
+                                    ],
+                                    "properties": {
+                                      "state": {
+                                        "type": "string",
+                                        "enum": [
+                                          "requested",
+                                          "succeeded",
+                                          "failed"
+                                        ],
+                                        "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                                      },
+                                      "amount": {
+                                        "type": "integer",
+                                        "description": "Integer US cents"
+                                      }
+                                    },
+                                    "required": [
+                                      "state",
+                                      "amount"
+                                    ],
+                                    "description": "A refund of the charge, when there is one"
+                                  }
+                                },
+                                "required": [
+                                  "state",
+                                  "refund"
+                                ],
+                                "description": "Paid is a succeeded charge with no refund"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reference",
+                              "booker",
+                              "party",
+                              "extras",
+                              "payment"
+                            ]
+                          },
+                          "description": "Every booking on the trip, oldest first. Complete: a trip seats at most 500"
+                        }
+                      },
+                      "required": [
+                        "generatedAt",
+                        "trip",
+                        "location",
+                        "totals",
+                        "bookings"
+                      ],
+                      "description": "A booking-management roster for one trip. Not a passenger manifest: participants and waivers are not collected yet"
+                    }
+                  },
+                  "required": [
+                    "roster"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such trip for it (trip_not_found)",
             "content": {
               "application/json": {
                 "schema": {

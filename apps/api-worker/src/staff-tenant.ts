@@ -7,6 +7,7 @@ import {
   isUuid,
   type JsonObject,
   requestHash,
+  snapshotRead,
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
@@ -49,9 +50,22 @@ export interface IdempotentCommand {
 export async function withStaffTenant<T extends JsonObject>(
   c: Context<AppEnv>,
   deps: AppDeps,
-  options: { tenantId: string; permission: Permission; idempotency?: IdempotentCommand },
+  options: {
+    tenantId: string;
+    permission: Permission;
+    idempotency?: IdempotentCommand;
+    /**
+     * A read whose statements must see one moment, such as a page and the
+     * counts beside it (G2.12b): one REPEATABLE READ, READ ONLY transaction.
+     * A command cannot be one, since it writes.
+     */
+    snapshot?: true;
+  },
   run: (trx: TenantTransaction, ctx: StaffTenantContext) => Promise<T>,
 ): Promise<{ body: T; status: number; replayed: boolean }> {
+  if (options.snapshot && options.idempotency) {
+    throw new TypeError("a snapshot read takes no idempotency key: it never writes");
+  }
   const principal = await requirePrincipal(c, deps);
   if (!isUuid(options.tenantId)) throw tenantNotFound();
   const ctx: TenantContext = {
@@ -77,27 +91,32 @@ export async function withStaffTenant<T extends JsonObject>(
     : null;
 
   try {
-    return await inTenantTransaction(getDb(c), ctx, async (trx) => {
-      const access = await loadStaffTenantAccess(trx, options.tenantId, principal.userId);
-      if (!access) throw tenantNotFound();
-      if (access.tenant.status !== "active") {
-        throw new ApiError(403, "tenant_suspended", "This tenant is suspended");
-      }
-      if (!can(access.role, options.permission)) {
-        throw new ApiError(403, "forbidden", "Your role does not allow this action");
-      }
-      if (claim && idem) {
-        const claimed = await claimIdempotencyKey(trx, ctx, claim);
-        if (claimed.kind === "replay") {
-          return { body: claimed.body as T, status: claimed.status, replayed: true };
+    return await inTenantTransaction(
+      getDb(c),
+      ctx,
+      async (trx) => {
+        const access = await loadStaffTenantAccess(trx, options.tenantId, principal.userId);
+        if (!access) throw tenantNotFound();
+        if (access.tenant.status !== "active") {
+          throw new ApiError(403, "tenant_suspended", "This tenant is suspended");
         }
-      }
-      const body = await run(trx, { ...ctx, principal, access });
-      if (claim && idem) {
-        await completeIdempotencyKey(trx, ctx, claim, { status: idem.successStatus, body });
-      }
-      return { body, status: idem?.successStatus ?? 200, replayed: false };
-    });
+        if (!can(access.role, options.permission)) {
+          throw new ApiError(403, "forbidden", "Your role does not allow this action");
+        }
+        if (claim && idem) {
+          const claimed = await claimIdempotencyKey(trx, ctx, claim);
+          if (claimed.kind === "replay") {
+            return { body: claimed.body as T, status: claimed.status, replayed: true };
+          }
+        }
+        const body = await run(trx, { ...ctx, principal, access });
+        if (claim && idem) {
+          await completeIdempotencyKey(trx, ctx, claim, { status: idem.successStatus, body });
+        }
+        return { body, status: idem?.successStatus ?? 200, replayed: false };
+      },
+      options.snapshot ? snapshotRead : undefined,
+    );
   } catch (err) {
     if (err instanceof IdempotencyKeyMismatchError) {
       throw new ApiError(422, "idempotency_key_reused", err.message);
