@@ -671,6 +671,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         fake_provider_payments: ["INSERT", "SELECT"],
         fake_provider_events: ["INSERT", "SELECT"],
         fake_provider_refunds: ["INSERT", "SELECT"],
+        // Console completion (G2.12c): booking notes are append-only.
+        booking_notes: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

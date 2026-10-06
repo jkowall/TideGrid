@@ -28,8 +28,27 @@ describe("role permissions", () => {
       "trips.manage",
       "bookings.read",
       "payments.read",
+      "notes.read",
+      "notes.write",
     ]);
-    expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read", "payments.read"]);
+    expect(permissionsFor("finance")).toEqual([
+      "audit.read",
+      "catalog.read",
+      "payments.read",
+      "notes.read",
+    ]);
+  });
+
+  it("lets every role read a booking's notes and only owners and booking staff write them", () => {
+    expect(StaffRole.options.filter((r) => can(r, "notes.read"))).toEqual([
+      "owner",
+      "booking_staff",
+      "finance",
+    ]);
+    expect(StaffRole.options.filter((r) => can(r, "notes.write"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
   });
 
   it("shows bookers' contact details to owners and booking staff, and payment exceptions to all", () => {
