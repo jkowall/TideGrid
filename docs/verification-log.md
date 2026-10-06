@@ -42,6 +42,20 @@ This log records each dated verification pass over the throwaway guest workflow 
     - The whole-boat index test could commit with the trigger disabled when the index was missing; it now always rolls back.
     - The committed OpenAPI document lacked the holds route.
     - `app.ts` logged the SQLSTATE of unhandled errors under a key the logger's allowlist dropped; the key is now allowed.
+- Independent review, October 5, 2026, on a second model: accept with listed fixes. No oversell, no double confirmation, no cross-tenant leak, nothing blocking. Each fix has a test that failed before it and passes after; the database tests failed first on a branch migrated with the unfixed migration.
+  - **Whole-boat reacquisition kept stale seats.** Found by inspection, then reproduced through the owner connection. With a charter's hold expired, the owner grew the boat and the trip from 6 to 8 seats, and the late confirmation reacquired the 6-seat hold. `app.trip_capacity_usage` then left 2 seats, so the listing showed a taken charter; nothing was oversold.
+    - Reacquisition now derives the kind and seats as a new hold does and refuses a hold that no longer matches (`capacity_holds_kind`). That also covers a product swap or a product kind change while the hold was expired.
+    - `confirmHold` checks first and answers `capacity_lost` with `trip_unavailable`, the reason for a trip no longer sold as it was held. `no_capacity` would be wrong for an empty boat. Two tests.
+  - **The owner role could extend a hold past departure.** Reproduced: moving an active hold's expiry to a day past departure succeeded, and the hold kept counting.
+    - The trigger now refuses any later expiry, for every role, and still allows an earlier one, which is how tests make time pass. No service or trigger path writes `expires_at` after insert. One test.
+    - The storm test backdates one hold more than once, and a second backdate is later than the first. Under the new rule, with the old helper, it failed twice with 23514. Both backdate helpers now keep the earlier instant.
+    - Invariant 7 in the inventory README, the migration, the table type, and the database README now say exactly what the trigger sets.
+  - **The cron outcome.** The handler passed the sweep to `waitUntil`. Cloudflare records the first failed `waitUntil` as the cron status, so a failure did reach the cron's past events, but the handler itself always resolved and no test could see a failure. It now awaits the sweep, and a failed run rejects the invocation after logging why. A Workers-runtime test with a failing sweep failed before the change and passes after it.
+  - Recorded in the [inventory README](../packages/domain-inventory/README.md#follow-ups), not fixed: the owner role can still change a product's kind under active or confirmed holds; the staff holds read has no pagination; the per-trip usage function in the listings needs watching as data grows; and once G2.5 lands, a quote for a trip with fewer seats left than the product's smallest party answers `trip_not_bookable`, not `insufficient_capacity`.
+  - Renumbering the migration after G2.5's 0005, and giving the fixtures' products the sale terms G2.5 requires, wait for G2.5 to merge.
+- Checks after the fixes:
+  - `pnpm check` is green: Biome on 190 files, 371 unit tests across 11 packages (31 in the Workers runtime), three dry-run deploys, doc links, and 29 prototype tests.
+  - On a fresh throwaway Neon branch, as CI runs it: migrate; seed, 892 trips; a second seed, 0 new trips; then 222 integration tests. That is 40 database, 24 catalog, 89 inventory, and 69 API tests.
 - Not done, and follow-ups for G2.7:
   - No route acquires, confirms, or releases a hold.
   - Canceling a trip with confirmed holds still succeeds.
