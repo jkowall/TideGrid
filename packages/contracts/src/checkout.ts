@@ -16,6 +16,11 @@ const EmailAddress = z
   .email()
   .max(254)
   .regex(/^[\x21-\x7e]+$/, "Addresses must be ASCII");
+/**
+ * Single-line text a guest types. C0 and C1 control characters are refused
+ * here, as PostgreSQL's [[:cntrl:]] check refuses them, so bad input answers
+ * 400 rather than failing in the database.
+ */
 const SingleLineText = (max: number) =>
   z
     .string()
@@ -23,7 +28,7 @@ const SingleLineText = (max: number) =>
     .min(1)
     .max(max)
     // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
-    .regex(/^[^\u0000-\u001f\u007f]*$/, "Control characters are not allowed");
+    .regex(/^[^\u0000-\u001f\u007f-\u009f]*$/, "Control characters are not allowed");
 
 export const CheckoutSecret = z
   .string()

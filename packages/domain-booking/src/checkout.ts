@@ -45,8 +45,9 @@ export const MAX_OPEN_CHECKOUTS_PER_CLIENT = 3;
 
 const ownerRefFor = (sessionId: string) => `checkout_session:${sessionId}`;
 
+// C0 and C1 controls, which the database's [[:cntrl:]] check also refuses.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
-const bookerNamePattern = /^[^\u0000-\u001f\u007f]{1,120}$/;
+const bookerNamePattern = /^[^\u0000-\u001f\u007f-\u009f]{1,120}$/;
 const emailPattern = /^[\x21-\x7e]+$/;
 
 export interface BookerDetails {

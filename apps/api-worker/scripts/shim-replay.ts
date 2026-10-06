@@ -98,6 +98,8 @@ async function findTrip(kind: "shared_seat" | "private_charter", party: number, 
 async function open(tripId: string, party: number, charter: boolean): Promise<Checkout> {
   const offer = await call("GET", `/v1/public/trips/${tripId}/offer`);
   const tickets = ((offer.json.offer as Json)?.tickets ?? []) as { code: string }[];
+  // One add-on when the trip offers any, so the order carries every kind of line.
+  const addOns = ((offer.json.offer as Json)?.addOns ?? []) as { code: string }[];
   const quoted = await call("POST", "/v1/public/quotes", {
     headers: { "idempotency-key": `shim-q-${randomUUID()}` },
     body: {
@@ -105,7 +107,8 @@ async function open(tripId: string, party: number, charter: boolean): Promise<Ch
       party: charter
         ? { kind: "charter", guests: party }
         : { kind: "tickets", tickets: [{ code: tickets[0]?.code ?? "adult", quantity: party }] },
-      addOns: [],
+      addOns: addOns[0] ? [{ code: addOns[0].code, quantity: 1 }] : [],
+      ...(process.env.PROMOTION_CODE ? { promotionCode: process.env.PROMOTION_CODE } : {}),
     },
   });
   if (quoted.status !== 201)
@@ -217,6 +220,21 @@ async function step(c: Checkout, label: string, action: () => Promise<string>) {
   log(`  - after:  ${after}`);
 }
 
+/** The order's lines as kind:amount, and its total against the payment's amount. */
+async function orderSummary(c: Checkout): Promise<string> {
+  const lines = await sql<{ kind: string; amount: number; tax_inclusive: boolean | null }[]>`
+    select l.kind, l.amount, l.tax_inclusive from public.order_lines l
+      join public.orders o on o.id = l.order_id
+     where o.checkout_session_id = ${c.sessionId}
+     order by l.line_no`;
+  const [totals] = await sql<{ total: number; included: number; charged: number }[]>`
+    select o.total_amount as total, o.included_tax_amount as included, p.amount as charged
+      from public.orders o join public.payments p on p.order_id = o.id
+     where o.checkout_session_id = ${c.sessionId}`;
+  const shown = lines.map((l) => `${l.kind}${l.tax_inclusive ? " (included)" : ""} ${l.amount}`);
+  return `order lines [${shown.join(", ")}]; total ${totals?.total}, included tax ${totals?.included}, charged ${totals?.charged}`;
+}
+
 async function backdate(c: Checkout): Promise<void> {
   await sql`
     with s as (update public.checkout_sessions set expires_at = now() - interval '1 second'
@@ -253,6 +271,7 @@ async function main(): Promise<void> {
   const sharedTrip = await findTrip("shared_seat", 2, used);
   used.push(sharedTrip);
   const one = await open(sharedTrip, 2, false);
+  log(`- opened: ${await orderSummary(one)}`);
   let heldEvent = "";
   await step(
     one,
@@ -335,6 +354,7 @@ async function main(): Promise<void> {
   const charterTrip = await findTrip("private_charter", 2, used);
   used.push(charterTrip);
   const three = await open(charterTrip, 2, true);
+  log(`- opened: ${await orderSummary(three)}`);
   let charterEvent = "";
   await step(three, "the guest pays; the event is held back", async () => {
     const r = await control(three, "succeed", { deliver: false });

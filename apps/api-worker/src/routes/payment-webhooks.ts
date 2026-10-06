@@ -8,6 +8,8 @@ import { providerFor } from "../payments.ts";
 import { errorBody } from "./responses.ts";
 
 const webhookPath = "/v1/webhooks/payments/{provider}";
+/** Outcomes an operator must see: refunded payments, and events that match no payment or the wrong one. */
+const needsAttention = new Set(["refund_required", "payment_mismatch", "unmatched_payment"]);
 /** Provider events are small; Stripe's largest are well under this. */
 export const MAX_WEBHOOK_BYTES = 64 * 1024;
 
@@ -95,7 +97,12 @@ export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: App
       });
       return c.json({ received: true as const, duplicate: true, outcome: "payload_mismatch" }, 200);
     }
-    log.info("payment_webhook", {
+    // Money that moved without a booking, or an event that matches no payment
+    // or does not match its payment, needs a person; everything else is routine.
+    const attention =
+      needsAttention.has(handled.outcome) ||
+      (handled.refund !== null && handled.refund.kind !== "succeeded");
+    (attention ? log.error : log.info)("payment_webhook", {
       "event.name": "payment_webhook",
       "tidegrid.tenant_id": handled.tenantId,
       "tidegrid.payment_event.outcome": handled.outcome,
