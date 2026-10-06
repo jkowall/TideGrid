@@ -18,13 +18,18 @@ export interface StatusBadgeProps {
   tone: StatusTone;
   /** The label is the status. Color and icon only reinforce it. */
   children: ReactNode;
+  /**
+   * A domain icon in place of the tone's own, for a set of states that need
+   * distinct shapes beyond the tones, such as trip sales states.
+   */
+  icon?: IconName;
   className?: string;
 }
 
-export function StatusBadge({ tone, children, className }: StatusBadgeProps) {
+export function StatusBadge({ tone, children, icon, className }: StatusBadgeProps) {
   return (
     <span className={cx("tg-status", `tg-status--${tone}`, className)}>
-      <Icon name={statusIcons[tone]} />
+      <Icon name={icon ?? statusIcons[tone]} />
       <span>{children}</span>
     </span>
   );

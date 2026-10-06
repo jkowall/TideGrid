@@ -11,6 +11,8 @@
  * - Standalone links take the `tap-target` class; buttons are 44 px tall.
  * - Wrap the operator console in `.tg-dark`; guest surfaces stay light and
  *   take the tenant brand on <html> through `applyBrandTheme`.
+ * - A final action, such as canceling, is confirmed in a Dialog whose one
+ *   action is a `danger` button.
  */
 export {
   Button,
@@ -20,6 +22,8 @@ export {
   type ButtonVariant,
 } from "./Button.tsx";
 export { cx } from "./cx.ts";
+export { Dialog, type DialogProps } from "./Dialog.tsx";
+export { ErrorBoundary, type ErrorBoundaryProps } from "./ErrorBoundary.tsx";
 export {
   EmptyState,
   type EmptyStateProps,
@@ -35,4 +39,5 @@ export {
   VisuallyHidden,
 } from "./Feedback.tsx";
 export { Icon, type IconName, type IconProps, iconNames } from "./Icon.tsx";
+export { SelectField, type SelectFieldProps, type SelectOption } from "./SelectField.tsx";
 export { TextField, type TextFieldProps } from "./TextField.tsx";

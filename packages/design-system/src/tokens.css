@@ -109,6 +109,10 @@
   --action-bg: var(--brand-primary);
   --action-bg-hover: color-mix(in srgb, var(--brand-primary) 84%, #000000);
   --action-ink: var(--brand-primary-ink);
+  /* Final, destructive actions. Never a brand color. White on it is 6.58:1. */
+  --action-danger-bg: var(--tg-status-blocked);
+  --action-danger-bg-hover: #8f1c13;
+  --action-danger-ink: #ffffff;
   --focus-color: var(--tg-status-info); /* 6.00:1 on Foam */
   --status-ready: var(--tg-status-ready);
   --status-warning: var(--tg-status-warning);
@@ -145,6 +149,10 @@
   --action-bg: var(--tg-tide-lime);
   --action-bg-hover: #b9e03e;
   --action-ink: var(--tg-deep-forest);
+  /* Deep Forest on the light blocked red is 5.98:1. */
+  --action-danger-bg: var(--tg-status-blocked-on-dark);
+  --action-danger-bg-hover: #ff958d;
+  --action-danger-ink: var(--tg-deep-forest);
   --focus-color: var(--tg-tide-lime); /* 9.38:1 on Harbor */
   --status-ready: var(--tg-status-ready-on-dark);
   --status-warning: var(--tg-status-warning-on-dark);

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { MeResponse } from "@tidegrid/contracts";
+import type { Membership, MeResponse, StaffTrip } from "@tidegrid/contracts";
+import { ErrorBoundary } from "@tidegrid/design-system/components";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CrashedConsole } from "./Gate.tsx";
 
 const me = (authMethod: "magic_link" | "access" = "magic_link"): MeResponse => ({
   principal: {
@@ -32,6 +34,47 @@ const json = (body: unknown, status = 200) =>
 const status = (code: number) => json({ error: { code: "x", message: "x", requestId: "r" } }, code);
 
 type Answer = () => Response | Promise<Response>;
+
+/** An operator's catalog, as far as the calendar reads it: its location's zone. */
+const catalog = (timeZone: string) =>
+  json({
+    locations: [
+      {
+        id: "0f2c7a10-1b2c-4d3e-8f40-5a6b7c8d9e01",
+        name: "Main dock",
+        timeZone,
+        meetingPoint: "Main dock",
+        status: "active",
+      },
+    ],
+    boats: [],
+    products: [],
+    schedules: [],
+  });
+
+/** A future, published trip on `saturday`, in `timeZone`. */
+const saturdayTrip = (saturday: string, timeZone = "America/New_York"): StaffTrip => ({
+  tripId: "bc5f3492-d330-487d-8078-7221db331801",
+  timeZone,
+  localDate: saturday,
+  localStartTime: "18:00",
+  startsAt: "2099-01-01T23:00:00.000Z",
+  endsAt: "2099-01-02T00:30:00.000Z",
+  startsAtLocal: `${saturday}T18:00:00-05:00`,
+  endsAtLocal: `${saturday}T19:30:00-05:00`,
+  durationMinutes: 90,
+  productId: "4f51db31-f9aa-492a-ad2b-05d7c1c3cb2a",
+  productName: "Sunset Harbor Cruise",
+  productKind: "shared_seat",
+  boatId: "9a0e7c55-3b1d-4f2a-8c6e-1d2f3a4b5c01",
+  boatName: "Sea Lark",
+  scheduleId: null,
+  salesState: "published",
+  salesStateChangedAt: "2026-09-30T12:00:00.000Z",
+  salesCloseAt: "2099-01-01T22:00:00.000Z",
+  blackedOut: false,
+  capacity: { kind: "seats", total: 20, remaining: 20 },
+});
 
 /** A fetch that answers each "METHOD /path" from its own queue, in order. */
 function api(routes: Record<string, Answer[]>) {
@@ -75,6 +118,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -260,6 +304,119 @@ describe("sign out", () => {
     const rail = container.querySelector<HTMLElement>(".console-rail__user") as HTMLElement;
     const link = within(rail).getByRole("link", { name: "Sign out of Cloudflare Access" });
     expect(link.getAttribute("href")).toBe("/cdn-cgi/access/logout");
+  });
+});
+
+describe("calendar roles come from /v1/me", () => {
+  it("shows no trip controls where the person is finance, and shows them where they own", async () => {
+    const base = me();
+    const [harbor, reef] = base.memberships as [Membership, Membership];
+    const mixed: MeResponse = {
+      ...base,
+      memberships: [
+        { ...harbor, role: "finance" },
+        { ...reef, role: "owner" },
+      ],
+    };
+    const tripsFor: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost:5174");
+        if (url.pathname === "/api/v1/me") return json(mixed);
+        if (/^\/api\/v1\/staff\/tenants\/[^/]+\/catalog$/.test(url.pathname)) {
+          return catalog("America/New_York");
+        }
+        const match = /^\/api\/v1\/staff\/tenants\/([^/]+)\/trips$/.exec(url.pathname);
+        if (!match) throw new Error(`unexpected request ${url.pathname}`);
+        tripsFor.push(match[1] as string);
+        // A future, published trip on the Saturday of whichever week is asked for.
+        return json({ trips: [saturdayTrip(url.searchParams.get("to") as string)] });
+      }),
+    );
+    const App = await loadApp();
+    window.history.replaceState(null, "", "/calendar");
+    render(<App />);
+    await heading("Calendar");
+    await screen.findByRole("heading", { level: 4, name: /Sunset Harbor Cruise/ });
+    expect(tripsFor).toEqual([harbor.tenantId]);
+    expect(screen.queryByRole("button", { name: /^Close sales/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Cancel trip/ })).toBeNull();
+    expect(screen.getByText(/View only\. Your role here, finance/)).toBeTruthy();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Operator" }), {
+      target: { value: reef.tenantId },
+    });
+    expect(await screen.findByRole("button", { name: /^Close sales/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Cancel trip/ })).toBeTruthy();
+    expect(screen.queryByText(/View only/)).toBeNull();
+    expect(tripsFor).toEqual([harbor.tenantId, reef.tenantId]);
+  });
+});
+
+describe("switching operators", () => {
+  it("starts the calendar afresh, so one marina's day never carries over to another", async () => {
+    // Thursday 12:00 AM in New York is still Wednesday evening in Honolulu.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-05T05:00:00Z"));
+    const base = me();
+    const [harbor, reef] = base.memberships as [Membership, Membership];
+    const zones: Record<string, string> = {
+      [harbor.tenantId]: "America/New_York",
+      [reef.tenantId]: "Pacific/Honolulu",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input), "http://localhost:5174");
+        if (url.pathname === "/api/v1/me") return json(base);
+        const match = /^\/api\/v1\/staff\/tenants\/([^/]+)\/(catalog|trips)$/.exec(url.pathname);
+        if (!match) throw new Error(`unexpected request ${url.pathname}`);
+        const tenantId = match[1] as string;
+        // The Reef's catalog does not answer, so its zone can only come from its trips.
+        if (match[2] === "catalog") {
+          return tenantId === harbor.tenantId ? catalog("America/New_York") : status(500);
+        }
+        const saturday = url.searchParams.get("to") as string;
+        return json({ trips: [saturdayTrip(saturday, zones[tenantId])] });
+      }),
+    );
+    const App = await loadApp();
+    window.history.replaceState(null, "", "/calendar");
+    render(<App />);
+    await screen.findByRole("heading", { level: 4, name: /Sunset Harbor Cruise/ });
+    const dayTitle = (name: RegExp) =>
+      screen.getByRole("region", { name }).querySelector("h3")?.textContent;
+    expect(dayTitle(/^Thursday, November 5/)).toBe("Thursday, November 5 Today");
+
+    const picker = screen.getByRole("combobox", { name: "Operator" });
+    picker.focus();
+    fireEvent.change(picker, { target: { value: reef.tenantId } });
+    await waitFor(() =>
+      expect(dayTitle(/^Wednesday, November 4/)).toBe("Wednesday, November 4 Today"),
+    );
+    expect(dayTitle(/^Thursday, November 5/)).toBe("Thursday, November 5");
+    // The person is still choosing an operator, so focus stays with the picker.
+    expect(document.activeElement).toBe(picker);
+  });
+});
+
+describe("a page that fails to render", () => {
+  it("shows the designed failure screen, not a blank page", async () => {
+    // React reports the caught error on the console; keep the test output clean.
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    function Broken(): never {
+      throw new RangeError("Invalid time zone specified: Mars/Olympus_Mons");
+    }
+    render(
+      <ErrorBoundary fallback={<CrashedConsole />}>
+        <Broken />
+      </ErrorBoundary>,
+    );
+    await focusLandsOn("Something went wrong on this page");
+    expect(screen.getByText("Try again. If it keeps happening, reload the console.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    quiet.mockRestore();
   });
 });
 

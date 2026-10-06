@@ -71,6 +71,62 @@ This log records each dated verification pass over the throwaway guest workflow 
   - The seed creates no holds, because a confirmed hold without a booking would be a phantom sale.
   - Not covered: Workers with Hyperdrive pooling, the sweep at scale, clock skew at the cutoff between the listing and acquisition, a blackout racing an acquisition, and a compute restart mid-transaction.
 
+### G2.11a and G2.12a trips slice verification, October 5, 2026
+
+- Built on branch `build/g2.11a-trips-slice` from `9349807`, which is G2.14a rebased onto main after G2.4 merged. The owner pulled the first, thinnest pieces of G2.11 and G2.12 forward on 2026-10-05 so the demo can be tested end to end; the step is recorded in the [demo build plan](v2/12-demo-build-plan.md#goal-sequence). The slice consumes the G2.4 catalog API unchanged. Contracts, domain packages, the database, the API, migrations, and CI are untouched.
+- Guest, on each branded site:
+  - upcoming trips from `GET /v1/public/trips`, four weeks at a time from the guest's today, with Previous and Next, and a party size from 1 to 12;
+  - trips grouped by the marina's local date, with "Today" and "Tomorrow" on the marina's calendar;
+  - each trip shows its stored local start time, its duration, the product, shared seats left or the whole boat, the meeting point, and "Book by" from the booking cutoff on the trip zone's clock;
+  - the page says whose clock the times use, and names a clock change in the dates shown;
+  - the address keeps the dates and party, so a reload shows the same list;
+  - loading, updating, empty, error with retry, and contract-failure states;
+  - no Book button. The screen's one primary action is calling or emailing the operator, and "Try again" takes that role while trips fail to load.
+- Console calendar, for the selected operator:
+  - a Sunday to Saturday week from `GET /api/v1/staff/tenants/{tenantId}/trips`, with Previous, This week, and Next, kept in the address;
+  - each trip shows its local time, product, boat, a sales-state badge with icon and label, a "Blacked out" badge, capacity, and the booking cutoff;
+  - owners and booking staff publish, close, reopen, cancel, and complete trips through a dialog that requires a reason. Canceling confirms in a danger dialog. Completing is offered only after departure;
+  - each change sends a new Idempotency-Key. Sending the same change again after a failure reuses its key, so the API applies it once;
+  - finance sees the same week with no controls and a view-only note. The API also refused a hand-made finance request with 403 and left the trip published;
+  - `trip_state_conflict` and `trip_not_departed` read in plain words, with no codes;
+  - focus follows the G2.14a rules. After a change it lands on the trip's heading, and after a dismissal on the trip's own button.
+- Design system: date and time formatting in a trip's zone, a select field, a modal dialog on the native `<dialog>`, a danger button, a badge icon override, and ten icons. Every new color pair has a contrast test.
+- Time zones. Start times are the API's stored wall clock, never recomputed in the browser. The cutoff is converted with the trip's zone and names the zone when the clock changes between the cutoff and the departure. On both surfaces the Nov 1, 2026 charter at 8:00 AM EST shows its cutoff as Sat, Oct 31, 9:00 AM EDT. Unit tests run with the viewer in Tokyo and the marina in New York.
+- Automated checks at `cacce8b`: `pnpm check` was green. It ran 411 unit tests across ten packages (28 in the Workers runtime), Biome on 184 files, typecheck, three dry-run deploys, doc links, and 29 prototype tests. New tests covered grouping by local date, party changes, paging, empty, error, retry focus, contract failure, and the address on the guest page. On the console they covered role gating (finance gets no actions; roles come from `/v1/me`), the reason requirement, the Idempotency-Key header and its reuse on retry, both 409 codes, the danger dialog, Escape, focus after the dialog, and week navigation across the clock change. The counts after the review fixes are below.
+- Browser walkthrough in the built-in browser at 375 and 1280, on a throwaway Neon branch with migrations and the seed, against the local API. The production builds were served with their `_headers` policies. Two local changes were made to the served policies: the guest's `connect-src` gained the local API, and both gained a `report-uri`.
+  - Both brands' lists render in their own colors and fonts. Honolulu times stay Honolulu's on a browser in New York.
+  - The Oct 31 to Nov 1 change reads correctly on both sides in the guest list and in the console's Oct 25 to 31 and Nov 1 to 7 weeks.
+  - The console works as owner, booking staff (marked a departed trip completed), finance, and the Reef owner.
+  - End to end: the Tuesday, Oct 6 cruise was closed in the console and was gone from the Harbor guest list on reload; reopened, it was back.
+  - Cancel confirmed in its danger dialog; Escape and "Keep trip" changed nothing and returned focus to the button.
+  - A real `trip_state_conflict`, from two console tabs, read in plain words.
+  - Clean production tabs logged nothing to the console. No content security policy reports arrived; a deliberate control violation proved the report path. No page overflowed horizontally at 375.
+  - The blacked-out view used one synthetic boat blackout added on the throwaway branch through the catalog's own setup service. The seed creates its blackouts before generating trips, so it has no blacked-out trip.
+- Fixed during the browser pass: at 375 the guest dates wrapped to three lines between Previous and Next with a wide body font; a conflict dialog kept showing the old state; after a dialog closed, focus could return to whatever had it before, which in Safari need not be the button that opened it; read-only rows kept an empty actions row.
+- Reviews: the independent review and the UI review of `cacce8b` both returned "accept with fixes", with nothing blocking. The fixes landed in `e74abfe`, `bdee840`, `04ec6c4`, and `31cb7b6`:
+  - the change dialog no longer closes while a change is in flight. It sets `closedby` to `none` while busy, and on an engine without `closedby` it reopens after a cancel it may not prevent. Each trip and change gets its own dialog, so no reason or key carries over;
+  - an error boundary on each app shows a designed failure screen. Dates in the address are kept inside the API's range (a year ahead on the guest page, two years either way in the console), a refused range (400) has its own message, and a trip with an unknown state or a zone the browser cannot show reads as a failed load, not a crash;
+  - dialog copy follows the trip as it is: blacked out, past its cutoff, or departed. After the cutoff and before departure, only Cancel is offered;
+  - the console opens on the marina's week, read from the catalog's location zone, and restarts on a switch of operator, so one marina's "today" never carries over. A replayed change answer reloads the week. A suspended operator and a sign-out during a change read in plain words, with "Sign in again";
+  - a departure in the hour clocks go back names its zone on both surfaces ("1:30 AM EST"). Times join with a no-break space;
+  - the guest list repeats its date paging after the list and never shows an old list under new dates. Empty states name the year as the dates above do and offer "Show from today" or a smaller party. Retry, the paging after the list, and empty-state actions all leave focus on the dates;
+  - the console skeleton lays out again and reads on Harbor. Day boxes stay at least 44 px and scroll inside the strip below about 352 px. Week buttons become chevrons below 360 px, and the console nav drops its icons below 26rem. The read-only note keeps to the measure. Departed and final trips show their size, not seats left. "This week" looks disabled when it is. The Today pill has a contrast test (6.6:1 on Harbor);
+  - outside the slice: the console's `style-src` no longer allows `'unsafe-inline'`, as recorded below.
+- Automated checks after the fixes: `pnpm check` is green. It ran 452 unit tests across ten packages (28 in the Workers runtime): 41 guest, 64 console, and 140 design system. Biome checked 185 files, and typecheck, three dry-run deploys, doc links across 83 Markdown files, and 29 prototype tests passed. New tests cover each review finding, including a jsdom `showModal` stand-in that sends a second Escape (a cancel the page may not prevent) while a change is in flight, the key reset after a 422, a new key after the reason changes, 401, 403, 400, and `tenant_suspended` on a change, a replayed answer, several zones in one week, the repeated hour, and an operator switch that must not carry the old zone over. That last test fails without the fix.
+- Browser recheck of the fixes, on a new throwaway Neon branch (migrated, seeded with local hostnames, one synthetic blackout), against production builds served with their policies and a `report-uri`, at 320, 360, 375, 390, 428, and 1280:
+  - Escape twice while a change was in flight left the dialog open with `closedby` set to `none` (Chrome 152). The change then landed, the dialog closed, and focus went to the trip. The trip was then reopened;
+  - the blacked-out trip's dialog showed both badges and the blackout sentence. Escape closed it and returned focus to its button;
+  - booking staff canceled a trip through the danger dialog. The guest list no longer showed it, nor the blacked-out trip;
+  - with the API stopped, the console showed "Trips didn't load"; after a restart, "Try again" loaded the week and focused its heading. A simulated network failure on the guest page did the same for the dates;
+  - the skeleton, the bottom paging (focus returns to the dates at the top), the horizon (`?from=9999-12-31` became the last page, with Next unavailable), and both brands at 320 and 1280 read as intended. No page scrolled sideways at any width checked;
+  - found and fixed in this pass: at 320 the day strip widened the whole calendar column and the page scrolled sideways; empty-state and refused-range actions dropped focus to the page; at 320 the Reef Call button broke its phone number after "555-"; a wrapped button label touched the button's edges.
+- Console content security policy: `style-src` is now `'self'`, as on the guest site. React sets styles through the CSSOM, which the policy allows, and no console or design-system code writes a style attribute or element. Every console route ran under the new policy: sign-in, the sign-in link, finish signing in, Overview, Calendar (week, dialogs idle and busy, skeleton, error and retry, finance, cancel), Bookings, and an unknown page. No violation was reported. A deliberate inline style on each server was blocked and reported, so the report path worked. A static test keeps `'unsafe-inline'` out of the policy.
+- Not done: screen reader and physical device tests; Cloudflare Access sign-in (the magic link was used); deployed CORS for tenant hostnames, which G2.14b owns. `trip_not_departed` and the crash screens are covered by unit tests only: the console offers Complete only after departure, and no address reaches a crash now. The second-Escape path on an engine without `closedby` is covered by the jsdom test only. Out of scope, as agreed: the local sign-in throttle answers 202 with no local link, and the expected 401 from the first `/v1/me` probe shows in the browser console.
+- Recheck: the original code reviewer verified `cacce8b..b11a592` and accepted it. All eleven code findings are fixed. The dialog fix was confirmed in Chrome 151 on a fresh production build, both with `closedby` and with it stripped to imitate an engine that lacks it. Follow-ups recorded for G2.12, not fixed here:
+  - the calendar loads the catalog before the week, so a catalog request that hangs keeps the skeleton up for the 15 s timeout;
+  - the marina's "today" follows the alphabetically first active location, which matters only for an operator with locations in two zones;
+  - if someone else changes a trip between a lost answer and its replay, the change note can disagree with the reloaded badge.
+
 ### G2.5 Pricing, add-ons, fees, and policies verification, October 5, 2026
 
 - Built on branch `build/g2.5-pricing-and-policies` from `a541eab`:

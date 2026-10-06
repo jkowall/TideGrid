@@ -74,6 +74,12 @@ describe("token contrast, light guest surfaces", () => {
   it("never lets Tide Lime pass as text on a light surface", () => {
     expect(contrastRatio(hex(root, "--tg-tide-lime"), hex(root, "--tg-foam"))).toBeLessThan(3);
   });
+
+  it("keeps the danger action readable in every state and visible on cards", () => {
+    expectContrast(root, "--action-danger-ink", "--action-danger-bg", 4.5);
+    expectContrast(root, "--action-danger-ink", "--action-danger-bg-hover", 4.5);
+    expectContrast(root, "--action-danger-bg", "--surface-raised", 3);
+  });
 });
 
 describe("token contrast, dark console", () => {
@@ -98,6 +104,12 @@ describe("token contrast, dark console", () => {
     expectContrast(dark, "--action-ink", "--action-bg", 4.5);
     expectContrast(dark, "--action-ink", "--action-bg-hover", 4.5);
     expectContrast(dark, "--action-bg", "--surface-page", 3);
+  });
+
+  it("keeps the danger action readable in every state and visible in a dialog", () => {
+    expectContrast(dark, "--action-danger-ink", "--action-danger-bg", 4.5);
+    expectContrast(dark, "--action-danger-ink", "--action-danger-bg-hover", 4.5);
+    expectContrast(dark, "--action-danger-bg", "--surface-raised", 3);
   });
 
   it("uses the light-on-dark status variants", () => {

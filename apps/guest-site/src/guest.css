@@ -249,6 +249,287 @@
   font-size: var(--text-lg);
 }
 
+/* Upcoming trips -------------------------------------------------------------- */
+
+.trips {
+  display: grid;
+  gap: var(--space-5);
+}
+.trips__head {
+  display: grid;
+  gap: var(--space-2);
+}
+.trips__head h2 {
+  margin: 0;
+  font-size: var(--text-2xl);
+}
+/* A focus target after "Try again", not a control. */
+.trips__head h2:focus {
+  outline: none;
+}
+.trips__notes {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.trips__notes li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: var(--measure);
+}
+.trips__notes .tg-icon {
+  margin-top: 0.15em;
+}
+/* "Email instead" lines its icon up with the call button's when they stack. */
+.trips__reserve .tg-notice__actions .tg-button--ghost {
+  padding-inline: var(--space-5);
+}
+/* A phone number reads as one unit: at 320 px it broke after "555-". */
+.guest-phone {
+  white-space: nowrap;
+}
+@media (min-width: 60rem) {
+  /* Text on the left, the ways to reach the operator on the right. */
+  .trips__reserve > div {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title actions"
+      "body actions";
+    column-gap: var(--space-6);
+    align-items: center;
+  }
+  .trips__reserve .tg-notice__title {
+    grid-area: title;
+  }
+  .trips__reserve .tg-notice__body {
+    grid-area: body;
+  }
+  .trips__reserve .tg-notice__actions {
+    grid-area: actions;
+    margin-top: 0;
+  }
+}
+
+.trips__controls {
+  display: grid;
+  gap: var(--space-4);
+  padding-block: var(--space-4);
+  border-block: 1px solid var(--border-subtle);
+}
+@media (min-width: 48rem) {
+  .trips__controls {
+    grid-template-columns: 13rem minmax(0, 1fr);
+    align-items: end;
+  }
+}
+/* Phone: the dates on their own line, then Previous and Next side by side.
+   Wider: Previous, the dates, Next. */
+.trips__range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "label label"
+    "previous next";
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.trips__range > :first-child {
+  grid-area: previous;
+}
+.trips__range > :last-child {
+  grid-area: next;
+}
+@media (min-width: 48rem) {
+  .trips__range {
+    justify-self: end;
+    grid-template-columns: auto minmax(12rem, auto) auto;
+    grid-template-areas: "previous label next";
+    gap: var(--space-3);
+  }
+}
+.trips__range-label {
+  grid-area: label;
+  margin: 0;
+  text-align: center;
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+  text-wrap: balance;
+  scroll-margin-top: var(--space-8);
+}
+/* A focus target after paging from the foot of the list or "Try again", not a control. */
+.trips__range-label:focus {
+  outline: none;
+}
+/* The same paging after the list, so a long list need not be scrolled back. */
+.trips__range--bottom {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.trips__updating {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.trips__list {
+  display: grid;
+  gap: var(--space-8);
+  transition: opacity var(--duration-fast) ease;
+}
+/* The list for the previous party size, while the new one loads. */
+.trips__list[aria-busy="true"] {
+  opacity: 0.55;
+}
+.trips-day {
+  display: grid;
+  gap: var(--space-3);
+}
+/* The day stays in view while its trips scroll past. */
+.trips-day__title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-page);
+  font-size: var(--text-lg);
+}
+.trips-day__relative {
+  display: inline-block;
+  margin-right: var(--space-1);
+  padding: 0.125rem var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--brand-primary);
+  color: var(--brand-primary-ink);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  line-height: var(--leading-snug);
+  text-transform: uppercase;
+  vertical-align: 0.15em;
+}
+.trips-day__skeleton-title {
+  margin-block: var(--space-2);
+}
+.trips-day__list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Phone: time, then the trip, then its facts. Tablet: time in a column.
+   Desktop: time, trip, and facts side by side. */
+.trip-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "when"
+    "main"
+    "facts";
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+@media (min-width: 40rem) {
+  .trip-card {
+    grid-template-columns: 7rem minmax(0, 1fr);
+    grid-template-areas:
+      "when main"
+      "when facts";
+    column-gap: var(--space-5);
+    padding: var(--space-5);
+  }
+}
+@media (min-width: 60rem) {
+  .trip-card {
+    grid-template-columns: 7.5rem minmax(0, 1fr) minmax(0, 17.5rem);
+    grid-template-areas: "when main facts";
+  }
+}
+.trip-card__when {
+  grid-area: when;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+}
+@media (min-width: 40rem) {
+  .trip-card__when {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+}
+.trip-card__time {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--leading-tight);
+  color: var(--brand-primary);
+  white-space: nowrap;
+}
+.trip-card__duration,
+.trip-card__zone {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.trip-card__main {
+  grid-area: main;
+  min-width: 0;
+}
+.trip-card__title {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-lg);
+}
+.trip-card__summary {
+  margin: 0;
+  color: var(--text-muted);
+}
+.trip-card__facts {
+  grid-area: facts;
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+.trip-card__facts li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.trip-card__facts .tg-icon {
+  margin-top: 0.1em;
+  color: var(--text-muted);
+}
+.trip-card__facts span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.trips__list--skeleton .trip-card {
+  box-shadow: none;
+}
+
 /* Footer ------------------------------------------------------------------ */
 
 .guest-footer {
