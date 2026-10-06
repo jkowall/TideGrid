@@ -1,6 +1,7 @@
 import { Button, ButtonLink, Notice } from "@tidegrid/design-system/components";
 import type { ReactNode } from "react";
 import type { ReadFailure } from "../http.ts";
+import { hereAddress } from "../navigation.tsx";
 
 /**
  * Why a booking view did not load, in plain words, with the one way forward:
@@ -88,8 +89,10 @@ export function ReadFailed({
   const retry = canRetry(reason) && onRetry !== undefined;
   let action: ReactNode = otherAction;
   if (reason === "signed_out") {
+    // This page again, from the start: the console asks the person to sign
+    // in here and, once they have, brings them back to it (G2.12c).
     action = (
-      <ButtonLink variant="primary" icon="arrow-left" href="/">
+      <ButtonLink variant="primary" icon="arrow-left" href={hereAddress()}>
         Sign in again
       </ButtonLink>
     );

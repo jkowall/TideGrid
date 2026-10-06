@@ -1,6 +1,6 @@
 import type { MeResponse } from "@tidegrid/contracts";
 import { useCallback, useEffect, useState } from "react";
-import { ConsoleShell } from "./ConsoleShell.tsx";
+import { ConsoleShell, routeOf } from "./ConsoleShell.tsx";
 import {
   Checking,
   ConfirmLink,
@@ -11,6 +11,7 @@ import {
   SignIn,
   SignOutControl,
 } from "./Gate.tsx";
+import { forgetSearches } from "./search/model.ts";
 
 /**
  * Operator console shell. It hosts the G2.2 sign-in flows unchanged: Cloudflare
@@ -29,6 +30,56 @@ type State =
   | { kind: "signed-out"; notice?: GateNotice }
   | { kind: "not-provisioned"; message: string; me?: MeResponse }
   | { kind: "failed"; reason: FailureReason };
+
+/**
+ * Where to return after signing in (G2.12c). A person who opens a booking,
+ * roster, or other page while signed out, or whose session ends on one, signs
+ * in and lands back on that page rather than the overview. The address holds
+ * dates and ids only (never a name or an email), lives in this browser for
+ * half an hour, and is used once. Cloudflare Access returns to the page by
+ * itself; this covers the email sign-in link, which opens at /login.
+ */
+const returnKey = "tidegrid.console.return";
+const returnTtlMs = 30 * 60_000;
+
+function returnable(address: string): boolean {
+  if (!address.startsWith("/") || address.startsWith("//")) return false;
+  const url = new URL(address, window.location.origin);
+  if (url.origin !== window.location.origin) return false;
+  const route = routeOf(url.pathname);
+  return route.kind !== "overview" && route.kind !== "not_found";
+}
+
+function rememberReturn(address: string): void {
+  if (!returnable(address)) return;
+  try {
+    window.localStorage.setItem(returnKey, JSON.stringify({ address, at: Date.now() }));
+  } catch {
+    // Blocked storage: the person lands on the overview, as before.
+  }
+}
+
+function forgetReturn(): void {
+  try {
+    window.localStorage.removeItem(returnKey);
+  } catch {
+    // Nothing stored.
+  }
+}
+
+/** The page to return to, once: fresh, same-origin, and a console page. */
+function takeReturn(): string | null {
+  try {
+    const raw = window.localStorage.getItem(returnKey);
+    window.localStorage.removeItem(returnKey);
+    const saved = JSON.parse(raw ?? "null") as { address?: unknown; at?: unknown } | null;
+    if (typeof saved?.address !== "string" || typeof saved.at !== "number") return null;
+    if (Date.now() - saved.at > returnTtlMs || saved.at > Date.now()) return null;
+    return returnable(saved.address) ? saved.address : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Read a sign-in token from the URL fragment once per page load and remove it
@@ -92,6 +143,12 @@ export function App() {
     void refresh(false);
   }, [refresh]);
 
+  // Found signed out on a page (not by signing out): come back to it.
+  const foundSignedOut = state.kind === "signed-out" && !state.notice;
+  useEffect(() => {
+    if (foundSignedOut) rememberReturn(`${window.location.pathname}${window.location.search}`);
+  }, [foundSignedOut]);
+
   const redeem = async (token: string) => {
     const res = await fetch("/api/v1/auth/sessions", {
       method: "POST",
@@ -105,10 +162,15 @@ export function App() {
         notice: { tone: "error", title: "That sign-in link is invalid, already used, or expired." },
       });
     }
+    const back = takeReturn();
+    if (back) window.history.replaceState(null, "", back);
     await refresh(true);
   };
 
   const signOut = async () => {
+    // Signing out on purpose leaves nothing behind for the next person.
+    forgetReturn();
+    forgetSearches();
     await fetch("/api/v1/auth/sessions/current", {
       method: "DELETE",
       credentials: "same-origin",
