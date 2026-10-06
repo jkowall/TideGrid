@@ -186,6 +186,21 @@ describe("focus after each transition", () => {
     }
   });
 
+  it("says the booking list comes later, and that the calendar shows booked seats now", async () => {
+    vi.stubGlobal("fetch", api({ "GET /api/v1/me": [() => json(me())] }));
+    const App = await loadApp();
+    const { container } = render(<App />);
+    await heading("Overview");
+    fireEvent.click(screen.getByRole("link", { name: "Bookings" }));
+    await focusLandsOn("Bookings");
+    expect(screen.getByRole("heading", { name: "The booking list isn't here yet" })).toBeTruthy();
+    expect(container.textContent).toContain(
+      "comes in a later build. Booked and held seats show on the calendar.",
+    );
+    // Guests can book now, so the page never says the build takes no bookings.
+    expect(container.textContent).not.toMatch(/does not take bookings|No bookings yet/);
+  });
+
   it("moves focus to the new page's heading when the click leaves focus behind", async () => {
     vi.stubGlobal("fetch", api({ "GET /api/v1/me": [() => json(me())] }));
     const App = await loadApp();
