@@ -102,6 +102,10 @@ export function ManagePage({
   const heading = useRef<HTMLHeadingElement>(null);
   const linkClick = useLinkClick();
   const alive = useRef(new AbortController());
+  // The page's latest read. One that finishes after a newer read started, or
+  // after the page moved on to a newer link, is dropped; so is one whose own
+  // signal was aborted, as development's double-run effects abort the first.
+  const latestRead = useRef(0);
 
   // The token stays in memory only: out of the address and this history entry now.
   useEffect(() => {
@@ -119,7 +123,7 @@ export function ManagePage({
       const token = readLinkToken();
       forgetLinkToken();
       if (!token) return;
-      reading.current = null;
+      latestRead.current += 1;
       setView({ kind: "landing", token, busy: false, trouble: null });
     };
     window.addEventListener("hashchange", onHash);
@@ -137,15 +141,11 @@ export function ManagePage({
     }
   }, [view.kind, focusOnArrival]);
 
-  // The session whose booking the page is reading. A read that finishes after
-  // the page moved on, to a newer link say, is dropped.
-  const reading = useRef<string | null>(null);
-
   const load = useCallback(async (session: StoredSession) => {
-    reading.current = session.token;
-    const result = await readBooking(session.token, alive.current.signal);
-    if (alive.current.signal.aborted || reading.current !== session.token) return;
-    reading.current = null;
+    const read = ++latestRead.current;
+    const signal = alive.current.signal;
+    const result = await readBooking(session.token, signal);
+    if (signal.aborted || read !== latestRead.current) return;
     if (result.kind === "ok") {
       setView({ kind: "booking", session, booking: result.value.booking });
       return;
