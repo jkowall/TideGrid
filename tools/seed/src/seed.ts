@@ -12,6 +12,7 @@
 import postgres from "postgres";
 import { seedBrands } from "./brands.ts";
 import { seedCatalog } from "./catalog.ts";
+import { seedPricing } from "./pricing.ts";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -93,6 +94,7 @@ try {
   });
 
   await seedCatalog(url, demoTenants);
+  await seedPricing(url, demoTenants);
 
   const [summary] = await sql<{ tenants: number; staff: number; memberships: number }[]>`
     select (select count(*)::int from public.tenants where id in ${sql(demoTenants.map((t) => t.id))}) as tenants,

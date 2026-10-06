@@ -228,11 +228,16 @@ export const PublishProductRequest = z.object({ reason: Reason });
 export const ProductResponse = z.object({ product: CatalogProduct });
 export type ProductResponse = z.infer<typeof ProductResponse>;
 
-/** Error codes a publish attempt can return, in the order they are checked. */
+/**
+ * Error codes a publish attempt can return, in the order they are checked.
+ * The last two (G2.5): a product needs a price list and a policy.
+ */
 export const ProductPublishProblem = z.enum([
   "product_archived",
   "product_location_inactive",
   "product_missing_eligible_boat",
   "product_party_exceeds_capacity",
+  "product_missing_price",
+  "product_missing_policy",
 ]);
 export type ProductPublishProblem = z.infer<typeof ProductPublishProblem>;

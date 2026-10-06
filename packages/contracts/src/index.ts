@@ -178,3 +178,4 @@ export type AuditEventListResponse = z.infer<typeof AuditEventListResponse>;
 
 export * from "./brand.ts";
 export * from "./catalog.ts";
+export * from "./pricing.ts";
