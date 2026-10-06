@@ -334,7 +334,7 @@ export function quoteRows(quote: Quote): LedgerRow[] {
 // Times -------------------------------------------------------------------------------
 
 /** U+00A0: keeps a time and its zone's name together, as the format module does. */
-const nbsp = " ";
+const nbsp = String.fromCharCode(0x00a0);
 
 /**
  * A deadline, such as a price's or a hold's expiry, on the trip zone's clock
@@ -488,6 +488,9 @@ export function quoteTrouble(failure: Failure, offer: TripOffer, limits: PartyLi
     return { party: "There aren't enough seats left for this party. Choose fewer guests." };
   }
   if (status !== 422) return { notice: serverNotice };
+  // The page always sends a fresh key with a new body, so a reused key is ours
+  // to fix, not the guest's. Its message is prose, not a problem list.
+  if (code === "idempotency_key_reused") return { notice: serverNotice };
   const trouble: Trouble = {};
   for (const problem of quoteProblems(message)) {
     const addOn = offer.addOns.find((a) => a.code === problem.subject);

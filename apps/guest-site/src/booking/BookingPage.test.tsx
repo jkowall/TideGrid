@@ -200,7 +200,8 @@ describe("choosing the party", () => {
     renderPage("?party=3");
     await heading("Who's coming");
     expect((screen.getByRole("spinbutton", { name: "Adult" }) as HTMLInputElement).value).toBe("3");
-    expect(window.location.search).toBe("?t.adult=3");
+    // The address follows the page in an effect, a moment after the render.
+    await waitFor(() => expect(window.location.search).toBe("?t.adult=3"));
   });
 
   it("keeps the party within the seats left, and says how many", async () => {
@@ -248,7 +249,7 @@ describe("choosing the party", () => {
     ).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Remove one Adult ticket" }));
     await waitFor(() => expect(drinks.value).toBe("2"));
-    expect(window.location.search).toBe("?t.adult=1&a.drinks=2");
+    await waitFor(() => expect(window.location.search).toBe("?t.adult=1&a.drinks=2"));
   });
 
   it("books a charter by guests aboard, within the boat and the product", async () => {
@@ -338,7 +339,7 @@ describe("the price", () => {
     expect(text(document.querySelector(".booking-price__expiry"))).toBe(
       "This price is good until 12:30 PM EDT, about 30 minutes from now. Seats are held for you once you continue to payment.",
     );
-    expect(window.location.search).toMatch(/&step=details&quote=0b7f3a52-/);
+    await waitFor(() => expect(window.location.search).toMatch(/&step=details&quote=0b7f3a52-/));
   });
 
   it("applies a promotion code as a new quote and shows the discount", async () => {
@@ -743,7 +744,7 @@ describe("paying and the outcome", () => {
       "Total paid": "$148.21",
     });
     expect(window.sessionStorage.getItem("tidegrid.checkout")).toBeNull();
-    expect(window.location.search).toMatch(/step=status$/);
+    await waitFor(() => expect(window.location.search).toMatch(/step=status$/));
   });
 
   it("shows a declined payment, then starts a new checkout from a new quote on Try again", async () => {
