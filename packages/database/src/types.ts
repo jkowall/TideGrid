@@ -724,7 +724,172 @@ interface CheckoutTables {
   fake_provider_refunds: FakeProviderRefundsTable;
 }
 
-export interface Database extends PricingTables, CheckoutTables {
+// Waiver evidence (G2.15). Triggers stamp every time and enforce the one-way
+// states; columns typed `never` for update are not granted to the runtime.
+
+export type WaiverTemplateScope = "operator" | "product";
+export type WaiverSignerRole = "participant" | "guardian";
+export type WaiverRequestState = "pending" | "signed" | "revoked" | "superseded";
+export type WaiverRevokedReason = "participant_removed" | "booking_canceled";
+export type WaiverTokenRevokedReason =
+  | "replaced"
+  | "signed"
+  | "participant_removed"
+  | "booking_canceled"
+  | "superseded";
+export type WaiverSessionRevokedReason =
+  | "participant_removed"
+  | "booking_canceled"
+  | "superseded"
+  | "recipient_changed";
+export type WaiverDeliveryKind = "initial" | "resend";
+export type GuardianRelationship = "parent" | "legal_guardian";
+
+export interface WaiverTemplatesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  scope: Fixed<WaiverTemplateScope>;
+  product_id: FixedDefault<string | null>;
+  name: Fixed<string>;
+  created_at: Stamped;
+  actor_type: ColumnType<"staff" | "system" | "support", never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+  reason: Fixed<string>;
+}
+
+export interface WaiverTemplateVersionsTable {
+  tenant_id: TenantColumn;
+  template_id: Fixed<string>;
+  version: Fixed<number>;
+  title: Fixed<string>;
+  body: Fixed<string>;
+  acknowledgments: Fixed<string[]>;
+  rendering_version: Fixed<number>;
+  adult_signer: FixedDefault<"participant">;
+  minor_signer: FixedDefault<"guardian">;
+  resign_policy: FixedDefault<"every_booking">;
+  /** Never earlier than the moment the version is written; the database moves it. */
+  effective_from: ColumnType<Date, Date | string, never>;
+  effective_until: ColumnType<Date | null, Date | string | null | undefined, never>;
+  /** Computed by the database from the canonical content. */
+  content_sha256: ColumnType<string, never, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<"staff" | "system" | "support", never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+  reason: Fixed<string>;
+}
+
+export interface WaiverRequestsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  participant_id: Fixed<string>;
+  template_id: Fixed<string>;
+  template_version: Fixed<number>;
+  content_sha256: Fixed<string>;
+  required_signer: Fixed<WaiverSignerRole>;
+  state: ColumnType<WaiverRequestState, "pending" | undefined, WaiverRequestState>;
+  revoked_reason: ColumnType<WaiverRevokedReason | null, never, WaiverRevokedReason>;
+  superseded_by: ColumnType<string | null, never, string>;
+  created_at: Stamped;
+  signed_at: Stamp;
+  revoked_at: Stamp;
+  superseded_at: Stamp;
+  updated_at: Stamped;
+}
+
+export interface WaiverAccessTokensTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  request_id: Fixed<string>;
+  purpose: Fixed<"sign">;
+  token_hash: Fixed<string>;
+  created_at: Stamped;
+  expires_at: ColumnType<Date, Date | string, never>;
+  /** Set to any instant to redeem; the database stamps its own clock. */
+  redeemed_at: ColumnType<Date | null, never, Date | string>;
+  revoked_at: ColumnType<Date | null, never, Date | string>;
+  revoked_reason: ColumnType<WaiverTokenRevokedReason | null, never, WaiverTokenRevokedReason>;
+}
+
+export interface WaiverDeliveriesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  request_id: Fixed<string>;
+  generation: Fixed<number>;
+  kind: Fixed<WaiverDeliveryKind>;
+  recipient_email: Fixed<string>;
+  token_id: Fixed<string>;
+  message_id: FixedDefault<string | null>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  api_request_id: ColumnType<string | null, never, never>;
+  reason: FixedDefault<string | null>;
+}
+
+export interface WaiverSigningSessionsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  token_id: Fixed<string>;
+  request_id: Fixed<string>;
+  booking_id: Fixed<string>;
+  participant_id: Fixed<string>;
+  purpose: Fixed<"sign">;
+  signer_role: Fixed<WaiverSignerRole>;
+  secret_hash: Fixed<string>;
+  created_at: Stamped;
+  expires_at: ColumnType<Date, Date | string, never>;
+  revoked_at: ColumnType<Date | null, never, Date | string>;
+  revoked_reason: ColumnType<WaiverSessionRevokedReason | null, never, WaiverSessionRevokedReason>;
+}
+
+export interface WaiverEvidenceTable {
+  id: ColumnType<string, string | undefined, never>;
+  tenant_id: TenantColumn;
+  request_id: Fixed<string>;
+  booking_id: Fixed<string>;
+  participant_id: Fixed<string>;
+  session_id: Fixed<string>;
+  template_id: Fixed<string>;
+  template_version: Fixed<number>;
+  content_sha256: Fixed<string>;
+  rendering_version: Fixed<number>;
+  participant_name: Fixed<string>;
+  participant_minor: Fixed<boolean>;
+  signer_role: Fixed<WaiverSignerRole>;
+  signer_name: Fixed<string>;
+  guardian_relationship: FixedDefault<GuardianRelationship | null>;
+  signature_method: Fixed<"typed_name">;
+  signature_text: Fixed<string>;
+  acknowledgments: Fixed<string[]>;
+  consent_version: Fixed<string>;
+  consent_text: Fixed<string>;
+  access_method: Fixed<"email_link">;
+  recipient_email: Fixed<string>;
+  match_method: Fixed<"signer_confirmed">;
+  /** Stamped by the database: the signing transaction's own clock. */
+  signed_at: Stamped;
+  source_ip: FixedDefault<string | null>;
+  user_agent: FixedDefault<string | null>;
+  document: Fixed<Uint8Array>;
+  document_sha256: Fixed<string>;
+}
+
+/** Tables added by the waiver migration (G2.15), merged into Database below. */
+interface WaiverTables {
+  waiver_templates: WaiverTemplatesTable;
+  waiver_template_versions: WaiverTemplateVersionsTable;
+  waiver_requests: WaiverRequestsTable;
+  waiver_access_tokens: WaiverAccessTokensTable;
+  waiver_deliveries: WaiverDeliveriesTable;
+  waiver_signing_sessions: WaiverSigningSessionsTable;
+  waiver_evidence: WaiverEvidenceTable;
+}
+
+export interface Database extends PricingTables, CheckoutTables, WaiverTables {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
   tenant_hostnames: TenantHostnamesTable;
