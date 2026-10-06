@@ -24,6 +24,8 @@ import {
   zoneCity,
 } from "@tidegrid/design-system/format";
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { bookingsHref } from "../bookings/model.ts";
+import { ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canChangeTrips, roleNames } from "../roles.ts";
 import { ActionDialog } from "./ActionDialog.tsx";
@@ -32,7 +34,7 @@ import {
   type ActionKind,
   actionCopy,
   actionsFor,
-  capacityText,
+  capacityParts,
   clampWeek,
   cutoffPassed,
   hasDeparted,
@@ -706,7 +708,7 @@ function TripRow({
           </li>
           <li>
             <Icon name="users" />
-            <span>{capacityText(trip, departed)}</span>
+            <Capacity trip={trip} departed={departed} />
           </li>
           <li>
             <Icon name="hourglass" />
@@ -752,5 +754,25 @@ function TripRow({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * Seats on the trip. The booked count links to the trip's bookings (G2.12b),
+ * named with the trip for anyone hearing a list of links. Every role can open
+ * the list; the API decides what each one sees there.
+ */
+function Capacity({ trip, departed }: { trip: StaffTrip; departed: boolean }) {
+  const { before, booked, after } = capacityParts(trip, departed);
+  if (!booked) return <span>{before}</span>;
+  return (
+    <span>
+      {before}
+      <ConsoleLink href={bookingsHref(trip.localDate, trip.tripId)} className="cal-trip__booked">
+        {booked}
+        <VisuallyHidden>: see the bookings for {tripLine(trip)}</VisuallyHidden>
+      </ConsoleLink>
+      {after}
+    </span>
   );
 }

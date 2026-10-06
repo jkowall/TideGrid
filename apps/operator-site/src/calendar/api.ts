@@ -1,45 +1,18 @@
 import type {
   CatalogResponse,
-  ErrorResponse,
   StaffTrip,
   StaffTripListResponse,
   TripResponse,
   TripSalesStateRequest,
 } from "@tidegrid/contracts";
 import { isKnownZone, isLocalDate, type LocalDate } from "@tidegrid/design-system/format";
+import { call, errorCode, type ReadFailure, tenantPath } from "../http.ts";
 import { type ActionFailure, failureFrom, isKnownSalesState } from "./model.ts";
 
 /**
- * The calendar's calls. Same-origin under /api, like every console call: the
- * console Worker forwards them to the API's ConsoleGateway. The API checks the
- * session, the membership, and the role on every call; the console's role
- * check only decides what to show.
+ * The calendar's calls, through the console's shared fetch (../http.ts):
+ * same-origin under /api, with a timeout.
  */
-
-const timeoutMs = 15_000;
-
-/** A fetch that gives up after `timeoutMs` or when `signal` aborts. Throws on network failure. */
-async function call(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
-  const controller = new AbortController();
-  const abort = () => controller.abort();
-  if (signal?.aborted) controller.abort();
-  signal?.addEventListener("abort", abort, { once: true });
-  const timer = setTimeout(abort, timeoutMs);
-  try {
-    return await fetch(path, { ...init, credentials: "same-origin", signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", abort);
-  }
-}
-
-async function errorCode(res: Response): Promise<string | undefined> {
-  const body = (await res.json().catch(() => null)) as Partial<ErrorResponse> | null;
-  const code = body?.error?.code;
-  return typeof code === "string" ? code : undefined;
-}
-
-const tenantPath = (tenantId: string) => `/api/v1/staff/tenants/${encodeURIComponent(tenantId)}`;
 
 /**
  * Whether a trip has what the calendar shows, in a form it can show: a known
@@ -70,22 +43,8 @@ export function isShowableTrip(value: unknown): value is StaffTrip {
   );
 }
 
-/**
- * Why a week did not load:
- * - signed_out, forbidden, suspended, not_found: what the API said about the person or operator;
- * - rejected: the API refused the dates (400);
- * - unreadable: trips the console cannot show, such as an unknown state or zone;
- * - unreachable: no answer; unavailable: any other failure.
- */
-export type WeekFailure =
-  | "signed_out"
-  | "forbidden"
-  | "suspended"
-  | "not_found"
-  | "rejected"
-  | "unreadable"
-  | "unreachable"
-  | "unavailable";
+/** Why a week did not load; see ReadFailure. `rejected`: the API refused the dates. */
+export type WeekFailure = ReadFailure;
 
 export type WeekResult =
   | { kind: "ok"; trips: StaffTrip[] }
