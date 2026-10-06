@@ -548,6 +548,9 @@ importers:
       '@tidegrid/domain-pricing':
         specifier: workspace:*
         version: link:../../packages/domain-pricing
+      '@tidegrid/domain-waivers':
+        specifier: workspace:*
+        version: link:../../packages/domain-waivers
       '@tidegrid/tenant-config':
         specifier: workspace:*
         version: link:../../packages/tenant-config
