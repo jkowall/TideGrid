@@ -1,6 +1,9 @@
-import { type ReactNode, type Ref, useEffect, useId, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from "react";
 import { cx } from "./cx.ts";
 import { Icon } from "./Icon.tsx";
+
+/** Where a new count came from: a button, or a keystroke in a count still being typed. */
+export type QuantityChange = "step" | "typing";
 
 export interface QuantityFieldProps {
   /** What is counted, as its visible label: "Adult", "Souvenir photo". */
@@ -17,7 +20,14 @@ export interface QuantityFieldProps {
    * by itself.
    */
   max: number;
-  onChange: (value: number) => void;
+  /**
+   * Each new count, and where it came from. A count being typed passes
+   * through others on its way ("12" passes 1), so a caller that adjusts
+   * something else to the count waits for a step or for `onCommit`.
+   */
+  onChange: (value: number, how: QuantityChange) => void;
+  /** The person left the field after typing in it: the count is final. */
+  onCommit?: (value: number) => void;
   /** The minus button's name, such as "Remove an adult". */
   decrementLabel: string;
   /** The plus button's name, such as "Add an adult". */
@@ -63,6 +73,7 @@ export function QuantityField({
   min = 0,
   max,
   onChange,
+  onCommit,
   decrementLabel,
   incrementLabel,
   describe,
@@ -83,6 +94,8 @@ export function QuantityField({
   // What the person is typing, which may be empty for a moment.
   const [draft, setDraft] = useState(String(value));
   const [spoken, setSpoken] = useState("");
+  // The person has typed since the field last settled; leaving it commits the count.
+  const typed = useRef(false);
 
   useEffect(() => {
     setDraft(String(value));
@@ -96,7 +109,7 @@ export function QuantityField({
     // One at a time from wherever the count is, even from a typed count past a limit.
     const next = by < 0 ? Math.max(min, value - 1) : Math.min(top, value + 1);
     if (next === value) return;
-    onChange(next);
+    onChange(next, "step");
     setSpoken(describe ? describe(next) : `${label}: ${next}`);
   };
 
@@ -141,19 +154,25 @@ export function QuantityField({
           aria-describedby={described || undefined}
           onChange={(event) => {
             const text = event.target.value;
+            typed.current = true;
             setDraft(text);
             if (!typedCount.test(text)) return;
             const next = Number(text);
-            if (next !== value) onChange(next);
+            if (next !== value) onChange(next, "typing");
           }}
           onBlur={() => {
+            const wasTyped = typed.current;
+            typed.current = false;
             // An emptied field means none. Anything typed stays as typed, in its plain form.
+            let count = value;
             if (!typedCount.test(draft)) {
-              if (value !== 0 && draft.trim() === "") onChange(0);
-              setDraft(draft.trim() === "" ? "0" : String(value));
-              return;
+              if (draft.trim() === "") {
+                count = 0;
+                if (value !== 0) onChange(0, "typing");
+              }
             }
-            setDraft(String(value));
+            setDraft(String(count));
+            if (wasTyped) onCommit?.(count);
           }}
         />
         <button

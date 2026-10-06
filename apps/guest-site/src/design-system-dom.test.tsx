@@ -104,4 +104,42 @@ describe("typing in a QuantityField", () => {
     fireEvent.blur(input());
     expect(input().value).toBe("5");
   });
+
+  it("says where each count came from, and commits a typed count when the person leaves", () => {
+    const log: string[] = [];
+    function Recorded() {
+      const [value, setValue] = useState(2);
+      return (
+        <QuantityField
+          label="Adult"
+          value={value}
+          max={6}
+          onChange={(next, how) => {
+            log.push(`${how} ${next}`);
+            setValue(next);
+          }}
+          onCommit={(count) => log.push(`commit ${count}`)}
+          decrementLabel="Remove an adult"
+          incrementLabel="Add an adult"
+        />
+      );
+    }
+    render(<Recorded />);
+    // "12" passes 1 on its way; neither keystroke is final.
+    fireEvent.change(input(), { target: { value: "1" } });
+    fireEvent.change(input(), { target: { value: "12" } });
+    expect(log).toEqual(["typing 1", "typing 12"]);
+    fireEvent.blur(input());
+    expect(log.at(-1)).toBe("commit 12");
+    fireEvent.click(screen.getByRole("button", { name: "Remove an adult" }));
+    expect(log.at(-1)).toBe("step 11");
+    // Leaving without typing commits nothing.
+    fireEvent.focus(input());
+    fireEvent.blur(input());
+    expect(log.at(-1)).toBe("step 11");
+    // An emptied field commits none.
+    fireEvent.change(input(), { target: { value: "" } });
+    fireEvent.blur(input());
+    expect(log.slice(-2)).toEqual(["typing 0", "commit 0"]);
+  });
 });

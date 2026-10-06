@@ -44,7 +44,7 @@ export {
 } from "./Feedback.tsx";
 export { Icon, type IconName, type IconProps, iconNames } from "./Icon.tsx";
 export { Ledger, type LedgerProps, type LedgerRow, type LedgerRowKind } from "./Ledger.tsx";
-export { QuantityField, type QuantityFieldProps } from "./QuantityField.tsx";
+export { type QuantityChange, QuantityField, type QuantityFieldProps } from "./QuantityField.tsx";
 export { SelectField, type SelectFieldProps, type SelectOption } from "./SelectField.tsx";
 export { Steps, type StepsProps } from "./Steps.tsx";
 export { TextField, type TextFieldProps } from "./TextField.tsx";
