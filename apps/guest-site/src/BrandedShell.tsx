@@ -7,6 +7,7 @@ import { formatPhone, type Tenant } from "./bootstrap.ts";
 import { useLinkClick } from "./navigation.tsx";
 import { useTitle } from "./States.tsx";
 import { UpcomingTrips } from "./UpcomingTrips.tsx";
+import { WaiverPage } from "./waiver/WaiverPage.tsx";
 
 /**
  * The branded guest frame. Every tenant value reaches the page as text, as an
@@ -24,11 +25,14 @@ type Page =
   | { kind: "home" }
   | { kind: "book"; tripId: string }
   | { kind: "legal"; title: string; placeholder: string }
+  // Waiver signing (G2.15): the email link's page.
+  | { kind: "waiver" }
   | { kind: "not-found" };
 
 function pageFor(path: string): Page {
   const clean = path.length > 1 ? path.replace(/\/+$/, "") : path;
   if (clean === "/") return { kind: "home" };
+  if (clean === "/waiver") return { kind: "waiver" };
   const tripId = tripIdOf(clean);
   if (tripId) return { kind: "book", tripId };
   const legal = Object.hasOwn(legalPages, clean) ? legalPages[clean] : undefined;
@@ -270,7 +274,7 @@ export function BrandedShell({
   // again" and after each move between pages. A booking page has no heading
   // until its trip loads, so it moves focus itself.
   useEffect(() => {
-    if (focusHeading && page.kind !== "book") {
+    if (focusHeading && page.kind !== "book" && page.kind !== "waiver") {
       main.current?.querySelector<HTMLElement>("h1")?.focus();
     }
   }, []);
@@ -305,9 +309,10 @@ export function BrandedShell({
         {page.kind === "legal" && (
           <LegalPage brand={brand} title={page.title} placeholder={page.placeholder} />
         )}
+        {page.kind === "waiver" && <WaiverPage brand={brand} focusOnArrival={focusHeading} />}
         {page.kind === "not-found" && <NotFoundPage brand={brand} />}
       </main>
-      <Footer brand={brand} inCheckout={page.kind === "book"} />
+      <Footer brand={brand} inCheckout={page.kind === "book" || page.kind === "waiver"} />
     </div>
   );
 }
