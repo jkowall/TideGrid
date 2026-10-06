@@ -479,8 +479,9 @@ function TripBookings({
           </span>
           <span>
             <Icon name="users" />
-            {trip.bookings === 1 ? "1 booking" : `${trip.bookings} bookings`},{" "}
-            {guestsText(trip.guests)}
+            {trip.bookings === 0
+              ? "No bookings yet"
+              : `${trip.bookings === 1 ? "1 booking" : `${trip.bookings} bookings`}, ${guestsText(trip.guests)}`}
           </span>
           {showZone && (
             <span>
@@ -509,14 +510,15 @@ function TripBookings({
           )}
         </div>
       </div>
-      {bookings.length === 0 ? (
-        <p className="bk-trip__none">
-          {complete || trip.bookings === 0
-            ? "No bookings yet"
-            : "Not loaded yet. Choose Show more bookings below."}
-        </p>
-      ) : (
+      {/* A trip with nothing booked says so in its line above; one whose
+          bookings are on a later page says where they are. */}
+      {bookings.length > 0 ? (
         <BookingRows bookings={bookings} seesGuests={seesGuests} />
+      ) : (
+        !complete &&
+        trip.bookings > 0 && (
+          <p className="bk-trip__none">Not loaded yet. Choose Show more bookings below.</p>
+        )
       )}
     </section>
   );

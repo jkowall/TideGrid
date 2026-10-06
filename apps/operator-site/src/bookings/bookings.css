@@ -703,6 +703,10 @@
     background: #fff !important;
     color: #000 !important;
   }
+  /* The console's dark scheme would also darken the page's margins. */
+  html.tg-dark {
+    color-scheme: light;
+  }
   .console-layout {
     display: block;
   }

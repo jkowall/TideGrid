@@ -232,8 +232,8 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
         title="Participants and waivers aren't collected yet"
       >
         <p>
-          This roster lists each booking and its party by ticket type, not the name of everyone on
-          board. Participant names and waiver status arrive with a later build.
+          This roster lists each booking and the size of its party, not the names of everyone
+          aboard. Participant names and waiver status arrive with a later build.
         </p>
       </Notice>
 
