@@ -170,6 +170,11 @@ export const BookingOrderLine = z.object({
     .boolean()
     .nullable()
     .describe("Tax lines only: true when the tax is inside the prices and reported, not added"),
+  taxRatePpm: z
+    .number()
+    .int()
+    .nullable()
+    .describe("Tax lines only: the rate the order used, in parts per million"),
 });
 export type BookingOrderLine = z.infer<typeof BookingOrderLine>;
 

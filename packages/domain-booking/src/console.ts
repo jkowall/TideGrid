@@ -104,6 +104,7 @@ export interface OrderLineView {
   unitAmount: number;
   amount: number;
   taxInclusive: boolean | null;
+  taxRatePpm: number | null;
 }
 
 export type TimelineKind =
@@ -585,11 +586,16 @@ export async function getBookingDetail(
     unit_amount: number;
     amount: number;
     tax_inclusive: boolean | null;
+    rate_ppm: number | null;
   }>`
-    select line_no, kind, code, name, basis, quantity, unit_amount, amount, tax_inclusive
-      from order_lines
-     where tenant_id = ${tenantId} and order_id = ${row.order_id}::uuid
-     order by line_no`.execute(trx);
+    select l.line_no, l.kind, l.code, l.name, l.basis, l.quantity, l.unit_amount, l.amount,
+           l.tax_inclusive, v.rate_ppm
+      from order_lines l
+      left join tax_rate_versions v
+        on v.tenant_id = l.tenant_id and v.tax_rate_id = l.tax_rate_id
+       and v.version = l.tax_rate_version
+     where l.tenant_id = ${tenantId} and l.order_id = ${row.order_id}::uuid
+     order by l.line_no`.execute(trx);
 
   const service = lineRows.filter((l) => l.kind === "service");
   const addOns = lineRows.filter((l) => l.kind === "add_on");
@@ -650,6 +656,7 @@ export async function getBookingDetail(
         unitAmount: l.unit_amount,
         amount: l.amount,
         taxInclusive: l.kind === "tax" ? l.tax_inclusive : null,
+        taxRatePpm: l.kind === "tax" ? l.rate_ppm : null,
       })),
       totals: {
         subtotal: row.subtotal_amount,
