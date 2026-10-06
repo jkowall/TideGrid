@@ -47,6 +47,7 @@ import {
   partyProblem,
   pollDelay,
   quoteBody,
+  quoteMatches,
   quoteTrouble,
   type Selection,
   type Stop,
@@ -595,7 +596,11 @@ export function BookingPage({
     if (address.quoteId) {
       const stored = await getQuote(address.quoteId);
       if (stored.kind === "ok" && stored.value.tripId === trip.tripId) {
-        if (Date.parse(stored.value.expiresAt) > Date.now()) {
+        // Only a quote that still prices this party, within its validity.
+        if (
+          Date.parse(stored.value.expiresAt) > Date.now() &&
+          quoteMatches(trip, chosen, stored.value)
+        ) {
           adopt(stored.value);
           setBusy(null);
           return;

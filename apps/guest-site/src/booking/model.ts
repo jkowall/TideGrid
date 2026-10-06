@@ -179,6 +179,29 @@ export function quoteBody(
   };
 }
 
+/**
+ * Whether a quote prices exactly this selection: the same tickets, or guests
+ * aboard, and the same add-ons. A reload shows a stored quote only then.
+ */
+export function quoteMatches(offer: TripOffer, selection: Selection, quote: Quote): boolean {
+  const quoted = (kind: Quote["lines"][number]["kind"]) =>
+    sameCounts(
+      Object.fromEntries(
+        quote.lines.filter((l) => l.kind === kind).map((l) => [l.code, l.quantity]),
+      ),
+    );
+  const chosen = (record: Record<string, number>) =>
+    sameCounts(Object.fromEntries(Object.entries(record).filter(([, n]) => n > 0)));
+  const addOns = quoted("add_on") === chosen(selection.addOns);
+  if (isCharter(offer)) return addOns && quote.partySize === selection.guests;
+  return addOns && quoted("ticket") === chosen(selection.tickets);
+}
+
+/** Counts as a stable string, so two sets of counts compare by value. */
+function sameCounts(counts: Record<string, number>): string {
+  return JSON.stringify(Object.entries(counts).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
 /** A problem with the party, before anything is sent. */
 export function partyProblem(offer: TripOffer, selection: Selection, limits: PartyLimits) {
   const size = partySize(offer, selection);

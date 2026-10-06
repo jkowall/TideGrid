@@ -506,6 +506,18 @@ describe("the price", () => {
     expect(screen.queryByText("This price has expired")).toBeNull();
   });
 
+  it("prices again after a reload when the address's party no longer matches the quote", async () => {
+    const stored = sharedQuote();
+    const calls = stubApi({ getQuote: () => json({ quote: stored }) });
+    // The stored quote is for 2 adults, 1 child, a photo, and 2 drinks.
+    renderPage(`?t.adult=4&step=details&quote=${stored.quoteId}`);
+    await heading("Your details");
+    await waitFor(() => expect(callsTo(calls, "createQuote")).toHaveLength(1));
+    expect(callsTo(calls, "createQuote")[0]?.body).toMatchObject({
+      party: { kind: "tickets", tickets: [{ code: "adult", quantity: 4 }] },
+    });
+  });
+
   it("shows the same quote after a reload of the details step, without pricing again", async () => {
     const stored = sharedQuote();
     const calls = stubApi({ getQuote: () => json({ quote: stored }) });
