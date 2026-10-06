@@ -1,3 +1,7 @@
 # Copy to .dev.vars (gitignored) for `pnpm dev`, which runs the "dev" environment.
 # A tidegrid_app connection string for a throwaway Neon branch, never the main branch.
 DATABASE_URL=postgresql://tidegrid_app:password@host/neondb?sslmode=require
+# Signs and verifies the fake payment provider's webhooks (G2.7). Any random
+# string of at least 32 characters, for example from `openssl rand -hex 32`.
+# Anything shorter, like this placeholder, leaves payments off.
+FAKE_PAYMENT_WEBHOOK_SECRET=change-me

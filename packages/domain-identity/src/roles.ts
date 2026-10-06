@@ -6,7 +6,9 @@ import type { StaffRole } from "@tidegrid/contracts";
  * booking staff manage bookings and messages but not people or billing, and
  * finance reads financial records and history without changing anything.
  * Everyone reads the catalog and calendar; only owners change the catalog, and
- * owners and booking staff open, close, cancel, and complete trips.
+ * owners and booking staff open, close, cancel, and complete trips. Owners and
+ * booking staff read bookings with the booker's contact details; every role
+ * reads payment exceptions, which carry no personal data (G2.7).
  */
 export type Permission =
   | "members.read"
@@ -14,7 +16,9 @@ export type Permission =
   | "audit.read"
   | "catalog.read"
   | "catalog.manage"
-  | "trips.manage";
+  | "trips.manage"
+  | "bookings.read"
+  | "payments.read";
 
 const matrix: Record<StaffRole, readonly Permission[]> = {
   owner: [
@@ -24,9 +28,11 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "catalog.read",
     "catalog.manage",
     "trips.manage",
+    "bookings.read",
+    "payments.read",
   ],
-  booking_staff: ["catalog.read", "trips.manage"],
-  finance: ["audit.read", "catalog.read"],
+  booking_staff: ["catalog.read", "trips.manage", "bookings.read", "payments.read"],
+  finance: ["audit.read", "catalog.read", "payments.read"],
 };
 
 export function can(role: StaffRole, permission: Permission): boolean {

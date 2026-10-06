@@ -69,7 +69,12 @@
         "ENVIRONMENT": "local",
         "BUILD_ID": "dev",
         "ALLOWED_ORIGINS": "http://localhost:5173,http://localhost:5174",
-        "STAFF_ORIGINS": "http://localhost:5174"
+        "STAFF_ORIGINS": "http://localhost:5174",
+        // Checkout pays through the fake provider in local development (G2.7).
+        // Its webhook secret, FAKE_PAYMENT_WEBHOOK_SECRET, lives in .dev.vars.
+        // Deployed environments leave payments off until the owner turns them
+        // on; a production configuration refuses the fake outright.
+        "PAYMENT_PROVIDER": "fake"
       }
     },
     "test": {

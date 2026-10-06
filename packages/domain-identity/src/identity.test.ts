@@ -23,8 +23,25 @@ describe("role permissions", () => {
       "owner",
       "booking_staff",
     ]);
-    expect(permissionsFor("booking_staff")).toEqual(["catalog.read", "trips.manage"]);
-    expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read"]);
+    expect(permissionsFor("booking_staff")).toEqual([
+      "catalog.read",
+      "trips.manage",
+      "bookings.read",
+      "payments.read",
+    ]);
+    expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read", "payments.read"]);
+  });
+
+  it("shows bookers' contact details to owners and booking staff, and payment exceptions to all", () => {
+    expect(StaffRole.options.filter((r) => can(r, "bookings.read"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
+    expect(StaffRole.options.filter((r) => can(r, "payments.read"))).toEqual([
+      "owner",
+      "booking_staff",
+      "finance",
+    ]);
   });
 
   it("denies unknown roles", () => {

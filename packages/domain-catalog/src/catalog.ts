@@ -510,12 +510,16 @@ export type TripStateResult =
   | { kind: "changed"; trip: StaffTrip }
   | { kind: "not_found" }
   | { kind: "conflict"; from: TripSalesState; to: TripSalesState }
-  | { kind: "not_departed" };
+  | { kind: "not_departed" }
+  /** Canceling would strand confirmed bookings; cancellation and remedies come first. */
+  | { kind: "has_bookings"; confirmed: number };
 
 /**
- * Moves a trip between sales states. Closing or canceling stops new sales and
- * leaves existing bookings alone; bookings arrive with G2.6 and G2.7. The same
- * transitions are enforced by a trigger in migration 0003.
+ * Moves a trip between sales states. Closing stops new sales and leaves
+ * existing bookings alone. Canceling is refused while the trip has confirmed
+ * bookings (G2.7): its guests would keep a paid booking on a trip that no
+ * longer runs, and cancellation with remedies arrives with G2.9 and G2.11. The
+ * same rules are enforced by triggers in migrations 0003 and 0007.
  */
 export async function changeTripSalesState(
   trx: TenantTransaction,
@@ -528,6 +532,19 @@ export async function changeTripSalesState(
   if (!transitions[from].includes(input.to)) return { kind: "conflict", from, to: input.to };
   if (input.to === "completed" && new Date(trip.starts_at).getTime() > input.now.getTime()) {
     return { kind: "not_departed" };
+  }
+  if (input.to === "canceled") {
+    // Take the trip's lock first, as confirming a hold does, then count: no
+    // confirmation can land between the count and the change.
+    await sql`select id from scheduled_trips
+               where tenant_id = ${ctx.tenantId} and id = ${trip.trip_id}
+                 for no key update`.execute(trx);
+    const { rows } = await sql<{ confirmed: number }>`
+      select count(*)::int as confirmed from capacity_holds
+       where tenant_id = ${ctx.tenantId} and trip_id = ${trip.trip_id}
+         and state = 'confirmed'`.execute(trx);
+    const confirmed = rows[0]?.confirmed ?? 0;
+    if (confirmed > 0) return { kind: "has_bookings", confirmed };
   }
   const updated = await trx
     .updateTable("scheduled_trips")

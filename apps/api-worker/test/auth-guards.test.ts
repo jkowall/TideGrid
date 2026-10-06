@@ -122,10 +122,25 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/sales-state",
         // Capacity and holds (G2.6).
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/holds",
+        // Checkout to confirmation (G2.7).
+        "/v1/public/checkout-sessions",
+        "/v1/public/checkout-sessions/{checkoutSessionId}",
+        "/v1/public/checkout-sessions/{checkoutSessionId}/cancel",
+        "/v1/webhooks/payments/{provider}",
+        "/v1/fake-provider/payments/{paymentRef}",
+        "/v1/fake-provider/payments/{paymentRef}/succeed",
+        "/v1/fake-provider/payments/{paymentRef}/fail",
+        "/v1/fake-provider/payments/{paymentRef}/events/{eventId}/redeliver",
+        "/v1/staff/tenants/{tenantId}/trips/{tripId}/bookings",
+        "/v1/staff/tenants/{tenantId}/finalization-exceptions",
       ].sort(),
     );
+    // The guest's checkout secret and the fake payment's client secret are
+    // bearer tokens on the public checkout and fake provider routes only.
     expect(Object.keys(doc.components.securitySchemes).sort()).toEqual([
       "accessJwt",
+      "checkoutSecret",
+      "fakeClientSecret",
       "sessionCookie",
     ]);
   });

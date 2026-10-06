@@ -1077,22 +1077,36 @@ describe.skipIf(!env)("G2.6 adversarial races as the runtime role", () => {
           );
 
           expect(errorCount).toBe(0);
-          if (canceled?.kind !== "changed") throw new Error(`cancel: ${canceled?.kind}`);
-          // What the cancellation saw at its commit point is all there ever is.
-          const seen = canceled.trip.capacity as { held?: number; confirmed?: number };
           const after = await holdsOnTrip(admin, tripId);
           const seats = (state: string) =>
             after.filter((h) => h.state === state).reduce((s, h) => s + h.seats, 0);
-          expect(seats("confirmed")).toBe(seen.confirmed);
-          expect(seats("active")).toBe(seen.held);
-          expect(usage.salesState).toBe("canceled");
-          for (const r of confirmValues) {
-            expect(["confirmed", "capacity_lost"]).toContain(r.kind);
-            if (r.kind === "capacity_lost") expect(r.reason).toBe("trip_canceled");
-          }
-          for (const r of acquireValues) {
-            expect(["acquired", "not_bookable", "insufficient_capacity"]).toContain(r.kind);
-            if (r.kind === "not_bookable") expect(r.reason).toBe("trip_canceled");
+          // Since G2.7 a trip with a confirmed booking cannot be canceled. Either
+          // a confirmation took the trip's lock first and the cancellation was
+          // refused, or the cancellation went first and every later confirmation
+          // lost its capacity.
+          if (canceled?.kind === "has_bookings") {
+            expect(usage.salesState).toBe("published");
+            expect(seats("confirmed")).toBeGreaterThan(0);
+            for (const r of confirmValues) expect(r.kind).toBe("confirmed");
+            for (const r of acquireValues) {
+              expect(["acquired", "insufficient_capacity"]).toContain(r.kind);
+            }
+          } else {
+            if (canceled?.kind !== "changed") throw new Error(`cancel: ${canceled?.kind}`);
+            // What the cancellation saw at its commit point is all there ever is.
+            const seen = canceled.trip.capacity as { held?: number; confirmed?: number };
+            expect(seen.confirmed).toBe(0);
+            expect(seats("confirmed")).toBe(0);
+            expect(seats("active")).toBe(seen.held);
+            expect(usage.salesState).toBe("canceled");
+            for (const r of confirmValues) {
+              expect(r.kind).toBe("capacity_lost");
+              if (r.kind === "capacity_lost") expect(r.reason).toBe("trip_canceled");
+            }
+            for (const r of acquireValues) {
+              expect(["acquired", "not_bookable", "insufficient_capacity"]).toContain(r.kind);
+              if (r.kind === "not_bookable") expect(r.reason).toBe("trip_canceled");
+            }
           }
           const history = await checkHistories(
             admin,

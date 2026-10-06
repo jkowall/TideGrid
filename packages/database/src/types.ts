@@ -483,7 +483,248 @@ export interface CapacityHoldsTable {
   updated_at: ColumnType<Date, never, never>;
 }
 
-export interface Database extends PricingTables {
+// Checkout, orders, payments, the provider-event inbox, and bookings (G2.7).
+// Triggers stamp every timestamp and enforce the one-way states; columns typed
+// `never` for update are not granted to the runtime.
+
+export type PaymentProviderName = "fake" | "stripe";
+/** unfulfilled: a verified success could not become a booking and is refunded in full. */
+export type CheckoutSessionState =
+  | "open"
+  | "confirmed"
+  | "unfulfilled"
+  | "failed"
+  | "expired"
+  | "canceled";
+export type OrderStatus = "pending" | "paid" | "void";
+export type OrderLineKind = "service" | "add_on" | "fee" | "tax" | "discount";
+export type PaymentState = "pending" | "succeeded" | "failed";
+export type RefundState = "requested" | "succeeded" | "failed";
+export type ProviderEventType = "payment.succeeded" | "payment.failed" | "other";
+export type InboxProcessingState = "received" | "processed";
+export type FinalizationReason =
+  | "no_capacity"
+  | "trip_canceled"
+  | "trip_unavailable"
+  | "sales_closed"
+  | "party_size_out_of_range"
+  | "session_failed"
+  | "session_canceled"
+  | "payment_mismatch";
+type Stamp = ColumnType<Date | null, never, never>;
+type Stamped = ColumnType<Date, never, never>;
+
+/** Written by onboarding (the seed); the runtime may only read it. */
+export interface PaymentAccountsTable {
+  tenant_id: ColumnType<string, never, never>;
+  provider: ColumnType<PaymentProviderName, never, never>;
+  account_ref: ColumnType<string, never, never>;
+  status: ColumnType<"active" | "disabled", never, never>;
+  created_at: CreatedAt;
+}
+
+export interface ProviderEventsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  provider: Fixed<PaymentProviderName>;
+  event_id: Fixed<string>;
+  event_type: Fixed<ProviderEventType>;
+  provider_type: Fixed<string>;
+  account_ref: Fixed<string>;
+  payment_ref: FixedDefault<string | null>;
+  client_reference: FixedDefault<string | null>;
+  amount: FixedDefault<number | null>;
+  currency: FixedDefault<string | null>;
+  provider_created_at: ColumnType<Date | null, Date | string | null | undefined, never>;
+  payload_sha256: Fixed<string>;
+  verified_at: Stamped;
+  processing_state: ColumnType<InboxProcessingState, "received" | undefined, InboxProcessingState>;
+  outcome: ColumnType<string | null, never, string | null>;
+  processed_at: Stamp;
+}
+
+export interface CheckoutSessionsTable {
+  /** Chosen by the service before the hold, whose owner is "checkout_session:<id>". */
+  id: Fixed<string>;
+  tenant_id: TenantColumn;
+  quote_id: Fixed<string>;
+  trip_id: Fixed<string>;
+  party_size: Fixed<number>;
+  hold_id: Fixed<string>;
+  policy_version: Fixed<number>;
+  state: ColumnType<CheckoutSessionState, "open" | undefined, CheckoutSessionState>;
+  /** Copied from the hold in SQL; never round-tripped through a JavaScript Date. */
+  expires_at: ColumnType<Date, Date | string, never>;
+  secret_hash: Fixed<string>;
+  client_key: FixedDefault<string | null>;
+  booker_name: Fixed<string>;
+  booker_email: Fixed<string>;
+  created_at: Stamped;
+  confirmed_at: Stamp;
+  unfulfilled_at: Stamp;
+  failed_at: Stamp;
+  expired_at: Stamp;
+  canceled_at: Stamp;
+  updated_at: Stamped;
+}
+
+export interface OrdersTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  checkout_session_id: Fixed<string>;
+  quote_id: Fixed<string>;
+  trip_id: Fixed<string>;
+  product_id: Fixed<string>;
+  party_size: Fixed<number>;
+  policy_version: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  subtotal_amount: Fixed<number>;
+  discount_amount: Fixed<number>;
+  fee_amount: Fixed<number>;
+  tax_amount: Fixed<number>;
+  included_tax_amount: Fixed<number>;
+  total_amount: Fixed<number>;
+  status: ColumnType<OrderStatus, "pending" | undefined, OrderStatus>;
+  created_at: Stamped;
+  created_txid: CreatedTxid;
+  paid_at: Stamp;
+  voided_at: Stamp;
+  updated_at: Stamped;
+}
+
+export interface OrderLinesTable {
+  tenant_id: TenantColumn;
+  order_id: Fixed<string>;
+  line_no: Fixed<number>;
+  kind: Fixed<OrderLineKind>;
+  code: Fixed<string>;
+  name: Fixed<string>;
+  basis: FixedDefault<ChargeBasis | null>;
+  quantity: Fixed<number>;
+  unit_amount: Fixed<number>;
+  amount: Fixed<number>;
+  discount_amount: FixedDefault<number>;
+  taxable: Fixed<boolean>;
+  tax_rate_id: FixedDefault<string | null>;
+  tax_rate_version: FixedDefault<number | null>;
+  tax_inclusive: FixedDefault<boolean | null>;
+  taxable_amount: FixedDefault<number | null>;
+}
+
+export interface PaymentsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  checkout_session_id: Fixed<string>;
+  order_id: Fixed<string>;
+  provider: Fixed<PaymentProviderName>;
+  account_ref: Fixed<string>;
+  idempotency_key: Fixed<string>;
+  /** Recorded once, after the provider call returns. */
+  provider_payment_id: ColumnType<string | null, never, string>;
+  amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  state: ColumnType<PaymentState, "pending" | undefined, PaymentState>;
+  succeeded_event_id: ColumnType<string | null, never, string>;
+  failed_event_id: ColumnType<string | null, never, string>;
+  created_at: Stamped;
+  provider_recorded_at: Stamp;
+  succeeded_at: Stamp;
+  failed_at: Stamp;
+  updated_at: Stamped;
+}
+
+export interface PaymentRefundsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  payment_id: Fixed<string>;
+  amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  reason: Fixed<"unfulfilled_payment">;
+  idempotency_key: Fixed<string>;
+  provider_refund_id: ColumnType<string | null, never, string>;
+  state: ColumnType<RefundState, "requested" | undefined, RefundState>;
+  failure_code: ColumnType<string | null, never, string>;
+  created_at: Stamped;
+  settled_at: Stamp;
+  updated_at: Stamped;
+}
+
+export interface BookingsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  reference: Fixed<string>;
+  checkout_session_id: Fixed<string>;
+  order_id: Fixed<string>;
+  payment_id: Fixed<string>;
+  hold_id: Fixed<string>;
+  trip_id: Fixed<string>;
+  party_size: Fixed<number>;
+  source: FixedDefault<"direct">;
+  state: FixedDefault<"confirmed">;
+  reacquired: Fixed<boolean>;
+  confirmed_at: Stamped;
+  created_at: Stamped;
+}
+
+export interface FinalizationExceptionsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  checkout_session_id: Fixed<string>;
+  payment_id: Fixed<string>;
+  provider_event_id: Fixed<string>;
+  reason: Fixed<FinalizationReason>;
+  refund_id: FixedDefault<string | null>;
+  created_at: Stamped;
+}
+
+export interface FakeProviderPaymentsTable {
+  id: Fixed<string>;
+  tenant_id: TenantColumn;
+  provider: FixedDefault<"fake">;
+  account_ref: Fixed<string>;
+  amount: Fixed<number>;
+  currency: Fixed<"USD">;
+  idempotency_key: Fixed<string>;
+  client_reference: Fixed<string>;
+  created_at: CreatedAt;
+}
+
+export interface FakeProviderEventsTable {
+  id: Fixed<string>;
+  tenant_id: TenantColumn;
+  payment_id: Fixed<string>;
+  type: Fixed<"payment.succeeded" | "payment.failed">;
+  /** The exact JSON text delivered, so a redelivery is byte for byte the same. */
+  body: Fixed<string>;
+  created_at: CreatedAt;
+}
+
+export interface FakeProviderRefundsTable {
+  id: Fixed<string>;
+  tenant_id: TenantColumn;
+  payment_id: Fixed<string>;
+  amount: Fixed<number>;
+  idempotency_key: Fixed<string>;
+  created_at: CreatedAt;
+}
+
+/** Tables added by the checkout migration (G2.7), merged into Database below. */
+interface CheckoutTables {
+  payment_accounts: PaymentAccountsTable;
+  provider_events: ProviderEventsTable;
+  checkout_sessions: CheckoutSessionsTable;
+  orders: OrdersTable;
+  order_lines: OrderLinesTable;
+  payments: PaymentsTable;
+  payment_refunds: PaymentRefundsTable;
+  bookings: BookingsTable;
+  finalization_exceptions: FinalizationExceptionsTable;
+  fake_provider_payments: FakeProviderPaymentsTable;
+  fake_provider_events: FakeProviderEventsTable;
+  fake_provider_refunds: FakeProviderRefundsTable;
+}
+
+export interface Database extends PricingTables, CheckoutTables {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
   tenant_hostnames: TenantHostnamesTable;

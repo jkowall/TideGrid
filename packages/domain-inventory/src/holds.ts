@@ -659,6 +659,59 @@ export async function expireDueHolds(
   return { expired: rows.map(toHold) };
 }
 
+export type ExpireHoldResult =
+  | { kind: "expired"; hold: Hold }
+  /** Already expired, released, or confirmed; nothing changed. */
+  | { kind: "unchanged"; hold: Hold }
+  /** Active and not yet past its expiry instant by the database clock. */
+  | { kind: "not_due"; hold: Hold }
+  /** Another transaction holds the hold's row; nothing was waited for or changed. */
+  | { kind: "busy" }
+  | { kind: "not_found" };
+
+/**
+ * Mark one owner's hold expired once its instant has passed, for checkout's
+ * sweep (G2.7). Like the hold sweep it never waits: it takes the hold's row
+ * with SKIP LOCKED and answers `busy` when another transaction has it, and it
+ * never touches the trip, because an expiry takes no capacity. Acquisition and
+ * confirmation lock a trip and then expire its due holds in whatever order
+ * their scan meets them; a sweep that waited for one hold while holding
+ * another could deadlock with them (found by the G2.7 test specialist). A busy
+ * hold is left for the next pass, or for the command that holds it, which
+ * expires it lazily anyway. Idempotent, and writes the same audit row and
+ * event as every other expiry, under the caller's actor.
+ */
+export async function expireHold(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: { holdId: string; ownerRef: string },
+): Promise<ExpireHoldResult> {
+  if (!isUuid(input.holdId) || !isOwnerRef(input.ownerRef)) return { kind: "not_found" };
+  await requireReadCommitted(trx);
+  const { rows: free } = await sql<HoldRow & { unexpired: boolean }>`
+    select ${holdColumns}, expires_at > now() as unexpired
+      from capacity_holds
+     where tenant_id = ${ctx.tenantId} and id = ${input.holdId}
+       for update skip locked`.execute(trx);
+  const held = free[0];
+  if (!held) {
+    const seen = await selectHold(trx, ctx.tenantId, input.holdId, { lock: false });
+    return seen && seen.owner_ref === input.ownerRef ? { kind: "busy" } : { kind: "not_found" };
+  }
+  if (held.owner_ref !== input.ownerRef) return { kind: "not_found" };
+  if (held.state !== "active") return { kind: "unchanged", hold: toHold(held) };
+  if (held.unexpired) return { kind: "not_due", hold: toHold(held) };
+  const { rows } = await sql<HoldRow>`
+    update capacity_holds set state = 'expired'
+     where tenant_id = ${ctx.tenantId} and id = ${held.id} and state = 'active'
+       and expires_at <= now()
+    returning ${holdColumns}`.execute(trx);
+  const row = rows[0];
+  if (!row) throw new Error("locked due hold did not expire");
+  await recordExpiries(trx, ctx, ctx.actorId ?? "hold-expiry", [row]);
+  return { kind: "expired", hold: toHold(row) };
+}
+
 // Reads ---------------------------------------------------------------------------
 
 export interface TripCapacityView {
