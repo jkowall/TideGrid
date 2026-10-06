@@ -234,7 +234,9 @@ export function registerCatalogStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       401: errorBody("Not signed in"),
       403: errorBody("Role or origin does not allow this"),
       404: errorBody("No such tenant or trip"),
-      409: errorBody("The trip cannot move to that state now"),
+      409: errorBody(
+        "The trip cannot move to that state now (trip_state_conflict, trip_not_departed), or canceling it would strand confirmed bookings (trip_has_bookings)",
+      ),
       422: errorBody("Idempotency key reused with a different request"),
     },
   });
@@ -278,6 +280,12 @@ export function registerCatalogStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
             );
           case "not_departed":
             throw new ApiError(409, "trip_not_departed", "A trip is completed after it departs");
+          case "has_bookings":
+            throw new ApiError(
+              409,
+              "trip_has_bookings",
+              `This trip has ${changed.confirmed} confirmed booking(s); it cannot be canceled until cancellation with remedies exists`,
+            );
         }
       },
     );

@@ -657,6 +657,20 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         quote_line_taxes: ["INSERT", "SELECT"],
         // Capacity and holds (G2.6).
         capacity_holds: ["INSERT", "SELECT"],
+        // Checkout and confirmation (G2.7). Payment accounts are written by
+        // onboarding, never by a request.
+        payment_accounts: ["SELECT"],
+        provider_events: ["INSERT", "SELECT"],
+        checkout_sessions: ["INSERT", "SELECT"],
+        orders: ["INSERT", "SELECT"],
+        order_lines: ["INSERT", "SELECT"],
+        payments: ["INSERT", "SELECT"],
+        payment_refunds: ["INSERT", "SELECT"],
+        bookings: ["INSERT", "SELECT"],
+        finalization_exceptions: ["INSERT", "SELECT"],
+        fake_provider_payments: ["INSERT", "SELECT"],
+        fake_provider_events: ["INSERT", "SELECT"],
+        fake_provider_refunds: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -680,6 +694,13 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         scheduled_trips: ["sales_state", "sales_state_changed_at", "updated_at"],
         // Capacity and holds (G2.6): the trigger sets the transition timestamps.
         capacity_holds: ["state"],
+        // Checkout and confirmation (G2.7): only the columns that carry a
+        // transition; triggers stamp the times and check the evidence.
+        checkout_sessions: ["state"],
+        orders: ["status"],
+        payments: ["failed_event_id", "provider_payment_id", "state", "succeeded_event_id"],
+        payment_refunds: ["failure_code", "provider_refund_id", "state"],
+        provider_events: ["outcome", "processing_state"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

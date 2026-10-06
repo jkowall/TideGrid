@@ -659,6 +659,43 @@ export async function expireDueHolds(
   return { expired: rows.map(toHold) };
 }
 
+export type ExpireHoldResult =
+  | { kind: "expired"; hold: Hold }
+  /** Already expired, released, or confirmed; nothing changed. */
+  | { kind: "unchanged"; hold: Hold }
+  /** Active and not yet past its expiry instant by the database clock. */
+  | { kind: "not_due"; hold: Hold }
+  | { kind: "not_found" };
+
+/**
+ * Mark one owner's hold expired once its instant has passed, for checkout's
+ * own expiry (G2.7). Like the sweep it locks the hold row only, never the
+ * trip, because an expiry takes no capacity; a caller may already hold its
+ * own row locks, such as the checkout session's. Idempotent, and writes the
+ * same audit row and event as every other expiry, under the caller's actor.
+ */
+export async function expireHold(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: { holdId: string; ownerRef: string },
+): Promise<ExpireHoldResult> {
+  if (!isUuid(input.holdId) || !isOwnerRef(input.ownerRef)) return { kind: "not_found" };
+  await requireReadCommitted(trx);
+  const held = await selectHold(trx, ctx.tenantId, input.holdId, { lock: true });
+  if (!held || held.owner_ref !== input.ownerRef) return { kind: "not_found" };
+  if (held.state !== "active") return { kind: "unchanged", hold: toHold(held) };
+  if (held.unexpired) return { kind: "not_due", hold: toHold(held) };
+  const { rows } = await sql<HoldRow>`
+    update capacity_holds set state = 'expired'
+     where tenant_id = ${ctx.tenantId} and id = ${held.id} and state = 'active'
+       and expires_at <= now()
+    returning ${holdColumns}`.execute(trx);
+  const row = rows[0];
+  if (!row) throw new Error("locked due hold did not expire");
+  await recordExpiries(trx, ctx, ctx.actorId ?? "hold-expiry", [row]);
+  return { kind: "expired", hold: toHold(row) };
+}
+
 // Reads ---------------------------------------------------------------------------
 
 export interface TripCapacityView {
