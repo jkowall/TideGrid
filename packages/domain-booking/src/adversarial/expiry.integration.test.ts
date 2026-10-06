@@ -8,14 +8,16 @@
  *
  * The tests run concurrently. The matrix has a tenant of its own, because it
  * depends on which checkouts a sweep has and has not reached; the others
- * tolerate a sweep from a neighbouring test.
+ * tolerate a sweep from a neighbouring test. The lazily expired cases (added
+ * with the independent review's fixes) have a tenant of their own too, which
+ * no test sweeps, so nothing can expire their checkouts before they act.
  */
 import { createDb, inTenantTransaction } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import { changeTripSalesState } from "@tidegrid/domain-catalog";
 import { tripAllocator } from "@tidegrid/domain-inventory/testing";
 import postgres from "postgres";
-import { afterAll, beforeAll, describe, inject, it } from "vitest";
+import { afterAll, beforeAll, describe, type ExpectStatic, inject, it } from "vitest";
 import { cancelCheckoutSession, ensureProviderPayment, getCheckoutSession } from "../index.ts";
 import {
   type CheckoutFixture,
@@ -65,20 +67,24 @@ describe.skipIf(!env).concurrent("G2.7 adversarial: late payments and expiry", (
   let world: World;
   let A: CheckoutFixture;
   let M: CheckoutFixture;
+  let L: CheckoutFixture;
   let trips: ReturnType<typeof tripAllocator>;
   let matrixTrips: ReturnType<typeof tripAllocator>;
+  let lazyTrips: ReturnType<typeof tripAllocator>;
 
   beforeAll(async () => {
     if (!env) return;
     admin = postgres(env.adminUrl, { max: 6, onnotice: () => {} });
     runtime = createDb(env.runtimeUrl, { max: 24 });
     world = { admin, db: runtime.db, provider: fakeProvider(runtime.db) };
-    [A, M] = await Promise.all([
+    [A, M, L] = await Promise.all([
       createCheckoutFixture(admin, runtime.db, "advexp"),
       createCheckoutFixture(admin, runtime.db, "advexm"),
+      createCheckoutFixture(admin, runtime.db, "advexl"),
     ]);
     trips = tripAllocator(A);
     matrixTrips = tripAllocator(M);
+    lazyTrips = tripAllocator(L);
   });
 
   afterAll(async () => {
@@ -389,5 +395,136 @@ describe.skipIf(!env).concurrent("G2.7 adversarial: late payments and expiry", (
       expect(state).toMatchObject({ session: "confirmed", bookings: 1 });
     }
     expect(await problems(A, [o.tripId])).toEqual([]);
+  });
+
+  // Added with the independent review's fixes. The two tests above cover a
+  // lapsed checkout whose hold is still stored active. Here another guest's
+  // checkout on the same trip has already written the lapsed hold down as
+  // expired (acquisition, a late confirmation, and the hold sweep all do),
+  // while the checkout itself is still stored open. Before the fix the
+  // database refused to cancel or fail it (23514): the guest's cancel failed,
+  // and the failure event failed and stayed received for the sweep.
+
+  /** A lapsed open checkout whose hold a second guest's checkout marked expired. */
+  async function lazilyExpired(expect: ExpectStatic) {
+    const tripId = lazyTrips.shared();
+    const o = await openCheckout(world, L, tripId, 2);
+    await backdateMany(admin, [o.sessionId]);
+    const other = await openCheckout(world, L, tripId, 3);
+    expect(await stateOf(admin, o.sessionId)).toMatchObject({
+      session: "open",
+      hold: "expired",
+      order: "pending",
+      payment: "pending",
+    });
+    expect((await view(o))?.state).toBe("expired");
+    return { o, other, tripId };
+  }
+
+  it("lets the guest cancel a lapsed checkout whose hold another checkout already expired, and refunds a payment after it", async ({
+    expect,
+  }) => {
+    const { o, other, tripId } = await lazilyExpired(expect);
+    const cancel = () =>
+      asGuest(runtime.db, L.id, (trx, ctx) =>
+        cancelCheckoutSession(trx, ctx, { sessionId: o.sessionId, secret: o.secret }),
+      );
+    expect(await cancel()).toMatchObject({ kind: "canceled", session: { state: "canceled" } });
+    expect(await cancel()).toMatchObject({ kind: "unchanged", session: { state: "canceled" } });
+    expect(await stateOf(admin, o.sessionId)).toMatchObject({
+      session: "canceled",
+      hold: "expired",
+      order: "void",
+      payment: "pending",
+      bookings: 0,
+      refund: null,
+    });
+    expect(await problems(L, [tripId])).toEqual([]);
+
+    // The guest pays in another tab anyway: refunded, never booked, and the
+    // other guest's seats are untouched.
+    const handled = await deliver(world, (await settleFake(world, o, "succeeded")).body);
+    expect(handled).toMatchObject({
+      kind: "processed",
+      outcome: "refund_required",
+      refund: { kind: "succeeded" },
+    });
+    expect(await stateOf(admin, o.sessionId)).toMatchObject({
+      session: "unfulfilled",
+      hold: "expired",
+      order: "void",
+      payment: "succeeded",
+      bookings: 0,
+      refund: "succeeded",
+      exceptions: ["session_canceled"],
+      fakeRefunded: o.amount,
+    });
+    expect(await sessionTrail(admin, o.sessionId)).toEqual([
+      "checkout.session_opened",
+      "checkout.session_canceled",
+      "checkout.session_unfulfilled",
+    ]);
+    expect(await stateOf(admin, other.sessionId)).toMatchObject({
+      session: "open",
+      hold: "active",
+    });
+    const [usage] = await usageOfTrips(admin, [tripId]);
+    expect(usage).toMatchObject({ counted: 3, confirmed: 0 });
+    expect(await problems(L, [tripId])).toEqual([]);
+  });
+
+  it("closes a lapsed checkout whose hold another checkout already expired as failed on a failure, once", async ({
+    expect,
+  }) => {
+    const { o, other, tripId } = await lazilyExpired(expect);
+    const failure = await settleFake(world, o, "failed");
+    expect(await deliver(world, failure.body)).toMatchObject({
+      kind: "processed",
+      duplicate: false,
+      outcome: "released",
+    });
+    expect(await stateOf(admin, o.sessionId)).toMatchObject({
+      session: "failed",
+      hold: "expired",
+      order: "void",
+      payment: "failed",
+      bookings: 0,
+      refund: null,
+    });
+    // Processed at once: nothing is left received for the sweep, and the
+    // provider's retry is a duplicate that changes nothing.
+    const [inbox] = await admin<{ processing_state: string; outcome: string | null }[]>`
+      select processing_state, outcome from public.provider_events where event_id = ${failure.id}`;
+    expect(inbox).toEqual({ processing_state: "processed", outcome: "released" });
+    expect(await deliver(world, failure.body)).toMatchObject({
+      kind: "processed",
+      duplicate: true,
+      outcome: "released",
+    });
+    expect(await sessionTrail(admin, o.sessionId)).toEqual([
+      "checkout.session_opened",
+      "checkout.session_failed",
+    ]);
+    expect(await problems(L, [tripId])).toEqual([]);
+
+    // A success after the provider said failed is an anomaly: refunded, never
+    // booked. The fake settled the payment as failed, so it refuses the refund.
+    expect(outcomeOf(await deliver(world, bodyFor(o, "payment.succeeded")))).toBe(
+      "refund_required",
+    );
+    expect(await stateOf(admin, o.sessionId)).toMatchObject({
+      session: "unfulfilled",
+      hold: "expired",
+      payment: "succeeded",
+      bookings: 0,
+      exceptions: ["session_failed"],
+      refund: "failed",
+      refundFailure: "payment_not_succeeded",
+    });
+    expect(await stateOf(admin, other.sessionId)).toMatchObject({
+      session: "open",
+      hold: "active",
+    });
+    expect(await problems(L, [tripId])).toEqual([]);
   });
 });

@@ -22,10 +22,12 @@
  * with them. Processing an event or a refund takes the same locks, in the same
  * order, as the webhook that would have done it. One event or refund that
  * keeps failing is reported and skipped, so it never blocks the rest of its
- * tenant's work.
+ * tenant's work; so is an open checkout whose hold is in a state an open
+ * checkout cannot have.
  */
 import {
   type Database,
+  type HoldState,
   inTenantTransaction,
   type TenantContext,
   type TenantTransaction,
@@ -49,7 +51,10 @@ export interface CheckoutSweepOptions {
   /** Inbox events and refunds younger than this (0 to 3,600 seconds) are left to the request that made them. */
   graceSeconds?: number;
   budgetMs?: number;
-  /** One tenant's step failed; the sweep moves on. `id` names the event or refund. */
+  /**
+   * One tenant's step failed, or one item in it could not be done; the sweep
+   * moves on. `id` names the checkout, event, or refund.
+   */
   onError?: (tenantId: string, item: CheckoutSweepItem, error: unknown, id?: string) => void;
   clock?: () => number;
 }
@@ -57,7 +62,11 @@ export interface CheckoutSweepOptions {
 export interface CheckoutSweepReport {
   tenants: number;
   expired: number;
-  /** Checkouts left open because another transaction held them or their holds. */
+  /**
+   * Checkouts left open because another transaction held them or their holds,
+   * or because their hold is in a state an open checkout cannot have (each of
+   * those is also reported through onError).
+   */
   skipped: number;
   reprocessed: number;
   refundsSettled: number;
@@ -74,17 +83,50 @@ export const DEFAULT_CHECKOUT_SWEEP_BATCH = 100;
 export const DEFAULT_CHECKOUT_SWEEP_GRACE_SECONDS = 60;
 
 /**
+ * An open checkout the sweep cannot expire because of its hold: missing or
+ * not the checkout's own (null), released, or confirmed. The database refuses
+ * all three at commit (the hold's foreign key and owner, and
+ * capacity_holds_checkout), so one can only come from a writer that bypassed
+ * a trigger. An operator must look at it; the sweep reports it every run and
+ * leaves it as it is.
+ */
+export interface InconsistentCheckout {
+  id: string;
+  holdState: HoldState | null;
+}
+
+/** Raised through onError for each inconsistent checkout; carries ids only. */
+export class InconsistentCheckoutError extends Error {
+  constructor(readonly checkout: InconsistentCheckout) {
+    super(
+      `open checkout ${checkout.id} has ${checkout.holdState ? `a ${checkout.holdState}` : "no"} hold`,
+    );
+    this.name = "InconsistentCheckoutError";
+  }
+}
+
+export interface ExpireCheckoutsResult {
+  expired: string[];
+  /** Left open: busy, not yet due, or inconsistent. */
+  skipped: string[];
+  /** The skipped checkouts whose hold an open checkout cannot have. */
+  inconsistent: InconsistentCheckout[];
+}
+
+/**
  * Expire up to `limit` of this tenant's open checkouts past their instant,
  * oldest first: each hold is marked expired, then the checkout. Never waits:
  * a checkout or a hold another transaction holds is skipped and reported, as
  * is a checkout whose hold is not yet due (only possible when someone moved
- * one expiry and not the other).
+ * one expiry and not the other). A checkout whose hold is missing, released,
+ * or confirmed is skipped too, and listed as inconsistent, so one impossible
+ * row cannot fail the whole batch, and with it every run.
  */
 export async function expireCheckoutSessions(
   trx: TenantTransaction,
   ctx: TenantContext,
   options: { limit: number },
-): Promise<{ expired: string[]; skipped: string[] }> {
+): Promise<ExpireCheckoutsResult> {
   if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 1000) {
     throw new RangeError("limit must be a whole number from 1 to 1000");
   }
@@ -96,6 +138,7 @@ export async function expireCheckoutSessions(
        for update skip locked`.execute(trx);
   const expired: string[] = [];
   const skipped: string[] = [];
+  const inconsistent: InconsistentCheckout[] = [];
   for (const session of rows) {
     const hold = await expireHold(trx, ctx, {
       holdId: session.hold_id,
@@ -105,9 +148,11 @@ export async function expireCheckoutSessions(
       skipped.push(session.id);
       continue;
     }
-    if (hold.kind === "not_found") throw new Error(`open checkout ${session.id} has no hold`);
-    if (hold.hold.state !== "expired") {
-      throw new Error(`open checkout ${session.id} has a ${hold.hold.state} hold`);
+    const holdState = hold.kind === "not_found" ? null : hold.hold.state;
+    if (holdState !== "expired") {
+      skipped.push(session.id);
+      inconsistent.push({ id: session.id, holdState });
+      continue;
     }
     await trx
       .updateTable("checkout_sessions")
@@ -127,7 +172,7 @@ export async function expireCheckoutSessions(
     });
     expired.push(session.id);
   }
-  return { expired, skipped };
+  return { expired, skipped, inconsistent };
 }
 
 function graceOf(seconds: number | undefined): number {
@@ -179,14 +224,23 @@ export async function sweepCheckouts(
     };
 
     // 1. Expiry, in batches. Each batch either expires something or ends the
-    // loop, so skipped checkouts cannot keep it turning.
+    // loop, so skipped checkouts cannot keep it turning. An inconsistent
+    // checkout is reported once per batch that meets it, and left alone.
     try {
       for (;;) {
-        const { expired, skipped } = await inTenantTransaction(db, ctx, (trx) =>
+        const { expired, skipped, inconsistent } = await inTenantTransaction(db, ctx, (trx) =>
           expireCheckoutSessions(trx, ctx, { limit: batchSize }),
         );
         report.expired += expired.length;
         report.skipped += skipped.length;
+        for (const checkout of inconsistent) {
+          options.onError?.(
+            tenantId,
+            "checkouts",
+            new InconsistentCheckoutError(checkout),
+            checkout.id,
+          );
+        }
         if (expired.length === 0 || expired.length + skipped.length < batchSize) break;
         if (overBudget()) {
           report.complete = false;

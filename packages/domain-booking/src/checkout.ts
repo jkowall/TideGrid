@@ -418,8 +418,10 @@ export type CancelCheckoutResult =
 /**
  * The guest abandons an open checkout: its hold is released at once, so the
  * party can be quoted again without its own hold counting against it, and its
- * order is void. A payment that succeeds later anyway is refunded in full
- * (finalize.ts). Idempotent.
+ * order is void. A lapsed checkout whose hold was already marked expired (by
+ * another checkout on its trip, a late confirmation, or the hold sweep) is
+ * canceled the same way; the hold stays expired. A payment that succeeds
+ * later anyway is refunded in full (finalize.ts). Idempotent.
  */
 export async function cancelCheckoutSession(
   trx: TenantTransaction,
