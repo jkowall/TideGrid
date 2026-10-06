@@ -11,6 +11,7 @@ import { requireConsoleGateway } from "./gateway.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
 import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
 import { registerCatalogStaffRoutes } from "./routes/catalog-staff.ts";
+import { registerPricingPublicRoutes } from "./routes/pricing-public.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
@@ -125,6 +126,7 @@ export function createApp(deps: AppDeps = {}) {
   registerAuthRoutes(app, deps);
   registerStaffRoutes(app, deps);
   registerCatalogStaffRoutes(app, deps);
+  registerPricingPublicRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",
