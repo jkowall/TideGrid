@@ -52,16 +52,23 @@ Independent problems are all reported, in the order above. Checks that depend on
 
 - **On sale** means exactly what the public availability query means: the trip is listed by `findAvailableTrips` for the product's smallest party. The quote then checks the real party against the product's limits and the trip's remaining capacity. G2.6 makes that capacity hold-aware; a quote never reserves anything.
 - **Snapshot.** A quote stores the trip it prices (product name, zone, local date and time, start instant, offset), the price list, policy, and promotion versions it used, every line with its code, name, quantity, unit price, amount, discount share, and taxability, one row per taxable line and tax rate, and the totals. Reading a quote uses only the snapshot and the immutable versions it names, so later price, tax, promotion, policy, or catalog changes never alter it.
-- **Validity.** `quotedAt` is the pricing instant; `expiresAt` is 30 minutes later. Checkout (G2.6 and G2.7) must start before then or ask for a new quote. The database refuses a quote that holds its price for more than an hour.
+- **Validity.** `quotedAt` is the pricing instant; `expiresAt` is 30 minutes later. Checkout (G2.6 and G2.7) must start before then or ask for a new quote. Both instants come from the writer's clock, so the database can only bound them: it refuses a quote dated at or after its trip's departure, or one whose `expiresAt` is not within an hour after its `quotedAt`. Within those bounds a writer with direct SQL still chooses `quotedAt`. The database's own guarantee is `created_at`: a trigger stamps it from the database clock when the row is written, whatever the writer sends. Checkout must measure a quote's age from it (below).
 - **Audit classification.** A quote records its actor and request id on its own row, stamped from the transaction's context, and writes no audit event or outbox event: it changes no booking, money, or configuration. Every command that appends terms records an audit event, and the database refuses terms written in a guest's transaction.
 - **Immutable.** Quotes, lines, and line taxes are append-only for every role. Lines and taxes can be written only in the quote's own transaction.
 - **Self-checking.** The database refuses a quote that its trip and versions do not produce, whoever writes it:
-  - when it is written, its trip snapshot must equal the trip and product it names;
+  - when it is written, its trip snapshot must equal the trip and product it names, its party must be within the product's limits and the trip's seats, and it must be dated before the trip departs;
   - at commit, the header totals must equal the lines, only taxable lines carry tax, the discount is fully allocated, there is a trip-price line, and a discount line exists exactly when a promotion is named;
   - at commit, every priced line must be an item of the named price list version copied exactly, with a quantity its rule allows on the trip's date; each item appears once, every fee is charged, and the tickets are the party;
-  - at commit, a named promotion must have been redeemable for the product at `quotedAt`, and the discount must be its rule applied to the trip price;
+  - at commit, a named promotion must have been redeemable for the product at `quotedAt`, the discount must be its rule applied to the trip price, and the discount line must carry the label the service writes, such as `HARBOR10, 10% off`;
+  - at commit, the discount must be split across the trip-price lines exactly as step 6 splits it: each line takes the floor of its proportional share, and the cents left over go one each to the largest remainders, ties to the lower line number;
   - at commit, every taxable line carries the same rate versions on one pre-tax amount, with inclusive tax extracted and added tax rounded exactly as above.
-- **What the self-check cannot see.** It checks a quote against the versions the quote names. Which versions were current, which tax rates were active, and the quote instant itself come from the service and its clock, which tests pin, so the database does not second-guess them: a writer with direct SQL could name an older price list, leave out an active tax rate, or backdate `quotedAt` into a promotion's window. Within one line, it checks that two inclusive rates' taxes sum correctly, not how the odd cent was split between them. Quotes from `createQuote` get all of these right. Checkout should take a quote by its id and charge its stored total, never an amount a client sends.
+- **What the self-check cannot see.** It checks a quote against the versions the quote names and the trip and product rows it points at. Everything else comes from the service and its clock, which tests pin. Quotes from `createQuote` get all of it right, but a writer with direct SQL could:
+  - name an older price list, policy, or promotion version than the current one, or leave out an active tax rate;
+  - choose any `quotedAt` before the trip departs, for example backdating it into a promotion's window, or dating it later to hold a price longer;
+  - store any party size within the product's limits and the trip's seats. A shared-seat party must equal its tickets, but a charter's guest count is the writer's word, and per-participant fees and add-on limits follow it. Remaining capacity, which holds change (G2.6), is checked by the service only;
+  - number the lines in another order than the service's, which decides which line takes the odd cent of a tied discount split;
+  - split the odd cent of extracted tax between two inclusive rates on one line differently, since the check covers their sum only.
+- **What checkout must do (G2.7).** Take a quote by its id and charge its stored total, never an amount a client sends. Accept a quote only while `now() < least(expires_at, created_at + interval '30 minutes')`, evaluated on the database clock, never the Worker's clock or `quotedAt`. Re-check the party against the participants checkout collects and against the trip's capacity, holds included.
 - `getTripOffer` returns what a guest can choose for one trip: ticket types or the charter price, the add-ons offered on its date, fees, active tax rates, and the policy with its cutoff instant.
 
 ## Publishing
@@ -75,10 +82,11 @@ Public routes resolve the tenant from the verified browser Origin, as `/v1/publi
 | Route | Answers |
 |---|---|
 | `GET /v1/public/trips/{tripId}/offer` | 200 offer; 404 `trip_not_found`; 409 `trip_not_bookable` or `pricing_unavailable` |
-| `POST /v1/public/quotes` | 201 quote; 400 contract; 404 `trip_not_found`; 409 `trip_not_bookable`, `pricing_unavailable`, `insufficient_capacity`; 422 the first quote problem, or `idempotency_key_reused` |
+| `POST /v1/public/quotes` | 201 quote; 400 contract; 404 `trip_not_found`; 409 `trip_not_bookable`, `pricing_unavailable`, `insufficient_capacity`; 422 the first quote problem, or `idempotency_key_reused`; 429 `rate_limited` |
 | `GET /v1/public/quotes/{quoteId}` | 200 quote; 404 `quote_not_found` for another tenant's quote, an unknown id, or a malformed one |
 
 - `POST /v1/public/quotes` needs an `Idempotency-Key`. A retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422. Guests are anonymous until checkout issues scoped credentials, so all of one tenant's guests share the principal `guest:public`. Keys are random and client-generated, and a quote holds no personal data, so a guessed key could only replay a price.
+- `POST /v1/public/quotes` is rate limited, because an Origin header is not authentication and every quote writes rows. The `PUBLIC_RATE_LIMITER` binding allows 30 a minute for each client address (`cf-connecting-ip`) at each tenant. The limit is checked after the origin resolves and before the transaction opens, so a limited request answers 429 `rate_limited` and writes nothing. Reads are not limited. Where the binding is absent, as in local development and tests, nothing is limited.
 - The error message lists every problem with the ticket type or add-on it is about. Every promotion problem answers `promotion_not_applicable`, so codes cannot be probed.
 - Responses are `Cache-Control: no-store` and `Vary: Origin`.
 
@@ -90,6 +98,18 @@ Public routes resolve the tenant from the verified browser Origin, as `/v1/publi
 
 - Deposits and balances (G2.8), refunds, credits, and applying policy remedies (G2.9 and G2.11), equipment rentals (G3.2), trip cards and credit as tender (G3.5), and tips (G3.4) are not in a quote yet. The order (G2.7) copies a quote's lines.
 - Tax rates are tenant-wide. An operator with locations in different tax jurisdictions needs per-location rates.
-- `POST /v1/public/quotes` writes a row per request and has no per-client rate limit yet. It needs one before a public deployment takes real traffic. Expired quotes are kept; nothing cleans them up yet.
+- Expired quotes are kept; nothing cleans them up yet.
 - There are no staff endpoints for terms or quotes yet; the console goal adds them on the commands above.
 - Quote creation reads `scheduled_trips` and `products` directly for a trip's product and local date before asking the catalog's availability query, which owns bookability.
+
+## Follow-ups
+
+The independent review of G2.5 on 2026-10-05 accepted it with fixes, which are applied. It also noted these, which are not fixed here:
+
+- **Sold-out trips (G2.6).** A quote finds its trip through the availability query for the product's smallest party. Once holds count against capacity, a sold-out or fully held trip drops out of that query, so a quote for it answers 409 `trip_not_bookable`, not `insufficient_capacity`. Clients should treat both as no longer available, or quote creation should tell them apart.
+- **A quote id is not authority (G2.7).** Anyone at the operator's origin who has a quote id can read the quote. Checkout must not treat holding one as the right to a checkout or a booking; it binds its own session and applies the checks above.
+- **Re-quoting a held party (G2.6 and G2.7).** Once holds count, re-quoting a guest who already holds seats counts their own hold against them, so a party that fits may be refused. A re-quote must leave out the caller's own hold.
+- **Deposits (G2.8).** A quote records no deposit terms yet. G2.8 needs a column saying whether a deposit is refundable, so the order can copy it from the quote.
+- **Index builds before production.** Migration 0005 adds unique constraints to `products` and `scheduled_trips` with a plain `ALTER TABLE`, which blocks writes to those tables while the index builds. Before production data exists, such indexes should be built with `CREATE UNIQUE INDEX CONCURRENTLY`, outside a transaction, and attached with `ADD CONSTRAINT ... USING INDEX`.
+- **Format characters in names.** Names refuse control characters (Unicode category Cc) but not format characters (category Cf), such as bidirectional overrides and zero-width joiners. Refuse Cf too when staff endpoints let operators type names.
+- **Promotion window (owner to confirm).** A promotion applies when the quote instant falls inside its window. Neither the trip's date nor the checkout instant is checked, so a code quoted a minute before its window ends still holds for the quote's 30 minutes. The owner is to confirm this reading.

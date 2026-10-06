@@ -42,12 +42,26 @@ This log records each dated verification pass over the throwaway guest workflow 
   - a guest transaction could write terms by naming another actor;
   - pricing error responses could be cached;
   - a trip starting at a time with seconds could not be quoted.
-- The specialist also probed what the database self-check cannot see. Current versions, active rates, and the quote instant come from the service and its clock. The quote validity bound was added; the rest is written down in the contract.
+- The specialist also probed what the database self-check cannot see. Current versions, active rates, and the quote instant come from the service and its clock, and the contract lists them. A bound of one hour from `quotedAt` to `expiresAt` was added, but `quotedAt` is the writer's, so the bound holds for honest quotes only. The review fixes below add what checkout can rely on: `created_at` stamped from the database clock.
+- Independent review, October 5, 2026: accept with listed fixes, none blocking. Each fix has a test that failed before it and passes after; on a branch migrated with the unfixed 0005, each new test failed at its first forged case.
+  - `POST /v1/public/quotes` is rate limited. An Origin header is not authentication, and each quote is about 20 round trips plus rows. A second Workers rate limit binding, `PUBLIC_RATE_LIMITER`, allows 30 a minute per client address and tenant, checked before the transaction opens. A limited request answers 429 `rate_limited` and writes nothing; reads are not limited. The API test's third quote was written before the fix and answers 429 after it.
+  - Quote validity no longer rests on the writer's clock alone. The reviewer's copy of a real quote dated 2030, years after its trip, had committed; a quote dated at or after its departure is now refused. A trigger stamps `created_at` from the database clock whatever the writer sends, so checkout (G2.7) can require `now() < least(expires_at, created_at + interval '30 minutes')`.
+  - The discount split is checked line by line. Forged copies that put the whole discount on either trip-price line had committed. The database now requires the exact largest-remainder split the service computes, so moving even one odd cent is refused.
+  - A quote's party must be within its product's limits and its trip's seats. In review, a charter quote re-stored with 500 guests on a 6-seat boat had committed, as had one re-stored with fewer guests and a lower fee. The first is now refused. The second stays possible within the bounds, because the database cannot count a charter's guests; the contract says so, and G2.7 must re-check the party.
+  - A discount line must carry its promotion's label exactly. A name with a control character had committed. `app.discount_label` gives the same label as the service for every percentage and for 217 fixed amounts.
+  - The demo plan lists quotes under `domain-pricing` only. The contract now states the validity guarantee, what checkout must do, what the self-check cannot see, and the review's follow-ups.
+- Checks after the fixes, on a fresh throwaway Neon branch:
+  - migrate, then seed: 892 trips, 5 price lists with 24 items, 5 policies, 3 tax rates, 2 promotion codes, and 5 published products;
+  - a second seed: nothing added;
+  - integration: 40 database, 25 catalog, 50 pricing, and 91 API tests;
+  - `pnpm check`: lint, typecheck, 457 unit tests across 11 packages (28 in the Workers runtime), 29 prototype tests, dry-run deploys of the three Workers (the API's lists `PUBLIC_RATE_LIMITER` at 30 requests per 60 seconds), and doc links;
+  - `pnpm contracts:generate` added the 429 to the OpenAPI document, and a second run changed nothing.
+- Not rerun after the fixes: the Workers-runtime smoke test under `wrangler dev`. The new limiter follows the sign-in limiter's pattern, which the G2.2 review confirmed under `wrangler dev`, and the API test drives it through a stand-in binding.
 - Not done:
-  - independent review;
   - 0005 is not applied to the Neon main branch, and nothing is deployed;
-  - no staff endpoints for terms or quotes, and no per-client limit on quote creation;
-  - tax rates are tenant-wide, not per location.
+  - no staff endpoints for terms or quotes;
+  - tax rates are tenant-wide, not per location;
+  - the review's follow-ups, listed in the [pricing contract](../packages/domain-pricing/README.md#follow-ups).
 
 ## 2026-09-30
 
