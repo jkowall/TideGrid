@@ -957,6 +957,19 @@ describe("the booking views' reads", () => {
     expect(await loadDay(tenant, { date: "2026-11-04" })).toEqual({ kind: "failed", reason });
   });
 
+  it("reads a 404 for the operator itself as a membership that ended, not a missing thing", async () => {
+    ask(reply(404, { error: { code: "tenant_not_found", message: "x", requestId: "r" } }));
+    expect(await loadDay(tenant, { date: "2026-11-04" })).toEqual({
+      kind: "failed",
+      reason: "no_access",
+    });
+    ask(reply(404, { error: { code: "booking_not_found", message: "x", requestId: "r" } }));
+    expect(await loadBooking(tenant, bookingIdsMaya)).toEqual({
+      kind: "failed",
+      reason: "not_found",
+    });
+  });
+
   it("reads an answer that is not JSON, or has nothing the screen needs, as unreadable", async () => {
     ask(() => Promise.resolve(new Response("<html>", { status: 200 })));
     expect(await loadDay(tenant, { date: "2026-11-04" })).toEqual({

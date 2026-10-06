@@ -44,7 +44,11 @@ export function isShowableTrip(value: unknown): value is StaffTrip {
 }
 
 /** Why a week did not load; see ReadFailure. `rejected`: the API refused the dates. */
-export type WeekFailure = ReadFailure;
+/**
+ * The trips route answers 404 only for an operator the person no longer
+ * belongs to, which the calendar reads as not_found and words that way.
+ */
+export type WeekFailure = Exclude<ReadFailure, "no_access">;
 
 export type WeekResult =
   | { kind: "ok"; trips: StaffTrip[] }

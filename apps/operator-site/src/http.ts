@@ -39,8 +39,11 @@ export const tenantPath = (tenantId: string) =>
 
 /**
  * Why a read did not load:
- * - signed_out, forbidden, suspended, not_found: what the API said about the
- *   person, the operator, or the thing asked for;
+ * - signed_out, forbidden, suspended: what the API said about the person or
+ *   the operator;
+ * - no_access: the person is no longer a member of the operator (404
+ *   tenant_not_found);
+ * - not_found: the operator has no such thing, such as a booking or a trip;
  * - rejected: the API refused the request as asked (400);
  * - unreadable: an answer the console cannot show, such as an unknown state;
  * - unreachable: no answer; unavailable: any other failure.
@@ -49,6 +52,7 @@ export type ReadFailure =
   | "signed_out"
   | "forbidden"
   | "suspended"
+  | "no_access"
   | "not_found"
   | "rejected"
   | "unreadable"
@@ -61,7 +65,9 @@ export async function failureOf(res: Response): Promise<ReadFailure> {
   if (res.status === 403) {
     return (await errorCode(res)) === "tenant_suspended" ? "suspended" : "forbidden";
   }
-  if (res.status === 404) return "not_found";
+  if (res.status === 404) {
+    return (await errorCode(res)) === "tenant_not_found" ? "no_access" : "not_found";
+  }
   if (res.status === 400) return "rejected";
   return "unavailable";
 }

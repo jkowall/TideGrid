@@ -720,6 +720,7 @@ function QuickFind({ tenantId, tenantName }: { tenantId: string; tenantName: str
       signed_out: "You're signed out. Sign in again, then find the booking.",
       forbidden: "Your role can't look up bookings.",
       suspended: `While ${tenantName} is suspended, bookings can't be shown.`,
+      no_access: `You no longer have access to ${tenantName}. Ask one of its owners.`,
       rejected: "That reference couldn't be looked up. Check it and try again.",
       unreadable: "TideGrid sent an answer this console can't read. Try again in a moment.",
       unreachable: "The console can't reach TideGrid. Check your connection, then try again.",

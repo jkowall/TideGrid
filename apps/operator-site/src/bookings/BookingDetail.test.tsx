@@ -588,6 +588,14 @@ describe("when the booking does not load", () => {
     await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 
+  it("says the person no longer has access, not that the booking is missing, when their membership ended", async () => {
+    api({ [route.booking(bookingId)]: () => apiError(404, "tenant_not_found") });
+    renderDetail("owner");
+    const alert = await screen.findByRole("alert");
+    expect(text(alert)).toContain("You no longer have access to this operator");
+    expect(screen.queryByText("This booking isn't here")).toBeNull();
+  });
+
   it("leaves focus where the person moved it while Try again worked", async () => {
     const retry = deferred();
     api({ [route.booking(bookingId)]: [dropped, retry.answer] });

@@ -2106,6 +2106,20 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
         400,
         "cursor_invalid",
       ],
+      // A booking of this operator, but not in this listing: another date, or
+      // another trip than the one asked for.
+      [
+        "after names a booking on another date",
+        dayPath(A.id, { date: d0, after: at(fx.crowd, 0).bookingId }),
+        400,
+        "cursor_invalid",
+      ],
+      [
+        "after names a booking on another trip",
+        dayPath(A.id, { date: d0, tripId: at(A.trips.charter, 0), after: fx.rich.bookingId }),
+        400,
+        "cursor_invalid",
+      ],
       ["exceptions limit 0", exceptionsPath(A.id, { limit: 0 }), 400, "validation_failed"],
       ["exceptions limit 101", exceptionsPath(A.id, { limit: 101 }), 400, "validation_failed"],
       ["before text", exceptionsPath(A.id, { before: "cursor" }), 400, "validation_failed"],

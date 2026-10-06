@@ -24,10 +24,15 @@ export function failureText(
         title: "This operator is suspended",
         body: `While ${what.tenantName} is suspended, ${what.noun} can't be shown.`,
       };
-    case "not_found":
+    case "no_access":
       return {
         title: "You no longer have access to this operator",
         body: `Your membership of ${what.tenantName} may have ended. Ask one of its owners.`,
+      };
+    case "not_found":
+      return {
+        title: `${capitalize(what.noun)} couldn't be found`,
+        body: `${what.tenantName} has nothing at this address. Go back to bookings and try again from there.`,
       };
     case "rejected":
       return {

@@ -574,7 +574,8 @@ describe("when the exceptions do not load", () => {
     [401, "unauthenticated", "You're signed out"],
     [403, "forbidden", "Your role can't see payment exceptions"],
     [403, "tenant_suspended", "This operator is suspended"],
-    [404, "not_found", "You no longer have access to this operator"],
+    [404, "tenant_not_found", "You no longer have access to this operator"],
+    [404, "not_found", "Payment exceptions couldn't be found"],
     [500, "internal_error", "Payment exceptions didn't load"],
   ] as const)("reads a %i %s in plain words", async (status, code, title) => {
     api({ [route.exceptions()]: () => apiError(status, code) });

@@ -911,7 +911,8 @@ describe("when the list does not load", () => {
     [401, "unauthenticated", "You're signed out", "link", "Sign in again"],
     [403, "forbidden", "Your role can't see bookings", null, null],
     [403, "tenant_suspended", "This operator is suspended", null, null],
-    [404, "not_found", "You no longer have access to this operator", null, null],
+    [404, "tenant_not_found", "You no longer have access to this operator", null, null],
+    [404, "not_found", "Bookings couldn't be found", null, null],
     [400, "validation_failed", "Bookings can't be shown for this address", "button", "Go to today"],
     [500, "internal_error", "Bookings didn't load", "button", "Try again"],
   ] as const)(
@@ -1474,6 +1475,24 @@ describe("find a booking by its reference", () => {
     type("QKG6ERBF");
     fireEvent.click(find());
     expect(await screen.findByText(message, { selector: problemText })).toBeTruthy();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("says the person no longer has access, not that the booking is missing, when their membership ended", async () => {
+    api({
+      [route.day()]: () => json(dayBody()),
+      [route.reference("QKG6ERBF")]: [() => apiError(404, "tenant_not_found")],
+    });
+    const { navigate } = renderPage();
+    await tripSection(/Sunset Harbor Cruise/);
+    type("QKG6ERBF");
+    fireEvent.click(find());
+    expect(
+      await screen.findByText(
+        `You no longer have access to ${tenantName}. Ask one of its owners.`,
+        { selector: problemText },
+      ),
+    ).toBeTruthy();
     expect(navigate).not.toHaveBeenCalled();
   });
 

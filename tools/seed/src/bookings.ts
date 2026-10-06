@@ -16,10 +16,13 @@
  * checkout is opened with the shortest hold the service allows (one minute),
  * the seed waits for it to run out, and another guest takes the boat first.
  *
- * Idempotent. A scenario whose booker already has a confirmed (or, for the
- * late payment, refunded) checkout at that operator is skipped. Bookers are
- * synthetic, at reserved `.test` addresses; the trips are whatever is
- * bookable when the seed runs.
+ * Idempotent, guest by guest. A booker who already has a confirmed (or, for
+ * the late payment, refunded) checkout at that operator is skipped, so a run
+ * interrupted after the late payment's refund books only the charter next
+ * time and never pays late twice. A refund that did not succeed stops the
+ * run. Bookers are synthetic, at reserved `.test` addresses, and the output
+ * counts them rather than naming them; the trips are whatever is bookable
+ * when the seed runs.
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
@@ -38,6 +41,8 @@ type Party =
   | { kind: "charter"; guests: number };
 
 interface Order {
+  /** What the order is, for the seed's messages, which name no booker. */
+  label: string;
   booker: { name: string; email: string };
   party: Party;
   addOns: { code: string; quantity: number }[];
@@ -59,6 +64,7 @@ const plans: Record<string, Plan> = {
     shared: {
       product: "Sunset Harbor Cruise",
       family: {
+        label: "the family's shared-seat booking",
         booker: guest("demo-harbor", "Maya Lindqvist"),
         party: {
           kind: "tickets",
@@ -73,6 +79,7 @@ const plans: Record<string, Plan> = {
         ],
       },
       discounted: {
+        label: "the discounted shared-seat booking",
         booker: guest("demo-harbor", "Theo Okafor"),
         party: { kind: "tickets", tickets: [{ code: "adult", quantity: 2 }] },
         addOns: [],
@@ -82,11 +89,13 @@ const plans: Record<string, Plan> = {
     charter: {
       product: "Private Half-Day Charter",
       winner: {
+        label: "the private charter",
         booker: guest("demo-harbor", "Iris Calder"),
         party: { kind: "charter", guests: 8 },
         addOns: [{ code: "lunch", quantity: 8 }],
       },
       late: {
+        label: "the late charter payment",
         booker: guest("demo-harbor", "Rafael Mendes"),
         party: { kind: "charter", guests: 6 },
         addOns: [],
@@ -97,6 +106,7 @@ const plans: Record<string, Plan> = {
     shared: {
       product: "Afternoon Snorkel Sail",
       family: {
+        label: "the family's shared-seat booking",
         booker: guest("demo-reef", "Keala Brooks"),
         party: {
           kind: "tickets",
@@ -111,6 +121,7 @@ const plans: Record<string, Plan> = {
         ],
       },
       discounted: {
+        label: "the discounted shared-seat booking",
         booker: guest("demo-reef", "Noah Park"),
         party: { kind: "tickets", tickets: [{ code: "adult", quantity: 2 }] },
         addOns: [],
@@ -120,11 +131,13 @@ const plans: Record<string, Plan> = {
     charter: {
       product: "Private Dive Charter",
       winner: {
+        label: "the private charter",
         booker: guest("demo-reef", "Lena Ortiz"),
         party: { kind: "charter", guests: 4 },
         addOns: [{ code: "photographer", quantity: 1 }],
       },
       late: {
+        label: "the late charter payment",
         booker: guest("demo-reef", "Sam Whitaker"),
         party: { kind: "charter", guests: 3 },
         addOns: [],
@@ -163,11 +176,20 @@ class Seeder {
 
   /** The latest checkout state a seeded booker has at this operator, or null. */
   async stateOf(order: Order): Promise<string | null> {
-    const [row] = await this.sql<{ state: string }[]>`
-      select state from public.checkout_sessions
+    return (await this.latest(order))?.state ?? null;
+  }
+
+  /** The trip of a seeded booker's latest checkout at this operator, or null. */
+  async tripOf(order: Order): Promise<string | null> {
+    return (await this.latest(order))?.tripId ?? null;
+  }
+
+  private async latest(order: Order): Promise<{ state: string; tripId: string } | null> {
+    const [row] = await this.sql<{ state: string; trip_id: string }[]>`
+      select state, trip_id from public.checkout_sessions
        where tenant_id = ${this.tenantId} and booker_email = ${order.booker.email}
        order by created_at desc limit 1`;
-    return row?.state ?? null;
+    return row ? { state: row.state, tripId: row.trip_id } : null;
   }
 
   /**
@@ -230,7 +252,7 @@ class Seeder {
       const opened = await this.open(tripId, order, ttlSeconds);
       if (opened) return opened;
     }
-    throw new Error(`${this.slug}: no bookable departure took ${order.booker.name}'s party`);
+    throw new Error(`${this.slug}: no bookable departure took ${order.label}`);
   }
 
   /**
@@ -258,6 +280,11 @@ class Seeder {
       sourceIp: null,
     });
     if (handled.kind !== "processed") throw new Error(`${this.slug}: event ${handled.kind}`);
+    // A refund the event asked for must have gone through: one left requested
+    // or refused would make the demo's exception say something untrue.
+    if (handled.refund && handled.refund.kind !== "succeeded") {
+      throw new Error(`${this.slug}: the refund came back ${handled.refund.kind}`);
+    }
     return handled.outcome;
   }
 }
@@ -290,7 +317,7 @@ export async function seedDemoBookings(
       const plan = plans[tenant.slug];
       if (!plan) continue;
       const seeder = new Seeder(sql, db, provider, tenant.id, tenant.slug);
-      const made: string[] = [];
+      let made = 0;
 
       // Two shared-seat bookings on the earliest departure that takes them.
       const shared = await seeder.candidates(plan.shared.product, false);
@@ -298,26 +325,45 @@ export async function seedDemoBookings(
         if ((await seeder.stateOf(order)) === "confirmed") continue;
         const opened = await seeder.openOnFirst(shared, order);
         const outcome = await seeder.pay(opened);
-        if (outcome !== "confirmed")
-          throw new Error(`${tenant.slug}: ${order.booker.name} ${outcome}`);
-        made.push(order.booker.name);
+        if (outcome !== "confirmed") {
+          throw new Error(`${tenant.slug}: ${order.label} came back ${outcome}`);
+        }
+        made += 1;
       }
 
       // The charter and the late payment run together: the late guest's
       // checkout lapses, the other guest takes the boat, then the late
-      // payment arrives and is refunded.
-      const done =
-        (await seeder.stateOf(plan.charter.winner)) === "confirmed" &&
-        (await seeder.stateOf(plan.charter.late)) === "unfulfilled";
-      if (!done) {
+      // payment arrives and is refunded. Each guest is checked on their own:
+      // after a run that stopped once the late payment was refunded, only the
+      // charter is left to book, on the late guest's trip when its boat is free.
+      const lateDone = (await seeder.stateOf(plan.charter.late)) === "unfulfilled";
+      const charterDone = (await seeder.stateOf(plan.charter.winner)) === "confirmed";
+      if (!lateDone) {
         const charters = await seeder.candidates(plan.charter.product, true);
         const opened = await seeder.openOnFirst(charters, plan.charter.late, LATE_HOLD_SECONDS);
         late.push({ seeder, plan, opened });
+      } else if (!charterDone) {
+        const lateTrip = await seeder.tripOf(plan.charter.late);
+        const opened =
+          (lateTrip ? await seeder.open(lateTrip, plan.charter.winner) : null) ??
+          (await seeder.openOnFirst(
+            await seeder.candidates(plan.charter.product, true),
+            plan.charter.winner,
+          ));
+        const outcome = await seeder.pay(opened);
+        if (outcome !== "confirmed") {
+          throw new Error(`${tenant.slug}: ${plan.charter.winner.label} came back ${outcome}`);
+        }
       }
+      const charterNote = lateDone
+        ? charterDone
+          ? "; the charter and the late payment already present"
+          : "; the charter booked, the late payment already present"
+        : "";
       console.log(
-        `seeded demo bookings for ${tenant.slug}: ${made.length ? made.join(", ") : "shared-seat bookings already present"}${
-          done ? "; the charter and the late payment already present" : ""
-        }`,
+        `seeded demo bookings for ${tenant.slug}: ${
+          made > 0 ? `${made} shared-seat booking(s)` : "shared-seat bookings already present"
+        }${charterNote}`,
       );
     }
 
@@ -334,11 +380,15 @@ export async function seedDemoBookings(
         if (!winner) throw new Error(`${plan.charter.product}: the boat could not be taken`);
         const refunded = await seeder.pay(opened);
         if (refunded !== "refund_required") {
-          throw new Error(`${plan.charter.product}: the late payment came back ${refunded}`);
+          throw new Error(
+            `${plan.charter.product}: ${plan.charter.late.label} came back ${refunded}`,
+          );
         }
         const confirmed = await seeder.pay(winner);
         if (confirmed !== "confirmed") {
-          throw new Error(`${plan.charter.product}: the charter came back ${confirmed}`);
+          throw new Error(
+            `${plan.charter.product}: ${plan.charter.winner.label} came back ${confirmed}`,
+          );
         }
       }
       console.log(
