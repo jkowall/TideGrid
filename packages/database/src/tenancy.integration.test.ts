@@ -644,6 +644,17 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         blackouts: ["INSERT", "SELECT"],
         brand_config_versions: ["INSERT", "SELECT"],
         brand_activations: ["INSERT", "SELECT"],
+        // Pricing, policies, and quotes (0005): append-only for the runtime.
+        price_list_versions: ["INSERT", "SELECT"],
+        price_list_items: ["INSERT", "SELECT"],
+        policy_versions: ["INSERT", "SELECT"],
+        tax_rate_versions: ["INSERT", "SELECT"],
+        promotions: ["INSERT", "SELECT"],
+        promotion_versions: ["INSERT", "SELECT"],
+        promotion_version_products: ["INSERT", "SELECT"],
+        quotes: ["INSERT", "SELECT"],
+        quote_lines: ["INSERT", "SELECT"],
+        quote_line_taxes: ["INSERT", "SELECT"],
         // Capacity and holds (G2.6).
         capacity_holds: ["INSERT", "SELECT"],
       };

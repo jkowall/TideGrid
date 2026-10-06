@@ -428,6 +428,33 @@ export async function publishProduct(
       product.kind === "shared_seat" ? Math.min(product.seat_limit ?? largest, largest) : largest;
     if (product.max_party_size > sellable) problems.push("product_party_exceeds_capacity");
   }
+  // Sale terms (G2.5): a price list and a policy, owned by domain-pricing and
+  // append-only, so a product that has them keeps them. Migration 0005 holds
+  // the same rule in a trigger for every writer; this names what is missing.
+  const terms = await trx
+    .selectNoFrom((eb) => [
+      eb
+        .exists(
+          eb
+            .selectFrom("price_list_versions")
+            .select("version")
+            .where("tenant_id", "=", ctx.tenantId)
+            .where("product_id", "=", product.id),
+        )
+        .as("has_price"),
+      eb
+        .exists(
+          eb
+            .selectFrom("policy_versions")
+            .select("version")
+            .where("tenant_id", "=", ctx.tenantId)
+            .where("product_id", "=", product.id),
+        )
+        .as("has_policy"),
+    ])
+    .executeTakeFirstOrThrow();
+  if (!terms.has_price) problems.push("product_missing_price");
+  if (!terms.has_policy) problems.push("product_missing_policy");
   if (problems.length > 0) return { kind: "not_publishable", problems };
   if (product.sales_status === "published") {
     return { kind: "unchanged", product: toCatalogProduct(product, eligibleBoatIds) };

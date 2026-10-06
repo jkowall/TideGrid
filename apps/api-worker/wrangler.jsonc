@@ -40,9 +40,20 @@
   // `wrangler dev` or the Workers test runtime.
   "triggers": { "crons": ["*/15 * * * *"] },
   // Per-IP limit on the sign-in endpoints, on top of the per-user limit in the
-  // database. The namespace id is an account-unique integer chosen here.
+  // database, and a per-address, per-tenant limit on public commands such as
+  // quote creation, which write rows. Namespace ids are account-unique
+  // integers chosen here.
   "ratelimits": [
-    { "name": "AUTH_RATE_LIMITER", "namespace_id": "7211", "simple": { "limit": 10, "period": 60 } }
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "7211",
+      "simple": { "limit": 10, "period": 60 }
+    },
+    {
+      "name": "PUBLIC_RATE_LIMITER",
+      "namespace_id": "7212",
+      "simple": { "limit": 30, "period": 60 }
+    }
   ],
   // The Workers test runtime cannot emulate Hyperdrive without a local Postgres,
   // and named environments do not inherit bindings, so tests run in this

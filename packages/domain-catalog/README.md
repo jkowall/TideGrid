@@ -49,7 +49,7 @@ A boat runs one departure at a time. Each trip holds its boat from departure unt
 - Sold out is not stored. It is capacity reaching zero, which the availability response reports.
 - Delayed belongs to trip changes, which the demo defers.
 
-Publishing a product is checked by the service only: an active location, an eligible active boat, and a party size the boat can seat. The runtime can change a product's sales status, so the database does not repeat those checks.
+Publishing a product is checked by the service: an active location, an eligible active boat, a party size the boat can seat, and, since G2.5, a price list (`product_missing_price`) and a policy (`product_missing_policy`). The runtime can change a product's sales status, so the database does not repeat the location, boat, and capacity checks. It does repeat the last two: a trigger from migration 0005 refuses publishing without sale terms for every writer, and sale terms are append-only, so a published product keeps them.
 
 ## Availability
 
@@ -66,7 +66,7 @@ Capacity left is the trip's seat count minus seats held by holds still within th
 
 ## Deferred and not yet reachable
 
-- Ticket types, prices, fees, taxes, and cancellation policy, including the change cutoff, arrive with G2.5, and the publish check grows with them.
+- Ticket types, prices, add-ons, fees, taxes, the promotion code, and the policy with its change cutoff live in [domain-pricing](../domain-pricing/README.md) since G2.5. Quotes price a trip only when the availability query above lists it.
 - Partial-day operator blocks are deferred. A single departure is blocked by closing it.
 - Browser access from tenant hostnames is deferred to G2.14b. `/v1/public/trips` resolves the tenant from the verified Origin, but the API's CORS allowlist is static configuration until G2.14b adds verified-origin CORS with its preflights. Until then a browser can call it only from a configured origin.
 - Location contact details are deferred. A tenant's contact details belong to its brand configuration (G2.14a).
