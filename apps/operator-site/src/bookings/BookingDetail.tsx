@@ -33,7 +33,7 @@ import {
   rosterHref,
   timelineLabel,
 } from "./model.ts";
-import { ReadFailed } from "./States.tsx";
+import { canRetry, ReadFailed } from "./States.tsx";
 
 /**
  * One booking (G2.12b): the trip and where to meet, the guest (for roles that
@@ -56,6 +56,9 @@ export function BookingDetailPage({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const retryRequested = useRef(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  /** Try again went with its notice: the page's heading takes focus. */
+  const focusHeadingOnLoad = useRef(false);
 
   useEffect(() => {
     void attempt;
@@ -67,6 +70,7 @@ export function BookingDetailPage({
     );
     void loadBooking(tenantId, bookingId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
+      focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetry(result.reason));
       if (result.kind === "ok") {
         setLoad({ kind: "ready", booking: result.value });
         return;
@@ -81,6 +85,13 @@ export function BookingDetailPage({
     return () => controller.abort();
   }, [tenantId, bookingId, attempt]);
 
+  useEffect(() => {
+    if (load.kind !== "loading" && focusHeadingOnLoad.current) {
+      focusHeadingOnLoad.current = false;
+      heading.current?.focus();
+    }
+  }, [load]);
+
   const retry = () => {
     retryRequested.current = true;
     setAttempt((n) => n + 1);
@@ -93,6 +104,7 @@ export function BookingDetailPage({
         eyebrow={tenantName}
         title={booking ? `Booking ${booking.reference}` : "Booking"}
         focusHeading={focusHeading}
+        headingRef={heading}
       />
       <p className="tg-visually-hidden" role="status">
         {load.kind === "loading"

@@ -97,8 +97,10 @@ export function paymentCopy(payment: BookingPaymentStatus): StatusCopy {
         return { label: "Refunded", tone: "info", icon: "receipt" };
       case "requested":
         return { label: "Refund pending", tone: "pending", icon: "clock" };
+      // A refund's states share the receipt; its tone tells them apart. A failed
+      // refund is not a failed charge, so the two differ in icon as well as words.
       case "failed":
-        return { label: "Refund failed", tone: "blocked", icon: "x-octagon" };
+        return { label: "Refund failed", tone: "blocked", icon: "receipt" };
     }
   }
   switch (payment.state) {
@@ -271,7 +273,7 @@ export function exceptionRefund(e: Pick<FinalizationException, "refund" | "reaso
       return {
         label: "Refund failed",
         tone: "blocked",
-        icon: "x-octagon",
+        icon: "receipt",
         detail: `The provider refused the ${amount} refund${
           e.refund.failureCode ? ` (${e.refund.failureCode.replaceAll("_", " ")})` : ""
         }. Refund the guest another way, or contact the provider.`,

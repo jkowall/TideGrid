@@ -46,6 +46,19 @@ async function read<T>(
 const isInt = (v: unknown): v is number => Number.isSafeInteger(v);
 const isString = (v: unknown): v is string => typeof v === "string";
 const isInstant = (v: unknown) => isString(v) && !Number.isNaN(Date.parse(v));
+const isInstantOrNull = (v: unknown) => v === null || isInstant(v);
+const isStringOrNull = (v: unknown) => v === null || isString(v);
+/** "2026-10-06T19:30:00-04:00": the local date and time are read from the text itself. */
+const isOffsetDateTime = (v: unknown) =>
+  isString(v) && /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d/.test(v) && isInstant(v);
+const timelineKinds = new Set([
+  "checkout_opened",
+  "paid",
+  "confirmed",
+  "refund_requested",
+  "refunded",
+  "refund_failed",
+]);
 
 function isTripSummary(t: Partial<BookingDayTrip> | null | undefined): boolean {
   return (
@@ -159,7 +172,8 @@ function isDetail(b: Partial<BookingDetail> | null | undefined): b is BookingDet
     isInstant(b.confirmedAt) &&
     isTripSummary(b.trip) &&
     isInstant(b.trip?.endsAt) &&
-    isString(b.trip?.endsAtLocal) &&
+    isOffsetDateTime(b.trip?.endsAtLocal) &&
+    isInt(b.trip?.durationMinutes) &&
     isString(b.location?.name) &&
     isString(b.location?.meetingPoint) &&
     isString(b.location?.meetingInstructions) &&
@@ -188,13 +202,16 @@ function isDetail(b: Partial<BookingDetail> | null | undefined): b is BookingDet
     (b.payment?.provider === "fake" || b.payment?.provider === "stripe") &&
     paymentStates.has(b.payment.state) &&
     isInt(b.payment.amount) &&
-    (b.payment.providerReference === null || isString(b.payment.providerReference)) &&
+    isStringOrNull(b.payment.providerReference) &&
+    isInstantOrNull(b.payment.succeededAt) &&
     (b.refund === null ||
       (refundStates.has(b.refund?.state as string) &&
         isInt(b.refund?.amount) &&
-        isInstant(b.refund?.requestedAt))) &&
+        isInstant(b.refund?.requestedAt) &&
+        isInstantOrNull(b.refund?.settledAt) &&
+        isStringOrNull(b.refund?.failureCode))) &&
     Array.isArray(b.timeline) &&
-    b.timeline.every((t) => isString(t?.kind) && isInstant(t?.at))
+    b.timeline.every((t) => timelineKinds.has(t?.kind) && isInstant(t?.at))
   );
 }
 
@@ -237,7 +254,8 @@ function isRoster(r: Partial<TripRoster> | null | undefined): r is TripRoster {
     !!r &&
     isInstant(r.generatedAt) &&
     isTripSummary(r.trip) &&
-    isString(r.trip?.endsAtLocal) &&
+    isOffsetDateTime(r.trip?.endsAtLocal) &&
+    isInt(r.trip?.durationMinutes) &&
     isInt(r.trip?.seats) &&
     isString(r.location?.name) &&
     isString(r.location?.meetingPoint) &&
@@ -294,13 +312,16 @@ function isException(e: Partial<FinalizationException> | null | undefined): bool
     isInt(e.amount) &&
     isInstant(e.createdAt) &&
     (e.refund === null ||
-      (refundStates.has(e.refund?.state as string) && isInt(e.refund?.amount))) &&
+      (refundStates.has(e.refund?.state as string) &&
+        isInt(e.refund?.amount) &&
+        isStringOrNull(e.refund?.failureCode))) &&
     isTripSummary(e.trip) &&
     isInt(e.partySize) &&
     isInstant(e.checkout?.expiresAt) &&
     isInstant(e.payment?.receivedAt) &&
-    (e.payment?.providerReference === null || isString(e.payment?.providerReference)) &&
+    isStringOrNull(e.payment?.providerReference) &&
     (e.payment?.reportedAmount === null || isInt(e.payment?.reportedAmount)) &&
+    isStringOrNull(e.payment?.reportedCurrency) &&
     isBooker(e.booker, true)
   );
 }

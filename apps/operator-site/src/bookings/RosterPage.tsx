@@ -29,7 +29,7 @@ import {
   partyDetail,
   paymentCopy,
 } from "./model.ts";
-import { ReadFailed } from "./States.tsx";
+import { canRetry, ReadFailed } from "./States.tsx";
 
 /**
  * A trip's roster (G2.12b): every booking with its reference, booker, party,
@@ -83,6 +83,9 @@ function Roster({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const retryRequested = useRef(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  /** Try again went with its notice: the page's heading takes focus. */
+  const focusHeadingOnLoad = useRef(false);
 
   useEffect(() => {
     void attempt;
@@ -94,6 +97,7 @@ function Roster({
     );
     void loadRoster(tenantId, tripId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
+      focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetry(result.reason));
       if (result.kind === "ok") {
         setLoad({ kind: "ready", roster: result.value });
         return;
@@ -108,10 +112,22 @@ function Roster({
     return () => controller.abort();
   }, [tenantId, tripId, attempt]);
 
+  useEffect(() => {
+    if (load.kind !== "loading" && focusHeadingOnLoad.current) {
+      focusHeadingOnLoad.current = false;
+      heading.current?.focus();
+    }
+  }, [load]);
+
   const roster = load.kind === "ready" ? load.roster : null;
   return (
     <>
-      <PageHeader eyebrow={tenantName} title="Roster" focusHeading={focusHeading} />
+      <PageHeader
+        eyebrow={tenantName}
+        title="Roster"
+        focusHeading={focusHeading}
+        headingRef={heading}
+      />
       <p className="tg-visually-hidden" role="status">
         {load.kind === "loading"
           ? "Loading the roster…"

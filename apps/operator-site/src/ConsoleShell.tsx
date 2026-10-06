@@ -66,21 +66,23 @@ const placeOf: Record<Route["kind"], { section: string | null; title: string }> 
 /**
  * Pathname routing for the shell. The console Worker serves the app for any
  * path. `moved` turns true once the person changes page, by the navigation, a
- * link, or the browser's back and forward buttons. `location` is the address
- * a page was opened at, path and query, so following a link to the same path
- * with another query opens the page afresh.
+ * link, or the browser's back and forward buttons. `visit` counts those
+ * changes, so every one opens its page afresh: a page may move its own
+ * address within itself (the list's day, the calendar's week), and a link to
+ * the address it was opened at must still open it anew. A link to the very
+ * address already showing changes nothing.
  */
 function usePath(): {
   path: string;
-  location: string;
+  visit: number;
   moved: boolean;
   navigate: (to: string) => void;
 } {
-  const [at, setAt] = useState(here);
+  const [at, setAt] = useState(() => ({ path: window.location.pathname, visit: 0 }));
   const [moved, setMoved] = useState(false);
   useEffect(() => {
     const onPop = () => {
-      setAt(here());
+      setAt((current) => ({ path: window.location.pathname, visit: current.visit + 1 }));
       setMoved(true);
     };
     window.addEventListener("popstate", onPop);
@@ -88,18 +90,16 @@ function usePath(): {
   }, []);
   const navigate = useCallback((to: string) => {
     const url = new URL(to, window.location.origin);
-    window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
-    setAt({ path: url.pathname, search: url.search });
+    const address = `${url.pathname}${url.search}`;
+    if (address === `${window.location.pathname}${window.location.search}`) return;
+    window.history.pushState(null, "", `${address}${url.hash}`);
+    setAt((current) => ({ path: url.pathname, visit: current.visit + 1 }));
     setMoved(true);
     // A new page starts at its top, as a page load would. Back and Forward
     // keep the browser's own scroll restoration.
     (document.scrollingElement ?? document.documentElement).scrollTop = 0;
   }, []);
-  return { path: at.path, location: `${at.path}${at.search}`, moved, navigate };
-}
-
-function here() {
-  return { path: window.location.pathname, search: window.location.search };
+  return { path: at.path, visit: at.visit, moved, navigate };
 }
 
 function initials(name: string): string {
@@ -249,21 +249,33 @@ export function ConsoleShell({
   /** The shell replaced a screen the person acted on, so the first page's heading takes focus. */
   focusHeading?: boolean;
 }) {
-  const { path, location, moved, navigate } = usePath();
+  const { path, visit, moved, navigate } = usePath();
   const { principal, memberships } = me;
   const [scopeId, setScopeId] = useState(memberships[0]?.tenantId);
   // Switching operators on a page restarts pages keyed on the operator. Their
   // headings must not take focus then: the person is still in the picker, and
   // moving them away on a change of value would be a surprise.
-  const [switchedOn, setSwitchedOn] = useState<string | null>(null);
+  const [switchedOn, setSwitchedOn] = useState<number | null>(null);
   useEffect(() => {
-    void path;
+    void visit;
     setSwitchedOn(null);
-  }, [path]);
-  const focusPage = switchedOn !== path && (focusHeading || moved);
+  }, [visit]);
+  const focusPage = switchedOn !== visit && (focusHeading || moved);
   const selectScope = (tenantId: string) => {
+    // A trip filter names one operator's trip; the next operator's list starts
+    // from every trip.
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("trip")) {
+      params.delete("trip");
+      const search = params.toString() ? `?${params}` : "";
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${search}${window.location.hash}`,
+      );
+    }
     setScopeId(tenantId);
-    setSwitchedOn(path);
+    setSwitchedOn(visit);
   };
   const selected = memberships.find((m) => m.tenantId === scopeId) ?? memberships[0];
   const route = routeOf(path);
@@ -377,9 +389,9 @@ export function ConsoleShell({
               <p>You're still signed in. Check your connection, then choose Sign out again.</p>
             </Notice>
           )}
-          {/* Keyed on the address: every page change mounts a new page, so its
+          {/* Keyed on the visit: every page change mounts a new page, so its
             heading takes focus even between two pages built alike. */}
-          <Fragment key={location}>{page}</Fragment>
+          <Fragment key={visit}>{page}</Fragment>
         </main>
       </div>
     </NavigationProvider>

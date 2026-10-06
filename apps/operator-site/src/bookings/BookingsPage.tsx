@@ -15,6 +15,7 @@ import {
   formatDate,
   formatMoney,
   formatTripTime,
+  isLocalDate,
   type LocalDate,
   todayIn,
   zoneCity,
@@ -78,7 +79,7 @@ export function BookingsPage({
   const [zone, setZone] = useState<string | undefined>();
   // A day in the address is known at once; otherwise it waits for the zone.
   const [day, setDay] = useState<LocalDate | null>(() =>
-    new URLSearchParams(window.location.search).has("day")
+    isLocalDate(new URLSearchParams(window.location.search).get("day") ?? "")
       ? readDay(window.location.search, todayIn())
       : null,
   );
@@ -89,6 +90,8 @@ export function BookingsPage({
   const keepList = useRef(false);
   const dayHeading = useRef<HTMLHeadingElement>(null);
   const focusDayOnLoad = useRef(false);
+  /** The last page took Show more bookings with it: its first booking takes focus. */
+  const focusBookingId = useRef<string | null>(null);
   const today = todayIn(zone);
   const bounds = dayBounds(today);
 
@@ -123,7 +126,11 @@ export function BookingsPage({
         if (named) setZone((known) => known ?? named);
         return;
       }
-      focusDayOnLoad.current = false;
+      // The list and the trip control the person was on go with a failed
+      // refresh, so the day's heading takes focus, as it does for a control
+      // that went with the change; a failed Try again keeps its button, and
+      // focus stays there.
+      focusDayOnLoad.current = keep || (focusDayOnLoad.current && !retry);
       setLoad((current) => ({
         kind: "failed",
         reason: result.reason,
@@ -149,9 +156,19 @@ export function BookingsPage({
     }
   }, [day, tripId, today]);
 
-  // A control that goes away with the change hands focus to the day's heading.
+  // A control that goes away with the change hands focus on: to the first
+  // booking of a last page, or to the day's heading.
   useEffect(() => {
-    if (load.kind === "ready" && focusDayOnLoad.current) {
+    // Only a settled answer moves focus: never while Try again is still working.
+    if (load.kind === "loading" || (load.kind === "failed" && load.retrying)) return;
+    const first = focusBookingId.current;
+    if (load.kind === "ready" && first !== null) {
+      focusBookingId.current = null;
+      const link = document.querySelector<HTMLElement>(`[data-booking="${first}"]`);
+      (link ?? dayHeading.current)?.focus();
+      return;
+    }
+    if (focusDayOnLoad.current) {
       focusDayOnLoad.current = false;
       dayHeading.current?.focus();
     }
@@ -178,13 +195,18 @@ export function BookingsPage({
   };
 
   const loadMore = () => {
-    if (load.kind !== "ready" || !load.page.nextAfter || !day) return;
+    if (load.kind !== "ready" || load.refreshing || !load.page.nextAfter || !day) return;
     const after = load.page.nextAfter;
     setLoad({ ...load, more: "loading" });
     void loadDay(tenantId, { date: day, tripId, after }).then((result) => {
       setLoad((current) => {
-        if (current.kind !== "ready" || current.page.nextAfter !== after) return current;
+        if (current.kind !== "ready" || current.refreshing || current.page.nextAfter !== after) {
+          return current;
+        }
         if (result.kind !== "ok") return { ...current, more: "failed" };
+        if (result.value.nextAfter === null) {
+          focusBookingId.current = result.value.bookings[0]?.id ?? "";
+        }
         return {
           kind: "ready",
           more: "idle",
@@ -431,7 +453,7 @@ function Day({
         />
       ))}
 
-      {page.nextAfter && (
+      {page.nextAfter && !refreshing && (
         <div className="bk-more">
           {more === "failed" && (
             <Notice tone="error" className="bk-notice" title="More bookings didn't load">
@@ -548,7 +570,11 @@ function BookingRows({
           const state = bookingStates[b.state];
           return (
             <li key={b.id} className="bk-row">
-              <ConsoleLink href={bookingHref(b.id)} className="bk-row__ref tap-target">
+              <ConsoleLink
+                href={bookingHref(b.id)}
+                className="bk-row__ref tap-target"
+                data-booking={b.id}
+              >
                 <VisuallyHidden>Booking </VisuallyHidden>
                 {b.reference}
               </ConsoleLink>
@@ -625,12 +651,12 @@ function QuickFind({ tenantId, tenantName }: { tenantId: string; tenantName: str
   const field = useRef<HTMLInputElement>(null);
   const inputId = useId();
   const live = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    live.current = true;
+    return () => {
       live.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

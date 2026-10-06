@@ -15,7 +15,7 @@ import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, roleNames } from "../roles.ts";
 import { loadExceptions, type ExceptionsPage as Page } from "./api.ts";
 import { bookingsHref, exceptionRefund, exceptionTitle, guestsText, instantText } from "./model.ts";
-import { ReadFailed } from "./States.tsx";
+import { canRetry, ReadFailed } from "./States.tsx";
 
 /**
  * Payments that arrived but could not become bookings (G2.12b): what
@@ -38,6 +38,11 @@ export function ExceptionsPage({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const retryRequested = useRef(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  /** Try again went with its notice: the page's heading takes focus. */
+  const focusHeadingOnLoad = useRef(false);
+  /** Show older exceptions went with the last page: the first older one takes focus. */
+  const focusExceptionId = useRef<string | null>(null);
 
   useEffect(() => {
     void attempt;
@@ -49,6 +54,7 @@ export function ExceptionsPage({
     );
     void loadExceptions(tenantId, {}, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
+      focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetry(result.reason));
       if (result.kind === "ok") {
         setLoad({ kind: "ready", page: result.value, more: "idle" });
         return;
@@ -63,6 +69,20 @@ export function ExceptionsPage({
     return () => controller.abort();
   }, [tenantId, attempt]);
 
+  useEffect(() => {
+    if (load.kind === "loading") return;
+    if (focusHeadingOnLoad.current) {
+      focusHeadingOnLoad.current = false;
+      heading.current?.focus();
+      return;
+    }
+    const first = focusExceptionId.current;
+    if (load.kind === "ready" && first) {
+      focusExceptionId.current = null;
+      (document.getElementById(exceptionHeadingId(first)) ?? heading.current)?.focus();
+    }
+  }, [load]);
+
   const loadOlder = () => {
     if (load.kind !== "ready" || !load.page.nextBefore) return;
     const before = load.page.nextBefore;
@@ -71,6 +91,11 @@ export function ExceptionsPage({
       setLoad((current) => {
         if (current.kind !== "ready" || current.page.nextBefore !== before) return current;
         if (result.kind !== "ok") return { ...current, more: "failed" };
+        // The button the person pressed goes with the last page; the first
+        // older exception takes focus, so their place is kept.
+        if (result.value.nextBefore === null) {
+          focusExceptionId.current = result.value.exceptions[0]?.id ?? "";
+        }
         return {
           kind: "ready",
           more: "idle",
@@ -86,7 +111,12 @@ export function ExceptionsPage({
   const exceptions = load.kind === "ready" ? load.page.exceptions : [];
   return (
     <>
-      <PageHeader eyebrow={tenantName} title="Payment exceptions" focusHeading={focusHeading} />
+      <PageHeader
+        eyebrow={tenantName}
+        title="Payment exceptions"
+        focusHeading={focusHeading}
+        headingRef={heading}
+      />
       <div className="ex">
         <p className="ex-lede">
           Payments that arrived but couldn't become bookings. TideGrid refunds each one in full
@@ -157,6 +187,8 @@ export function ExceptionsPage({
   );
 }
 
+const exceptionHeadingId = (id: string) => `exception-${id}`;
+
 function ExceptionItem({
   exception: e,
   seesGuests,
@@ -171,7 +203,9 @@ function ExceptionItem({
   return (
     <li className="ex-item" data-tone={refund.tone}>
       <div className="ex-item__head">
-        <h2 className="ex-item__title">{exceptionTitle(e.reason)}</h2>
+        <h2 className="ex-item__title" id={exceptionHeadingId(e.id)} tabIndex={-1}>
+          {exceptionTitle(e.reason)}
+        </h2>
         <StatusBadge tone={refund.tone} icon={refund.icon}>
           {refund.label}
         </StatusBadge>
