@@ -613,6 +613,25 @@ export function api(routes: Record<string, Answer | Answer[]>): Call[] {
       const method = init?.method ?? "GET";
       const key = `${method} ${url.pathname}`;
       const call: Call = { method, path: url.pathname, query: url.searchParams };
+      // Waivers (G2.15): the booking page's waiver card reads its own route.
+      // A test that does not name it gets "no waiver applies", kept out of
+      // `calls` so each view's own requests stay countable.
+      if (
+        !routes[key] &&
+        /^GET \/api\/v1\/staff\/tenants\/[^/]+\/bookings\/[^/]+\/waivers$/.test(key)
+      ) {
+        return json({
+          waivers: {
+            bookingId: url.pathname.split("/").at(-2),
+            reference: "0000AAAA",
+            bookingState: "confirmed",
+            partySize: 1,
+            required: false,
+            participants: [],
+            unnamedPlaces: 1,
+          },
+        });
+      }
       calls.push(call);
       const queued = routes[key];
       const answer =

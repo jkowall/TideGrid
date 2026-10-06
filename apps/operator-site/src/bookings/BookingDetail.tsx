@@ -21,6 +21,7 @@ import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, roleNames } from "../roles.ts";
+import { BookingWaiversCard } from "../waivers/BookingWaivers.tsx";
 import { loadBooking } from "./api.ts";
 import { MaskedReference } from "./MaskedReference.tsx";
 import {
@@ -154,6 +155,15 @@ export function BookingDetailPage({
         ))}
       {booking && (
         <Detail booking={booking} seesGuests={canSeeGuests(role)} roleName={roleNames[role]} />
+      )}
+      {/* Waivers (G2.15): a self-contained card; this line is its only placement. */}
+      {booking && canSeeGuests(role) && (
+        <BookingWaiversCard
+          tenantId={tenantId}
+          bookingId={booking.id}
+          role={role}
+          timeZone={booking.trip.timeZone}
+        />
       )}
     </>
   );
