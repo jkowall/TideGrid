@@ -15,6 +15,7 @@ import {
   type PaymentProvider,
   ProviderUnavailableError,
 } from "@tidegrid/domain-payments";
+import { sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
@@ -22,6 +23,7 @@ import {
   cancelCheckoutSession,
   createCheckoutSession,
   ensureProviderPayment,
+  expireCheckoutSessions,
   getCheckoutSession,
   handleVerifiedEvent,
   listFinalizationExceptions,
@@ -730,5 +732,64 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
     const [settledFirst] = await admin<{ state: string }[]>`
       select state from public.payment_refunds where id = ${first ?? ""}`;
     expect(settledFirst?.state).toBe("succeeded");
+  });
+
+  // Added with the independent review's fixes. An open checkout whose hold is
+  // released or confirmed cannot commit (capacity_holds_checkout checks at
+  // commit), but if one ever existed the sweep must not fail its tenant's
+  // whole batch over it every run. The state is built inside a runtime
+  // transaction that always rolls back: the deferred check never runs, and
+  // nothing is kept.
+  it("skips and reports an open checkout whose hold is released or confirmed, and expires the rest of its batch", async () => {
+    const healthy = await checkout(A, tripsA.shared(), 1);
+    const released = await checkout(A, tripsA.shared(), 1);
+    const confirmed = await checkout(A, tripsA.shared(), 1);
+    // Time passes for the first two, checkout and hold together. Only the
+    // third checkout lapses, so its hold can still be confirmed in place.
+    await backdateCheckout(admin, healthy.session.id);
+    await backdateCheckout(admin, released.session.id);
+    await admin`update public.checkout_sessions set expires_at = now() - interval '1 second'
+      where id = ${confirmed.session.id}`;
+    const holds = await admin<{ id: string; session: string }[]>`
+      select hold_id as id, id as session from public.checkout_sessions
+       where id in ${admin([released.session.id, confirmed.session.id])}`;
+    const holdOf = (sessionId: string) => holds.find((h) => h.session === sessionId)?.id ?? "";
+
+    const ctx: TenantContext = {
+      tenantId: A.id,
+      actorType: "system",
+      actorId: "checkout-sweep",
+      requestId: `sweep-${randomUUID()}`,
+    };
+    const rollback = new Error("always roll back");
+    let swept: Awaited<ReturnType<typeof expireCheckoutSessions>> | undefined;
+    await expect(
+      inTenantTransaction(runtime.db, ctx, async (trx) => {
+        await sql`update capacity_holds set state = 'released'
+                   where tenant_id = ${A.id} and id = ${holdOf(released.session.id)}`.execute(trx);
+        await sql`update capacity_holds set state = 'confirmed'
+                   where tenant_id = ${A.id} and id = ${holdOf(confirmed.session.id)}`.execute(trx);
+        swept = await expireCheckoutSessions(trx, ctx, { limit: 1000 });
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+
+    expect(swept?.expired).toContain(healthy.session.id);
+    expect(swept?.expired).not.toContain(released.session.id);
+    expect(swept?.expired).not.toContain(confirmed.session.id);
+    expect(swept?.skipped).toEqual(
+      expect.arrayContaining([released.session.id, confirmed.session.id]),
+    );
+    expect(swept?.inconsistent).toEqual(
+      expect.arrayContaining([
+        { id: released.session.id, holdState: "released" },
+        { id: confirmed.session.id, holdState: "confirmed" },
+      ]),
+    );
+    expect(swept?.inconsistent.map((c) => c.id)).not.toContain(healthy.session.id);
+    // Nothing was kept.
+    for (const id of [healthy.session.id, released.session.id, confirmed.session.id]) {
+      expect(await stateOf(id)).toMatchObject({ session: "open", hold: "active" });
+    }
   });
 });

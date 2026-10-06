@@ -40,7 +40,10 @@ export {
   type CheckoutSweepReport,
   DEFAULT_CHECKOUT_SWEEP_BATCH,
   DEFAULT_CHECKOUT_SWEEP_GRACE_SECONDS,
+  type ExpireCheckoutsResult,
   expireCheckoutSessions,
+  type InconsistentCheckout,
+  InconsistentCheckoutError,
   sweepCheckouts,
 } from "./sweep.ts";
 export { type CheckoutSessionView, loadSessionView } from "./views.ts";

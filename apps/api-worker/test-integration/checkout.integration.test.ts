@@ -231,6 +231,8 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
       `events/${eventId}/redeliver`,
     );
     expect(again.json.delivery).toEqual({ status: 200, outcome: "confirmed", duplicate: true });
+    // A stored event is a settlement, so the payment had settled before the redelivery.
+    expect(again.json.alreadySettled).toBe(true);
     const [stored] = await admin<{ body: string }[]>`
       select body from public.fake_provider_events where id = ${eventId}`;
     const signature = await signatureHeaderValue(TEST_FAKE_SECRET, Date.now(), stored?.body ?? "");
@@ -312,6 +314,69 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
     );
     expect(confirmedCancel.status).toBe(409);
     expect(confirmedCancel.json.error?.code).toBe("checkout_not_cancelable");
+  });
+
+  // Added with the independent review's fixes: a lapsed checkout whose hold
+  // another guest's checkout has already marked expired, before any sweep
+  // reached the checkout itself. Both answered 500 before the fix.
+  async function lapsedWithExpiredHold() {
+    const tripId = tripsA.shared();
+    const opened = await open(A, tripId, 2);
+    const session = opened.json.checkoutSession;
+    const payment = opened.json.payment;
+    if (!session || !payment) throw new Error(JSON.stringify(opened.json));
+    await admin`
+      with s as (update public.checkout_sessions set expires_at = now() - interval '1 second'
+                  where id = ${session.id} returning hold_id)
+      update public.capacity_holds h set expires_at = now() - interval '1 second'
+        from s where h.id = s.hold_id`;
+    // Another guest's checkout on the same trip writes the lapsed hold down.
+    expect((await open(A, tripId, 1)).status).toBe(201);
+    const [stored] = await admin<{ state: string; hold: string }[]>`
+      select s.state, h.state as hold from public.checkout_sessions s
+        join public.capacity_holds h on h.id = s.hold_id where s.id = ${session.id}`;
+    expect(stored).toEqual({ state: "open", hold: "expired" });
+    return { session, payment, secret: opened.secret };
+  }
+
+  it("cancels a lapsed checkout whose hold another checkout already expired", async () => {
+    const leaving = await lapsedWithExpiredHold();
+    const canceled = await request(
+      "POST",
+      `/v1/public/checkout-sessions/${leaving.session.id}/cancel`,
+      { origin: guest(A), headers: { authorization: `Bearer ${leaving.secret}` } },
+    );
+    expect(canceled.status).toBe(200);
+    expect(canceled.json.checkoutSession?.state).toBe("canceled");
+  });
+
+  it("fails a lapsed checkout whose hold another checkout already expired, and answers its retry", async () => {
+    const failing = await lapsedWithExpiredHold();
+    const failed = await control(
+      A,
+      failing.payment.paymentRef,
+      failing.payment.clientSecret,
+      "fail",
+    );
+    expect(failed.json.delivery).toEqual({ status: 200, outcome: "released", duplicate: false });
+    expect((await status(A, failing.session.id, failing.secret)).json.checkoutSession?.state).toBe(
+      "failed",
+    );
+    // The provider's retry of the same event is a 200 duplicate, not another 500.
+    const [stored] = await admin<{ body: string }[]>`
+      select body from public.fake_provider_events where id = ${failed.json.event?.id ?? ""}`;
+    const retry = await request("POST", "/v1/webhooks/payments/fake", {
+      raw: stored?.body ?? "",
+      headers: {
+        "fake-signature": await signatureHeaderValue(
+          TEST_FAKE_SECRET,
+          Date.now(),
+          stored?.body ?? "",
+        ),
+      },
+    });
+    expect(retry.status).toBe(200);
+    expect(retry.json).toEqual({ received: true, duplicate: true, outcome: "released" });
   });
 
   it("refunds a late success that cannot reacquire, and the sweep expires checkouts", async () => {

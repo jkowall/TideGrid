@@ -7808,7 +7808,7 @@
                     },
                     "alreadySettled": {
                       "type": "boolean",
-                      "description": "The payment had settled before; this is its first event"
+                      "description": "The payment had settled before this call, so the event is its existing outcome, not a new one. A redelivery settles nothing, and a payment has an event only once it has settled, so a redelivery always answers true"
                     },
                     "delivery": {
                       "type": [
@@ -8031,7 +8031,7 @@
                     },
                     "alreadySettled": {
                       "type": "boolean",
-                      "description": "The payment had settled before; this is its first event"
+                      "description": "The payment had settled before this call, so the event is its existing outcome, not a new one. A redelivery settles nothing, and a payment has an event only once it has settled, so a redelivery always answers true"
                     },
                     "delivery": {
                       "type": [
@@ -8245,7 +8245,7 @@
                     },
                     "alreadySettled": {
                       "type": "boolean",
-                      "description": "The payment had settled before; this is its first event"
+                      "description": "The payment had settled before this call, so the event is its existing outcome, not a new one. A redelivery settles nothing, and a payment has an event only once it has settled, so a redelivery always answers true"
                     },
                     "delivery": {
                       "type": [

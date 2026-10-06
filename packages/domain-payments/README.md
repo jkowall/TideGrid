@@ -68,6 +68,17 @@ Stripe's scheme: a header `t=<unix seconds>,v1=<hex>`, where v1 is HMAC-SHA256 o
 
 The API's demo controls over it are listed in the [checkout contract](../domain-booking/README.md#api) and the OpenAPI document under the `fake-provider` tag.
 
+## Follow-ups for the Stripe adapter
+
+Recorded from the G2.7 independent review. They are notes for the goal that builds the Stripe adapter, and nothing here changes until then.
+
+- **Inbox provenance.** The database cannot tell where an inbox row came from. The owner and the runtime role can both insert a `provider_events` row directly; the runtime needs INSERT to record events at all. A `payment.succeeded` row for a payment's provider id, account, amount, and currency is all the evidence the payment trigger asks for before the payment may become `succeeded`. The signature is checked in the service, not the database: the `VerifiedProviderEvent` brand, which only an adapter's `verifyWebhook` sets, is the only guard on what reaches `recordProviderEvent`. The [checkout contract](../domain-booking/README.md#the-rule) says so too. The Stripe adapter must keep `verifyWebhook` the only producer of that brand, and nothing but `recordProviderEvent` may insert into the inbox. A guard inside the database would need the signing secret there, or a separate inbox-writer role; both are outside the demo.
+- **Stripe retries can change the body.** Stripe signs every delivery afresh, and an event's `pending_webhooks` counts the endpoints that have not yet received it, so it falls as other endpoints succeed ([the event object](https://docs.stripe.com/api/events/object)). Two deliveries of one event need not be byte for byte the same. Today the inbox compares the SHA-256 of the raw body, so such a retry:
+  - is recorded as `samePayload: false`, and the webhook route logs `payment_webhook_payload_mismatch` as an error on every one;
+  - answers `payload_mismatch` without processing, even when the first delivery's processing failed and the event is still `received`, so only the sweep finishes it.
+
+  The Stripe adapter must deduplicate on the event id, as [Stripe advises](https://docs.stripe.com/webhooks#handle-duplicate-events), or hash a normalized body that leaves out per-delivery fields. Stripe never changes an event's `data`. The fake's redeliveries are identical bytes, so the demo cannot show this. Stripe also says it sometimes sends two separate events for one change. Processing is already idempotent per payment (`already_succeeded`, `already_failed`), so a second event id for the same outcome changes nothing.
+
 ## Tests
 
 - `pnpm --filter @tidegrid/domain-payments test` runs the signature and fake-provider unit tests, none of which touch a database.

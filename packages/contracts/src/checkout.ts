@@ -200,7 +200,11 @@ export const FakeDelivery = z
 
 export const FakePaymentControlResponse = z.object({
   event: FakePaymentEvent,
-  alreadySettled: z.boolean().describe("The payment had settled before; this is its first event"),
+  alreadySettled: z
+    .boolean()
+    .describe(
+      "The payment had settled before this call, so the event is its existing outcome, not a new one. A redelivery settles nothing, and a payment has an event only once it has settled, so a redelivery always answers true",
+    ),
   delivery: FakeDelivery.nullable().describe("Null when delivery was held back"),
 });
 export type FakePaymentControlResponse = z.infer<typeof FakePaymentControlResponse>;

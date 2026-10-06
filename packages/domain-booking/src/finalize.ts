@@ -7,7 +7,8 @@
  *   after expiry) and create the booking, or, when the capacity is gone, refund
  *   in full and raise a finalization exception;
  * - success after the checkout failed or was canceled: refund and raise;
- * - failure on an open checkout: release the hold and close it as failed;
+ * - failure on an open checkout: release the hold, unless it was already
+ *   marked expired, and close it as failed;
  * - anything already decided: change nothing.
  *
  * Every outcome is idempotent per event and per payment, whatever order or
@@ -53,7 +54,7 @@ export type ProcessOutcome =
   | "confirmed_reacquired"
   /** The success could not be honored; a full refund was requested and an exception raised. */
   | "refund_required"
-  /** A failure closed an open checkout and released its hold. */
+  /** A failure closed an open checkout and released its hold, or found it already expired. */
   | "released"
   /** A failure arrived after the checkout expired or was canceled; recorded on the payment. */
   | "failure_recorded"
@@ -524,6 +525,10 @@ async function onFailure(
     .execute();
   if (session.state !== "open") return result("failure_recorded", ids);
 
+  // A lapsed checkout's hold may already be marked expired: acquisition and
+  // confirmation expire every due hold on their trip, and the hold sweep runs
+  // before the checkout sweep. releaseHold leaves an expired hold as it is,
+  // and the checkout fails all the same; its seats are free either way.
   const released = await releaseHold(trx, ctx, {
     holdId: session.hold_id,
     ownerRef: ownerRefFor(session.id),

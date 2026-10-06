@@ -205,10 +205,17 @@ export function registerFakeProviderRoutes(app: OpenAPIHono<AppEnv>) {
   app.openapi(redeliverRoute, async (c) => {
     const { paymentRef, eventId } = c.req.valid("param");
     const { fake, tenantId } = await authorize(c, paymentRef, true);
-    const event = await fake.findEvent(tenantId, paymentRef, eventId);
-    if (!event) throw new ApiError(404, "event_not_found", "No such event");
+    const found = await fake.findEvent(tenantId, paymentRef, eventId);
+    if (!found) throw new ApiError(404, "event_not_found", "No such event");
+    // Read from the stored payment, not assumed. A redelivery settles nothing,
+    // and a payment has an event only once it has settled, so this is true.
+    const alreadySettled = found.payment.status !== "pending";
     return c.json(
-      { event: eventView(event), alreadySettled: true, delivery: await deliver(c, fake, event) },
+      {
+        event: eventView(found.event),
+        alreadySettled,
+        delivery: await deliver(c, fake, found.event),
+      },
       200,
     );
   });
