@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { BookingWaivers, ParticipantWaiver } from "@tidegrid/contracts";
+import type { BookingWaivers, ParticipantWaiver, StaffRole } from "@tidegrid/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BookingWaiversCard } from "./BookingWaivers.tsx";
 import { TripWaiversCard } from "./TripWaivers.tsx";
@@ -9,6 +9,8 @@ import { TripWaiversCard } from "./TripWaivers.tsx";
 const tenantId = "7d1e5b3a-1c2f-4a8e-9b61-0a1c2e3f4a01";
 const bookingId = "11111111-2222-4333-8444-555555555555";
 const tripId = "a99737eb-69c6-4c43-a430-a33aa4740556";
+const owner: StaffRole = "owner";
+const bookingStaff: StaffRole = "booking_staff";
 
 function participant(
   name: string,
@@ -97,7 +99,7 @@ describe("a booking's waivers", () => {
       <BookingWaiversCard
         tenantId={tenantId}
         bookingId={bookingId}
-        role="booking_staff"
+        role={bookingStaff}
         timeZone="America/New_York"
       />,
     );
@@ -120,7 +122,7 @@ describe("a booking's waivers", () => {
   });
 
   it("sends a request again with a reason and a key, and reloads", async () => {
-    const calls = stubApi((url, init) =>
+    const calls = stubApi((url) =>
       url.endsWith("/resend")
         ? json(201, { delivery: { generation: 2, queuedAt: "2026-10-06T16:00:00.000Z" } })
         : json(200, { waivers }),
@@ -129,7 +131,7 @@ describe("a booking's waivers", () => {
       <BookingWaiversCard
         tenantId={tenantId}
         bookingId={bookingId}
-        role="owner"
+        role={owner}
         timeZone="America/New_York"
       />,
     );
@@ -157,7 +159,7 @@ describe("a booking's waivers", () => {
       <BookingWaiversCard
         tenantId={tenantId}
         bookingId={bookingId}
-        role="owner"
+        role={owner}
         timeZone="America/New_York"
       />,
     );

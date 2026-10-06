@@ -20,6 +20,7 @@ import {
   sendWaiverRequest,
 } from "@tidegrid/domain-waivers";
 import type { AppDeps, AppEnv } from "../context.ts";
+import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
 import { pdfResponse, waiverDeps } from "../waivers.ts";
@@ -285,6 +286,8 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       },
     );
     if (replayed) c.header("Idempotent-Replayed", "true");
+    // The new email goes out at once; the cron's sweep sends it if this misses.
+    else deliverAfterCommit(c, deps, tenantId);
     return c.json(body as WaiverResendResponse, 201);
   });
 
