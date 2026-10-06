@@ -19,6 +19,13 @@ export interface RequestAttributes {
   /** Staff user id (a UUID). Never an email address. */
   "user.id"?: string;
   duration_ms?: number;
+  /** SQLSTATE of a failed database call. */
+  "db.response.status_code"?: string;
+  /** Hold sweep counters (G2.6). */
+  "tidegrid.hold_sweep.tenant_count"?: number;
+  "tidegrid.hold_sweep.expired_count"?: number;
+  "tidegrid.hold_sweep.failed_tenant_count"?: number;
+  "tidegrid.hold_sweep.complete"?: boolean;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -33,6 +40,11 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "event.name",
   "user.id",
   "duration_ms",
+  "db.response.status_code",
+  "tidegrid.hold_sweep.tenant_count",
+  "tidegrid.hold_sweep.expired_count",
+  "tidegrid.hold_sweep.failed_tenant_count",
+  "tidegrid.hold_sweep.complete",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

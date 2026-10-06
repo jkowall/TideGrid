@@ -4,6 +4,67 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-10-05
 
+### G2.6 Capacity and holds verification, October 5, 2026
+
+- Built on branch `build/g2.6-capacity-and-holds` from `a541eab`, in parallel with G2.5. The contract is the [inventory README](../packages/domain-inventory/README.md).
+  - The capacity and holds migration, renumbered if G2.5 merges first, adds `capacity_holds` under the tenancy contract. One trigger locks the trip's row, counts active and confirmed holds, and refuses any insert or reacquisition that does not fit, for every role. It also enforces sales rules, expiry bounds, one-way states, and immutability.
+  - A second trigger stops any role from shrinking a trip below its held seats, changing its product, or resizing a held charter. A partial unique index backs the whole-boat rule. The runtime may update `state` only, and no role may delete or truncate.
+  - `packages/domain-inventory` acquires (idempotent per owner and trip), confirms (reacquiring after expiry, or reporting lost capacity), releases, expires per tenant, sweeps across tenants, and reads capacity. Each transition writes one audit row and one `inventory.hold.*` event.
+  - Both trip listings subtract held and confirmed seats. Staff also see `soldOut`, `held`, and `confirmed`, and can read a trip's holds. The new contract fields are optional, so the trips slice's fixtures keep validating.
+  - The API Worker sweeps from a cron trigger every 15 minutes. Its tenant list comes from a definer function that returns tenant ids only; the security argument is in the [database README](../packages/database/README.md#capacity-holds).
+- Decisions, recorded in the inventory README:
+  - A per-trip row lock and a count over stored states, not counter columns or an exclusion constraint.
+  - Expiry is written down under the lock before anything is counted. So a hold past its instant never blocks a new one, and no two transactions can disagree about it.
+  - The database clock decides expiry: `now()`, the transaction's start.
+  - Every command needs READ COMMITTED.
+- Checks:
+  - `pnpm check` is green: Biome on 189 files, 370 unit tests across 11 packages (30 in the Workers runtime), three dry-run deploys, doc links, and 29 prototype tests. A frozen install, the build, and the OpenAPI drift check are clean.
+  - On a fresh throwaway Neon branch, as CI runs it: migrate; seed, 892 trips; a second seed, 0 new trips; then 219 integration tests. That is 40 database, 24 catalog, 86 inventory (28 by the lead, 58 adversarial), and 69 API tests.
+- Race evidence. An independent test specialist wrote 58 adversarial tests and 3 API tests against the contract.
+  - Every race ran 20 to 30 sessions on separate connections, released together from a barrier so every snapshot came before every write.
+  - Races covered the last seat, filling from empty, mixed parties, and the whole boat, each both through the service and as raw inserts that bypass it. They also covered acquisitions against sweeps, late confirmations against expiry, release then acquire, mixed isolation levels, cancellation, duplicate replays, all-or-nothing checkouts, and a storm with an observer sampling the invariant.
+  - Before the fixes below: seven runs of 54 rounds and one stress run of 162 rounds at 28 to 30 sessions. The stress run had 739 successes and 3,997 refusals.
+  - After the fixes: a run of 81 rounds (371 successes, 1,668 refusals) and the 54-round acceptance run.
+  - Every run had 0 oversell and 0 unexpected errors. Where order matters, both orders happened: across three final runs, lazy expiry and the sweep each won 18 times, and late confirmations reacquired 15 times and lost 15 times.
+- Mutation checks, each reverted:
+  - Without the trigger's capacity check, the two tests that write past the service turned red.
+  - Without the trigger's row lock, raw concurrent inserts oversold: 3 winners for one last seat, 24 holds on a 10-seat trip, and 66 seats sold on 10. The whole-boat race still held, because the unique index refused the second hold.
+  - Without the expiry predicate in `app.trip_capacity_usage`, two read tests turned red.
+  - Without the whole-boat index, its test turned red.
+  - Without lazy expiry in acquisition, both tests where an expired hold must not block turned red.
+  - Without the service's own trip lock, nothing oversold, but losers got 4 to 23 errors per race instead of clean refusals.
+- Defects found and fixed during the goal:
+  - The specialist's D1: under REPEATABLE READ or SERIALIZABLE, commands answered `insufficient_capacity` or `capacity_lost` from a stale snapshot; only writes were refused. Every command now refuses any level but READ COMMITTED before deciding. Four red tests turned green.
+  - The specialist's D2: the owner role could shrink a trip below its held seats. The trip-side trigger fixes it.
+  - The specialist's observations, acted on: a replayed acquisition after expiry reported a stale `active`, and now reports `expired`. The fixture's always-closed product was on sale for later trips.
+  - Found by the lead:
+    - Release took no trip lock, so release then acquire could deadlock against another acquisition.
+    - The whole-boat index test could commit with the trigger disabled when the index was missing; it now always rolls back.
+    - The committed OpenAPI document lacked the holds route.
+    - `app.ts` logged the SQLSTATE of unhandled errors under a key the logger's allowlist dropped; the key is now allowed.
+- Independent review, October 5, 2026, on a second model: accept with listed fixes. No oversell, no double confirmation, no cross-tenant leak, nothing blocking. Each fix has a test that failed before it and passes after; the database tests failed first on a branch migrated with the unfixed migration.
+  - **Whole-boat reacquisition kept stale seats.** Found by inspection, then reproduced through the owner connection. With a charter's hold expired, the owner grew the boat and the trip from 6 to 8 seats, and the late confirmation reacquired the 6-seat hold. `app.trip_capacity_usage` then left 2 seats, so the listing showed a taken charter; nothing was oversold.
+    - Reacquisition now derives the kind and seats as a new hold does and refuses a hold that no longer matches (`capacity_holds_kind`). That also covers a product swap or a product kind change while the hold was expired.
+    - `confirmHold` checks first and answers `capacity_lost` with `trip_unavailable`, the reason for a trip no longer sold as it was held. `no_capacity` would be wrong for an empty boat. Two tests.
+  - **The owner role could extend a hold past departure.** Reproduced: moving an active hold's expiry to a day past departure succeeded, and the hold kept counting.
+    - The trigger now refuses any later expiry, for every role, and still allows an earlier one, which is how tests make time pass. No service or trigger path writes `expires_at` after insert. One test.
+    - The storm test backdates one hold more than once, and a second backdate is later than the first. Under the new rule, with the old helper, it failed twice with 23514. Both backdate helpers now keep the earlier instant.
+    - Invariant 7 in the inventory README, the migration, the table type, and the database README now say exactly what the trigger sets.
+  - **The cron outcome.** The handler passed the sweep to `waitUntil`. Cloudflare records the first failed `waitUntil` as the cron status, so a failure did reach the cron's past events, but the handler itself always resolved and no test could see a failure. It now awaits the sweep, and a failed run rejects the invocation after logging why. A Workers-runtime test with a failing sweep failed before the change and passes after it.
+  - Recorded in the [inventory README](../packages/domain-inventory/README.md#follow-ups), not fixed: the owner role can still change a product's kind under active or confirmed holds; the staff holds read has no pagination; the per-trip usage function in the listings needs watching as data grows; and once G2.5 lands, a quote for a trip with fewer seats left than the product's smallest party answers `trip_not_bookable`, not `insufficient_capacity`.
+  - Renumbering the migration after G2.5's 0005, and giving the fixtures' products the sale terms G2.5 requires, wait for G2.5 to merge.
+- Checks after the fixes:
+  - `pnpm check` is green: Biome on 190 files, 371 unit tests across 11 packages (31 in the Workers runtime), three dry-run deploys, doc links, and 29 prototype tests.
+  - On a fresh throwaway Neon branch, as CI runs it: migrate; seed, 892 trips; a second seed, 0 new trips; then 222 integration tests. That is 40 database, 24 catalog, 89 inventory, and 69 API tests.
+- Not done, and follow-ups for G2.7:
+  - No route acquires, confirms, or releases a hold.
+  - Canceling a trip with confirmed holds still succeeds.
+  - Nothing limits holds per guest.
+  - A late payment gets no priority over acquisitions already queued.
+  - The cron is not deployed.
+  - The seed creates no holds, because a confirmed hold without a booking would be a phantom sale.
+  - Not covered: Workers with Hyperdrive pooling, the sweep at scale, clock skew at the cutoff between the listing and acquisition, a blackout racing an acquisition, and a compute restart mid-transaction.
+
 ### G2.5 Pricing, add-ons, fees, and policies verification, October 5, 2026
 
 - Built on branch `build/g2.5-pricing-and-policies` from `a541eab`:

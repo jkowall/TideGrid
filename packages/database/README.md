@@ -70,6 +70,21 @@ Migration 0005 adds ten tenant-owned tables under rules 1 to 10, described in th
 - **Actors.** A trigger stamps `actor_type`, `actor_id`, and `request_id` from the transaction's context on every version, promotion, and quote row, so no writer can name another actor. Version and promotion rows refuse the guest actor type through their `actor_type` check, so a guest may create quotes only.
 - **Numbering.** Commands that append a version take a per-aggregate transaction lock, such as `tidegrid.price_list:<tenant>:<product>`, before reading the current version, as brand publishing does.
 
+## Capacity holds
+
+The capacity and holds migration adds `capacity_holds` under rules 1 to 10. The contract, the concurrency design, and the clock decision are in the [inventory README](../domain-inventory/README.md); what matters for tenancy:
+
+- The runtime keeps the default SELECT and INSERT and may UPDATE `state` only. A trigger sets the kind, the seats taken, and every timestamp but the expiry instant, which can only move earlier. It enforces the one-way states and the capacity rule for every role, and refuses DELETE and TRUNCATE for every role, the owner included. A second trigger, on `scheduled_trips`, keeps a trip's capacity and product from changing under its holds.
+- The trigger runs as the caller. It reads the trip under the caller's row-level security and filters by the hold's tenant, so a hold can never name another tenant's trip; the composite foreign key backs that up.
+- `app.trip_capacity_usage(tenant, trip)` is an invoker function. Row-level security applies inside it, and it filters by tenant explicitly.
+
+`app.capacity_hold_sweep_tenants(limit)` lets the cron sweep find the tenants with holds past their expiry instant. It is the one cross-tenant read the runtime has beyond sign-in and hostname resolution. The argument for it:
+
+- It returns tenant ids and nothing else: no hold, trip, owner, or count. An id grants nothing. Every read and write that follows runs in `inTenantTransaction` under forced row-level security, and tenant ids already appear in staff URLs.
+- What it reveals is that some tenant has at least one stale hold. That is a weaker activity signal than the shared audit and outbox id sequences already give (see the known gaps above).
+- It is read-only and STABLE, a SECURITY DEFINER function with `search_path` pinned, every relation qualified, explicit predicates, and at most 1,000 rows. EXECUTE is granted to `tidegrid_app` only.
+- The alternatives are worse. A row-level-security bypass for the cron's connection would expose every tenant's rows to one session. A tenant list in configuration drifts from the database and would silently skip new tenants. One definer function that expired holds across tenants would write audit and outbox rows outside any tenant's transaction.
+
 ## Tests
 
 - `pnpm test` runs unit tests.
