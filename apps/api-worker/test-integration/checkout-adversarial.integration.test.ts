@@ -799,6 +799,9 @@ describe.skipIf(!env).concurrent("G2.7 adversarial: checkout and payments throug
     }
   });
 
+  // About 30 requests in sequence, each on its own database connection, so on
+  // a distant Neon branch this one test runs close to a minute. It gets three
+  // minutes instead of the suite's one.
   it("keeps every new route inside its tenant", async ({ expect }) => {
     const a = await open(A, tripsA.shared(), 1);
     const b = await open(B, tripsB.shared(), 1);
@@ -995,5 +998,5 @@ describe.skipIf(!env).concurrent("G2.7 adversarial: checkout and payments throug
       select count(*)::int as n from public.fake_provider_events
        where payment_id in (${a.payment.paymentRef}, ${b.payment.paymentRef})`;
     expect(settledCount?.n).toBe(0);
-  });
+  }, 180_000);
 });
