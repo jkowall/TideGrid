@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { charterTripId, testNow, tripId } from "./fixtures.ts";
 import {
   type BookedRecord,
+  clearBooked,
   clearResume,
   type ResumeRecord,
   readBooked,
@@ -194,6 +195,24 @@ describe("a record past its checkout's expiry", () => {
     expect(stored()).toBeNull();
   });
 
+  it("ages on the server's clock it learned, so a fast device keeps a live record", () => {
+    // The device runs 45 minutes fast: by its clock the expiry is 30 minutes past.
+    const fast = { ...record, clockOffsetMs: -45 * minute };
+    saveResume(fast);
+    expect(readResume(tripId, now + 45 * minute)).toEqual(fast);
+    expect(stored()).not.toBeNull();
+    // On the server's clock it ages as any other: removed once 10 minutes past.
+    expect(readResume(tripId, expiry + 45 * minute + 10 * minute + 1)).toBeNull();
+    expect(stored()).toBeNull();
+  });
+
+  it("ages on the server's clock for a slow device too", () => {
+    const slow = { ...record, clockOffsetMs: 20 * minute };
+    saveResume(slow);
+    // By the device's clock only 5 minutes past the expiry; by the server's, 25.
+    expect(readResume(tripId, expiry + 5 * minute)).toBeNull();
+  });
+
   it("reads the clock when no time is given", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     saveResume(record);
@@ -335,5 +354,14 @@ describe("the last confirmation", () => {
   it("reads nothing from text that is not a record", () => {
     window.sessionStorage.setItem("tidegrid.booked", "{not json");
     expect(readBooked(tripId)).toBeNull();
+  });
+
+  it("is forgotten when a new checkout opens for its trip, and kept for another trip's", () => {
+    saveBooked(booked);
+    clearBooked(charterTripId);
+    expect(readBooked(tripId)).toEqual(booked);
+    clearBooked(tripId.toUpperCase());
+    expect(bookedText()).toBeNull();
+    expect(() => clearBooked(tripId)).not.toThrow();
   });
 });

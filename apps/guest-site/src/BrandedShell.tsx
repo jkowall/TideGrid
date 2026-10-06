@@ -156,7 +156,38 @@ function NotFoundPage({ brand }: { brand: PublicBrand }) {
   );
 }
 
-function Footer({ brand }: { brand: PublicBrand }) {
+/**
+ * A footer link away from the page. During a checkout it opens in a new tab,
+ * so reading the terms or the operator's website never leaves the checkout,
+ * and it says so.
+ */
+function FooterLink({
+  href,
+  newTab,
+  children,
+}: {
+  href: string;
+  newTab: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <a
+      className="tap-target guest-footer__link"
+      href={href}
+      {...(newTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+    >
+      {children}
+      {newTab && (
+        <>
+          <Icon name="external" />
+          <span className="tg-visually-hidden"> (opens in a new tab)</span>
+        </>
+      )}
+    </a>
+  );
+}
+
+function Footer({ brand, inCheckout }: { brand: PublicBrand; inCheckout: boolean }) {
   const { phone, email, website } = brand.contact;
   return (
     <footer className="guest-footer">
@@ -187,10 +218,10 @@ function Footer({ brand }: { brand: PublicBrand }) {
               )}
               {website && (
                 <li>
-                  <a className="tap-target guest-footer__link" href={website}>
+                  <FooterLink href={website} newTab={inCheckout}>
                     <Icon name="globe" />
                     Website
-                  </a>
+                  </FooterLink>
                 </li>
               )}
             </ul>
@@ -199,14 +230,14 @@ function Footer({ brand }: { brand: PublicBrand }) {
             <h2 className="tg-eyebrow">Policies</h2>
             <ul className="guest-footer__list">
               <li>
-                <a className="tap-target guest-footer__link" href={brand.legal.terms}>
+                <FooterLink href={brand.legal.terms} newTab={inCheckout}>
                   Terms of booking
-                </a>
+                </FooterLink>
               </li>
               <li>
-                <a className="tap-target guest-footer__link" href={brand.legal.privacy}>
+                <FooterLink href={brand.legal.privacy} newTab={inCheckout}>
                   Privacy notice
-                </a>
+                </FooterLink>
               </li>
             </ul>
           </nav>
@@ -276,7 +307,7 @@ export function BrandedShell({
         )}
         {page.kind === "not-found" && <NotFoundPage brand={brand} />}
       </main>
-      <Footer brand={brand} />
+      <Footer brand={brand} inCheckout={page.kind === "book"} />
     </div>
   );
 }

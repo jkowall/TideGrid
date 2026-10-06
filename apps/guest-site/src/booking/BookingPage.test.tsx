@@ -1612,3 +1612,172 @@ describe("a stored quote in a zone the page doesn't know", () => {
     expect(await heading("We couldn't load this trip")).toBeTruthy();
   });
 });
+
+// The code review's second round ----------------------------------------------------------
+
+/** Lose the answer to opening a checkout, so the page is in doubt. */
+async function intoDoubt() {
+  await toDetails();
+  fillDetails();
+  fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
+  expect(await screen.findByText("We couldn't confirm that your checkout started")).toBeTruthy();
+}
+
+describe("after a lost answer, the next answer decides", () => {
+  it("clears the doubt on a definite refusal and shows it: too many checkouts", async () => {
+    stubApi({ openCheckout: inOrder(offline, () => refusal(429, "too_many_checkouts")) });
+    renderPage("?t.adult=1");
+    await intoDoubt();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Too many checkouts are open")).toBeTruthy();
+    expect(screen.queryByText("We couldn't confirm that your checkout started")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Full name" }).matches(":disabled")).toBe(false);
+    expect(
+      screen.getByRole("button", { name: "Change party or extras" }).getAttribute("aria-disabled"),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Continue to payment" })).toBeTruthy();
+  });
+
+  it("clears the doubt on a definite refusal and shows it: an expired price", async () => {
+    stubApi({ openCheckout: inOrder(offline, () => refusal(409, "quote_expired")) });
+    renderPage("?t.adult=1");
+    await intoDoubt();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Your price was updated")).toBeTruthy();
+    expect(screen.queryByText("We couldn't confirm that your checkout started")).toBeNull();
+  });
+
+  it("keeps the doubt and the request through a rate limit, which refuses before the key is read", async () => {
+    const calls = stubApi({
+      openCheckout: inOrder(
+        offline,
+        () => refusal(429, "rate_limited"),
+        (call) => opened(call),
+      ),
+    });
+    renderPage("?t.adult=1");
+    await intoDoubt();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Too many tries in a short time")).toBeTruthy();
+    expect(screen.getByText("We couldn't confirm that your checkout started")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Full name" }).matches(":disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await heading("Payment");
+    const opens = callsTo(calls, "openCheckout");
+    expect(opens).toHaveLength(3);
+    expect(new Set(opens.map((c) => c.headers.get("idempotency-key"))).size).toBe(1);
+    expect(new Set(opens.map((c) => JSON.stringify(c.body))).size).toBe(1);
+  });
+
+  it("asks before a link leaves while the checkout is still opening", async () => {
+    const answer = held();
+    stubApi({ openCheckout: answer.answer });
+    const { navigate } = renderPage("?t.adult=1");
+    await toDetails();
+    fillDetails();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
+    fireEvent.click(screen.getByRole("link", { name: "All trips" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Leave before your checkout is confirmed?" }),
+    ).toBeTruthy();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("a kept confirmation and a later checkout", () => {
+  it("never shows an earlier booking for a later checkout of the same trip", async () => {
+    let state: "open" | "confirmed" | "failed" = "open";
+    const settledAs = (next: "confirmed" | "failed") => () => {
+      state = next;
+      return settled();
+    };
+    stubApi({
+      succeed: settledAs("confirmed"),
+      fail: settledAs("failed"),
+      readCheckout: () => json({ checkoutSession: checkout(state) }),
+    });
+    renderPage("?t.adult=1");
+    await toDetails();
+    await toPayment();
+    fireEvent.click(screen.getByRole("button", { name: "Simulate successful payment" }));
+    await heading("You're booked");
+    expect(window.sessionStorage.getItem("tidegrid.booked")).not.toBeNull();
+
+    // Back to book the same trip again, and this time the card is declined.
+    window.history.back();
+    await heading("Who's coming");
+    state = "open";
+    await toDetails();
+    await toPayment();
+    expect(window.sessionStorage.getItem("tidegrid.booked")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Simulate declined payment" }));
+    await heading("Your payment was declined");
+    await waitFor(() => expect(window.location.search).toMatch(/step=status$/));
+
+    // The reload shows no booking.
+    const address = window.location.search;
+    cleanup();
+    stubApi();
+    renderPage(address);
+    expect(await heading("This checkout isn't open in this tab")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "You're booked" })).toBeNull();
+  });
+});
+
+describe("a reload with a device clock that is off", () => {
+  it("follows a sent payment with the device 45 minutes fast", async () => {
+    // The checkout expires 10 minutes after the server's now; the device reads 45 minutes later.
+    storeCheckout({
+      paymentSent: true,
+      paymentTried: true,
+      expiresAt: new Date(testNow.getTime() + 10 * 60_000).toISOString(),
+      clockOffsetMs: -45 * 60_000,
+    });
+    vi.setSystemTime(testNow.getTime() + 45 * 60_000);
+    const calls = stubApi({
+      readCheckout: inOrder(
+        () => json({ checkoutSession: checkout("open") }),
+        () => json({ checkoutSession: checkout("confirmed") }),
+      ),
+    });
+    renderPage("?t.adult=1&step=status");
+    expect(await heading("Confirming your payment")).toBeTruthy();
+    expect(await heading("You're booked")).toBeTruthy();
+    expect(callsTo(calls, "readCheckout").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("typing a party count through lower ones", () => {
+  it("waits for the count to be final before lowering extras, then says so", async () => {
+    stubApi();
+    renderPage("?t.adult=2&a.drinks=4");
+    await heading("Who's coming");
+    const adult = screen.getByRole("spinbutton", { name: "Adult" }) as HTMLInputElement;
+    const drinks = screen.getByRole("spinbutton", { name: "Drink voucher" }) as HTMLInputElement;
+    // On the way to 12, the count passes 1: the extras wait.
+    fireEvent.change(adult, { target: { value: "1" } });
+    expect(drinks.value).toBe("4");
+    fireEvent.change(adult, { target: { value: "12" } });
+    fireEvent.blur(adult);
+    expect(drinks.value).toBe("4");
+    // A count left at 1 is final: the extras fit it, and the page says so.
+    fireEvent.change(adult, { target: { value: "1" } });
+    fireEvent.blur(adult);
+    await waitFor(() => expect(drinks.value).toBe("2"));
+    expect(announced()).toBe("Drink voucher lowered to 2, the most for 1 guest.");
+  });
+
+  it("fits the extras when the form is sent with a count still being typed", async () => {
+    const calls = stubApi();
+    renderPage("?t.adult=2&a.drinks=4");
+    await heading("Who's coming");
+    const adult = screen.getByRole("spinbutton", { name: "Adult" }) as HTMLInputElement;
+    fireEvent.change(adult, { target: { value: "1" } });
+    fireEvent.submit(adult.form as HTMLFormElement);
+    await heading("Your details");
+    expect(callsTo(calls, "createQuote")[0]?.body).toMatchObject({
+      party: { kind: "tickets", tickets: [{ code: "adult", quantity: 1 }] },
+      addOns: [{ code: "drinks", quantity: 2 }],
+    });
+  });
+});

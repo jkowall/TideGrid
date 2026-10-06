@@ -245,7 +245,8 @@ export function DetailsStep({
             </p>
           </Notice>
         )}
-        {!inDoubt && trouble?.notice && (
+        {/* While in doubt, a notice is about the last try, such as the rate limit. */}
+        {trouble?.notice && (
           <Notice tone="error" title={trouble.notice.title}>
             <p>{trouble.notice.body}</p>
           </Notice>

@@ -15,7 +15,8 @@
  * The last confirmation ("tidegrid.booked"): what the confirmation screen
  * showed, so a reload of it still shows the booking reference. It holds no
  * secret and no name or email: the reference, the trip, the party, the
- * extras, and the total. The next confirmation in the tab replaces it.
+ * extras, and the total. The next confirmation in the tab replaces it, and a
+ * new checkout for the same trip removes it.
  */
 
 const checkoutKey = "tidegrid.checkout";
@@ -154,13 +155,15 @@ export function clearResume(): void {
 
 /**
  * The record for this trip's checkout, if there is one. A record that is
- * unreadable or long past its checkout's expiry is removed instead.
+ * unreadable or long past its checkout's expiry is removed instead. The
+ * expiry is the server's, so it is compared on the server's clock as the
+ * record learned it: a device clock that is off must not age the record.
  */
 export function readResume(tripId: string, now: number = Date.now()): ResumeRecord | null {
   const text = read(checkoutKey);
   if (text === null) return null;
   const record = parseResume(text);
-  if (!record || Date.parse(record.expiresAt) + graceMs < now) {
+  if (!record || Date.parse(record.expiresAt) + graceMs < now + (record.clockOffsetMs ?? 0)) {
     clearResume();
     return null;
   }
@@ -173,6 +176,16 @@ const optionalText = (value: unknown): value is string | null => value === null 
 
 export function saveBooked(record: BookedRecord): void {
   write(bookedKey, record);
+}
+
+/**
+ * Forget the confirmation kept for a trip, as a new checkout for it opens: a
+ * reload of the new checkout's outcome must never show the old booking. A
+ * confirmation for another trip stays.
+ */
+export function clearBooked(tripId: string): void {
+  const value = json(read(bookedKey));
+  if (value && value.tripId === tripId.toLowerCase()) remove(bookedKey);
 }
 
 /** The last confirmation in this tab, if it was for this trip. */

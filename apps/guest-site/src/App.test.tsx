@@ -131,6 +131,41 @@ describe("guest app", () => {
     window.history.replaceState(null, "", "/");
   });
 
+  it("opens the footer's policies in a new tab during a checkout, and says so", async () => {
+    window.history.replaceState(null, "", `/book/${tripId}`);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/v1/public/tenant") return ready();
+        if (url.pathname.endsWith("/offer")) return json({ offer });
+        if (url.pathname === "/v1/public/trips") return json({ trips: [listing] });
+        throw new Error(`unexpected ${url}`);
+      }),
+    );
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Sunset Harbor Cruise" });
+    // This brand lists no website; the website's link follows the same rule.
+    for (const name of ["Terms of booking", "Privacy notice"]) {
+      const link = screen.getByRole("link", {
+        name: new RegExp(`^${name}\\s*\\(opens in a new tab\\)$`),
+      });
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("keeps the footer's policies in the same tab away from a checkout", async () => {
+    window.history.replaceState(null, "", "/legal/terms");
+    vi.stubGlobal("fetch", vi.fn(site()));
+    render(<App />);
+    await screen.findByRole("heading", { level: 1, name: "Terms of booking" });
+    const link = screen.getByRole("link", { name: "Privacy notice" });
+    expect(link.getAttribute("target")).toBeNull();
+    window.history.replaceState(null, "", "/");
+  });
+
   it("keeps a page through Back and Forward within it, such as a checkout's steps", async () => {
     window.history.replaceState(null, "", `/book/${tripId}`);
     vi.stubGlobal(

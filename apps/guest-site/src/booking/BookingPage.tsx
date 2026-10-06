@@ -89,6 +89,7 @@ import { PartyStep, partyFieldId } from "./PartyStep.tsx";
 import { type PayBusy, PayStep } from "./PayStep.tsx";
 import {
   type BookedRecord,
+  clearBooked,
   clearResume,
   type ResumeRecord,
   readBooked,
@@ -325,6 +326,8 @@ export function BookingPage({
   /** Aborted when the page goes, so no answer acts on a page that is gone. */
   const page = useRef<AbortController | null>(null);
   const lock = useRef(false);
+  /** A request to open a checkout is out: until it answers, the checkout may be opening. */
+  const opening = useRef(false);
   const initialized = useRef(false);
   /** The offer the selection was last fitted to; a new listing alone changes nothing. */
   const fittedOffer = useRef<TripOffer | null>(null);
@@ -412,7 +415,9 @@ export function BookingPage({
       setConfirm({ kind: "leave", proceed });
       return true;
     }
-    if (at === "details" && inDoubtRef.current) {
+    // A checkout that may have started, or may be starting now, could hold the
+    // seats with no way back to it from another page.
+    if (at === "details" && (inDoubtRef.current || opening.current)) {
       setConfirm({ kind: "leave-in-doubt", proceed });
       return true;
     }
@@ -1022,6 +1027,8 @@ export function BookingPage({
   ): Promise<CheckoutSession | null> {
     if (!ready) return null;
     const from = stageRef.current.kind;
+    // An earlier request under this key may have opened the checkout: its answer was lost.
+    const doubted = inDoubtRef.current;
     const fingerprint = JSON.stringify([forQuote.quoteId, forQuote.policy.version, who]);
     const { key, secret } = checkoutAttempt.current.for(fingerprint);
     const body = {
@@ -1030,12 +1037,19 @@ export function BookingPage({
       booker: who,
       checkoutSecret: secret,
     };
-    let result = await openCheckout(body, key, signal());
-    for (const delay of timing.providerRetryDelaysMs) {
-      if (!alive() || !isProviderUnavailable(result)) break;
-      await wait(delay);
-      if (!alive()) break;
+    // While the request is out, the checkout may be opening: leaving asks first.
+    opening.current = true;
+    let result: Awaited<ReturnType<typeof openCheckout>>;
+    try {
       result = await openCheckout(body, key, signal());
+      for (const delay of timing.providerRetryDelaysMs) {
+        if (!alive() || !isProviderUnavailable(result)) break;
+        await wait(delay);
+        if (!alive()) break;
+        result = await openCheckout(body, key, signal());
+      }
+    } finally {
+      opening.current = false;
     }
     if (!alive()) return null;
     if (result.kind === "ok") {
@@ -1071,6 +1085,9 @@ export function BookingPage({
         return null;
       }
       saveResume(recordOf(opened, false));
+      // A confirmation kept for this trip belongs to an earlier checkout: a
+      // reload must never show it for this one.
+      clearBooked(tripId);
       // From the details, the payment is a new step in the history; a retry
       // after a decline takes the outcome's place.
       pendingPush.current = from === "details" ? "pay" : null;
@@ -1085,7 +1102,21 @@ export function BookingPage({
       go({ kind: "details" });
       return null;
     }
+    // The rate limit refuses before the API reads the key, so after a lost
+    // answer the checkout may still exist: the doubt and the attempt stand.
+    if (doubted && result.kind === "refused" && result.code === "rate_limited") {
+      setTrouble({
+        notice: {
+          title: "Too many tries in a short time",
+          body: "Wait a minute, then press Try again.",
+        },
+      });
+      go({ kind: "details" });
+      return null;
+    }
+    // Any other refusal is definite: nothing was written under this key.
     checkoutAttempt.current.done();
+    setInDoubt(false);
     const found = checkoutTrouble(result, brand.name, isCharter(ready.offer));
     if (result.kind === "refused" && result.code === "idempotency_key_reused") {
       setTrouble(found);

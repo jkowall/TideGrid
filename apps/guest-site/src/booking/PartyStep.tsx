@@ -1,7 +1,13 @@
 import type { TripOffer } from "@tidegrid/contracts";
-import { Button, Icon, Notice, QuantityField } from "@tidegrid/design-system/components";
+import {
+  Button,
+  Icon,
+  Notice,
+  type QuantityChange,
+  QuantityField,
+} from "@tidegrid/design-system/components";
 import { formatMoney } from "@tidegrid/design-system/format";
-import type { ReactNode, Ref } from "react";
+import { type ReactNode, type Ref, useRef } from "react";
 import {
   addOnChangeText,
   addOnHint,
@@ -93,15 +99,33 @@ export function PartyStep({
   const addOnErrors = { ...trouble?.addOns, ...addOnProblems(offer, selection) };
   const tax = taxText(offer);
 
-  const withParty = (next: Selection) => {
+  // The party size the extras were last fitted to. A count being typed passes
+  // through others ("12" passes 1), so extras wait until the count is final:
+  // a button, leaving the field, or sending the form.
+  const fittedFor = useRef(size);
+  const fit = (next: Selection): Selection => {
     const fitted = fitAddOns(offer, next);
     const lowered = addOnChangeText(offer, next, fitted);
     if (lowered) onAnnounce(lowered);
-    onSelection(fitted);
+    fittedFor.current = partySize(offer, fitted);
+    return fitted;
   };
-  const setTicket = (code: string, n: number) =>
-    withParty({ ...selection, tickets: { ...selection.tickets, [code]: n } });
-  const setGuests = (n: number) => withParty({ ...selection, guests: n });
+  const withTicket = (code: string, n: number) => ({
+    ...selection,
+    tickets: { ...selection.tickets, [code]: n },
+  });
+  const setTicket = (code: string, n: number, how: QuantityChange) => {
+    const next = withTicket(code, n);
+    onSelection(how === "typing" ? next : fit(next));
+  };
+  const setGuests = (n: number, how: QuantityChange) => {
+    const next = { ...selection, guests: n };
+    onSelection(how === "typing" ? next : fit(next));
+  };
+  /** A typed party count is final: fit the extras to it, if its size changed. */
+  const commitParty = (next: Selection) => {
+    if (partySize(offer, next) !== fittedFor.current) onSelection(fit(next));
+  };
   const setAddOn = (code: string, n: number) =>
     onSelection({ ...selection, addOns: { ...selection.addOns, [code]: n } });
 
@@ -112,7 +136,9 @@ export function PartyStep({
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        onContinue(committedSelection(offer, selection, new FormData(event.currentTarget)));
+        const committed = committedSelection(offer, selection, new FormData(event.currentTarget));
+        // Sent while a party count was still being typed: fit the extras as leaving it would.
+        onContinue(partySize(offer, committed) !== fittedFor.current ? fit(committed) : committed);
       }}
     >
       <h2 id="booking-step-title" className="booking-step__title" ref={headingRef} tabIndex={-1}>
@@ -139,6 +165,7 @@ export function PartyStep({
               min={limits.min}
               max={limits.max}
               onChange={setGuests}
+              onCommit={(n) => commitParty({ ...selection, guests: n })}
               decrementLabel="Remove a guest"
               incrementLabel="Add a guest"
               describe={guests}
@@ -160,7 +187,8 @@ export function PartyStep({
                 hint={eachPrice(ticket.unitAmount)}
                 value={count}
                 max={count + room}
-                onChange={(n) => setTicket(ticket.code, n)}
+                onChange={(n, how) => setTicket(ticket.code, n, how)}
+                onCommit={(n) => commitParty(withTicket(ticket.code, n))}
                 decrementLabel={`Remove one ${ticket.name} ticket`}
                 incrementLabel={`Add one ${ticket.name} ticket`}
                 describe={(n) => `${ticket.name}: ${n}. ${guests(size - count + n)} in all.`}
