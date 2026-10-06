@@ -30,3 +30,11 @@ export function canChangeTrips(role: StaffRole): boolean {
 export function canSeeGuests(role: StaffRole): boolean {
   return role === "owner" || role === "booking_staff";
 }
+
+/**
+ * Who adds a booking's internal notes (G2.12c). Every role reads them. This
+ * mirrors the API's `notes.write` permission for display only.
+ */
+export function canWriteNotes(role: StaffRole): boolean {
+  return role === "owner" || role === "booking_staff";
+}

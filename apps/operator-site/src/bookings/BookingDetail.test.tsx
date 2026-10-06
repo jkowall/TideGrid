@@ -95,7 +95,8 @@ describe("one booking", () => {
     const heading = await loaded();
     expect(text(heading)).toBe("Booking QKG6ERBF");
     expect(text(container.querySelector(".tg-eyebrow"))).toBe(tenantName);
-    expect(calls).toHaveLength(1);
+    // The booking once; its notes are read on their own (G2.12c).
+    expect(calls.filter((c) => !c.path.endsWith("/notes"))).toHaveLength(1);
     expect(calls[0]?.path).toBe(
       `/api/v1/staff/tenants/${membership("owner").tenantId}/bookings/${bookingId}`,
     );

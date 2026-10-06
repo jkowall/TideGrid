@@ -120,8 +120,13 @@ describe("which day the list opens on", () => {
     const heading = await dayHeading(/^Wednesday, November 4/);
     expect(text(heading)).toBe("Wednesday, November 4 Today");
     await tripSection(/Sunset Harbor Cruise/);
-    // The zone first, then the day in that zone.
-    expect(calls.map((c) => c.path.split("/").pop())).toEqual(["catalog", "bookings"]);
+    // The zone first, then the day in that zone, then its totals (G2.12c).
+    await screen.findByRole("heading", { level: 3, name: "Day totals" });
+    expect(calls.map((c) => c.path.split("/").pop())).toEqual([
+      "catalog",
+      "bookings",
+      "booking-day-totals",
+    ]);
     const [, asked] = calls;
     expect(asked?.query.get("date")).toBe(wednesday);
     expect(asked?.query.has("tripId")).toBe(false);
@@ -255,7 +260,12 @@ describe("the day's trips and bookings", () => {
       "6:00 PM, Sunset Harbor Cruise",
     );
     const order = screen.getAllByRole("heading", { level: 3 }).map((h) => text(h));
-    expect(order).toEqual(["8:00 AM, Private Half-Day Charter", "6:00 PM, Sunset Harbor Cruise"]);
+    // The day's totals come first (G2.12c), then the trips in departure order.
+    expect(order).toEqual([
+      "Day totals",
+      "8:00 AM, Private Half-Day Charter",
+      "6:00 PM, Sunset Harbor Cruise",
+    ]);
 
     expect(parts(charter.querySelector(".bk-trip__meta"))).toEqual([
       "Boat: Blue Heron",
@@ -930,7 +940,10 @@ describe("when the list does not load", () => {
         expect(within(alert).getByRole(role, { name })).toBeTruthy();
       }
       if (status === 401) {
-        expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe("/");
+        // This page again, so signing in comes back here (G2.12c).
+        expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe(
+          "/bookings",
+        );
       }
     },
   );
@@ -1535,11 +1548,11 @@ describe("the page's own headings and landmarks", () => {
     await tripSection(/Sunset Harbor Cruise/);
     expect(screen.getAllByRole("heading", { level: 1 }).map((h) => text(h))).toEqual(["Bookings"]);
     expect(text(container.querySelector(".tg-eyebrow"))).toBe(tenantName);
-    // The day is the one h2, with each trip an h3 beneath it.
+    // The day is the one h2, with its totals and each trip an h3 beneath it.
     expect(screen.getAllByRole("heading", { level: 2 }).map((h) => text(h))).toEqual([
       "Wednesday, November 4 Today",
     ]);
-    expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(3);
     expect(screen.getByRole("navigation", { name: "Days" })).toBeTruthy();
   });
 });

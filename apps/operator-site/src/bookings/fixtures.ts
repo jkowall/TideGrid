@@ -1,4 +1,5 @@
 import type {
+  BookingDayTotals,
   BookingDayTrip,
   BookingDetail,
   BookingListItem,
@@ -593,7 +594,50 @@ export const route = {
   roster: (id: string, tenant?: string) => `GET ${base(tenant)}/trips/${id}/roster`,
   exceptions: (tenant?: string) => `GET ${base(tenant)}/finalization-exceptions`,
   trips: (tenant?: string) => `GET ${base(tenant)}/trips`,
+  // Console completion (G2.12c).
+  notes: (id: string, tenant?: string) => `GET ${base(tenant)}/bookings/${id}/notes`,
+  addNote: (id: string, tenant?: string) => `POST ${base(tenant)}/bookings/${id}/notes`,
+  dayTotals: (tenant?: string) => `GET ${base(tenant)}/booking-day-totals`,
+  dayExport: (tenant?: string) => `GET ${base(tenant)}/booking-day-export`,
+  search: (tenant?: string) => `POST ${base(tenant)}/booking-searches`,
 };
+
+/** A day's control totals as the API sends them; zero by default. */
+export function dayTotalsBody(date: string, over: Partial<BookingDayTotals> = {}) {
+  return {
+    date,
+    generatedAt: "2026-11-04T19:03:00.000Z",
+    currency: "USD",
+    totals: {
+      bookings: 0,
+      guests: 0,
+      gross: 0,
+      discounts: 0,
+      fees: 0,
+      taxes: 0,
+      total: 0,
+      refunds: 0,
+      net: 0,
+      includedTax: 0,
+      pendingRefunds: { count: 0, amount: 0 },
+      ...over,
+    },
+  };
+}
+
+/**
+ * Answers every view gets unless a test says otherwise: the catalog (a New
+ * York marina), a booking's notes (none), and a day's totals (zero). A test
+ * that counts calls counts the ones to its own route.
+ */
+function defaultAnswer(key: string): Answer | undefined {
+  if (key.endsWith("/catalog")) return () => catalog();
+  if (key.startsWith("GET ") && key.endsWith("/notes")) return () => json({ notes: [], total: 0 });
+  if (key.startsWith("GET ") && key.endsWith("/booking-day-totals")) {
+    return (call) => json(dayTotalsBody(call.query.get("date") ?? ""));
+  }
+  return undefined;
+}
 
 /**
  * A fetch that answers "METHOD /path" from per-route queues (an array, one
@@ -613,9 +657,7 @@ export function api(routes: Record<string, Answer | Answer[]>): Call[] {
       const call: Call = { method, path: url.pathname, query: url.searchParams };
       calls.push(call);
       const queued = routes[key];
-      const answer =
-        (Array.isArray(queued) ? queued.shift() : queued) ??
-        (key.endsWith("/catalog") ? () => catalog() : undefined);
+      const answer = (Array.isArray(queued) ? queued.shift() : queued) ?? defaultAnswer(key);
       if (!answer) {
         strays.push(key);
         throw new Error(`unexpected request ${key}`);

@@ -43,9 +43,9 @@ async function read<T>(
 
 // Shape checks --------------------------------------------------------------------------
 
-const isInt = (v: unknown): v is number => Number.isSafeInteger(v);
-const isString = (v: unknown): v is string => typeof v === "string";
-const isInstant = (v: unknown) => isString(v) && !Number.isNaN(Date.parse(v));
+export const isInt = (v: unknown): v is number => Number.isSafeInteger(v);
+export const isString = (v: unknown): v is string => typeof v === "string";
+export const isInstant = (v: unknown) => isString(v) && !Number.isNaN(Date.parse(v));
 const isInstantOrNull = (v: unknown) => v === null || isInstant(v);
 const isStringOrNull = (v: unknown) => v === null || isString(v);
 /** "2026-10-06T19:30:00-04:00": the local date and time are read from the text itself. */
@@ -60,7 +60,7 @@ const timelineKinds = new Set([
   "refund_failed",
 ]);
 
-function isTripSummary(t: Partial<BookingDayTrip> | null | undefined): boolean {
+export function isTripSummary(t: Partial<BookingDayTrip> | null | undefined): boolean {
   return (
     isString(t?.tripId) &&
     isString(t.productName) &&
@@ -98,14 +98,14 @@ function isExtras(extras: unknown): boolean {
 const paymentStates = new Set(["pending", "succeeded", "failed"]);
 const refundStates = new Set(["requested", "succeeded", "failed"]);
 
-function isPaymentStatus(p: Partial<BookingPaymentStatus> | null | undefined): boolean {
+export function isPaymentStatus(p: Partial<BookingPaymentStatus> | null | undefined): boolean {
   if (!paymentStates.has(p?.state as string)) return false;
   const refund = p?.refund;
   return refund === null || (refundStates.has(refund?.state as string) && isInt(refund?.amount));
 }
 
 /** A booker, when present, has the fields the role was sent; absent is fine. */
-function isBooker(b: unknown, withEmail: boolean): boolean {
+export function isBooker(b: unknown, withEmail: boolean): boolean {
   if (b === undefined) return true;
   const booker = b as { name?: unknown; email?: unknown } | null;
   return isString(booker?.name) && (!withEmail || isString(booker?.email));

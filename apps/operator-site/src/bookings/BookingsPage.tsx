@@ -28,6 +28,7 @@ import { ConsoleButtonLink, ConsoleLink, useNavigate } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, roleNames } from "../roles.ts";
 import { type DayPage, findReference, loadDay } from "./api.ts";
+import { DayTotals } from "./DayTotals.tsx";
 import {
   bookingHref,
   bookingStates,
@@ -88,6 +89,12 @@ export function BookingsPage({
       : null,
   );
   const [tripId, setTripId] = useState<string | undefined>(() => readTrip(window.location.search));
+  // A day in the address beyond two years of today opens the nearest day
+  // that is not, and says so (G2.12c) until the person moves to another day.
+  const [clampedFrom, setClampedFrom] = useState<LocalDate | null>(() => {
+    const asked = new URLSearchParams(window.location.search).get("day") ?? "";
+    return isLocalDate(asked) && clampDay(asked, todayIn()) !== asked ? asked : null;
+  });
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const retryRequested = useRef(false);
@@ -189,6 +196,7 @@ export function BookingsPage({
 
   const goToDay = (next: LocalDate, moveFocus = false) => {
     const target = clampDay(next, today);
+    setClampedFrom(null);
     if (moveFocus) focusDayOnLoad.current = true;
     // A trip departs on one day only, so a new day shows every trip.
     setTripId(undefined);
@@ -242,7 +250,15 @@ export function BookingsPage({
     <>
       <PageHeader eyebrow={tenantName} title="Bookings" focusHeading={focusHeading} />
       <div className="bk">
-        <QuickFind tenantId={tenantId} tenantName={tenantName} />
+        <div className="bk-finders">
+          <QuickFind tenantId={tenantId} tenantName={tenantName} />
+          <ConsoleLink href="/bookings/search" className="bk-search-link tap-target">
+            <Icon name="search" />
+            <span>
+              {seesGuests ? "Search by name, email, or dates" : "Search by reference or dates"}
+            </span>
+          </ConsoleLink>
+        </div>
 
         <div className="bk-bar">
           <h2 className="bk-bar__day" ref={dayHeading} tabIndex={-1}>
@@ -282,6 +298,19 @@ export function BookingsPage({
           </nav>
         </div>
 
+        {clampedFrom && day && (
+          <Notice
+            tone="info"
+            className="bk-notice"
+            title={`Showing ${dayText(day, "full", today)} instead`}
+          >
+            <p>
+              The address asked for {dayText(clampedFrom, "medium", today)}. The console shows days
+              within two years of today, so it opened the nearest one.
+            </p>
+          </Notice>
+        )}
+
         {!seesGuests && (
           <p className="bk-note">
             <Icon name="eye-off" />
@@ -290,6 +319,17 @@ export function BookingsPage({
               see each booking's party, extras, total, and payment.
             </span>
           </p>
+        )}
+
+        {day && page && page.trips.length > 0 && (
+          <DayTotals
+            key={day}
+            tenantId={tenantId}
+            tenantName={tenantName}
+            day={day}
+            zone={zone ?? page.trips[0]?.timeZone}
+            seesGuests={seesGuests}
+          />
         )}
 
         <p className="tg-visually-hidden" role="status">

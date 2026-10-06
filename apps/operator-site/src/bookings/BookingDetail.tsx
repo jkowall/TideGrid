@@ -15,12 +15,12 @@ import {
   todayIn,
   zoneCity,
 } from "@tidegrid/design-system/format";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
-import { canSeeGuests, roleNames } from "../roles.ts";
+import { canSeeGuests, canWriteNotes, roleNames } from "../roles.ts";
 import { loadBooking } from "./api.ts";
 import { MaskedReference } from "./MaskedReference.tsx";
 import {
@@ -37,6 +37,7 @@ import {
   rosterHref,
   timelineLabel,
 } from "./model.ts";
+import { Notes } from "./Notes.tsx";
 import { canRetry, ReadFailed } from "./States.tsx";
 
 /**
@@ -151,7 +152,21 @@ export function BookingDetailPage({
           />
         ))}
       {booking && (
-        <Detail booking={booking} seesGuests={canSeeGuests(role)} roleName={roleNames[role]} />
+        <Detail
+          booking={booking}
+          seesGuests={canSeeGuests(role)}
+          roleName={roleNames[role]}
+          notes={
+            <Notes
+              tenantId={tenantId}
+              tenantName={tenantName}
+              bookingId={booking.id}
+              zone={booking.trip.timeZone}
+              canWrite={canWriteNotes(role)}
+              roleName={roleNames[role]}
+            />
+          }
+        />
       )}
     </>
   );
@@ -161,10 +176,13 @@ function Detail({
   booking,
   seesGuests,
   roleName,
+  notes,
 }: {
   booking: BookingDetail;
   seesGuests: boolean;
   roleName: string;
+  /** The booking's internal notes (G2.12c), last on the page. */
+  notes: ReactNode;
 }) {
   const { trip, location } = booking;
   const zone = trip.timeZone;
@@ -357,6 +375,8 @@ function Detail({
             ))}
           </ol>
         </section>
+
+        {notes}
       </div>
     </div>
   );
