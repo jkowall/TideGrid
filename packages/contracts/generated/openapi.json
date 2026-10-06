@@ -11121,6 +11121,1491 @@
           }
         }
       }
+    },
+    "/v1/staff/tenants/{tenantId}/booking-searches": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Search bookings",
+        "description": "Every role. Bookings across every day by reference, by the booker's name or email, and by departure dates, a page at a time, with how many match. Owners and booking staff match on, and receive, the booker's name and email; for finance the text matches booking references only and no booker is sent. A POST, so the terms never enter a URL.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "q": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "Text to find. It matches a booking reference from its start, read the way a guest quotes it (case, spaces, and hyphens ignored; O, I, and L as 0, 1, and 1). For roles that hold bookings.read it also matches the booker's name, when every word appears in it, and part of the booker's email, ignoring case. For any other role it matches references only"
+                  },
+                  "from": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "First departure date at the marina, inclusive. Bookings are found by their trip's local date"
+                  },
+                  "to": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Last departure date at the marina, inclusive"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 25
+                  },
+                  "after": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking this search finds answers 400 cursor_invalid"
+                  }
+                },
+                "description": "A booking search. At least one of q, from, and to"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The bookings found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "reference": {
+                            "type": "string",
+                            "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                            "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "confirmed"
+                            ]
+                          },
+                          "confirmedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "trip": {
+                            "type": "object",
+                            "properties": {
+                              "tripId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "productName": {
+                                "type": "string"
+                              },
+                              "productKind": {
+                                "type": "string",
+                                "enum": [
+                                  "shared_seat",
+                                  "private_charter"
+                                ]
+                              },
+                              "boatName": {
+                                "type": "string"
+                              },
+                              "timeZone": {
+                                "type": "string",
+                                "description": "IANA time zone name, such as America/New_York"
+                              },
+                              "localDate": {
+                                "type": "string",
+                                "format": "date",
+                                "description": "Local calendar date, YYYY-MM-DD"
+                              },
+                              "localStartTime": {
+                                "type": "string",
+                                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                                "description": "Local wall-clock time, HH:MM, 24-hour"
+                              },
+                              "startsAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "salesState": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "published",
+                                  "closed",
+                                  "canceled",
+                                  "completed"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "tripId",
+                              "productName",
+                              "productKind",
+                              "boatName",
+                              "timeZone",
+                              "localDate",
+                              "localStartTime",
+                              "startsAt",
+                              "salesState"
+                            ]
+                          },
+                          "booker": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "email": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "email"
+                            ],
+                            "description": "Personal data. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise"
+                          },
+                          "guests": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "The party's size"
+                          },
+                          "total": {
+                            "type": "integer",
+                            "description": "The order's total"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "enum": [
+                              "USD"
+                            ]
+                          },
+                          "payment": {
+                            "type": "object",
+                            "properties": {
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "succeeded",
+                                  "failed"
+                                ],
+                                "description": "The charge: succeeded once a verified provider event says so"
+                              },
+                              "refund": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "requested",
+                                      "succeeded",
+                                      "failed"
+                                    ],
+                                    "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                                  },
+                                  "amount": {
+                                    "type": "integer",
+                                    "description": "Integer US cents"
+                                  }
+                                },
+                                "required": [
+                                  "state",
+                                  "amount"
+                                ],
+                                "description": "A refund of the charge, when there is one"
+                              }
+                            },
+                            "required": [
+                              "state",
+                              "refund"
+                            ],
+                            "description": "Paid is a succeeded charge with no refund"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reference",
+                          "state",
+                          "confirmedAt",
+                          "trip",
+                          "guests",
+                          "total",
+                          "currency",
+                          "payment"
+                        ]
+                      },
+                      "description": "This page, by departure, then trip, then confirmation"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Bookings found across every page"
+                    },
+                    "nextAfter": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid",
+                      "description": "Pass as after for the next page; null on the last page"
+                    },
+                    "matchedOn": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "reference",
+                          "booker_name",
+                          "booker_email"
+                        ]
+                      },
+                      "description": "What q was matched against for this role: every field for owners and booking staff, the reference only for finance. Empty when there is no q"
+                    }
+                  },
+                  "required": [
+                    "results",
+                    "total",
+                    "nextAfter",
+                    "matchedOn"
+                  ],
+                  "description": "Bookings that match a search, a page at a time"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed search (validation_failed), from after to (invalid_range), or a cursor this search does not find (cursor_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or origin does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/booking-day-totals": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "A day's control totals",
+        "description": "Every role. The bookings on trips departing on one local date, totaled from the ledger: bookings, guests, gross, discounts, fees, taxes, the total charged, succeeded refunds, and net, with included taxes and pending refunds beside them. The day's CSV export ends with the same figures.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "The marina's local date: the bookings on trips departing that day, as on the bookings list"
+            },
+            "required": true,
+            "description": "The marina's local date: the bookings on trips departing that day, as on the bookings list",
+            "name": "date",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The day's totals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string",
+                      "format": "date",
+                      "description": "Local calendar date at the marina, YYYY-MM-DD"
+                    },
+                    "generatedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When the totals were read"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "enum": [
+                        "USD"
+                      ]
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "bookings": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Bookings on the day's trips"
+                        },
+                        "guests": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Guests across those bookings"
+                        },
+                        "gross": {
+                          "type": "integer",
+                          "description": "Trip prices and paid extras, before discounts: the orders' subtotals"
+                        },
+                        "discounts": {
+                          "type": "integer",
+                          "description": "Promotion discounts, as a positive amount"
+                        },
+                        "fees": {
+                          "type": "integer",
+                          "description": "Mandatory fees"
+                        },
+                        "taxes": {
+                          "type": "integer",
+                          "description": "Taxes added on top of prices"
+                        },
+                        "total": {
+                          "type": "integer",
+                          "description": "What the guests were charged: gross - discounts + fees + taxes"
+                        },
+                        "refunds": {
+                          "type": "integer",
+                          "description": "Refunds that succeeded, as a positive amount"
+                        },
+                        "net": {
+                          "type": "integer",
+                          "description": "total - refunds"
+                        },
+                        "includedTax": {
+                          "type": "integer",
+                          "description": "Taxes already inside prices, and so inside gross; informational"
+                        },
+                        "pendingRefunds": {
+                          "type": "object",
+                          "properties": {
+                            "count": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            }
+                          },
+                          "required": [
+                            "count",
+                            "amount"
+                          ],
+                          "description": "Refunds requested and not yet settled. Not in refunds or net until they succeed"
+                        }
+                      },
+                      "required": [
+                        "bookings",
+                        "guests",
+                        "gross",
+                        "discounts",
+                        "fees",
+                        "taxes",
+                        "total",
+                        "refunds",
+                        "net",
+                        "includedTax",
+                        "pendingRefunds"
+                      ],
+                      "description": "Control totals that reconcile to the ledger: each booking's immutable order and its payment's refunds"
+                    }
+                  },
+                  "required": [
+                    "date",
+                    "generatedAt",
+                    "currency",
+                    "totals"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed date (validation_failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "More bookings on the day than one report holds (day_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/booking-day-export": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Export a day's bookings as CSV",
+        "description": "Every role. One row per booking on trips departing on one local date, with its ledger, then a total row equal to the day's control totals. Stable columns; owners and booking staff also get the booker's name and email, and finance gets the financial columns only. UTF-8 with a byte order mark and CRLF lines; text a person typed is kept from running as a spreadsheet formula. The file name holds the operator's slug and the date only. Each export is recorded in the audit history.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "The marina's local date: the bookings on trips departing that day, as on the bookings list"
+            },
+            "required": true,
+            "description": "The marina's local date: the bookings on trips departing that day, as on the bookings list",
+            "name": "date",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The day's bookings as an attachment",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed date (validation_failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "More bookings on the day than one export holds (day_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "A booking's internal notes",
+        "description": "Every role. The newest 200 notes, newest first, each with its author as this operator names them and when it was written, and how many there are. An unknown id and another tenant's id answer the same 404.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The notes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "author": {
+                            "type": "object",
+                            "properties": {
+                              "userId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "How this operator names the staff member"
+                              }
+                            },
+                            "required": [
+                              "userId",
+                              "name"
+                            ],
+                            "description": "Who wrote it: the signed-in staff member, never a value the request named"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When it was written, on the database's clock"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "body",
+                          "author",
+                          "createdAt"
+                        ],
+                        "description": "An internal note on a booking. Append-only: never edited or removed"
+                      },
+                      "description": "Newest first; at most 200"
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Every note on the booking"
+                    }
+                  },
+                  "required": [
+                    "notes",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such booking for it (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Add an internal note to a booking",
+        "description": "Owners and booking staff. Append-only: a note is never edited or removed. The author is the signed-in staff member and the time is the database's. Recorded in the audit history by the note's id; the text itself never enters the audit history. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f]*$",
+                    "description": "Up to 500 characters. Line breaks are kept"
+                  }
+                },
+                "required": [
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "note": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "body": {
+                          "type": "string"
+                        },
+                        "author": {
+                          "type": "object",
+                          "properties": {
+                            "userId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string",
+                              "description": "How this operator names the staff member"
+                            }
+                          },
+                          "required": [
+                            "userId",
+                            "name"
+                          ],
+                          "description": "Who wrote it: the signed-in staff member, never a value the request named"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When it was written, on the database's clock"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "body",
+                        "author",
+                        "createdAt"
+                      ],
+                      "description": "An internal note on a booking. Append-only: never edited or removed"
+                    }
+                  },
+                  "required": [
+                    "note"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or origin does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such booking for it (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key reused with a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

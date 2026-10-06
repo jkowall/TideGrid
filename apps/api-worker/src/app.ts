@@ -13,6 +13,7 @@ import { registerBookingStaffRoutes } from "./routes/bookings-staff.ts";
 import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
 import { registerCatalogStaffRoutes } from "./routes/catalog-staff.ts";
 import { registerCheckoutPublicRoutes } from "./routes/checkout-public.ts";
+import { registerConsoleStaffRoutes } from "./routes/console-staff.ts";
 import { registerFakeProviderRoutes } from "./routes/fake-provider.ts";
 import { registerHoldStaffRoutes } from "./routes/holds-staff.ts";
 import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.ts";
@@ -141,6 +142,8 @@ export function createApp(deps: AppDeps = {}) {
   registerPaymentWebhookRoutes(app, deps);
   registerFakeProviderRoutes(app);
   registerBookingStaffRoutes(app, deps);
+  // Console completion (G2.12c): search, day totals and export, booking notes.
+  registerConsoleStaffRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",
