@@ -488,10 +488,11 @@ export interface CapacityHoldsTable {
 // `never` for update are not granted to the runtime.
 
 export type PaymentProviderName = "fake" | "stripe";
+/** unfulfilled: a verified success could not become a booking and is refunded in full. */
 export type CheckoutSessionState =
   | "open"
   | "confirmed"
-  | "paid"
+  | "unfulfilled"
   | "failed"
   | "expired"
   | "canceled";
@@ -560,7 +561,7 @@ export interface CheckoutSessionsTable {
   booker_email: Fixed<string>;
   created_at: Stamped;
   confirmed_at: Stamp;
-  paid_at: Stamp;
+  unfulfilled_at: Stamp;
   failed_at: Stamp;
   expired_at: Stamp;
   canceled_at: Stamp;

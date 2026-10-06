@@ -402,7 +402,7 @@ export type CancelCheckoutResult =
   | { kind: "canceled"; session: CheckoutSessionView }
   /** Already canceled; nothing changed. */
   | { kind: "unchanged"; session: CheckoutSessionView }
-  /** Confirmed, failed, expired, or closed as paid; it cannot be canceled. */
+  /** Confirmed, failed, expired, or unfulfilled; it cannot be canceled. */
   | { kind: "not_cancelable"; session: CheckoutSessionView }
   | { kind: "not_found" };
 

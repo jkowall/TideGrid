@@ -39,12 +39,12 @@ States move one way; triggers refuse anything else, for every role.
 | open | failed | A verified failure; the hold is released and the order void |
 | open | expired | Past its instant (the sweep); the hold is marked expired, not released |
 | open | canceled | The guest abandoned it; the hold is released and the order void |
-| open | paid | A verified success could not be honored; refund and exception |
+| open | unfulfilled | A verified success could not be honored; refund and exception |
 | expired | confirmed | A late success reacquired the capacity |
-| expired | paid | A late success could not reacquire it; refund and exception |
-| failed, canceled | paid | A success arrived after the hold was released; refund and exception |
+| expired | unfulfilled | A late success could not reacquire it; refund and exception |
+| failed, canceled | unfulfilled | A success arrived after the hold was released; refund and exception |
 
-`paid` means "the money arrived and is going back": the guest sees the refund's state. An open session past its instant reads as `expired` to the guest at once, before the sweep writes it.
+`unfulfilled` means "the money arrived and is going back": the guest sees the refund's state. It is never a sale; an order is `paid` only with a booking. An open session past its instant reads as `expired` to the guest at once, before the sweep writes it.
 
 ## Commands
 
@@ -99,7 +99,7 @@ Processing locks the inbox row first (an event already processed returns its rec
 | Event | Payment, checkout | Result | Outcome |
 |---|---|---|---|
 | success | pending; open or expired | `confirmHold`; confirmed, possibly reacquired: payment succeeded, booking created, order paid, checkout confirmed | `confirmed`, `confirmed_reacquired` |
-| success | pending; open or expired | `confirmHold` reports `capacity_lost`: any capacity still held is released, payment succeeded, refund requested, exception raised, order void, checkout paid | `refund_required` |
+| success | pending; open or expired | `confirmHold` reports `capacity_lost`: any capacity still held is released, payment succeeded, refund requested, exception raised, order void, checkout unfulfilled | `refund_required` |
 | success | pending; canceled | refund and exception (`session_canceled`) | `refund_required` |
 | success | failed | refund and exception (`session_failed`): the provider had said it failed | `refund_required` |
 | success | succeeded | nothing | `already_succeeded` |
@@ -169,7 +169,7 @@ What the guest checkout UI calls:
 1. Generate a checkout secret (32 random bytes, base64url) and an idempotency key, and keep both for the session (session storage).
 2. `POST /v1/public/checkout-sessions` with `{ quoteId, acceptedPolicyVersion, booker, checkoutSecret }` and the key. The response has the checkout (id, state, amount, expiry) and `payment: { provider, paymentRef, clientSecret }`. On 503 `payment_provider_unavailable`, or a lost response, send the same request again with the same key: it returns the same checkout and finishes creating the payment.
 3. Pay at the provider with the client secret. With the fake provider: `POST /v1/fake-provider/payments/{paymentRef}/succeed` (or `/fail`) with `Authorization: Bearer <clientSecret>`.
-4. Poll `GET /v1/public/checkout-sessions/{id}` with `Authorization: Bearer <checkoutSecret>` until the state is `confirmed` (show `booking.reference`), `failed`, `expired`, or `paid` (show the refund).
+4. Poll `GET /v1/public/checkout-sessions/{id}` with `Authorization: Bearer <checkoutSecret>` until the state is `confirmed` (show `booking.reference`), `failed`, `expired`, or `unfulfilled` (show the refund).
 5. To change the party before paying, `POST .../cancel` first, then re-quote.
 
 The checkout secret and the client secret travel in headers and bodies only, never in URLs. Every response is `Cache-Control: no-store` and `Vary: Origin`. Public routes resolve the tenant from the verified Origin, as `/v1/public/trips` does.

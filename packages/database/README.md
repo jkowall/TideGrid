@@ -85,6 +85,22 @@ The capacity and holds migration adds `capacity_holds` under rules 1 to 10. The 
 - It is read-only and STABLE, a SECURITY DEFINER function with `search_path` pinned, every relation qualified, explicit predicates, and at most 1,000 rows. EXECUTE is granted to `tidegrid_app` only.
 - The alternatives are worse. A row-level-security bypass for the cron's connection would expose every tenant's rows to one session. A tenant list in configuration drifts from the database and would silently skip new tenants. One definer function that expired holds across tenants would write audit and outbox rows outside any tenant's transaction.
 
+## Checkout, payments, and bookings
+
+The checkout migration (0007) adds twelve tenant-owned tables under rules 1 to 10, described in the [checkout contract](../domain-booking/README.md) and the [payments contract](../domain-payments/README.md): `checkout_sessions`, `orders` and `order_lines`, `payments`, `payment_refunds`, `provider_events` (the inbox), `bookings`, `finalization_exceptions`, `payment_accounts`, and the fake provider's `fake_provider_payments`, `fake_provider_events`, and `fake_provider_refunds`.
+
+- **Privileges.** The runtime keeps the default SELECT and INSERT, except on `payment_accounts`, which it may only read: onboarding (the seed) writes where money goes, never a request. UPDATE is granted only on the columns that carry a transition: `checkout_sessions.state`, `orders.status`, `payments` (`state`, `provider_payment_id`, and the two evidence columns), `payment_refunds` (`state`, `provider_refund_id`, `failure_code`), and `provider_events` (`processing_state`, `outcome`). Triggers stamp every time from the database clock.
+- **No deletes.** DELETE and TRUNCATE raise on every table here for every role, the owner included. Order lines, bookings, exceptions, and the fake provider's tables refuse UPDATE too.
+- **States and evidence for every role.** Triggers run as the writer, under its row-level security, and filter by tenant explicitly. They enforce the one-way states and the chain of custody: a checkout confirms only with a booking, a booking needs a succeeded payment and a confirmed hold, an order is paid only with a booking, and a payment succeeds only with a verified inbox event for its provider id, account, amount, and currency. The owner role cannot skip a link either.
+- **Sealed and self-checking orders.** Order lines can be written only in their order's transaction, and a deferred check refuses at commit an order that does not equal its quote, line for line and tax rate for tax rate.
+- **Composite keys.** Every reference carries `tenant_id`, including the inbox's reference to the connected account, so an event can be recorded only in the tenant that owns the account it names.
+- **Trips with bookings.** A trigger on `scheduled_trips` refuses canceling a trip that has confirmed holds, under READ COMMITTED only, until cancellation with remedies exists.
+
+Two more cross-tenant reads join `app.resolve_hostname` and `app.capacity_hold_sweep_tenants`. Both are read-only, STABLE, SECURITY DEFINER with `search_path` pinned, every relation qualified, and EXECUTE granted to `tidegrid_app` only:
+
+- `app.resolve_payment_account(provider, account_ref)` returns the tenant id and the account's status for a connected account. A provider callback names an account, not a tenant, and the webhook must record the event inside the owning tenant's transaction. It runs only after the provider's signature verifies, an id grants nothing, and everything that follows runs under row-level security. It returns accounts whatever their status, because money that moved must be recorded.
+- `app.checkout_sweep_tenants(limit)` returns, at most 1,000, the tenant ids with an open checkout past its instant, a refund requested a minute ago or more, or an inbox event received a minute ago or more and never processed. It reveals that some tenant has such work, a weaker signal than the shared id sequences already give, and the sweep then works inside each tenant's own transaction, for the reasons the hold sweep's argument gives.
+
 ## Tests
 
 - `pnpm test` runs unit tests.

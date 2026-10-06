@@ -6508,12 +6508,12 @@
                           "enum": [
                             "open",
                             "confirmed",
-                            "paid",
+                            "unfulfilled",
                             "failed",
                             "expired",
                             "canceled"
                           ],
-                          "description": "open: awaiting payment. confirmed: paid and booked. paid: the payment arrived but the trip could not be confirmed; it is refunded in full. failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                          "description": "open: awaiting payment. confirmed: paid and booked. unfulfilled: the payment arrived but the trip could not be confirmed; it is refunded in full (see refund). failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
                         },
                         "quoteId": {
                           "type": "string",
@@ -6896,12 +6896,12 @@
                           "enum": [
                             "open",
                             "confirmed",
-                            "paid",
+                            "unfulfilled",
                             "failed",
                             "expired",
                             "canceled"
                           ],
-                          "description": "open: awaiting payment. confirmed: paid and booked. paid: the payment arrived but the trip could not be confirmed; it is refunded in full. failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                          "description": "open: awaiting payment. confirmed: paid and booked. unfulfilled: the payment arrived but the trip could not be confirmed; it is refunded in full (see refund). failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
                         },
                         "quoteId": {
                           "type": "string",
@@ -7117,12 +7117,12 @@
                           "enum": [
                             "open",
                             "confirmed",
-                            "paid",
+                            "unfulfilled",
                             "failed",
                             "expired",
                             "canceled"
                           ],
-                          "description": "open: awaiting payment. confirmed: paid and booked. paid: the payment arrived but the trip could not be confirmed; it is refunded in full. failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                          "description": "open: awaiting payment. confirmed: paid and booked. unfulfilled: the payment arrived but the trip could not be confirmed; it is refunded in full (see refund). failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
                         },
                         "quoteId": {
                           "type": "string",

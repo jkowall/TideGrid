@@ -60,9 +60,9 @@ export const CheckoutSessionCreateRequest = z.object({
 export type CheckoutSessionCreateRequest = z.infer<typeof CheckoutSessionCreateRequest>;
 
 export const CheckoutSessionState = z
-  .enum(["open", "confirmed", "paid", "failed", "expired", "canceled"])
+  .enum(["open", "confirmed", "unfulfilled", "failed", "expired", "canceled"])
   .describe(
-    "open: awaiting payment. confirmed: paid and booked. paid: the payment arrived but the trip could not be confirmed; it is refunded in full. failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it",
+    "open: awaiting payment. confirmed: paid and booked. unfulfilled: the payment arrived but the trip could not be confirmed; it is refunded in full (see refund). failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it",
   );
 export type CheckoutSessionState = z.infer<typeof CheckoutSessionState>;
 

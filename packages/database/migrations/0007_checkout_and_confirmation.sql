@@ -21,19 +21,21 @@
 --
 -- State machines, one way, enforced by triggers:
 --
---   checkout session: open -> confirmed | paid | failed | expired | canceled
---                     expired -> confirmed | paid   (a late success reacquires
---                                                    or is refunded)
---                     failed | canceled -> paid     (a success after the hold was
---                                                    released is refunded)
+--   checkout session: open -> confirmed | unfulfilled | failed | expired | canceled
+--                     expired -> confirmed | unfulfilled  (a late success
+--                                                          reacquires or is
+--                                                          refunded)
+--                     failed | canceled -> unfulfilled    (a success after the
+--                                                          hold was released is
+--                                                          refunded)
 --   order:            pending -> paid | void
 --   payment:          pending -> succeeded | failed; failed -> succeeded
 --   refund:           requested -> succeeded | failed
 --   inbox event:      received -> processed
 --
--- "paid" on a checkout session means a verified success arrived that could not
--- be honored. The payment is refunded in full and a finalization exception is
--- left for the operator.
+-- "unfulfilled" on a checkout session means a verified success arrived that
+-- could not be honored. The payment is refunded in full and a finalization
+-- exception is left for the operator. An order is "paid" only with a booking.
 --
 -- Lock order for every command: provider event, then checkout session, then
 -- trip, then hold (the inventory module's order), then the rest. External calls
@@ -146,7 +148,7 @@ CREATE TABLE public.checkout_sessions (
   -- The policy version the guest accepted before paying: the quote's.
   policy_version integer NOT NULL CHECK (policy_version >= 1),
   state text NOT NULL DEFAULT 'open'
-    CHECK (state IN ('open', 'confirmed', 'paid', 'failed', 'expired', 'canceled')),
+    CHECK (state IN ('open', 'confirmed', 'unfulfilled', 'failed', 'expired', 'canceled')),
   -- The hold's expiry instant. Can move earlier, never later.
   expires_at timestamptz NOT NULL,
   secret_hash text NOT NULL CHECK (secret_hash ~ '^[0-9a-f]{64}$'),
@@ -162,7 +164,7 @@ CREATE TABLE public.checkout_sessions (
            AND booker_email ~ '^[^@]+@[^@]+\.[^@]+$'),
   created_at timestamptz NOT NULL DEFAULT now(),
   confirmed_at timestamptz,
-  paid_at timestamptz,
+  unfulfilled_at timestamptz,
   failed_at timestamptz,
   expired_at timestamptz,
   canceled_at timestamptz,
@@ -174,10 +176,11 @@ CREATE TABLE public.checkout_sessions (
   FOREIGN KEY (tenant_id, quote_id) REFERENCES public.quotes (tenant_id, id),
   FOREIGN KEY (tenant_id, trip_id) REFERENCES public.scheduled_trips (tenant_id, id),
   FOREIGN KEY (tenant_id, hold_id) REFERENCES public.capacity_holds (tenant_id, id),
-  CHECK (state <> 'open' OR (confirmed_at IS NULL AND paid_at IS NULL AND failed_at IS NULL
-                             AND expired_at IS NULL AND canceled_at IS NULL)),
+  CHECK (state <> 'open' OR (confirmed_at IS NULL AND unfulfilled_at IS NULL
+                             AND failed_at IS NULL AND expired_at IS NULL
+                             AND canceled_at IS NULL)),
   CHECK (state <> 'confirmed' OR confirmed_at IS NOT NULL),
-  CHECK (state <> 'paid' OR paid_at IS NOT NULL),
+  CHECK (state <> 'unfulfilled' OR unfulfilled_at IS NOT NULL),
   CHECK (state <> 'failed' OR failed_at IS NOT NULL),
   CHECK (state <> 'expired' OR expired_at IS NOT NULL),
   CHECK (state <> 'canceled' OR canceled_at IS NOT NULL)
@@ -530,8 +533,8 @@ CREATE TRIGGER provider_events_rules BEFORE INSERT OR UPDATE ON public.provider_
 -- the database clock, for the quote's trip, party, and policy, with an active
 -- hold this session owns that expires when the session does. Afterwards only
 -- the state moves, one way, and each move needs its evidence: a booking to
--- confirm, a refund exception to close as paid, a released hold to fail or
--- cancel, an expired hold to expire.
+-- confirm, a refund exception to close as unfulfilled, a released hold to fail
+-- or cancel, an expired hold to expire.
 CREATE FUNCTION app.check_checkout_session() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -550,7 +553,7 @@ BEGIN
     NEW.created_at := now();
     NEW.updated_at := now();
     NEW.confirmed_at := NULL;
-    NEW.paid_at := NULL;
+    NEW.unfulfilled_at := NULL;
     NEW.failed_at := NULL;
     NEW.expired_at := NULL;
     NEW.canceled_at := NULL;
@@ -613,7 +616,7 @@ BEGIN
       USING ERRCODE = '23514', CONSTRAINT = 'checkout_sessions_expiry';
   END IF;
   NEW.confirmed_at := OLD.confirmed_at;
-  NEW.paid_at := OLD.paid_at;
+  NEW.unfulfilled_at := OLD.unfulfilled_at;
   NEW.failed_at := OLD.failed_at;
   NEW.expired_at := OLD.expired_at;
   NEW.canceled_at := OLD.canceled_at;
@@ -621,9 +624,10 @@ BEGIN
   IF NEW.state = OLD.state THEN
     RETURN NEW;
   END IF;
-  IF NOT (   (OLD.state = 'open' AND NEW.state IN ('confirmed', 'paid', 'failed', 'expired', 'canceled'))
-          OR (OLD.state = 'expired' AND NEW.state IN ('confirmed', 'paid'))
-          OR (OLD.state IN ('failed', 'canceled') AND NEW.state = 'paid')) THEN
+  IF NOT (   (OLD.state = 'open'
+              AND NEW.state IN ('confirmed', 'unfulfilled', 'failed', 'expired', 'canceled'))
+          OR (OLD.state = 'expired' AND NEW.state IN ('confirmed', 'unfulfilled'))
+          OR (OLD.state IN ('failed', 'canceled') AND NEW.state = 'unfulfilled')) THEN
     RAISE EXCEPTION 'a checkout session cannot move from % to %', OLD.state, NEW.state
       USING ERRCODE = '23514', CONSTRAINT = 'checkout_sessions_transition';
   END IF;
@@ -644,7 +648,7 @@ BEGIN
         USING ERRCODE = '23514', CONSTRAINT = 'checkout_sessions_evidence';
     END IF;
     NEW.confirmed_at := now();
-  ELSIF NEW.state = 'paid' THEN
+  ELSIF NEW.state = 'unfulfilled' THEN
     IF payment_state IS DISTINCT FROM 'succeeded'
        OR hold_state NOT IN ('released', 'expired')
        OR NOT EXISTS (SELECT 1 FROM public.finalization_exceptions e
@@ -652,10 +656,10 @@ BEGIN
                          AND e.refund_id IS NOT NULL)
        OR EXISTS (SELECT 1 FROM public.bookings b
                    WHERE b.tenant_id = NEW.tenant_id AND b.checkout_session_id = NEW.id) THEN
-      RAISE EXCEPTION 'checkout session % closes as paid only with a refund exception and no booking', NEW.id
+      RAISE EXCEPTION 'checkout session % closes as unfulfilled only with a refund exception and no booking', NEW.id
         USING ERRCODE = '23514', CONSTRAINT = 'checkout_sessions_evidence';
     END IF;
-    NEW.paid_at := now();
+    NEW.unfulfilled_at := now();
   ELSIF NEW.state = 'failed' THEN
     IF payment_state IS DISTINCT FROM 'failed' OR hold_state IS DISTINCT FROM 'released' THEN
       RAISE EXCEPTION 'checkout session % fails only on a failed payment with its hold released', NEW.id

@@ -97,8 +97,11 @@ getHold(trx, tenantId, holdId)           // Hold or null
 findHoldsByOwner(trx, tenantId, ownerRef)
 listTripHolds(trx, tenantId, tripId)
 expireDueHolds(trx, ctx, { limit })      // one tenant, for the sweep
+expireHold(trx, ctx, { holdId, ownerRef }) // one hold, for checkout's expiry (G2.7)
 sweepExpiredHolds(db, { runId, ... })    // every tenant, for the cron
 ```
+
+`expireHold` marks one owner's hold expired once its instant has passed and answers `expired`, `unchanged` (already expired, released, or confirmed), `not_due`, or `not_found`. Like the sweep it locks the hold row only, never the trip, so a caller may already hold its own row locks, such as a checkout session's.
 
 `Hold` is `{ id, tripId, ownerRef, kind, partySize, seats, state, expiresAt, createdAt, confirmedAt, releasedAt, expiredAt }`, with instants as RFC 3339 strings.
 
@@ -138,7 +141,7 @@ Each transition appends one audit row (subject `capacity_hold`) and one outbox e
 
 The API Worker's cron runs `sweepExpiredHolds` every 15 minutes. It asks `app.capacity_hold_sweep_tenants` for the tenants with due holds, a definer function that returns tenant ids and nothing else, then expires each tenant's holds inside that tenant's own transaction, in batches of 100, under row-level security. Concurrent or repeated runs are safe: `FOR UPDATE SKIP LOCKED` keeps runs from waiting on each other or on checkouts, and a hold moves to expired once. A tenant whose batch fails is reported and skipped; the next run retries it. The run stops starting batches after 20 seconds. The cron handler awaits the run, so a run that fails, after logging why, fails the cron invocation itself; a skipped tenant is logged and counted but does not. The security argument for the definer function is in the [database README](../database/README.md#capacity-holds).
 
-The sweep is housekeeping and events, not correctness. Fifteen minutes keeps the Neon compute from waking every minute; G2.7 or the outbox delivery goal can shorten it when something needs prompt expiry events.
+The sweep is housekeeping and events, not correctness. Fifteen minutes keeps the Neon compute from waking every minute; the outbox delivery goal can shorten it when something needs prompt expiry events. G2.7 kept it: a checkout reads as expired to its guest at its instant, and the checkout sweep runs right after this one.
 
 ## Availability
 
@@ -150,9 +153,9 @@ The sweep is housekeeping and events, not correctness. Fifteen minutes keeps the
 
 ## Not in this goal
 
-- No public or staff endpoint acquires, confirms, or releases a hold. Checkout (G2.7) owns those commands and their idempotency keys.
-- Canceling a trip leaves its holds as they are. Confirmation refuses a canceled trip, but a trip with confirmed holds can still be canceled; G2.7 or the cancellation goal must refuse that or route it through remedies, as the [catalog README](../domain-catalog/README.md#deferred-and-not-yet-reachable) already notes.
-- No rate limit on holds per guest. A script could hold every seat for an hour at a time; checkout creation needs a limit before any public exposure.
+- No public or staff endpoint acquires, confirms, or releases a hold directly. Since G2.7, [checkout](../domain-booking/README.md) does: opening a checkout acquires, a verified payment confirms (reacquiring after expiry), and a failure or a guest's cancellation releases.
+- Canceling a trip leaves its holds as they are. Confirmation refuses a canceled trip. Since G2.7 a trip with confirmed holds cannot be canceled at all, by the catalog service or by any writer (a trigger in the checkout migration), until cancellation with remedies exists.
+- No limit on holds per guest here. Since G2.7, checkout allows at most three open checkouts per client address and operator, on top of the per-minute rate limit on public commands.
 - Holds are never deleted, so expired and released rows accumulate as history. The live indexes cover only active and confirmed rows.
 - Creating a blackout or changing a product's sales status takes no trip lock, so a hold can be acquired at the same moment a blackout lands. It then behaves like any checkout already in progress: it confirms within its time. Sales-state changes on the trip itself do queue on the lock.
 

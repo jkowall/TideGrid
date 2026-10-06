@@ -258,7 +258,7 @@ async function onSuccess(
     case "canceled":
       return unfulfilled(trx, ctx, event, session, payment, "session_canceled");
     case "confirmed":
-    case "paid":
+    case "unfulfilled":
       throw new Error(`checkout ${session.id} is ${session.state} with a pending payment`);
   }
 }
@@ -401,7 +401,7 @@ async function book(
  * A success that cannot become a booking. The payment is recorded as
  * succeeded, because the money moved; any capacity the hold still takes is
  * given back; a full refund is requested and a finalization exception raised;
- * the order is void and the checkout closes as paid.
+ * the order is void and the checkout closes as unfulfilled.
  */
 async function unfulfilled(
   trx: TenantTransaction,
@@ -447,7 +447,7 @@ async function unfulfilled(
     .execute();
   await trx
     .updateTable("checkout_sessions")
-    .set({ state: "paid" })
+    .set({ state: "unfulfilled" })
     .where("tenant_id", "=", ctx.tenantId)
     .where("id", "=", session.id)
     .where("state", "=", session.state)
@@ -478,7 +478,7 @@ async function unfulfilled(
     subjectId: session.id,
     reason,
     before: { state: session.state },
-    after: { state: "paid", orderStatus: "void", refundId },
+    after: { state: "unfulfilled", orderStatus: "void", refundId },
   });
   return result("refund_required", { checkoutSessionId: session.id, refundId });
 }

@@ -373,7 +373,7 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
       refund: { kind: "succeeded" },
     });
     expect(await stateOf(lost.session.id)).toEqual({
-      session: "paid",
+      session: "unfulfilled",
       hold: "expired",
       order: "void",
       payment: "succeeded",
@@ -400,7 +400,7 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
     expect(await stateOf(session.id)).toMatchObject({ session: "canceled", hold: "released" });
     expect(await pay(A, paymentRef, "succeeded")).toMatchObject({ outcome: "refund_required" });
     expect(await stateOf(session.id)).toMatchObject({
-      session: "paid",
+      session: "unfulfilled",
       payment: "succeeded",
       refund: "succeeded",
       bookings: 0,

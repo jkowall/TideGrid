@@ -360,7 +360,7 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
     expect(paid.json.delivery).toMatchObject({ status: 200, outcome: "refund_required" });
     const view = (await status(A, session.id, secret)).json.checkoutSession;
     expect(view).toMatchObject({
-      state: "paid",
+      state: "unfulfilled",
       booking: null,
       refund: { state: "succeeded", amount: session.amount },
     });
