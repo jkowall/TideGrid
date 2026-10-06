@@ -1,5 +1,6 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  ManageWaiversResponse,
   WaiverLinkRedeemRequest,
   WaiverSessionOpenResponse,
   WaiverSessionResponse,
@@ -8,8 +9,11 @@ import {
   WaiverSignRequest,
 } from "@tidegrid/contracts";
 import type { JsonObject } from "@tidegrid/database";
+import { manageSession } from "@tidegrid/domain-booking";
 import {
+  type GuestBookingWaivers,
   getSigningView,
+  listGuestBookingWaivers,
   loadEvidenceDocument,
   loadWaiverSession,
   type RedeemResult,
@@ -30,6 +34,8 @@ const sessionsPath = "/v1/public/waiver-sessions";
 const currentPath = "/v1/public/waiver-sessions/current";
 const signaturePath = "/v1/public/waiver-sessions/current/signature";
 const documentPath = "/v1/public/waiver-sessions/current/document";
+/** The booker's view, in lane 1's booking session; the path sits beside lane 1's manage routes. */
+const manageWaiversPath = "/v1/public/manage/waivers";
 
 const bearerSecurity = [{ waiverSession: [] }];
 
@@ -54,6 +60,38 @@ function sessionSecret(c: Context<AppEnv>): string {
     );
   }
   return match[1];
+}
+
+/**
+ * Lane 1's booking session token, from `Authorization: Bearer <token>`, with
+ * lane 1's codes, so the management page treats this read as its own.
+ */
+function bookingSessionToken(c: Context<AppEnv>): string {
+  const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(c.req.header("authorization") ?? "");
+  if (!match?.[1]) {
+    throw new ApiError(
+      401,
+      "session_required",
+      "Send the booking session as Authorization: Bearer <token>",
+    );
+  }
+  return match[1];
+}
+
+export function guestWaiversJson(view: GuestBookingWaivers): ManageWaiversResponse["waivers"] {
+  return {
+    applies: view.applies,
+    unnamedPlaces: view.unnamedPlaces,
+    participants: view.participants.map((p) => ({
+      position: p.position,
+      name: p.name,
+      minor: p.minor,
+      status: p.status,
+      signer: p.signer,
+      signedAt: p.signedAt ? p.signedAt.toISOString() : null,
+      sentTo: p.sentTo,
+    })),
+  };
 }
 
 /** What a client sends about itself, for the evidence: bounded, single-line. */
@@ -132,7 +170,7 @@ function closedRefusal(state: string): ApiError {
  * /v1/public/trips does, so another operator's token or session finds nothing.
  */
 export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
-  for (const path of [sessionsPath, "/v1/public/waiver-sessions/*"]) {
+  for (const path of [sessionsPath, "/v1/public/waiver-sessions/*", manageWaiversPath]) {
     app.use(path, async (c, next) => {
       await next();
       c.header("Cache-Control", "no-store");
@@ -352,5 +390,45 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     });
     if (!doc) throw new Error("the document read produced nothing");
     return pdfResponse(c, doc.bytes, `waiver-${doc.reference}.pdf`);
+  });
+
+  const manageRoute = createRoute({
+    method: "get",
+    path: manageWaiversPath,
+    tags: ["public", "manage", "waivers"],
+    summary: "The waivers of the booking session's party",
+    description:
+      "Resolves the browser Origin and needs the booking session from POST /v1/public/booking-access (lane 1) as a bearer token. Each named person's waiver status, who signs, when it was signed, and where the latest email went, masked. No evidence, text, typed names, or ids: the booker named the party but signs only for themselves. An unknown, expired, or ended session, or another operator's, answers 401.",
+    security: [{ manageSession: [] }],
+    responses: {
+      200: {
+        content: { "application/json": { schema: ManageWaiversResponse } },
+        description: "Each named person's waiver",
+      },
+      401: errorBody(
+        "No booking session (session_required), or it has ended (session_expired); open the link again",
+      ),
+      404: errorBody("No operator at this address, or no such booking (booking_not_found)"),
+    },
+  });
+
+  app.openapi(manageRoute, async (c) => {
+    const token = bookingSessionToken(c);
+    const { body } = await withPublicTenant(c, {}, async (trx, ctx) => {
+      const session = await manageSession(trx, ctx.tenantId, token);
+      if (!session) {
+        throw new ApiError(
+          401,
+          "session_expired",
+          "This booking session has ended; open your link again",
+        );
+      }
+      const found = await listGuestBookingWaivers(trx, ctx.tenantId, session.bookingId);
+      if (!found) {
+        throw new ApiError(404, "booking_not_found", "No such booking at this address");
+      }
+      return { waivers: guestWaiversJson(found) } as JsonObject;
+    });
+    return c.json(body as ManageWaiversResponse, 200);
   });
 }

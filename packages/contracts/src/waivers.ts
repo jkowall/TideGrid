@@ -9,7 +9,9 @@ import { z } from "zod";
  * PDF, and may send a request again.
  *
  * Who sees what. The signer sees only their own request: the waiver's text,
- * the trip, and the names they sign with. Staff reads carry participants'
+ * the trip, and the names they sign with. The booker, in their booking
+ * session, sees each named person's status, who signs, and where the latest
+ * email went, masked; never the evidence. Staff reads carry participants'
  * names, so they need bookings.read (owners and booking staff); finance is
  * refused. The primitives below mirror the private helpers in index.ts, which
  * this module cannot import without a cycle.
@@ -292,3 +294,34 @@ export const WaiverResendResponse = z.object({
   }),
 });
 export type WaiverResendResponse = z.infer<typeof WaiverResendResponse>;
+
+// The booker's side, on the booking's management page --------------------------------
+
+export const GuestParticipantWaiver = z.object({
+  position: z.number().int().min(1).describe("The person's place in the party"),
+  name: z.string(),
+  minor: z.boolean(),
+  status: WaiverStatusCode,
+  signer: WaiverSignerRole.nullable().describe("Who signs; null when nothing was requested"),
+  signedAt: Instant.nullable(),
+  sentTo: z
+    .string()
+    .nullable()
+    .describe(
+      "Where the latest email went, masked: first character and domain; null once signed or when none went out",
+    ),
+});
+export type GuestParticipantWaiver = z.infer<typeof GuestParticipantWaiver>;
+
+export const ManageWaiversResponse = z.object({
+  waivers: z.object({
+    applies: z
+      .boolean()
+      .describe(
+        "False when no waiver applies to the trip or the booking is not confirmed; the page then shows nothing",
+      ),
+    unnamedPlaces: z.number().int().min(0).describe("Places nobody has been named for yet"),
+    participants: z.array(GuestParticipantWaiver).describe("By place in the party"),
+  }),
+});
+export type ManageWaiversResponse = z.infer<typeof ManageWaiversResponse>;

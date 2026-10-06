@@ -1,5 +1,6 @@
 import {
   ErrorResponse,
+  ManageWaiversResponse,
   WaiverSessionOpenResponse,
   WaiverSessionResponse,
   type WaiverSigning,
@@ -33,10 +34,17 @@ const timeoutMs = 15_000;
 
 async function send(
   path: string,
-  init: { method?: "GET" | "POST"; body?: unknown; bearer?: string; accept?: string },
+  init: {
+    method?: "GET" | "POST";
+    body?: unknown;
+    bearer?: string;
+    accept?: string;
+    signal?: AbortSignal | undefined;
+  },
 ): Promise<Response | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  init.signal?.addEventListener("abort", () => controller.abort(), { once: true });
   try {
     const headers: Record<string, string> = { accept: init.accept ?? "application/json" };
     if (init.body !== undefined) headers["content-type"] = "application/json";
@@ -60,7 +68,12 @@ async function send(
 async function call<S extends z.ZodType>(
   path: string,
   schema: S,
-  init: { method?: "GET" | "POST"; body?: unknown; bearer?: string } = {},
+  init: {
+    method?: "GET" | "POST";
+    body?: unknown;
+    bearer?: string;
+    signal?: AbortSignal | undefined;
+  } = {},
 ): Promise<Result<z.infer<S>>> {
   const res = await send(path, init);
   if (!res) return { kind: "network" };
@@ -150,4 +163,21 @@ export async function downloadDocument(secret: string): Promise<Result<Blob>> {
     return { kind: "unreadable" };
   }
   return { kind: "ok", value: await res.blob(), status: res.status };
+}
+
+export type PartyWaiverList = ManageWaiversResponse["waivers"];
+
+/**
+ * The party's waivers for the booking's management page, with lane 1's
+ * booking session as the bearer token: names and statuses only.
+ */
+export async function readPartyWaivers(
+  bookingSession: string,
+  signal?: AbortSignal,
+): Promise<Result<PartyWaiverList>> {
+  const result = await call("/v1/public/manage/waivers", ManageWaiversResponse, {
+    bearer: bookingSession,
+    signal,
+  });
+  return result.kind === "ok" ? { ...result, value: result.value.waivers } : result;
 }

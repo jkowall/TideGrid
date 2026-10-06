@@ -73,7 +73,10 @@ export {
 } from "./signing.ts";
 export {
   type BookingWaivers,
+  type GuestBookingWaivers,
+  type GuestParticipantWaiver,
   listBookingWaivers,
+  listGuestBookingWaivers,
   listTripWaivers,
   type MessageState,
   type MessageStatus,

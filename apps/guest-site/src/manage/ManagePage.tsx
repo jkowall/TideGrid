@@ -21,6 +21,7 @@ import { ConfirmDialog } from "../booking/ConfirmDialog.tsx";
 import { ContactActions } from "../Contact.tsx";
 import { useLinkClick } from "../navigation.tsx";
 import { useTitle } from "../States.tsx";
+import { PartyWaivers } from "../waiver/PartyWaivers.tsx";
 import {
   cancel,
   emailNewLink,
@@ -510,6 +511,14 @@ function BookingView({
           session={session.token}
           operator={brand.name}
           onSaved={reload}
+          onEnded={() => onEnded("expired")}
+        />
+        {/* Waiver evidence (G2.15): the party's waivers, self-contained. */}
+        <PartyWaivers
+          session={session.token}
+          operator={brand.name}
+          timeZone={trip.timeZone}
+          refresh={booking}
           onEnded={() => onEnded("expired")}
         />
 

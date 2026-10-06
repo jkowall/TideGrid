@@ -325,3 +325,54 @@ export async function listTripWaivers(
     },
   };
 }
+
+/** One person's waiver as the booker sees it on the booking's management page. */
+export interface GuestParticipantWaiver {
+  position: number;
+  name: string;
+  minor: boolean;
+  status: WaiverStatusCode;
+  /** Who signs: the participant, or a minor's parent or guardian; null when nothing was requested. */
+  signer: WaiverSignerRole | null;
+  signedAt: Date | null;
+  /** Where the latest email went, masked; null once signed or when none went out. */
+  sentTo: string | null;
+}
+
+export interface GuestBookingWaivers {
+  /** False when no waiver applies or the booking is not confirmed: the page shows nothing. */
+  applies: boolean;
+  unnamedPlaces: number;
+  participants: GuestParticipantWaiver[];
+}
+
+/**
+ * The booker's view of their party's waivers, for lane 1's management page:
+ * each named person's status, who signs, when it was signed, and where the
+ * latest email went, masked. It leaves out ids, evidence, the text, the
+ * signer's typed name, and the delivery history: the booker named the party
+ * but signs only for themselves. Null when the booking is not this tenant's.
+ */
+export async function listGuestBookingWaivers(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<GuestBookingWaivers | null> {
+  const booking = await listBookingWaivers(trx, tenantId, bookingId);
+  if (!booking) return null;
+  return {
+    applies:
+      booking.bookingState === "confirmed" &&
+      (booking.required || booking.participants.some((p) => p.request !== null)),
+    unnamedPlaces: booking.unnamedPlaces,
+    participants: booking.participants.map((p) => ({
+      position: p.position,
+      name: p.name,
+      minor: p.minor,
+      status: p.status,
+      signer: p.request?.requiredSigner ?? null,
+      signedAt: p.status === "signed" ? (p.request?.signed?.signedAt ?? null) : null,
+      sentTo: p.status === "signed" ? null : (p.request?.delivery?.recipient ?? null),
+    })),
+  };
+}

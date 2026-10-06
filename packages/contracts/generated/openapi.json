@@ -16542,6 +16542,194 @@
         }
       }
     },
+    "/v1/public/manage/waivers": {
+      "get": {
+        "tags": [
+          "public",
+          "manage",
+          "waivers"
+        ],
+        "summary": "The waivers of the booking session's party",
+        "description": "Resolves the browser Origin and needs the booking session from POST /v1/public/booking-access (lane 1) as a bearer token. Each named person's waiver status, who signs, when it was signed, and where the latest email went, masked. No evidence, text, typed names, or ids: the booker named the party but signs only for themselves. An unknown, expired, or ended session, or another operator's, answers 401.",
+        "security": [
+          {
+            "manageSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Each named person's waiver",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "waivers": {
+                      "type": "object",
+                      "properties": {
+                        "applies": {
+                          "type": "boolean",
+                          "description": "False when no waiver applies to the trip or the booking is not confirmed; the page then shows nothing"
+                        },
+                        "unnamedPlaces": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Places nobody has been named for yet"
+                        },
+                        "participants": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "position": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "The person's place in the party"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "minor": {
+                                "type": "boolean"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "signed",
+                                  "waiting",
+                                  "email_failed",
+                                  "no_address",
+                                  "not_assigned",
+                                  "not_required",
+                                  "not_needed"
+                                ],
+                                "description": "signed; waiting: sent, not signed yet; email_failed: the latest email failed; no_address: no address to send to yet; not_assigned: a waiver applies but this participant has no request; not_required: no waiver applies to the trip; not_needed: the booking was canceled"
+                              },
+                              "signer": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "participant",
+                                  "guardian",
+                                  null
+                                ],
+                                "description": "Who signs; null when nothing was requested"
+                              },
+                              "signedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              },
+                              "sentTo": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "Where the latest email went, masked: first character and domain; null once signed or when none went out"
+                              }
+                            },
+                            "required": [
+                              "position",
+                              "name",
+                              "minor",
+                              "status",
+                              "signer",
+                              "signedAt",
+                              "sentTo"
+                            ]
+                          },
+                          "description": "By place in the party"
+                        }
+                      },
+                      "required": [
+                        "applies",
+                        "unnamedPlaces",
+                        "participants"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "waivers"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No booking session (session_required), or it has ended (session_expired); open the link again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No operator at this address, or no such booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/waivers": {
       "get": {
         "tags": [
