@@ -468,9 +468,15 @@ importers:
       '@tidegrid/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@tidegrid/domain-booking':
+        specifier: workspace:*
+        version: link:../../packages/domain-booking
       '@tidegrid/domain-catalog':
         specifier: workspace:*
         version: link:../../packages/domain-catalog
+      '@tidegrid/domain-payments':
+        specifier: workspace:*
+        version: link:../../packages/domain-payments
       '@tidegrid/domain-pricing':
         specifier: workspace:*
         version: link:../../packages/domain-pricing
