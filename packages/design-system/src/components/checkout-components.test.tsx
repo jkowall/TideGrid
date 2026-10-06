@@ -123,6 +123,18 @@ describe("QuantityField", () => {
     expect(tag(quantity({ hint: "$45.00 each" }), "input")).not.toHaveProperty("aria-invalid");
   });
 
+  it("marks the input invalid for an error shown on its group, and reads that error with it", () => {
+    const out = quantity({ hint: "$45.00 each", invalid: true, describedBy: "party-error" });
+    expect(tag(out, "input")["aria-invalid"]).toBe("true");
+    expect(tag(out, "input")["aria-describedby"]).toBe("adult-hint party-error");
+    expect(out).not.toContain("tg-field__error");
+  });
+
+  it("names the input, so a form reads every count as typed when it is sent", () => {
+    expect(tag(quantity({ name: "t.adult" }), "input").name).toBe("t.adult");
+    expect(tag(quantity(), "input")).not.toHaveProperty("name");
+  });
+
   it("names each button for what it does, and ties it to the input", () => {
     const out = quantity();
     expect(tag(out, "button", 0)).toMatchObject({

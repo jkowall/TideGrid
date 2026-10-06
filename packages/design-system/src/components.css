@@ -130,6 +130,10 @@
 .tg-button--block {
   width: 100%;
 }
+/* A busy button keeps its width at rest (set by Button), but never outgrows its row. */
+.tg-button[aria-busy="true"] {
+  max-width: 100%;
+}
 /* Disabled controls are exempt from contrast minimums, but these stay legible. */
 .tg-button:disabled,
 .tg-button[aria-disabled="true"] {
@@ -675,10 +679,11 @@
 
 /* Ledgers: line items and their sums ---------------------------------------- */
 
+/* Money lines up: lining, tabular figures wherever the tenant's font has them. */
 .tg-ledger {
   width: 100%;
   border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 .tg-ledger__caption {
   margin-bottom: var(--space-2);

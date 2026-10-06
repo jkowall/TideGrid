@@ -1,4 +1,13 @@
-import type { AnchorHTMLAttributes, ButtonHTMLAttributes, MouseEvent, ReactNode, Ref } from "react";
+import {
+  type AnchorHTMLAttributes,
+  type ButtonHTMLAttributes,
+  type MouseEvent,
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import { cx } from "./cx.ts";
 import { Icon, type IconName } from "./Icon.tsx";
 
@@ -23,8 +32,9 @@ export interface ButtonProps
   extends CommonProps,
     Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "disabled"> {
   /**
-   * Working on a request. The button keeps focus and its colors, announces
-   * itself as busy, and ignores further presses.
+   * Working on a request. The button keeps focus, its colors, and at least its
+   * width at rest, so a shorter busy label never moves the buttons beside it.
+   * It announces itself as busy and ignores further presses.
    */
   busy?: boolean;
   /** Replaces the label while busy, for example "Sending…". */
@@ -54,6 +64,28 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const inactive = busy || disabled;
+  const own = useRef<HTMLButtonElement | null>(null);
+  const restWidth = useRef(0);
+  // At rest, remember the width; while busy, keep at least that width. Set
+  // through the CSSOM, which the guest CSP allows; no style attribute.
+  useLayoutEffect(() => {
+    const element = own.current;
+    if (!element) return;
+    if (busy) {
+      if (restWidth.current > 0) element.style.minWidth = `${restWidth.current}px`;
+      return;
+    }
+    element.style.minWidth = "";
+    restWidth.current = element.getBoundingClientRect().width;
+  });
+  const setRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      own.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) ref.current = node;
+    },
+    [ref],
+  );
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
     if (inactive) {
       event.preventDefault();
@@ -63,7 +95,7 @@ export function Button({
   };
   return (
     <button
-      ref={ref}
+      ref={setRef}
       type={type}
       className={cx("tg-button", `tg-button--${variant}`, block && "tg-button--block", className)}
       aria-busy={busy || undefined}

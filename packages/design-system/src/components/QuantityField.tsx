@@ -8,9 +8,14 @@ export interface QuantityFieldProps {
   /** Read with the field, such as a price or a limit. */
   hint?: ReactNode;
   value: number;
-  /** The fewest allowed. Defaults to 0. */
+  /** The fewest the minus button goes to. Defaults to 0. */
   min?: number;
-  /** The most allowed now. A count above it is lowered by the caller. */
+  /**
+   * The most the plus button goes to now. A typed count outside `min` and
+   * `max` is still reported through `onChange`, so the caller can say what is
+   * wrong beside what the person typed. The field never changes a typed count
+   * by itself.
+   */
   max: number;
   onChange: (value: number) => void;
   /** The minus button's name, such as "Remove an adult". */
@@ -24,21 +29,32 @@ export interface QuantityFieldProps {
   describe?: (value: number) => string;
   /** Shown after the control with an icon, read with it, and marks it invalid. */
   error?: string | undefined;
+  /** Marks the count invalid when its error is shown elsewhere, such as on its group. */
+  invalid?: boolean;
+  /** More ids that describe the input, such as its group's error. */
+  describedBy?: string | undefined;
   /** Unavailable, for example while the page waits for a price. */
   disabled?: boolean;
   id?: string;
+  /** The input's name, so a form can read every count as typed when it is sent. */
+  name?: string;
   className?: string;
   /** The input, for moving focus to a field that needs attention. */
   ref?: Ref<HTMLInputElement>;
 }
 
-const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
+/** A count as typed: up to four digits. */
+const typedCount = /^\d{1,4}$/;
 
 /**
  * A count with minus and plus buttons around a number input. The buttons are
- * 44 px targets for touch; the input takes typing and the arrow keys; each
- * button names what it does. A button at its limit stays focusable and says
- * it is unavailable, as Button does.
+ * 44 px targets for touch and stay within `min` and `max`; the input takes
+ * typing and the arrow keys; each button names what it does. A button at its
+ * limit stays focusable and says it is unavailable, as Button does.
+ *
+ * Typing reports each whole number as it is typed, even one past a limit, so
+ * the count shown is always the count the caller holds. An emptied field
+ * counts as zero once the person leaves it.
  */
 export function QuantityField({
   label,
@@ -51,8 +67,11 @@ export function QuantityField({
   incrementLabel,
   describe,
   error,
+  invalid = false,
+  describedBy,
   disabled = false,
   id,
+  name,
   className,
   ref,
 }: QuantityFieldProps) {
@@ -60,8 +79,8 @@ export function QuantityField({
   const inputId = id ?? generated;
   const hintId = hint ? `${inputId}-hint` : undefined;
   const errorId = error ? `${inputId}-error` : undefined;
-  const describedBy = [hintId, errorId].filter(Boolean).join(" ");
-  // What the person is typing, which may be empty or out of range for a moment.
+  const described = [hintId, errorId, describedBy].filter(Boolean).join(" ");
+  // What the person is typing, which may be empty for a moment.
   const [draft, setDraft] = useState(String(value));
   const [spoken, setSpoken] = useState("");
 
@@ -73,8 +92,9 @@ export function QuantityField({
   const canDecrement = !disabled && value > min;
   const canIncrement = !disabled && value < top;
 
-  const step = (by: number) => {
-    const next = clamp(value + by, min, top);
+  const step = (by: -1 | 1) => {
+    // One at a time from wherever the count is, even from a typed count past a limit.
+    const next = by < 0 ? Math.max(min, value - 1) : Math.min(top, value + 1);
     if (next === value) return;
     onChange(next);
     setSpoken(describe ? describe(next) : `${label}: ${next}`);
@@ -108,6 +128,7 @@ export function QuantityField({
         <input
           ref={ref}
           id={inputId}
+          name={name}
           className="tg-field__input tg-quantity__input"
           type="number"
           inputMode="numeric"
@@ -116,21 +137,23 @@ export function QuantityField({
           step={1}
           value={draft}
           disabled={disabled}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={describedBy || undefined}
+          aria-invalid={error || invalid ? true : undefined}
+          aria-describedby={described || undefined}
           onChange={(event) => {
             const text = event.target.value;
             setDraft(text);
-            if (!/^\d+$/.test(text)) return;
+            if (!typedCount.test(text)) return;
             const next = Number(text);
-            if (next >= min && next <= top && next !== value) onChange(next);
+            if (next !== value) onChange(next);
           }}
           onBlur={() => {
-            // Whatever was typed, the field settles on a count it allows.
-            const typed = /^\d+$/.test(draft) ? Number(draft) : value;
-            const next = clamp(typed, min, top);
-            if (next !== value) onChange(next);
-            setDraft(String(next));
+            // An emptied field means none. Anything typed stays as typed, in its plain form.
+            if (!typedCount.test(draft)) {
+              if (value !== 0 && draft.trim() === "") onChange(0);
+              setDraft(draft.trim() === "" ? "0" : String(value));
+              return;
+            }
+            setDraft(String(value));
           }}
         />
         <button

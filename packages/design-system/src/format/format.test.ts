@@ -201,10 +201,12 @@ describe("times", () => {
     expect(spring).toMatchObject({ date: "2027-03-14", direction: "forward", after: "EDT" });
   });
 
-  it("writes durations short and long", () => {
-    expect(formatDuration(90)).toBe("1 h 30 min");
-    expect(formatDuration(240)).toBe("4 h");
-    expect(formatDuration(45)).toBe("45 min");
+  it("writes durations short and long, the short one in a single unbreakable piece", () => {
+    // U+00A0 throughout: "1 h 30 min" must never wrap as "1 h" over "30 min".
+    const nb = String.fromCharCode(0x00a0);
+    expect(formatDuration(90)).toBe(`1${nb}h${nb}30${nb}min`);
+    expect(formatDuration(240)).toBe(`4${nb}h`);
+    expect(formatDuration(45)).toBe(`45${nb}min`);
     expect(formatDuration(150, "long")).toBe("2 hours 30 minutes");
     expect(formatDuration(61, "long")).toBe("1 hour 1 minute");
   });
