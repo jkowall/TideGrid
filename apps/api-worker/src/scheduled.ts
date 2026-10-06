@@ -17,7 +17,8 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  * across tenants, one tenant transaction at a time. Correctness never waits
  * for this run; it writes the expiry down and emits the events. A second cron
  * job would dispatch on `controller.cron` here. Each run opens one connection
- * and closes it before returning.
+ * and closes it before returning. A failed run is logged and rethrown, so the
+ * cron invocation that awaits it fails too.
  */
 export async function runScheduled(
   _controller: Pick<ScheduledController, "cron">,
