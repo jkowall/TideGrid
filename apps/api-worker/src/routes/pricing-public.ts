@@ -96,7 +96,7 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
     tags: ["public", "pricing"],
     summary: "Price a party on a trip and keep the quote",
     description:
-      "Resolves the browser Origin as /v1/public/trips does. Prices the party, add-ons, and optional promotion code on the server under the current versions and stores an immutable quote that names every version it used. Idempotent by key: a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422.",
+      "Resolves the browser Origin as /v1/public/trips does. Prices the party, add-ons, and optional promotion code on the server under the current versions and stores an immutable quote that names every version it used. Idempotent by key: a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422. Rate limited per client address and operator; a limited request answers 429 and writes nothing.",
     request: {
       headers: z.object({ "idempotency-key": IdempotencyKey }),
       body: { required: true, content: { "application/json": { schema: QuoteCreateRequest } } },
@@ -113,6 +113,9 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
       ),
       422: errorBody(
         `The party, add-ons, or promotion code cannot be priced; the code names the first problem and the message lists all: ${requestProblems.join(", ")}. Or idempotency_key_reused: the key was used with another request`,
+      ),
+      429: errorBody(
+        "Too many quotes from this address for this operator in the last minute (rate_limited); nothing was written",
       ),
     },
   });

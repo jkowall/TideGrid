@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { QuoteResponse, TripOfferResponse } from "@tidegrid/contracts";
+import { ErrorResponse, QuoteResponse, TripOfferResponse } from "@tidegrid/contracts";
 import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import {
@@ -52,16 +52,23 @@ describe.skipIf(!env)("pricing API against a real database as the runtime role",
   async function call(
     method: string,
     path: string,
-    opts: { host?: string | null; body?: unknown; key?: string | null } = {},
+    opts: {
+      host?: string | null;
+      body?: unknown;
+      key?: string | null;
+      ip?: string;
+      env?: Record<string, unknown>;
+    } = {},
   ) {
     const headers = new Headers();
     if (opts.host !== null) headers.set("origin", `https://${opts.host ?? A.host}`);
     if (opts.body !== undefined) headers.set("content-type", "application/json");
     if (opts.key) headers.set("idempotency-key", opts.key);
+    if (opts.ip) headers.set("cf-connecting-ip", opts.ip);
     const res = await app.request(
       `http://localhost${path}`,
       { method, headers, body: opts.body === undefined ? null : JSON.stringify(opts.body) },
-      bindings(),
+      { ...bindings(), ...opts.env },
       executionCtx,
     );
     const text = await res.text();
@@ -316,6 +323,45 @@ describe.skipIf(!env)("pricing API against a real database as the runtime role",
         results.filter((r) => r.res.headers.get("idempotent-replayed") === "true"),
       ).toHaveLength(3);
       expect(await quoteCount(A.id)).toBe(before + 1);
+    });
+
+    it("limits quote creation per address and operator before writing, and never limits reads", async () => {
+      // A stand-in for the Workers rate limit binding: two requests per key.
+      const counts = new Map<string, number>();
+      const env = {
+        PUBLIC_RATE_LIMITER: {
+          limit: async ({ key }: { key: string }) => {
+            const n = (counts.get(key) ?? 0) + 1;
+            counts.set(key, n);
+            return { success: n <= 2 };
+          },
+        },
+      };
+      const ip = "203.0.113.7";
+      const before = await quoteCount(A.id);
+      const create = (host = A.host, tripId = trips.a[0] ?? "") =>
+        call("POST", "/v1/public/quotes", {
+          host,
+          key: randomUUID(),
+          body: quoteBody(tripId),
+          ip,
+          env,
+        });
+      const first = await create();
+      const second = await create();
+      const limited = await create();
+      expect([first.res.status, second.res.status, limited.res.status]).toEqual([201, 201, 429]);
+      expect(ErrorResponse.parse(limited.json).error.code).toBe("rate_limited");
+      expect(limited.res.headers.get("cache-control")).toBe("no-store");
+      expect(await quoteCount(A.id)).toBe(before + 2);
+      // Reads take nothing from the bucket.
+      const quoteId = (first.json.quote as { quoteId: string }).quoteId;
+      const read = await call("GET", `/v1/public/quotes/${quoteId}`, { ip, env });
+      const offer = await call("GET", `/v1/public/trips/${trips.a[0]}/offer`, { ip, env });
+      expect([read.res.status, offer.res.status]).toEqual([200, 200]);
+      // The same address has its own bucket at another operator's site.
+      expect((await create(B.host, trips.b)).res.status).toBe(201);
+      expect(Object.fromEntries(counts)).toEqual({ [`${A.id}:${ip}`]: 3, [`${B.id}:${ip}`]: 1 });
     });
 
     it("names the problem with the first error code and lists every problem", async () => {

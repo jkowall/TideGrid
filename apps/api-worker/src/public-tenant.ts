@@ -26,6 +26,21 @@ export const GUEST_PRINCIPAL = "guest:public";
 const notPublished = () =>
   new ApiError(404, "tenant_not_found", "No operator is published at this address");
 
+/**
+ * Public commands write rows for anyone a published origin lets through, and
+ * an Origin header is not authentication, so each client address may send
+ * only so many to one operator per minute. Checked before the transaction
+ * opens, so a limited request writes nothing. A no-op where the binding is
+ * absent, as the sign-in limiter is.
+ */
+async function limitPublicCommand(c: Context<AppEnv>, tenantId: string): Promise<void> {
+  const limiter = c.env.PUBLIC_RATE_LIMITER;
+  if (!limiter) return;
+  const ip = c.req.header("cf-connecting-ip") ?? "unknown";
+  const { success } = await limiter.limit({ key: `${tenantId}:${ip}` });
+  if (!success) throw new ApiError(429, "rate_limited", "Too many requests; wait a minute");
+}
+
 export interface PublicCommand {
   /** Operation name, for example `public.quotes.create`. */
   scope: string;
@@ -41,9 +56,10 @@ export interface PublicCommand {
  * Run a guest request for the tenant the browser Origin resolves to: an
  * active, verified hostname of an active tenant, as /v1/public/trips does.
  * Anything else answers the same 404. The work runs in one tenant
- * transaction with a guest context; a command claims its idempotency key
- * first and stores its response before commit, and any thrown error rolls
- * everything back.
+ * transaction with a guest context. A command is rate limited per client
+ * address and tenant, claims its idempotency key first, and stores its
+ * response before commit; any thrown error rolls everything back. Reads are
+ * not limited.
  */
 export async function withPublicTenant<T extends JsonObject>(
   c: Context<AppEnv>,
@@ -58,6 +74,7 @@ export async function withPublicTenant<T extends JsonObject>(
   `.execute(db);
   const tenantId = rows[0]?.tenant_id;
   if (!tenantId) throw notPublished();
+  if (options.idempotency) await limitPublicCommand(c, tenantId);
   const ctx: TenantContext = {
     tenantId,
     actorType: "guest",
