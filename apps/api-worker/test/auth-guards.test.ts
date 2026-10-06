@@ -158,6 +158,15 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/roster",
         // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/messages",
+        "/v1/public/booking-access",
+        "/v1/public/booking-access/renewals",
+        "/v1/public/checkout-sessions/{checkoutSessionId}/manage-session",
+        "/v1/public/manage/booking",
+        "/v1/public/manage/participants/{position}",
+        "/v1/public/manage/cancellation",
+        "/v1/public/manage/link-email",
+        "/v1/public/manage/session/end",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are
@@ -166,6 +175,8 @@ describe("contract", () => {
       "accessJwt",
       "checkoutSecret",
       "fakeClientSecret",
+      // The guest's booking session (lane 1, G2.11c).
+      "manageSession",
       "sessionCookie",
     ]);
   });

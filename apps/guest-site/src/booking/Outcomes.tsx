@@ -9,9 +9,12 @@ import {
   StatusBadge,
 } from "@tidegrid/design-system/components";
 import { formatMoney } from "@tidegrid/design-system/format";
-import type { ReactNode, Ref } from "react";
+import { type ReactNode, type Ref, useState } from "react";
 import { ContactActions } from "../Contact.tsx";
-import { useLinkClick } from "../navigation.tsx";
+import { openFromCheckout } from "../manage/api.ts";
+import { DemoMailboxLink } from "../manage/DemoMailbox.tsx";
+import { storeSession } from "../manage/session.ts";
+import { useLinkClick, useNavigate } from "../navigation.tsx";
 import { deadlineText, heldThing, type Stop, shortReference } from "./model.ts";
 
 type Tone = "ready" | "blocked" | "warning" | "neutral";
@@ -152,14 +155,69 @@ export interface BookingSummary {
   total: number;
 }
 
+/**
+ * The checkout that just paid, while this page still holds its secret: it can
+ * open the booking at once (lane 1, G2.11c), within an hour of confirmation.
+ */
+export interface ManageFromCheckout {
+  checkoutSessionId: string;
+  secret: string;
+}
+
+/** "Name your party now": opens the booking from the checkout, then the management page. */
+function NamePartyNow({ manage }: { manage: ManageFromCheckout }) {
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const go = async () => {
+    if (busy) return;
+    setBusy(true);
+    setFailed(false);
+    const result = await openFromCheckout(manage.checkoutSessionId, manage.secret);
+    if (result.kind === "ok") {
+      storeSession({
+        token: result.value.token,
+        expiresAt: result.value.expiresAt,
+        reference: result.value.reference,
+      });
+      navigate("/manage");
+      return;
+    }
+    setBusy(false);
+    setFailed(true);
+  };
+  return (
+    <>
+      {failed && (
+        <Notice tone="info" title="Use the button in your email instead">
+          We couldn't open your booking from here just now. Your confirmation email has a button
+          that opens it.
+        </Notice>
+      )}
+      <Button
+        variant="primary"
+        icon="users"
+        busy={busy}
+        busyLabel="Opening…"
+        onClick={() => void go()}
+      >
+        Name your party now
+      </Button>
+    </>
+  );
+}
+
 export function Confirmed({
   summary,
   brand,
   headingRef,
+  manage = null,
 }: {
   summary: BookingSummary;
   brand: PublicBrand;
   headingRef: Ref<HTMLHeadingElement>;
+  /** Present right after paying, when the page can open the booking itself. */
+  manage?: ManageFromCheckout | null;
 }) {
   return (
     <OutcomePanel
@@ -167,7 +225,13 @@ export function Confirmed({
       tone="ready"
       title="You're booked"
       headingRef={headingRef}
-      actions={<BackToTrips primary />}
+      actions={
+        <>
+          {manage && <NamePartyNow manage={manage} />}
+          <BackToTrips primary={!manage} />
+          <DemoMailboxLink />
+        </>
+      }
     >
       <StatusBadge tone="ready">Confirmed</StatusBadge>
       <Reference code={summary.reference} />
@@ -208,8 +272,9 @@ export function Confirmed({
         </div>
       </dl>
       <p>
-        Keep this reference, and quote it if you contact {brand.name}. This demo build doesn't send
-        confirmation emails yet.
+        Keep this reference, and quote it if you contact {brand.name}. We're emailing your
+        confirmation and receipt, with a button that opens your booking to name your party or cancel
+        within the policy.
       </p>
     </OutcomePanel>
   );

@@ -44,6 +44,7 @@ import {
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
+import { enqueueConfirmationEmail } from "./emails.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import { newBookingReference } from "./secrets.ts";
 import { record } from "./views.ts";
@@ -398,6 +399,9 @@ async function book(
     before: { state: session.state },
     after: { state: "confirmed", bookingId: booking.id, orderStatus: "paid", reacquired },
   });
+  // The confirmation email with its receipt and management link (lane 1),
+  // enqueued with the booking, once per booking; the delivery job sends it.
+  await enqueueConfirmationEmail(trx, ctx, booking.id);
   // Lane 1 contract: in-transaction work other modules attach to a new
   // booking (waiver assignment, G2.15) commits or rolls back with it.
   const { rows: products } = await sql<{ product_id: string }>`

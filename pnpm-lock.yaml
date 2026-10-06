@@ -38,6 +38,9 @@ importers:
       '@tidegrid/domain-inventory':
         specifier: workspace:*
         version: link:../../packages/domain-inventory
+      '@tidegrid/domain-messaging':
+        specifier: workspace:*
+        version: link:../../packages/domain-messaging
       '@tidegrid/domain-payments':
         specifier: workspace:*
         version: link:../../packages/domain-payments

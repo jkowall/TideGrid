@@ -74,7 +74,12 @@
         // Its webhook secret, FAKE_PAYMENT_WEBHOOK_SECRET, lives in .dev.vars.
         // Deployed environments leave payments off until the owner turns them
         // on; a production configuration refuses the fake outright.
-        "PAYMENT_PROVIDER": "fake"
+        "PAYMENT_PROVIDER": "fake",
+        // Email goes to the fake provider and its local mailbox at
+        // /v1/fake-email/mailbox (lane 1, the G2.16 shim); links in it point
+        // at the local guest site. A production configuration refuses the fake.
+        "EMAIL_PROVIDER": "fake",
+        "GUEST_LINK_ORIGIN": "http://{slug}.book.localhost:5173"
       }
     },
     "test": {

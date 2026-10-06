@@ -4,6 +4,7 @@ import { handleVerifiedEvent } from "@tidegrid/domain-booking";
 import { bookingHooksFor } from "../booking-hooks.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
+import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
 import { providerFor } from "../payments.ts";
 import { errorBody } from "./responses.ts";
@@ -102,6 +103,10 @@ export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: App
     // Money that moved without a booking, or an event that matches no payment
     // or does not match its payment, needs a person, once: a redelivery of an
     // event already handled is routine. A refund that did not settle always is.
+    // A new booking's confirmation email goes out now, in the background (lane 1).
+    if (handled.outcome === "confirmed" || handled.outcome === "confirmed_reacquired") {
+      deliverAfterCommit(c, deps, handled.tenantId);
+    }
     const attention =
       (needsAttention.has(handled.outcome) && !handled.duplicate) ||
       (handled.refund !== null && handled.refund.kind !== "succeeded");

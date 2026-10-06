@@ -1,12 +1,18 @@
 import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
-import { ParticipantListResponse, StaffParticipantParams } from "@tidegrid/contracts";
+import {
+  BookingMessagesResponse,
+  ParticipantListResponse,
+  StaffParticipantParams,
+} from "@tidegrid/contracts";
 import { listParticipants } from "@tidegrid/domain-booking";
+import { listBookingMessages } from "@tidegrid/domain-messaging";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const participantsPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants";
+const messagesPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/messages";
 
 /**
  * Staff read of a booking's participants (lane 1, G2.11c). Participants are
@@ -53,5 +59,46 @@ export function registerParticipantStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
       },
     );
     return c.json(body as ParticipantListResponse, 200);
+  });
+
+  app.use("/v1/staff/tenants/:tenantId/bookings/:bookingId/messages", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
+
+  const messagesRoute = createRoute({
+    method: "get",
+    path: messagesPath,
+    tags: ["staff", "bookings"],
+    summary: "A booking's email and its delivery",
+    description:
+      "Owners and booking staff. Each message the booking caused, oldest first: its template, its delivery state, attempts, when it was sent, and the last failure's code. No recipient or content. Provider acceptance is not proof the guest read a message. Finance does not hold bookings.read and is refused.",
+    security: staffSecurity,
+    request: { params: StaffParticipantParams },
+    responses: {
+      200: {
+        content: { "application/json": { schema: BookingMessagesResponse } },
+        description: "The booking's messages",
+      },
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant or booking (booking_not_found)"),
+    },
+  });
+
+  app.openapi(messagesRoute, async (c) => {
+    const { tenantId, bookingId } = c.req.valid("param");
+    const { body } = await withStaffTenant(
+      c,
+      deps,
+      { tenantId, permission: "bookings.read", snapshot: true },
+      async (trx) => {
+        const party = await listParticipants(trx, tenantId, bookingId);
+        if (!party) throw new ApiError(404, "booking_not_found", "No such booking for this tenant");
+        const messages = await listBookingMessages(trx, tenantId, bookingId);
+        return { messages: messages.map((m) => ({ ...m })) };
+      },
+    );
+    return c.json(body as BookingMessagesResponse, 200);
   });
 }

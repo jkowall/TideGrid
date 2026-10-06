@@ -1,6 +1,7 @@
 import type { Principal } from "@tidegrid/contracts";
 import type { createDb, Database } from "@tidegrid/database";
 import type { BookingHooks } from "@tidegrid/domain-booking";
+import type { EmailProvider } from "@tidegrid/domain-messaging";
 import type { PaymentProvider } from "@tidegrid/domain-payments";
 import type { createLogger } from "@tidegrid/observability";
 import type { Kysely } from "kysely";
@@ -34,4 +35,8 @@ export interface AppDeps {
    * every path that confirms a booking or changes its party, for tests.
    */
   bookingHooks?: BookingHooks;
+  /** Replaces the configured email provider (src/email.ts), for tests. */
+  emailProvider?: (db: Kysely<Database>, env: Bindings) => EmailProvider | null;
+  /** False keeps committed mail queued for the test to deliver; default true. */
+  deliverEmailAfterCommit?: boolean;
 }
