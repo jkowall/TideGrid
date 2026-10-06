@@ -250,13 +250,40 @@ export function NotProvisioned({ message, signOut }: { message: string; signOut:
   );
 }
 
-/** Why the console could not check the sign-in, in words a person can act on. */
-export type FailureReason = "unreachable" | "unavailable";
+/**
+ * Why the console could not go on, in words a person can act on: it could not
+ * check the sign-in, or a page failed to render (crashed).
+ */
+export type FailureReason = "unreachable" | "unavailable" | "crashed";
 
-const failureCopy: Record<FailureReason, string> = {
-  unreachable: "Check your connection, then try again.",
-  unavailable: "TideGrid isn't responding right now. Try again in a moment.",
+const failureCopy: Record<FailureReason, { title: string; body: string }> = {
+  unreachable: {
+    title: "The console can't reach TideGrid",
+    body: "Check your connection, then try again.",
+  },
+  unavailable: {
+    title: "The console can't reach TideGrid",
+    body: "TideGrid isn't responding right now. Try again in a moment.",
+  },
+  crashed: {
+    title: "Something went wrong on this page",
+    body: "Try again. If it keeps happening, reload the console.",
+  },
 };
+
+/**
+ * Shown by the error boundary when a page fails to render. "Try again" starts
+ * the console afresh on the same page without its query, so an address that
+ * caused the failure cannot cause it again.
+ */
+export function CrashedConsole() {
+  return (
+    <Failed
+      reason="crashed"
+      onRetry={async () => window.location.assign(window.location.pathname)}
+    />
+  );
+}
 
 export function Failed({
   reason,
@@ -271,8 +298,8 @@ export function Failed({
       <div className="console-gate__icon console-gate__icon--warning">
         <Icon name="alert-triangle" />
       </div>
-      <GateTitle>The console can't reach TideGrid</GateTitle>
-      <p className="console-gate__lede">{failureCopy[reason]}</p>
+      <GateTitle>{failureCopy[reason].title}</GateTitle>
+      <p className="console-gate__lede">{failureCopy[reason].body}</p>
       <Button
         variant="primary"
         icon="refresh"

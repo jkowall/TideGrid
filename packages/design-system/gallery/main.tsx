@@ -20,10 +20,12 @@ import {
 import {
   Button,
   ButtonLink,
+  Dialog,
   EmptyState,
   Icon,
   iconNames,
   Notice,
+  SelectField,
   Skeleton,
   Spinner,
   StatusBadge,
@@ -178,6 +180,40 @@ function Section({
   );
 }
 
+/** A final action confirmed in a danger dialog, as the console cancels a trip. */
+function DialogDemo() {
+  const [open, setOpen] = useState(false);
+  const reason = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <div className="gallery-row">
+        <Button onClick={() => setOpen(true)}>Open a danger dialog</Button>
+      </div>
+      {open && (
+        <Dialog
+          title="Cancel this trip?"
+          tone="danger"
+          onClose={() => setOpen(false)}
+          initialFocus={reason}
+          footer={
+            <>
+              <Button variant="danger" icon="x-octagon" onClick={() => setOpen(false)}>
+                Cancel trip
+              </Button>
+              <Button onClick={() => setOpen(false)}>Keep trip</Button>
+            </>
+          }
+        >
+          <Notice tone="warning" title="This can't be undone" announce="none">
+            <p>Canceling is final. The trip stops selling.</p>
+          </Notice>
+          <TextField ref={reason} label="Reason" hint="Saved in the audit history." />
+        </Dialog>
+      )}
+    </>
+  );
+}
+
 function Components({ dark }: { dark: boolean }) {
   const [busy, setBusy] = useState(false);
   const tones: StatusTone[] = ["ready", "warning", "blocked", "info", "pending", "neutral"];
@@ -217,6 +253,15 @@ function Components({ dark }: { dark: boolean }) {
             Link as button
           </ButtonLink>
         </div>
+        <div className="gallery-row">
+          <Button icon="chevron-left">Previous</Button>
+          <Button icon="chevron-right" iconPosition="end">
+            Next
+          </Button>
+          <Button variant="danger" icon="x-octagon">
+            Cancel trip
+          </Button>
+        </div>
       </Section>
       <Section id={`fields-${dark}`} title="Text fields">
         <div className="gallery-grid">
@@ -228,6 +273,14 @@ function Components({ dark }: { dark: boolean }) {
           />
           <TextField label="Invalid" defaultValue="ava@" error="Enter your work email address." />
           <TextField label="Unavailable" defaultValue="locked@demo-harbor.test" disabled />
+          <SelectField
+            label="Party size"
+            defaultValue="2"
+            options={[1, 2, 3, 4].map((n) => ({
+              value: String(n),
+              label: n === 1 ? "1 guest" : `${n} guests`,
+            }))}
+          />
         </div>
       </Section>
       <Section id={`status-${dark}`} title="Status: icon plus label">
@@ -238,6 +291,30 @@ function Components({ dark }: { dark: boolean }) {
             </StatusBadge>
           ))}
         </div>
+        <p className="tg-muted">Trip sales states: a tone, a domain icon, and the word.</p>
+        <div className="gallery-row">
+          <StatusBadge tone="pending" icon="pencil">
+            Draft
+          </StatusBadge>
+          <StatusBadge tone="ready" icon="check-circle">
+            Published
+          </StatusBadge>
+          <StatusBadge tone="warning" icon="lock">
+            Closed
+          </StatusBadge>
+          <StatusBadge tone="blocked" icon="x-octagon">
+            Canceled
+          </StatusBadge>
+          <StatusBadge tone="neutral" icon="flag">
+            Completed
+          </StatusBadge>
+          <StatusBadge tone="info" icon="eye-off">
+            Blacked out
+          </StatusBadge>
+        </div>
+      </Section>
+      <Section id={`dialog-${dark}`} title="Dialog">
+        <DialogDemo />
       </Section>
       <Section id={`notices-${dark}`} title="Notices">
         <div className="gallery-stack">

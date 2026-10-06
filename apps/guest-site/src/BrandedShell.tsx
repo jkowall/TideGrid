@@ -1,8 +1,9 @@
 import type { PublicBrand } from "@tidegrid/contracts";
-import { ButtonLink, EmptyState, Icon } from "@tidegrid/design-system/components";
+import { ButtonLink, Icon } from "@tidegrid/design-system/components";
 import { type ReactNode, useEffect, useRef } from "react";
 import { formatPhone, type Tenant } from "./bootstrap.ts";
 import { useTitle } from "./States.tsx";
+import { UpcomingTrips } from "./UpcomingTrips.tsx";
 
 /**
  * The branded guest frame. Every tenant value reaches the page as text, as an
@@ -58,30 +59,6 @@ function BrandLockup({ brand }: { brand: PublicBrand }) {
   );
 }
 
-/** The single primary action while trips are not listed: reach the operator. */
-function ContactActions({ brand }: { brand: PublicBrand }) {
-  const { phone, email } = brand.contact;
-  const primary = phone ? (
-    <ButtonLink variant="primary" icon="phone" href={`tel:${phone}`}>
-      Call {formatPhone(phone)}
-    </ButtonLink>
-  ) : (
-    <ButtonLink variant="primary" icon="mail" href={`mailto:${email}`}>
-      Email {brand.name}
-    </ButtonLink>
-  );
-  return (
-    <>
-      {primary}
-      {phone && email && (
-        <ButtonLink variant="ghost" icon="mail" href={`mailto:${email}`}>
-          Email instead
-        </ButtonLink>
-      )}
-    </>
-  );
-}
-
 function Home({ brand }: { brand: PublicBrand }) {
   useTitle(brand.name);
   return (
@@ -117,20 +94,7 @@ function Home({ brand }: { brand: PublicBrand }) {
         </svg>
       </section>
       <div className="guest-container guest-content">
-        <section aria-labelledby="trips-title" className="guest-section">
-          <h2 id="trips-title">Upcoming trips</h2>
-          <EmptyState
-            icon="calendar"
-            headingLevel={3}
-            title="No trips are open for online booking yet"
-            actions={<ContactActions brand={brand} />}
-          >
-            <p>
-              {brand.name} lists its trips here once online booking opens. Until then, get in touch
-              to reserve a spot.
-            </p>
-          </EmptyState>
-        </section>
+        <UpcomingTrips brand={brand} />
       </div>
     </>
   );
