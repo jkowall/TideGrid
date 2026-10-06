@@ -379,6 +379,8 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
     expect(retry.json).toEqual({ received: true, duplicate: true, outcome: "released" });
   });
 
+  // Up to six cron runs, each with its own time budget, so this test gets five
+  // minutes instead of the suite's one.
   it("refunds a late success that cannot reacquire, and the sweep expires checkouts", async () => {
     const tripId = tripsA.charter();
     const q = await quoteFor(runtime.db, A.id, tripId, 2, { charter: true });
@@ -403,10 +405,16 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
       update public.capacity_holds h set expires_at = now() - interval '1 second'
         from s where h.id = s.hold_id`;
     expect((await status(A, session.id, secret)).json.checkoutSession?.state).toBe("expired");
-    await runScheduled({ cron: "*/15 * * * *" }, bindings(), { log: () => {} });
-    const [swept] = await admin<{ state: string; hold: string }[]>`
-      select s.state, h.state as hold from public.checkout_sessions s
-        join public.capacity_holds h on h.id = s.hold_id where s.id = ${session.id}`;
+    // The cron sweeps every tenant with due work in this shared database, at
+    // most 100 a run in tenant id order and within a time budget, so this
+    // tenant's turn can take more than one run. Each run makes progress.
+    let swept: { state: string; hold: string } | undefined;
+    for (let run = 0; run < 6 && swept?.state !== "expired"; run += 1) {
+      await runScheduled({ cron: "*/15 * * * *" }, bindings(), { log: () => {} });
+      [swept] = await admin<{ state: string; hold: string }[]>`
+        select s.state, h.state as hold from public.checkout_sessions s
+          join public.capacity_holds h on h.id = s.hold_id where s.id = ${session.id}`;
+    }
     expect(swept).toEqual({ state: "expired", hold: "expired" });
     // Another guest takes the boat; then the first guest's payment succeeds.
     const q2 = await quoteFor(runtime.db, A.id, tripId, 3, { charter: true });
@@ -438,7 +446,7 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
         (e) => e.checkoutSessionId === session.id,
       ),
     ).toMatchObject({ reason: "no_capacity" });
-  });
+  }, 300_000);
 
   it("refuses a checkout for a trip with too few seats, a stale quote, and too many open checkouts", async () => {
     const stale = await quoteFor(runtime.db, A.id, tripsA.shared(), 1, {
