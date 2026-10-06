@@ -12,6 +12,7 @@ import {
   isTripSummary,
   type Read,
 } from "../bookings/api.ts";
+import { bookingStates } from "../bookings/model.ts";
 import { call, failureOf, tenantPath } from "../http.ts";
 
 /**
@@ -39,7 +40,10 @@ function isResult(r: Partial<BookingSearchResult> | null | undefined): boolean {
   return (
     isString(r?.id) &&
     isString(r.reference) &&
-    r.state === "confirmed" &&
+    // Any booking state the console can show, so a state added for the
+    // booking views (cancellation) reads here too.
+    typeof r.state === "string" &&
+    Object.hasOwn(bookingStates, r.state) &&
     isInstant(r.confirmedAt) &&
     isTripSummary(r.trip) &&
     isBooker(r.booker, true) &&
