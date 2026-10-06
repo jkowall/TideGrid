@@ -17,7 +17,9 @@ export { enqueueOutbox, type OutboxEvent } from "./outbox.ts";
 export {
   inTenantTransaction,
   isUuid,
+  type SnapshotRead,
   setTenantContext,
+  snapshotRead,
   type TenantContext,
   type TenantTransaction,
 } from "./tenant.ts";

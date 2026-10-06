@@ -388,25 +388,35 @@ export type DayBookingsResult =
   | { kind: "cursor_invalid" };
 
 /**
- * Bookings on trips departing on one local date, by departure and then by
+ * Bookings on trips departing on one local date, by departure, trip, and
  * confirmation, a page at a time, with every trip of that date and its counts.
- * The cursor is the last booking id of the previous page; its position is
- * read in SQL, so the database's own precision orders the page.
+ * The cursor is the last booking id of the previous page and must be in this
+ * listing; its position is read in SQL, so the database's own precision orders
+ * the page. Run it in one snapshot (`snapshotRead`) so the counts and the page
+ * always agree.
  */
 export async function listDayBookings(
   trx: TenantTransaction,
   tenantId: string,
   query: { date: string; tripId?: string; limit: number; after?: string; withBooker: boolean },
 ): Promise<DayBookingsResult> {
+  const tripFilter =
+    query.tripId === undefined
+      ? sql``
+      : isUuid(query.tripId)
+        ? sql`and b.trip_id = ${query.tripId}::uuid`
+        : sql`and false`;
   if (query.after !== undefined) {
     if (!isUuid(query.after)) return { kind: "cursor_invalid" };
-    const found = await trx
-      .selectFrom("bookings")
-      .select("id")
-      .where("tenant_id", "=", tenantId)
-      .where("id", "=", query.after)
-      .executeTakeFirst();
-    if (!found) return { kind: "cursor_invalid" };
+    // The cursor must name a booking this listing could have returned.
+    const { rows: found } = await sql<{ id: string }>`
+      select b.id
+        from bookings b
+        join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
+       where b.tenant_id = ${tenantId} and b.id = ${query.after}::uuid
+         and t.local_date = ${query.date}::date
+         ${tripFilter}`.execute(trx);
+    if (!found[0]) return { kind: "cursor_invalid" };
   }
   const { rows: tripRows } = await sql<TripRow & { bookings: number; guests: number }>`
     select ${tripColumns},
@@ -419,12 +429,6 @@ export async function listDayBookings(
      order by t.starts_at, t.id
      limit ${DAY_TRIPS_LIMIT}`.execute(trx);
 
-  const tripFilter =
-    query.tripId === undefined
-      ? sql``
-      : isUuid(query.tripId)
-        ? sql`and b.trip_id = ${query.tripId}::uuid`
-        : sql`and false`;
   const cursor =
     query.after === undefined
       ? sql``

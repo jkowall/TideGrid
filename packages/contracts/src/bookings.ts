@@ -97,13 +97,16 @@ const BookerContact = z
 // A day's bookings ------------------------------------------------------------------
 
 export const BookingListQuery = z.object({
-  date: LocalDate.describe("The marina's local date: bookings on trips departing that day"),
+  date: LocalDate
+    // The ISO calendar has a year 0000; PostgreSQL's dates do not.
+    .refine((value) => !value.startsWith("0000-"), "There is no year 0")
+    .describe("The marina's local date: bookings on trips departing that day"),
   tripId: Uuid.optional().describe(
     "Only this trip's bookings. A trip of another operator, or on another date, matches nothing",
   ),
   limit: z.coerce.number().int().min(1).max(200).default(100),
   after: Uuid.optional().describe(
-    "Cursor: the last booking id of the previous page (nextAfter). One that names no booking of this operator answers 400 cursor_invalid",
+    "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid",
   ),
 });
 export type BookingListQuery = z.infer<typeof BookingListQuery>;
@@ -140,7 +143,7 @@ export const BookingListResponse = z
       ),
     bookings: z
       .array(BookingListItem)
-      .describe("This page, sorted by departure, then by confirmation"),
+      .describe("This page, sorted by departure, then by trip, then by confirmation"),
     nextAfter: Uuid.nullable().describe(
       "Pass as after for the next page; null on the last page. The same cursor always returns the same page while nothing is booked in between",
     ),

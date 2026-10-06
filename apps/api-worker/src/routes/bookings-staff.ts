@@ -23,7 +23,6 @@ import {
   listTripBookings,
 } from "@tidegrid/domain-booking";
 import { can } from "@tidegrid/domain-identity";
-import type { Context } from "hono";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { type StaffTenantContext, withStaffTenant } from "../staff-tenant.ts";
@@ -49,10 +48,19 @@ const cursorInvalid = () =>
  */
 const seesBooker = (ctx: StaffTenantContext) => can(ctx.access.role, "bookings.read");
 
-/** Booking reads carry personal data or money; no cache keeps them. */
-function noStore(c: Context<AppEnv>) {
-  c.header("Cache-Control", "no-store");
-}
+/**
+ * Booking reads carry personal data or money, so no cache keeps any answer,
+ * refusals included: the header is set after the handler or the error handler
+ * has made the response.
+ */
+const bookingReadPaths = [
+  "/v1/staff/tenants/:tenantId/trips/:tripId/bookings",
+  "/v1/staff/tenants/:tenantId/trips/:tripId/roster",
+  "/v1/staff/tenants/:tenantId/finalization-exceptions",
+  "/v1/staff/tenants/:tenantId/bookings",
+  "/v1/staff/tenants/:tenantId/bookings/:bookingId",
+  "/v1/staff/tenants/:tenantId/booking-references/:reference",
+];
 
 /**
  * Staff booking reads. G2.7 added a trip's bookings and the finalization
@@ -63,6 +71,13 @@ function noStore(c: Context<AppEnv>) {
  * email, and only they read rosters.
  */
 export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
+  for (const path of bookingReadPaths) {
+    app.use(path, async (c, next) => {
+      await next();
+      c.header("Cache-Control", "no-store");
+    });
+  }
+
   const tripBookingsRoute = createRoute({
     method: "get",
     path: tripBookingsPath,
@@ -88,14 +103,13 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     const { body } = await withStaffTenant(
       c,
       deps,
-      { tenantId, permission: "bookings.read" },
+      { tenantId, permission: "bookings.read", snapshot: true },
       async (trx) => {
         const bookings = await listTripBookings(trx, tenantId, tripId);
         if (!bookings) throw tripNotFound();
         return { bookings: bookings.map((b) => ({ ...b })) };
       },
     );
-    noStore(c);
     return c.json(body, 200);
   });
 
@@ -126,7 +140,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     const { body } = await withStaffTenant(
       c,
       deps,
-      { tenantId, permission: "payments.read" },
+      { tenantId, permission: "payments.read", snapshot: true },
       async (trx, ctx) => {
         const page = await listExceptionsPage(trx, tenantId, {
           limit,
@@ -140,7 +154,6 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         };
       },
     );
-    noStore(c);
     return c.json(body, 200);
   });
 
@@ -150,7 +163,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "Bookings on trips departing on one local date",
     description:
-      "Every role. The date's trips with their booking and guest counts, and a page of its bookings by departure and then by confirmation: reference, party, extras, total, and payment state. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
+      "Every role. The date's trips with their booking and guest counts, and a page of its bookings by departure, trip, and confirmation: reference, party, extras, total, and payment state. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
     security: staffSecurity,
     request: { params: StaffTenantParams, query: BookingListQuery },
     responses: {
@@ -173,7 +186,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     const { body } = await withStaffTenant(
       c,
       deps,
-      { tenantId, permission: "payments.read" },
+      { tenantId, permission: "payments.read", snapshot: true },
       async (trx, ctx) => {
         const result = await listDayBookings(trx, tenantId, {
           date,
@@ -191,7 +204,6 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         };
       },
     );
-    noStore(c);
     return c.json(body, 200);
   });
 
@@ -220,7 +232,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     const { body } = await withStaffTenant(
       c,
       deps,
-      { tenantId, permission: "payments.read" },
+      { tenantId, permission: "payments.read", snapshot: true },
       async (trx, ctx) => {
         const booking = await getBookingDetail(trx, tenantId, bookingId, {
           withBooker: seesBooker(ctx),
@@ -229,7 +241,6 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         return { booking: { ...booking } };
       },
     );
-    noStore(c);
     return c.json(body, 200);
   });
 
@@ -258,7 +269,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     const { body } = await withStaffTenant(
       c,
       deps,
-      { tenantId, permission: "payments.read" },
+      { tenantId, permission: "payments.read", snapshot: true },
       async (trx) => {
         const normalized = normalizeBookingReference(reference);
         const found = normalized ? await findBookingByReference(trx, tenantId, normalized) : null;
@@ -266,7 +277,6 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         return { booking: { ...found } };
       },
     );
-    noStore(c);
     return c.json(body, 200);
   });
 
@@ -295,14 +305,13 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     const { body } = await withStaffTenant(
       c,
       deps,
-      { tenantId, permission: "bookings.read" },
+      { tenantId, permission: "bookings.read", snapshot: true },
       async (trx) => {
         const roster = await getTripRoster(trx, tenantId, tripId);
         if (!roster) throw tripNotFound();
         return { roster: { ...roster } };
       },
     );
-    noStore(c);
     return c.json(body, 200);
   });
 }

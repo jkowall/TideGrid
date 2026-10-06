@@ -9169,7 +9169,7 @@
           "bookings"
         ],
         "summary": "Bookings on trips departing on one local date",
-        "description": "Every role. The date's trips with their booking and guest counts, and a page of its bookings by departure and then by confirmation: reference, party, extras, total, and payment state. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
+        "description": "Every role. The date's trips with their booking and guest counts, and a page of its bookings by departure, trip, and confirmation: reference, party, extras, total, and payment state. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
         "security": [
           {
             "accessJwt": []
@@ -9226,10 +9226,10 @@
             "schema": {
               "type": "string",
               "format": "uuid",
-              "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking of this operator answers 400 cursor_invalid"
+              "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid"
             },
             "required": false,
-            "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking of this operator answers 400 cursor_invalid",
+            "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid",
             "name": "after",
             "in": "query"
           }
@@ -9543,7 +9543,7 @@
                           "payment"
                         ]
                       },
-                      "description": "This page, sorted by departure, then by confirmation"
+                      "description": "This page, sorted by departure, then by trip, then by confirmation"
                     },
                     "nextAfter": {
                       "type": [
