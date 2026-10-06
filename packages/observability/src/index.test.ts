@@ -7,6 +7,24 @@ describe("observability", () => {
     expect(out).toEqual({ "url.path": "/v1/health" });
   });
 
+  it("keeps the SQLSTATE of a failed query and the hold sweep counters", () => {
+    const out = redact({
+      "db.response.status_code": "23514",
+      "tidegrid.hold_sweep.tenant_count": 2,
+      "tidegrid.hold_sweep.expired_count": 5,
+      "tidegrid.hold_sweep.failed_tenant_count": 0,
+      "tidegrid.hold_sweep.complete": true,
+      "db.query.text": "select secret",
+    });
+    expect(out).toEqual({
+      "db.response.status_code": "23514",
+      "tidegrid.hold_sweep.tenant_count": 2,
+      "tidegrid.hold_sweep.expired_count": 5,
+      "tidegrid.hold_sweep.failed_tenant_count": 0,
+      "tidegrid.hold_sweep.complete": true,
+    });
+  });
+
   it("emits one JSON line with level, message, and merged attributes", () => {
     const lines: string[] = [];
     const log = createLogger({ "tidegrid.environment": "local" }, (l) => lines.push(l));

@@ -178,4 +178,6 @@ export type AuditEventListResponse = z.infer<typeof AuditEventListResponse>;
 
 export * from "./brand.ts";
 export * from "./catalog.ts";
+// Capacity and holds (G2.6).
+export * from "./inventory.ts";
 export * from "./pricing.ts";

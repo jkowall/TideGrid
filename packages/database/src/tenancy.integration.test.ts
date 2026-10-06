@@ -655,6 +655,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         quotes: ["INSERT", "SELECT"],
         quote_lines: ["INSERT", "SELECT"],
         quote_line_taxes: ["INSERT", "SELECT"],
+        // Capacity and holds (G2.6).
+        capacity_holds: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -676,6 +678,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         idempotency_keys: ["completed_at", "response_body", "response_status", "status"],
         products: ["sales_status", "updated_at"],
         scheduled_trips: ["sales_state", "sales_state_changed_at", "updated_at"],
+        // Capacity and holds (G2.6): the trigger sets the transition timestamps.
+        capacity_holds: ["state"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

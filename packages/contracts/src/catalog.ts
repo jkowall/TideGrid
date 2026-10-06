@@ -50,9 +50,36 @@ export const TripCapacity = z
       .int()
       .min(0)
       .describe("Seats left, or the full total while the boat is free and 0 once taken"),
+    // G2.6. Optional in the schema only so earlier clients and fixtures keep
+    // validating; the API sends it on every trip.
+    soldOut: z
+      .boolean()
+      .optional()
+      .describe(
+        "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there",
+      ),
   })
-  .describe("Held and confirmed bookings reduce this from G2.6 on");
+  .describe(
+    "Seats held by unexpired checkouts and confirmed seats are taken; a whole-boat hold takes every seat. Advisory: only acquiring a hold decides",
+  );
 export type TripCapacity = z.infer<typeof TripCapacity>;
+
+/** Staff see how the taken seats split (G2.6). Sent on every staff trip; optional for the same reason. */
+export const StaffTripCapacity = TripCapacity.extend({
+  held: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Seats taken by holds still within their time; a held charter counts every seat"),
+  confirmed: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Seats taken by confirmed holds; a confirmed charter counts every seat"),
+}).describe("Capacity left, with the taken seats split into held and confirmed. Advisory");
+export type StaffTripCapacity = z.infer<typeof StaffTripCapacity>;
 
 export const TripTiming = z.object({
   timeZone: TimeZone,
@@ -112,7 +139,7 @@ export const StaffTrip = TripTiming.extend({
   salesStateChangedAt: Instant,
   salesCloseAt: Instant,
   blackedOut: z.boolean().describe("A blackout overlaps the trip, so it is hidden from guests"),
-  capacity: TripCapacity,
+  capacity: StaffTripCapacity,
 });
 export type StaffTrip = z.infer<typeof StaffTrip>;
 

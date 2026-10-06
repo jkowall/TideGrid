@@ -120,6 +120,8 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/schedules/{scheduleId}/trips",
         "/v1/staff/tenants/{tenantId}/trips",
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/sales-state",
+        // Capacity and holds (G2.6).
+        "/v1/staff/tenants/{tenantId}/trips/{tripId}/holds",
       ].sort(),
     );
     expect(Object.keys(doc.components.securitySchemes).sort()).toEqual([

@@ -642,6 +642,10 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              },
+                              "soldOut": {
+                                "type": "boolean",
+                                "description": "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there"
                               }
                             },
                             "required": [
@@ -649,7 +653,7 @@
                               "total",
                               "remaining"
                             ],
-                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                            "description": "Seats held by unexpired checkouts and confirmed seats are taken; a whole-boat hold takes every seat. Advisory: only acquiring a hold decides"
                           }
                         },
                         "required": [
@@ -2681,6 +2685,20 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              },
+                              "soldOut": {
+                                "type": "boolean",
+                                "description": "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there"
+                              },
+                              "held": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats taken by holds still within their time; a held charter counts every seat"
+                              },
+                              "confirmed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats taken by confirmed holds; a confirmed charter counts every seat"
                               }
                             },
                             "required": [
@@ -2688,7 +2706,7 @@
                               "total",
                               "remaining"
                             ],
-                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                            "description": "Capacity left, with the taken seats split into held and confirmed. Advisory"
                           }
                         },
                         "required": [
@@ -3067,6 +3085,20 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                              },
+                              "soldOut": {
+                                "type": "boolean",
+                                "description": "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there"
+                              },
+                              "held": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats taken by holds still within their time; a held charter counts every seat"
+                              },
+                              "confirmed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Seats taken by confirmed holds; a confirmed charter counts every seat"
                               }
                             },
                             "required": [
@@ -3074,7 +3106,7 @@
                               "total",
                               "remaining"
                             ],
-                            "description": "Held and confirmed bookings reduce this from G2.6 on"
+                            "description": "Capacity left, with the taken seats split into held and confirmed. Advisory"
                           }
                         },
                         "required": [
@@ -3552,6 +3584,20 @@
                               "type": "integer",
                               "minimum": 0,
                               "description": "Seats left, or the full total while the boat is free and 0 once taken"
+                            },
+                            "soldOut": {
+                              "type": "boolean",
+                              "description": "True when nothing remains, counting unexpired holds as taken. Guest listings omit trips without room for the party, so it is false there"
+                            },
+                            "held": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Seats taken by holds still within their time; a held charter counts every seat"
+                            },
+                            "confirmed": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Seats taken by confirmed holds; a confirmed charter counts every seat"
                             }
                           },
                           "required": [
@@ -3559,7 +3605,7 @@
                             "total",
                             "remaining"
                           ],
-                          "description": "Held and confirmed bookings reduce this from G2.6 on"
+                          "description": "Capacity left, with the taken seats split into held and confirmed. Advisory"
                         }
                       },
                       "required": [
@@ -6022,6 +6068,306 @@
           },
           "404": {
             "description": "No active tenant hostname matches the origin, or no such quote",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/trips/{tripId}/holds": {
+      "get": {
+        "tags": [
+          "staff",
+          "inventory"
+        ],
+        "summary": "A trip's capacity and every hold on it",
+        "description": "Every role. Holds in any state, oldest first, each marked with whether it takes capacity now. Capacity is computed by the database clock and is advisory; only acquiring a hold decides.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tripId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capacity and holds",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "capacity": {
+                      "type": "object",
+                      "properties": {
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "seats",
+                            "whole_boat"
+                          ],
+                          "description": "seats on a shared-seat trip; whole_boat on a private charter"
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "held": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Seats taken by holds still within their time"
+                        },
+                        "confirmed": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Seats taken by confirmed holds"
+                        },
+                        "remaining": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "soldOut": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "tripId",
+                        "kind",
+                        "total",
+                        "held",
+                        "confirmed",
+                        "remaining",
+                        "soldOut"
+                      ]
+                    },
+                    "holds": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "tripId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "ownerRef": {
+                            "type": "string",
+                            "description": "Opaque owner, such as checkout_session:<uuid>"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "seats",
+                              "whole_boat"
+                            ],
+                            "description": "seats on a shared-seat trip; whole_boat on a private charter"
+                          },
+                          "partySize": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Guests the hold is for"
+                          },
+                          "seats": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Capacity the hold takes: its party size, or every seat for a whole boat"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "active",
+                              "confirmed",
+                              "released",
+                              "expired"
+                            ],
+                            "description": "One way: active to confirmed, released, or expired; expired to confirmed when a late payment reacquires; confirmed to released"
+                          },
+                          "takesCapacity": {
+                            "type": "boolean",
+                            "description": "Confirmed, or active and not yet past its expiry instant. An active hold past its instant takes nothing, even before the sweep marks it expired"
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "confirmedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "releasedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "expiredAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "tripId",
+                          "ownerRef",
+                          "kind",
+                          "partySize",
+                          "seats",
+                          "state",
+                          "takesCapacity",
+                          "expiresAt",
+                          "createdAt",
+                          "confirmedAt",
+                          "releasedAt",
+                          "expiredAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "capacity",
+                    "holds"
+                  ],
+                  "description": "Every hold on the trip, in any state, oldest first, with the capacity left now"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or trip",
             "content": {
               "application/json": {
                 "schema": {
