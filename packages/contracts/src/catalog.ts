@@ -143,6 +143,20 @@ export const StaffTrip = TripTiming.extend({
 });
 export type StaffTrip = z.infer<typeof StaffTrip>;
 
+/** A trip as the console's booking views name it (G2.12b): what, on which boat, and when. */
+export const TripSummary = z.object({
+  tripId: Uuid,
+  productName: z.string(),
+  productKind: ProductKind,
+  boatName: z.string(),
+  timeZone: TimeZone,
+  localDate: LocalDate,
+  localStartTime: LocalTime,
+  startsAt: Instant,
+  salesState: TripSalesState,
+});
+export type TripSummary = z.infer<typeof TripSummary>;
+
 export const StaffTripQuery = z.object({
   from: LocalDate.describe("First local date, inclusive"),
   to: LocalDate.describe("Last local date, inclusive; at most 92 days after from"),

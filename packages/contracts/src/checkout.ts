@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TripSummary } from "./catalog.ts";
 
 /**
  * Checkout, payment, and booking contracts (G2.7). A guest opens a checkout
@@ -264,8 +265,8 @@ export const FinalizationException = z.object({
   checkoutSessionId: Uuid,
   tripId: Uuid,
   paymentId: Uuid,
-  amount: Cents,
-  createdAt: Instant,
+  amount: Cents.describe("What the checkout charged: its order's total"),
+  createdAt: Instant.describe("When the payment was found unable to become a booking"),
   refund: z
     .object({
       id: Uuid,
@@ -275,14 +276,45 @@ export const FinalizationException = z.object({
       settledAt: Instant.nullable(),
     })
     .nullable(),
+  // G2.12b: what an operator needs to follow it up.
+  trip: TripSummary.describe("The trip the checkout was for"),
+  partySize: z.number().int().min(1),
+  checkout: z.object({
+    state: CheckoutSessionState,
+    expiresAt: Instant.describe("When the checkout's hold ran out, or would have"),
+  }),
+  payment: z.object({
+    provider: PaymentProviderName,
+    providerReference: z
+      .string()
+      .nullable()
+      .describe("The provider's payment id, masked: its prefix and last four characters"),
+    receivedAt: Instant.describe("When TideGrid verified the provider's event"),
+    reportedAmount: Cents.nullable().describe(
+      "The amount the provider's event reported; differs from amount on a payment_mismatch",
+    ),
+    reportedCurrency: z.string().nullable(),
+  }),
+  booker: z
+    .object({ name: z.string(), email: z.string() })
+    .optional()
+    .describe(
+      "Personal data, for following up with the guest. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise",
+    ),
 });
 export type FinalizationException = z.infer<typeof FinalizationException>;
 
 export const FinalizationExceptionQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
+  before: Uuid.optional().describe(
+    "Cursor: the last exception id of the previous page (nextBefore). One that names no exception of this operator answers 400 cursor_invalid",
+  ),
 });
 
 export const FinalizationExceptionsResponse = z
-  .object({ exceptions: z.array(FinalizationException) })
+  .object({
+    exceptions: z.array(FinalizationException),
+    nextBefore: Uuid.nullable().describe("Pass as before for the next page; null on the last page"),
+  })
   .describe("Payments that could not become bookings, newest first, for operator follow-up");
 export type FinalizationExceptionsResponse = z.infer<typeof FinalizationExceptionsResponse>;
