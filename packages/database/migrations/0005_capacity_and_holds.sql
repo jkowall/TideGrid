@@ -29,10 +29,11 @@
 -- then counts with a fresh snapshot: a VOLATILE trigger function in READ
 -- COMMITTED sees rows committed while it waited. Under REPEATABLE READ the
 -- count would use a stale snapshot, so the trigger refuses any isolation level
--- but READ COMMITTED. A partial unique index backs up the whole-boat rule
--- without any trigger. A second trigger guards the trip side: no role can
--- shrink a trip below the seats its holds take, change the product its holds
--- came from, or resize a charter a whole-boat hold has taken.
+-- but READ COMMITTED. A reacquired hold must still have the kind and seats a
+-- new hold on the trip would take. A partial unique index backs up the
+-- whole-boat rule without any trigger. A second trigger guards the trip side:
+-- no role can shrink a trip below the seats its holds take, change the product
+-- its holds came from, or resize a charter a whole-boat hold has taken.
 --
 -- Clock. The database clock decides expiry: now(), the transaction's start,
 -- read once per transaction, so every statement in a command agrees with the
@@ -253,17 +254,26 @@ BEGIN
     END IF;
   END IF;
 
-  IF TG_OP = 'INSERT' THEN
+  -- The kind and the seats come from the trip: the party size on a shared-seat
+  -- trip, every seat on a charter. A new hold takes them here. A reacquired
+  -- hold must still match them, because the owner role can resize a charter,
+  -- or change a trip's product or that product's kind, while the hold is
+  -- expired and uncounted. Its seats are fixed, so a hold that no longer
+  -- matches is refused, never resized.
+  IF check_capacity THEN
     derived_kind := CASE trip.product_kind WHEN 'shared_seat' THEN 'seats' ELSE 'whole_boat' END;
     derived_seats := CASE derived_kind WHEN 'seats' THEN NEW.party_size ELSE trip.seat_capacity END;
     IF (NEW.kind IS NOT NULL AND NEW.kind <> derived_kind)
        OR (NEW.seats IS NOT NULL AND NEW.seats <> derived_seats) THEN
-      RAISE EXCEPTION 'a % hold on this trip is a % hold of % seats',
-        NEW.kind, derived_kind, derived_seats
+      RAISE EXCEPTION 'a % hold of % seats on this trip must be a % hold of % seats',
+        NEW.kind, NEW.seats, derived_kind, derived_seats
         USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_kind';
     END IF;
     NEW.kind := derived_kind;
     NEW.seats := derived_seats;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
     IF NEW.expires_at <= now()
        OR NEW.expires_at > now() + interval '1 hour'
        OR NEW.expires_at > trip.starts_at THEN

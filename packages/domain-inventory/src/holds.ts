@@ -64,7 +64,10 @@ export interface Hold {
 
 /**
  * Why a trip cannot take a hold now. trip_unavailable covers a trip or product
- * that is not published, an inactive location or boat, and a blackout.
+ * that is not published, an inactive location or boat, and a blackout. When a
+ * late payment reacquires a hold, it also covers a trip that no longer sells
+ * what the hold reserved: a charter resized, or a trip's product or that
+ * product's kind changed, after the hold was taken.
  */
 export type NotBookableReason =
   | "trip_canceled"
@@ -298,6 +301,16 @@ function notBookable(trip: TripSaleRow, partySize: number): NotBookableReason | 
   return null;
 }
 
+/**
+ * The kind and seats a hold on this trip takes now, as the database derives
+ * them: the party size on a shared-seat trip, every seat on a charter.
+ */
+function holdShape(trip: TripSaleRow, partySize: number): { kind: HoldKind; seats: number } {
+  return trip.product_kind === "shared_seat"
+    ? { kind: "seats", seats: partySize }
+    : { kind: "whole_boat", seats: trip.seat_capacity };
+}
+
 /** Seats of the trip's holds in a counted state. Call after expiring due holds. */
 async function seatsCounted(trx: TenantTransaction, tenantId: string, tripId: string) {
   const { rows } = await sql<{ taken: number }>`
@@ -425,7 +438,7 @@ export async function acquireHold(
   if (reason) return { kind: "not_bookable", reason };
 
   const taken = await seatsCounted(trx, ctx.tenantId, trip.trip_id);
-  const needed = trip.product_kind === "shared_seat" ? input.partySize : trip.seat_capacity;
+  const needed = holdShape(trip, input.partySize).seats;
   if (taken + needed > trip.seat_capacity) {
     return { kind: "insufficient_capacity", remaining: Math.max(0, trip.seat_capacity - taken) };
   }
@@ -468,11 +481,12 @@ export async function acquireHold(
 /**
  * Turn a hold into confirmed capacity, for a verified payment (G2.7). A hold
  * still within its time is confirmed as it is, unless its trip was canceled.
- * A hold past its time, swept or not, is reacquired: the trip must be on sale
- * and have room, exactly as for a new hold. If it cannot be, nothing is
- * confirmed and the result says why, so the caller can refund and raise an
- * operator exception. The caller owns the transaction; to confirm several
- * holds all or nothing, roll back when any result is not confirmed.
+ * A hold past its time, swept or not, is reacquired: the trip must be on sale,
+ * still take a hold of this kind and size, and have room, exactly as for a new
+ * hold. If it cannot be, nothing is confirmed and the result says why, so the
+ * caller can refund and raise an operator exception. The caller owns the
+ * transaction; to confirm several holds all or nothing, roll back when any
+ * result is not confirmed.
  */
 export async function confirmHold(
   trx: TenantTransaction,
@@ -519,6 +533,14 @@ export async function confirmHold(
   if (!trip) throw new Error("locked trip vanished inside its own transaction");
   const reason = notBookable(trip, current.party_size);
   if (reason) return { kind: "capacity_lost", hold: toHold(current), reason };
+  // The trip may have changed while the hold had expired and did not count: a
+  // charter resized, or another product or kind. A hold's seats never change,
+  // so one that no longer takes what a new hold would is not reacquired; the
+  // database refuses it too (capacity_holds_kind).
+  const shape = holdShape(trip, current.party_size);
+  if (shape.kind !== current.kind || shape.seats !== current.seats) {
+    return { kind: "capacity_lost", hold: toHold(current), reason: "trip_unavailable" };
+  }
   const taken = await seatsCounted(trx, ctx.tenantId, trip.trip_id);
   if (taken + current.seats > trip.seat_capacity) {
     return { kind: "capacity_lost", hold: toHold(current), reason: "no_capacity" };

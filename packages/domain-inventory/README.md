@@ -32,7 +32,7 @@ The database enforces these for every role, the table owner included, in the cap
 1. For every trip, the seats of its holds in state active or confirmed never exceed the trip's seat capacity. This is a rule over stored states, not over time.
 2. At most one active or confirmed whole-boat hold per trip. A partial unique index enforces this even without the trigger.
 3. A new hold starts active, on a published trip of a published product, before the booking cutoff, with a party the product allows and the trip can seat. It expires after now, within one hour, and no later than departure.
-4. A reacquired hold (expired to confirmed) passes rule 3's sales checks again, and rule 1.
+4. A reacquired hold (expired to confirmed) passes rule 3's sales checks again, still has the kind and seats a new hold on the trip would take, and passes rule 1. A hold whose charter was resized, or whose trip's product or product kind changed, while it was expired is refused, because its seats never change.
 5. Nothing moves into a counted state on a canceled trip.
 6. A hold is marked expired only once its expiry instant has passed. An active hold past its instant is never confirmed directly; it is reacquired.
 7. Trip, owner, kind, party size, seats, and creation time never change. The trigger sets every timestamp.
@@ -108,6 +108,7 @@ Semantics checkout relies on:
 - **The expiry is the database's:** now plus `ttlSeconds`, but never past departure. Read it from `hold.expiresAt` and give the checkout session the same instant.
 - **Confirm within the hold's time** succeeds without counting again, because the hold was counted all along, unless the trip was canceled (`capacity_lost`, `trip_canceled`). A closed trip does not stop it: the checkout began before sales closed.
 - **Confirm after the hold's time**, swept or not, reacquires: the hold is marked expired, then must find room on a trip still on sale, exactly like a new hold. If it does, the result is `confirmed` with `reacquired: true`. If not, the result is `capacity_lost` with the reason and nothing is confirmed. Checkout then refunds in full and raises an operator exception, as the architecture requires.
+- **A changed trip loses a late payment.** The trip must still sell what the hold reserved. If the owner resized a charter, or changed the trip's product or that product's kind, while the hold was expired, the result is `capacity_lost` with `trip_unavailable`: the hold's seats never change, so it cannot become the hold the trip now takes.
 - **Several holds all or nothing.** Confirm each in one transaction and roll the transaction back when any result is not `confirmed`, then record the exception and refund in a new transaction.
 - **A late payment gets no priority.** Confirm reads the hold before it queues for the trip lock, so in a burst, acquisitions already queued go first and can take the seats a late payment needed. The test specialist saw late confirmations lose every race until the starts were staggered. If checkout wants paid guests to win, it needs its own policy, such as a shorter checkout window than the hold or a grace period before others may take the seats.
 - **Release** gives back the capacity of an active or confirmed hold. Releasing a confirmed hold is how a canceled booking returns its seats.

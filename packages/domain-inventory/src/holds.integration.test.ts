@@ -458,6 +458,72 @@ describe.skipIf(!env)("capacity holds against a real database as the runtime rol
       expect(await confirm(A.id, inFlight)).toMatchObject({ kind: "confirmed", reacquired: false });
     });
 
+    it("does not reacquire a whole-boat hold on a charter resized while it had expired", async () => {
+      // The owner role may resize a charter once its hold no longer counts.
+      // Reacquiring the six-seat hold on the eight-seat boat would list two
+      // seats on a charter that is taken.
+      const refusedShape = { code: "23514", constraint: "capacity_holds_kind" };
+      const trip = tripsA.charter();
+      const hold = await acquired(A.id, trip, 2);
+      expect(hold).toMatchObject({ kind: "whole_boat", seats: 6 });
+      await backdateHold(admin, hold.id);
+      await admin`update public.capacity_holds set state = 'expired' where id = ${hold.id}`;
+      await admin`update public.boats set guest_capacity = 8 where id = ${A.boats.wren}`;
+      await admin`update public.scheduled_trips set seat_capacity = 8 where id = ${trip}`;
+
+      expect(await confirm(A.id, hold)).toMatchObject({
+        kind: "capacity_lost",
+        reason: "trip_unavailable",
+        hold: { state: "expired", seats: 6 },
+      });
+      expect(
+        await failure(
+          raw(
+            A.id,
+            (tx) => tx`update public.capacity_holds set state = 'confirmed' where id = ${hold.id}`,
+          ),
+        ),
+      ).toEqual(refusedShape);
+      expect(await capacity(A.id, trip)).toMatchObject({
+        total: 8,
+        held: 0,
+        confirmed: 0,
+        remaining: 8,
+      });
+      // A new hold takes the whole resized boat.
+      expect(await acquired(A.id, trip, 2)).toMatchObject({ kind: "whole_boat", seats: 8 });
+    });
+
+    it("does not reacquire a hold whose trip's product changed kind while it had expired", async () => {
+      const trip = tripsA.charter();
+      const hold = await acquired(A.id, trip, 3);
+      await backdateHold(admin, hold.id);
+      await admin`update public.capacity_holds set state = 'expired' where id = ${hold.id}`;
+      // Only the owner role can change a product's kind. Put it back afterwards,
+      // because every charter trip of this tenant shares the product.
+      await admin`update public.products set kind = 'shared_seat' where id = ${A.products.charter}`;
+      try {
+        expect(await confirm(A.id, hold)).toMatchObject({
+          kind: "capacity_lost",
+          reason: "trip_unavailable",
+          hold: { state: "expired", kind: "whole_boat" },
+        });
+        expect(
+          await failure(
+            raw(
+              A.id,
+              (tx) =>
+                tx`update public.capacity_holds set state = 'confirmed' where id = ${hold.id}`,
+            ),
+          ),
+        ).toEqual({ code: "23514", constraint: "capacity_holds_kind" });
+      } finally {
+        await admin`update public.products set kind = 'private_charter'
+                     where id = ${A.products.charter}`;
+      }
+      expect(await holdState(A.id, hold.id)).toBe("expired");
+    });
+
     it("refuses other owners, malformed ids, and released holds", async () => {
       const hold = await acquired(A.id, tripsA.shared(), 1);
       expect(await confirm(A.id, { id: hold.id, ownerRef: owner() })).toEqual({
