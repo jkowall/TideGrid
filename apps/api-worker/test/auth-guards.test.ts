@@ -156,6 +156,8 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}",
         "/v1/staff/tenants/{tenantId}/booking-references/{reference}",
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/roster",
+        // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are

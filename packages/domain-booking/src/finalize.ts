@@ -44,6 +44,7 @@ import {
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
+import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import { newBookingReference } from "./secrets.ts";
 import { record } from "./views.ts";
 
@@ -136,14 +137,16 @@ async function findPayment(
 /**
  * Act on one recorded inbox event, once. Locks the inbox row first; an event
  * already processed returns its recorded outcome and changes nothing. With
- * `skipLocked`, an event another transaction is processing returns null.
+ * `skipLocked`, an event another transaction is processing returns null. A
+ * booking it confirms runs `hooks.bookingConfirmed` in this transaction.
  */
 export async function processProviderEvent(
   trx: TenantTransaction,
   ctx: TenantContext,
   inboxId: string,
-  options: { skipLocked?: boolean } = {},
+  options: { skipLocked?: boolean; hooks?: BookingHooks | undefined } = {},
 ): Promise<ProcessResult | null> {
+  const hooks = options.hooks ?? noBookingHooks;
   if (options.skipLocked) {
     const { rows } = await sql<{ id: string }>`
       select id from provider_events where tenant_id = ${ctx.tenantId} and id = ${inboxId}
@@ -157,7 +160,7 @@ export async function processProviderEvent(
   }
   const outcome =
     event.eventType === "payment.succeeded"
-      ? await onSuccess(trx, ctx, event)
+      ? await onSuccess(trx, ctx, event, hooks)
       : event.eventType === "payment.failed"
         ? await onFailure(trx, ctx, event)
         : result("ignored_event_type");
@@ -229,6 +232,7 @@ async function onSuccess(
   trx: TenantTransaction,
   ctx: TenantContext,
   event: InboxEvent,
+  hooks: BookingHooks,
 ): Promise<ProcessResult> {
   const locked = await lockCheckout(trx, ctx, event);
   if (locked.kind === "unmatched") return result("unmatched_payment");
@@ -248,7 +252,7 @@ async function onSuccess(
         ownerRef: ownerRefFor(session.id),
       });
       if (confirmed.kind === "confirmed") {
-        return book(trx, ctx, event, session, payment, confirmed.reacquired);
+        return book(trx, ctx, event, session, payment, confirmed.reacquired, hooks);
       }
       if (confirmed.kind === "capacity_lost") {
         return unfulfilled(trx, ctx, event, session, payment, confirmed.reason);
@@ -333,6 +337,7 @@ async function book(
   session: SessionRow,
   payment: PaymentRow,
   reacquired: boolean,
+  hooks: BookingHooks,
 ): Promise<ProcessResult> {
   await markSucceeded(trx, ctx, event, payment);
   let booking: { id: string; reference: string } | undefined;
@@ -392,6 +397,21 @@ async function book(
     subjectId: session.id,
     before: { state: session.state },
     after: { state: "confirmed", bookingId: booking.id, orderStatus: "paid", reacquired },
+  });
+  // Lane 1 contract: in-transaction work other modules attach to a new
+  // booking (waiver assignment, G2.15) commits or rolls back with it.
+  const { rows: products } = await sql<{ product_id: string }>`
+    select product_id from orders
+     where tenant_id = ${ctx.tenantId} and id = ${payment.order_id}`.execute(trx);
+  const productId = products[0]?.product_id;
+  if (!productId) throw new Error("a booking's order was not found");
+  await hooks.bookingConfirmed?.(trx, ctx, {
+    bookingId: booking.id,
+    checkoutSessionId: session.id,
+    tripId: session.trip_id,
+    productId,
+    partySize: session.party_size,
+    reacquired,
   });
   return result(reacquired ? "confirmed_reacquired" : "confirmed", {
     checkoutSessionId: session.id,
@@ -675,7 +695,7 @@ export async function handleVerifiedEvent(
   db: Kysely<Database>,
   provider: PaymentProvider,
   event: VerifiedProviderEvent,
-  meta: { requestId: string | null; sourceIp?: string | null },
+  meta: { requestId: string | null; sourceIp?: string | null; hooks?: BookingHooks | undefined },
 ): Promise<HandledEvent> {
   const account = await resolvePaymentAccount(db, event.provider, event.accountRef);
   if (!account) return { kind: "unknown_account" };
@@ -711,7 +731,7 @@ export async function handleVerifiedEvent(
     };
   }
   const processed = await inTenantTransaction(db, ctx, (trx) =>
-    processProviderEvent(trx, ctx, recorded.inboxId),
+    processProviderEvent(trx, ctx, recorded.inboxId, { hooks: meta.hooks }),
   );
   if (!processed) throw new Error("an inbox event was skipped without skipLocked");
   let refund: SettleRefundResult | null = null;

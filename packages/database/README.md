@@ -105,6 +105,15 @@ Two more cross-tenant reads join `app.resolve_hostname` and `app.capacity_hold_s
 - `app.resolve_payment_account(provider, account_ref)` returns the tenant id and the account's status for a connected account. A provider callback names an account, not a tenant, and the webhook must record the event inside the owning tenant's transaction. It runs only after the provider's signature verifies, an id grants nothing, and everything that follows runs under row-level security. It returns accounts whatever their status, because money that moved must be recorded.
 - `app.checkout_sweep_tenants(limit, grace_seconds)` returns, at most 1,000, the tenant ids with an open checkout past its instant, or a refund requested or an inbox event received at least the grace period ago (0 to 3,600 seconds) and never settled or processed. It reveals that some tenant has such work, a weaker signal than the shared id sequences already give, and the sweep then works inside each tenant's own transaction, for the reasons the hold sweep's argument gives.
 
+## Guest self-service and email (lane 1)
+
+The self-service and email migration (`0008_self_service_and_email.sql`, renumbered at merge) adds tenant-owned tables under rules 1 to 10, described in the [booking contract](../domain-booking/README.md#guest-self-service-lane-1-g211c) and the [messaging contract](../domain-messaging/README.md):
+
+- `booking_participants`: one person per place in a booking's party. The runtime may UPDATE the details only (name, minor, emails, guardian); a trigger keeps the booking and place fixed and refuses a place past the party size or a booking that is not confirmed. No role deletes one.
+- `booking_cancellations`: one per booking, append-only for every role. A trigger recomputes the remedy from the booking's policy version on the database clock and refuses any other.
+- `bookings` gains `canceled_at`, and the runtime may UPDATE `state`, from `confirmed` to `canceled` only, with its cancellation; the 0007 append-only trigger is replaced by `bookings_lifecycle`, which keeps every other column fixed for every role.
+- `payment_refunds` gains the reason `booking_canceled`, for exactly what the booking's cancellation computed.
+
 ## Tests
 
 - `pnpm test` runs unit tests.

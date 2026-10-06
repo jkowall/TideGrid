@@ -44,6 +44,27 @@ export {
   type SettleRefundResult,
   settleRefund,
 } from "./finalize.ts";
+// Booking lifecycle hooks and participants (lane 1, G2.11c).
+export {
+  type BookingCanceledEvent,
+  type BookingConfirmedEvent,
+  BookingHookRefusal,
+  type BookingHooks,
+  noBookingHooks,
+  type ParticipantEvent,
+  type ParticipantField,
+  type ParticipantUpdatedEvent,
+} from "./hooks.ts";
+export {
+  listParticipants,
+  MAX_PARTY_SIZE,
+  normalizeParticipant,
+  type ParticipantDetails,
+  type ParticipantListView,
+  type ParticipantView,
+  type PutParticipantResult,
+  putParticipant,
+} from "./participants.ts";
 export {
   type FinalizationExceptionView,
   listFinalizationExceptions,

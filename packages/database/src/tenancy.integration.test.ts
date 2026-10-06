@@ -671,6 +671,9 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         fake_provider_payments: ["INSERT", "SELECT"],
         fake_provider_events: ["INSERT", "SELECT"],
         fake_provider_refunds: ["INSERT", "SELECT"],
+        // Guest self-service (lane 1, G2.11c).
+        booking_participants: ["INSERT", "SELECT"],
+        booking_cancellations: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -701,6 +704,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         payments: ["failed_event_id", "provider_payment_id", "state", "succeeded_event_id"],
         payment_refunds: ["failure_code", "provider_refund_id", "state"],
         provider_events: ["outcome", "processing_state"],
+        // Guest self-service (lane 1, G2.11c): a participant's details may be
+        // corrected, and a booking may move to canceled with its cancellation.
+        booking_participants: ["email", "full_name", "guardian_email", "guardian_name", "is_minor"],
+        bookings: ["state"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

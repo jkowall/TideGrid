@@ -1,5 +1,6 @@
 import type { Principal } from "@tidegrid/contracts";
 import type { createDb, Database } from "@tidegrid/database";
+import type { BookingHooks } from "@tidegrid/domain-booking";
 import type { PaymentProvider } from "@tidegrid/domain-payments";
 import type { createLogger } from "@tidegrid/observability";
 import type { Kysely } from "kysely";
@@ -28,4 +29,9 @@ export interface AppDeps {
    * controls always use the configured fake.
    */
   paymentProvider?: (db: Kysely<Database>, env: Bindings) => PaymentProvider | null;
+  /**
+   * Replaces the configured booking lifecycle hooks (src/booking-hooks.ts) on
+   * every path that confirms a booking or changes its party, for tests.
+   */
+  bookingHooks?: BookingHooks;
 }

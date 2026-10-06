@@ -162,6 +162,74 @@ The operator console's booking views read through `src/console.ts`, under the ca
 - **By reference.** `findBookingByReference` takes the issued form; the API normalizes what was typed first.
 - **Exceptions.** `listExceptionsPage` adds the trip, the checkout's state and expiry, and what the provider's event reported (when it arrived, the amount, the currency) to G2.7's read, newest first by creation and id, with a `before` cursor. G2.7's `listFinalizationExceptions` now delegates to it with no booker.
 
+## Guest self-service (lane 1, G2.11c)
+
+After a booking confirms, its guest names the party and may cancel within the booking's own policy, through an accountless management link (G2.11). Tables are in migration `0008_self_service_and_email.sql`; the guest routes and the email that carries the link follow in [domain-messaging](../domain-messaging/README.md) and the API section below.
+
+### Participants
+
+- **One per place.** A participant fills one place in the party, `position` 1 to the booking's party size, so a party never holds more people than it bought. The database checks the place against the booking (`booking_participants_party_size`) and keeps one participant per place (`booking_participants_position_key`).
+- **What is recorded.** The full name; whether a minor; for a minor, the guardian's name and email; for anyone, an optional email of their own. A minor without a guardian, or an adult with one, never reaches the table (`booking_participants_guardian`). Addresses are stored lowercased and ASCII, as the booker's are.
+- **Edited in place, never removed.** The guest corrects a place's details; the participant keeps its id, booking, and place for good (`booking_participants_immutable`). Removing a shared-seat participant releases a seat and is a later goal. No role deletes a participant.
+- **Only while the booking stands.** A participant joins or changes only on a confirmed booking, and the service refuses it once the trip has departed. The booking's row lock orders a participant change against a cancellation, so whichever commits second sees the other.
+- **Personal data.** Names and addresses live in the participant rows and the responses that read them. Audit rows and events record which place changed and which fields (`changed: ["name", "email"]`), never the values. Finance never reads them.
+
+```ts
+listParticipants(trx, tenantId, bookingId): Promise<{ partySize, participants: ParticipantView[] } | null>
+putParticipant(trx, ctx, { bookingId, position, details: { name, isMinor, email?, guardian? } }, hooks?):
+  Promise<
+    | { kind: "created"; participant } | { kind: "updated"; participant; changed: ParticipantField[] }
+    | { kind: "unchanged"; participant }
+    | { kind: "booking_not_found" } | { kind: "booking_canceled" } | { kind: "trip_departed" }
+    | { kind: "position_out_of_range"; partySize }
+  >
+```
+
+`putParticipant` is idempotent by place: the same details again change nothing and record nothing. It locks the booking row, then the participant at the place, so concurrent writes to one place serialize: one creates, the rest update or find it unchanged. The contract is [packages/contracts/src/participants.ts](../contracts/src/participants.ts).
+
+| Change | Audit action | Outbox topic |
+|---|---|---|
+| participant named | `participant.added` | `booking.participant.added` `{ bookingId, participantId, position }` |
+| participant corrected | `participant.updated` | `booking.participant.updated` `{ bookingId, participantId, position, changed }` |
+
+### Lifecycle hooks: how waivers attach
+
+Waivers (G2.15) must be assigned atomically when a booking confirms and when a participant is added ([architecture: waivers](../../docs/v2/04-architecture.md#waivers)). This package does not depend on the waiver module; instead it runs hooks the API passes in, inside the transaction that makes the change, after the change's rows are written and before commit. The interface and its rules are in [src/hooks.ts](src/hooks.ts):
+
+```ts
+interface BookingHooks {
+  bookingConfirmed?(trx, ctx, { bookingId, checkoutSessionId, tripId, productId, partySize, reacquired }): Promise<void>;
+  participantAdded?(trx, ctx, { bookingId, participantId, position }): Promise<void>;
+  participantUpdated?(trx, ctx, { bookingId, participantId, position, changed }): Promise<void>;
+  bookingCanceled?(trx, ctx, { bookingId, cancellationId, refundId }): Promise<void>;
+}
+```
+
+- **Where they run.** `bookingConfirmed` in `book()`, on every path that confirms: the webhook route (`handleVerifiedEvent(db, provider, event, { hooks })`), which the fake provider's delivery also goes through, and the checkout sweep's reprocessing (`sweepCheckouts(db, { hooks })`, `processProviderEvent(trx, ctx, id, { hooks })`). `participantAdded` and `participantUpdated` in `putParticipant`. `bookingCanceled` in the cancellation, after the booking is canceled and its seats released.
+- **One wiring point.** The API builds the hooks once, in [apps/api-worker/src/booking-hooks.ts](../../apps/api-worker/src/booking-hooks.ts), and passes them on every path above. The waiver module returns its hooks there; nothing else in the API changes. Tests pass their own (`AppDeps.bookingHooks` in the API).
+- **Atomic both ways.** Whatever a hook writes, assignments and `enqueueMessage` rows included, commits or rolls back with the change. A throw rolls the change back.
+- **Who may refuse.** Only `participantAdded` and `participantUpdated`, by throwing `BookingHookRefusal(code, message)`; the API answers 409 with that code. `bookingConfirmed` and `bookingCanceled` must not refuse: payment and confirmation never wait on waivers, and a throw in `bookingConfirmed` rolls back a confirmation whose money has moved, leaving the event received for the sweep's retry.
+- **Ids only.** Events carry ids; a hook reads what else it needs through the transaction, such as `listParticipants`. It locks only its own module's rows, after the change's locks.
+- **Also as events.** The same changes are outbox events (`booking.confirmed`, `booking.participant.added`, `booking.participant.updated`, `booking.canceled`) for work that may happen after commit.
+
+### Cancellation within policy
+
+A guest cancels a confirmed booking whose trip has not departed, once. The remedy comes from the booking's own policy version (its order's), on the database clock:
+
+1. **The cutoff.** `cutoff = departure - change_cutoff_minutes`. Before it, the policy's before-cutoff remedy applies; at or after it, the after-cutoff remedy.
+2. **The refund.** `full_refund` returns the whole payment, `percent_refund` its basis points of the payment rounded half up to the cent, `none` nothing. The percentage applies to everything paid, taxes and fees included.
+3. **Credit is not self-service.** A remedy of `credit` is refused (`remedy_requires_operator`): credits are G2.9, and the operator issues them. The guest is told to contact the operator.
+4. **What happens, in one transaction:** the cancellation row with the terms as applied; the booking moves to `canceled`; the refund row (reason `booking_canceled`) for the computed amount when it is above zero; the booking's confirmed hold is released, so the seats return to sale; audit, events, the cancellation email, and the `bookingCanceled` hook. After commit, `settleRefund` sends the refund through the payment adapter with the refund row's idempotency key, as G2.7's refunds do; an unknown outcome stays requested for the checkout sweep. The order stays `paid`: it is the immutable statement of the sale, and the refund records the money going back.
+5. **Say the amount first.** A preview returns the remedy, the amount, the cutoff, and the policy text; the cancel command carries the amount the guest was shown and is refused (`cancellation_terms_changed`) if the terms moved since, for instance because the cutoff passed in between.
+
+The database is the judge, for every role, the owner included:
+
+- `booking_cancellations` (one per booking, append-only): its trigger reads the booking, its order's policy version, its trip, and its payment, and refuses a row whose cutoff, side of the cutoff (the database clock), remedy, basis points, paid amount, or refund amount is not what the policy gives (`booking_cancellations_terms`), a credit remedy (`booking_cancellations_credit`), a departed trip (`booking_cancellations_departed`), or a booking that is not confirmed.
+- `bookings`: the only change is `confirmed` to `canceled`, with its cancellation row (`bookings_evidence`); everything else about a booking is fixed (`bookings_immutable`). At commit, a canceled booking's hold must be released (`bookings_canceled_released`).
+- `payment_refunds`: a `booking_canceled` refund needs its booking canceled and the cancellation naming this refund for exactly this amount, up to what was paid. At commit, a cancellation with money to return has its refund row (a deferred foreign key). One refund per payment stays, so a booking is refunded at most once.
+
+**Lock order:** checkout session, booking, payment, trip, hold: the confirmation path's order with the booking after the session. A late or duplicate payment event for a canceled booking's checkout finds its payment already succeeded and changes nothing (`already_succeeded`); a late failure is `ignored_after_success`.
+
 ## Lock order
 
 Inbox event, checkout session, payment, trip, hold, then the order and the rest. Opening a checkout takes transaction-scoped advisory locks on the quote and the client address before any row lock, then the trip and its holds. The database's own checks lock the payment row before inserting a booking or a refund for it, so the two can never both be written. Expiring a checkout takes its session and then its hold row with SKIP LOCKED, never waiting and never touching the trip. External calls never run inside a transaction. Every command needs READ COMMITTED, as the inventory commands do.
@@ -206,6 +274,7 @@ Hold transitions keep their own `hold.*` audit rows and `inventory.hold.*` event
 | `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}` | every role (G2.12b); 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/booking-references/{reference}` | every role (G2.12b); 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/roster` | owners and booking staff (G2.12b); 403 for finance; 404 `trip_not_found` |
+| `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants` | owners and booking staff (lane 1, G2.11c); the party as named so far; 403 for finance; 404 `booking_not_found` |
 
 What the guest checkout UI calls:
 
@@ -219,7 +288,7 @@ The checkout secret and the client secret travel in headers and bodies only, nev
 
 ## Deferred and known gaps
 
-- Deposits and balances (G2.8), refunds beyond this compensation and booking cancellation (G2.9, G2.11), participants (G2.11, G2.15), and the guest UI are not here.
+- Deposits and balances (G2.8), credits (G2.9), rescheduling, removing a participant, and staff cancellation are not here. Participants and guest cancellation within policy arrived with lane 1 (G2.11c, above).
 - **A late success gets no priority (owner to decide).** It reacquires only if its seats are still free, and new checkouts queued for the same trip usually take them first: in the test specialist's race with no sweep, 1 of 10 late payments reacquired and 9 were refunded. Every one was handled correctly, but a guest who paid a little late is refunded rather than booked. If that is not acceptable, the remedy is a grace period: hold the seats a few minutes longer than the checkout window the guest is shown, so a payment made at the last moment still finds them.
 - Nothing reconciles a payment whose webhook never arrives, other than the provider's own retries (Stripe retries for days; the fake can redeliver). The adapter's `retrievePayment` is the seam for the reconciliation goal (G2.10).
 - The booker's name and email stay on abandoned checkouts. A retention job should clear them after a set time before real guests use the system.
