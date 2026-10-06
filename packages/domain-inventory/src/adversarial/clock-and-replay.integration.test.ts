@@ -526,7 +526,9 @@ describe.skipIf(!env)("G2.6 adversarial clock, replay, and sweep checks", () => 
       raceTimeout(30_000),
     );
 
-    it("documents that replaying an acquire after the hold's instant reports the stored state, active, with an expiry in the past", async () => {
+    // Changed by the lead after this suite found the stale answer: acquisition now
+    // expires the trip's due holds before it looks for the owner's hold.
+    it("replays an acquire after the hold's instant as the expired hold, and writes the expiry down", async () => {
       const { tenantId, tripId } = await trips.shared();
       const hold = await acquired(tenantId, tripId, 2);
       await expireByClock(admin, [hold.id]);
@@ -535,11 +537,15 @@ describe.skipIf(!env)("G2.6 adversarial clock, replay, and sweep checks", () => 
       );
       expect(replay.kind).toBe("existing");
       if (replay.kind !== "existing") return;
-      expect(replay.hold.state).toBe("active");
+      expect(replay.hold.state).toBe("expired");
+      expect(replay.hold.expiredAt).not.toBeNull();
       expect(Date.parse(replay.hold.expiresAt)).toBeLessThan(Date.now());
-      // It does not count, and the replay wrote nothing.
-      expect(await usageOf(admin, tripId)).toMatchObject({ counted: 2, live: 0 });
-      expect((await auditsOf(hold.id)).map((a) => a.action)).toEqual(["hold.acquired"]);
+      // Nothing counts it any more, and the only write was its expiry.
+      expect(await usageOf(admin, tripId)).toMatchObject({ counted: 0, live: 0 });
+      expect((await auditsOf(hold.id)).map((a) => a.action)).toEqual([
+        "hold.acquired",
+        "hold.expired",
+      ]);
     });
 
     it(
@@ -1010,7 +1016,9 @@ describe.skipIf(!env)("G2.6 adversarial clock, replay, and sweep checks", () => 
       });
     }
 
-    it("still lets a REPEATABLE READ caller confirm a hold within its time, which needs no count", async () => {
+    // Changed by the lead with the D1 fix: every command needs READ COMMITTED, even
+    // one that would not count, so the rule for callers has no exceptions.
+    it("refuses a REPEATABLE READ caller even for a hold within its time, and leaves it active", async () => {
       const { tenantId, tripId } = await trips.shared();
       const hold = await acquired(tenantId, tripId, 2);
       const result = await settle(
@@ -1023,8 +1031,9 @@ describe.skipIf(!env)("G2.6 adversarial clock, replay, and sweep checks", () => 
             return confirmHold(trx, ctx, { holdId: hold.id, ownerRef: hold.ownerRef });
           }),
       );
-      expect(result).toMatchObject({ ok: true, value: { kind: "confirmed", reacquired: false } });
+      expect(refusal(result)).toEqual({ refused: true, answered: null });
       expect(await usageOf(admin, tripId)).toMatchObject({ counted: 2 });
+      expect((await auditsOf(hold.id)).map((a) => a.action)).toEqual(["hold.acquired"]);
     });
   });
 

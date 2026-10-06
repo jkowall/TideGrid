@@ -204,7 +204,34 @@ function requireReason(reason: string | null | undefined): string | null {
   return reason;
 }
 
+/**
+ * A command ran above READ COMMITTED; nothing was decided or written. It
+ * carries SQLSTATE 25000, as the database's own refusal does, so a caller can
+ * handle both the same way.
+ */
+export class IsolationLevelError extends Error {
+  readonly code = "25000";
+  constructor(readonly isolation: string) {
+    super(`capacity hold commands need READ COMMITTED, not ${isolation}`);
+    this.name = "IsolationLevelError";
+  }
+}
+
 // Shared steps --------------------------------------------------------------------
+
+/**
+ * Capacity decisions read the rows committed by the time the trip lock is
+ * granted. Above READ COMMITTED the transaction's first snapshot would answer
+ * instead, so a seat freed a moment earlier would look taken and a late
+ * payment would be refunded for nothing. The database refuses such a write;
+ * this refuses before any decision, including the ones that write nothing.
+ */
+async function requireReadCommitted(trx: TenantTransaction): Promise<void> {
+  const { rows } = await sql<{ isolation: string }>`
+    select current_setting('transaction_isolation') as isolation`.execute(trx);
+  const isolation = rows[0]?.isolation ?? "unknown";
+  if (isolation !== "read committed") throw new IsolationLevelError(isolation);
+}
 
 /** Take the trip's row lock. Writers to one trip queue here, as the trigger also does. */
 async function lockTrip(trx: TenantTransaction, tenantId: string, tripId: string) {
@@ -364,8 +391,9 @@ async function expireDueOnTrip(trx: TenantTransaction, ctx: TenantContext, tripI
 /**
  * Reserve capacity on one trip for one owner. Idempotent per owner and trip:
  * a second call returns the first hold in whatever state it is now, and never
- * creates another. Holds expired by time stop counting first, so they never
- * block a new hold.
+ * creates another. The trip's holds past their time are marked expired first,
+ * so they never block a new hold and a replay reports an expired hold as
+ * expired.
  */
 export async function acquireHold(
   trx: TenantTransaction,
@@ -376,7 +404,9 @@ export async function acquireHold(
   requireTtl(input.ttlSeconds);
   requirePartySize(input.partySize);
   if (!isUuid(input.tripId)) return { kind: "trip_not_found" };
+  await requireReadCommitted(trx);
   if (!(await lockTrip(trx, ctx.tenantId, input.tripId))) return { kind: "trip_not_found" };
+  await expireDueOnTrip(trx, ctx, input.tripId);
 
   const { rows: mine } = await sql<HoldRow>`
     select ${holdColumns} from capacity_holds
@@ -394,7 +424,6 @@ export async function acquireHold(
   const reason = notBookable(trip, input.partySize);
   if (reason) return { kind: "not_bookable", reason };
 
-  await expireDueOnTrip(trx, ctx, trip.trip_id);
   const taken = await seatsCounted(trx, ctx.tenantId, trip.trip_id);
   const needed = trip.product_kind === "shared_seat" ? input.partySize : trip.seat_capacity;
   if (taken + needed > trip.seat_capacity) {
@@ -451,6 +480,7 @@ export async function confirmHold(
   input: { holdId: string; ownerRef: string },
 ): Promise<ConfirmHoldResult> {
   if (!isUuid(input.holdId) || !isOwnerRef(input.ownerRef)) return { kind: "not_found" };
+  await requireReadCommitted(trx);
   const located = await selectHold(trx, ctx.tenantId, input.holdId, { lock: false });
   if (!located || located.owner_ref !== input.ownerRef) return { kind: "not_found" };
 
@@ -535,6 +565,7 @@ export async function releaseHold(
 ): Promise<ReleaseHoldResult> {
   const reason = requireReason(input.reason);
   if (!isUuid(input.holdId) || !isOwnerRef(input.ownerRef)) return { kind: "not_found" };
+  await requireReadCommitted(trx);
   const located = await selectHold(trx, ctx.tenantId, input.holdId, { lock: false });
   if (!located || located.owner_ref !== input.ownerRef) return { kind: "not_found" };
   // The trip first, as everywhere else, so a caller that releases and then
@@ -587,6 +618,7 @@ export async function expireDueHolds(
   if (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > MAX_EXPIRY_BATCH) {
     throw new RangeError(`limit must be a whole number from 1 to ${MAX_EXPIRY_BATCH}`);
   }
+  await requireReadCommitted(trx);
   const { rows } = await sql<HoldRow>`
     with due as (
       select id from capacity_holds

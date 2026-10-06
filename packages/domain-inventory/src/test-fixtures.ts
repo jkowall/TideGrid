@@ -30,7 +30,10 @@ export interface TenantFixture {
     shared: string[];
     /** Private charter: party 2 to 6, the whole six-guest boat, no cutoff. */
     charter: string[];
-    /** Shared seats whose sales close seven days before departure: always closed here. */
+    /**
+     * Shared seats whose sales close seven days before departure. Only the first
+     * five days get one, so every late trip is inside its cutoff: always closed.
+     */
     late: string[];
   };
   location: string;
@@ -64,7 +67,6 @@ export async function createTenantFixture(
     values (${id}, ${slug}, ${`Inventory ${slug}`})`;
   const today = await databaseToday(admin);
   const from = addDays(today, 2);
-  const to = addDays(from, days - 1);
   const ctx = systemContext(id, "fixture");
   return inTenantTransaction(db, ctx, async (trx) => {
     const reason = "fixture";
@@ -105,18 +107,21 @@ export async function createTenantFixture(
       reason,
     });
     const trips: TenantFixture["trips"] = { shared: [], charter: [], late: [] };
-    for (const [key, productId, boatId] of [
-      ["shared", shared, lark],
-      ["charter", charter, wren],
-      ["late", late, tern],
+    // Late trips depart two to six days out, all inside their seven-day cutoff.
+    const lateDays = Math.min(days, 5);
+    for (const [key, productId, boatId, count] of [
+      ["shared", shared, lark, days],
+      ["charter", charter, wren, days],
+      ["late", late, tern, lateDays],
     ] as const) {
+      const last = addDays(from, count - 1);
       const published = await publishProduct(trx, ctx, { productId, reason });
       if (published.kind !== "published") throw new Error(`fixture product ${key} did not publish`);
       const schedule = await createSchedule(trx, ctx, {
         productId,
         boatId,
         startsOn: from,
-        endsOn: to,
+        endsOn: last,
         weekdays: [1, 2, 3, 4, 5, 6, 7],
         startTimes: ["10:00"],
         reason,
@@ -125,11 +130,11 @@ export async function createTenantFixture(
       const generated = await generateTrips(trx, ctx, {
         scheduleId: schedule.id,
         fromDate: from,
-        toDate: to,
+        toDate: last,
         publish: true,
         reason,
       });
-      if (generated.kind !== "generated" || generated.created.length !== days) {
+      if (generated.kind !== "generated" || generated.created.length !== count) {
         throw new Error(`fixture trips for ${key} were not generated`);
       }
       trips[key] = generated.created.map((t) => t.tripId);

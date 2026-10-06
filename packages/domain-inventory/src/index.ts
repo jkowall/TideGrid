@@ -11,6 +11,7 @@ export {
   getHold,
   getTripCapacity,
   type Hold,
+  IsolationLevelError,
   isOwnerRef,
   listTripHolds,
   MAX_EXPIRY_BATCH,

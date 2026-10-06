@@ -765,6 +765,61 @@ describe.skipIf(!env)("capacity holds against a real database as the runtime rol
       expect(await failure(admin`truncate public.capacity_holds`)).toEqual({ code: "55000" });
     });
 
+    it("keeps a trip's capacity and product from changing under its holds", async () => {
+      const shared = tripsA.shared();
+      const charter = tripsA.charter();
+      await acquired(A.id, shared, 6);
+      await acquired(A.id, charter, 2);
+      const outcomes: Record<string, unknown> = {};
+      const rollback = new Error("always roll back");
+      await expect(
+        admin.begin(async (tx) => {
+          const attempt = async (label: string, run: (q: postgres.TransactionSql) => unknown) => {
+            try {
+              await tx.savepoint(async (sp) => {
+                await run(sp);
+              });
+              outcomes[label] = "accepted";
+            } catch (err) {
+              const e = err as { code?: string; constraint_name?: string };
+              outcomes[label] = { code: e.code, constraint: e.constraint_name };
+            }
+          };
+          await attempt(
+            "shrink below the held seats",
+            (q) => q`update public.scheduled_trips set seat_capacity = 5 where id = ${shared}`,
+          );
+          await attempt(
+            "shrink to exactly the held seats",
+            (q) => q`update public.scheduled_trips set seat_capacity = 6 where id = ${shared}`,
+          );
+          await attempt(
+            "grow a shared trip",
+            (q) => q`update public.scheduled_trips set seat_capacity = 12 where id = ${shared}`,
+          );
+          await attempt(
+            "swap the product",
+            (q) =>
+              q`update public.scheduled_trips set product_id = ${A.products.late} where id = ${shared}`,
+          );
+          await attempt(
+            "resize a held charter",
+            (q) => q`update public.scheduled_trips set seat_capacity = 5 where id = ${charter}`,
+          );
+          throw rollback;
+        }),
+      ).rejects.toBe(rollback);
+      const floor = { code: "23514", constraint: "capacity_holds_trip_floor" };
+      expect(outcomes).toEqual({
+        "shrink below the held seats": floor,
+        "shrink to exactly the held seats": "accepted",
+        "grow a shared trip": "accepted",
+        "swap the product": floor,
+        "resize a held charter": floor,
+      });
+      expect(await capacity(A.id, shared)).toMatchObject({ total: 10, held: 6 });
+    });
+
     it("backs the whole-boat rule with a unique index that needs no trigger", async () => {
       const trip = tripsA.charter();
       const insert = (q: postgres.TransactionSql) => q`

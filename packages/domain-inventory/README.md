@@ -38,6 +38,7 @@ The database enforces these for every role, the table owner included, in the cap
 7. Trip, owner, kind, party size, seats, and creation time never change. The trigger sets every timestamp.
 8. No role deletes or truncates holds. The runtime may update `state` only.
 9. Tenancy: forced row-level security, a composite foreign key to the trip, and explicit tenant filters.
+10. The trip side of rule 1: no role can shrink a trip below the seats its holds take, change the product its holds came from, or resize a charter that a whole-boat hold has taken. The runtime cannot change either column at all.
 
 The service adds what availability checks and the database does not: an active location and boat, and no blackout over the trip.
 
@@ -53,9 +54,9 @@ Three designs were weighed.
 
 Rules the choice depends on:
 
-- **READ COMMITTED only.** Under REPEATABLE READ the count would use the transaction's first snapshot and miss a hold committed while it waited, so the trigger refuses any other level for a new or reacquired hold (SQLSTATE 25000). Kysely and the API use the default, READ COMMITTED.
+- **READ COMMITTED only.** Under REPEATABLE READ or SERIALIZABLE the count would use the transaction's first snapshot: it could miss a hold committed while it waited, or still see seats released a moment ago. So every command refuses any other level before it decides anything, with `IsolationLevelError` (code 25000), and the trigger refuses a new or reacquired hold (SQLSTATE 25000) for writers that skip the service. Kysely and the API use the default, READ COMMITTED.
 - **Expiry is written down before anyone relies on it.** The count is over stored states. The service marks a trip's due holds expired, under the trip lock, before it counts. Once one transaction has decided a hold expired, every later one sees the stored state, so no two transactions can disagree about a hold, whatever their clocks read.
-- **The trigger takes the lock itself.** A writer that skips the service still queues and still counts.
+- **The trigger takes the lock itself.** A writer that skips the service still queues and still counts. Such a writer changing a hold's state locks the hold row before the trigger locks the trip, the reverse of the service's order, so it can deadlock with a command; PostgreSQL then aborts one of them (40P01) and the invariant holds. Use the service.
 
 ## Clock
 
@@ -65,7 +66,7 @@ The availability listing keeps the request clock for its booking cutoff, as G2.4
 
 ## Interface for checkout (G2.7)
 
-Every command takes the caller's tenant transaction and context, writes its domain change, audit row, and outbox event in that transaction, and returns a result union instead of throwing for business outcomes. Programmer errors throw: a malformed owner reference (`TypeError`), a non-integer party size (`TypeError`), a lifetime outside 60 to 3600 seconds (`RangeError`), a malformed reason (`RangeError`). A database refusal that the service did not predict propagates and rolls the caller back.
+Every command takes the caller's tenant transaction and context, writes its domain change, audit row, and outbox event in that transaction, and returns a result union instead of throwing for business outcomes. Programmer errors throw: a malformed owner reference (`TypeError`), a non-integer party size (`TypeError`), a lifetime outside 60 to 3600 seconds (`RangeError`), a malformed reason (`RangeError`), and a transaction above READ COMMITTED (`IsolationLevelError`, code 25000). A database refusal that the service did not predict propagates and rolls the caller back.
 
 ```ts
 acquireHold(trx, ctx, { ownerRef, tripId, partySize, ttlSeconds }): Promise<
@@ -103,11 +104,12 @@ sweepExpiredHolds(db, { runId, ... })    // every tenant, for the cron
 
 Semantics checkout relies on:
 
-- **Acquire is idempotent per owner and trip.** A replay returns the first hold in its current state, even if it has since been confirmed, released, or expired. It never creates a second hold. A new attempt after an abandoned checkout needs a new owner reference.
+- **Acquire is idempotent per owner and trip.** A replay returns the first hold in its current state, even if it has since been confirmed, released, or expired. Acquisition marks the trip's due holds expired before it looks, so a replay after the hold's instant reports `expired`, never a stale `active`. It never creates a second hold. A new attempt after an abandoned checkout needs a new owner reference.
 - **The expiry is the database's:** now plus `ttlSeconds`, but never past departure. Read it from `hold.expiresAt` and give the checkout session the same instant.
 - **Confirm within the hold's time** succeeds without counting again, because the hold was counted all along, unless the trip was canceled (`capacity_lost`, `trip_canceled`). A closed trip does not stop it: the checkout began before sales closed.
 - **Confirm after the hold's time**, swept or not, reacquires: the hold is marked expired, then must find room on a trip still on sale, exactly like a new hold. If it does, the result is `confirmed` with `reacquired: true`. If not, the result is `capacity_lost` with the reason and nothing is confirmed. Checkout then refunds in full and raises an operator exception, as the architecture requires.
 - **Several holds all or nothing.** Confirm each in one transaction and roll the transaction back when any result is not `confirmed`, then record the exception and refund in a new transaction.
+- **A late payment gets no priority.** Confirm reads the hold before it queues for the trip lock, so in a burst, acquisitions already queued go first and can take the seats a late payment needed. The test specialist saw late confirmations lose every race until the starts were staggered. If checkout wants paid guests to win, it needs its own policy, such as a shorter checkout window than the hold or a grace period before others may take the seats.
 - **Release** gives back the capacity of an active or confirmed hold. Releasing a confirmed hold is how a canceled booking returns its seats.
 - **Not found is opaque.** Another owner's hold, another tenant's hold, and a malformed id all answer `not_found`.
 
@@ -151,6 +153,7 @@ The sweep is housekeeping and events, not correctness. Fifteen minutes keeps the
 - Canceling a trip leaves its holds as they are. Confirmation refuses a canceled trip, but a trip with confirmed holds can still be canceled; G2.7 or the cancellation goal must refuse that or route it through remedies, as the [catalog README](../domain-catalog/README.md#deferred-and-not-yet-reachable) already notes.
 - No rate limit on holds per guest. A script could hold every seat for an hour at a time; checkout creation needs a limit before any public exposure.
 - Holds are never deleted, so expired and released rows accumulate as history. The live indexes cover only active and confirmed rows.
+- Creating a blackout or changing a product's sales status takes no trip lock, so a hold can be acquired at the same moment a blackout lands. It then behaves like any checkout already in progress: it confirms within its time. Sales-state changes on the trip itself do queue on the lock.
 
 ## Tests
 

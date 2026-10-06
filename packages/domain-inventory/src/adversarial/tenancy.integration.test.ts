@@ -495,7 +495,9 @@ describe.skipIf(!env)("G2.6 two-tenant escapes and database rules", () => {
     const aTrips = new Set([...A.trips.shared, ...A.trips.charter, ...A.trips.late]);
     expect(views.guestA.every((t) => aTrips.has(t.tripId))).toBe(true);
     expect(views.staffA.every((t) => aTrips.has(t.tripId))).toBe(true);
-    expect(views.staffA).toHaveLength(3);
+    // Shared and charter only: since the lead's fixture fix, late trips run on the
+    // first five fixture days, so every one of them is inside its cutoff.
+    expect(views.staffA).toHaveLength(2);
     const staff = Object.fromEntries(views.staffA.map((t) => [t.tripId, t.capacity]));
     expect(staff[sharedA]).toMatchObject({ held: 3, confirmed: 0, remaining: 7, soldOut: false });
     expect(staff[charterA]).toMatchObject({ held: 0, confirmed: 0, remaining: 6, soldOut: false });

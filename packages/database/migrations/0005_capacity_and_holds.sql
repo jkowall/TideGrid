@@ -30,7 +30,9 @@
 -- COMMITTED sees rows committed while it waited. Under REPEATABLE READ the
 -- count would use a stale snapshot, so the trigger refuses any isolation level
 -- but READ COMMITTED. A partial unique index backs up the whole-boat rule
--- without any trigger.
+-- without any trigger. A second trigger guards the trip side: no role can
+-- shrink a trip below the seats its holds take, change the product its holds
+-- came from, or resize a charter a whole-boat hold has taken.
 --
 -- Clock. The database clock decides expiry: now(), the transaction's start,
 -- read once per transaction, so every statement in a command agrees with the
@@ -209,7 +211,8 @@ BEGIN
   END IF;
 
   -- Writers to one trip queue here. The lock also orders holds against the
-  -- trip's own sales-state changes.
+  -- trip's own sales-state changes. FOR NO KEY UPDATE needs UPDATE on some
+  -- column of the trip, which 0003 grants the runtime; keep that grant.
   SELECT t.sales_state, t.starts_at, t.seat_capacity,
          p.kind AS product_kind, p.sales_status AS product_status,
          p.min_party_size, p.max_party_size, p.booking_cutoff_minutes
@@ -290,6 +293,53 @@ CREATE TRIGGER capacity_holds_rules
   BEFORE INSERT OR UPDATE ON public.capacity_holds
   FOR EACH ROW EXECUTE FUNCTION app.check_capacity_hold();
 
+-- The trip side of the invariant. The runtime cannot change a trip's capacity
+-- or product at all (0003 grants it neither column). This stops the owner role,
+-- or a later migration, from shrinking a trip below the seats its holds take,
+-- from changing the product its holds' kind came from, and from resizing a
+-- charter that a whole-boat hold has taken. The update has already locked the
+-- trip's row when this runs, so no hold can arrive in between, and the count
+-- sees every committed hold. Holds count by stored state, as everywhere.
+CREATE FUNCTION app.check_trip_capacity_floor() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  taken integer;
+  has_whole_boat boolean;
+BEGIN
+  IF NEW.seat_capacity IS NOT DISTINCT FROM OLD.seat_capacity
+     AND NEW.product_id IS NOT DISTINCT FROM OLD.product_id THEN
+    RETURN NEW;
+  END IF;
+  IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'a trip''s capacity or product changes only under READ COMMITTED, not %',
+      pg_catalog.current_setting('transaction_isolation')
+      USING ERRCODE = '25000';
+  END IF;
+  SELECT coalesce(sum(h.seats), 0)::integer, coalesce(bool_or(h.kind = 'whole_boat'), false)
+    INTO taken, has_whole_boat
+    FROM public.capacity_holds h
+   WHERE h.tenant_id = OLD.tenant_id
+     AND h.trip_id = OLD.id
+     AND h.state IN ('active', 'confirmed');
+  IF taken > 0 AND (NEW.product_id IS DISTINCT FROM OLD.product_id OR has_whole_boat) THEN
+    RAISE EXCEPTION 'trip % has holds; neither its product nor a held charter''s size can change',
+      OLD.id
+      USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_trip_floor';
+  END IF;
+  IF NEW.seat_capacity < taken THEN
+    RAISE EXCEPTION 'trip % has % seats held or confirmed, more than a capacity of %',
+      OLD.id, taken, NEW.seat_capacity
+      USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_trip_floor';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER scheduled_trips_capacity_floor
+  BEFORE UPDATE OF seat_capacity, product_id ON public.scheduled_trips
+  FOR EACH ROW EXECUTE FUNCTION app.check_trip_capacity_floor();
+
 -- Holds are released or expire; they are never deleted, by any role.
 CREATE FUNCTION app.reject_capacity_hold_removal() RETURNS trigger
   LANGUAGE plpgsql
@@ -351,6 +401,7 @@ CREATE FUNCTION app.capacity_hold_sweep_tenants(p_limit integer)
 GRANT UPDATE (state) ON public.capacity_holds TO tidegrid_app;
 
 REVOKE ALL ON FUNCTION app.check_capacity_hold() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_trip_capacity_floor() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.reject_capacity_hold_removal() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.trip_capacity_usage(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.capacity_hold_sweep_tenants(integer) FROM PUBLIC;
