@@ -35,6 +35,44 @@ export {
   type RosterView,
   sumByCode,
 } from "./console.ts";
+// Console completion (G2.12c): search, a day's report and CSV, and notes.
+export {
+  csvField,
+  csvInstant,
+  csvMoney,
+  csvText,
+  dayExportFileName,
+  renderCsv,
+  renderDayExport,
+} from "./csv.ts";
+export {
+  buildDayReport,
+  DAY_REPORT_LIMIT,
+  type DayReport,
+  type DayReportOutcome,
+  type DayReportRow,
+  type DayReportTotals,
+  totalsOf,
+} from "./day-report.ts";
+export {
+  type AddBookingNoteResult,
+  addBookingNote,
+  type BookingNoteView,
+  listBookingNotes,
+  NOTES_LIMIT,
+} from "./notes.ts";
+export {
+  type BookingSearchField,
+  type BookingSearchOutcome,
+  type BookingSearchQuery,
+  type BookingSearchView,
+  emailFragment,
+  escapeLike,
+  nameWords,
+  referencePrefix,
+  searchBookings,
+  searchFields,
+} from "./search.ts";
 export {
   type HandledEvent,
   handleVerifiedEvent,
