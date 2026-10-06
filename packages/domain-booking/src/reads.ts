@@ -3,6 +3,7 @@
  * need an operator. Read-only, under the caller's tenant transaction.
  */
 import {
+  type BookingState,
   isUuid,
   type OrderStatus,
   type PaymentProviderName,
@@ -18,7 +19,8 @@ export interface StaffBooking {
   reference: string;
   tripId: string;
   partySize: number;
-  state: "confirmed";
+  /** Canceled since lane 1 (G2.11c): a guest's cancellation within policy. */
+  state: BookingState;
   source: "direct";
   reacquired: boolean;
   confirmedAt: string;
@@ -45,6 +47,7 @@ export async function listTripBookings(
     id: string;
     reference: string;
     trip_id: string;
+    state: BookingState;
     party_size: number;
     reacquired: boolean;
     confirmed_at: Date | string;
@@ -58,7 +61,7 @@ export async function listTripBookings(
     payment_state: PaymentState;
     amount: number;
   }>`
-    select b.id, b.reference, b.trip_id, b.party_size, b.reacquired, b.confirmed_at,
+    select b.id, b.reference, b.trip_id, b.state, b.party_size, b.reacquired, b.confirmed_at,
            s.booker_name, s.booker_email,
            o.id as order_id, o.status as order_status, o.total_amount,
            p.id as payment_id, p.provider, p.state as payment_state, p.amount
@@ -73,7 +76,7 @@ export async function listTripBookings(
     reference: r.reference,
     tripId: r.trip_id,
     partySize: r.party_size,
-    state: "confirmed" as const,
+    state: r.state,
     source: "direct" as const,
     reacquired: r.reacquired,
     confirmedAt: iso(r.confirmed_at),

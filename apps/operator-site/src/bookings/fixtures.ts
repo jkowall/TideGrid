@@ -341,6 +341,8 @@ export function bookingDetail(over: Partial<BookingDetail> = {}): BookingDetail 
     reacquired: false,
     // 2:17 PM in New York; already Oct 7 in Tokyo.
     confirmedAt: "2026-10-06T18:17:00.000Z",
+    canceledAt: null,
+    cancellation: null,
     trip: {
       tripId: tripIds.sunset,
       productName: "Sunset Harbor Cruise",

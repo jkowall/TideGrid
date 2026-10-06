@@ -217,7 +217,9 @@ export const StaffBooking = z.object({
   reference: z.string(),
   tripId: Uuid,
   partySize: z.number().int().min(1),
-  state: z.literal("confirmed"),
+  state: z
+    .enum(["confirmed", "canceled"])
+    .describe("canceled: the guest canceled within policy (lane 1, G2.11c)"),
   source: z.literal("direct"),
   reacquired: z
     .boolean()

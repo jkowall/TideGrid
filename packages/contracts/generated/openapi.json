@@ -8458,8 +8458,10 @@
                           "state": {
                             "type": "string",
                             "enum": [
-                              "confirmed"
-                            ]
+                              "confirmed",
+                              "canceled"
+                            ],
+                            "description": "canceled: the guest canceled within policy (lane 1, G2.11c)"
                           },
                           "source": {
                             "type": "string",
@@ -9300,7 +9302,7 @@
                           "bookings": {
                             "type": "integer",
                             "minimum": 0,
-                            "description": "Bookings on the trip"
+                            "description": "Confirmed bookings on the trip; canceled ones gave their seats back"
                           },
                           "guests": {
                             "type": "integer",
@@ -9346,8 +9348,10 @@
                           "state": {
                             "type": "string",
                             "enum": [
-                              "confirmed"
-                            ]
+                              "confirmed",
+                              "canceled"
+                            ],
+                            "description": "confirmed: booked and holding its seats. canceled: given back, with any refund"
                           },
                           "source": {
                             "type": "string",
@@ -9763,8 +9767,10 @@
                         "state": {
                           "type": "string",
                           "enum": [
-                            "confirmed"
-                          ]
+                            "confirmed",
+                            "canceled"
+                          ],
+                          "description": "confirmed: booked and holding its seats. canceled: given back, with any refund"
                         },
                         "source": {
                           "type": "string",
@@ -9779,6 +9785,82 @@
                         "confirmedAt": {
                           "type": "string",
                           "format": "date-time"
+                        },
+                        "canceledAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "cancellation": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "canceledAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "by": {
+                              "type": "string",
+                              "enum": [
+                                "guest",
+                                "staff",
+                                "system",
+                                "support"
+                              ],
+                              "description": "Who canceled: the guest, today"
+                            },
+                            "remedy": {
+                              "type": "string",
+                              "enum": [
+                                "full_refund",
+                                "percent_refund",
+                                "none"
+                              ],
+                              "description": "What the booking's policy version gave on the side of its cutoff it fell"
+                            },
+                            "refundBp": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10000,
+                              "description": "Basis points of what was paid: 10000 for a full refund, 0 for none"
+                            },
+                            "refundAmount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "paidAmount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "cutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The policy's change cutoff for this trip"
+                            },
+                            "beforeCutoff": {
+                              "type": "boolean"
+                            },
+                            "policyVersion": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          },
+                          "required": [
+                            "canceledAt",
+                            "by",
+                            "remedy",
+                            "refundBp",
+                            "refundAmount",
+                            "paidAmount",
+                            "cutoffAt",
+                            "beforeCutoff",
+                            "policyVersion"
+                          ],
+                          "description": "Present once the booking is canceled"
                         },
                         "trip": {
                           "type": "object",
@@ -10259,6 +10341,7 @@
                                   "checkout_opened",
                                   "paid",
                                   "confirmed",
+                                  "canceled",
                                   "refund_requested",
                                   "refunded",
                                   "refund_failed"
@@ -10274,7 +10357,7 @@
                               "at"
                             ]
                           },
-                          "description": "Checkout opened, paid, confirmed, and any refund, oldest first"
+                          "description": "Checkout opened, paid, confirmed, any cancellation, and any refund, oldest first"
                         }
                       },
                       "required": [
@@ -10284,6 +10367,8 @@
                         "source",
                         "reacquired",
                         "confirmedAt",
+                        "canceledAt",
+                        "cancellation",
                         "trip",
                         "location",
                         "party",
@@ -10997,7 +11082,7 @@
                               "payment"
                             ]
                           },
-                          "description": "Every booking on the trip, oldest first. Complete: a trip seats at most 500"
+                          "description": "Every confirmed booking on the trip, oldest first; canceled ones are not on it. Complete: a trip seats at most 500"
                         }
                       },
                       "required": [

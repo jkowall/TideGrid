@@ -15,11 +15,15 @@ import {
 } from "@tidegrid/domain-inventory/testing";
 import {
   createFakePaymentProvider,
+  FAKE_MINIMUM_AMOUNT,
   type FakePaymentProvider,
   type VerifiedProviderEvent,
 } from "@tidegrid/domain-payments";
 import { createPromotion, createQuote, createTaxRate } from "@tidegrid/domain-pricing";
 import type postgres from "postgres";
+import { createCheckoutSession, ensureProviderPayment, getCheckoutSession } from "./checkout.ts";
+import { handleVerifiedEvent } from "./finalize.ts";
+import type { BookingHooks } from "./hooks.ts";
 
 type Sql = ReturnType<typeof postgres>;
 type Db = ReturnType<typeof createDb>["db"];
@@ -170,6 +174,82 @@ export function craftedFakeEventBody(input: {
       },
     },
   });
+}
+
+/**
+ * A confirmed booking on a trip, made the way a guest makes one (lane 1): a
+ * quote, a checkout with its hold and order, the fake payment settled, and its
+ * signed event through `handleVerifiedEvent` with the given hooks. Returns the
+ * booking, its checkout, and the checkout's secret.
+ */
+export async function confirmBooking(
+  db: Db,
+  provider: FakePaymentProvider,
+  tenant: CheckoutFixture,
+  tripId: string,
+  party: number,
+  options: {
+    charter?: boolean;
+    hooks?: BookingHooks;
+    booker?: { name: string; email: string };
+  } = {},
+): Promise<{ bookingId: string; reference: string; checkoutSessionId: string; secret: string }> {
+  const quote = await quoteFor(db, tenant.id, tripId, party, { charter: options.charter ?? false });
+  const secret = newSecret();
+  const ctx = guestContext(tenant.id);
+  const created = await inTenantTransaction(db, ctx, (trx) =>
+    createCheckoutSession(trx, ctx, {
+      quoteId: quote.quoteId,
+      acceptedPolicyVersion: quote.policy.version,
+      booker: options.booker ?? { name: "Fixture Booker", email: "booker@example.test" },
+      secret,
+      clientAddress: null,
+      provider: "fake",
+      minimumAmount: FAKE_MINIMUM_AMOUNT,
+    }),
+  );
+  if (created.kind !== "created") throw new Error(`checkout: ${JSON.stringify(created)}`);
+  const ready = await ensureProviderPayment(
+    db,
+    provider,
+    guestContext(tenant.id),
+    created.session.id,
+  );
+  if (ready.kind !== "ready") throw new Error(`payment: ${JSON.stringify(ready)}`);
+  const settled = await provider.settlePayment(
+    tenant.id,
+    ready.paymentRef,
+    "succeeded",
+    Date.now(),
+  );
+  if (settled.kind === "not_found") throw new Error("no fake payment");
+  const event = await verifiedFakeEvent(provider, settled.event.body);
+  const handled = await handleVerifiedEvent(db, provider, event, {
+    requestId: `fixture-${randomUUID()}`,
+    hooks: options.hooks,
+  });
+  if (handled.kind !== "processed" || !handled.outcome.startsWith("confirmed")) {
+    throw new Error(`confirmation: ${JSON.stringify(handled)}`);
+  }
+  const view = await inTenantTransaction(db, ctx, (trx) =>
+    getCheckoutSession(trx, tenant.id, { sessionId: created.session.id, secret }),
+  );
+  const reference = view?.booking?.reference;
+  const found = await inTenantTransaction(db, ctx, async (trx) =>
+    trx
+      .selectFrom("bookings")
+      .select("id")
+      .where("tenant_id", "=", tenant.id)
+      .where("checkout_session_id", "=", created.session.id)
+      .executeTakeFirst(),
+  );
+  if (!found || !reference) throw new Error("the confirmed booking was not found");
+  return {
+    bookingId: found.id,
+    reference,
+    checkoutSessionId: created.session.id,
+    secret,
+  };
 }
 
 /**
