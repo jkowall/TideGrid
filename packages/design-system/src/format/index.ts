@@ -411,3 +411,6 @@ export function describeClockChange(change: ClockChange): string {
       : `${change.minutes} minutes`;
   return `Clocks go ${change.direction} ${amount} on ${formatDate(change.date, "medium")}.`;
 }
+
+// Money, rates, and time left (G2.11b).
+export * from "./money.ts";
