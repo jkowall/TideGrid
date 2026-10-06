@@ -40,6 +40,18 @@ export interface RequestAttributes {
   "tidegrid.checkout_sweep.failed_event_count"?: number;
   "tidegrid.checkout_sweep.failed_refund_count"?: number;
   "tidegrid.checkout_sweep.complete"?: boolean;
+  /** Email delivery (lane 1, the G2.16 shim): counts and codes, never a recipient or body. */
+  "tidegrid.email.sent_count"?: number;
+  "tidegrid.email.retried_count"?: number;
+  "tidegrid.email.failed_count"?: number;
+  "tidegrid.email.reason"?: string;
+  "tidegrid.email_sweep.tenant_count"?: number;
+  "tidegrid.email_sweep.sent_count"?: number;
+  "tidegrid.email_sweep.retried_count"?: number;
+  "tidegrid.email_sweep.failed_count"?: number;
+  "tidegrid.email_sweep.superseded_count"?: number;
+  "tidegrid.email_sweep.failed_tenant_count"?: number;
+  "tidegrid.email_sweep.complete"?: boolean;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -71,6 +83,18 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.checkout_sweep.failed_event_count",
   "tidegrid.checkout_sweep.failed_refund_count",
   "tidegrid.checkout_sweep.complete",
+  // Email delivery (lane 1, the G2.16 shim).
+  "tidegrid.email.sent_count",
+  "tidegrid.email.retried_count",
+  "tidegrid.email.failed_count",
+  "tidegrid.email.reason",
+  "tidegrid.email_sweep.tenant_count",
+  "tidegrid.email_sweep.sent_count",
+  "tidegrid.email_sweep.retried_count",
+  "tidegrid.email_sweep.failed_count",
+  "tidegrid.email_sweep.superseded_count",
+  "tidegrid.email_sweep.failed_tenant_count",
+  "tidegrid.email_sweep.complete",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

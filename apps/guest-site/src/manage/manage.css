@@ -5,11 +5,15 @@
  * through the --brand-* properties applyBrandTheme sets on <html>.
  */
 
+/* The page's column keeps the band's left edge, and a reading width. */
 .manage-layout {
   display: grid;
   gap: var(--space-6);
-  max-width: 46rem;
   padding-block: var(--space-6) var(--space-16);
+}
+.manage-layout > * {
+  width: 100%;
+  max-width: 46rem;
 }
 
 .manage-status {
@@ -144,4 +148,9 @@
 
 .manage-alone .booking-outcome__body > p {
   max-width: 65ch;
+}
+
+/* A focus target once something happened, such as a cancellation, not a control. */
+.manage-done:focus {
+  outline: none;
 }

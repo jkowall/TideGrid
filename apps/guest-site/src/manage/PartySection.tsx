@@ -1,4 +1,4 @@
-import type { ManagedBooking } from "@tidegrid/contracts";
+import type { ManagedBooking, Participant } from "@tidegrid/contracts";
 import {
   Button,
   CheckboxField,
@@ -35,7 +35,8 @@ export function PartySection({
   booking: ManagedBooking;
   session: string;
   operator: string;
-  onSaved: () => Promise<void>;
+  /** The participant the API saved: shown at once, then the booking is read again. */
+  onSaved: (participant: Participant) => Promise<void>;
   onEnded: () => void;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
@@ -74,7 +75,7 @@ export function PartySection({
             : "This trip has left, so its party no longer changes."}
         </p>
       )}
-      {saved && (
+      {saved && editable && (
         <Notice tone="success" title="Saved">
           {saved}
         </Notice>
@@ -88,12 +89,12 @@ export function PartySection({
                 initial={formOf(slot.participant)}
                 session={session}
                 isNew={slot.participant === null}
-                onDone={async (name) => {
+                onDone={async (participant) => {
                   returnTo.current = slot.position;
                   setEditing(null);
-                  if (name) {
-                    setSaved(`${name} is guest ${slot.position}.`);
-                    await onSaved();
+                  if (participant) {
+                    setSaved(`${participant.name} is guest ${slot.position}.`);
+                    await onSaved(participant);
                   }
                 }}
                 onEnded={onEnded}
@@ -152,7 +153,7 @@ function ParticipantEditor({
   session: string;
   isNew: boolean;
   /** The saved name, or null when the guest closed the form without saving. */
-  onDone: (name: string | null) => Promise<void>;
+  onDone: (participant: Participant | null) => Promise<void>;
   onEnded: () => void;
 }) {
   const [form, setForm] = useState(initial);
@@ -197,7 +198,7 @@ function ParticipantEditor({
     setBusy(false);
     if (result.kind === "ok") {
       attempt.current = null;
-      await onDone(result.value.participant.name);
+      await onDone(result.value.participant);
       return;
     }
     if (result.kind === "refused") {

@@ -229,7 +229,7 @@ export async function enqueueCancellationEmail(
     {
       kind: "paragraph",
       text: clean(
-        `We have canceled booking ${detail.reference}: ${detail.trip.productName}, ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}. Your places have gone back on sale.`,
+        `We have canceled booking ${detail.reference}: ${detail.trip.productName}, ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}. ${detail.party.guests === 1 ? "Your place has" : "Your places have"} gone back on sale.`,
         2000,
       ),
     },

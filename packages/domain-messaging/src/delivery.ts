@@ -60,6 +60,12 @@ export interface DeliveryOptions {
   /** Messages per tenant per run. */
   limit?: number;
   leaseSeconds?: number;
+  /**
+   * A send failed with something other than a provider's answer: a bug, or an
+   * outcome nobody knows. The message is retried with its key like an outage;
+   * this is for the log.
+   */
+  onSendError?: (messageId: string, error: unknown) => void;
 }
 
 export type DeliveryOutcome =
@@ -139,11 +145,16 @@ export async function guestOriginFor(
   return rows[0]?.tenant_id === tenantId ? url.origin : null;
 }
 
+/**
+ * Claim one due message in a short transaction. `origin` is resolved before:
+ * nothing here may use the database outside `trx`, because a Worker's pool
+ * holds one connection and a second query would wait for it forever.
+ */
 async function claimOne(
   db: Kysely<Database>,
   ctx: TenantContext,
   options: DeliveryOptions,
-  origin: () => Promise<string | null>,
+  origin: string | null,
 ): Promise<Claimed> {
   const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
   return inTenantTransaction(db, ctx, async (trx) => {
@@ -178,7 +189,7 @@ async function claimOne(
     if (row.link_purpose === null || row.link_path === null || row.link_ttl_seconds === null) {
       return { kind: "ready", row, url: null } as const;
     }
-    const base = await origin();
+    const base = origin;
     if (!base || row.booking_id === null) {
       await fail(trx, ctx, row.id, attempt, "link_host_unmapped");
       return { kind: "failed", messageId: row.id, attempt, code: "link_host_unmapped" } as const;
@@ -270,19 +281,15 @@ export async function deliverTenantMessages(
     actorId: "email-delivery",
     requestId: options.runId,
   };
+  // Where links point, resolved once and before any claim: a claim's
+  // transaction holds the connection, and a Worker's pool has only one.
   const template = options.guestLinkOrigin ?? DEFAULT_GUEST_LINK_ORIGIN;
-  let originMemo: Promise<string | null> | undefined;
-  const origin = () => {
-    originMemo ??= (async () => {
-      const slug = await inTenantTransaction(db, ctx, async (trx) => {
-        const { rows } = await sql<{ slug: string }>`
-          select slug from tenants where id = ${tenantId}`.execute(trx);
-        return rows[0]?.slug ?? null;
-      });
-      return slug ? guestOriginFor(db, tenantId, slug, template) : null;
-    })();
-    return originMemo;
-  };
+  const slug = await inTenantTransaction(db, ctx, async (trx) => {
+    const { rows } = await sql<{ slug: string }>`
+      select slug from tenants where id = ${tenantId}`.execute(trx);
+    return rows[0]?.slug ?? null;
+  });
+  const origin = slug ? await guestOriginFor(db, tenantId, slug, template) : null;
 
   const report: TenantDeliveryReport = {
     claimed: 0,
@@ -333,6 +340,7 @@ export async function deliverTenantMessages(
           result = { kind: "retry", code: error.code };
         } else {
           // An unknown outcome: retry with the same key, as for an outage.
+          options.onSendError?.(row.id, error);
           result = { kind: "retry", code: "send_error" };
         }
       }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   checkContent,
+  displayPhone,
   type EmailBrand,
   type EmailContent,
   escapeHtml,
@@ -105,6 +106,15 @@ describe("email rendering", () => {
     expect(out.text).toContain("Total: $96.30");
     expect(out.text).toContain("no real booking or payment is made");
     expect(out.html).toContain('lang="en"');
+  });
+
+  it("shows the operator's phone as the booking site does", () => {
+    const out = renderEmail(brand, content, { slot });
+    expect(out.text).toContain("hello@demo-harbor.test, (305) 555-0142.");
+    expect(out.html).toContain("(305) 555-0142");
+    expect(out.html).not.toContain("+13055550142");
+    expect(displayPhone("+13055550142")).toBe("(305) 555-0142");
+    expect(displayPhone("+442079460000")).toBe("+442079460000");
   });
 
   it("picks a readable text color on the operator's primary", () => {

@@ -83,6 +83,18 @@ export function slotsOf(partySize: number, participants: readonly Participant[])
   }));
 }
 
+/** The booking with one participant saved: the place's old one replaced, or a new place. */
+export function withParticipant(booking: ManagedBooking, saved: Participant): ManagedBooking {
+  const others = booking.participants.participants.filter((p) => p.position !== saved.position);
+  return {
+    ...booking,
+    participants: {
+      ...booking.participants,
+      participants: [...others, saved].sort((a, b) => a.position - b.position),
+    },
+  };
+}
+
 /** "2 of 4 named". */
 export function namedText(partySize: number, participants: readonly Participant[]): string {
   return `${participants.length} of ${partySize} named`;

@@ -350,8 +350,22 @@ function summary(
   const bookings = trips.reduce((n, t) => n + t.bookings, 0);
   const guests = trips.reduce((n, t) => n + t.guests, 0);
   const on = selected ? `on ${selected.productName}, ${dayName}` : `on ${dayName}`;
-  if (bookings === 0) return `No bookings ${on}.`;
+  if (bookings === 0) {
+    const rows = selected
+      ? page.bookings.filter((b) => b.tripId === selected.tripId)
+      : page.bookings;
+    return `${hasCanceled(rows) ? "No active bookings" : "No bookings"} ${on}.`;
+  }
   return `${bookings === 1 ? "1 booking" : `${bookings} bookings`}, ${guestsText(guests)} ${on}.`;
+}
+
+/**
+ * Counts are of active bookings, the ones holding seats (lane 1, G2.11c). A
+ * canceled booking still lists, with its badge, so a count of none says
+ * "active" when one shows below it.
+ */
+function hasCanceled(rows: readonly BookingListItem[]): boolean {
+  return rows.some((b) => b.state === "canceled");
 }
 
 function tripTime(trip: BookingDayTrip): string {
@@ -429,8 +443,12 @@ function Day({
         />
         {!unknownTrip && (
           <p className="bk-filters__totals">
-            {totals.bookings === 1 ? "1 booking" : `${totals.bookings} bookings`},{" "}
-            {guestsText(totals.guests)}
+            {totals.bookings === 0 &&
+            hasCanceled(
+              selected ? page.bookings.filter((b) => b.tripId === selected.tripId) : page.bookings,
+            )
+              ? "No active bookings"
+              : `${totals.bookings === 1 ? "1 booking" : `${totals.bookings} bookings`}, ${guestsText(totals.guests)}`}
           </p>
         )}
       </div>
@@ -528,9 +546,11 @@ function TripBookings({
           <span>
             <Icon name="users" />
             {trip.bookings === 0
-              ? departed
-                ? "No bookings"
-                : "No bookings yet"
+              ? hasCanceled(bookings)
+                ? "No active bookings"
+                : departed
+                  ? "No bookings"
+                  : "No bookings yet"
               : `${trip.bookings === 1 ? "1 booking" : `${trip.bookings} bookings`}, ${guestsText(trip.guests)}`}
           </span>
           {showZone && (

@@ -76,6 +76,16 @@ function errorType(error: unknown): string {
   return error instanceof Error ? error.name : "unknown";
 }
 
+/** A send's unexpected failure, for the log: its type and any SQLSTATE, never its message. */
+export function sendErrorAttributes(error: unknown): Record<string, string> {
+  const code = (error as { code?: unknown } | null)?.code;
+  return {
+    "event.name": "email_send_error",
+    "error.type": errorType(error),
+    ...(typeof code === "string" ? { "db.response.status_code": code } : {}),
+  };
+}
+
 /**
  * After a request commits mail, send that tenant's due messages in the
  * background, on a connection of their own, so the guest sees the email at
@@ -103,6 +113,8 @@ export function deliverAfterCommit(c: Context<AppEnv>, deps: AppDeps, tenantId: 
           ...deliverySettings(env),
           runId,
           limit: 10,
+          onSendError: (_messageId, error) =>
+            log.error("email_send_error", sendErrorAttributes(error)),
         });
         log.info("email_delivery", {
           "event.name": "email_delivery",
