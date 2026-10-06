@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { ErrorBoundary } from "@tidegrid/design-system/components";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
+import { json, listing, offer, tripId } from "./booking/fixtures.ts";
 import { loadExperience } from "./bootstrap.ts";
 import { CrashedState, NotReadyState } from "./States.tsx";
 
@@ -73,9 +74,61 @@ describe("guest app", () => {
     const trips = await screen.findByRole("region", { name: "Upcoming trips" });
     expect(await screen.findByRole("combobox", { name: "Party size" })).toBeTruthy();
     expect(trips.textContent).not.toContain("No trips are open for online booking yet");
-    // Discovery only: nothing on the page books or checks out. ("Terms of booking" is a policy link.)
+    // With no trips, nothing offers to book. ("Terms of booking" is a policy link.)
     expect(screen.queryByRole("button", { name: /^(book|checkout|check out)/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /^(book|checkout|check out)/i })).toBeNull();
+    // Booking is online now: the old "call to reserve" notice is gone.
+    expect(trips.textContent).not.toContain("Online booking isn't open yet");
+  });
+
+  it("moves from a trip's Book link to its booking page in place, and back", async () => {
+    window.history.replaceState(null, "", "/?party=2");
+    window.scrollTo = vi.fn();
+    const fetched: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        fetched.push(url.pathname);
+        if (url.pathname === "/v1/public/tenant") return ready();
+        if (url.pathname.endsWith("/offer")) return json({ offer });
+        if (url.pathname === "/v1/public/trips") {
+          return json({ trips: [listing] });
+        }
+        throw new Error(`unexpected ${url}`);
+      }),
+    );
+    render(<App />);
+    const book = await screen.findByRole("link", {
+      // Times keep "PM" with the hour: a no-break space, U+00A0.
+      name: "Book Sunset Harbor Cruise, Wednesday, October 7, 6:00\u00a0PM",
+    });
+    expect(book.getAttribute("href")).toBe(`/book/${tripId}?party=2`);
+    // A modified click is the browser's: a new tab or window, never in place.
+    let prevented: boolean | null = null;
+    const record = (event: Event) => {
+      prevented = event.defaultPrevented;
+      event.preventDefault();
+    };
+    document.addEventListener("click", record);
+    fireEvent.click(book, { metaKey: true });
+    document.removeEventListener("click", record);
+    expect(prevented).toBe(false);
+    expect(window.location.pathname).toBe("/");
+
+    fireEvent.click(book);
+    const title = await screen.findByRole("heading", { level: 1, name: "Sunset Harbor Cruise" });
+    expect(window.location.pathname).toBe(`/book/${tripId}`);
+    await waitFor(() => expect(document.activeElement).toBe(title));
+    // The brand is not loaded again for the new page.
+    expect(fetched.filter((p) => p === "/v1/public/tenant")).toHaveLength(1);
+    expect((screen.getByRole("spinbutton", { name: "Adult" }) as HTMLInputElement).value).toBe("2");
+
+    window.history.back();
+    const home = await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
+    await waitFor(() => expect(document.activeElement).toBe(home));
+    expect(window.location.search).toBe("?party=2");
+    window.history.replaceState(null, "", "/");
   });
 
   it("moves focus to the page heading when Try again brings the site in", async () => {

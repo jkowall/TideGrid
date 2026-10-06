@@ -439,6 +439,11 @@ const stopCopy: Record<Stop, (operator: string) => { title: string; body: string
   }),
 };
 
+/** The heading a stop shows, for the page title too. */
+export function stopTitle(stop: Stop, operator: string): string {
+  return stopCopy[stop](operator).title;
+}
+
 /** The trip cannot be booked here now. */
 export function Stopped({
   stop,

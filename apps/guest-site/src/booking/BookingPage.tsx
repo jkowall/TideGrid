@@ -63,6 +63,7 @@ import {
   Interrupted,
   LoadFailed,
   Stopped,
+  stopTitle,
   Unfulfilled,
   Waiting,
 } from "./Outcomes.tsx";
@@ -259,7 +260,11 @@ export function BookingPage({
       ? `${stageTitle(stage)} · ${context.productName} · ${brand.name}`
       : load.kind === "gone"
         ? `Checkout not open · ${brand.name}`
-        : `Book a trip · ${brand.name}`,
+        : load.kind === "stopped"
+          ? `${stopTitle(load.stop, brand.name)} · ${brand.name}`
+          : load.kind === "failed"
+            ? `Trip unavailable · ${brand.name}`
+            : `Book a trip · ${brand.name}`,
   );
 
   // Focus moves to each new step's heading, once it is on screen. Not while
@@ -387,6 +392,8 @@ export function BookingPage({
     setSlow(false);
     setUnreachable(false);
     focusStep();
+    // The seats left beside the outcome include this checkout's own now.
+    void refreshListing();
   };
 
   // While waiting: read the checkout with a gentle backoff until it is final.
@@ -545,13 +552,16 @@ export function BookingPage({
     }
   }
 
+  /**
+   * Ask again how many seats are left. A trip that no longer lists, because
+   * it is full, keeps the facts it had: the meeting point and cutoff still hold.
+   */
   async function refreshListing() {
     if (!ready) return;
     const listing = await getListing(ready.offer);
-    if (listing.kind === "ok") {
-      setLoad((current) =>
-        current.kind === "ready" ? { ...current, listing: listing.value } : current,
-      );
+    if (listing.kind === "ok" && listing.value) {
+      const fresh = listing.value;
+      setLoad((current) => (current.kind === "ready" ? { ...current, listing: fresh } : current));
     }
   }
 
