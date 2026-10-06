@@ -55,12 +55,27 @@ export {
   totalsOf,
 } from "./day-report.ts";
 export {
+  type HandledEvent,
+  handleVerifiedEvent,
+  type ProcessOutcome,
+  type ProcessResult,
+  processProviderEvent,
+  type SettleRefundResult,
+  settleRefund,
+} from "./finalize.ts";
+export {
   type AddBookingNoteResult,
   addBookingNote,
   type BookingNoteView,
   listBookingNotes,
   NOTES_LIMIT,
 } from "./notes.ts";
+export {
+  type FinalizationExceptionView,
+  listFinalizationExceptions,
+  listTripBookings,
+  type StaffBooking,
+} from "./reads.ts";
 export {
   type BookingSearchField,
   type BookingSearchOutcome,
@@ -73,21 +88,6 @@ export {
   searchBookings,
   searchFields,
 } from "./search.ts";
-export {
-  type HandledEvent,
-  handleVerifiedEvent,
-  type ProcessOutcome,
-  type ProcessResult,
-  processProviderEvent,
-  type SettleRefundResult,
-  settleRefund,
-} from "./finalize.ts";
-export {
-  type FinalizationExceptionView,
-  listFinalizationExceptions,
-  listTripBookings,
-  type StaffBooking,
-} from "./reads.ts";
 export {
   bookingReferencePattern,
   checkoutSecretPattern,

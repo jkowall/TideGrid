@@ -182,8 +182,8 @@ export const BookingNoteBody = z
   .trim()
   .min(1)
   .max(500)
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
   .regex(
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
     /^[^\u0000-\u0009\u000b-\u001f\u007f]*$/,
     "Only line breaks are allowed as control characters",
   )
