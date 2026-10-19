@@ -34,8 +34,8 @@ import {
   type WaiverSession,
 } from "../index.ts";
 import {
-  bookParty,
   type Booked,
+  bookParty,
   FIXTURE_FROM,
   FIXTURE_LINK_ORIGIN,
   linkFor,

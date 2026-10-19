@@ -13,7 +13,11 @@ import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/dat
 import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks, ParticipantDetails } from "@tidegrid/domain-booking";
 import { TEST_FAKE_SECRET } from "@tidegrid/domain-booking/testing";
-import { createWaiverHooks, defaultWaiverDeps, publishWaiverTemplateVersion } from "@tidegrid/domain-waivers";
+import {
+  createWaiverHooks,
+  defaultWaiverDeps,
+  publishWaiverTemplateVersion,
+} from "@tidegrid/domain-waivers";
 import {
   adult,
   bookParty,
@@ -291,7 +295,10 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
         request("POST", SESSIONS, { origin: guestOf(A), body: { token: p.annToken } }),
       ),
     );
-    const answers = results.map(code).map((c) => c.join(" ")).sort();
+    const answers = results
+      .map(code)
+      .map((c) => c.join(" "))
+      .sort();
     expect(answers).toEqual(["201 ", ...Array(7).fill("409 waiver_link_used")]);
     for (const res of results) expect(res.headers.get("cache-control")).toBe("no-store");
     expect(await linkState(p.annRequest)).toEqual({ links: [true], sessions: 1 });
@@ -303,7 +310,11 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     const bearer = ann.sessionSecret;
     const as = { origin: guestOf(A), bearer };
     const probes = {
-      query: await request("GET", `${CURRENT}?requestId=${p.kitRequest}&participantId=${p.kitId}`, as),
+      query: await request(
+        "GET",
+        `${CURRENT}?requestId=${p.kitRequest}&participantId=${p.kitId}`,
+        as,
+      ),
       path: await request("GET", `${SESSIONS}/${p.kitRequest}`, as),
       document: await request("GET", `${DOCUMENT}?requestId=${p.kitRequest}`, as),
     };
@@ -381,7 +392,9 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
         expect(res.headers.get("cache-control")).toBe("no-store");
       }
     }
-    expect(await admin`select 1 from public.waiver_evidence where booking_id = ${p.booked.bookingId}`).toHaveLength(0);
+    expect(
+      await admin`select 1 from public.waiver_evidence where booking_id = ${p.booked.bookingId}`,
+    ).toHaveLength(0);
 
     // A new version moves unsigned work: the old session ends, the new email opens version 2.
     const C = await createWaiverFixture(admin, runtime.db, "g215adv-c", { days: 2 });
@@ -426,9 +439,9 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
       select id, document, document_sha256 from public.waiver_evidence where request_id = ${p.annRequest}`;
     if (!stored) throw new Error("no evidence");
     expect(sha256(stored.document)).toBe(stored.document_sha256);
-    expect((signed.json.waiver as { signed: { documentSha256: string } }).signed.documentSha256).toBe(
-      stored.document_sha256,
-    );
+    expect(
+      (signed.json.waiver as { signed: { documentSha256: string } }).signed.documentSha256,
+    ).toBe(stored.document_sha256);
     const downloads = {
       signer: await request("GET", DOCUMENT, { origin: guestOf(A), bearer: ann.sessionSecret }),
       owner: await request("GET", `${staffBase(A.id)}/waiver-evidence/${stored.id}/document`, {
@@ -445,9 +458,13 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
       expect(res.headers.get("cache-control"), who).toBe("no-store");
       expect(res.headers.get("x-content-type-options"), who).toBe("nosniff");
     }
-    const finance = await request("GET", `${staffBase(A.id)}/waiver-evidence/${stored.id}/document`, {
-      as: A.finance,
-    });
+    const finance = await request(
+      "GET",
+      `${staffBase(A.id)}/waiver-evidence/${stored.id}/document`,
+      {
+        as: A.finance,
+      },
+    );
     expect(code(finance)).toEqual([403, "forbidden"]);
     expect(finance.bytes.length).toBeLessThan(1000);
   });
@@ -461,12 +478,21 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     ] as const) {
       const s = await open(t, pp.annToken);
       expect(
-        (await request("POST", SIGNATURE, { origin: guestOf(t), bearer: s.sessionSecret, body: signature(s) }))
-          .status,
+        (
+          await request("POST", SIGNATURE, {
+            origin: guestOf(t),
+            bearer: s.sessionSecret,
+            body: signature(s),
+          })
+        ).status,
       ).toBe(201);
     }
     const evidenceOf = async (requestId: string) =>
-      (await admin<{ id: string }[]>`select id from public.waiver_evidence where request_id = ${requestId}`)[0]?.id ?? "";
+      (
+        await admin<
+          { id: string }[]
+        >`select id from public.waiver_evidence where request_id = ${requestId}`
+      )[0]?.id ?? "";
     const aEvidence = await evidenceOf(pa.annRequest);
     const bEvidence = await evidenceOf(pb.annRequest);
     const resend = (as: string, requestId: string) =>
@@ -502,7 +528,9 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
       const denied = await request("GET", r.path(r.own), { as: A.finance });
       expect(code(denied), label).toEqual([403, "forbidden"]);
       // No participant's name in a refusal.
-      expect(new TextDecoder().decode(denied.bytes), label).not.toMatch(/Ann Adult|Kit Minor|Gus Guardian/);
+      expect(new TextDecoder().decode(denied.bytes), label).not.toMatch(
+        /Ann Adult|Kit Minor|Gus Guardian/,
+      );
       const misses = [
         await request("GET", r.path(r.other), { as: A.owner }),
         await request("GET", r.path(randomUUID()), { as: A.owner }),
@@ -549,13 +577,19 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
       read.json.waivers as {
         participants: {
           status: string;
-          request: { state: string; delivery: { message: { state: string; failureCode: string | null } } };
+          request: {
+            state: string;
+            delivery: { message: { state: string; failureCode: string | null } };
+          };
         }[];
       }
     ).participants;
     expect(ivy?.status).toBe("email_failed");
     expect(ivy?.request.state).toBe("pending");
-    expect(ivy?.request.delivery.message).toMatchObject({ state: "failed", failureCode: "bounced" });
+    expect(ivy?.request.delivery.message).toMatchObject({
+      state: "failed",
+      failureCode: "bounced",
+    });
     expect(joy?.status).toBe("waiting");
     // Delivery left the request as it was.
     const [row] = await admin<{ state: string; signed_at: Date | null }[]>`
