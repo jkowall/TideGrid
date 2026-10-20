@@ -12,10 +12,13 @@
  *   for the old address;
  * - the new address's email carries the one live link.
  *
- * The claim also refuses, on its own, a message written before its
- * recipient changed or whose own link was withdrawn, for callers that revoke
- * without canceling. And a claim never waits behind a participant change in
- * progress, so `cancelMessage` waiting for a claim cannot deadlock.
+ * Revoking the subject's links for a closing reason (recipient_changed,
+ * completed, withdrawn, booking_canceled) closes its pending email by itself,
+ * under the message rows' locks: a message never claimed (no link yet), one
+ * retrying, and one a claim holds at that moment are all canceled, and no
+ * link they carry stays live. The claim keeps a backstop for a link revoked
+ * outside that function. And a claim never waits behind a participant change
+ * in progress, so a correction waiting for a claim cannot deadlock.
  */
 import { randomBytes, randomUUID } from "node:crypto";
 import { createDb } from "@tidegrid/database";
@@ -204,8 +207,9 @@ describe.skipIf(!env)("adversarial: a corrected address against email in flight"
     await deliverMail(world, A.id, slow);
     if (!corrected || !inFlight) throw new Error("the provider never saw the old email");
     const done: Awaited<ReturnType<typeof correct>> = corrected;
-    // The scope's revocation already took the committed link; the message is canceled mid-send.
-    expect(done.canceled).toMatchObject({ kind: "canceled", inFlight: true, revokedLinks: 0 });
+    // The scope's revocation canceled the message mid-send and took its link;
+    // the correction's own cancelMessage then finds it canceled.
+    expect(done.canceled).toMatchObject({ kind: "not_cancelable", state: "canceled" });
     expect(await messageOf(world.admin, old)).toMatchObject({
       state: "canceled",
       attempts: 1,
@@ -274,12 +278,128 @@ describe.skipIf(!env)("adversarial: a corrected address against email in flight"
     release();
     await claim;
     const done = await correction;
-    expect(done.canceled).toMatchObject({ kind: "canceled", inFlight: true, revokedLinks: 1 });
+    expect(done.canceled).toMatchObject({ kind: "not_cancelable", state: "canceled" });
     expect(await liveLinksOf(old)).toBe(0);
-    expect(await messageOf(world.admin, old)).toMatchObject({ state: "canceled" });
+    expect(await messageOf(world.admin, old)).toMatchObject({
+      state: "canceled",
+      last_error_code: "recipient_changed",
+    });
   });
 
-  it("cancels at its claim a message written before its recipient changed, even if nobody canceled it", async () => {
+  it("closes an email nobody claimed yet when its subject's links are revoked, though no link exists", async () => {
+    const scope = await participantWithEmail("unsent.address@example.test");
+    const old = await enqueueSigning(scope, "unsent.address@example.test", 1);
+    // No delivery has run: the message is queued and has no link at all.
+    const revoked = await asSystem(world.db, A.id, (trx, ctx) =>
+      revokeAccessLinks(trx, ctx, {
+        bookingId: scope.bookingId,
+        purpose: "waiver_sign",
+        participantId: scope.participantId,
+        subjectRef: scope.subjectRef,
+        reason: "recipient_changed",
+      }),
+    );
+    expect(revoked).toBe(0);
+    expect(await messageOf(world.admin, old)).toMatchObject({
+      state: "canceled",
+      attempts: 0,
+      last_error_code: "recipient_changed",
+    });
+    const report = await deliverMail(world, A.id);
+    expect(report.items.map((i) => i.messageId)).not.toContain(old);
+    expect(await callsFor(old)).toBe(0);
+    expect(await liveLinksOf(old)).toBe(0);
+  });
+
+  it("makes a revocation wait for a claim in progress, then closes the link that claim issued", async () => {
+    const scope = await participantWithEmail("racing.claim@example.test");
+    const old = await enqueueSigning(scope, "racing.claim@example.test", 1);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let claimed: () => void = () => {};
+    const claiming = new Promise<void>((resolve) => {
+      claimed = resolve;
+    });
+    // A claim in progress, as the delivery job's: row locked, sending, link written.
+    const claim = world.admin.begin(async (tx) => {
+      await tx`select id from public.email_messages where id = ${old} for update`;
+      await tx`update public.email_messages
+                  set state = 'sending', attempts = attempts + 1, provider = 'fake',
+                      lease_expires_at = now() + interval '2 minutes'
+                where id = ${old}`;
+      await tx`insert into public.guest_access_links
+                 (tenant_id, booking_id, participant_id, purpose, subject_ref, message_id,
+                  token_hash, expires_at)
+               values (${A.id}, ${scope.bookingId}, ${scope.participantId}, 'waiver_sign',
+                       ${scope.subjectRef}, ${old}, ${randomBytes(32).toString("hex")},
+                       now() + interval '1 hour')`;
+      claimed();
+      await held;
+    });
+    await claiming;
+    // A revocation alone, with no cancelMessage.
+    const revocation = asSystem(world.db, A.id, (trx, ctx) =>
+      revokeAccessLinks(trx, ctx, {
+        bookingId: scope.bookingId,
+        purpose: "waiver_sign",
+        participantId: scope.participantId,
+        subjectRef: scope.subjectRef,
+        reason: "recipient_changed",
+      }),
+    );
+    let settled = false;
+    void revocation.then(() => {
+      settled = true;
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(settled).toBe(false);
+    release();
+    await claim;
+    expect(await revocation).toBe(1);
+    expect(await liveLinksOf(old)).toBe(0);
+    expect(await messageOf(world.admin, old)).toMatchObject({
+      state: "canceled",
+      last_error_code: "recipient_changed",
+    });
+  });
+
+  it("keeps the delivery job off an email while a revocation of its subject is in progress", async () => {
+    const scope = await participantWithEmail("held.revocation@example.test");
+    const old = await enqueueSigning(scope, "held.revocation@example.test", 1);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let revoked: () => void = () => {};
+    const revoking = new Promise<void>((resolve) => {
+      revoked = resolve;
+    });
+    const revocation = asSystem(world.db, A.id, async (trx, ctx) => {
+      await revokeAccessLinks(trx, ctx, {
+        bookingId: scope.bookingId,
+        purpose: "waiver_sign",
+        participantId: scope.participantId,
+        subjectRef: scope.subjectRef,
+        reason: "recipient_changed",
+      });
+      revoked();
+      await held;
+    });
+    await revoking;
+    // The job runs while the revocation has not committed: it does not claim the email.
+    const report = await deliverMail(world, A.id);
+    expect(report.items.map((i) => i.messageId)).not.toContain(old);
+    release();
+    await revocation;
+    await deliverMail(world, A.id);
+    expect(await messageOf(world.admin, old)).toMatchObject({ state: "canceled" });
+    expect(await callsFor(old)).toBe(0);
+    expect(await liveLinksOf(old)).toBe(0);
+  });
+
+  it("closes a retrying email when its subject's links are revoked, even if nobody canceled it", async () => {
     const scope = await participantWithEmail("stale.address@example.test");
     const old = await enqueueSigning(scope, "stale.address@example.test", 1);
     // The first attempt fails for a while, leaving a link and a retry.
@@ -301,21 +421,18 @@ describe.skipIf(!env)("adversarial: a corrected address against email in flight"
         reason: "recipient_changed",
       }),
     );
-    await makeDue(world.admin, old);
-    const report = await deliverMail(world, A.id);
-    expect(report.items.find((i) => i.messageId === old)).toMatchObject({
-      outcome: "canceled",
-      code: "recipient_changed",
-    });
     expect(await messageOf(world.admin, old)).toMatchObject({
       state: "canceled",
       last_error_code: "recipient_changed",
     });
+    await makeDue(world.admin, old);
+    const report = await deliverMail(world, A.id);
+    expect(report.items.map((i) => i.messageId)).not.toContain(old);
     expect(await callsFor(old)).toBe(0);
     expect(await liveLinksOf(old)).toBe(0);
   });
 
-  it("cancels at its claim a message whose own link was withdrawn, instead of minting another", async () => {
+  it("cancels at its claim a message whose own link was revoked outside revokeAccessLinks, instead of minting another", async () => {
     const scope = await participantWithEmail("withdrawn@example.test");
     const old = await enqueueSigning(scope, "withdrawn@example.test", 1);
     const down: EmailProvider = {
