@@ -106,6 +106,8 @@ The decision register puts private evidence in R2, and the demo plan names a pri
 
 Before real evidence, the pilot moves documents to a private R2 bucket with object lock: write the PDF under a content-addressed key before the transaction, record the key and hash in the evidence row, and keep the database's hash as the check. The API reads documents only through `loadEvidenceDocument`, so the move changes one function.
 
+`loadEvidenceDocument` hashes the bytes again on every read and throws `WaiverDocumentMismatchError` when they no longer match the recorded SHA-256, so bytes changed under the database's check (storage, a restore, or a dropped check) are never served; the API answers 500 and logs the error's name. The same check carries over to R2, where the database no longer guards the bytes.
+
 ## Status
 
 `listBookingWaivers` and `listTripWaivers` give each named participant one status, which the console shows as an icon and a label, never color alone:

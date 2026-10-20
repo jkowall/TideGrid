@@ -14,13 +14,15 @@
  *   request never moves back; evidence cannot be forged around the chain.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { inTenantTransaction } from "@tidegrid/database";
+import { createDb, inTenantTransaction } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks } from "@tidegrid/domain-booking";
 import { hashLinkToken } from "@tidegrid/domain-messaging";
+import { sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
   getSigningView,
+  loadEvidenceDocument,
   loadWaiverSession,
   publishWaiverTemplateVersion,
   reassignUnsignedRequests,
@@ -30,6 +32,7 @@ import {
   sendWaiverRequest,
   signWaiver,
   type WaiverDeps,
+  WaiverDocumentMismatchError,
   type WaiverSession,
 } from "../index.ts";
 import {
@@ -56,6 +59,7 @@ import {
   openWorld,
   Rollback,
   redeem,
+  refusal,
   type Sql,
   settle,
   sign,
@@ -506,6 +510,71 @@ describe.skipIf(!env)("G2.15 adversarial: signing and evidence", () => {
       expect(evidence).toEqual([{ session_id: winner.id }]);
     }
   }, 180_000);
+
+  it("hashes the stored PDF again on every read and never serves bytes that no longer match", async () => {
+    const booked = await book(world, A, nextTrip(), 1, hooks);
+    const pid = await name(world, A.id, booked.bookingId, 1, adult("Tess Tamper"), hooks);
+    const request = (await liveRequest(world.admin, booked.bookingId, pid)).id;
+    const { session } = await openFor(world, A.id, request);
+    expect((await sign(world, A.id, deps, session)).kind).toBe("signed");
+    const read = (filter: { requestId: string } | { evidenceId: string }) =>
+      inTenantTransaction(world.db, guestCtx(A.id), (trx) =>
+        loadEvidenceDocument(trx, A.id, filter),
+      );
+    const intact = await read({ requestId: request });
+    if (!intact) throw new Error("the signed PDF did not load");
+    const { evidenceId } = intact;
+    expect(createHash("sha256").update(intact.document).digest("hex")).toBe(intact.sha256);
+
+    // The table's own check ties the hash to the bytes, so only bytes changed
+    // under it (storage, a restore, a dropped check) can differ. The owner
+    // drops the check and the guard inside one transaction, changes the
+    // bytes, reads through the service there, and rolls it all back.
+    const owner = createDb(env?.adminUrl ?? "", { max: 1 });
+    const refusals: unknown[] = [];
+    try {
+      await inTenantTransaction(owner.db, guestCtx(A.id), async (trx) => {
+        const { rows } = await sql<{ conname: string }>`
+          select conname from pg_constraint
+           where conrelid = 'public.waiver_evidence'::regclass and contype = 'c'
+             and pg_get_constraintdef(oid) like '%sha256(document)%'`.execute(trx);
+        expect(rows).toHaveLength(1);
+        await sql`alter table public.waiver_evidence drop constraint ${sql.id(rows[0]?.conname ?? "")}`.execute(
+          trx,
+        );
+        await sql`alter table public.waiver_evidence disable trigger waiver_evidence_append_only`.execute(
+          trx,
+        );
+        await sql`update public.waiver_evidence set document = document || '\\x00'::bytea
+                   where id = ${evidenceId}`.execute(trx);
+        for (const filter of [{ requestId: request }, { evidenceId }]) {
+          refusals.push(
+            await loadEvidenceDocument(trx, A.id, filter).then(
+              () => null,
+              (err: unknown) => err,
+            ),
+          );
+        }
+        throw new Rollback();
+      }).catch((err: unknown) => {
+        if (!(err instanceof Rollback)) throw err;
+      });
+    } finally {
+      await owner.sql.end({ timeout: 5 });
+      await owner.db.destroy();
+    }
+    expect(refusals).toHaveLength(2);
+    for (const refused of refusals) {
+      expect(refused).toBeInstanceOf(WaiverDocumentMismatchError);
+      expect((refused as WaiverDocumentMismatchError).evidenceId).toBe(evidenceId);
+    }
+    // Rolled back: the check, the guard, and the bytes are as they were.
+    expect((await read({ evidenceId }))?.sha256).toBe(intact.sha256);
+    expect(
+      await refusal(world.admin`update public.waiver_evidence set document = document || '\\x00'::bytea
+                                  where id = ${evidenceId}`),
+    ).not.toBe("no-error");
+  }, 120_000);
 
   it("never changes evidence, versions, templates, or deliveries, never moves a request back, and refuses forged evidence, for the owner and for tidegrid_app", async () => {
     const booked = await book(world, A, nextTrip(), 4, hooks);

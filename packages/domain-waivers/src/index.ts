@@ -71,6 +71,7 @@ export {
   type SignProblem,
   type SignResult,
   signWaiver,
+  WaiverDocumentMismatchError,
 } from "./signing.ts";
 export {
   type BookingWaivers,

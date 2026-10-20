@@ -496,7 +496,22 @@ export async function signWaiver(
   };
 }
 
-/** The signed PDF, for the session that signed it or for staff; null otherwise. */
+/**
+ * A stored PDF whose bytes no longer hash to the SHA-256 recorded beside
+ * them. It is never served; the API answers 500 and logs this error's name.
+ */
+export class WaiverDocumentMismatchError extends Error {
+  constructor(readonly evidenceId: string) {
+    super(`waiver evidence ${evidenceId}: the stored PDF does not match its recorded SHA-256`);
+    this.name = "WaiverDocumentMismatchError";
+  }
+}
+
+/**
+ * The signed PDF, for the session that signed it or for staff; null otherwise.
+ * The bytes are hashed again on every read and must match the recorded
+ * SHA-256, or it throws WaiverDocumentMismatchError.
+ */
 export async function loadEvidenceDocument(
   trx: TenantTransaction,
   tenantId: string,
@@ -524,10 +539,14 @@ export async function loadEvidenceDocument(
   );
   const row = rows[0];
   if (!row) return null;
+  const document = new Uint8Array(row.document);
+  if ((await sha256Hex(document)) !== row.document_sha256) {
+    throw new WaiverDocumentMismatchError(row.id);
+  }
   return {
     evidenceId: row.id,
     bookingReference: row.reference,
-    document: new Uint8Array(row.document),
+    document,
     sha256: row.document_sha256,
   };
 }
