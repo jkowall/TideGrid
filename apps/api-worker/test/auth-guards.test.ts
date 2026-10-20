@@ -14,6 +14,16 @@ const bookingViews = [
   `/v1/staff/tenants/${tenant}/booking-references/QKG6ERBF`,
   `/v1/staff/tenants/${tenant}/trips/${someId}/roster`,
 ];
+/** Console completion (G2.12c): the reads, and the two writes that need the console origin. */
+const completionReads = [
+  `/v1/staff/tenants/${tenant}/booking-day-totals?date=2026-10-06`,
+  `/v1/staff/tenants/${tenant}/booking-day-export?date=2026-10-06`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/notes`,
+];
+const completionWrites = [
+  `/v1/staff/tenants/${tenant}/booking-searches`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/notes`,
+];
 
 describe("the public entry hides staff and sign-in routes", () => {
   for (const [method, path] of [
@@ -24,6 +34,9 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["GET", "/v1/staff/tenants/11111111-1111-4111-8111-111111111111/members"],
     // Console booking views (G2.12b).
     ...bookingViews.map((path) => ["GET", path] as const),
+    // Console completion (G2.12c).
+    ...completionReads.map((path) => ["GET", path] as const),
+    ...completionWrites.map((path) => ["POST", path] as const),
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -70,6 +83,13 @@ describe("staff authentication fails closed before touching the database", () =>
     expect(res.status).toBe(401);
     expect(await errorCode(res)).toBe("unauthenticated");
   });
+
+  it.each(completionReads)("asks for a session before a G2.12c read: %s", async (path) => {
+    const res = await SELF.fetch(`http://localhost${path}`);
+    expect(res.status).toBe(401);
+    expect(await errorCode(res)).toBe("unauthenticated");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
 });
 
 describe("state-changing staff requests require the console origin", () => {
@@ -95,6 +115,18 @@ describe("state-changing staff requests require the console origin", () => {
       { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
     );
     expect(res.status).toBe(403);
+  });
+
+  // A search carries names and emails, and a note is a write: both need the
+  // console origin, checked before authentication (G2.12c).
+  it.each(completionWrites)("rejects a POST to %s without the console origin", async (path) => {
+    const res = await SELF.fetch(`http://localhost${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://evil.example" },
+      body: JSON.stringify({ q: "maya", body: "note" }),
+    });
+    expect(res.status).toBe(403);
+    expect(await errorCode(res)).toBe("origin_not_allowed");
   });
 });
 
@@ -156,6 +188,11 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}",
         "/v1/staff/tenants/{tenantId}/booking-references/{reference}",
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/roster",
+        // Console completion (G2.12c).
+        "/v1/staff/tenants/{tenantId}/booking-searches",
+        "/v1/staff/tenants/{tenantId}/booking-day-totals",
+        "/v1/staff/tenants/{tenantId}/booking-day-export",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are
