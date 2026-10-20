@@ -191,7 +191,7 @@ export async function requestManageLink(
   if (!isUuid(input.bookingId)) return { kind: "not_found" };
   const { rows: locked } = await sql<{ id: string }>`
     select id from bookings where tenant_id = ${ctx.tenantId} and id = ${input.bookingId}
-       for update`.execute(trx);
+       for no key update`.execute(trx);
   if (!locked[0]) return { kind: "not_found" };
   const { rows } = await sql<{ n: number }>`
     select count(*)::int as n from email_messages

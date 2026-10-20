@@ -360,7 +360,7 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
     expect((await deliveries(A, messageId)).accepted).toBe(1);
   });
 
-  it("cancels a queued message or loses to its claim, never both canceled and sent", async () => {
+  it("cancels a queued or sending message or finds it sent, never both canceled and recorded sent", async () => {
     const seen = new Set<string>();
     for (let round = 0; round < 8; round++) {
       const { messageId } = await enqueue(B, `cancel-race-${randomUUID()}`);
@@ -379,8 +379,10 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
       const stored = await row(messageId);
       const sent = (await deliveries(B, messageId)).accepted;
       if (canceled.value.kind === "canceled") {
+        // Canceled before its claim, nothing went out; canceled mid-send, the
+        // email may have gone out once, and the message still records canceled.
         expect(stored.state).toBe("canceled");
-        expect(sent).toBe(0);
+        expect(sent).toBeLessThanOrEqual(canceled.value.inFlight ? 1 : 0);
       } else {
         expect(canceled.value).toMatchObject({ kind: "not_cancelable" });
         expect(stored.state).toBe("sent");
@@ -501,15 +503,20 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
       constraint: "email_messages_claim",
     });
     expect((await deliver(T)).claimed).toBe(0);
-    // A lease never grows, and a sending message is not canceled.
+    // A lease never grows.
     expect(
       await refusal(admin`update public.email_messages
           set lease_expires_at = lease_expires_at + interval '1 minute' where id = ${now.messageId}`),
     ).toEqual({ code: "23514", constraint: "email_messages_transition" });
-    expect(await inTenant(T, (trx, ctx) => cancelMessage(trx, ctx, now.messageId))).toEqual({
-      kind: "not_cancelable",
-      state: "sending",
+    // A message being sent can be canceled; it is then never claimed again.
+    const doomed = await enqueue(T, "doomed");
+    await claim(doomed.messageId, "5 minutes");
+    expect(await inTenant(T, (trx, ctx) => cancelMessage(trx, ctx, doomed.messageId))).toEqual({
+      kind: "canceled",
+      inFlight: true,
+      revokedLinks: 0,
     });
+    expect(await row(doomed.messageId)).toMatchObject({ state: "canceled", attempts: 1 });
     // A run asking for a longer lease than the database allows claims nothing.
     await lapseLease(now.messageId);
     const greedy = await settle(deliver(T, fake, { leaseSeconds: 601 }));

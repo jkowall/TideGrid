@@ -563,8 +563,10 @@ CREATE INDEX email_messages_booking_idx ON public.email_messages (tenant_id, boo
 -- A message's content never changes. Its delivery moves one way: claimed for
 -- a short lease (each claim one more attempt, only when due or when the last
 -- attempt's lease has lapsed), then sent with the provider's id, back to
--- queued for a later attempt after a temporary failure, or failed; a queued
--- message may be canceled. Times come from the database clock.
+-- queued for a later attempt after a temporary failure, or failed. A queued
+-- message may be canceled, and so may one being sent: the attempt under way
+-- then records nothing and is never retried. Times come from the database
+-- clock.
 CREATE FUNCTION app.check_email_message() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -692,12 +694,13 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
-  IF OLD.state = 'queued' AND NEW.state = 'canceled' THEN
+  IF OLD.state IN ('queued', 'sending') AND NEW.state = 'canceled' THEN
     NEW.next_attempt_at := OLD.next_attempt_at;
     NEW.lease_expires_at := NULL;
     NEW.provider := OLD.provider;
     NEW.provider_message_id := NULL;
-    NEW.last_error_code := OLD.last_error_code;
+    -- A cancellation may say why, such as recipient_changed.
+    NEW.last_error_code := coalesce(NEW.last_error_code, OLD.last_error_code);
     NEW.canceled_at := now();
     RETURN NEW;
   END IF;

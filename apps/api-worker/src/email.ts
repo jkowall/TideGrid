@@ -122,6 +122,7 @@ export function deliverAfterCommit(c: Context<AppEnv>, deps: AppDeps, tenantId: 
           "tidegrid.email.sent_count": report.sent,
           "tidegrid.email.retried_count": report.retried,
           "tidegrid.email.failed_count": report.failed,
+          "tidegrid.email.canceled_count": report.canceled,
         });
       } catch (error) {
         log.error("email_delivery_failed", {

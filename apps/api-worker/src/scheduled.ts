@@ -135,6 +135,7 @@ export async function runScheduled(
           "tidegrid.email_sweep.retried_count": report.retried,
           "tidegrid.email_sweep.failed_count": report.failed,
           "tidegrid.email_sweep.superseded_count": report.superseded,
+          "tidegrid.email_sweep.canceled_count": report.canceled,
           "tidegrid.email_sweep.failed_tenant_count": report.failedTenants,
           "tidegrid.email_sweep.complete": report.complete,
           duration_ms: Date.now() - started,

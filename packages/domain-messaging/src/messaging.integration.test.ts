@@ -303,10 +303,12 @@ describe.skipIf(!env)(
       for (const id of ids) expect(await accepted(B, id)).toBe(1);
     });
 
-    it("cancels only a queued message, and the sweep finds every tenant with due mail", async () => {
+    it("cancels a message once, only its tenant's, and the sweep finds every tenant with due mail", async () => {
       const queued = await enqueue(A, "cancel");
       expect(await inTenant(A, (trx, ctx) => cancelMessage(trx, ctx, queued.messageId))).toEqual({
         kind: "canceled",
+        inFlight: false,
+        revokedLinks: 0,
       });
       expect(await inTenant(A, (trx, ctx) => cancelMessage(trx, ctx, queued.messageId))).toEqual({
         kind: "not_cancelable",
