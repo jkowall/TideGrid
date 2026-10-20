@@ -111,7 +111,8 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     );
     const bytes = new Uint8Array(await res.arrayBuffer());
     let json: Json = {};
-    if ((res.headers.get("content-type") ?? "").includes("json")) {
+    // A HEAD answer names its type but carries no body.
+    if ((res.headers.get("content-type") ?? "").includes("json") && bytes.length > 0) {
       json = JSON.parse(new TextDecoder().decode(bytes)) as Json;
     }
     return { status: res.status, headers: res.headers, json, bytes };
@@ -156,8 +157,15 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     return row.id;
   }
 
-  /** A booking with an adult and a minor named, and the links their emails carry. */
-  async function party(t: WaiverFixture, people?: [ParticipantDetails, ParticipantDetails]) {
+  /**
+   * A booking with an adult and a minor named, and the links their emails
+   * carry; without links when an email is meant to fail.
+   */
+  async function party(
+    t: WaiverFixture,
+    people?: [ParticipantDetails, ParticipantDetails],
+    links = true,
+  ) {
     const tripId = nextTrip(t);
     const booked = await bookParty(admin, runtime.db, t, tripId, 2, hooks);
     const [first, second] = people ?? [
@@ -175,8 +183,8 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
       kitId: kit.participant.id,
       annRequest,
       kitRequest,
-      annToken: (await linkFor(admin, runtime.db, t.id, annRequest)).token,
-      kitToken: (await linkFor(admin, runtime.db, t.id, kitRequest)).token,
+      annToken: links ? (await linkFor(admin, runtime.db, t.id, annRequest)).token : "",
+      kitToken: links ? (await linkFor(admin, runtime.db, t.id, kitRequest)).token : "",
     };
   }
 
@@ -566,14 +574,19 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
       Array(3).fill([404, "waiver_request_not_found", resendMisses[0]?.json.error?.message]),
     );
     expect(code(await resend(A.owner, pa.annRequest))).toEqual([409, "waiver_not_pending"]);
-  });
+    // About 40 requests and two bookings through the real checkout.
+  }, 240_000);
 
   it("shows a failed email as email_failed while the request stays pending, and holds the resend limit", async () => {
     const bounce = `ivy.${randomUUID().slice(0, 8)}+bounce@example.test`;
-    const p = await party(A, [
-      adult("Ivy Bounce", bounce),
-      minor("Joy Minor", { name: "Kay Guardian", email: "kay.guardian@example.test" }),
-    ]);
+    const p = await party(
+      A,
+      [
+        adult("Ivy Bounce", bounce),
+        minor("Joy Minor", { name: "Kay Guardian", email: "kay.guardian@example.test" }),
+      ],
+      false,
+    );
     await deliverMail(runtime.db, A.id);
     const read = await request("GET", `${staffBase(A.id)}/bookings/${p.booked.bookingId}/waivers`, {
       as: A.staff,
