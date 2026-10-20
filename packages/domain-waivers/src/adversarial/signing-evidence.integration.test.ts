@@ -25,6 +25,7 @@ import {
   publishWaiverTemplateVersion,
   revokeParticipantWaivers,
   type SignInput,
+  type SignResult,
   sendWaiverRequest,
   signWaiver,
   type WaiverDeps,
@@ -46,6 +47,7 @@ import {
   barrier,
   book,
   closeWorld,
+  gate,
   guestCtx,
   liveRequest,
   name,
@@ -61,6 +63,7 @@ import {
   trips,
   uniqueEmail,
   type World,
+  within,
 } from "./harness.ts";
 
 const env = inject("integrationDb");
@@ -252,6 +255,65 @@ describe.skipIf(!env)("G2.15 adversarial: signing and evidence", () => {
       { state: "revoked", revoked_reason: "participant_changed" },
       { state: "pending", revoked_reason: null },
     ]);
+  }, 180_000);
+
+  it("refuses a signature cleanly when an address correction ends its session while it waits", async () => {
+    const booked = await book(world, A, nextTrip(), 1, hooks);
+    const details = (email: string) => adult("Rae Racer", email);
+    const pid = await name(
+      world,
+      A.id,
+      booked.bookingId,
+      1,
+      details(uniqueEmail("rae.old")),
+      hooks,
+    );
+    const request = await liveRequest(world.admin, booked.bookingId, pid);
+    const { session, secret } = await openFor(world, A.id, request.id);
+    const input = await signingInput(world, A.id, deps, session);
+    // The correction's waiver hook has revoked the old address's session and
+    // holds the request's lock, uncommitted.
+    const corrected = gate();
+    const release = gate();
+    const holding: BookingHooks = {
+      ...hooks,
+      async participantUpdated(trx, ctx, event) {
+        await hooks.participantUpdated?.(trx, ctx, event);
+        corrected.open();
+        await release.opened;
+      },
+    };
+    const correcting = settle(
+      name(world, A.id, booked.bookingId, 1, details(uniqueEmail("rae.new")), holding),
+    );
+    const ctx = guestCtx(A.id);
+    let signing: ReturnType<typeof settle<SignResult | { kind: "no_session" }>> | undefined;
+    try {
+      await within(corrected.opened, 60_000, "the correction's hook");
+      // The signature finds its session open, as the route does, then waits for the request.
+      signing = settle(
+        inTenantTransaction(world.db, ctx, async (trx) => {
+          const found = await loadWaiverSession(trx, A.id, secret);
+          if (!found) return { kind: "no_session" as const };
+          return signWaiver(trx, ctx, deps, found, input, META);
+        }),
+      );
+      for (let i = 0; i < 100; i++) {
+        const [waiting] = await world.admin<{ n: number }[]>`
+          select count(*)::int as n from pg_stat_activity
+           where wait_event_type = 'Lock' and query ilike '%from waiver_requests%for no key update%'`;
+        if ((waiting?.n ?? 0) > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    } finally {
+      release.open();
+    }
+    expect((await within(correcting, 60_000, "the correction")).ok).toBe(true);
+    const signed = await within(signing ?? Promise.reject(new Error("no signing")), 60_000, "sign");
+    // A clean refusal the route answers as an ended session, never a raised error.
+    expect(signed).toEqual({ ok: true, value: { kind: "session_ended" } });
+    expect(await evidenceOf(request.id)).toBeNull();
+    expect((await liveRequest(world.admin, booked.bookingId, pid)).state).toBe("pending");
   }, 180_000);
 
   it("keeps signed versions, refuses a stale hash, and moves only unsigned work when asked", async () => {

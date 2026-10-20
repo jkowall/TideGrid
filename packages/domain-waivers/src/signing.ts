@@ -231,6 +231,11 @@ export type SignResult =
   | { kind: "content_changed" }
   /** The participant's details changed in a way that changes who must sign. */
   | { kind: "participant_changed" }
+  /**
+   * The session ended while this signature waited for the request: an
+   * address correction, a withdrawal, or its hour ran out.
+   */
+  | { kind: "session_ended" }
   | { kind: "invalid"; problems: SignProblem[] };
 
 /**
@@ -333,6 +338,14 @@ export async function signWaiver(
     return { kind: "not_pending", state: request.state };
   }
   if (request.state !== "pending") return { kind: "not_pending", state: request.state };
+  // The caller found the session open before the request's lock; a change
+  // that committed while this waited (an address correction revokes the old
+  // address's sessions under the same lock) is visible now.
+  const { rows: open } = await sql<{ open: boolean }>`
+    select (revoked_at is null and expires_at > now()) as open
+      from waiver_signing_sessions
+     where tenant_id = ${ctx.tenantId} and id = ${session.id}`.execute(trx);
+  if (!open[0]?.open) return { kind: "session_ended" };
   const version = await loadTemplateVersion(
     trx,
     ctx.tenantId,

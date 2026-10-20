@@ -337,6 +337,8 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
             "waiver_participant_changed",
             "The booking's details for this person changed; a new email has the waiver to sign",
           );
+        case "session_ended":
+          throw sessionInvalid();
         case "not_pending":
           throw closedRefusal(signed.state);
       }

@@ -147,8 +147,17 @@ export async function sendWaiverRequest(
   // A request that never went out (it had no address) goes out now as its
   // first generation, whoever asks.
   const kind = facts.latest_generation === null ? "initial" : input.kind;
+  const recipientChanged = facts.latest_recipient !== null && facts.latest_recipient !== recipient;
   if (kind === "resend") {
     if (facts.latest_generation !== null && facts.latest_generation >= MAX_GENERATIONS) {
+      // Nothing more goes out, but an address that is no longer this
+      // participant's loses its links and sessions all the same.
+      if (recipientChanged) {
+        await closeRequestAccess(trx, ctx, request, {
+          link: "recipient_changed",
+          session: "recipient_changed",
+        });
+      }
       return { kind: "limit_reached" };
     }
     // The interval protects one mailbox from repeats; a corrected address
@@ -161,9 +170,16 @@ export async function sendWaiverRequest(
   const ttlSeconds = Math.floor(
     Math.min(LINK_TTL_DAYS * 86_400_000, booking.endsAt.getTime() - now) / 1000,
   );
-  if (ttlSeconds < MIN_LINK_SECONDS) return { kind: "trip_over" };
+  if (ttlSeconds < MIN_LINK_SECONDS) {
+    if (recipientChanged) {
+      await closeRequestAccess(trx, ctx, request, {
+        link: "recipient_changed",
+        session: "recipient_changed",
+      });
+    }
+    return { kind: "trip_over" };
+  }
 
-  const recipientChanged = facts.latest_recipient !== null && facts.latest_recipient !== recipient;
   if (recipientChanged) {
     // The old address loses its links and any session it opened.
     await closeRequestAccess(trx, ctx, request, {

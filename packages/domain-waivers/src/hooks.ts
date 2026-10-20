@@ -7,8 +7,9 @@
  * - bookingConfirmed: assign every participant named so far.
  * - participantAdded: assign the new participant.
  * - participantUpdated: a change of who must sign (minor or not), or a new
- *   name on a signed waiver, ends the request and assigns a new one; a
- *   corrected address on a pending request sends it there at once.
+ *   name for the participant or for the guardian who signed, on a signed
+ *   waiver, ends the request and assigns a new one; a corrected address on a
+ *   pending request sends it there at once.
  * - bookingCanceled: end every request on the booking.
  *
  * None of them refuses: confirmation and party changes never wait on waivers.
@@ -53,7 +54,12 @@ export async function onParticipantUpdated(
     return;
   }
   const signerChanged = requiredSignerFor(participant) !== live.required_signer;
-  const renamedAfterSigning = live.state === "signed" && event.changed.includes("name");
+  // A signature is a named person's: a new name for the participant, or for
+  // the guardian who signed for a minor, asks for a new one.
+  const signerField = live.required_signer === "guardian" ? "guardianName" : "name";
+  const renamedAfterSigning =
+    live.state === "signed" &&
+    (event.changed.includes("name") || event.changed.includes(signerField));
   if (signerChanged || renamedAfterSigning) {
     await revokeParticipantWaivers(trx, ctx, {
       bookingId: event.bookingId,
