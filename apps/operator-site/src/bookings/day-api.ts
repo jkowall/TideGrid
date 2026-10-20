@@ -1,7 +1,7 @@
 import type { BookingDayTotals, BookingDayTotalsResponse } from "@tidegrid/contracts";
 import type { LocalDate } from "@tidegrid/design-system/format";
-import { call, failureOf, type ReadFailure, tenantPath } from "../http.ts";
-import { isInstant, isInt, type Read } from "./api.ts";
+import { call, errorCode, failureOf, type ReadFailure, tenantPath } from "../http.ts";
+import { isInstant, isInt } from "./api.ts";
 
 /**
  * A day's control totals and its CSV export (G2.12c). Both read the same
@@ -12,6 +12,26 @@ import { isInstant, isInt, type Read } from "./api.ts";
 export interface DayTotals {
   generatedAt: string;
   totals: BookingDayTotals;
+}
+
+/**
+ * Why the day's totals or export did not come. `too_large`: the day holds
+ * more bookings than one report does (the API's 422 day_too_large). Trying
+ * again cannot help; TideGrid can split the export.
+ */
+export type DayFailure = ReadFailure | "too_large";
+
+/** The most bookings one report holds, as the API says it (day_too_large). */
+export const dayReportLimit = 5000;
+
+export type DayRead<T> = { kind: "ok"; value: T } | { kind: "failed"; reason: DayFailure };
+
+/** A refusal read for its reason: a day too large has its own. */
+async function dayFailureOf(res: Response): Promise<DayFailure> {
+  if (res.status === 422 && (await errorCode(res.clone())) === "day_too_large") {
+    return "too_large";
+  }
+  return failureOf(res);
 }
 
 const totalKeys = [
@@ -40,14 +60,14 @@ export async function loadDayTotals(
   tenantId: string,
   date: LocalDate,
   signal?: AbortSignal,
-): Promise<Read<DayTotals>> {
+): Promise<DayRead<DayTotals>> {
   try {
     const res = await call(
       `${tenantPath(tenantId)}/booking-day-totals?${new URLSearchParams({ date })}`,
       { headers: { accept: "application/json" } },
       signal,
     );
-    if (!res.ok) return { kind: "failed", reason: await failureOf(res) };
+    if (!res.ok) return { kind: "failed", reason: await dayFailureOf(res) };
     const body = (await res.json().catch(() => null)) as Partial<BookingDayTotalsResponse> | null;
     if (body?.date !== date || !isInstant(body.generatedAt) || !isTotals(body.totals)) {
       return { kind: "failed", reason: "unreadable" };
@@ -69,7 +89,7 @@ export function exportFileName(disposition: string | null, date: LocalDate): str
 
 export type ExportResult =
   | { kind: "saved"; fileName: string }
-  | { kind: "failed"; reason: ReadFailure };
+  | { kind: "failed"; reason: DayFailure };
 
 /**
  * Hand the browser a file to save: an object URL behind a link with
@@ -103,7 +123,7 @@ export async function exportDay(
       `${tenantPath(tenantId)}/booking-day-export?${new URLSearchParams({ date })}`,
       { headers: { accept: "text/csv" } },
     );
-    if (!res.ok) return { kind: "failed", reason: await failureOf(res) };
+    if (!res.ok) return { kind: "failed", reason: await dayFailureOf(res) };
     if (!(res.headers.get("content-type") ?? "").startsWith("text/csv")) {
       return { kind: "failed", reason: "unreadable" };
     }

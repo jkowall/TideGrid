@@ -96,9 +96,9 @@ describe("a day's totals", () => {
     renderTotals();
     const region = screen.getByRole("region", { name: "Day totals" });
     expect(region.getAttribute("aria-busy")).toBe("true");
-    // Placeholders for the nine figures, hidden from a screen reader; no figures yet.
+    // Placeholders for the ten figures, hidden from a screen reader; no figures yet.
     const placeholders = document.querySelector('.bk-totals__grid[aria-hidden="true"]');
-    expect(placeholders?.querySelectorAll(".bk-total")).toHaveLength(9);
+    expect(placeholders?.querySelectorAll(".bk-total")).toHaveLength(10);
     expect(document.querySelector("dl")).toBeNull();
     expect(document.querySelector(".bk-totals__note")).toBeNull();
     // The export does not wait for the figures.
@@ -120,10 +120,11 @@ describe("a day's totals", () => {
       "Gross",
       "Discounts",
       "Fees",
-      "Taxes",
+      "Added taxes",
       "Total charged",
       "Refunds",
       "Net",
+      "Included tax",
     ]);
     expect(figures()).toEqual({
       Bookings: "3",
@@ -131,11 +132,24 @@ describe("a day's totals", () => {
       Gross: "$1,500.00",
       Discounts: "−$115.00",
       Fees: "$22.50",
-      Taxes: "$80.90",
+      "Added taxes": "$80.90",
       "Total charged": "$1,488.40",
       Refunds: "−$94.50",
       Net: "$1,393.90",
+      "Included tax": "$54.20",
     });
+  });
+
+  it("shows tax in the prices as its own figure, so a tax-included operator never reads as no tax", async () => {
+    api({ [route.dayTotals()]: totalsFor({ taxes: 0, includedTax: 2173 }) });
+    renderTotals();
+    await waitFor(() => expect(grid()).not.toBeNull());
+    expect(figures()["Added taxes"]).toBe("$0.00");
+    expect(figures()["Included tax"]).toBe("$21.73");
+    expect(figures()).not.toHaveProperty("Taxes");
+    expect(note()).toContain(
+      "Included tax is already in the prices, so it isn't added to the total.",
+    );
   });
 
   it("shows deductions as minus amounts, and nothing deducted as plain zero", async () => {
@@ -171,6 +185,7 @@ describe("a day's totals", () => {
     expect(Object.values(figures())).toEqual([
       "0",
       "0",
+      "$0.00",
       "$0.00",
       "$0.00",
       "$0.00",
@@ -227,13 +242,13 @@ describe("what the figures cover, and what they leave out", () => {
     renderTotals();
     await waitFor(() => expect(note()).not.toBe(""));
     expect(note()).toBe(
-      "Every booking on the trips departing this day, from each booking's order and refunds, as of Wed, Nov 4, 2:03 PM EST. Prices include $54.20 in taxes.",
+      "Every booking on the trips departing this day, from each booking's order and refunds, as of Wed, Nov 4, 2:03 PM EST. Included tax is already in the prices, so it isn't added to the total.",
     );
     cleanup();
     renderTotals();
     await waitFor(() => expect(note()).not.toBe(""));
-    expect(note()).not.toContain("Prices include");
-    expect(note()).not.toContain("taxes");
+    expect(note()).not.toContain("Included tax");
+    expect(note()).not.toContain("tax");
   });
 
   it.each([
@@ -245,7 +260,7 @@ describe("what the figures cover, and what they leave out", () => {
     renderTotals();
     await waitFor(() => expect(note()).toContain("pending"));
     expect(note()).toBe(
-      `Every booking on the trips departing this day, from each booking's order and refunds, as of Wed, Nov 4, 2:03 PM EST. Prices include $54.20 in taxes. ${sentence}`,
+      `Every booking on the trips departing this day, from each booking's order and refunds, as of Wed, Nov 4, 2:03 PM EST. Included tax is already in the prices, so it isn't added to the total. ${sentence}`,
     );
   });
 
@@ -336,6 +351,19 @@ describe("when the totals do not load", () => {
     expect(text(alert)).toContain("TideGrid isn't responding right now. Try again in a moment.");
     expect(text(alert)).not.toMatch(/\b[1-5]\d\d\b|_/);
     expect(within(alert).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("says a day too large for one report is too large, with what to do and no Try again", async () => {
+    const calls = api({ [route.dayTotals()]: () => apiError(422, "day_too_large") });
+    renderTotals();
+    const alert = await screen.findByRole("alert");
+    expect(text(alert)).toContain("This day is too large for one report");
+    expect(text(alert)).toContain(
+      "This day has more than 5,000 bookings, more than one report holds. Ask TideGrid for a split export.",
+    );
+    expect(text(alert)).not.toContain("isn't responding");
+    expect(within(alert).queryByRole("button")).toBeNull();
+    expect(callsTo(calls, route.dayTotals())).toHaveLength(1);
   });
 
   it("reads an answer it can't show as a failure with Try again", async () => {
@@ -591,6 +619,11 @@ describe("the CSV export", () => {
       "a file that is not a CSV",
       () => csvAnswer({ type: "text/html; charset=utf-8" }),
       "TideGrid sent something this console can't read. Try again in a moment.",
+    ],
+    [
+      "a day too large for one report",
+      () => apiError(422, "day_too_large"),
+      "This day has more than 5,000 bookings, more than one report holds. Ask TideGrid for a split export.",
     ],
   ])("says so after %s, and keeps the button", async (_what, answer, reason) => {
     api({ [route.dayTotals()]: totalsFor(), [route.dayExport()]: answer });

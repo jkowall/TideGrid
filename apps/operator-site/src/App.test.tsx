@@ -676,6 +676,29 @@ describe("returning to the page after signing in", () => {
     expect(kept()).toBeNull();
   });
 
+  it.each([
+    ["the overview", "/"],
+    ["a page the console does not have", "/not-a-page"],
+  ])(
+    "drops a page kept earlier when the person is later found signed out on %s, so sign-in opens there",
+    async (_what, address) => {
+      // Found signed out on a booking at 10:00, then the tab was closed.
+      keep(entry(bookingPath, 20 * minute));
+      await openSignedOutAt(address);
+      expect(kept()).toBeNull();
+      cleanup();
+      await continueFromLink();
+      await focusLandsOn("Overview");
+      expect(window.location.pathname).toBe("/");
+    },
+  );
+
+  it("keeps the newer page when the person is later found signed out on another one", async () => {
+    keep(entry("/bookings/search", 20 * minute));
+    await openSignedOutAt(bookingPath);
+    expect(JSON.parse(kept() ?? "null")).toEqual({ address: bookingPath, at: Date.now() });
+  });
+
   it("stores nothing for a sign-in screen that opens with a notice, as after a link that failed", async () => {
     vi.stubGlobal("fetch", api({ "POST /api/v1/auth/sessions": [() => status(400)] }));
     const App = await loadApp("#token=synthetic-used-link");

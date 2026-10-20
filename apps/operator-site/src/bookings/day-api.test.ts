@@ -40,6 +40,10 @@ const failures = [
   [404, "tenant_not_found", "no_access"],
   [400, "validation_failed", "rejected"],
   [500, "internal_error", "unavailable"],
+  // A day over the API's limit: its own reason, as trying again cannot help.
+  [422, "day_too_large", "too_large"],
+  // Any other 422 is not a day too large.
+  [422, "unprocessable", "unavailable"],
 ] as const;
 
 const unreadable = { kind: "failed", reason: "unreadable" };

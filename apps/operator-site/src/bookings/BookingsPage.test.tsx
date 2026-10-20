@@ -243,6 +243,59 @@ describe("which day the list opens on", () => {
     await tripSection(/Sunset Harbor Cruise/);
     expect(window.location.search).toBe("");
   });
+
+  it("says when the address's day was beyond two years, and which day it shows instead", async () => {
+    vi.setSystemTime(new Date("2026-11-04T05:00:00Z"));
+    window.history.replaceState(null, "", "/bookings?day=9999-12-31");
+    api({ [route.day()]: listFor() });
+    renderPage();
+    await screen.findByRole("heading", { name: /^No trips on / });
+    const notice = document.querySelector(".tg-notice--info");
+    expect(text(notice?.querySelector(".tg-notice__title"))).toBe(
+      "Showing Friday, November 3, 2028 instead",
+    );
+    expect(text(notice?.querySelector(".tg-notice__body"))).toBe(
+      "The address asked for Fri, Dec 31, 9999. The console shows days within two years of today, so it opened the nearest one.",
+    );
+  });
+
+  it.each(["2026-02-30", "0000-01-01", "soon", "2026-11-4"])(
+    "says the address's day %j doesn't exist, and that today opened instead",
+    async (asked) => {
+      window.history.replaceState(null, "", `/bookings?day=${asked}`);
+      api({ [route.day()]: listFor() });
+      renderPage();
+      await tripSection(/Sunset Harbor Cruise/);
+      const notice = document.querySelector(".tg-notice--info");
+      expect(notice?.getAttribute("role")).toBe("status");
+      expect(text(notice?.querySelector(".tg-notice__title"))).toBe(
+        "Showing Wednesday, November 4 instead",
+      );
+      expect(text(notice?.querySelector(".tg-notice__body"))).toBe(
+        "The address asked for a day that doesn't exist, so the console opened today.",
+      );
+      // What was asked is never repeated on the page.
+      expect(document.body.textContent).not.toContain(asked);
+    },
+  );
+
+  it("drops the notice once the person moves to another day, and gives none for a real day", async () => {
+    window.history.replaceState(null, "", "/bookings?day=2026-02-30");
+    api({ [route.day()]: listFor() });
+    renderPage();
+    await tripSection(/Sunset Harbor Cruise/);
+    expect(document.querySelector(".tg-notice--info")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Next day" }));
+    await waitFor(() => expect(window.location.search).toBe("?day=2026-11-05"));
+    expect(document.querySelector(".tg-notice--info")).toBeNull();
+
+    cleanup();
+    window.history.replaceState(null, "", "/bookings?day=2026-11-05");
+    api({ [route.day()]: listFor() });
+    renderPage();
+    await screen.findByRole("heading", { level: 2, name: /Thursday, November 5/ });
+    expect(document.querySelector(".tg-notice--info")).toBeNull();
+  });
 });
 
 describe("the day's trips and bookings", () => {

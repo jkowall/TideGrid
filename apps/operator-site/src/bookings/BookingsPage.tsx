@@ -95,6 +95,12 @@ export function BookingsPage({
     const asked = new URLSearchParams(window.location.search).get("day") ?? "";
     return isLocalDate(asked) && clampDay(asked, todayIn()) !== asked ? asked : null;
   });
+  // A day in the address that no calendar holds (February 30, year 0000, a
+  // word) opens today, and says so the same way.
+  const [impossibleDay, setImpossibleDay] = useState(() => {
+    const asked = new URLSearchParams(window.location.search).get("day");
+    return asked !== null && asked !== "" && !isLocalDate(asked);
+  });
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const retryRequested = useRef(false);
@@ -197,6 +203,7 @@ export function BookingsPage({
   const goToDay = (next: LocalDate, moveFocus = false) => {
     const target = clampDay(next, today);
     setClampedFrom(null);
+    setImpossibleDay(false);
     if (moveFocus) focusDayOnLoad.current = true;
     // A trip departs on one day only, so a new day shows every trip.
     setTripId(undefined);
@@ -308,6 +315,15 @@ export function BookingsPage({
               The address asked for {dayText(clampedFrom, "medium", today)}. The console shows days
               within two years of today, so it opened the nearest one.
             </p>
+          </Notice>
+        )}
+        {impossibleDay && day && (
+          <Notice
+            tone="info"
+            className="bk-notice"
+            title={`Showing ${dayText(day, "full", today)} instead`}
+          >
+            <p>The address asked for a day that doesn't exist, so the console opened today.</p>
           </Notice>
         )}
 

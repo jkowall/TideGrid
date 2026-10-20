@@ -3,28 +3,47 @@ import { Button, Icon, Notice, Skeleton } from "@tidegrid/design-system/componen
 import { formatMoney, type LocalDate } from "@tidegrid/design-system/format";
 import { useEffect, useId, useRef, useState } from "react";
 import { focusIsLost } from "../focus.ts";
-import type { ReadFailure } from "../http.ts";
-import { exportDay, loadDayTotals, type DayTotals as Totals } from "./day-api.ts";
+import {
+  type DayFailure,
+  dayReportLimit,
+  exportDay,
+  loadDayTotals,
+  type DayTotals as Totals,
+} from "./day-api.ts";
 import { guestsText, instantText } from "./model.ts";
 import { canRetry, failureText } from "./States.tsx";
 
 /**
  * A day's control totals and its CSV export (G2.12c), for every role. The
  * figures come from the ledger on the server, the same read the export's
- * total row comes from: gross, less discounts, plus fees and taxes, is what
- * guests were charged; less succeeded refunds, it is net.
+ * total row comes from: gross, less discounts, plus fees and added taxes, is
+ * what guests were charged; less succeeded refunds, it is net. Tax already in
+ * the prices is shown on its own, as the CSV's Included tax column is.
  */
+
+/** A day too large for one report: trying again cannot help, so the words say what can. */
+const tooLarge = {
+  title: "This day is too large for one report",
+  body: `This day has more than ${dayReportLimit.toLocaleString("en-US")} bookings, more than one report holds. Ask TideGrid for a split export.`,
+};
+
+/** What went wrong, in words, for a day's read. */
+function dayFailureText(reason: DayFailure, noun: string, tenantName: string) {
+  return reason === "too_large" ? tooLarge : failureText(reason, { noun, tenantName });
+}
+
+const canRetryDay = (reason: DayFailure) => reason !== "too_large" && canRetry(reason);
 
 type Load =
   | { kind: "loading" }
   | { kind: "ready"; value: Totals }
-  | { kind: "failed"; reason: ReadFailure; retrying: boolean };
+  | { kind: "failed"; reason: DayFailure; retrying: boolean };
 
 type Export =
   | { kind: "idle" }
   | { kind: "busy" }
   | { kind: "saved"; fileName: string }
-  | { kind: "failed"; reason: ReadFailure };
+  | { kind: "failed"; reason: DayFailure };
 
 export function DayTotals({
   tenantId,
@@ -67,7 +86,7 @@ export function DayTotals({
     setExported({ kind: "idle" });
     void loadDayTotals(tenantId, day, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
-      focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetry(result.reason));
+      focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetryDay(result.reason));
       setLoad(
         result.kind === "ok"
           ? { kind: "ready", value: result.value }
@@ -100,7 +119,7 @@ export function DayTotals({
             text: `The CSV couldn't be prepared. ${
               exported.reason === "signed_out"
                 ? "You're signed out. Sign in again, then export."
-                : failureText(exported.reason, { noun: "the export", tenantName }).body
+                : dayFailureText(exported.reason, "the export", tenantName).body
             }`,
           }
         : null;
@@ -137,9 +156,9 @@ export function DayTotals({
         <Notice
           tone="error"
           className="bk-notice"
-          title={failureText(load.reason, { noun: "the day's totals", tenantName }).title}
+          title={dayFailureText(load.reason, "the day's totals", tenantName).title}
           actions={
-            canRetry(load.reason) ? (
+            canRetryDay(load.reason) ? (
               <Button
                 icon="refresh"
                 busy={load.retrying}
@@ -154,7 +173,7 @@ export function DayTotals({
             ) : undefined
           }
         >
-          <p>{failureText(load.reason, { noun: "the day's totals", tenantName }).body}</p>
+          <p>{dayFailureText(load.reason, "the day's totals", tenantName).body}</p>
         </Notice>
       )}
       {load.kind === "ready" && <Figures totals={load.value.totals} />}
@@ -163,7 +182,7 @@ export function DayTotals({
           Every booking on the trips departing this day, from each booking's order and refunds
           {zone ? `, as of ${instantText(load.value.generatedAt, zone)}` : ""}.
           {load.value.totals.includedTax > 0 &&
-            ` Prices include ${formatMoney(load.value.totals.includedTax)} in taxes.`}
+            " Included tax is already in the prices, so it isn't added to the total."}
           {load.value.totals.pendingRefunds.count > 0 &&
             ` ${pendingText(load.value.totals.pendingRefunds)} not counted until it settles.`}
         </p>
@@ -199,10 +218,12 @@ function Figures({ totals: t }: { totals: BookingDayTotals }) {
     { label: "Gross", value: formatMoney(t.gross) },
     { label: "Discounts", value: formatMoney(-t.discounts) },
     { label: "Fees", value: formatMoney(t.fees) },
-    { label: "Taxes", value: formatMoney(t.taxes) },
+    // Tax added on top of the prices; tax inside them is Included tax, below.
+    { label: "Added taxes", value: formatMoney(t.taxes) },
     { label: "Total charged", value: formatMoney(t.total), kind: "total" },
     { label: "Refunds", value: formatMoney(-t.refunds) },
     { label: "Net", value: formatMoney(t.net), kind: "net" },
+    { label: "Included tax", value: formatMoney(t.includedTax) },
   ];
   return (
     <dl className="bk-totals__grid">
@@ -219,7 +240,7 @@ function Figures({ totals: t }: { totals: BookingDayTotals }) {
 function TotalsSkeleton() {
   return (
     <div className="bk-totals__grid" aria-hidden="true">
-      {Array.from({ length: 9 }, (_, i) => (
+      {Array.from({ length: 10 }, (_, i) => (
         <div key={i} className="bk-total">
           <Skeleton variant="text" width="4rem" />
           <Skeleton width="5rem" height="1.5rem" />

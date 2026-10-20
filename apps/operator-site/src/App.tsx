@@ -143,10 +143,15 @@ export function App() {
     void refresh(false);
   }, [refresh]);
 
-  // Found signed out on a page (not by signing out): come back to it.
+  // Found signed out on a page (not by signing out): come back to it. Found
+  // signed out on the overview, or a page the console lacks, the person signs
+  // in from there: a page kept from an earlier visit must not win.
   const foundSignedOut = state.kind === "signed-out" && !state.notice;
   useEffect(() => {
-    if (foundSignedOut) rememberReturn(`${window.location.pathname}${window.location.search}`);
+    if (!foundSignedOut) return;
+    const here = `${window.location.pathname}${window.location.search}`;
+    if (returnable(here)) rememberReturn(here);
+    else forgetReturn();
   }, [foundSignedOut]);
 
   const redeem = async (token: string) => {
