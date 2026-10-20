@@ -349,6 +349,24 @@ describe("opening the booking", () => {
     expect(callsTo(calls, "open")).toHaveLength(1);
   });
 
+  it("drops an opening's late answer once a newer link arrived in the same tab", async () => {
+    const answer = held();
+    stubManageApi({ open: answer.answer });
+    arrive();
+    fireEvent.click(await openButton());
+    // Before the API answers, the guest opens a newer email's link in this tab.
+    const newer = "test_link_token_".padEnd(43, "N");
+    window.location.hash = `#t=${newer}`;
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    await waitFor(() => expect(window.location.hash).toBe(""));
+    // The first link's answer arrives late: it is about a link this page no longer shows.
+    answer.release(refusal(410, "link_superseded"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByRole("heading", { name: "A newer email replaced this link" })).toBeNull();
+    const button = await openButton();
+    expect(button.getAttribute("aria-busy")).toBeNull();
+  });
+
   it("stores the session for this tab, and reads the booking with it as a bearer token", async () => {
     const calls = await openedFromLink();
     expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null")).toEqual({

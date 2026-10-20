@@ -106,6 +106,9 @@ export function ManagePage({
   // after the page moved on to a newer link, is dropped; so is one whose own
   // signal was aborted, as development's double-run effects abort the first.
   const latestRead = useRef(0);
+  // The page's latest attempt to open a link: an answer for an older one,
+  // such as a link replaced in the same tab meanwhile, is dropped.
+  const latestOpen = useRef(0);
 
   // The token stays in memory only: out of the address and this history entry now.
   useEffect(() => {
@@ -124,6 +127,7 @@ export function ManagePage({
       forgetLinkToken();
       if (!token) return;
       latestRead.current += 1;
+      latestOpen.current += 1;
       setView({ kind: "landing", token, busy: false, trouble: null });
     };
     window.addEventListener("hashchange", onHash);
@@ -165,9 +169,10 @@ export function ManagePage({
   const open = async () => {
     if (view.kind !== "landing" || view.busy) return;
     const token = view.token;
+    const attempt = ++latestOpen.current;
     setView({ ...view, busy: true, trouble: null });
     const result = await openWithLink(token, alive.current.signal);
-    if (alive.current.signal.aborted) return;
+    if (alive.current.signal.aborted || attempt !== latestOpen.current) return;
     if (result.kind === "ok") {
       const session: StoredSession = {
         token: result.value.token,
