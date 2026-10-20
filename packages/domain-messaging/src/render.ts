@@ -213,8 +213,20 @@ function textBlock(block: EmailBlock, link: string | null): string {
   }
 }
 
+/**
+ * A phone number as a guest reads it: a North American one as (305) 555-0142,
+ * as the booking site shows it; any other as stored, in E.164.
+ */
+export function displayPhone(e164: string): string {
+  const us = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164);
+  return us ? `(${us[1]}) ${us[2]}-${us[3]}` : e164;
+}
+
 function footerParts(brand: EmailBrand): string[] {
-  const contact = [brand.contactEmail, brand.contactPhone].filter((v): v is string => !!v);
+  const contact = [
+    brand.contactEmail,
+    brand.contactPhone ? displayPhone(brand.contactPhone) : null,
+  ].filter((v): v is string => !!v);
   return [
     contact.length ? `Questions? Contact ${brand.name}: ${contact.join(", ")}.` : null,
     `Sent by TideGrid for ${brand.name}. TideGrid demo build: the operator and its trips are synthetic, and no real booking or payment is made.`,

@@ -44,6 +44,7 @@ export {
 } from "./delivery.ts";
 export {
   type AccessLinkSpec,
+  type CancelMessageOptions,
   type CancelMessageResult,
   cancelMessage,
   DEFAULT_LINK_TTL_SECONDS,

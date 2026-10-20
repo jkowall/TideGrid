@@ -253,8 +253,10 @@ export async function cancelBooking(
   if (!sessionId) return { kind: "not_found" };
   await sql`select id from checkout_sessions where tenant_id = ${tenantId} and id = ${sessionId}
               for update`.execute(trx);
+  // NO KEY UPDATE: the email delivery job's foreign key checks on the booking
+  // never wait behind a cancellation whose hooks may wait for that job.
   await sql`select id from bookings where tenant_id = ${tenantId} and id = ${input.bookingId}
-              for update`.execute(trx);
+              for no key update`.execute(trx);
   const row = await termsRow(trx, tenantId, input.bookingId);
   if (!row) throw new Error("a locked booking's terms were not found");
   await sql`select id from payments where tenant_id = ${tenantId} and id = ${row.payment_id}

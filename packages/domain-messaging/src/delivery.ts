@@ -8,9 +8,16 @@
  *
  * 1. Claim, in a short transaction: take a due message (queued and due, or
  *    sending with a lapsed lease, an attempt that crashed) with FOR UPDATE
- *    SKIP LOCKED, so concurrent runs never claim one message together; mark it
- *    sending under a lease, one more attempt; and, when it carries an access
- *    link, issue the link (only the token's hash is stored). Commit.
+ *    SKIP LOCKED, so concurrent runs never claim one message together. A
+ *    message that carries an access link is checked first: if access was
+ *    withdrawn from it (one of its own links revoked for any reason but
+ *    superseded), or its subject's access closed or moved since it was
+ *    written (a link of its booking, purpose, participant, and subject
+ *    revoked after it as recipient_changed, completed, withdrawn, or
+ *    booking_canceled), it is canceled, with its live links revoked, and
+ *    nothing is sent. Otherwise mark it sending under a lease, one more attempt, and
+ *    issue the link (only the token's hash is stored). Commit. The claim never
+ *    waits on another transaction's lock, so `cancelMessage` can wait for it.
  * 2. Send, outside any transaction, with the message id as the provider's
  *    idempotency key and the link's URL written into the bodies.
  * 3. Record the outcome, in a second short transaction, only if the attempt
@@ -21,8 +28,13 @@
  * sending; once its lease lapses a later run claims it again and sends with
  * the same key, and the provider answers with the first email. That attempt
  * issues a new token that the provider never sends, which simply expires.
+ *
+ * A message canceled while an attempt is under way (`cancelMessage`) loses
+ * its links at once; the attempt's email may still arrive, with a link that
+ * opens nothing, and the attempt records nothing and is never retried.
  */
 import {
+  type AccessRevocationReason,
   type Database,
   inTenantTransaction,
   type TenantContext,
@@ -35,6 +47,7 @@ import {
   EmailProviderRejectedError,
   EmailProviderUnavailableError,
 } from "./adapter.ts";
+import { revokeMessageLinks } from "./enqueue.ts";
 import { fillLinkSlot } from "./render.ts";
 
 /** Attempts before a temporarily failing message fails for good. */
@@ -60,6 +73,12 @@ export interface DeliveryOptions {
   /** Messages per tenant per run. */
   limit?: number;
   leaseSeconds?: number;
+  /**
+   * A send failed with something other than a provider's answer: a bug, or an
+   * outcome nobody knows. The message is retried with its key like an outage;
+   * this is for the log.
+   */
+  onSendError?: (messageId: string, error: unknown) => void;
 }
 
 export type DeliveryOutcome =
@@ -68,7 +87,12 @@ export type DeliveryOutcome =
   | "retry"
   /** Refused, out of attempts, or its link has no mapped host. */
   | "failed"
-  /** Another run claimed it after this attempt's lease lapsed; that run records it. */
+  /** Its access was withdrawn or its recipient changed; canceled unsent. */
+  | "canceled"
+  /**
+   * Another run claimed it after this attempt's lease lapsed, or it was
+   * canceled while this attempt was under way; this attempt records nothing.
+   */
   | "superseded";
 
 export interface DeliveryItem {
@@ -83,6 +107,7 @@ export interface TenantDeliveryReport {
   sent: number;
   retried: number;
   failed: number;
+  canceled: number;
   superseded: number;
   items: DeliveryItem[];
 }
@@ -109,7 +134,51 @@ interface ClaimedRow {
 type Claimed =
   | { kind: "none" }
   | { kind: "ready"; row: ClaimedRow; url: string | null }
-  | { kind: "failed"; messageId: string; attempt: number; code: string };
+  | { kind: "failed"; messageId: string; attempt: number; code: string }
+  | { kind: "canceled"; messageId: string; attempt: number; code: string };
+
+/**
+ * Why a link-carrying message must not go out now, or null. Read in the
+ * claim, under the message's row lock:
+ *
+ * - its own link was revoked for any reason but `superseded`: access was
+ *   withdrawn from this email (a waiver signed, an address corrected);
+ * - its booking, purpose, participant, and subject saw a link revoked after
+ *   the message was written, as `recipient_changed`, `completed`, `withdrawn`,
+ *   or `booking_canceled`: what it asks for is over, or goes elsewhere now.
+ *   `staff` and `superseded` revocations of the scope do not count: a newer
+ *   email, or an operator closing old links, leaves a later message standing.
+ */
+async function staleness(
+  trx: TenantTransaction,
+  tenantId: string,
+  messageId: string,
+): Promise<{ code: string; linkReason: AccessRevocationReason } | null> {
+  const { rows } = await sql<{
+    own: AccessRevocationReason | null;
+    scope: AccessRevocationReason | null;
+  }>`
+    select (select l.revoked_reason from guest_access_links l
+             where l.tenant_id = m.tenant_id and l.message_id = m.id
+               and l.revoked_reason is not null and l.revoked_reason <> 'superseded'
+             order by l.revoked_at, l.id limit 1) as own,
+           (select l.revoked_reason from guest_access_links l
+             where l.tenant_id = m.tenant_id and l.booking_id = m.booking_id
+               and l.purpose = m.link_purpose
+               and l.participant_id is not distinct from m.participant_id
+               and l.subject_ref is not distinct from m.subject_ref
+               and l.revoked_reason in ('recipient_changed', 'completed', 'withdrawn',
+                                        'booking_canceled')
+               and l.revoked_at > m.created_at
+             order by l.revoked_at, l.id limit 1) as scope
+      from email_messages m
+     where m.tenant_id = ${tenantId} and m.id = ${messageId}`.execute(trx);
+  const reason = rows[0]?.own ?? rows[0]?.scope ?? null;
+  if (!reason) return null;
+  return reason === "recipient_changed"
+    ? { code: "recipient_changed", linkReason: "recipient_changed" }
+    : { code: "access_withdrawn", linkReason: reason };
+}
 
 function backoffFor(attempt: number): number {
   return RETRY_BACKOFF_SECONDS[Math.min(attempt, RETRY_BACKOFF_SECONDS.length) - 1] ?? 14_400;
@@ -139,11 +208,16 @@ export async function guestOriginFor(
   return rows[0]?.tenant_id === tenantId ? url.origin : null;
 }
 
+/**
+ * Claim one due message in a short transaction. `origin` is resolved before:
+ * nothing here may use the database outside `trx`, because a Worker's pool
+ * holds one connection and a second query would wait for it forever.
+ */
 async function claimOne(
   db: Kysely<Database>,
   ctx: TenantContext,
   options: DeliveryOptions,
-  origin: () => Promise<string | null>,
+  origin: string | null,
 ): Promise<Claimed> {
   const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
   return inTenantTransaction(db, ctx, async (trx) => {
@@ -160,6 +234,22 @@ async function claimOne(
        for update skip locked`.execute(trx);
     const found = rows[0];
     if (!found) return { kind: "none" } as const;
+    if (found.link_purpose !== null) {
+      const stale = await staleness(trx, ctx.tenantId, found.id);
+      if (stale) {
+        await sql`
+          update email_messages set state = 'canceled', last_error_code = ${stale.code}
+           where tenant_id = ${ctx.tenantId} and id = ${found.id}
+             and state in ('queued', 'sending')`.execute(trx);
+        await revokeMessageLinks(trx, ctx.tenantId, found.id, stale.linkReason);
+        return {
+          kind: "canceled",
+          messageId: found.id,
+          attempt: found.attempts,
+          code: stale.code,
+        } as const;
+      }
+    }
     const { rows: claimed } = await sql<{ attempts: number }>`
       update email_messages
          set state = 'sending', attempts = attempts + 1,
@@ -178,7 +268,7 @@ async function claimOne(
     if (row.link_purpose === null || row.link_path === null || row.link_ttl_seconds === null) {
       return { kind: "ready", row, url: null } as const;
     }
-    const base = await origin();
+    const base = origin;
     if (!base || row.booking_id === null) {
       await fail(trx, ctx, row.id, attempt, "link_host_unmapped");
       return { kind: "failed", messageId: row.id, attempt, code: "link_host_unmapped" } as const;
@@ -270,25 +360,22 @@ export async function deliverTenantMessages(
     actorId: "email-delivery",
     requestId: options.runId,
   };
+  // Where links point, resolved once and before any claim: a claim's
+  // transaction holds the connection, and a Worker's pool has only one.
   const template = options.guestLinkOrigin ?? DEFAULT_GUEST_LINK_ORIGIN;
-  let originMemo: Promise<string | null> | undefined;
-  const origin = () => {
-    originMemo ??= (async () => {
-      const slug = await inTenantTransaction(db, ctx, async (trx) => {
-        const { rows } = await sql<{ slug: string }>`
-          select slug from tenants where id = ${tenantId}`.execute(trx);
-        return rows[0]?.slug ?? null;
-      });
-      return slug ? guestOriginFor(db, tenantId, slug, template) : null;
-    })();
-    return originMemo;
-  };
+  const slug = await inTenantTransaction(db, ctx, async (trx) => {
+    const { rows } = await sql<{ slug: string }>`
+      select slug from tenants where id = ${tenantId}`.execute(trx);
+    return rows[0]?.slug ?? null;
+  });
+  const origin = slug ? await guestOriginFor(db, tenantId, slug, template) : null;
 
   const report: TenantDeliveryReport = {
     claimed: 0,
     sent: 0,
     retried: 0,
     failed: 0,
+    canceled: 0,
     superseded: 0,
     items: [],
   };
@@ -297,11 +384,11 @@ export async function deliverTenantMessages(
     if (claimed.kind === "none") break;
     report.claimed += 1;
     let item: DeliveryItem;
-    if (claimed.kind === "failed") {
+    if (claimed.kind === "failed" || claimed.kind === "canceled") {
       item = {
         messageId: claimed.messageId,
         attempt: claimed.attempt,
-        outcome: "failed",
+        outcome: claimed.kind,
         code: claimed.code,
       };
     } else {
@@ -333,6 +420,7 @@ export async function deliverTenantMessages(
           result = { kind: "retry", code: error.code };
         } else {
           // An unknown outcome: retry with the same key, as for an outage.
+          options.onSendError?.(row.id, error);
           result = { kind: "retry", code: "send_error" };
         }
       }
@@ -342,6 +430,7 @@ export async function deliverTenantMessages(
     if (item.outcome === "sent") report.sent += 1;
     else if (item.outcome === "retry") report.retried += 1;
     else if (item.outcome === "failed") report.failed += 1;
+    else if (item.outcome === "canceled") report.canceled += 1;
     else report.superseded += 1;
   }
   return report;
@@ -362,6 +451,7 @@ export interface EmailSweepReport {
   sent: number;
   retried: number;
   failed: number;
+  canceled: number;
   superseded: number;
   failedTenants: number;
   complete: boolean;
@@ -389,6 +479,7 @@ export async function sweepEmail(
     sent: 0,
     retried: 0,
     failed: 0,
+    canceled: 0,
     superseded: 0,
     failedTenants: 0,
     complete: rows.length < tenantLimit,
@@ -405,6 +496,7 @@ export async function sweepEmail(
       report.sent += done.sent;
       report.retried += done.retried;
       report.failed += done.failed;
+      report.canceled += done.canceled;
       report.superseded += done.superseded;
     } catch (error) {
       report.failedTenants += 1;

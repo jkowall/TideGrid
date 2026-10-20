@@ -42,7 +42,8 @@ A link that grants access (the booking's management link, and a waiver signing l
 
 - The link's origin is the operator's guest site, from `GUEST_LINK_ORIGIN` (default `https://{slug}.book.tidegrid.us`; locally `http://{slug}.book.localhost:<port>`), and the delivery job checks that its hostname is an active, verified hostname of the message's tenant before sending. A message whose link host does not resolve to its tenant fails as `link_host_unmapped`.
 - The issued link keeps the message's booking, participant, and `subjectRef`, and the message's id.
-- Issuing a link for a message revokes, as `superseded`, the unused links of the same booking, purpose, participant, and subject that other messages carried, so only the newest email's link works. Retries of one message revoke nothing of their own: the provider's idempotency key keeps the first accepted email, and a token issued for an attempt the provider never accepted is never delivered and expires.
+- Issuing a link for a message revokes, as `superseded`, the unused links of the same booking, purpose, participant, and subject that older messages carried (written before it), so the newest email's link is the one that works. A retry of an older message never supersedes a newer message's link: a confirmation whose answer was lost, retried after the guest asked for a new link, leaves the new link working. Retries of one message revoke nothing of their own: the provider's idempotency key keeps the first accepted email, and a token issued for an attempt the provider never accepted is never delivered and expires. Superseding skips a link another transaction holds at that moment (it is being used or revoked), so a claim never waits on a lock.
+- Before it issues a link, the claim checks, under the message's row lock, that the message is still current. It is canceled unsent, with its live links revoked, when its own link was revoked for any reason but `superseded`, or when its booking, purpose, participant, and subject saw a link revoked after the message was written as `recipient_changed`, `completed`, `withdrawn`, or `booking_canceled`. Its `failureCode` says `recipient_changed` or `access_withdrawn`. No retry ever mints a fresh link for an address that was corrected away from, or for a waiver already signed. `staff` and `superseded` revocations of the subject leave a later message standing.
 
 ## Access links and guest sessions
 
@@ -73,8 +74,13 @@ issueAccessLink(trx, ctx, { bookingId, participantId?, purpose, subjectRef?, mes
 ## Message status
 
 ```ts
-cancelMessage(trx, ctx, messageId): Promise<
-  { kind: "canceled" } | { kind: "not_cancelable"; state } | { kind: "not_found" }>
+cancelMessage(trx, ctx, messageId, options?: {
+  linkReason?: AccessRevocationReason; // why its links stop working; withdrawn by default
+  code?: string;                       // why it was canceled, such as recipient_changed
+}): Promise<
+  | { kind: "canceled"; inFlight: boolean; revokedLinks: number }
+  | { kind: "not_cancelable"; state } // already sent, failed, or canceled
+  | { kind: "not_found" }>
 getMessageStatus(trx, tenantId, messageId): Promise<MessageStatus | null>
 listBookingMessages(trx, tenantId, bookingId): Promise<MessageStatus[]>
 
@@ -82,18 +88,23 @@ interface MessageStatus {
   id; template; templateVersion;
   state: "queued" | "sending" | "sent" | "failed" | "canceled";
   attempts; lastAttemptAt; nextAttemptAt; sentAt; failedAt; canceledAt;
-  failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error
+  failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error;
+                 // for a canceled message, why (recipient_changed, access_withdrawn) when known
   provider; createdAt;
 }
 ```
 
-`cancelMessage` cancels only a queued message. A message the delivery job is claiming right now answers `not_cancelable` with state `sending`: it goes out. Status reads carry no recipient or content. Provider acceptance is not proof that a guest read a message or used its link.
+`cancelMessage` cancels a message that has not gone out, queued or being sent, and in the same transaction revokes the unused links it carried (with `linkReason`). Once the caller commits, no email of that message opens anything and the delivery job never claims it again. It waits for a delivery claim in progress, so the link that claim issued is revoked too; the claim is a short transaction that never waits on another's lock. A message canceled mid-send (`inFlight: true`) may still arrive, with a link that opens nothing; its attempt records nothing and is never retried. Correcting an address: revoke the old address's links as `recipient_changed`, cancel the old message with `linkReason: "recipient_changed"`, and enqueue the new one, in one transaction.
+
+**Locks for callers.** A transaction that may call `cancelMessage` must not hold `FOR UPDATE` on a row a link references (the booking, the participant): the claim's foreign key checks take `KEY SHARE` on them, and would wait while `cancelMessage` waits for the claim. Lock those rows `FOR NO KEY UPDATE`, as domain-booking does.
+
+Status reads carry no recipient or content. Provider acceptance is not proof that a guest read a message or used its link.
 
 ## Delivery
 
 A delivery job sends due messages after commit and records each outcome. It runs from the API Worker's cron, after the checkout sweep, and right after a request commits a message (in the background, so the guest sees the email at once). Correctness never waits for it.
 
-- **States, one way.** `queued`, then `sending` (claimed for a short lease), then `sent`, or back to `queued` with a later attempt after a temporary failure, or `failed`. A queued message may be `canceled` (a waiver request made obsolete). The database refuses every other move, for every role.
+- **States, one way.** `queued`, then `sending` (claimed for a short lease), then `sent`, or back to `queued` with a later attempt after a temporary failure, or `failed`. A queued or sending message may be `canceled` (a waiver request made obsolete, an address corrected); a sending one's attempt then records nothing. The database refuses every other move, for every role.
 - **Idempotent sends.** The provider receives the message id as its idempotency key. A crash after the provider accepted a message and before the outcome was recorded leaves the message `sending`; once the lease lapses the job claims it again and sends with the same key, and the provider answers with the first message instead of sending twice.
 - **Retries.** A temporary failure (`EmailProviderUnavailableError`) retries after 1, 5, 15, and 60 minutes, then 4 hours, and fails after six attempts as `retries_exhausted`. A refusal (`EmailProviderRejectedError`, such as a bounced address) fails at once with the provider's code. Failures stay visible on the message and in staff reads.
 - **No duplicate claims.** Claims take due rows with `FOR UPDATE SKIP LOCKED`, so concurrent jobs never send one message at once; recording an outcome checks that the attempt it ran is still the message's latest.

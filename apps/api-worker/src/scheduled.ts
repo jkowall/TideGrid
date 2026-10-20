@@ -4,7 +4,7 @@ import { sweepExpiredHolds } from "@tidegrid/domain-inventory";
 import { sweepEmail } from "@tidegrid/domain-messaging";
 import { createLogger, newRequestId } from "@tidegrid/observability";
 import { bookingHooks } from "./booking-hooks.ts";
-import { deliverySettings, emailProvider, emailSettings } from "./email.ts";
+import { deliverySettings, emailProvider, emailSettings, sendErrorAttributes } from "./email.ts";
 import { type Bindings, databaseUrl } from "./env.ts";
 import { paymentProvider } from "./payments.ts";
 
@@ -126,6 +126,8 @@ export async function runScheduled(
               "tidegrid.tenant_id": tenantId,
               ...errorAttributes(error),
             }),
+          onSendError: (_messageId, error) =>
+            emailLog.error("email_send_error", sendErrorAttributes(error)),
         });
         emailLog.info("email_sweep", {
           "tidegrid.email_sweep.tenant_count": report.tenants,
@@ -133,6 +135,7 @@ export async function runScheduled(
           "tidegrid.email_sweep.retried_count": report.retried,
           "tidegrid.email_sweep.failed_count": report.failed,
           "tidegrid.email_sweep.superseded_count": report.superseded,
+          "tidegrid.email_sweep.canceled_count": report.canceled,
           "tidegrid.email_sweep.failed_tenant_count": report.failedTenants,
           "tidegrid.email_sweep.complete": report.complete,
           duration_ms: Date.now() - started,

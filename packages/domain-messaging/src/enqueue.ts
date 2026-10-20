@@ -6,6 +6,7 @@
  */
 import {
   type AccessPurpose,
+  type AccessRevocationReason,
   type EmailMessageState,
   type EmailProviderName,
   isUuid,
@@ -175,41 +176,79 @@ async function findByKey(
 }
 
 export type CancelMessageResult =
-  | { kind: "canceled" }
-  /** Already sending, sent, failed, or canceled: nothing changed. */
+  /**
+   * Canceled, and the links it carried no longer work. `inFlight`: an attempt
+   * was under way, so its email may still arrive, with a link that opens
+   * nothing; the attempt records nothing and is never retried.
+   */
+  | { kind: "canceled"; inFlight: boolean; revokedLinks: number }
+  /** Already sent, failed, or canceled: nothing changed. */
   | { kind: "not_cancelable"; state: EmailMessageState }
   | { kind: "not_found" };
 
+export interface CancelMessageOptions {
+  /** Why the links the message carried stop working; `withdrawn` when omitted. */
+  linkReason?: AccessRevocationReason;
+  /** Recorded on the message as why it was canceled, such as `recipient_changed`. */
+  code?: string;
+}
+
+const codePattern = /^[a-z][a-z0-9_]{0,63}$/;
+
 /**
- * Cancel a message that is still queued, such as a waiver request made
- * obsolete before it went out. A message already claimed for sending goes
- * out; one already final stays as it is. Takes the row with SKIP LOCKED, so it
- * never waits on the delivery job: a message the job holds right now is
- * being sent and answers `not_cancelable` as `sending`.
+ * Cancel a message that has not gone out: queued, or claimed and being sent.
+ * Revokes, in the same transaction, the unused links the message carried, so
+ * once the caller commits no email of this message opens anything and the
+ * delivery job never claims it again. Waits for a delivery claim in progress
+ * (a short transaction that waits on nothing a caller holds), so the link that
+ * claim issued is revoked too. A message already sent, failed, or canceled
+ * stays as it is.
  */
 export async function cancelMessage(
   trx: TenantTransaction,
-  _ctx: TenantContext,
+  ctx: TenantContext,
   messageId: string,
+  options: CancelMessageOptions = {},
 ): Promise<CancelMessageResult> {
-  const tenantId = _ctx.tenantId;
+  const tenantId = ctx.tenantId;
   if (!isUuid(messageId)) return { kind: "not_found" };
+  if (options.code !== undefined && !codePattern.test(options.code)) {
+    throw new TypeError("a cancellation code is lowercase letters, digits, and underscores");
+  }
   const { rows } = await sql<{ state: EmailMessageState }>`
     select state from email_messages
      where tenant_id = ${tenantId} and id = ${messageId}
-       for update skip locked`.execute(trx);
+       for update`.execute(trx);
   const row = rows[0];
-  if (!row) {
-    const { rows: seen } = await sql<{ state: EmailMessageState }>`
-      select state from email_messages where tenant_id = ${tenantId} and id = ${messageId}`.execute(
-      trx,
-    );
-    return seen[0] ? { kind: "not_cancelable", state: "sending" } : { kind: "not_found" };
+  if (!row) return { kind: "not_found" };
+  if (row.state !== "queued" && row.state !== "sending") {
+    return { kind: "not_cancelable", state: row.state };
   }
-  if (row.state !== "queued") return { kind: "not_cancelable", state: row.state };
-  await sql`update email_messages set state = 'canceled'
-             where tenant_id = ${tenantId} and id = ${messageId} and state = 'queued'`.execute(trx);
-  return { kind: "canceled" };
+  await sql`update email_messages set state = 'canceled', last_error_code = ${options.code ?? null}
+             where tenant_id = ${tenantId} and id = ${messageId}
+               and state in ('queued', 'sending')`.execute(trx);
+  const revokedLinks = await revokeMessageLinks(
+    trx,
+    tenantId,
+    messageId,
+    options.linkReason ?? "withdrawn",
+  );
+  return { kind: "canceled", inFlight: row.state === "sending", revokedLinks };
+}
+
+/** Revoke the unused, live links one message carried. */
+export async function revokeMessageLinks(
+  trx: TenantTransaction,
+  tenantId: string,
+  messageId: string,
+  reason: AccessRevocationReason,
+): Promise<number> {
+  const { rows } = await sql<{ id: string }>`
+    update guest_access_links set revoked_at = now(), revoked_reason = ${reason}
+     where tenant_id = ${tenantId} and message_id = ${messageId}
+       and consumed_at is null and revoked_at is null
+    returning id`.execute(trx);
+  return rows.length;
 }
 
 export interface MessageStatus {

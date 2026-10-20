@@ -40,6 +40,7 @@ import {
   orderRows,
   refundSentence,
   refundStateText,
+  withParticipant,
 } from "./model.ts";
 import { PartySection } from "./PartySection.tsx";
 import {
@@ -102,6 +103,10 @@ export function ManagePage({
   const heading = useRef<HTMLHeadingElement>(null);
   const linkClick = useLinkClick();
   const alive = useRef(new AbortController());
+  // The page's latest read. One that finishes after a newer read started, or
+  // after the page moved on to a newer link, is dropped; so is one whose own
+  // signal was aborted, as development's double-run effects abort the first.
+  const latestRead = useRef(0);
 
   // The token stays in memory only: out of the address and this history entry now.
   useEffect(() => {
@@ -109,6 +114,21 @@ export function ManagePage({
     const controller = new AbortController();
     alive.current = controller;
     return () => controller.abort();
+  }, []);
+
+  // A link opened in this same tab changes only the fragment, which reloads
+  // nothing. Take its token the same way, and still ask before using it.
+  useEffect(() => {
+    const onHash = () => {
+      if (!window.location.hash.startsWith("#t=")) return;
+      const token = readLinkToken();
+      forgetLinkToken();
+      if (!token) return;
+      latestRead.current += 1;
+      setView({ kind: "landing", token, busy: false, trouble: null });
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   // Focus the page's heading when what the page says changes, so a screen
@@ -123,8 +143,10 @@ export function ManagePage({
   }, [view.kind, focusOnArrival]);
 
   const load = useCallback(async (session: StoredSession) => {
-    const result = await readBooking(session.token, alive.current.signal);
-    if (alive.current.signal.aborted) return;
+    const read = ++latestRead.current;
+    const signal = alive.current.signal;
+    const result = await readBooking(session.token, signal);
+    if (signal.aborted || read !== latestRead.current) return;
     if (result.kind === "ok") {
       setView({ kind: "booking", session, booking: result.value.booking });
       return;
@@ -334,7 +356,13 @@ export function ManagePage({
           session={view.session}
           booking={view.booking}
           heading={heading}
-          onChange={(booking) => setView({ kind: "booking", session: view.session, booking })}
+          onChange={(booking) =>
+            setView((current) =>
+              current.kind === "booking" && current.session.token === view.session.token
+                ? { ...current, booking }
+                : current,
+            )
+          }
           onEnded={(reason) => {
             clearSession();
             setView({ kind: "ended", reason, linkToken: view.session.linkToken ?? null });
@@ -410,7 +438,7 @@ function Loading() {
   );
 }
 
-type Done = { tone: "success" | "info"; title: string; body: string } | null;
+type Done = { tone: "success" | "info"; title: string; body: string; focus?: boolean } | null;
 
 function BookingView({
   brand,
@@ -430,6 +458,10 @@ function BookingView({
   useTitle(`Booking ${booking.reference} · ${brand.name}`);
   const linkClick = useLinkClick();
   const [done, setDone] = useState<Done>(null);
+  const doneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (done?.focus) doneRef.current?.focus();
+  }, [done]);
   const [linkBusy, setLinkBusy] = useState(false);
   const [closing, setClosing] = useState(false);
   const { trip, location } = booking;
@@ -501,16 +533,21 @@ function BookingView({
           </p>
         </div>
         {done && (
-          <Notice tone={done.tone} title={done.title}>
-            {done.body}
-          </Notice>
+          <div ref={doneRef} tabIndex={-1} className="manage-done">
+            <Notice tone={done.tone} title={done.title}>
+              {done.body}
+            </Notice>
+          </div>
         )}
 
         <PartySection
           booking={booking}
           session={session.token}
           operator={brand.name}
-          onSaved={reload}
+          onSaved={async (participant) => {
+            onChange(withParticipant(booking, participant));
+            await reload();
+          }}
           onEnded={() => onEnded("expired")}
         />
         {/* Waiver evidence (G2.15): the party's waivers, self-contained. */}
@@ -580,10 +617,13 @@ function BookingView({
           session={session.token}
           onCanceled={(updated) => {
             onChange(updated);
+            // The dialog's opener is gone with the cancel section, so focus
+            // goes to what happened, at the top.
             setDone({
               tone: "success",
               title: "Your booking is canceled",
               body: `${updated.refund ? refundStateText(updated.refund) : "There is no refund under the policy"}. We've emailed you the details.`,
+              focus: true,
             });
           }}
           onEnded={() => onEnded("expired")}

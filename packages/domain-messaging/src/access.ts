@@ -90,8 +90,12 @@ export interface IssuedAccessLink {
 /**
  * Issue a link in the caller's transaction (the delivery job's claim). Revokes,
  * as `superseded`, the unused links of the same booking, purpose, participant,
- * and subject that other messages carried, so only the newest email's link
- * works.
+ * and subject that older messages carried (written before this one), so the
+ * newest email's link is the one that works. A retry of an older message
+ * never supersedes a newer one's link. A link issued with no message counts
+ * as newer than every message's link, and supersedes those. Links another
+ * transaction holds right now are skipped rather than waited for: that
+ * transaction is using or revoking them, and a claim never waits on a lock.
  */
 export async function issueAccessLink(
   trx: TenantTransaction,
@@ -112,15 +116,29 @@ export async function issueAccessLink(
     throw new RangeError("a link lasts 300 seconds to 14 days");
   }
   const { rows: revoked } = await sql<{ id: string }>`
-    update guest_access_links
+    with older as (
+      select l.id
+        from guest_access_links l
+       where l.tenant_id = ${ctx.tenantId} and l.booking_id = ${input.bookingId}
+         and l.purpose = ${input.purpose}
+         and l.participant_id is not distinct from ${participantId}
+         and l.subject_ref is not distinct from ${subjectRef}
+         and l.consumed_at is null and l.revoked_at is null
+         and ((${messageId}::uuid is null and l.message_id is not null)
+              or (l.message_id is null
+                  and l.created_at < (select m.created_at from email_messages m
+                                       where m.tenant_id = ${ctx.tenantId} and m.id = ${messageId}))
+              or exists (
+                   select 1 from email_messages o, email_messages m
+                    where o.tenant_id = l.tenant_id and o.id = l.message_id
+                      and m.tenant_id = ${ctx.tenantId} and m.id = ${messageId}
+                      and (o.created_at, o.id) < (m.created_at, m.id)))
+       for update of l skip locked)
+    update guest_access_links g
        set revoked_at = now(), revoked_reason = 'superseded'
-     where tenant_id = ${ctx.tenantId} and booking_id = ${input.bookingId}
-       and purpose = ${input.purpose}
-       and participant_id is not distinct from ${participantId}
-       and subject_ref is not distinct from ${subjectRef}
-       and message_id is distinct from ${messageId}
-       and consumed_at is null and revoked_at is null
-    returning id`.execute(trx);
+      from older
+     where g.tenant_id = ${ctx.tenantId} and g.id = older.id
+    returning g.id`.execute(trx);
   const token = newAccessToken();
   const tokenHash = await hashLinkToken(token);
   const { rows } = await sql<{ id: string; expires_at: Date | string }>`

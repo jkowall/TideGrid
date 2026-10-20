@@ -8,10 +8,13 @@
  * responses that read them, never into audit rows, events, logs, or URLs:
  * audit and events record which place changed and which fields, not values.
  *
- * Lock order: the booking row (FOR UPDATE), then the participant at the place.
- * A cancellation locks the checkout session and then the booking, so the two
- * serialize on the booking: a participant written after a cancellation is
- * refused, by this service and by the table's trigger.
+ * Lock order: the booking row, then the participant at the place, both FOR NO
+ * KEY UPDATE. A cancellation locks the checkout session and then the booking
+ * the same way, so the two serialize on the booking: a participant written
+ * after a cancellation is refused, by this service and by the table's trigger.
+ * NO KEY UPDATE, not UPDATE, so the email delivery job's foreign key checks on
+ * these rows never wait behind a change that may itself wait for that job
+ * (a hook that cancels a message being sent).
  */
 import { isUuid, type TenantContext, type TenantTransaction } from "@tidegrid/database";
 import { sql } from "kysely";
@@ -205,7 +208,7 @@ export async function putParticipant(
       from bookings b
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
      where b.tenant_id = ${ctx.tenantId} and b.id = ${input.bookingId}
-       for update of b`.execute(trx);
+       for no key update of b`.execute(trx);
   const booking = bookings[0];
   if (!booking) return { kind: "booking_not_found" };
   if (booking.state !== "confirmed") return { kind: "booking_canceled" };
@@ -218,7 +221,7 @@ export async function putParticipant(
     select ${participantColumns} from booking_participants
      where tenant_id = ${ctx.tenantId} and booking_id = ${input.bookingId}
        and position = ${input.position}
-       for update`.execute(trx);
+       for no key update`.execute(trx);
   const current = existing[0];
 
   if (!current) {
