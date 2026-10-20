@@ -257,6 +257,9 @@ Events carry identifiers only.
 | success not honored | `checkout.session_unfulfilled`, `payment_refund.requested`, `finalization_exception.raised` | `checkout.finalization_exception.raised` |
 | refund settled | `payment_refund.succeeded`, `payment_refund.failed` | `payment.refund.succeeded`, `payment.refund.failed` |
 | provider id recorded | `payment.provider_recorded` | |
+| confirmation email not written (lane 1) | `booking.confirmation_email_failed` | `booking.confirmation_email_failed` |
+
+The confirmation email is written in the confirming transaction under a savepoint (lane 1, review F2). A failure writing it, such as a stored value the email cannot carry, rolls back only the email: the booking confirms, its money and seats stay with it, and the audit row and event above tell staff that no email went out. Subjects, previews, and recipients' names are made single-line from stored data (`singleLine`), so a product name with a tab or a newline no longer fails.
 
 Hold transitions keep their own `hold.*` audit rows and `inventory.hold.*` events.
 

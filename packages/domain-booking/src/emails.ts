@@ -26,6 +26,7 @@ import {
   partyText,
   receiptRows,
   shortDay,
+  singleLine,
   tripWhen,
 } from "./format.ts";
 
@@ -100,7 +101,7 @@ function receipt(detail: BookingDetailView): EmailBlock {
 
 function subject(prefix: string, detail: BookingDetailView): string {
   const day = shortDay(detail.trip.startsAt, detail.trip.timeZone);
-  return clean(`${prefix}: ${detail.trip.productName}, ${day}`, 200);
+  return singleLine(`${prefix}: ${detail.trip.productName}, ${day}`, 200);
 }
 
 /**
@@ -141,11 +142,11 @@ export async function enqueueConfirmationEmail(
     dedupeKey: `booking.confirmation:${bookingId}`,
     template: CONFIRMATION_TEMPLATE.key,
     templateVersion: CONFIRMATION_TEMPLATE.version,
-    to: { email: detail.booker.email, name: clean(detail.booker.name, 120) },
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
     bookingId,
     content: {
       subject: subject(`Booking ${detail.reference} confirmed`, detail),
-      preview: clean(`See you ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}.`, 200),
+      preview: singleLine(`See you ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}.`, 200),
       blocks,
     },
     accessLink: {
@@ -193,10 +194,10 @@ export async function enqueueManageLinkEmail(
     dedupeKey: `booking.manage_link:${bookingId}:${requestKey}`,
     template: MANAGE_LINK_TEMPLATE.key,
     templateVersion: MANAGE_LINK_TEMPLATE.version,
-    to: { email: detail.booker.email, name: clean(detail.booker.name, 120) },
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
     bookingId,
     content: {
-      subject: clean(`Your link to booking ${detail.reference}`, 200),
+      subject: singleLine(`Your link to booking ${detail.reference}`, 200),
       preview: "Open your booking to name your party or cancel within the policy.",
       blocks,
     },
@@ -255,7 +256,7 @@ export async function enqueueCancellationEmail(
     dedupeKey: `booking.canceled:${bookingId}`,
     template: CANCELED_TEMPLATE.key,
     templateVersion: CANCELED_TEMPLATE.version,
-    to: { email: detail.booker.email, name: clean(detail.booker.name, 120) },
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
     bookingId,
     content: { subject: subject(`Booking ${detail.reference} canceled`, detail), blocks },
   });

@@ -401,7 +401,28 @@ async function book(
   });
   // The confirmation email with its receipt and management link (lane 1),
   // enqueued with the booking, once per booking; the delivery job sends it.
-  await enqueueConfirmationEmail(trx, ctx, booking.id);
+  // An email problem must never undo a paid booking: it is written under a
+  // savepoint, and a failure leaves the booking confirmed, with an audited
+  // event for staff, and no email.
+  await sql`savepoint confirmation_email`.execute(trx);
+  try {
+    await enqueueConfirmationEmail(trx, ctx, booking.id);
+    await sql`release savepoint confirmation_email`.execute(trx);
+  } catch (error) {
+    await sql`rollback to savepoint confirmation_email`.execute(trx);
+    const code = (error as { code?: unknown } | null)?.code;
+    await record(trx, ctx, {
+      action: "booking.confirmation_email_failed",
+      subjectType: "booking",
+      subjectId: booking.id,
+      after: {
+        error: error instanceof Error ? error.name : "unknown",
+        ...(typeof code === "string" ? { code } : {}),
+      },
+      topic: "booking.confirmation_email_failed",
+      payload: { bookingId: booking.id },
+    });
+  }
   // Lane 1 contract: in-transaction work other modules attach to a new
   // booking (waiver assignment, G2.15) commits or rolls back with it.
   const { rows: products } = await sql<{ product_id: string }>`
