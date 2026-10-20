@@ -7,10 +7,11 @@
  * route is tried from both tenants, with each role.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { createDb } from "@tidegrid/database";
+import { createDb, inTenantTransaction } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks } from "@tidegrid/domain-booking";
-import { TEST_FAKE_SECRET } from "@tidegrid/domain-booking/testing";
+import { guestContext, TEST_FAKE_SECRET } from "@tidegrid/domain-booking/testing";
+import { openGuestSession } from "@tidegrid/domain-messaging";
 import {
   adult,
   bookParty,
@@ -450,5 +451,108 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
       body: { reason: "x" },
     });
     expect(forged.json.error?.code).toBe("origin_not_allowed");
+  });
+
+  /** Lane 1's booking session for a booking its checkout just made, as the paid page opens it. */
+  async function bookingSession(
+    t: Tenant,
+    booked: { bookingId: string; checkoutSessionId: string },
+  ) {
+    const ctx = guestContext(t.id);
+    const opened = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      openGuestSession(trx, ctx, {
+        checkout: { checkoutSessionId: booked.checkoutSessionId, bookingId: booked.bookingId },
+      }),
+    );
+    return opened.token;
+  }
+
+  it("shows the booker their party's waivers in the booking session: names and statuses only", async () => {
+    const p = await party(A);
+    const session = await bookingSession(A, p.booked);
+    const read = (o: { origin?: string; bearer?: string }) =>
+      request("GET", "/v1/public/manage/waivers", o);
+    // No session, an unknown one, another operator's site, and a waiver signing session.
+    expect((await read({ origin: guestOf(A) })).json.error?.code).toBe("session_required");
+    expect((await read({ origin: guestOf(A), bearer: "x".repeat(43) })).json.error?.code).toBe(
+      "session_expired",
+    );
+    expect((await read({ origin: guestOf(B), bearer: session })).json.error?.code).toBe(
+      "session_expired",
+    );
+    const signing = await openSession(A, p.annToken);
+    expect((await read({ origin: guestOf(A), bearer: signing.sessionSecret })).status).toBe(401);
+    expect(
+      (
+        await request("POST", "/v1/public/waiver-sessions/current/signature", {
+          origin: guestOf(A),
+          bearer: signing.sessionSecret,
+          body: signature(signing),
+        })
+      ).status,
+    ).toBe(201);
+
+    const res = await read({ origin: guestOf(A), bearer: session });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.json.waivers).toEqual({
+      applies: true,
+      unnamedPlaces: 0,
+      participants: [
+        {
+          position: 1,
+          name: "Ann Adult",
+          minor: false,
+          status: "signed",
+          signer: "participant",
+          signedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+          sentTo: null,
+        },
+        {
+          position: 2,
+          name: "Kit Minor",
+          minor: true,
+          status: "waiting",
+          signer: "guardian",
+          signedAt: null,
+          sentTo: "g•••@example.test",
+        },
+      ],
+    });
+    // Nothing that identifies a record, a guardian, or an address in full.
+    const raw = new TextDecoder().decode(res.bytes);
+    const [ids] = await admin<{ ids: string[] }[]>`
+      select array_agg(x) as ids from (
+        select id::text as x from public.waiver_requests where booking_id = ${p.booked.bookingId}
+        union all select participant_id::text from public.waiver_requests
+                   where booking_id = ${p.booked.bookingId}
+        union all select id::text from public.waiver_evidence where booking_id = ${p.booked.bookingId}
+        union all select ${p.booked.bookingId}::text) found`;
+    expect(ids?.ids.length).toBeGreaterThanOrEqual(6);
+    for (const value of [...(ids?.ids ?? []), "Gus Guardian", "gus@example.test"]) {
+      expect(raw).not.toContain(value);
+    }
+
+    // Canceled: nothing is needed, so the page shows nothing.
+    const managed = await request("GET", "/v1/public/manage/booking", {
+      origin: guestOf(A),
+      bearer: session,
+    });
+    const refund = (managed.json.booking as { cancellationTerms: { refundAmount: number } })
+      .cancellationTerms.refundAmount;
+    const canceled = await request("POST", "/v1/public/manage/cancellation", {
+      origin: guestOf(A),
+      bearer: session,
+      headers: { "idempotency-key": `k-${randomUUID()}` },
+      body: { expectedRefundAmount: refund },
+    });
+    expect(canceled.status).toBe(200);
+    const after = await read({ origin: guestOf(A), bearer: session });
+    expect(after.json.waivers).toMatchObject({ applies: false });
+    expect(
+      (after.json.waivers as { participants: { status: string }[] }).participants.map(
+        (x) => x.status,
+      ),
+    ).toEqual(["not_needed", "not_needed"]);
   });
 });
