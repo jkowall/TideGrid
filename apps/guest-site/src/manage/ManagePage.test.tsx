@@ -1366,12 +1366,10 @@ describe("canceling", () => {
   it("says plainly when canceling gives nothing back, and asks for a refund of nothing", async () => {
     const calls = await shown({}, { booking: withTerms(managedBooking(), terms("none")) });
     expect(cardText()).toContain(
-      "If you cancel now: There's no refund now: the policy refunds nothing after its cutoff.",
+      "If you cancel now: You get no refund: the cutoff for a refund has passed.",
     );
     const dialog = await askToCancel();
-    expect(text(dialog)).toContain(
-      "There's no refund now: the policy refunds nothing after its cutoff.",
-    );
+    expect(text(dialog)).toContain("You get no refund: the cutoff for a refund has passed.");
     confirmCancel(dialog);
     expect(text(await noticeTitled("Your booking is canceled"))).toContain(
       "There is no refund under the policy. We've emailed you the details.",
@@ -1459,9 +1457,7 @@ describe("canceling", () => {
     const changed = await within(dialog).findByRole("alert");
     expect(text(changed)).toContain("The refund changed");
     expect(text(changed)).toContain("The policy's cutoff passed while you were deciding.");
-    expect(text(dialog)).toContain(
-      "There's no refund now: the policy refunds nothing after its cutoff.",
-    );
+    expect(text(dialog)).toContain("You get no refund: the cutoff for a refund has passed.");
     expect(text(dialog)).not.toContain("You get a full refund");
     // Nothing was canceled, and the terms were read again.
     expect(server.booking.state).toBe("confirmed");
@@ -1473,9 +1469,7 @@ describe("canceling", () => {
       `Bearer ${sessionToken}`,
     );
     // The card behind the dialog says the same.
-    expect(cardText()).toContain(
-      "There's no refund now: the policy refunds nothing after its cutoff.",
-    );
+    expect(cardText()).toContain("You get no refund: the cutoff for a refund has passed.");
     // The guest decides again: the new amount, and a new key.
     confirmCancel(dialog);
     expect(text(await noticeTitled("Your booking is canceled"))).toContain(
@@ -1508,9 +1502,7 @@ describe("canceling", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const again = await askToCancel();
     expect(within(again).queryByText("The refund changed")).toBeNull();
-    expect(text(again)).toContain(
-      "There's no refund now: the policy refunds nothing after its cutoff.",
-    );
+    expect(text(again)).toContain("You get no refund: the cutoff for a refund has passed.");
   });
 
   it("closes the dialog, and says so in the card, when the terms changed to something the guest cannot cancel under", async () => {

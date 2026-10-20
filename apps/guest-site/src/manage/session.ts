@@ -37,7 +37,12 @@ function storage(): Storage | null {
 
 /** The tab's session, unless it has expired by the device's clock or is unreadable. */
 export function loadSession(now: number = Date.now()): StoredSession | null {
-  const raw = storage()?.getItem(KEY);
+  let raw: string | null | undefined;
+  try {
+    raw = storage()?.getItem(KEY);
+  } catch {
+    return null;
+  }
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as Partial<StoredSession>;
