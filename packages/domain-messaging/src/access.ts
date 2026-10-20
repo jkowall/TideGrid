@@ -243,12 +243,30 @@ export async function redeemAccessLink(
   return { kind: "invalid" };
 }
 
+/** Reasons that close a subject's access: its pending email must not go out either. */
+const closingReasons: ReadonlySet<AccessRevocationReason> = new Set([
+  "recipient_changed",
+  "completed",
+  "withdrawn",
+  "booking_canceled",
+]);
+
 /**
  * Revoke the unused links of one booking and purpose, optionally of one
  * participant and subject: a waiver signed (completed), a requirement or
  * participant removed (withdrawn), a recipient corrected, a booking canceled.
- * Answers how many were revoked. Used links stay as they are; their sessions
- * are revoked with `revokeGuestSessions`.
+ * Answers how many links were revoked. Used links stay as they are; their
+ * sessions are revoked with `revokeGuestSessions`.
+ *
+ * For those four reasons it also closes the email that would carry a link to
+ * the same booking, purpose, participant, and subject and has not gone out:
+ * every such message written before this transaction, queued or being sent,
+ * is canceled (`recipient_changed`, or `access_withdrawn`), before the links
+ * are revoked. It takes those messages' row locks first, waiting for a
+ * delivery claim in progress, so the link that claim issued is revoked too,
+ * and a claim that comes later finds the message canceled. A link that does
+ * not exist yet, because its email was never claimed, is thereby never
+ * minted. `staff` and `superseded` close no email.
  */
 export async function revokeAccessLinks(
   trx: TenantTransaction,
@@ -266,6 +284,24 @@ export async function revokeAccessLinks(
   if (!isUuid(input.bookingId)) throw new TypeError("bookingId must be a UUID");
   const byParticipant = input.participantId !== undefined;
   const bySubject = input.subjectRef !== undefined;
+  if (closingReasons.has(input.reason)) {
+    const { rows: pending } = await sql<{ id: string }>`
+      select id from email_messages
+       where tenant_id = ${ctx.tenantId} and booking_id = ${input.bookingId}
+         and link_purpose = ${input.purpose}
+         and (${!byParticipant} or participant_id is not distinct from ${input.participantId ?? null})
+         and (${!bySubject} or subject_ref is not distinct from ${input.subjectRef ?? null})
+         and state in ('queued', 'sending') and created_at < now()
+       order by id
+         for update`.execute(trx);
+    if (pending.length > 0) {
+      const code = input.reason === "recipient_changed" ? "recipient_changed" : "access_withdrawn";
+      await sql`
+        update email_messages set state = 'canceled', last_error_code = ${code}
+         where tenant_id = ${ctx.tenantId} and id = any(${pending.map((m) => m.id)}::uuid[])
+           and state in ('queued', 'sending')`.execute(trx);
+    }
+  }
   const { rows } = await sql<{ id: string }>`
     update guest_access_links
        set revoked_at = now(), revoked_reason = ${input.reason}
