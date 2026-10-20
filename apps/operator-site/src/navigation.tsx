@@ -32,6 +32,14 @@ export function useNavigate(): (to: string) => void {
   return useContext(NavigationContext);
 }
 
+/**
+ * This page's address, for "Sign in again" (G2.12c): loading it afresh asks
+ * the person to sign in here, and the console brings them back to it.
+ */
+export function hereAddress(): string {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
 /** Whether a click should open a new tab or window the browser's own way. */
 export function isModifiedClick(event: MouseEvent<HTMLAnchorElement>): boolean {
   return event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0;

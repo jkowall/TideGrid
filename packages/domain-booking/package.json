@@ -13,6 +13,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@tidegrid/contracts": "workspace:*",
     "@tidegrid/database": "workspace:*",
     "@tidegrid/domain-inventory": "workspace:*",
     "@tidegrid/domain-payments": "workspace:*",

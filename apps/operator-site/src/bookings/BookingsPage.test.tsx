@@ -120,8 +120,13 @@ describe("which day the list opens on", () => {
     const heading = await dayHeading(/^Wednesday, November 4/);
     expect(text(heading)).toBe("Wednesday, November 4 Today");
     await tripSection(/Sunset Harbor Cruise/);
-    // The zone first, then the day in that zone.
-    expect(calls.map((c) => c.path.split("/").pop())).toEqual(["catalog", "bookings"]);
+    // The zone first, then the day in that zone, then its totals (G2.12c).
+    await screen.findByRole("heading", { level: 3, name: "Day totals" });
+    expect(calls.map((c) => c.path.split("/").pop())).toEqual([
+      "catalog",
+      "bookings",
+      "booking-day-totals",
+    ]);
     const [, asked] = calls;
     expect(asked?.query.get("date")).toBe(wednesday);
     expect(asked?.query.has("tripId")).toBe(false);
@@ -238,6 +243,59 @@ describe("which day the list opens on", () => {
     await tripSection(/Sunset Harbor Cruise/);
     expect(window.location.search).toBe("");
   });
+
+  it("says when the address's day was beyond two years, and which day it shows instead", async () => {
+    vi.setSystemTime(new Date("2026-11-04T05:00:00Z"));
+    window.history.replaceState(null, "", "/bookings?day=9999-12-31");
+    api({ [route.day()]: listFor() });
+    renderPage();
+    await screen.findByRole("heading", { name: /^No trips on / });
+    const notice = document.querySelector(".tg-notice--info");
+    expect(text(notice?.querySelector(".tg-notice__title"))).toBe(
+      "Showing Friday, November 3, 2028 instead",
+    );
+    expect(text(notice?.querySelector(".tg-notice__body"))).toBe(
+      "The address asked for Fri, Dec 31, 9999. The console shows days within two years of today, so it opened the nearest one.",
+    );
+  });
+
+  it.each(["2026-02-30", "0000-01-01", "soon", "2026-11-4"])(
+    "says the address's day %j doesn't exist, and that today opened instead",
+    async (asked) => {
+      window.history.replaceState(null, "", `/bookings?day=${asked}`);
+      api({ [route.day()]: listFor() });
+      renderPage();
+      await tripSection(/Sunset Harbor Cruise/);
+      const notice = document.querySelector(".tg-notice--info");
+      expect(notice?.getAttribute("role")).toBe("status");
+      expect(text(notice?.querySelector(".tg-notice__title"))).toBe(
+        "Showing Wednesday, November 4 instead",
+      );
+      expect(text(notice?.querySelector(".tg-notice__body"))).toBe(
+        "The address asked for a day that doesn't exist, so the console opened today.",
+      );
+      // What was asked is never repeated on the page.
+      expect(document.body.textContent).not.toContain(asked);
+    },
+  );
+
+  it("drops the notice once the person moves to another day, and gives none for a real day", async () => {
+    window.history.replaceState(null, "", "/bookings?day=2026-02-30");
+    api({ [route.day()]: listFor() });
+    renderPage();
+    await tripSection(/Sunset Harbor Cruise/);
+    expect(document.querySelector(".tg-notice--info")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Next day" }));
+    await waitFor(() => expect(window.location.search).toBe("?day=2026-11-05"));
+    expect(document.querySelector(".tg-notice--info")).toBeNull();
+
+    cleanup();
+    window.history.replaceState(null, "", "/bookings?day=2026-11-05");
+    api({ [route.day()]: listFor() });
+    renderPage();
+    await screen.findByRole("heading", { level: 2, name: /Thursday, November 5/ });
+    expect(document.querySelector(".tg-notice--info")).toBeNull();
+  });
 });
 
 describe("the day's trips and bookings", () => {
@@ -255,7 +313,12 @@ describe("the day's trips and bookings", () => {
       "6:00 PM, Sunset Harbor Cruise",
     );
     const order = screen.getAllByRole("heading", { level: 3 }).map((h) => text(h));
-    expect(order).toEqual(["8:00 AM, Private Half-Day Charter", "6:00 PM, Sunset Harbor Cruise"]);
+    // The day's totals come first (G2.12c), then the trips in departure order.
+    expect(order).toEqual([
+      "Day totals",
+      "8:00 AM, Private Half-Day Charter",
+      "6:00 PM, Sunset Harbor Cruise",
+    ]);
 
     expect(parts(charter.querySelector(".bk-trip__meta"))).toEqual([
       "Boat: Blue Heron",
@@ -930,7 +993,10 @@ describe("when the list does not load", () => {
         expect(within(alert).getByRole(role, { name })).toBeTruthy();
       }
       if (status === 401) {
-        expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe("/");
+        // This page again, so signing in comes back here (G2.12c).
+        expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe(
+          "/bookings",
+        );
       }
     },
   );
@@ -1535,11 +1601,11 @@ describe("the page's own headings and landmarks", () => {
     await tripSection(/Sunset Harbor Cruise/);
     expect(screen.getAllByRole("heading", { level: 1 }).map((h) => text(h))).toEqual(["Bookings"]);
     expect(text(container.querySelector(".tg-eyebrow"))).toBe(tenantName);
-    // The day is the one h2, with each trip an h3 beneath it.
+    // The day is the one h2, with its totals and each trip an h3 beneath it.
     expect(screen.getAllByRole("heading", { level: 2 }).map((h) => text(h))).toEqual([
       "Wednesday, November 4 Today",
     ]);
-    expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { level: 3 })).toHaveLength(3);
     expect(screen.getByRole("navigation", { name: "Days" })).toBeTruthy();
   });
 });

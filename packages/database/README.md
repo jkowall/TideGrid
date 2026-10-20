@@ -105,6 +105,16 @@ Two more cross-tenant reads join `app.resolve_hostname` and `app.capacity_hold_s
 - `app.resolve_payment_account(provider, account_ref)` returns the tenant id and the account's status for a connected account. A provider callback names an account, not a tenant, and the webhook must record the event inside the owning tenant's transaction. It runs only after the provider's signature verifies, an id grants nothing, and everything that follows runs under row-level security. It returns accounts whatever their status, because money that moved must be recorded.
 - `app.checkout_sweep_tenants(limit, grace_seconds)` returns, at most 1,000, the tenant ids with an open checkout past its instant, or a refund requested or an inbox event received at least the grace period ago (0 to 3,600 seconds) and never settled or processed. It reveals that some tenant has such work, a weaker signal than the shared id sequences already give, and the sweep then works inside each tenant's own transaction, for the reasons the hold sweep's argument gives.
 
+## Booking notes
+
+The console completion migration (G2.12c, numbered 0008 on its branch) adds one tenant-owned table, `booking_notes`, under rules 1 to 10. The commands are in the [checkout contract](../domain-booking/README.md#console-completion-g212c).
+
+- **Append-only for every role.** The runtime keeps the default SELECT and INSERT and receives nothing more. UPDATE, DELETE, and TRUNCATE raise for every role, the owner included (`app.reject_mutation`).
+- **The author is the transaction's.** A trigger (`app.stamp_booking_note`, an invoker function with `search_path` pinned and no EXECUTE for anyone) sets the author from `app.actor_id`, and the request id and the time from the transaction, whatever the insert names. It refuses a note unless the actor is staff with a UUID id (SQLSTATE 42501, `booking_notes_staff_author`), so a guest, the system, or an admin connection without context cannot write one.
+- **Composite keys.** The note names its booking and its author through foreign keys that carry `tenant_id`: a note can name only its own tenant's booking, and only a member of that tenant as its author.
+- **The body** is 1 to 500 characters with at least one visible character; line breaks are allowed and other control characters are not. The CHECK refuses every C0 control but the line break, DEL, and the C1 controls (U+0080 to U+009F), and wants one character outside white space, those controls, and the Unicode spaces, joiners, marks, fillers, and variation selectors that show nothing (the same set as the contract's `invisibleCharacters`). It is text a person typed: it never enters an audit row, an event, a log, or the idempotency store, whose kept answer to an added note holds the note's id, author, and time only.
+- **Who reads it.** Owners and booking staff hold `notes.read` and `notes.write`; finance holds neither (owner decision, 2026-10-19), as a note can name a guest. Row-level security keeps notes to their tenant; the role check is the API's.
+
 ## Tests
 
 - `pnpm test` runs unit tests.

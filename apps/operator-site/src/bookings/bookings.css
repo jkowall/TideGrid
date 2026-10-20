@@ -712,6 +712,197 @@
   font-size: var(--text-sm);
 }
 
+/* Finding a booking (G2.12c): quick find, and the way to the full search ----- */
+
+.bk-finders {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-6);
+}
+.bk-finders .bk-find {
+  flex: 0 1 30rem;
+}
+.bk-search-link {
+  gap: var(--space-2);
+  color: var(--link);
+  font-weight: var(--weight-medium);
+}
+.bk-search-link .tg-icon {
+  flex: none;
+}
+
+/* A day's totals and its export (G2.12c) -------------------------------------- */
+
+.bk-totals {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.bk-totals__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+}
+.bk-totals__title {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+/* Headings take focus only from code, after Try again; like the page's own
+   heading, they show no ring for it. */
+.bk-totals__title:focus,
+.bd-notes h2:focus {
+  outline: none;
+}
+@media (max-width: 29.99rem) {
+  .bk-totals__head > .tg-button {
+    flex: 1 1 100%;
+  }
+}
+.bk-totals__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+@media (max-width: 29.99rem) {
+  .bk-totals__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.bk-total {
+  display: grid;
+  align-content: start;
+  gap: 0.125rem;
+  min-width: 0;
+}
+.bk-total dt {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.bk-total dd {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+/* The bottom line, marked with a Tide Lime rule as the console marks what is
+   selected; its label says what it is. */
+.bk-total--net {
+  padding-left: var(--space-3);
+  box-shadow: inset 3px 0 0 var(--tg-tide-lime);
+}
+.bk-totals__note {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.bk-totals__export {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.bk-totals__export .tg-icon {
+  flex: none;
+  margin-top: 0.15em;
+}
+.bk-totals__export--done .tg-icon {
+  color: var(--status-ready);
+}
+.bk-totals__export--failed .tg-icon {
+  color: var(--status-blocked);
+}
+
+/* A booking's notes (G2.12c) --------------------------------------------------- */
+
+.bd-notes {
+  grid-column: 1 / -1;
+}
+.bd-notes__form {
+  max-width: 44rem;
+}
+.bd-notes__input {
+  min-height: 6rem;
+  padding-block: var(--space-3);
+  line-height: var(--leading-body);
+  resize: vertical;
+}
+.bd-notes__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.bd-notes__count {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.bd-notes__count--over {
+  color: var(--status-blocked);
+  font-weight: var(--weight-semibold);
+}
+.bd-notes__list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bd-note {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-left: 2px solid var(--border-control);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--surface-sunken);
+}
+.bd-note__body {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-strong);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.bd-note__meta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.bd-note__author {
+  color: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+.bd-notes__empty,
+.bd-notes__more {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.bd-notes__skeleton {
+  display: grid;
+  gap: var(--space-2);
+}
+.bd-notes__skeleton .tg-skeleton {
+  --surface-sunken: #34403b;
+  --surface-raised: #4a5852;
+}
+
 /* Paper: black on white, without the rail. The roster prints alone, under its
    own heading, with the table's head on every page. Paper must beat every
    surface, text, and status color the dark console sets, whatever their
@@ -762,6 +953,10 @@
   .bk-find,
   .bk-bar__nav,
   .bk-more,
+  .bk-search-link,
+  .bk-totals .tg-button,
+  .bd-notes__form,
+  .bs-form,
   .tg-visually-hidden {
     display: none !important;
   }

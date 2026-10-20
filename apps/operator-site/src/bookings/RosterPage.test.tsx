@@ -561,12 +561,41 @@ describe("the sheet", () => {
     expect(within(tools).getAllByRole("button")).toHaveLength(1);
   });
 
-  it("lets a keyboard reach a scrolling table", async () => {
-    api({ [route.roster(tripId)]: () => json(rosterBody()) });
-    renderPage("owner");
-    await loaded();
-    const region = screen.getByRole("region", { name: "Bookings on this trip" });
-    expect(region.getAttribute("tabindex")).toBe("0");
-    expect(region.querySelector("table")).not.toBeNull();
+  /** jsdom lays nothing out: give the roster's region the widths a browser would. */
+  function withRegionWidths(scrollWidth: number, clientWidth: number) {
+    const proto = HTMLElement.prototype;
+    const scroll = vi.spyOn(proto, "scrollWidth", "get").mockReturnValue(scrollWidth);
+    const client = vi.spyOn(proto, "clientWidth", "get").mockReturnValue(clientWidth);
+    return () => {
+      scroll.mockRestore();
+      client.mockRestore();
+    };
+  }
+
+  it("lets a keyboard reach the table while it scrolls, as on a phone", async () => {
+    const restore = withRegionWidths(640, 343);
+    try {
+      api({ [route.roster(tripId)]: () => json(rosterBody()) });
+      renderPage("owner");
+      await loaded();
+      const region = screen.getByRole("region", { name: "Bookings on this trip" });
+      expect(region.getAttribute("tabindex")).toBe("0");
+      expect(region.querySelector("table")).not.toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves the region out of the tab order when the table fits, as on a desktop (G2.12c)", async () => {
+    const restore = withRegionWidths(900, 900);
+    try {
+      api({ [route.roster(tripId)]: () => json(rosterBody()) });
+      renderPage("owner");
+      await loaded();
+      const region = screen.getByRole("region", { name: "Bookings on this trip" });
+      expect(region.hasAttribute("tabindex")).toBe(false);
+    } finally {
+      restore();
+    }
   });
 });

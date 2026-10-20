@@ -1,5 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { createLogger, newRequestId } from "@tidegrid/observability";
+import type { Context, Next } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { requireStaffOrigin } from "./auth/guards.ts";
@@ -13,6 +14,7 @@ import { registerBookingStaffRoutes } from "./routes/bookings-staff.ts";
 import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
 import { registerCatalogStaffRoutes } from "./routes/catalog-staff.ts";
 import { registerCheckoutPublicRoutes } from "./routes/checkout-public.ts";
+import { registerConsoleStaffRoutes } from "./routes/console-staff.ts";
 import { registerFakeProviderRoutes } from "./routes/fake-provider.ts";
 import { registerHoldStaffRoutes } from "./routes/holds-staff.ts";
 import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.ts";
@@ -84,6 +86,16 @@ export function createApp(deps: AppDeps = {}) {
     })(c, next);
   });
 
+  // Staff and sign-in answers are private, and no cache keeps any of them:
+  // registered before the guards, so their refusals are no-store too (G2.12c).
+  const noStore = async (c: Context<AppEnv>, next: Next) => {
+    await next();
+    c.header("Cache-Control", "no-store");
+  };
+  app.use("/v1/auth/*", noStore);
+  app.use("/v1/staff/*", noStore);
+  app.use("/v1/me", noStore);
+
   app.use("/v1/auth/*", requireConsoleGateway, requireStaffOrigin);
   app.use("/v1/staff/*", requireConsoleGateway, requireStaffOrigin);
   app.use("/v1/me", requireConsoleGateway);
@@ -141,6 +153,8 @@ export function createApp(deps: AppDeps = {}) {
   registerPaymentWebhookRoutes(app, deps);
   registerFakeProviderRoutes(app);
   registerBookingStaffRoutes(app, deps);
+  // Console completion (G2.12c): search, day totals and export, booking notes.
+  registerConsoleStaffRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",

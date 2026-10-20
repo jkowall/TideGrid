@@ -17,6 +17,7 @@ import { Wordmark } from "./Gate.tsx";
 import { ConsoleLink, NavigationProvider } from "./navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "./PageHeader.tsx";
 import { roleLabels } from "./roles.ts";
+import { SearchPage } from "./search/SearchPage.tsx";
 
 export { roleLabels } from "./roles.ts";
 
@@ -32,6 +33,7 @@ export type Route =
   | { kind: "overview" }
   | { kind: "calendar" }
   | { kind: "bookings" }
+  | { kind: "search" }
   | { kind: "booking"; bookingId: string }
   | { kind: "exceptions" }
   | { kind: "roster"; tripId: string }
@@ -44,6 +46,8 @@ export function routeOf(path: string): Route {
   if (path === "/") return { kind: "overview" };
   if (path === "/calendar") return { kind: "calendar" };
   if (path === "/bookings") return { kind: "bookings" };
+  // G2.12c. Searches carry no terms in the address, only the page.
+  if (path === "/bookings/search") return { kind: "search" };
   if (path === "/exceptions") return { kind: "exceptions" };
   const booking = bookingPath.exec(path)?.[1];
   if (booking && isUuid(booking)) return { kind: "booking", bookingId: booking.toLowerCase() };
@@ -57,6 +61,7 @@ const placeOf: Record<Route["kind"], { section: string | null; title: string }> 
   overview: { section: "/", title: "Overview" },
   calendar: { section: "/calendar", title: "Calendar" },
   bookings: { section: "/bookings", title: "Bookings" },
+  search: { section: "/bookings", title: "Search bookings" },
   booking: { section: "/bookings", title: "Booking" },
   roster: { section: "/bookings", title: "Roster" },
   exceptions: { section: "/exceptions", title: "Payment exceptions" },
@@ -344,6 +349,9 @@ export function ConsoleShell({
       page = (
         <BookingsPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />
       );
+      break;
+    case "search":
+      page = <SearchPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />;
       break;
     case "booking":
       page = (
