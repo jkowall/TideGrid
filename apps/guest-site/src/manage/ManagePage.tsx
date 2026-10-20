@@ -381,7 +381,8 @@ function RenewalNotice({ renewal }: { renewal: Renewal }) {
     return (
       <Notice tone="success" title="Check your email">
         If this link belongs to a booking here, we've sent a new one to the email address it was
-        booked with. It can take a minute to arrive.
+        booked with. It can take a minute to arrive. We send at most three new links an hour: if
+        you've asked several times, use the newest email, or wait an hour and ask again.
       </Notice>
     );
   }

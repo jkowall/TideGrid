@@ -607,6 +607,10 @@ describe("a link that does not open the booking", () => {
     expect(text(notice)).toContain(
       "If this link belongs to a booking here, we've sent a new one to the email address it was booked with. It can take a minute to arrive.",
     );
+    // The API answers alike past its hourly limit, so the copy says what that means.
+    expect(text(notice)).toContain(
+      "We send at most three new links an hour: if you've asked several times, use the newest email, or wait an hour and ask again.",
+    );
     expect(notice.getAttribute("role")).toBe("status");
     const [renewal] = callsTo(calls, "renew");
     expect(renewal?.method).toBe("POST");
