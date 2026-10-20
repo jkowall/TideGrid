@@ -28,9 +28,10 @@ import {
   type TenantTransaction,
 } from "@tidegrid/database";
 import { releaseHold } from "@tidegrid/domain-inventory";
+import { cancelMessage } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
-import { enqueueCancellationEmail } from "./emails.ts";
+import { CONFIRMATION_TEMPLATE, enqueueCancellationEmail, MANAGE_LINK_TEMPLATE } from "./emails.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import { iso, record } from "./views.ts";
 
@@ -362,6 +363,19 @@ export async function cancelBooking(
         reason: "booking_canceled",
       },
     });
+  }
+  // The booking's own email still waiting to go out (a confirmation in its
+  // retry backoff, a link asked for a moment ago) would arrive after the
+  // cancellation's, saying the booking stands. Cancel it. Its links keep
+  // working, so the guest can still open the canceled booking and its refund.
+  const { rows: pending } = await sql<{ id: string }>`
+    select id from email_messages
+     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
+       and template in (${CONFIRMATION_TEMPLATE.key}, ${MANAGE_LINK_TEMPLATE.key})
+       and state in ('queued', 'sending')
+     order by id`.execute(trx);
+  for (const message of pending) {
+    await cancelMessage(trx, ctx, message.id, { code: "booking_canceled", revokeLinks: false });
   }
   await enqueueCancellationEmail(trx, ctx, input.bookingId);
   await hooks.bookingCanceled?.(trx, ctx, {

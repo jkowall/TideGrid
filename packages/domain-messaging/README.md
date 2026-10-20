@@ -78,6 +78,7 @@ issueAccessLink(trx, ctx, { bookingId, participantId?, purpose, subjectRef?, mes
 cancelMessage(trx, ctx, messageId, options?: {
   linkReason?: AccessRevocationReason; // why its links stop working; withdrawn by default
   code?: string;                       // why it was canceled, such as recipient_changed
+  revokeLinks?: boolean;               // false keeps its links working; true by default
 }): Promise<
   | { kind: "canceled"; inFlight: boolean; revokedLinks: number }
   | { kind: "not_cancelable"; state } // already sent, failed, or canceled

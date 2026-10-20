@@ -189,6 +189,12 @@ export type CancelMessageResult =
 export interface CancelMessageOptions {
   /** Why the links the message carried stop working; `withdrawn` when omitted. */
   linkReason?: AccessRevocationReason;
+  /**
+   * False keeps the links the message carried working, for a message that is
+   * no longer worth sending but whose links still serve the guest (a
+   * confirmation overtaken by the booking's cancellation). True by default.
+   */
+  revokeLinks?: boolean;
   /** Recorded on the message as why it was canceled, such as `recipient_changed`. */
   code?: string;
 }
@@ -227,12 +233,10 @@ export async function cancelMessage(
   await sql`update email_messages set state = 'canceled', last_error_code = ${options.code ?? null}
              where tenant_id = ${tenantId} and id = ${messageId}
                and state in ('queued', 'sending')`.execute(trx);
-  const revokedLinks = await revokeMessageLinks(
-    trx,
-    tenantId,
-    messageId,
-    options.linkReason ?? "withdrawn",
-  );
+  const revokedLinks =
+    options.revokeLinks === false
+      ? 0
+      : await revokeMessageLinks(trx, tenantId, messageId, options.linkReason ?? "withdrawn");
   return { kind: "canceled", inFlight: row.state === "sending", revokedLinks };
 }
 
