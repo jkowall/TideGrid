@@ -165,7 +165,9 @@ describe.skipIf(!env)("G2.15 adversarial: email and delivery", () => {
     }
     expect((await within(run, 60_000, "the delivery run")).ok).toBe(true);
     const signed = await requestRow(request.id);
-    expect((await messageOf(world.admin, request.id, 2)).state).toBe("failed");
+    // Signing canceled the email in flight; the provider's later refusal
+    // records nothing on it (the messaging module's cancelMessage contract).
+    expect((await messageOf(world.admin, request.id, 2)).state).toBe("canceled");
     expect(signed.state).toBe("signed");
     expect((await status(booked.bookingId)).status).toBe("signed");
     const [evidence] = await world.admin<{ n: number }[]>`

@@ -76,7 +76,9 @@ What ends access:
 | Request revoked (participant changed, booking canceled) | revoked `withdrawn` or `booking_canceled` | revoked | canceled |
 | Request superseded by a new version | revoked `withdrawn` | revoked | canceled |
 | Address corrected | revoked `recipient_changed` | revoked | canceled, then the new address's email is queued |
-| Resend to the same address | superseded when the new link is issued | stay open | the earlier one canceled |
+| Resend to the same address | superseded when the new link is issued | stay open | the earlier one canceled, and the link it carried withdrawn |
+
+Every cancellation here reaches an email in flight too: the messaging module's `cancelMessage` waits for a send in progress, records nothing for it, never retries it, and revokes the unused links it carried with the waiver's reason. Its delivery job also rechecks under the message's lock before issuing a link, so a retry never sends a live link to an address corrected away, or for a request already signed.
 
 ## Signing
 
