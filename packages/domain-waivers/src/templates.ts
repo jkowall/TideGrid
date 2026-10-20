@@ -227,8 +227,8 @@ export async function findApplicableVersion(
       join waiver_template_versions v on v.tenant_id = t.tenant_id and v.template_id = t.id
      where t.tenant_id = ${tenantId}
        and (t.scope = 'operator' or (t.scope = 'product' and t.product_id = ${productId}))
-       and v.effective_from <= now()
-       and (v.effective_until is null or v.effective_until > now())
+       and v.effective_from <= clock_timestamp()
+       and (v.effective_until is null or v.effective_until > clock_timestamp())
      order by (t.scope = 'product') desc, v.version desc
      limit 1`.execute(trx);
   const row = rows[0];

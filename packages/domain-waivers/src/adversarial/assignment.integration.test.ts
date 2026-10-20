@@ -448,4 +448,60 @@ describe.skipIf(!env)("G2.15 adversarial: assignment", () => {
          where booking_id = ${booked.bookingId} and state in ('pending', 'signed')`;
     expect(live).toEqual([{ v: 2, state: "pending" }]);
   }, 180_000);
+
+  it("gives the new version to an assignment that began before the publish and reads after the move", async () => {
+    // From the review of 2026-10-20 (evidence F1): the transaction's start
+    // time judged the new version not yet in effect.
+    const t = await createWaiverFixture(world.admin, world.db, "wva-clock", { days: 3 });
+    const booked = await book(world, t, t.trips.shared[0] ?? "", 1, hooks);
+    // Named without the waiver hooks, so nothing is assigned yet.
+    const named = await nameParticipant(
+      world.db,
+      t.id,
+      booked.bookingId,
+      1,
+      adult("Cleo Clock"),
+      {},
+    );
+    const ctx = systemCtx(t.id, "owner");
+    const begun = gate();
+    const go = gate();
+    const assigning = settle(
+      inTenantTransaction(world.db, ctx, async (trx) => {
+        // The transaction has begun, so its now() is fixed before the publish.
+        begun.open();
+        await go.opened;
+        return assignBookingWaivers(trx, ctx, deps, {
+          bookingId: booked.bookingId,
+          participantIds: [named.participant.id],
+        });
+      }),
+    );
+    try {
+      await within(begun.opened, 60_000, "the assignment's transaction");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const published = await inTenantTransaction(world.db, ctx, (trx) =>
+        publishWaiverTemplateVersion(trx, ctx, {
+          templateId: t.templateId,
+          text: { ...FIXTURE_TEXT, body: `${FIXTURE_TEXT.body}\n\nA clock paragraph.` },
+          reason: "Synthetic revision",
+        }),
+      );
+      expect(published).toMatchObject({ kind: "published", version: 2 });
+      // Nothing to move yet; the assignment holds no key, so the barrier passes.
+      expect(
+        await reassignUnsignedRequests(world.db, ctx, deps, {
+          templateId: t.templateId,
+          version: 2,
+        }),
+      ).toEqual({ kind: "reassigned", moved: 0 });
+    } finally {
+      go.open();
+    }
+    expect((await within(assigning, 60_000, "the assignment")).ok).toBe(true);
+    const live = await world.admin<{ v: number }[]>`
+      select template_version as v from public.waiver_requests
+       where booking_id = ${booked.bookingId} and state in ('pending', 'signed')`;
+    expect(live).toEqual([{ v: 2 }]);
+  }, 180_000);
 });

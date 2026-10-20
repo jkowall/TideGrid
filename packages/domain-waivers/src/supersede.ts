@@ -55,7 +55,8 @@ export async function reassignUnsignedRequests(
   if (!isUuid(input.templateId) || !Number.isInteger(input.version)) return { kind: "not_found" };
   const target = await inTenantTransaction(db, ctx, async (trx) => {
     const { rows } = await sql<{ in_effect: boolean }>`
-      select (effective_from <= now() and (effective_until is null or effective_until > now()))
+      select (effective_from <= clock_timestamp()
+              and (effective_until is null or effective_until > clock_timestamp()))
              as in_effect
         from waiver_template_versions
        where tenant_id = ${ctx.tenantId} and template_id = ${input.templateId}
