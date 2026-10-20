@@ -194,7 +194,7 @@ export const MessageStatus = z
       .string()
       .nullable()
       .describe(
-        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error",
+        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error. Null once sent. For a canceled message, why, when known: recipient_changed or access_withdrawn",
       ),
     provider: z.enum(["fake", "cloudflare"]).nullable(),
     createdAt: Instant,

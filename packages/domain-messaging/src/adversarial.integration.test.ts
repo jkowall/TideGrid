@@ -542,7 +542,12 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
     await makeDue(messageId);
     const again = await Promise.all([deliver(T), deliver(T), deliver(T)]);
     expect(again.reduce((n, r) => n + r.sent, 0)).toBe(1);
-    expect(await row(messageId)).toMatchObject({ state: "sent", attempts: 2 });
+    // Sent on its second attempt, it no longer reports the first attempt's error.
+    expect(await row(messageId)).toMatchObject({
+      state: "sent",
+      attempts: 2,
+      last_error_code: null,
+    });
     expect(await deliveries(T, messageId)).toEqual({ accepted: 1, unavailable: 1, rejected: 0 });
   });
 

@@ -677,6 +677,8 @@ BEGIN
     END IF;
     NEW.lease_expires_at := NULL;
     NEW.next_attempt_at := OLD.next_attempt_at;
+    -- The last attempt was accepted: an earlier attempt's error no longer applies.
+    NEW.last_error_code := NULL;
     NEW.sent_at := now();
     RETURN NEW;
   END IF;

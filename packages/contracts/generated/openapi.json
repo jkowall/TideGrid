@@ -11568,7 +11568,7 @@
                               "string",
                               "null"
                             ],
-                            "description": "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error"
+                            "description": "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error. Null once sent. For a canceled message, why, when known: recipient_changed or access_withdrawn"
                           },
                           "provider": {
                             "type": [

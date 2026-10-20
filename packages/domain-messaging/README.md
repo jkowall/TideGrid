@@ -88,7 +88,7 @@ interface MessageStatus {
   id; template; templateVersion;
   state: "queued" | "sending" | "sent" | "failed" | "canceled";
   attempts; lastAttemptAt; nextAttemptAt; sentAt; failedAt; canceledAt;
-  failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error;
+  failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; null once sent;
                  // for a canceled message, why (recipient_changed, access_withdrawn) when known
   provider; createdAt;
 }
