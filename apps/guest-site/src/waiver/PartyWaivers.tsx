@@ -183,8 +183,8 @@ export function PartyWaivers({
       {list && (
         <>
           <p>
-            Everyone in your party signs {operator}'s waiver before the trip. We email each person
-            their own link, and a parent or guardian signs for anyone under 18.
+            Everyone in your party signs a waiver for {operator} before the trip. We email each
+            person their own link, and a parent or guardian signs for anyone under 18.
           </p>
           {list.participants.length === 0 ? (
             <p className="manage-quiet">
