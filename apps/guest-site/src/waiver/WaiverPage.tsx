@@ -147,6 +147,7 @@ function stopFor(code: string): Stop {
   return stops[code] ?? unavailable;
 }
 
+/** When it was signed, on this device's clock, with the zone named (the trip's line names its own). */
 function signedAtText(iso: string): string {
   return new Intl.DateTimeFormat("en-US", {
     weekday: "long",
@@ -155,6 +156,7 @@ function signedAtText(iso: string): string {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZoneName: "short",
   }).format(new Date(iso));
 }
 
