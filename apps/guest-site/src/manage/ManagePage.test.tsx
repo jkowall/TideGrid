@@ -101,7 +101,7 @@ const card = (name: string) => screen.getByRole("region", { name });
 const badges = () => [...document.querySelectorAll(".tg-status")].map((badge) => text(badge));
 
 /** A description list's term, and the value beside it. */
-const valueOf = (list: Element, term: string) =>
+const termValue = (list: Element, term: string) =>
   [...list.querySelectorAll("dt")].find((dt) => text(dt) === term)?.nextElementSibling ?? null;
 
 /** The receipt's rows as they read: label, detail, amount. */
@@ -398,15 +398,15 @@ describe("opening the booking", () => {
     await openedFromLink();
     const trip = card("The trip");
     // 6:00 PM in New York, which is already the next morning in Tokyo.
-    expect(text(valueOf(trip, "When"))).toBe(
+    expect(text(termValue(trip, "When"))).toBe(
       "Wednesday, October 7, 6:00 PM (1 h 30 min, New York time)",
     );
-    const meet = valueOf(trip, "Meet at");
+    const meet = termValue(trip, "Meet at");
     expect(text(meet)).toContain("Dock C, slip 14, Harbor Marina, Dock C");
     expect(text(meet?.querySelector(".manage-block"))).toBe(
       "Check in at the dock office 20 minutes before departure.",
     );
-    const by = valueOf(trip, "Booked by");
+    const by = termValue(trip, "Booked by");
     expect(text(by)).toContain(booker.name);
     expect(text(by?.querySelector(".manage-block"))).toBe(booker.email);
   });
@@ -420,7 +420,7 @@ describe("opening the booking", () => {
         }),
       },
     );
-    const meet = valueOf(card("The trip"), "Meet at");
+    const meet = termValue(card("The trip"), "Meet at");
     expect(text(meet)).toBe("Harbor Marina, Dock C");
     expect(meet?.querySelector(".manage-block")).toBeNull();
   });
@@ -838,12 +838,12 @@ describe("naming the party", () => {
   it("lets one place be edited at a time, and makes its Save the page's one primary action", async () => {
     await shown();
     await openEditor(3);
-    expect(screen.getByRole("button", { name: placeButton("Edit", 1) }).getAttribute("aria-disabled")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: placeButton("Edit", 2) }).getAttribute("aria-disabled")).toBe(
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: placeButton("Edit", 1) }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: placeButton("Edit", 2) }).getAttribute("aria-disabled"),
+    ).toBe("true");
     const primary = [...document.querySelectorAll(".tg-button--primary")];
     expect(primary.map((button) => text(button))).toEqual(["Save guest 3"]);
   });
@@ -873,7 +873,9 @@ describe("naming the party", () => {
     // The form is gone, and keyboard focus is back on the place's own button.
     expect(screen.queryByRole("group", { name: "Add guest 3" })).toBeNull();
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: placeButton("Edit", 3) })),
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: placeButton("Edit", 3) }),
+      ),
     );
   });
 
@@ -1027,7 +1029,9 @@ describe("naming the party", () => {
     expect(callsTo(calls, "saveParticipant")).toHaveLength(0);
     expect(party()[2]).toEqual(["Guest 3: Not named yet", "", "Add guest 3"]);
     await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: placeButton("Add", 3) })),
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: placeButton("Add", 3) }),
+      ),
     );
     expect(screen.queryByText("Saved")).toBeNull();
   });
