@@ -366,7 +366,7 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     ).toEqual([404, "waiver_document_not_found"]);
   });
 
-  it("refuses a session on every route once its request ends, and at any other operator", async () => {
+  it("refuses a session on every route once its request ends, saying why, and at any other operator", async () => {
     const p = await party(A);
     const ann = await open(A, p.annToken);
     const kit = await open(A, p.kitToken);
@@ -382,7 +382,8 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     for (const res of await Promise.all(routes(ann.sessionSecret, "https://nobody.example.test"))) {
       expect(code(res)).toEqual([404, "tenant_not_found"]);
     }
-    // The booking is canceled: its waivers end with it.
+    // The booking is canceled: its waivers end with it, and each route says
+    // the waiver is no longer needed rather than that the hour ran out.
     const ctx: TenantContext = {
       tenantId: A.id,
       actorType: "system",
@@ -398,15 +399,20 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     });
     for (const secret of [ann.sessionSecret, kit.sessionSecret]) {
       for (const res of await Promise.all(routes(secret, guestOf(A)))) {
-        expect(code(res)).toEqual([401, "waiver_session_invalid"]);
+        expect(code(res)).toEqual([409, "waiver_not_needed"]);
         expect(res.headers.get("cache-control")).toBe("no-store");
+      }
+      // Still nothing at another operator.
+      for (const res of await Promise.all(routes(secret, guestOf(B)))) {
+        expect(code(res)).toEqual([401, "waiver_session_invalid"]);
       }
     }
     expect(
       await admin`select 1 from public.waiver_evidence where booking_id = ${p.booked.bookingId}`,
     ).toHaveLength(0);
 
-    // A new version moves unsigned work: the old session ends, the new email opens version 2.
+    // A new version moves unsigned work: the old session ends and says it was
+    // replaced, and the new email opens version 2.
     const C = await createWaiverFixture(admin, runtime.db, "g215adv-c", { days: 2 });
     const pc = await party(C);
     const old = await open(C, pc.annToken);
@@ -431,7 +437,7 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
       }),
     ).toEqual({ kind: "reassigned", moved: 2 });
     for (const res of await Promise.all(routes(old.sessionSecret, guestOf(C)))) {
-      expect(code(res)).toEqual([401, "waiver_session_invalid"]);
+      expect(code(res)).toEqual([409, "waiver_superseded"]);
     }
     expect(
       code(await request("POST", SESSIONS, { origin: guestOf(C), body: { token: pc.kitToken } })),
