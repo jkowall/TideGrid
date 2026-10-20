@@ -1640,6 +1640,32 @@ describe("coming back later", () => {
     expect(email?.headers.get("authorization")).toBe(`Bearer ${sessionToken}`);
   });
 
+  it.each([
+    ["a sent link", () => json({ status: "accepted" }, 202), "New link sent"],
+    [
+      "the hour's limit",
+      () => refusal(429, "link_email_rate_limited"),
+      "We've already sent three links this hour",
+    ],
+    ["no answer", offline, "We couldn't send a link"],
+  ])(
+    "shows the outcome of %s under the button that asked, and moves focus to it",
+    async (_what, answer, title) => {
+      await shown({ emailLink: answer });
+      fireEvent.click(screen.getByRole("button", { name: "Email me a new link" }));
+      const notice = await noticeTitled(title);
+      const later = card("Coming back later?");
+      // In the card the guest is looking at, after its actions, not at the top of the page.
+      expect(later.contains(notice)).toBe(true);
+      const actions = later.querySelector(".booking-actions");
+      if (!actions) throw new Error("no actions in the card");
+      expect(
+        actions.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      await waitFor(() => expect(notice.closest("[tabindex='-1']")).toBe(document.activeElement));
+    },
+  );
+
   it("shows Sending while the API answers, and sends once", async () => {
     const answer = held();
     const calls = await shown({ emailLink: answer.answer });

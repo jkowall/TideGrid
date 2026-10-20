@@ -462,6 +462,12 @@ function BookingView({
     if (done?.focus) doneRef.current?.focus();
   }, [done]);
   const [linkBusy, setLinkBusy] = useState(false);
+  // What asking for a new link did, shown under the button that asked.
+  const [linkOutcome, setLinkOutcome] = useState<Done>(null);
+  const linkOutcomeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (linkOutcome) linkOutcomeRef.current?.focus();
+  }, [linkOutcome]);
   const [closing, setClosing] = useState(false);
   const { trip, location } = booking;
   const when = `${formatDate(trip.localDate, "full")}, ${formatTripTime(trip.localStartTime, trip.startsAt, trip.timeZone)}`;
@@ -476,10 +482,11 @@ function BookingView({
   const sendLink = async () => {
     if (linkBusy) return;
     setLinkBusy(true);
+    setLinkOutcome(null);
     const result = await emailNewLink(session.token);
     setLinkBusy(false);
     if (result.kind === "ok") {
-      setDone({
+      setLinkOutcome({
         tone: "success",
         title: "New link sent",
         body: `We've emailed a new link to ${booking.booker.email}. Links in earlier emails no longer work.`,
@@ -487,13 +494,13 @@ function BookingView({
     } else if (result.kind === "refused" && result.status === 401) {
       onEnded("expired");
     } else if (result.kind === "refused" && result.code === "link_email_rate_limited") {
-      setDone({
+      setLinkOutcome({
         tone: "info",
         title: "We've already sent three links this hour",
         body: "Check your email, including spam, or try again later.",
       });
     } else {
-      setDone({ tone: "info", title: "We couldn't send a link", body: troubleText(result) });
+      setLinkOutcome({ tone: "info", title: "We couldn't send a link", body: troubleText(result) });
     }
   };
 
@@ -649,6 +656,13 @@ function BookingView({
             </Button>
             <DemoMailboxLink />
           </div>
+          {linkOutcome && (
+            <div ref={linkOutcomeRef} tabIndex={-1} className="manage-done">
+              <Notice tone={linkOutcome.tone} title={linkOutcome.title}>
+                {linkOutcome.body}
+              </Notice>
+            </div>
+          )}
         </section>
       </div>
     </>
