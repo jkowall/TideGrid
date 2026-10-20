@@ -91,7 +91,7 @@ interface MessageStatus {
   state: "queued" | "sending" | "sent" | "failed" | "canceled";
   attempts; lastAttemptAt; nextAttemptAt; sentAt; failedAt; canceledAt;
   failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; null once sent;
-                 // for a canceled message, why (recipient_changed, access_withdrawn) when known
+                 // for a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled) or null
   provider; createdAt;
 }
 ```

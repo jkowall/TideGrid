@@ -701,8 +701,9 @@ BEGIN
     NEW.lease_expires_at := NULL;
     NEW.provider := OLD.provider;
     NEW.provider_message_id := NULL;
-    -- A cancellation may say why, such as recipient_changed.
-    NEW.last_error_code := coalesce(NEW.last_error_code, OLD.last_error_code);
+    -- Its error code is the one the cancellation sets (such as
+    -- recipient_changed), or none: every cancel sets it, and an earlier
+    -- attempt's error no longer describes the message.
     NEW.canceled_at := now();
     RETURN NEW;
   END IF;

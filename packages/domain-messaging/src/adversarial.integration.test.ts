@@ -551,6 +551,27 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
     expect(await deliveries(T, messageId)).toEqual({ accepted: 1, unavailable: 1, rejected: 0 });
   });
 
+  it("reports a canceled message's own reason, or none, never an earlier attempt's error", async () => {
+    const T = await newTenant("adv-msg-cancel-code");
+    const plain = await enqueue(T, "plain", "synthetic.plain+fail-once@example.test");
+    const named = await enqueue(T, "named", "synthetic.named+fail-once@example.test");
+    await deliver(T);
+    expect(await row(plain.messageId)).toMatchObject({
+      state: "queued",
+      last_error_code: "provider_unavailable",
+    });
+    await inTenant(T, (trx, ctx) => cancelMessage(trx, ctx, plain.messageId));
+    await inTenant(T, (trx, ctx) =>
+      cancelMessage(trx, ctx, named.messageId, { code: "recipient_changed" }),
+    );
+    expect(
+      (await inTenant(T, (trx) => getMessageStatus(trx, T, plain.messageId)))?.failureCode,
+    ).toBeNull();
+    expect(
+      (await inTenant(T, (trx) => getMessageStatus(trx, T, named.messageId)))?.failureCode,
+    ).toBe("recipient_changed");
+  });
+
   it("fails a bounced recipient at once and never tries it again", async () => {
     const T = await newTenant("adv-msg-bounce");
     const { messageId } = await enqueue(T, "bounce", "synthetic.gone+bounce@example.test");
