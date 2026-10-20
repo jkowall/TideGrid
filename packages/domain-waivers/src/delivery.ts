@@ -124,8 +124,7 @@ export async function sendWaiverRequest(
       (p) => p.id === request.participant_id,
     );
   if (!participant) return { kind: "no_participant" };
-  const recipient = participant.email?.trim().toLowerCase() ?? null;
-  if (!recipient) return { kind: "no_address" };
+  const recipient = participant.email?.trim().toLowerCase() || null;
 
   const { rows: clock } = await sql<{
     now: Date;
@@ -142,6 +141,17 @@ export async function sendWaiverRequest(
          order by generation desc limit 1) d on true`.execute(trx);
   const facts = clock[0];
   if (!facts) throw new Error("no database clock");
+  if (!recipient) {
+    // The address removed from the booking is no longer this participant's:
+    // its unsent email is canceled and its links and sessions end.
+    if (facts.latest_recipient !== null) {
+      await closeRequestAccess(trx, ctx, request, {
+        link: "recipient_changed",
+        session: "recipient_changed",
+      });
+    }
+    return { kind: "no_address" };
+  }
   const now = facts.now.getTime();
   if (input.kind === "initial" && facts.latest_generation !== null) return { kind: "already_sent" };
   // A request that never went out (it had no address) goes out now as its

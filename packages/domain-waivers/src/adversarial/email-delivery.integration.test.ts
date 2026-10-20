@@ -351,4 +351,99 @@ describe.skipIf(!env)("G2.15 adversarial: email and delivery", () => {
     expect((await requestRow(r)).generations).toBe(5);
     expect((await redeem(world, A.id, fifth.token)).kind).toBe("replaced");
   }, 180_000);
+
+  // Every change of who gets the email cancels the old message itself, with
+  // the messaging module's cancelMessage, in the transaction that makes the
+  // change. Revoking links alone would leave a queued email, which has no link
+  // yet, to go out later with a fresh one.
+  describe("every recipient change cancels the old message, queued or not", () => {
+    async function messages(requestId: string) {
+      return world.admin<{ generation: number; state: string; to: string; code: string | null }[]>`
+        select d.generation, m.state, m.to_email as to, m.last_error_code as code
+          from public.waiver_deliveries d
+          join public.email_messages m on m.tenant_id = d.tenant_id and m.id = d.message_id
+         where d.request_id = ${requestId} order by d.generation`;
+    }
+
+    it("a corrected guardian address", async () => {
+      const booked = await book(world, A, nextTrip(), 1, hooks);
+      const old = uniqueEmail("gwen.old");
+      const fresh = uniqueEmail("gwen.new");
+      const kid = (email: string) => minor("Kai Kid", { name: "Gwen Guardian", email });
+      const pid = await name(world, A.id, booked.bookingId, 1, kid(old), hooks);
+      const request = await liveRequest(world.admin, booked.bookingId, pid);
+      expect((await messages(request.id)).map((m) => m.state)).toEqual(["queued"]);
+      await name(world, A.id, booked.bookingId, 1, kid(fresh), hooks);
+      expect(await messages(request.id)).toEqual([
+        { generation: 1, state: "canceled", to: old, code: "recipient_changed" },
+        { generation: 2, state: "queued", to: fresh, code: null },
+      ]);
+      await deliverMail(world.db, A.id);
+      expect((await messages(request.id)).map((m) => [m.state, m.to])).toEqual([
+        ["canceled", old],
+        ["sent", fresh],
+      ]);
+      expect(await liveLinks(request.id)).toBe(1);
+    }, 180_000);
+
+    it("a corrected participant address", async () => {
+      const booked = await book(world, A, nextTrip(), 1, hooks);
+      const old = uniqueEmail("pat.old");
+      const fresh = uniqueEmail("pat.new");
+      const pid = await name(world, A.id, booked.bookingId, 1, adult("Pat Moved", old), hooks);
+      const request = await liveRequest(world.admin, booked.bookingId, pid);
+      await name(world, A.id, booked.bookingId, 1, adult("Pat Moved", fresh), hooks);
+      expect(await messages(request.id)).toEqual([
+        { generation: 1, state: "canceled", to: old, code: "recipient_changed" },
+        { generation: 2, state: "queued", to: fresh, code: null },
+      ]);
+      await deliverMail(world.db, A.id);
+      expect((await messages(request.id)).map((m) => m.state)).toEqual(["canceled", "sent"]);
+    }, 180_000);
+
+    it("a resend while the old generation is still queued", async () => {
+      const booked = await book(world, A, nextTrip(), 1, hooks);
+      const to = uniqueEmail("ren.queued");
+      const pid = await name(world, A.id, booked.bookingId, 1, adult("Ren Queued", to), hooks);
+      const request = await liveRequest(world.admin, booked.bookingId, pid);
+      await ageDeliveries(world.admin, request.id);
+      expect(await staffResend(request.id)).toMatchObject({ kind: "sent", generation: 2 });
+      expect(await messages(request.id)).toEqual([
+        { generation: 1, state: "canceled", to, code: "resent" },
+        { generation: 2, state: "queued", to, code: null },
+      ]);
+      await deliverMail(world.db, A.id);
+      expect((await messages(request.id)).map((m) => m.state)).toEqual(["canceled", "sent"]);
+      expect(await liveLinks(request.id)).toBe(1);
+    }, 180_000);
+
+    it("an address removed from the booking, queued or already sent", async () => {
+      const booked = await book(world, A, nextTrip(), 2, hooks);
+      // Queued when the address goes.
+      const quinn = uniqueEmail("quinn.gone");
+      const q = await name(world, A.id, booked.bookingId, 1, adult("Quinn Gone", quinn), hooks);
+      const qRequest = await liveRequest(world.admin, booked.bookingId, q);
+      await name(world, A.id, booked.bookingId, 1, adult("Quinn Gone", null), hooks);
+      expect(await messages(qRequest.id)).toEqual([
+        { generation: 1, state: "canceled", to: quinn, code: "recipient_changed" },
+      ]);
+      // Sent, with a link, when the address goes.
+      const sam = uniqueEmail("sam.gone");
+      const s = await name(world, A.id, booked.bookingId, 2, adult("Sam Gone", sam), hooks);
+      const sRequest = await liveRequest(world.admin, booked.bookingId, s);
+      const { token } = await linkFor(world.admin, world.db, A.id, sRequest.id);
+      await name(world, A.id, booked.bookingId, 2, adult("Sam Gone", null), hooks);
+      expect((await redeem(world, A.id, token)).kind).toBe("replaced");
+      await deliverMail(world.db, A.id);
+      expect(await liveLinks(qRequest.id)).toBe(0);
+      expect(await liveLinks(sRequest.id)).toBe(0);
+      const found = await inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
+        listBookingWaivers(trx, A.id, booked.bookingId),
+      );
+      expect(found?.participants.map((p) => [p.status, p.request?.resendAvailableAt])).toEqual([
+        ["no_address", null],
+        ["no_address", null],
+      ]);
+    }, 180_000);
+  });
 });

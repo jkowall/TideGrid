@@ -122,6 +122,8 @@ interface Row {
   message_state: MessageState | null;
   message_at: Date | null;
   message_error: string | null;
+  /** The address the booking has now for the request's signer; null when it has none. */
+  current_recipient: string | null;
   now: Date;
 }
 
@@ -144,6 +146,8 @@ async function rows(
            m.state as message_state,
            coalesce(m.sent_at, m.failed_at, m.canceled_at, m.last_attempt_at) as message_at,
            m.last_error_code as message_error,
+           nullif(btrim(case when r.required_signer = 'guardian' then p.guardian_email
+                             else p.email end), '') as current_recipient,
            now() as now
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
@@ -175,13 +179,15 @@ function statusOf(row: Row, required: boolean): WaiverStatusCode {
     return required ? "not_assigned" : "not_required";
   }
   if (row.state === "signed") return "signed";
-  if (row.generation === null) return "no_address";
+  // Never sent, or the address it went to was removed from the booking.
+  if (row.generation === null || row.current_recipient === null) return "no_address";
   if (row.message_state === "failed") return "email_failed";
   return "waiting";
 }
 
 function resendAt(row: Row): Date | null {
   if (row.state !== "pending" || row.booking_state !== "confirmed") return null;
+  if (row.current_recipient === null) return null;
   if (row.generation === null) return row.now;
   if (row.generation >= MAX_GENERATIONS) return null;
   const at = (row.queued_at?.getTime() ?? 0) + RESEND_INTERVAL_MINUTES * 60_000;
