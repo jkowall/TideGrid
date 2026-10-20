@@ -45,6 +45,10 @@ The API decides; the console mirrors it with `canSeeGuests` in `src/roles.ts`, o
 - **No roster for finance.** The product scope calls the roster a booking-management view. It exists to run a departure: who is coming, how many, and what to prepare. Without the guests' names it would be the bookings list printed again, and finance's reconciliation work is covered by the list, the detail, and the exceptions, which carry the same money. Keeping the roster to `bookings.read` also keeps every sheet that leaves the screen on paper to the roles that manage bookings. The API answers 403 to finance; the console shows a designed explanation and makes no call.
 - **The roster names the booker but prints no email.** The email is one click away on the booking, and a sheet carried to the dock has no use for it.
 
+### Canceled bookings (lane 1, G2.11c)
+
+A guest may cancel within the booking's policy from the management page. The console reads it: a canceled booking keeps its place in the day's list with a Canceled badge beside its payment's, while the counts are of active bookings, the ones holding seats, so a trip whose bookings are all canceled says "No active bookings" above them. The booking's detail says who canceled and when, and that the seats went back on sale; a Cancellation block gives the remedy the policy applied on its side of the cutoff, the policy version and cutoff, and the refund due; the Refund block and the history follow the refund. Rosters and counts leave canceled bookings out.
+
 ## Content security policy
 
 `public/_headers` keeps `style-src 'self'` with no inline styles: React and the design system set styles only through the CSSOM, and print styles live in the stylesheet. `src/static.test.ts` holds this. The console bundles no schema code: it imports only types from `@tidegrid/contracts`, and the reference normalizer from the dependency-free `@tidegrid/contracts/references`.
