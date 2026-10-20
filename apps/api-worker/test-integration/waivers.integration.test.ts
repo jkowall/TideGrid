@@ -508,6 +508,7 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
           signer: "participant",
           signedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
           sentTo: null,
+          sendsAt: null,
         },
         {
           position: 2,
@@ -517,6 +518,7 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
           signer: "guardian",
           signedAt: null,
           sentTo: "g•••@example.test",
+          sendsAt: null,
         },
       ],
     });
