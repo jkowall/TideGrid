@@ -129,6 +129,12 @@ const stops: Record<string, Stop> = {
     body: (op) =>
       `Nothing was signed. Ask ${op} to send you a new link to read the current version.`,
   },
+  waiver_trip_over: {
+    icon: "clock",
+    tone: "neutral",
+    title: "This trip has ended",
+    body: () => "Waivers are signed before the trip ends, so there's nothing to sign here.",
+  },
   waiver_participant_changed: {
     icon: "users",
     tone: "warning",
@@ -145,7 +151,12 @@ const stops: Record<string, Stop> = {
 };
 
 /** Codes after which the stored session has nothing more to show. */
-const doneCodes = new Set(["waiver_signed", "waiver_not_needed", "waiver_superseded"]);
+const doneCodes = new Set([
+  "waiver_signed",
+  "waiver_not_needed",
+  "waiver_superseded",
+  "waiver_trip_over",
+]);
 
 function stopFor(code: string): Stop {
   return stops[code] ?? unavailable;

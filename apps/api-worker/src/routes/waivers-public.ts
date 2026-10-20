@@ -304,7 +304,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       401: errorBody("No session secret, or no open session"),
       404: errorBody("No operator at this address"),
       409: errorBody(
-        "The waiver changed since it was shown (waiver_changed), was signed through another link (waiver_signed), was replaced by a newer version (waiver_superseded), is no longer needed (waiver_not_needed), or the participant's details changed who signs (waiver_participant_changed)",
+        "The waiver changed since it was shown (waiver_changed), was signed through another link (waiver_signed), was replaced by a newer version (waiver_superseded), is no longer needed (waiver_not_needed), the participant's details changed who signs (waiver_participant_changed), or the trip has ended (waiver_trip_over)",
       ),
       422: {
         content: { "application/json": { schema: WaiverSignProblemsResponse } },
@@ -350,6 +350,12 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           );
         case "session_ended":
           throw sessionInvalid();
+        case "trip_over":
+          throw new ApiError(
+            409,
+            "waiver_trip_over",
+            "This trip has ended, so its waiver takes no signature",
+          );
         case "not_pending":
           throw closedRefusal(signed.state);
       }

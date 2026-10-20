@@ -28,6 +28,7 @@ import {
   redeemWaiverToken,
   sendWaiverRequest,
   type WaiverDeps,
+  waiverSubject,
 } from "../index.ts";
 import {
   adult,
@@ -586,4 +587,122 @@ describe.skipIf(!env)("G2.15 adversarial: links and sessions", () => {
     ).toBe("23514:waiver_signing_sessions_immutable");
     expect(await loads(A.id, reopened.secret)).toBe(false);
   }, 240_000);
+
+  it("lets one waiver link open a waiver session or a guest session, never both", async () => {
+    const booked = await book(world, A, nextTrip(), 2, hooks);
+    const p1 = await name(world, A.id, booked.bookingId, 1, adult("Nia Once"), hooks);
+    const p2 = await name(world, A.id, booked.bookingId, 2, adult("Oto Once"), hooks);
+    const r1 = (await liveRequest(world.admin, booked.bookingId, p1)).id;
+    const r2 = (await liveRequest(world.admin, booked.bookingId, p2)).id;
+    const l1 = await linkRow((await linkFor(world.admin, world.db, A.id, r1)).token);
+    const l2 = await linkRow((await linkFor(world.admin, world.db, A.id, r2)).token);
+    const hex = () => randomUUID().replaceAll("-", "").repeat(2);
+    const consume = (tx: Sql, linkId: string) => tx`
+        update public.guest_access_links set consumed_at = now() where id = ${linkId}`;
+    const waiverSession = (tx: Sql, linkId: string, request: string, participant: string) => tx`
+        insert into public.waiver_signing_sessions (tenant_id, access_link_id, request_id,
+          booking_id, participant_id, purpose, signer_role, secret_hash, expires_at)
+        values (${A.id}, ${linkId}, ${request}, ${booked.bookingId}, ${participant}, 'sign',
+                'participant', ${hex()}, now() + interval '30 minutes')`;
+    // Lane 1's guest session, as its rules allow it for the same consumed link.
+    const guestSession = (
+      tx: Sql,
+      link: { id: string; subject_ref: string },
+      participant: string,
+    ) =>
+      tx`
+        insert into public.guest_sessions (tenant_id, booking_id, participant_id, purpose,
+          subject_ref, link_id, token_hash, expires_at)
+        values (${A.id}, ${booked.bookingId}, ${participant}, 'waiver_sign', ${link.subject_ref},
+                ${link.id}, ${hex()}, now() + interval '1 hour')`;
+
+    // A waiver session first: the guest session is refused.
+    expect(
+      await refusal(
+        asApp(world, A.id, async (tx) => {
+          await consume(tx, l1.id);
+          await waiverSession(tx, l1.id, r1, p1);
+          await guestSession(tx, l1, p1);
+        }),
+      ),
+    ).toBe("23514:guest_sessions_waiver_link");
+    // A guest session first: the waiver session is refused.
+    expect(
+      await refusal(
+        asApp(world, A.id, async (tx) => {
+          await consume(tx, l2.id);
+          await guestSession(tx, l2, p2);
+          await waiverSession(tx, l2.id, r2, p2);
+        }),
+      ),
+    ).toBe("23514:waiver_signing_sessions_link");
+    // Either alone opens: the refusals above are the rule.
+    for (const open of [
+      (tx: Sql) => waiverSession(tx, l1.id, r1, p1),
+      (tx: Sql) => guestSession(tx, l1, p1),
+    ]) {
+      const control = await settle(
+        asApp(world, A.id, async (tx) => {
+          await consume(tx, l1.id);
+          await open(tx);
+          throw new Rollback();
+        }),
+      );
+      expect(control.ok === false && control.message).toBe("rolled back on purpose");
+    }
+    expect(await sessionsOf(r1)).toEqual([]);
+    expect(
+      (await redeem(world, A.id, (await linkFor(world.admin, world.db, A.id, r1)).token)).kind,
+    ).toBe("opened");
+  }, 180_000);
+
+  it("ends a waiver link with its trip, and takes no signature once the trip has ended", async () => {
+    const tripId = nextTrip();
+    const booked = await book(world, A, tripId, 1, hooks);
+    const pid = await name(world, A.id, booked.bookingId, 1, adult("Pia Late"), hooks);
+    const request = (await liveRequest(world.admin, booked.bookingId, pid)).id;
+    const opened = await redeem(
+      world,
+      A.id,
+      (await linkFor(world.admin, world.db, A.id, request)).token,
+    );
+    if (opened.kind !== "opened") throw new Error("the email's link did not open");
+
+    // A link asked to outlive the trip ends with it, whoever issues it.
+    const ctx = systemCtx(A.id, "long-link");
+    const long = await inTenantTransaction(world.db, ctx, (trx) =>
+      issueAccessLink(trx, ctx, {
+        bookingId: booked.bookingId,
+        participantId: pid,
+        purpose: "waiver_sign",
+        subjectRef: waiverSubject(request),
+        ttlSeconds: 14 * 86_400,
+      }),
+    );
+    const [ends] = await world.admin<{ clamped: boolean }[]>`
+      select l.expires_at = t.ends_at as clamped
+        from public.guest_access_links l
+        join public.bookings b on b.id = l.booking_id
+        join public.scheduled_trips t on t.id = b.trip_id
+       where l.id = ${long.linkId}`;
+    expect(ends?.clamped).toBe(true);
+
+    // The trip moves into the past: the long link opens nothing and stays
+    // unused, and the open session signs nothing.
+    await world.admin`
+      with t as (select date_trunc('minute', now()) - interval '2 days' as s)
+      update public.scheduled_trips st
+         set starts_at = t.s, ends_at = t.s + make_interval(mins => st.duration_minutes),
+             local_date = (t.s at time zone st.time_zone)::date,
+             local_start_time = (t.s at time zone st.time_zone)::time(0)
+        from t where st.id = ${tripId}`;
+    expect(await redeem(world, A.id, long.token)).toEqual({ kind: "expired" });
+    expect((await linkRow(long.token)).consumed).toBe(false);
+    expect(await loads(A.id, opened.secret)).toBe(true);
+    expect(await sign(world, A.id, deps, opened.session)).toEqual({ kind: "trip_over" });
+    expect(
+      await world.admin`select 1 from public.waiver_evidence where request_id = ${request}`,
+    ).toHaveLength(0);
+    expect((await liveRequest(world.admin, booked.bookingId, pid)).state).toBe("pending");
+  }, 180_000);
 });

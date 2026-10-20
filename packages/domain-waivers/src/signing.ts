@@ -19,7 +19,7 @@ import {
 } from "@tidegrid/database";
 import { sql } from "kysely";
 import type { WaiverSession } from "./access.ts";
-import { type BookingContext, loadBookingContext, tripFacts } from "./booking.ts";
+import { type BookingContext, loadBookingContext, tripFacts, tripIsOver } from "./booking.ts";
 import { sha256Hex } from "./content.ts";
 import { lockRequest } from "./delivery.ts";
 import { cleanLine, comparableName, formatInstant } from "./format.ts";
@@ -236,6 +236,8 @@ export type SignResult =
    * address correction, a withdrawal, or its hour ran out.
    */
   | { kind: "session_ended" }
+  /** The trip ended while the session was open: a waiver is signed before its trip ends. */
+  | { kind: "trip_over" }
   | { kind: "invalid"; problems: SignProblem[] };
 
 /**
@@ -346,6 +348,7 @@ export async function signWaiver(
       from waiver_signing_sessions
      where tenant_id = ${ctx.tenantId} and id = ${session.id}`.execute(trx);
   if (!open[0]?.open) return { kind: "session_ended" };
+  if (await tripIsOver(trx, ctx.tenantId, request.booking_id)) return { kind: "trip_over" };
   const version = await loadTemplateVersion(
     trx,
     ctx.tenantId,

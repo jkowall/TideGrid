@@ -17852,7 +17852,7 @@
             }
           },
           "409": {
-            "description": "The waiver changed since it was shown (waiver_changed), was signed through another link (waiver_signed), was replaced by a newer version (waiver_superseded), is no longer needed (waiver_not_needed), or the participant's details changed who signs (waiver_participant_changed)",
+            "description": "The waiver changed since it was shown (waiver_changed), was signed through another link (waiver_signed), was replaced by a newer version (waiver_superseded), is no longer needed (waiver_not_needed), the participant's details changed who signs (waiver_participant_changed), or the trip has ended (waiver_trip_over)",
             "content": {
               "application/json": {
                 "schema": {

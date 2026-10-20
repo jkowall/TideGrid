@@ -20,6 +20,7 @@ import {
 } from "@tidegrid/database";
 import { accessTokenPattern, hashLinkToken, redeemAccessLink } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
+import { tripIsOver } from "./booking.ts";
 import { lockRequest } from "./delivery.ts";
 import { requestIdOf, WAIVER_LINK_PURPOSE, waiverSubject } from "./links.ts";
 import { hashWaiverSession, newWaiverSecret, waiverSecretPattern } from "./secrets.ts";
@@ -68,11 +69,7 @@ export async function redeemWaiverToken(
   if (!request) return { kind: "invalid" };
   // Once the trip has ended a link opens nothing, even one issued before the
   // trip moved earlier; the link is left as it is.
-  const { rows: trip } = await sql<{ over: boolean }>`
-    select t.ends_at <= now() as over
-      from bookings b join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
-     where b.tenant_id = ${ctx.tenantId} and b.id = ${request.booking_id}`.execute(trx);
-  if (trip[0]?.over) {
+  if (await tripIsOver(trx, ctx.tenantId, request.booking_id)) {
     return request.state === "pending"
       ? { kind: "expired" }
       : { kind: "closed", state: request.state };

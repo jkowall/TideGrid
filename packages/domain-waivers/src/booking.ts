@@ -74,3 +74,19 @@ export function tripFacts(booking: BookingContext) {
     bookingReference: booking.reference,
   };
 }
+
+/**
+ * Whether the booking's trip has ended by the database clock, as the evidence
+ * trigger judges it: a waiver is signed, and a link opens, only before then.
+ */
+export async function tripIsOver(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<boolean> {
+  const { rows } = await sql<{ over: boolean }>`
+    select t.ends_at <= now() as over
+      from bookings b join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
+  return rows[0]?.over === true;
+}

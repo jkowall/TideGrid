@@ -319,6 +319,24 @@ describe("the waiver page", () => {
     expect(screen.getByRole("heading", { name: "Open the link from your email" })).toBeTruthy();
   });
 
+  it("says the trip has ended when a signature comes too late, and forgets the session", async () => {
+    stubApi((call) =>
+      call.url.endsWith("/waiver-sessions")
+        ? json(201, { sessionSecret: secret, waiver: waiver() })
+        : refusal(409, "waiver_trip_over"),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+    await screen.findByText("Boating has risks.");
+    for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+    fireEvent.change(screen.getByLabelText("Type your full name to sign"), {
+      target: { value: "Ann Adult" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign waiver" }));
+    await screen.findByRole("heading", { name: "This trip has ended" });
+    expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+  });
+
   it.each([
     ["waiver_signed", "This waiver is already signed"],
     ["waiver_superseded", "This waiver was updated"],
