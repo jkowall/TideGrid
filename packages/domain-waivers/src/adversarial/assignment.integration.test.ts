@@ -427,11 +427,12 @@ describe.skipIf(!env)("G2.15 adversarial: assignment", () => {
         "the publish",
       );
       expect(published).toMatchObject({ kind: "published", version: 2 });
-      // The move starts while the addition, which read version 1, is still open.
+      // The move starts while the addition, which read version 1, is still
+      // open, and gets every chance to finish before the addition commits.
       moving = settle(
         reassignUnsignedRequests(world.db, ctx, deps, { templateId: t.templateId, version: 2 }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await Promise.race([moving, new Promise((resolve) => setTimeout(resolve, 5_000))]);
     } finally {
       release.open();
     }
