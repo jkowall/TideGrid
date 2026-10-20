@@ -39,6 +39,7 @@ import {
   assignBookingWaivers,
   listBookingWaivers,
   publishWaiverTemplateVersion,
+  reassignUnsignedRequests,
   type WaiverDeps,
 } from "../index.ts";
 import {
@@ -410,26 +411,34 @@ describe.skipIf(!env)("G2.15 adversarial: assignment", () => {
     const adding = settle(
       nameParticipant(world.db, t.id, booked.bookingId, 1, adult("Val Version"), holding),
     );
+    const ctx = systemCtx(t.id, "owner");
+    let moving: ReturnType<typeof settle<unknown>> | undefined;
     try {
       await within(assigned.opened, 60_000, "the addition's assignment");
-      const ctx = systemCtx(t.id, "owner");
       const published = await within(
         inTenantTransaction(world.db, ctx, (trx) =>
-          publishWaiverTemplateVersion(trx, ctx, deps, {
+          publishWaiverTemplateVersion(trx, ctx, {
             templateId: t.templateId,
             text: { ...FIXTURE_TEXT, body: `${FIXTURE_TEXT.body}\n\nRevised synthetic paragraph.` },
             reason: "Synthetic revision",
-            reassignUnsigned: true,
           }),
         ),
         60_000,
         "the publish",
       );
       expect(published).toMatchObject({ kind: "published", version: 2 });
+      // The move starts while the addition, which read version 1, is still open.
+      moving = settle(
+        reassignUnsignedRequests(world.db, ctx, deps, { templateId: t.templateId, version: 2 }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 500));
     } finally {
       release.open();
     }
     expect((await adding).ok).toBe(true);
+    expect(
+      await within(moving ?? Promise.reject(new Error("no move")), 60_000, "the move"),
+    ).toEqual({ ok: true, value: { kind: "reassigned", moved: 1 } });
     // The publisher asked that unsigned work move to version 2. The request
     // assigned beside the publish is unsigned, for a trip that has not
     // started, and no later step will move it.

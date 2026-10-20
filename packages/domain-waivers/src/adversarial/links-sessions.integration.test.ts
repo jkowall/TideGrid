@@ -23,6 +23,7 @@ import {
   defaultWaiverDeps,
   loadWaiverSession,
   publishWaiverTemplateVersion,
+  reassignUnsignedRequests,
   redeemWaiverToken,
   sendWaiverRequest,
   type WaiverDeps,
@@ -284,14 +285,19 @@ describe.skipIf(!env)("G2.15 adversarial: links and sessions", () => {
     const sUnused = (await linkFor(world.admin, world.db, t.id, linkReq)).token;
     const owner = systemCtx(t.id, "owner");
     const published = await inTenantTransaction(world.db, owner, (trx) =>
-      publishWaiverTemplateVersion(trx, owner, deps, {
+      publishWaiverTemplateVersion(trx, owner, {
         templateId: t.templateId,
         text: { ...FIXTURE_TEXT, title: "Fixture participation waiver, revised" },
         reason: "Synthetic revision",
-        reassignUnsigned: true,
       }),
     );
-    expect(published).toMatchObject({ kind: "published", version: 2, reassigned: 2 });
+    expect(published).toMatchObject({ kind: "published", version: 2 });
+    expect(
+      await reassignUnsignedRequests(world.db, owner, deps, {
+        templateId: t.templateId,
+        version: 2,
+      }),
+    ).toEqual({ kind: "reassigned", moved: 2 });
     expect(await loads(t.id, sOpened.secret)).toBe(false);
     expect(await redeem(world, t.id, sUnused)).toEqual({ kind: "closed", state: "superseded" });
     expect((await linkRow(sUnused)).revoked_reason).toBe("withdrawn");

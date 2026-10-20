@@ -4,15 +4,30 @@
  * a confirmed booking whose trip has not started, is superseded by a request
  * for the new version, which goes out at once; the old request's links and
  * sessions stop working. Signed requests and their evidence never change.
+ *
+ * It runs after the version's publish commits, in transactions of its own:
+ *
+ * 1. a check that the version exists and is in effect now;
+ * 2. a barrier: the tenant's assignment key taken exclusive and let go at
+ *    once, which waits for every assignment that might have read the older
+ *    version (each holds the key shared until it commits); any assignment
+ *    after that reads the new version;
+ * 3. the move itself, booking by booking, under each booking's lock.
+ *
+ * Holding the key through the move would deadlock: an assignment holds its
+ * booking's lock while it waits for the key, and the move needs that lock.
  */
 import {
+  type Database,
   enqueueOutbox,
+  inTenantTransaction,
+  isUuid,
   recordAudit,
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
-import { sql } from "kysely";
-import { lockBookingForWaivers, requiredSignerFor } from "./assign.ts";
+import { type Kysely, sql } from "kysely";
+import { assignmentLockKey, lockBookingForWaivers, requiredSignerFor } from "./assign.ts";
 import { sendWaiverRequest } from "./delivery.ts";
 import { closeRequestAccess } from "./links.ts";
 import type { WaiverDeps } from "./ports.ts";
@@ -20,7 +35,47 @@ import type { WaiverDeps } from "./ports.ts";
 /** At most this many requests move in one publish; the rest keep their version. */
 export const SUPERSEDE_LIMIT = 500;
 
-export async function supersedeUnsignedRequests(
+export type ReassignResult =
+  | { kind: "reassigned"; moved: number }
+  | { kind: "not_found" }
+  /** Unsigned requests move only to a version in effect now. */
+  | { kind: "not_in_effect" };
+
+/**
+ * Move unsigned requests on the template's older versions to `version`, a
+ * version whose publish has committed. Call it after the publish's
+ * transaction, never inside one.
+ */
+export async function reassignUnsignedRequests(
+  db: Kysely<Database>,
+  ctx: TenantContext,
+  deps: WaiverDeps,
+  input: { templateId: string; version: number },
+): Promise<ReassignResult> {
+  if (!isUuid(input.templateId) || !Number.isInteger(input.version)) return { kind: "not_found" };
+  const target = await inTenantTransaction(db, ctx, async (trx) => {
+    const { rows } = await sql<{ in_effect: boolean }>`
+      select (effective_from <= now() and (effective_until is null or effective_until > now()))
+             as in_effect
+        from waiver_template_versions
+       where tenant_id = ${ctx.tenantId} and template_id = ${input.templateId}
+         and version = ${input.version}`.execute(trx);
+    return rows[0] ?? null;
+  });
+  if (!target) return { kind: "not_found" };
+  if (!target.in_effect) return { kind: "not_in_effect" };
+  await inTenantTransaction(db, ctx, async (trx) => {
+    await sql`select pg_advisory_xact_lock(hashtextextended(${assignmentLockKey(ctx.tenantId)}, 0))`.execute(
+      trx,
+    );
+  });
+  const moved = await inTenantTransaction(db, ctx, (trx) =>
+    supersedeUnsignedRequests(trx, ctx, deps, input),
+  );
+  return { kind: "reassigned", moved };
+}
+
+async function supersedeUnsignedRequests(
   trx: TenantTransaction,
   ctx: TenantContext,
   deps: WaiverDeps,

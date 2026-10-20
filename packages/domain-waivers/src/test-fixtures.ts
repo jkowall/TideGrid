@@ -79,7 +79,7 @@ export async function createWaiverFixture(
       reason: "fixture",
     });
     if (created.kind !== "created") throw new Error(`fixture template: ${JSON.stringify(created)}`);
-    const published = await publishWaiverTemplateVersion(trx, ctx, null, {
+    const published = await publishWaiverTemplateVersion(trx, ctx, {
       templateId: created.templateId,
       text: FIXTURE_TEXT,
       reason: "fixture",

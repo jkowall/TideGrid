@@ -23,6 +23,7 @@ import {
   getSigningView,
   loadWaiverSession,
   publishWaiverTemplateVersion,
+  reassignUnsignedRequests,
   revokeParticipantWaivers,
   type SignInput,
   type SignResult,
@@ -332,15 +333,24 @@ describe.skipIf(!env)("G2.15 adversarial: signing and evidence", () => {
     const p3 = await named(3, "Vic Three");
     const o3 = await openFor(world, t.id, p3.request);
     const owner = systemCtx(t.id, "owner");
-    const publish = (body: string, reassignUnsigned: boolean) =>
-      inTenantTransaction(world.db, owner, (trx) =>
-        publishWaiverTemplateVersion(trx, owner, deps, {
+    // Publish, then (when asked) move unsigned work once the publish commits.
+    const publish = async (body: string, reassignUnsigned: boolean) => {
+      const published = await inTenantTransaction(world.db, owner, (trx) =>
+        publishWaiverTemplateVersion(trx, owner, {
           templateId: t.templateId,
           text: { ...FIXTURE_TEXT, body: `${FIXTURE_TEXT.body}\n\n${body}` },
           reason: "Synthetic revision",
-          reassignUnsigned,
         }),
       );
+      if (published.kind !== "published" || !reassignUnsigned) {
+        return { ...published, reassigned: 0 };
+      }
+      const moved = await reassignUnsignedRequests(world.db, owner, deps, {
+        templateId: t.templateId,
+        version: published.version,
+      });
+      return { ...published, reassigned: moved.kind === "reassigned" ? moved.moved : -1 };
+    };
 
     // Version 2, unsigned work left where it is.
     const v2 = await publish("Second synthetic paragraph.", false);
@@ -411,22 +421,28 @@ describe.skipIf(!env)("G2.15 adversarial: signing and evidence", () => {
       const request = (await liveRequest(world.admin, raced.bookingId, pid)).id;
       const { session } = await openFor(world, t.id, request);
       const input = await signingInput(world, t.id, deps, session);
+      const published = await inTenantTransaction(world.db, owner, (trx) =>
+        publishWaiverTemplateVersion(trx, owner, {
+          templateId: t.templateId,
+          text: { ...FIXTURE_TEXT, body: `${FIXTURE_TEXT.body}\n\nRace ${round}.` },
+          reason: "Synthetic revision",
+        }),
+      );
+      if (published.kind !== "published") throw new Error(JSON.stringify(published));
       const start = barrier(2);
-      const [signed, published] = await Promise.all([
+      const [signed, moved] = await Promise.all([
         racingSign(t.id, session, input, start),
         settle(
-          inTenantTransaction(world.db, owner, async (trx) => {
+          (async () => {
             await start.arrive();
-            return publishWaiverTemplateVersion(trx, owner, deps, {
+            return reassignUnsignedRequests(world.db, owner, deps, {
               templateId: t.templateId,
-              text: { ...FIXTURE_TEXT, body: `${FIXTURE_TEXT.body}\n\nRace ${round}.` },
-              reason: "Synthetic revision",
-              reassignUnsigned: true,
+              version: published.version,
             });
-          }),
+          })(),
         ),
       ]);
-      expect([signed.ok, published.ok]).toEqual([true, true]);
+      expect([signed.ok, moved.ok]).toEqual([true, true]);
       if (!signed.ok) continue;
       const [row] = await world.admin<{ state: string; evidence: number }[]>`
           select r.state, (select count(*)::int from public.waiver_evidence e

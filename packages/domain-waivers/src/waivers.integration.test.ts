@@ -18,6 +18,7 @@ import {
   getSigningView,
   loadWaiverSession,
   publishWaiverTemplateVersion,
+  reassignUnsignedRequests,
   redeemWaiverToken,
   revokeBookingWaivers,
   type SignInput,
@@ -609,14 +610,19 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
 
     const ctx = staffContext(t.id, "owner");
     const published = await inTenantTransaction(runtime.db, ctx, (trx) =>
-      publishWaiverTemplateVersion(trx, ctx, deps, {
+      publishWaiverTemplateVersion(trx, ctx, {
         templateId: t.templateId,
         text: { ...FIXTURE_TEXT, body: `${FIXTURE_TEXT.body}\n\nA new paragraph.` },
         reason: "Counsel updated the text",
-        reassignUnsigned: true,
       }),
     );
-    expect(published).toMatchObject({ kind: "published", version: 2, reassigned: 1 });
+    expect(published).toMatchObject({ kind: "published", version: 2 });
+    expect(
+      await reassignUnsignedRequests(runtime.db, ctx, deps, {
+        templateId: t.templateId,
+        version: 2,
+      }),
+    ).toEqual({ kind: "reassigned", moved: 1 });
     expect(await sign(t.id, wesSession.session)).toEqual({
       kind: "not_pending",
       state: "superseded",

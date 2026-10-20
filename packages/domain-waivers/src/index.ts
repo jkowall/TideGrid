@@ -84,7 +84,7 @@ export {
   type TripWaivers,
   type WaiverStatusCode,
 } from "./status.ts";
-export { SUPERSEDE_LIMIT, supersedeUnsignedRequests } from "./supersede.ts";
+export { type ReassignResult, reassignUnsignedRequests, SUPERSEDE_LIMIT } from "./supersede.ts";
 export {
   type ApplicableVersion,
   type CreateTemplateResult,

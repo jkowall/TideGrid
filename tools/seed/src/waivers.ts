@@ -136,7 +136,7 @@ export async function seedWaivers(
             .where("template_id", "=", created.templateId)
             .executeTakeFirst();
           if (existing) return;
-          const published = await publishWaiverTemplateVersion(trx, ctx, null, {
+          const published = await publishWaiverTemplateVersion(trx, ctx, {
             templateId: created.templateId,
             text: plan.text,
             reason: REASON,

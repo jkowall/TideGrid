@@ -60,6 +60,17 @@ export async function lockBookingForWaivers(
   return rows[0] ?? null;
 }
 
+/**
+ * The tenant's assignment key. Each assignment holds it shared, from just
+ * before it reads which version applies until it commits; moving unsigned
+ * work to a new version takes it exclusive for a moment first (see
+ * supersede.ts), so every assignment that read the older version has
+ * committed, and is seen, before the move reads its candidates.
+ */
+export function assignmentLockKey(tenantId: string): string {
+  return `tidegrid.waiver_assign:${tenantId}`;
+}
+
 export function requiredSignerFor(participant: WaiverParticipant): WaiverSignerRole {
   return participant.minor ? "guardian" : "participant";
 }
@@ -81,6 +92,9 @@ export async function assignBookingWaivers(
   if (booking.state !== "confirmed") {
     return { required: false, version: null, created: [], alreadyAssigned: 0 };
   }
+  await sql`select pg_advisory_xact_lock_shared(hashtextextended(${assignmentLockKey(ctx.tenantId)}, 0))`.execute(
+    trx,
+  );
   const version = await findApplicableVersion(trx, ctx.tenantId, booking.productId);
   if (!version) return { required: false, version: null, created: [], alreadyAssigned: 0 };
 

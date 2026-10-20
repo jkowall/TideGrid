@@ -19,9 +19,7 @@ import {
   type WaiverText,
   type WaiverTextProblem,
 } from "./content.ts";
-import type { WaiverDeps } from "./ports.ts";
 import { RENDERING_VERSION } from "./render.ts";
-import { supersedeUnsignedRequests } from "./supersede.ts";
 
 export type TemplateScopeInput = { scope: "operator" } | { scope: "product"; productId: string };
 
@@ -99,13 +97,6 @@ export interface PublishVersionInput {
   effectiveFrom?: Date;
   effectiveUntil?: Date | null;
   reason: string;
-  /**
-   * Also move unsigned requests on this template's older versions to the new
-   * one: each is superseded and replaced by a request for this version, which
-   * is sent at once. Signed requests and their evidence never change. Only
-   * for a version in effect now.
-   */
-  reassignUnsigned?: boolean;
 }
 
 export type PublishVersionResult =
@@ -114,8 +105,6 @@ export type PublishVersionResult =
       version: number;
       contentSha256: string;
       effectiveFrom: Date;
-      /** Requests superseded and replaced, when reassignUnsigned was asked for. */
-      reassigned: number;
     }
   | { kind: "not_found" }
   | {
@@ -125,12 +114,13 @@ export type PublishVersionResult =
 
 /**
  * Append the next version of a template. The database numbers it, stamps its
- * hash, and refuses an edit of any earlier version for every role.
+ * hash, and refuses an edit of any earlier version for every role. To move
+ * unsigned requests to it as well, call reassignUnsignedRequests (supersede.ts)
+ * after this transaction commits.
  */
 export async function publishWaiverTemplateVersion(
   trx: TenantTransaction,
   ctx: TenantContext,
-  deps: WaiverDeps | null,
   input: PublishVersionInput,
 ): Promise<PublishVersionResult> {
   if (!isUuid(input.templateId)) return { kind: "not_found" };
@@ -156,15 +146,6 @@ export async function publishWaiverTemplateVersion(
       message: "A version ends after it takes effect",
     });
   }
-  if (input.reassignUnsigned && input.effectiveFrom && input.effectiveFrom.getTime() > Date.now()) {
-    problems.problems.push({
-      field: "reassignUnsigned",
-      code: "not_in_effect",
-      message: "Unsigned requests move only to a version in effect now",
-    });
-  }
-  if (input.reassignUnsigned && !deps)
-    throw new TypeError("reassigning requests needs waiver deps");
   if (problems.problems.length > 0) return problems;
 
   await lock(trx, `tidegrid.waiver_template:${ctx.tenantId}:${template.id}`);
@@ -201,7 +182,6 @@ export async function publishWaiverTemplateVersion(
       contentSha256: row.content_sha256,
       effectiveFrom: row.effective_from.toISOString(),
       effectiveUntil: input.effectiveUntil?.toISOString() ?? null,
-      reassignUnsigned: input.reassignUnsigned === true,
     },
   });
   await enqueueOutbox(trx, ctx, {
@@ -210,19 +190,11 @@ export async function publishWaiverTemplateVersion(
     aggregateId: template.id,
     payload: { templateId: template.id, version, contentSha256: row.content_sha256 },
   });
-  let reassigned = 0;
-  if (input.reassignUnsigned && deps) {
-    reassigned = await supersedeUnsignedRequests(trx, ctx, deps, {
-      templateId: template.id,
-      version,
-    });
-  }
   return {
     kind: "published",
     version,
     contentSha256: row.content_sha256,
     effectiveFrom: row.effective_from,
-    reassigned,
   };
 }
 

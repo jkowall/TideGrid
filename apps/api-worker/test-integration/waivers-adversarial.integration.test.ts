@@ -17,6 +17,7 @@ import {
   createWaiverHooks,
   defaultWaiverDeps,
   publishWaiverTemplateVersion,
+  reassignUnsignedRequests,
 } from "@tidegrid/domain-waivers";
 import {
   adult,
@@ -407,14 +408,19 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
       requestId: `adv-${randomUUID()}`,
     };
     const published = await inTenantTransaction(runtime.db, owner, (trx) =>
-      publishWaiverTemplateVersion(trx, owner, defaultWaiverDeps, {
+      publishWaiverTemplateVersion(trx, owner, {
         templateId: C.templateId,
         text: { ...FIXTURE_TEXT, title: "Fixture participation waiver, second edition" },
         reason: "Synthetic revision",
-        reassignUnsigned: true,
       }),
     );
-    expect(published).toMatchObject({ kind: "published", version: 2, reassigned: 2 });
+    expect(published).toMatchObject({ kind: "published", version: 2 });
+    expect(
+      await reassignUnsignedRequests(runtime.db, owner, defaultWaiverDeps, {
+        templateId: C.templateId,
+        version: 2,
+      }),
+    ).toEqual({ kind: "reassigned", moved: 2 });
     for (const res of await Promise.all(routes(old.sessionSecret, guestOf(C)))) {
       expect(code(res)).toEqual([401, "waiver_session_invalid"]);
     }
