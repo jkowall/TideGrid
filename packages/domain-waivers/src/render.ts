@@ -154,9 +154,21 @@ class Flow {
     this.y -= 5;
   }
 
-  heading(text: string): void {
-    // Never leave a heading alone at the foot of a page.
-    this.keep(16 + 2 * 15);
+  /** The height `field` takes for each of these, together. */
+  static fieldsHeight(fields: readonly (readonly [string, string])[], size: number): number {
+    return fields.reduce(
+      (sum, [, value]) =>
+        sum + wrapText(value, "regular", size, CONTENT_WIDTH - LABEL_WIDTH).length * size * 1.5,
+      0,
+    );
+  }
+
+  /**
+   * A section heading. It never sits alone at the foot of a page, and with
+   * `keepWith` it starts a new page unless that much more fits under it.
+   */
+  heading(text: string, keepWith = 2 * 15): void {
+    this.keep(24 + keepWith);
     this.gap(6);
     this.line(text, { font: "bold", size: 11.5, leading: 18 });
   }
@@ -206,20 +218,23 @@ export function renderWaiverPdf(input: WaiverDocumentInput): Uint8Array {
   flow.line(capacity(input), { size: 9.5, leading: 14 });
   flow.line(`Signed ${input.signedAtLocal}`, { size: 9.5, leading: 14 });
 
-  flow.heading("Signing record");
-  flow.field("Evidence", input.evidenceId, 8.5);
-  flow.field("Waiver request", input.requestId, 8.5);
-  flow.field("Waiver version", `${input.title}, version ${input.version}`, 8.5);
-  flow.field("Content SHA-256", input.contentSha256, 8.5);
-  flow.field(
-    "How it was reached",
-    `A single-use link emailed to ${input.recipientMasked}, opened by an explicit request; the signer confirmed who they are and who they signed for`,
-    8.5,
-  );
-  flow.field("Signed at (UTC)", input.signedAt.toISOString(), 8.5);
-  flow.field("IP address", input.sourceIp ?? "Not recorded", 8.5);
-  flow.field("Device", input.userAgent ?? "Not recorded", 8.5);
-  flow.field("Rendering", `TideGrid waiver renderer ${RENDERING_VERSION}`, 8.5);
+  // The signing record stays on one page: it starts a new page unless all of it fits.
+  const record = [
+    ["Evidence", input.evidenceId],
+    ["Waiver request", input.requestId],
+    ["Waiver version", `${input.title}, version ${input.version}`],
+    ["Content SHA-256", input.contentSha256],
+    [
+      "How it was reached",
+      `A single-use link emailed to ${input.recipientMasked}, opened by an explicit request; the signer confirmed who they are and who they signed for`,
+    ],
+    ["Signed at (UTC)", input.signedAt.toISOString()],
+    ["IP address", input.sourceIp ?? "Not recorded"],
+    ["Device", input.userAgent ?? "Not recorded"],
+    ["Rendering", `TideGrid waiver renderer ${RENDERING_VERSION}`],
+  ] as const;
+  flow.heading("Signing record", Flow.fieldsHeight(record, 8.5));
+  for (const [label, value] of record) flow.field(label, value, 8.5);
 
   const total = flow.pages.length;
   const left = `${input.operatorName}. ${input.title}, version ${input.version}.`;

@@ -98,6 +98,24 @@ describe("renderWaiverPdf", () => {
     }
   });
 
+  it("keeps the signing record on one page however long the waiver runs", () => {
+    const pageOf = (pdf: string, text: string) =>
+      [...pdf.matchAll(/stream\n([\s\S]*?)endstream/g)].findIndex((m) => m[1]?.includes(text));
+    const pagesSeen = new Set<number>();
+    for (let lines = 1; lines <= 60; lines++) {
+      const body = Array.from({ length: lines }, (_, i) => `Short line ${i + 1}.`).join("\n\n");
+      const pdf = ascii(renderWaiverPdf(sampleWaiver({ body })));
+      const start = pageOf(pdf, "(Signing record)");
+      expect(start).toBeGreaterThanOrEqual(0);
+      for (const label of ["(Evidence)", "(How it was reached)", "(Device)", "(Rendering)"]) {
+        expect([lines, label, pageOf(pdf, label)]).toEqual([lines, label, start]);
+      }
+      pagesSeen.add(start);
+    }
+    // The bodies push the record across at least one page break.
+    expect(pagesSeen.size).toBeGreaterThan(1);
+  });
+
   it("masks an address to its first character and domain", () => {
     expect(maskEmail("pat@example.test")).toBe("p•••@example.test");
     expect(maskEmail("broken")).toBe("•••");
