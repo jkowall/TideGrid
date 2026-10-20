@@ -59,8 +59,10 @@ export async function closeRequestAccess(
   request: { id: string; booking_id: string; participant_id: string },
   reasons: {
     link: "completed" | "withdrawn" | "recipient_changed" | "booking_canceled";
-    /** Null keeps open sessions open: the signer's own, for the signed copy. */
+    /** Null keeps open sessions open. */
     session: WaiverSessionRevokedReason | null;
+    /** A session left open when the others close: the signer's own, for the signed copy. */
+    keepSession?: string;
   },
 ): Promise<void> {
   await revokeAccessLinks(trx, ctx, {
@@ -78,6 +80,7 @@ export async function closeRequestAccess(
     await sql`
       update waiver_signing_sessions set revoked_at = now(), revoked_reason = ${reasons.session}
        where tenant_id = ${ctx.tenantId} and request_id = ${request.id}
-         and revoked_at is null`.execute(trx);
+         and revoked_at is null
+         and id is distinct from ${reasons.keepSession ?? null}::uuid`.execute(trx);
   }
 }

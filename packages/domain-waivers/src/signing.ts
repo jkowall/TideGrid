@@ -440,9 +440,13 @@ export async function signWaiver(
   await sql`
     update waiver_requests set state = 'signed'
      where tenant_id = ${ctx.tenantId} and id = ${request.id}`.execute(trx);
-  // Every other link to this waiver stops working, and no queued email goes
-  // out; the signer's own session stays open for the signed copy.
-  await closeRequestAccess(trx, ctx, request, { link: "completed", session: null });
+  // Every other link and session to this waiver stops working, and no queued
+  // email goes out; the signer's own session stays open for the signed copy.
+  await closeRequestAccess(trx, ctx, request, {
+    link: "completed",
+    session: "completed",
+    keepSession: session.id,
+  });
   await recordAudit(trx, ctx, {
     action: "waiver_request.signed",
     subjectType: "waiver_request",

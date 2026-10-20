@@ -66,6 +66,17 @@ export async function redeemWaiverToken(
   if (!requestId) return { kind: "invalid" };
   const request = await lockRequest(trx, ctx.tenantId, requestId);
   if (!request) return { kind: "invalid" };
+  // Once the trip has ended a link opens nothing, even one issued before the
+  // trip moved earlier; the link is left as it is.
+  const { rows: trip } = await sql<{ over: boolean }>`
+    select t.ends_at <= now() as over
+      from bookings b join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
+     where b.tenant_id = ${ctx.tenantId} and b.id = ${request.booking_id}`.execute(trx);
+  if (trip[0]?.over) {
+    return request.state === "pending"
+      ? { kind: "expired" }
+      : { kind: "closed", state: request.state };
+  }
 
   const redeemed = await redeemAccessLink(trx, ctx, {
     token: input.token,
@@ -73,9 +84,14 @@ export async function redeemWaiverToken(
   });
   switch (redeemed.kind) {
     case "invalid":
+      return { kind: "invalid" };
     case "expired":
     case "used":
-      return { kind: redeemed.kind };
+      // A spent or lapsed link of a waiver that was signed or ended says so,
+      // rather than asking for a new link.
+      return request.state === "pending"
+        ? { kind: redeemed.kind }
+        : { kind: "closed", state: request.state };
     case "superseded":
       return { kind: "replaced" };
     case "revoked":
@@ -161,4 +177,26 @@ export async function loadWaiverSession(
     signerRole: row.signer_role,
     expiresAt: row.expires_at,
   };
+}
+
+/**
+ * The state of the request whose session a secret names, when that session
+ * exists in this tenant but is no longer open and its request no longer
+ * takes a signature (signed, superseded, or revoked), so the page can say
+ * what happened instead of only that the session ended. Null otherwise.
+ */
+export async function endedWaiverSession(
+  trx: TenantTransaction,
+  tenantId: string,
+  secret: string,
+): Promise<{ requestState: Exclude<WaiverRequestState, "pending"> } | null> {
+  if (!waiverSecretPattern.test(secret)) return null;
+  const { rows } = await sql<{ state: WaiverRequestState }>`
+    select r.state
+      from waiver_signing_sessions s
+      join waiver_requests r on r.tenant_id = s.tenant_id and r.id = s.request_id
+     where s.tenant_id = ${tenantId} and s.secret_hash = ${await hashWaiverSession(secret)}
+       and (s.revoked_at is not null or s.expires_at <= now())`.execute(trx);
+  const state = rows[0]?.state;
+  return state && state !== "pending" ? { requestState: state } : null;
 }

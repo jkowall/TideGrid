@@ -1,4 +1,5 @@
 export {
+  endedWaiverSession,
   loadWaiverSession,
   type RedeemResult,
   redeemWaiverToken,

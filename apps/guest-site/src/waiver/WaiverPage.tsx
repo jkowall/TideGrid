@@ -144,7 +144,8 @@ const stops: Record<string, Stop> = {
   unavailable,
 };
 
-const doneCodes = new Set(["waiver_signed", "waiver_not_needed"]);
+/** Codes after which the stored session has nothing more to show. */
+const doneCodes = new Set(["waiver_signed", "waiver_not_needed", "waiver_superseded"]);
 
 function stopFor(code: string): Stop {
   return stops[code] ?? unavailable;

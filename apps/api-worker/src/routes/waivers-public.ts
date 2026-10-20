@@ -11,6 +11,7 @@ import {
 import type { JsonObject } from "@tidegrid/database";
 import { manageSession } from "@tidegrid/domain-booking";
 import {
+  endedWaiverSession,
   type GuestBookingWaivers,
   getSigningView,
   listGuestBookingWaivers,
@@ -227,15 +228,21 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     return c.json(body as WaiverSessionOpenResponse, 201);
   });
 
-  /** The open session for this request's bearer secret, in the Origin's tenant. */
+  /**
+   * The open session for this request's bearer secret, in the Origin's
+   * tenant. A session that ended because its waiver was signed elsewhere,
+   * replaced, or is no longer needed says which, as the link does; any other
+   * ended or unknown session answers 401.
+   */
   async function openSession(
     trx: Parameters<Parameters<typeof withPublicTenant>[2]>[0],
     tenantId: string,
     secret: string,
   ): Promise<WaiverSession> {
     const session = await loadWaiverSession(trx, tenantId, secret);
-    if (!session) throw sessionInvalid();
-    return session;
+    if (session) return session;
+    const ended = await endedWaiverSession(trx, tenantId, secret);
+    throw ended ? closedRefusal(ended.requestState) : sessionInvalid();
   }
 
   const readRoute = createRoute({
@@ -244,7 +251,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["public", "waivers"],
     summary: "The waiver of the current signing session",
     description:
-      "Resolves the browser Origin and needs the session's secret as a bearer token. The waiver's text and version hash, the trip, who signs, and, once signed, what was recorded. An unknown, expired, or revoked session, or another operator's, answers 401.",
+      "Resolves the browser Origin and needs the session's secret as a bearer token. The waiver's text and version hash, the trip, who signs, and, once signed, what was recorded. A session that ended because its waiver was signed through another link, replaced by a newer version, or is no longer needed answers 409 with that reason. Any other unknown, expired, or revoked session, or another operator's, answers 401.",
     security: bearerSecurity,
     responses: {
       200: {
@@ -255,6 +262,9 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         "No session secret (waiver_session_required), or no open session (waiver_session_invalid)",
       ),
       404: errorBody("No operator at this address"),
+      409: errorBody(
+        "The session ended because the waiver was signed (waiver_signed), replaced by a newer version (waiver_superseded), or is no longer needed (waiver_not_needed)",
+      ),
     },
   });
 
@@ -376,6 +386,9 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       },
       401: errorBody("No session secret, or no open session"),
       404: errorBody("No operator at this address, or not signed yet (waiver_document_not_found)"),
+      409: errorBody(
+        "The session ended because the waiver was signed through another session (waiver_signed), replaced (waiver_superseded), or is no longer needed (waiver_not_needed)",
+      ),
     },
   });
 

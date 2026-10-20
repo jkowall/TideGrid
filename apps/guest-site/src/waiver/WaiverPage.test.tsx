@@ -318,4 +318,20 @@ describe("the waiver page", () => {
     renderPage();
     expect(screen.getByRole("heading", { name: "Open the link from your email" })).toBeTruthy();
   });
+
+  it.each([
+    ["waiver_signed", "This waiver is already signed"],
+    ["waiver_superseded", "This waiver was updated"],
+    ["waiver_not_needed", "This waiver is no longer needed"],
+  ])("says why a reloaded session ended (%s), and forgets it", async (code, title) => {
+    window.history.replaceState(null, "", "/waiver");
+    stubApi(() => refusal(409, code));
+    window.sessionStorage.setItem(
+      "tidegrid.waiver.session",
+      JSON.stringify({ secret, expiresAt: new Date(Date.now() + 60_000).toISOString() }),
+    );
+    renderPage();
+    await screen.findByRole("heading", { name: title });
+    expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+  });
 });

@@ -21,6 +21,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
   createWaiverHooks,
   defaultWaiverDeps,
+  endedWaiverSession,
   loadWaiverSession,
   publishWaiverTemplateVersion,
   reassignUnsignedRequests,
@@ -90,6 +91,11 @@ describe.skipIf(!env)("G2.15 adversarial: links and sessions", () => {
     (await inTenantTransaction(world.db, guestCtx(tenantId), (trx) =>
       loadWaiverSession(trx, tenantId, secret),
     )) !== null;
+
+  const ended = (tenantId: string, secret: string) =>
+    inTenantTransaction(world.db, guestCtx(tenantId), (trx) =>
+      endedWaiverSession(trx, tenantId, secret),
+    );
 
   async function linkRow(token: string) {
     const [row] = await world.admin<
@@ -166,16 +172,36 @@ describe.skipIf(!env)("G2.15 adversarial: links and sessions", () => {
     await first(kai);
     expect(await loads(A.id, kaiOpened.secret)).toBe(true);
 
-    // Signing closes every other link to the waiver; the signer's session stays.
+    // Signing closes every other link and session to the waiver; the signer's
+    // session stays. A spent link of the signed waiver says it was signed.
     const sigOpened = await redeem(world, A.id, await first(sig));
     if (sigOpened.kind !== "opened") throw new Error("sig did not open");
     await ageDeliveries(world.admin, req[sig] ?? "");
     expect(await staffResend(A.id, req[sig] ?? "")).toMatchObject({ kind: "sent" });
     const sigSecond = await first(sig);
+    const sigOther = await redeem(world, A.id, sigSecond);
+    if (sigOther.kind !== "opened") throw new Error("sig's second link did not open");
+    await ageDeliveries(world.admin, req[sig] ?? "");
+    expect(await staffResend(A.id, req[sig] ?? "")).toMatchObject({ kind: "sent" });
+    const sigThird = await first(sig);
     expect((await sign(world, A.id, deps, sigOpened.session)).kind).toBe("signed");
+    expect(await redeem(world, A.id, sigThird)).toEqual({ kind: "closed", state: "signed" });
+    expect((await linkRow(sigThird)).revoked_reason).toBe("completed");
     expect(await redeem(world, A.id, sigSecond)).toEqual({ kind: "closed", state: "signed" });
-    expect((await linkRow(sigSecond)).revoked_reason).toBe("completed");
     expect(await loads(A.id, sigOpened.secret)).toBe(true);
+    expect(await loads(A.id, sigOther.secret)).toBe(false);
+    expect(
+      (await sessionsOf(req[sig] ?? "")).map((s) => [
+        s.id === sigOpened.session.id,
+        s.revoked_reason,
+      ]),
+    ).toEqual([
+      [true, null],
+      [false, "completed"],
+    ]);
+    expect(await ended(A.id, sigOther.secret)).toEqual({ requestState: "signed" });
+    expect(await ended(B.id, sigOther.secret)).toBeNull();
+    expect(await ended(A.id, sigOpened.secret)).toBeNull();
 
     // A corrected address ends the old address's links and sessions at once.
     const coraOpened = await redeem(world, A.id, await first(cora));
@@ -191,6 +217,8 @@ describe.skipIf(!env)("G2.15 adversarial: links and sessions", () => {
     expect((await sessionsOf(req[cora] ?? "")).map((s) => s.revoked_reason)).toEqual([
       "recipient_changed",
     ]);
+    // Still to sign: an ended session of it reads as just ended.
+    expect(await ended(A.id, coraOpened.secret)).toBeNull();
     const coraMail = await linkFor(world.admin, world.db, A.id, req[cora] ?? "");
     expect(coraMail.to).toBe(coraNew);
     expect((await redeem(world, A.id, coraMail.token)).kind).toBe("opened");

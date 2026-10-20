@@ -328,6 +328,85 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     expect((await sign(signature(session, { relationship: "legal_guardian" }))).status).toBe(201);
   });
 
+  it("tells another session and a spent link that the waiver was signed, and keeps the signer's", async () => {
+    const p = await party(A);
+    const first = await openSession(A, p.annToken);
+    await admin.begin(async (tx) => {
+      await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
+      await tx`update public.waiver_deliveries set created_at = created_at - interval '11 minutes',
+                      send_after = send_after - interval '11 minutes'
+                where request_id = ${p.annRequest}`;
+      await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
+    });
+    const resent = await request(
+      "POST",
+      `${staffBase(A.id)}/waiver-requests/${p.annRequest}/resend`,
+      {
+        as: A.staff,
+        origin: CONSOLE,
+        headers: { "idempotency-key": `k-${randomUUID()}` },
+        body: { reason: "Guest asked" },
+      },
+    );
+    expect(resent.status).toBe(201);
+    const second = await openSession(
+      A,
+      (await linkFor(admin, runtime.db, A.id, p.annRequest)).token,
+    );
+    const as = (secret: string) => ({ origin: guestOf(A), bearer: secret });
+    const signed = await request("POST", "/v1/public/waiver-sessions/current/signature", {
+      ...as(second.sessionSecret),
+      body: signature(second),
+    });
+    expect(signed.status).toBe(201);
+
+    const codeOf = (res: Res) => [res.status, res.json.error?.code];
+    expect(
+      codeOf(await request("GET", "/v1/public/waiver-sessions/current", as(first.sessionSecret))),
+    ).toEqual([409, "waiver_signed"]);
+    expect(
+      codeOf(
+        await request("POST", "/v1/public/waiver-sessions/current/signature", {
+          ...as(first.sessionSecret),
+          body: signature(first),
+        }),
+      ),
+    ).toEqual([409, "waiver_signed"]);
+    expect(
+      codeOf(
+        await request(
+          "GET",
+          "/v1/public/waiver-sessions/current/document",
+          as(first.sessionSecret),
+        ),
+      ),
+    ).toEqual([409, "waiver_signed"]);
+    // Another operator's site still finds no session at all.
+    expect(
+      codeOf(
+        await request("GET", "/v1/public/waiver-sessions/current", {
+          origin: guestOf(B),
+          bearer: first.sessionSecret,
+        }),
+      ),
+    ).toEqual([401, "waiver_session_invalid"]);
+    // The first email's link, opened once already, says the same.
+    expect(
+      codeOf(
+        await request("POST", "/v1/public/waiver-sessions", {
+          origin: guestOf(A),
+          body: { token: p.annToken },
+        }),
+      ),
+    ).toEqual([409, "waiver_signed"]);
+    const mine = await request(
+      "GET",
+      "/v1/public/waiver-sessions/current",
+      as(second.sessionSecret),
+    );
+    expect([mine.status, (mine.json.waiver as { state: string }).state]).toEqual([200, "signed"]);
+  });
+
   it("shows waiver status to owners and booking staff only, and nothing across operators", async () => {
     const p = await party(A);
     const session = await openSession(A, p.annToken);
