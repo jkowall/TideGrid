@@ -445,7 +445,7 @@ describe.skipIf(!env)("adversarial: guest booking access through the API", () =>
     expect([ended.status, ended.json.error?.code]).toEqual([401, "session_expired"]);
   });
 
-  it("says why a link stopped working, and a renewal from any old link mails the booker a working one", async () => {
+  it("says why a link stopped working; a superseded link renews to the booker, a revoked one renews nothing", async () => {
     const { booked, booker: who, token: first } = await bookedWithLink(A);
     const session = await sessionFor(A, booked);
     const asked = await request("POST", "/v1/public/manage/link-email", {
@@ -478,7 +478,17 @@ describe.skipIf(!env)("adversarial: guest booking access through the API", () =>
     const revoked = await redeemAt(A, second);
     expect([revoked.status, revoked.json.error?.code]).toEqual([410, "link_revoked"]);
 
-    const renewed = await renewAt(A, { token: second });
+    // A link revoked on purpose renews nothing, though it answers as any token does:
+    // otherwise whoever still holds that email could keep replacing the booker's link.
+    const refused = await renewAt(A, { token: second });
+    expect([refused.status, refused.json]).toEqual([202, { status: "accepted" }]);
+    await deliver(A);
+    expect(
+      (await messages(booked.bookingId)).filter((m) => m.template === "booking_manage_link"),
+    ).toHaveLength(1);
+
+    // A superseded link still renews, to the booker's address on file.
+    const renewed = await renewAt(A, { token: first });
     expect([renewed.status, renewed.json]).toEqual([202, { status: "accepted" }]);
     await deliver(A);
     const newest = (await messages(booked.bookingId)).filter(

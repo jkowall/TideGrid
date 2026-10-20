@@ -684,6 +684,73 @@ describe.skipIf(!env)("adversarial: access links, guest sessions, and booking em
     expect(await asGuest(world.db, A.id, (trx) => manageSession(trx, A.id, token))).toBeNull();
   });
 
+  it("renews nothing from a link revoked on purpose, and still renews a superseded one", async () => {
+    const { b, token } = await bookedWithLink(A, tripsA);
+    const linkMails = async () =>
+      (await messagesOf(world.admin, b.bookingId)).filter(
+        (m) => m.template === "booking_manage_link",
+      ).length;
+    const renew = (candidate: string) =>
+      asGuest(world.db, A.id, (trx, ctx) =>
+        renewManageLink(trx, ctx, { token: candidate, requestKey: `adv-${randomUUID()}` }),
+      );
+    for (const reason of ["recipient_changed", "staff", "booking_canceled"] as const) {
+      const fresh = await bookedWithLink(A, tripsA);
+      await asSystem(world.db, A.id, (trx, ctx) =>
+        revokeAccessLinks(trx, ctx, {
+          bookingId: fresh.b.bookingId,
+          purpose: "booking_manage",
+          reason,
+        }),
+      );
+      expect(await renew(fresh.token), reason).toEqual({ kind: "not_found" });
+      const [mails] = await world.admin<{ n: number }[]>`
+        select count(*)::int as n from public.email_messages
+         where booking_id = ${fresh.b.bookingId} and template = 'booking_manage_link'`;
+      expect(mails?.n, reason).toBe(0);
+    }
+    // A live link asks for a new one; once that newer email supersedes it, it still can.
+    expect((await renew(token)).kind).toBe("enqueued");
+    await deliverMail(world, A.id);
+    expect(await linkMails()).toBe(1);
+    expect((await renew(token)).kind).toBe("enqueued");
+    expect(await linkMails()).toBe(2);
+  });
+
+  it("keeps at most three live sessions for one checkout's secret, ending the oldest", async () => {
+    const { b } = await bookedWithLink(A, tripsA);
+    const open = () =>
+      asGuest(world.db, A.id, (trx, ctx) =>
+        openManageSessionFromCheckout(trx, ctx, {
+          checkoutSessionId: b.checkoutSessionId,
+          secret: b.secret,
+        }),
+      );
+    const tokens: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const opened = await open();
+      if (opened.kind !== "opened") throw new Error(`open ${i}: ${opened.kind}`);
+      tokens.push(opened.session.token);
+    }
+    const live = async () => {
+      const [row] = await world.admin<{ n: number }[]>`
+        select count(*)::int as n from public.guest_sessions
+         where checkout_session_id = ${b.checkoutSessionId}
+           and revoked_at is null and expires_at > now()`;
+      return row?.n ?? 0;
+    };
+    expect(await live()).toBe(3);
+    const still = async (token: string) =>
+      (await asGuest(world.db, A.id, (trx) => manageSession(trx, A.id, token))) !== null;
+    expect(await still(tokens[0] ?? "")).toBe(false);
+    expect(await still(tokens[1] ?? "")).toBe(false);
+    expect(await still(tokens[4] ?? "")).toBe(true);
+    // Opened at once, they still leave at most three.
+    const burst = await Promise.all([open(), open(), open(), open()]);
+    expect(burst.every((o) => o.kind === "opened")).toBe(true);
+    expect(await live()).toBe(3);
+  });
+
   it("never stores a raw link or session token, in any table it writes", async () => {
     const { messageId, token } = await bookedWithLink(A, tripsA);
     const opened = await redeem(world, A.id, token);
