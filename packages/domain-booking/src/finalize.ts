@@ -44,7 +44,7 @@ import {
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
-import { enqueueConfirmationEmail } from "./emails.ts";
+import { enqueueConfirmationEmail, enqueueRefundFailedEmail } from "./emails.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import { newBookingReference } from "./secrets.ts";
 import { record } from "./views.ts";
@@ -612,6 +612,7 @@ export type SettleRefundResult =
 interface RefundRow {
   id: string;
   payment_id: string;
+  reason: string;
   amount: number;
   idempotency_key: string;
   state: string;
@@ -633,8 +634,8 @@ export async function settleRefund(
 ): Promise<SettleRefundResult> {
   const refund = await inTenantTransaction(db, ctx, async (trx) => {
     const { rows } = await sql<RefundRow>`
-      select r.id, r.payment_id, r.amount, r.idempotency_key, r.state, p.provider, p.account_ref,
-             p.provider_payment_id
+      select r.id, r.payment_id, r.reason, r.amount, r.idempotency_key, r.state, p.provider,
+             p.account_ref, p.provider_payment_id
         from payment_refunds r
         join payments p on p.tenant_id = r.tenant_id and p.id = r.payment_id
        where r.tenant_id = ${ctx.tenantId} and r.id = ${refundId}`.execute(trx);
@@ -687,10 +688,45 @@ export async function settleRefund(
       topic: outcome.state === "succeeded" ? "payment.refund.succeeded" : "payment.refund.failed",
       payload: { refundId: refund.id, paymentId: refund.payment_id },
     });
+    if (outcome.state === "failed" && refund.reason === "booking_canceled") {
+      await followUpRefusedRefund(trx, ctx, refund);
+    }
     return outcome.state === "succeeded"
       ? { kind: "succeeded" as const, providerRefundId: outcome.ref }
       : { kind: "failed" as const, failureCode: outcome.code };
   });
+}
+
+/**
+ * A canceled booking's refund was refused: the cancellation email said it was
+ * on its way, so the guest is told it is not, once. Written under a
+ * savepoint, so an email problem never undoes the recorded refusal; a
+ * failure is audited for staff instead.
+ */
+async function followUpRefusedRefund(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  refund: RefundRow,
+): Promise<void> {
+  const { rows } = await sql<{ id: string }>`
+    select id from bookings where tenant_id = ${ctx.tenantId} and payment_id = ${refund.payment_id}`.execute(
+    trx,
+  );
+  const bookingId = rows[0]?.id;
+  if (!bookingId) return;
+  await sql`savepoint refund_failed_email`.execute(trx);
+  try {
+    await enqueueRefundFailedEmail(trx, ctx, bookingId, refund.amount);
+    await sql`release savepoint refund_failed_email`.execute(trx);
+  } catch (error) {
+    await sql`rollback to savepoint refund_failed_email`.execute(trx);
+    await record(trx, ctx, {
+      action: "booking.refund_failed_email_failed",
+      subjectType: "booking",
+      subjectId: bookingId,
+      after: { error: error instanceof Error ? error.name : "unknown" },
+    });
+  }
 }
 
 // The webhook path ---------------------------------------------------------------------

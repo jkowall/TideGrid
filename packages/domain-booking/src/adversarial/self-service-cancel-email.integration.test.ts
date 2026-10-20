@@ -19,8 +19,14 @@ import {
 } from "@tidegrid/domain-messaging";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { cancelBooking, previewCancellation } from "../index.ts";
-import { type CheckoutFixture, createCheckoutFixture, fakeProvider } from "../test-fixtures.ts";
+import { cancelBooking, previewCancellation, settleRefund } from "../index.ts";
+import {
+  type CheckoutFixture,
+  createCheckoutFixture,
+  fakeProvider,
+  guestContext,
+} from "../test-fixtures.ts";
+import { FlakyProvider } from "./harness.ts";
 import {
   acceptedFor,
   addLocalHostname,
@@ -126,5 +132,49 @@ describe.skipIf(!env)("adversarial: the email a cancellation leaves behind", () 
     await cancel(b);
     await deliverMail(world, A.id);
     expect((await redeem(world, A.id, token)).kind).toBe("opened");
+  });
+
+  it("says the refund is on its way, and follows up once when the provider refuses it", async () => {
+    const b = await book(world, A, trips.shared(), 1);
+    const canceled = await cancel(b);
+    const refundId = canceled.cancellation.refundId;
+    if (!refundId) throw new Error("setup: no refund");
+    await deliverMail(world, A.id);
+    const [notice] = await world.admin<{ text_body: string }[]>`
+      select text_body from public.email_messages
+       where booking_id = ${b.bookingId} and template = 'booking_canceled'`;
+    expect(notice?.text_body).toContain("on its way back to your original payment method");
+    expect(notice?.text_body).toContain("If the refund can't be made, we'll email you.");
+
+    const refusing = new FlakyProvider(world.payments);
+    refusing.failRefund = "reject";
+    expect(await settleRefund(world.db, refusing, guestContext(A.id), refundId)).toMatchObject({
+      kind: "failed",
+    });
+    // Settling again changes nothing and writes no second follow-up.
+    expect(await settleRefund(world.db, refusing, guestContext(A.id), refundId)).toEqual({
+      kind: "not_pending",
+    });
+    await deliverMail(world, A.id);
+    const followUps = await world.admin<{ state: string; text_body: string }[]>`
+      select state, text_body from public.email_messages
+       where booking_id = ${b.bookingId} and template = 'booking_refund_failed'`;
+    expect(followUps).toHaveLength(1);
+    expect(followUps[0]?.state).toBe("sent");
+    expect(followUps[0]?.text_body).toContain("has not been returned yet");
+  });
+
+  it("sends no follow-up when the refund goes through", async () => {
+    const b = await book(world, A, trips.shared(), 1);
+    const canceled = await cancel(b);
+    const refundId = canceled.cancellation.refundId;
+    if (!refundId) throw new Error("setup: no refund");
+    expect(
+      await settleRefund(world.db, world.payments, guestContext(A.id), refundId),
+    ).toMatchObject({ kind: "succeeded" });
+    const [followUps] = await world.admin<{ n: number }[]>`
+      select count(*)::int as n from public.email_messages
+       where booking_id = ${b.bookingId} and template = 'booking_refund_failed'`;
+    expect(followUps?.n).toBe(0);
   });
 });
