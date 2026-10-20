@@ -314,6 +314,57 @@ describe("asking", () => {
     expect(sentTo(route.search())).toHaveLength(1);
   });
 
+  it("searches new terms typed while a search is on its way, and never shows the old answer", async () => {
+    const first = deferred();
+    const second = deferred();
+    api({ [route.search()]: [first.answer, second.answer] });
+    renderPage("finance");
+    ask({ text: "QKG6" });
+    const button = await screen.findByRole("button", { name: "Searching…" });
+    // Other terms: the button is ready for them at once, so Enter or a press searches them.
+    type("3zrb");
+    expect(searchButton()).toBe(button);
+    expect(button.getAttribute("aria-busy")).toBeNull();
+    expect(button.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.submit(textbox().closest("form") as HTMLFormElement);
+    expect(bodiesSent()).toEqual([
+      { q: "QKG6", limit: 25 },
+      { q: "3zrb", limit: 25 },
+    ]);
+    expect(await screen.findByRole("button", { name: "Searching…" })).toBe(button);
+    // The first answer comes late: its search was replaced, so it never shows.
+    first.release(json(asSeenBy("finance", searchBody({ total: 0, results: [] }))));
+    await settle();
+    expect(screen.queryByText("No bookings match")).toBeNull();
+    expect(liveText()).toBe("Searching bookings…");
+    second.release(
+      json(
+        asSeenBy("finance", searchBody({ results: [priya], total: 1, matchedOn: ["reference"] })),
+      ),
+    );
+    await resultsHeading("1 booking");
+    expect(refs()).toEqual(["Booking 3ZRB8N4C"]);
+    expect(liveText()).toBe("1 booking found.");
+  });
+
+  it("searches new terms pressed for while a search is on its way", async () => {
+    const first = deferred();
+    api({ [route.search()]: [first.answer, found()] });
+    renderPage();
+    ask({ text: "maya" });
+    await screen.findByRole("button", { name: "Searching…" });
+    ask({ text: "luis" });
+    await resultsHeading("2 bookings");
+    expect(bodiesSent()).toEqual([
+      { q: "maya", limit: 25 },
+      { q: "luis", limit: 25 },
+    ]);
+    first.release(json(searchBody({ results: [priya], total: 1 })));
+    await settle();
+    expect(screen.getByRole("heading", { level: 2, name: "2 bookings" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "1 booking" })).toBeNull();
+  });
+
   it("reads the same terms afresh each time they are searched", async () => {
     const second = deferred();
     api({ [route.search()]: [found(), second.answer] });
@@ -377,6 +428,29 @@ describe("the results", () => {
     expect(navigate).toHaveBeenCalledWith(`/bookings/${bookingIds.priya}`);
     expect(navigate).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    [{ text: "  maya  " }, "Matching “maya”."],
+    [
+      { text: "maya", from: "2026-11-01", to: "2026-11-30" },
+      "Matching “maya”, departing Nov 1 to 30, 2026.",
+    ],
+    [{ from: "2026-11-04", to: "2026-11-04" }, "Departing Nov 4, 2026."],
+    [{ from: "2026-11-01" }, "Departing on or after Nov 1, 2026."],
+    [{ text: "maya", to: "2027-01-31" }, "Matching “maya”, departing on or before Jan 31, 2027."],
+  ])(
+    "names what %j searched for under the count, as the field may change",
+    async (given, words) => {
+      api({ [route.search()]: found() });
+      renderPage();
+      ask(given);
+      const heading = await resultsHeading("2 bookings");
+      expect(text(heading.nextElementSibling)).toBe(words);
+      // Typing other terms leaves the results saying what they were found for.
+      type("luis");
+      expect(text(heading.nextElementSibling)).toBe(words);
+    },
+  );
 
   it("says 1 booking in the singular, with 1 guest", async () => {
     api({
@@ -478,6 +552,16 @@ describe("when nothing matches", () => {
     expect(items()).toEqual([]);
     expect(screen.queryByRole("button", { name: /Show more/ })).toBeNull();
     expect(screen.queryByRole("heading", { name: /^0 bookings?$/ })).toBeNull();
+  });
+
+  it("says what found nothing, with the advice", async () => {
+    api({ [route.search()]: found("owner", { results: [], total: 0 }) });
+    renderPage();
+    ask({ text: "x7bw", from: "2026-11-01" });
+    const empty = await screen.findByRole("heading", { level: 2, name: "No bookings match" });
+    expect(text(empty.closest(".tg-empty"))).toContain(
+      "Matching “x7bw”, departing on or after Nov 1, 2026. Check the spelling",
+    );
   });
 
   it("says so in the words of finance, which searched by reference or date", async () => {
@@ -598,6 +682,21 @@ describe("when the search does not run", () => {
     // The address as it stands, so signing in comes back here.
     expect(link.getAttribute("href")).toBe("/bookings/search?from=elsewhere");
     expect(within(alert).queryByRole("button")).toBeNull();
+  });
+
+  it("keeps Sign in again the one primary action while the person is signed out", async () => {
+    api({ [route.search()]: [() => apiError(401, "unauthenticated"), found()] });
+    const { container } = renderPage();
+    expect(searchButton().classList.contains("tg-button--primary")).toBe(true);
+    ask({ text: "maya" });
+    const alert = await screen.findByRole("alert");
+    const primaries = [...container.querySelectorAll(".tg-button--primary")];
+    expect(primaries).toEqual([within(alert).getByRole("link", { name: "Sign in again" })]);
+    expect(searchButton().classList.contains("tg-button--secondary")).toBe(true);
+    // Once a search runs again, Search is the page's primary action again.
+    press(searchButton());
+    await resultsHeading("2 bookings");
+    expect(searchButton().classList.contains("tg-button--primary")).toBe(true);
   });
 
   it.each([
@@ -744,6 +843,23 @@ describe("more bookings than one page", () => {
     expect(screen.getByRole("heading", { level: 2, name: "3 bookings" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Show more bookings|Loading more/ })).toBeNull();
     expect(screen.queryByText("More bookings didn't load")).toBeNull();
+    // Focus stayed with the person: the status says what the page added.
+    expect(liveText()).toBe("Showing 3 of 3 bookings.");
+  });
+
+  it("says how many are shown after each page, while more remain", async () => {
+    api({
+      [route.search()]: [
+        () => json(firstPage()),
+        () => json(searchBody({ results: [priya], total: 4, nextAfter: bookingIds.priya })),
+      ],
+    });
+    renderPage();
+    ask({ text: "maya" });
+    await resultsHeading("3 bookings");
+    expect(liveText()).toBe("3 bookings found.");
+    fireEvent.click(screen.getByRole("button", { name: "Show more bookings" }));
+    await waitFor(() => expect(liveText()).toBe("Showing 3 of 4 bookings."));
   });
 
   it("hands focus to the first booking of the last page when Show more bookings goes away with it", async () => {
@@ -916,6 +1032,67 @@ describe("the form's own checks", () => {
     press(searchButton());
     await resultsHeading("2 bookings");
     expect(bodiesSent()).toEqual([{ from: "2026-11-10", to: "2026-11-10", limit: 25 }]);
+  });
+
+  it.each([
+    ["nothing given", {}, staffProblem],
+    ["one character", { text: "m" }, "Enter at least 2 characters."],
+    ["a date out of range", { text: "maya", from: "1999-12-31" }, dateProblem],
+    [
+      "dates in the wrong order",
+      { from: "2026-11-10", to: "2026-11-05" },
+      "The last date is before the first.",
+    ],
+    ["text and a date", { text: "m", from: "1999-12-31" }, "Enter at least 2 characters."],
+  ])(
+    "says the first problem with %s in the status, as focus may already be in the field",
+    (_what, given, problem) => {
+      api({});
+      renderPage();
+      ask(given);
+      expect(liveText()).toBe(problem);
+      // The next change takes it away.
+      type("ma");
+      expect(liveText()).toBe("");
+    },
+  );
+
+  it("says the problem when Enter is pressed in the field that has it", () => {
+    api({});
+    renderPage();
+    type("m");
+    textbox().focus();
+    fireEvent.submit(textbox().closest("form") as HTMLFormElement);
+    expect(document.activeElement).toBe(textbox());
+    expect(liveText()).toBe("Enter at least 2 characters.");
+  });
+
+  it("takes away results for terms the field no longer holds when the new terms need fixing", async () => {
+    api({ [route.search()]: found() });
+    renderPage();
+    ask({ text: "maya" });
+    await resultsHeading("2 bookings");
+    ask({ text: "m" });
+    expect(problemOf(textbox())).toBe("Enter at least 2 characters.");
+    expect(items()).toEqual([]);
+    expect(screen.queryByRole("heading", { level: 2, name: "2 bookings" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "Find any booking" })).toBeTruthy();
+    expect(liveText()).toBe("Enter at least 2 characters.");
+    expect(sentTo(route.search())).toHaveLength(1);
+  });
+
+  it("cancels a search on its way when the new terms need fixing, and never shows its answer", async () => {
+    const answer = deferred();
+    api({ [route.search()]: [answer.answer] });
+    renderPage();
+    ask({ text: "maya" });
+    await screen.findByRole("button", { name: "Searching…" });
+    ask({ text: "m" });
+    expect(screen.getByRole("button", { name: "Search" }).getAttribute("aria-busy")).toBeNull();
+    answer.release(json(searchBody()));
+    await settle();
+    expect(items()).toEqual([]);
+    expect(liveText()).toBe("Enter at least 2 characters.");
   });
 
   it("puts focus on the text first when text and a date both need fixing, and says both", () => {

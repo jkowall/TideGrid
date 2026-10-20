@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { bookingReferencePrefix } from "@tidegrid/contracts/references";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { tenantId } from "../bookings/fixtures.ts";
 import {
@@ -11,6 +12,8 @@ import {
   referencePrefix,
   rememberSearch,
   type SearchForm,
+  sameCriteria,
+  termsText,
 } from "./model.ts";
 
 /** U+00A0, a space a person can paste from a document. */
@@ -81,6 +84,12 @@ describe("the start of a booking reference", () => {
     "Luis Fernandez",
   ])("refuses %j, which is not the start of a reference", (typed) => {
     expect(referencePrefix(typed)).toBeNull();
+  });
+
+  it("is the API's own reader, from the shared references module", () => {
+    expect(referencePrefix).toBe(bookingReferencePrefix);
+    // Past 64 characters nothing is read, as the API reads nothing.
+    expect(referencePrefix(`QK${" ".repeat(70)}G6`)).toBeNull();
   });
 });
 
@@ -266,6 +275,37 @@ describe("what a search may ask of finance", () => {
       kind: "invalid",
       problems: { from: "Enter a date from 2000 to 2099." },
     });
+  });
+});
+
+describe("searches compared, and named", () => {
+  it("takes two searches as the same when they ask the same, however the form was typed", () => {
+    const asked = (over: Partial<SearchForm>) => {
+      const result = criteriaOf(form(over), true);
+      return result.kind === "ok" ? result.criteria : null;
+    };
+    expect(sameCriteria(asked({ text: "maya" }), asked({ text: "  maya " }))).toBe(true);
+    expect(sameCriteria(asked({ text: "maya" }), asked({ text: "Maya" }))).toBe(false);
+    expect(sameCriteria(asked({ from: "2026-11-01" }), asked({ to: "2026-11-01" }))).toBe(false);
+    expect(sameCriteria(asked({ text: "maya" }), asked({ text: "maya", to: "2026-11-30" }))).toBe(
+      false,
+    );
+    expect(sameCriteria(null, asked({ text: "maya" }))).toBe(false);
+    expect(sameCriteria(asked({ text: "maya" }), null)).toBe(false);
+  });
+
+  it.each([
+    [{ q: "maya" }, "Matching “maya”."],
+    [
+      { q: "QKG6", from: "2026-11-01", to: "2026-11-30" },
+      "Matching “QKG6”, departing Nov 1 to 30, 2026.",
+    ],
+    [{ from: "2026-12-28", to: "2027-01-03" }, "Departing Dec 28, 2026 to Jan 3, 2027."],
+    [{ from: "2026-11-04", to: "2026-11-04" }, "Departing Nov 4, 2026."],
+    [{ from: "2026-11-04" }, "Departing on or after Nov 4, 2026."],
+    [{ to: "2026-11-04" }, "Departing on or before Nov 4, 2026."],
+  ])("names %j in words", (criteria, words) => {
+    expect(termsText(criteria)).toBe(words);
   });
 });
 

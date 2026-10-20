@@ -27,6 +27,8 @@ import {
   recallSearch,
   rememberSearch,
   type SearchForm,
+  sameCriteria,
+  termsText,
 } from "./model.ts";
 
 /**
@@ -44,7 +46,8 @@ import {
 type Load =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "ready"; page: Page; more: "idle" | "loading" | "failed" }
+  /** `paged`: Show more bookings added to the first page, so the count says how many are shown. */
+  | { kind: "ready"; page: Page; more: "idle" | "loading" | "failed"; paged?: boolean }
   /** `retrying`: "Try again" is working; the notice stays so focus stays on it. */
   | { kind: "failed"; reason: ReadFailure; failures: number; retrying: boolean };
 
@@ -59,6 +62,8 @@ export function SearchPage({
   const recalled = useRef(recallSearch(tenantId));
   const [form, setForm] = useState<SearchForm>(() => recalled.current ?? emptyForm);
   const [problems, setProblems] = useState<FieldProblems>({});
+  /** A refused search's first problem, said once: focus may already be in its field. */
+  const [problemSaid, setProblemSaid] = useState("");
   const [criteria, setCriteria] = useState<SearchCriteria | null>(null);
   const [load, setLoad] = useState<Load>({ kind: "idle" });
   const [attempt, setAttempt] = useState(0);
@@ -123,15 +128,22 @@ export function SearchPage({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (load.kind === "loading") return;
     const asked = criteriaOf(form, seesGuests);
     if (asked.kind === "invalid") {
       setProblems(asked.problems);
+      setProblemSaid(asked.problems.text ?? asked.problems.from ?? asked.problems.to ?? "");
+      // The results, or the search on its way, belong to terms the form no longer holds.
+      setCriteria(null);
+      setLoad({ kind: "idle" });
       const first = asked.problems.text ? textField : asked.problems.from ? fromField : toField;
       first.current?.focus();
       return;
     }
+    // The search on its way already asks this. New terms replace it: the
+    // effect's cleanup cancels the old request, so its answer never shows.
+    if (load.kind === "loading" && sameCriteria(criteria, asked.criteria)) return;
     setProblems({});
+    setProblemSaid("");
     rememberSearch(tenantId, form);
     setCriteria(asked.criteria);
     // The same search again reads afresh.
@@ -141,6 +153,7 @@ export function SearchPage({
   const clear = () => {
     setForm(emptyForm);
     setProblems({});
+    setProblemSaid("");
     setCriteria(null);
     setLoad({ kind: "idle" });
     rememberSearch(tenantId, emptyForm);
@@ -161,6 +174,7 @@ export function SearchPage({
         return {
           kind: "ready",
           more: "idle",
+          paged: true,
           page: { ...result.value, results: [...current.page.results, ...result.value.results] },
         };
       });
@@ -170,14 +184,24 @@ export function SearchPage({
   const change = (field: keyof SearchForm) => (value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
     if (problems[field]) setProblems((current) => ({ ...current, [field]: undefined }));
+    if (problemSaid) setProblemSaid("");
   };
 
   const hasInput = Boolean(form.text || form.from || form.to);
-  const announcement =
-    load.kind === "loading"
+  const typed = criteriaOf(form, seesGuests);
+  // Busy only for the terms on their way: changed terms can be searched at once.
+  const searching =
+    load.kind === "loading" && typed.kind === "ok" && sameCriteria(criteria, typed.criteria);
+  // Until the person signs in again, Sign in again is the page's one primary action.
+  const signedOut = load.kind === "failed" && load.reason === "signed_out";
+  const announcement = problemSaid
+    ? problemSaid
+    : load.kind === "loading"
       ? "Searching bookings…"
       : load.kind === "ready"
-        ? foundText(load.page.total)
+        ? load.paged
+          ? shownText(load.page.results.length, load.page.total)
+          : foundText(load.page.total)
         : "";
 
   return (
@@ -240,9 +264,9 @@ export function SearchPage({
             <div className="bs-actions">
               <Button
                 type="submit"
-                variant="primary"
+                variant={signedOut ? "secondary" : "primary"}
                 icon="search"
-                busy={load.kind === "loading"}
+                busy={searching}
                 busyLabel="Searching…"
               >
                 Search
@@ -303,9 +327,10 @@ export function SearchPage({
             }}
           />
         )}
-        {load.kind === "ready" && (
+        {load.kind === "ready" && criteria && (
           <Results
             page={load.page}
+            terms={termsText(criteria)}
             seesGuests={seesGuests}
             more={load.more}
             onMore={loadMore}
@@ -322,14 +347,22 @@ function foundText(total: number): string {
   return total === 1 ? "1 booking found." : `${total} bookings found.`;
 }
 
+/** After Show more bookings: how many of the search's bookings the list now holds. */
+function shownText(shown: number, total: number): string {
+  return `Showing ${shown} of ${total} ${total === 1 ? "booking" : "bookings"}.`;
+}
+
 function Results({
   page,
+  terms,
   seesGuests,
   more,
   onMore,
   headingRef,
 }: {
   page: Page;
+  /** What was searched, in words: the field may hold other terms by now. */
+  terms: string;
   seesGuests: boolean;
   more: "idle" | "loading" | "failed";
   onMore: () => void;
@@ -340,6 +373,7 @@ function Results({
     return (
       <EmptyState icon="search" title="No bookings match">
         <p>
+          {terms}{" "}
           {seesGuests
             ? "Check the spelling, try part of the name or email, or widen the dates."
             : "Check the reference with the guest, or widen the dates."}
@@ -352,6 +386,7 @@ function Results({
       <h2 className="bs-results__title" id={headingId} ref={headingRef} tabIndex={-1}>
         {page.total === 1 ? "1 booking" : `${page.total} bookings`}
       </h2>
+      <p className="bs-results__terms">{terms}</p>
       <ul className="bs-list">
         {page.results.map((result) => (
           <ResultItem key={result.id} result={result} seesGuests={seesGuests} />

@@ -25,6 +25,8 @@
 .bs-dates {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  /* A field with an error grows; the field beside it keeps its height and line. */
+  align-items: start;
   gap: var(--space-2) var(--space-4);
   min-width: 0;
   margin: 0;
@@ -67,6 +69,13 @@
 }
 .bs-results__title:focus {
   outline: none;
+}
+/* What was searched: the field above may hold other terms by now. */
+.bs-results__terms {
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 .bs-list {
   display: grid;

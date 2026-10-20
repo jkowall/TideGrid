@@ -1,4 +1,5 @@
-import { isLocalDate } from "@tidegrid/design-system/format";
+import { bookingReferencePrefix } from "@tidegrid/contracts/references";
+import { formatDate, formatDateRange, isLocalDate } from "@tidegrid/design-system/format";
 import type { SearchCriteria } from "./api.ts";
 
 /**
@@ -13,11 +14,10 @@ export const lastSearchDate = "2099-12-31";
 /**
  * The start of a booking reference, read as the API reads it: case, spaces,
  * and hyphens ignored, O, I, and L as 0, 1, and 1. Two to eight characters.
+ * The same function the API's search runs, from the shared references module,
+ * so the form never refuses what the API would find, or the reverse.
  */
-export function referencePrefix(text: string): string | null {
-  const compact = text.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
-  return /^[0-9A-HJKMNP-TV-Z]{2,8}$/.test(compact) ? compact : null;
-}
+export const referencePrefix = bookingReferencePrefix;
 
 export interface SearchForm {
   text: string;
@@ -71,6 +71,32 @@ export function criteriaOf(
       ...(to ? { to } : {}),
     },
   };
+}
+
+/** Whether two searches ask the same thing: a form trimmed differently asks the same. */
+export function sameCriteria(a: SearchCriteria | null, b: SearchCriteria | null): boolean {
+  return a !== null && b !== null && a.q === b.q && a.from === b.from && a.to === b.to;
+}
+
+/**
+ * What a search asked, in words, for the results it found: "Matching “maya”,
+ * departing Nov 1 to 30, 2026." The field may have changed since, so the
+ * results say which terms they belong to.
+ */
+export function termsText(criteria: SearchCriteria): string {
+  const { q, from, to } = criteria;
+  const dates =
+    from && to
+      ? from === to
+        ? `departing ${formatDate(from, "short", { year: true })}`
+        : `departing ${formatDateRange(from, to, "short")}`
+      : from
+        ? `departing on or after ${formatDate(from, "short", { year: true })}`
+        : to
+          ? `departing on or before ${formatDate(to, "short", { year: true })}`
+          : "";
+  if (q === undefined) return `${dates.charAt(0).toUpperCase()}${dates.slice(1)}.`;
+  return dates ? `Matching “${q}”, ${dates}.` : `Matching “${q}”.`;
 }
 
 /**
