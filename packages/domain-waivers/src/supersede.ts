@@ -82,6 +82,12 @@ async function supersedeUnsignedRequests(
   deps: WaiverDeps,
   input: { templateId: string; version: number },
 ): Promise<number> {
+  // One move per template at a time: a later move waits for an earlier one to
+  // commit, then sees its replacements among its own candidates. Assignments
+  // never take this key, so it adds no wait to them.
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`tidegrid.waiver_move:${ctx.tenantId}:${input.templateId}`}, 0))`.execute(
+    trx,
+  );
   const target = await trx
     .selectFrom("waiver_template_versions")
     .select(["content_sha256"])

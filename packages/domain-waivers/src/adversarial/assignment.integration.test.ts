@@ -504,4 +504,53 @@ describe.skipIf(!env)("G2.15 adversarial: assignment", () => {
        where booking_id = ${booked.bookingId} and state in ('pending', 'signed')`;
     expect(live).toEqual([{ v: 2 }]);
   }, 180_000);
+
+  it("leaves no replacement on an older version when two version moves overlap", async () => {
+    // From the review of 2026-10-20 (lifecycle F3).
+    const t = await createWaiverFixture(world.admin, world.db, "wva-moves", { days: 3 });
+    const booked = await book(world, t, t.trips.shared[0] ?? "", 1, hooks);
+    await nameParticipant(world.db, t.id, booked.bookingId, 1, adult("Mo Moves"), hooks);
+    const ctx = systemCtx(t.id, "owner");
+    for (const body of ["Second paragraph.", "Third paragraph."]) {
+      expect(
+        await inTenantTransaction(world.db, ctx, (trx) =>
+          publishWaiverTemplateVersion(trx, ctx, {
+            templateId: t.templateId,
+            text: { ...FIXTURE_TEXT, body: `${FIXTURE_TEXT.body}\n\n${body}` },
+            reason: "Synthetic revision",
+          }),
+        ),
+      ).toMatchObject({ kind: "published" });
+    }
+    // The booking is busy, so the first move waits on its row.
+    const held = gate();
+    const release = gate();
+    const holding = settle(
+      world.admin.begin(async (tx) => {
+        await tx`select id from public.bookings where id = ${booked.bookingId} for no key update`;
+        held.open();
+        await release.opened;
+      }),
+    );
+    const move = (version: number) =>
+      settle(reassignUnsignedRequests(world.db, ctx, deps, { templateId: t.templateId, version }));
+    let toTwo: ReturnType<typeof move> | undefined;
+    let toThree: ReturnType<typeof move> | undefined;
+    try {
+      await within(held.opened, 60_000, "the booking's lock");
+      toTwo = move(2);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      toThree = move(3);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    } finally {
+      release.open();
+    }
+    expect((await within(holding, 60_000, "the holder")).ok).toBe(true);
+    expect((await within(toTwo ?? Promise.reject(), 60_000, "the move to 2")).ok).toBe(true);
+    expect((await within(toThree ?? Promise.reject(), 60_000, "the move to 3")).ok).toBe(true);
+    const live = await world.admin<{ v: number }[]>`
+      select template_version as v from public.waiver_requests
+       where booking_id = ${booked.bookingId} and state in ('pending', 'signed')`;
+    expect(live).toEqual([{ v: 3 }]);
+  }, 180_000);
 });
