@@ -403,15 +403,17 @@ describe("orderRows", () => {
   });
 
   it("shows a discount as an adjustment with its own sign, and no quantity", () => {
-    const discount = {
-      ...orderLines[0],
+    const discount: (typeof orderLines)[number] = {
       lineNo: 6,
-      kind: "discount" as const,
+      kind: "discount",
       code: "HARBOR10",
       name: "HARBOR10, 10% off",
+      basis: null,
       quantity: 1,
       unitAmount: 1150,
       amount: -1150,
+      taxInclusive: null,
+      taxRatePpm: null,
     };
     const rows = orderRows(order([...orderLines.slice(0, 5), discount, ...orderLines.slice(5)]));
     const row = rows.find((r) => r.id === "l6");
