@@ -17,7 +17,7 @@ import { emailFragment, escapeLike, nameWords, referencePrefix, searchFields } f
  * drops the byte order mark first, as a spreadsheet or `utf-8-sig` does.
  */
 function parseCsv(withMark: string): string[][] {
-  expect(withMark.startsWith("﻿")).toBe(true);
+  expect(withMark.startsWith("\ufeff")).toBe(true);
   const text = withMark.slice(1);
   const rows: string[][] = [];
   let row: string[] = [];
@@ -141,7 +141,7 @@ describe("CSV fields", () => {
 
   it("starts the file with a byte order mark and ends every line with CRLF", () => {
     const csv = renderCsv(["A", "B"], [["1", "x,y"]]);
-    expect(csv).toBe('﻿A,B\r\n1,"x,y"\r\n');
+    expect(csv).toBe('\ufeffA,B\r\n1,"x,y"\r\n');
   });
 });
 
@@ -224,7 +224,10 @@ describe("a day's export", () => {
     expect(at(first, "Departure date")).toBe("2026-11-04");
     expect(at(first, "Departure time")).toBe("18:00");
     expect(at(first, "Time zone")).toBe("America/New_York");
+    // The departure's exact instant beside its wall clock (review data F5).
+    expect(at(first, "Departure at (UTC)")).toBe("2026-11-04 23:00:00");
     expect(at(first, "Booking reference")).toBe("QKG6ERBF");
+    expect(at(first, "Pending refunds")).toBe("0.00");
     expect(at(first, "Gross")).toBe("125.00");
     expect(at(first, "Discounts")).toBe("12.50");
     expect(at(first, "Total")).toBe("128.40");
@@ -240,15 +243,28 @@ describe("a day's export", () => {
     expect(at(total, "Gross")).toBe("1425.00");
     expect(at(total, "Discounts")).toBe("12.50");
     expect(at(total, "Fees")).toBe("12.50");
-    expect(at(total, "Taxes")).toBe("80.40");
+    expect(at(total, "Added taxes")).toBe("80.40");
     expect(at(total, "Total")).toBe("1505.40");
     expect(at(total, "Refunds")).toBe("112.00");
+    // Requested and unsettled: its own column, in neither Refunds nor Net (review UI-5).
+    expect(at(total, "Pending refunds")).toBe("1265.00");
     expect(at(total, "Net")).toBe("1393.40");
     expect(at(total, "Included tax")).toBe("3.00");
     expect(at(total, "Time zone")).toBe("America/New_York");
+    expect(at(total, "Departure at (UTC)")).toBe("");
 
     // Each money column of the total row is the sum of the booking rows.
-    for (const column of ["Gross", "Discounts", "Fees", "Taxes", "Total", "Refunds", "Net"]) {
+    for (const column of [
+      "Gross",
+      "Discounts",
+      "Fees",
+      "Added taxes",
+      "Total",
+      "Refunds",
+      "Pending refunds",
+      "Net",
+      "Included tax",
+    ]) {
       const cents = rows
         .slice(1, -1)
         .map((r) => Math.round(Number(at(r, column)) * 100))

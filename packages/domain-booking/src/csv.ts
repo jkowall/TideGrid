@@ -11,7 +11,7 @@
 import { bookingDayExportColumns, bookingDayExportGuestColumns } from "@tidegrid/contracts";
 import type { DayReport, DayReportMoney, DayReportRow } from "./day-report.ts";
 
-const byteOrderMark = "﻿";
+const byteOrderMark = "\ufeff";
 const lineEnd = "\r\n";
 
 /** One field, quoted when it holds a comma, a quote, or a line break, with quotes doubled. */
@@ -48,13 +48,18 @@ export function renderCsv(header: readonly string[], rows: readonly (readonly st
   return `${byteOrderMark}${[header, ...rows].map(line).join(lineEnd)}${lineEnd}`;
 }
 
-const money = (m: DayReportMoney) => [
+/**
+ * Gross to Included tax, in the contract's column order. Pending refunds sit
+ * after Refunds: requested and not settled, so in neither Refunds nor Net.
+ */
+const money = (m: DayReportMoney, pendingRefunds: number) => [
   csvMoney(m.gross),
   csvMoney(m.discounts),
   csvMoney(m.fees),
   csvMoney(m.taxes),
   csvMoney(m.total),
   csvMoney(m.refunds),
+  csvMoney(pendingRefunds),
   csvMoney(m.net),
   csvMoney(m.includedTax),
 ];
@@ -88,6 +93,9 @@ export function renderDayExport(
     r.trip.localDate,
     r.trip.localStartTime,
     csvText(r.trip.timeZone),
+    // The exact instant beside the wall clock: two departures at 01:30 on a
+    // fall-back night read the same locally and differ here.
+    csvInstant(r.trip.startsAt),
     csvText(r.trip.productName),
     csvText(r.trip.boatName),
     r.reference,
@@ -96,7 +104,7 @@ export function renderDayExport(
     r.refundState ?? "",
     String(r.bookings),
     String(r.guests),
-    ...money(r),
+    ...money(r, r.pendingRefund.amount),
     "USD",
     csvInstant(r.confirmedAt),
     generated,
@@ -115,9 +123,10 @@ export function renderDayExport(
     "",
     "",
     "",
+    "",
     String(t.bookings),
     String(t.guests),
-    ...money(t),
+    ...money(t, t.pendingRefunds.amount),
     "USD",
     "",
     generated,

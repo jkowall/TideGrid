@@ -11,8 +11,9 @@ import type { StaffRole } from "@tidegrid/contracts";
  * and payment exceptions (`payments.read`). Only owners and booking staff
  * (`bookings.read`) also receive the booker's name and email, which the API
  * leaves out of every response for anyone else, and read trip rosters (G2.7,
- * G2.12b). Every role reads a booking's internal notes; owners and booking
- * staff write them (G2.12c).
+ * G2.12b). Owners and booking staff read and write a booking's internal
+ * notes (G2.12c); finance does neither, since a note is free text that can
+ * mention a guest (the owner's decision of 2026-10-19).
  */
 export type Permission =
   | "members.read"
@@ -48,7 +49,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "notes.read",
     "notes.write",
   ],
-  finance: ["audit.read", "catalog.read", "payments.read", "notes.read"],
+  finance: ["audit.read", "catalog.read", "payments.read"],
 };
 
 export function can(role: StaffRole, permission: Permission): boolean {

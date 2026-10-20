@@ -21,12 +21,14 @@ CREATE TABLE public.booking_notes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
   booking_id uuid NOT NULL,
-  -- Line breaks are allowed; other control characters are not, and a note
-  -- holds at least one visible character.
+  -- Line breaks are allowed; other control characters, C0 and C1, are not.
+  -- A note holds at least one visible character: one outside white space,
+  -- the controls, and the Unicode spaces, joiners, marks, fillers, and
+  -- variation selectors (the contract's invisibleCharacters).
   body text NOT NULL
     CHECK (char_length(body) BETWEEN 1 AND 500
-           AND body ~ '[^[:space:]]'
-           AND body !~ '[\x01-\x09\x0b-\x1f\x7f]'),
+           AND body !~ '[\x01-\x09\x0b-\x1f\x7f-\x9f]'
+           AND body ~ '[^[:space:]\x01-\x1f\x7f-\x9f\u00a0\u00ad\u115f\u1160\u1680\u180e\u2000-\u200f\u2028-\u202f\u205f-\u2064\u206a-\u206f\u3000\u3164\ufe00-\ufe0f\ufeff\uffa0]'),
   -- The staff member who wrote it: the transaction's actor, set by the trigger.
   author_user_id uuid NOT NULL,
   request_id text,

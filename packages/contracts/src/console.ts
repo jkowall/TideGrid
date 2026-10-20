@@ -14,8 +14,9 @@ import { TripSummary } from "./catalog.ts";
  *   searches match on them. For finance a search matches booking references
  *   only, the `booker` field is absent, and the export carries financial
  *   columns only.
- * - Every role reads a booking's notes (`notes.read`); owners and booking
- *   staff write them (`notes.write`).
+ * - Owners and booking staff read and write a booking's notes (`notes.read`,
+ *   `notes.write`). Finance holds neither: a note is free text that can
+ *   mention a guest (the owner's decision of 2026-10-19).
  *
  * Search terms can be names and email addresses, so a search is a POST with a
  * JSON body: the terms never enter a URL, a log line, or browser history.
@@ -151,6 +152,7 @@ export const bookingDayExportColumns = [
   "Departure date",
   "Departure time",
   "Time zone",
+  "Departure at (UTC)",
   "Trip",
   "Boat",
   "Booking reference",
@@ -162,9 +164,10 @@ export const bookingDayExportColumns = [
   "Gross",
   "Discounts",
   "Fees",
-  "Taxes",
+  "Added taxes",
   "Total",
   "Refunds",
+  "Pending refunds",
   "Net",
   "Included tax",
   "Currency",
@@ -177,6 +180,16 @@ export const bookingDayExportGuestColumns = ["Booker name", "Booker email"] as c
 
 // Notes ---------------------------------------------------------------------------------
 
+/**
+ * Characters that show nothing: white space, C0 and C1 controls, and the
+ * Unicode spaces, joiners, marks, fillers, and variation selectors. A note
+ * holds at least one character outside them. Migration 0008's CHECK uses the
+ * same set.
+ */
+export const invisibleCharacters =
+  "\\s\\u0000-\\u001f\\u007f-\\u009f\\u00a0\\u00ad\\u115f\\u1160\\u1680\\u180e\\u2000-\\u200f\\u2028-\\u202f\\u205f-\\u2064\\u206a-\\u206f\\u3000\\u3164\\ufe00-\\ufe0f\\ufeff\\uffa0";
+const visibleCharacter = new RegExp(`[^${invisibleCharacters}]`, "u");
+
 export const BookingNoteBody = z
   .string()
   .trim()
@@ -184,10 +197,13 @@ export const BookingNoteBody = z
   .max(500)
   .regex(
     // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
-    /^[^\u0000-\u0009\u000b-\u001f\u007f]*$/,
+    /^[^\u0000-\u0009\u000b-\u001f\u007f-\u009f]*$/,
     "Only line breaks are allowed as control characters",
   )
-  .describe("Up to 500 characters. Line breaks are kept");
+  .regex(visibleCharacter, "A note holds at least one visible character")
+  .describe(
+    "Up to 500 characters (code points, after trimming), with at least one visible one. Line breaks are kept; other control characters are refused",
+  );
 
 export const BookingNoteCreateRequest = z.object({ body: BookingNoteBody });
 export type BookingNoteCreateRequest = z.infer<typeof BookingNoteCreateRequest>;
@@ -213,5 +229,15 @@ export const BookingNotesResponse = z.object({
 });
 export type BookingNotesResponse = z.infer<typeof BookingNotesResponse>;
 
-export const BookingNoteResponse = z.object({ note: BookingNote });
-export type BookingNoteResponse = z.infer<typeof BookingNoteResponse>;
+/**
+ * What adding a note answers: the note without its text. The answer is kept
+ * for replaying the idempotency key, so the text, which can mention a guest,
+ * is never copied there. The writer already holds the text it sent.
+ */
+export const BookingNoteCreated = BookingNote.omit({ body: true }).describe(
+  "The note just written, without its text: the writer sent it",
+);
+export type BookingNoteCreated = z.infer<typeof BookingNoteCreated>;
+
+export const BookingNoteCreatedResponse = z.object({ note: BookingNoteCreated });
+export type BookingNoteCreatedResponse = z.infer<typeof BookingNoteCreatedResponse>;

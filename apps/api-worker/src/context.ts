@@ -28,4 +28,9 @@ export interface AppDeps {
    * controls always use the configured fake.
    */
   paymentProvider?: (db: Kysely<Database>, env: Bindings) => PaymentProvider | null;
+  /**
+   * The most bookings one day's totals or export holds (G2.12c). Production
+   * keeps the domain's limit; tests lower it to reach `day_too_large`.
+   */
+  dayReportLimit?: number;
 }

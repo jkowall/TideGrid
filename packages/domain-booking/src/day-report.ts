@@ -142,13 +142,15 @@ export function totalsOf(rows: readonly DayReportRow[]): DayReportTotals {
 
 /**
  * Every booking on trips departing on one local date, by departure, trip,
- * and confirmation, with its money and the day's totals.
+ * and confirmation, with its money and the day's totals. More than `limit`
+ * bookings (DAY_REPORT_LIMIT unless a test sets less) is `too_large`.
  */
 export async function buildDayReport(
   trx: TenantTransaction,
   tenantId: string,
-  query: { date: string; withBooker: boolean },
+  query: { date: string; withBooker: boolean; limit?: number },
 ): Promise<DayReportOutcome> {
+  const limit = Math.min(query.limit ?? DAY_REPORT_LIMIT, DAY_REPORT_LIMIT);
   const bookerColumns: RawBuilder<unknown> = query.withBooker
     ? sql`, s.booker_name, s.booker_email`
     : sql``;
@@ -185,8 +187,8 @@ export async function buildDayReport(
       ${bookerJoin}
      where b.tenant_id = ${tenantId} and t.local_date = ${query.date}::date
      order by t.starts_at, t.id, b.confirmed_at, b.id
-     limit ${DAY_REPORT_LIMIT + 1}`.execute(trx);
-  if (rows.length > DAY_REPORT_LIMIT) return { kind: "too_large" };
+     limit ${limit + 1}`.execute(trx);
+  if (rows.length > limit) return { kind: "too_large" };
 
   const reportRows = rows.map((r): DayReportRow => {
     const total = r.total_amount;

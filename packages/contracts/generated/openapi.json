@@ -12107,7 +12107,7 @@
           "bookings"
         ],
         "summary": "A booking's internal notes",
-        "description": "Every role. The newest 200 notes, newest first, each with its author as this operator names them and when it was written, and how many there are. An unknown id and another tenant's id answer the same 404.",
+        "description": "Owners and booking staff; finance holds no notes.read. The newest 200 notes, newest first, each with its author as this operator names them and when it was written, and how many there are. An unknown id and another tenant's id answer the same 404.",
         "security": [
           {
             "accessJwt": []
@@ -12365,8 +12365,8 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500,
-                    "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f]*$",
-                    "description": "Up to 500 characters. Line breaks are kept"
+                    "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f]*$",
+                    "description": "Up to 500 characters (code points, after trimming), with at least one visible one. Line breaks are kept; other control characters are refused"
                   }
                 },
                 "required": [
@@ -12378,7 +12378,7 @@
         },
         "responses": {
           "201": {
-            "description": "The note",
+            "description": "The note, without its text",
             "content": {
               "application/json": {
                 "schema": {
@@ -12390,9 +12390,6 @@
                         "id": {
                           "type": "string",
                           "format": "uuid"
-                        },
-                        "body": {
-                          "type": "string"
                         },
                         "author": {
                           "type": "object",
@@ -12420,11 +12417,10 @@
                       },
                       "required": [
                         "id",
-                        "body",
                         "author",
                         "createdAt"
                       ],
-                      "description": "An internal note on a booking. Append-only: never edited or removed"
+                      "description": "The note just written, without its text: the writer sent it"
                     }
                   },
                   "required": [

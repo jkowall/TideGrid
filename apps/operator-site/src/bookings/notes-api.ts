@@ -1,10 +1,15 @@
-import type { BookingNote, BookingNoteResponse, BookingNotesResponse } from "@tidegrid/contracts";
+import type {
+  BookingNote,
+  BookingNoteCreated,
+  BookingNoteCreatedResponse,
+  BookingNotesResponse,
+} from "@tidegrid/contracts";
 import { call, errorCode, failureOf, type ReadFailure, tenantPath } from "../http.ts";
 import { isInstant, isInt, isString, type Read } from "./api.ts";
 
 /**
- * A booking's internal notes (G2.12c): every role reads them; owners and
- * booking staff add them. A note is never edited or removed. Neither call
+ * A booking's internal notes (G2.12c): owners and booking staff read and add
+ * them; finance does neither. A note is never edited or removed. Neither call
  * throws.
  */
 
@@ -14,9 +19,13 @@ export interface NotesPage {
 }
 
 export function isNote(n: Partial<BookingNote> | null | undefined): n is BookingNote {
+  return isString(n?.body) && isCreated(n);
+}
+
+/** The API's answer to an added note: its id, author, and time, without its text. */
+function isCreated(n: Partial<BookingNoteCreated> | null | undefined): n is BookingNoteCreated {
   return (
     isString(n?.id) &&
-    isString(n.body) &&
     isString(n.author?.userId) &&
     isString(n.author?.name) &&
     isInstant(n.createdAt)
@@ -58,7 +67,9 @@ export type AddNoteResult =
 /**
  * Add a note. `key` is the Idempotency-Key: a new one for each new note, the
  * same one when the same note is sent again after a failure, so the API adds
- * it once.
+ * it once. The API answers with the note's id, author, and time, not its text,
+ * so a stored replay holds no copy of the text; the note added is the text
+ * sent, as the API keeps it (trimmed).
  */
 export async function addNote(
   tenantId: string,
@@ -77,9 +88,20 @@ export async function addNote(
       body: JSON.stringify({ body }),
     });
     if (res.ok) {
-      const data = (await res.json().catch(() => null)) as Partial<BookingNoteResponse> | null;
-      return isNote(data?.note)
-        ? { kind: "added", note: data.note }
+      const data = (await res
+        .json()
+        .catch(() => null)) as Partial<BookingNoteCreatedResponse> | null;
+      const created = data?.note;
+      return isCreated(created)
+        ? {
+            kind: "added",
+            note: {
+              id: created.id,
+              body: body.trim(),
+              author: { userId: created.author.userId, name: created.author.name },
+              createdAt: created.createdAt,
+            },
+          }
         : { kind: "failed", reason: "unreadable" };
     }
     if (res.status === 422 && (await errorCode(res.clone())) === "idempotency_key_reused") {

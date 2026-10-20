@@ -19,7 +19,7 @@
 import { randomUUID } from "node:crypto";
 import {
   BookingDayTotalsResponse,
-  BookingNoteResponse,
+  BookingNoteCreatedResponse,
   BookingNotesResponse,
   BookingSearchResponse,
   bookingDayExportColumns,
@@ -117,7 +117,7 @@ function keysOf(value: unknown, out = new Set<string>()): Set<string> {
 
 /** A minimal RFC 4180 reader for the export; it checks and drops the byte order mark. */
 function parseCsv(withMark: string): string[][] {
-  expect(withMark.startsWith("﻿")).toBe(true);
+  expect(withMark.startsWith("\ufeff")).toBe(true);
   const text = withMark.slice(1);
   const rows: string[][] = [];
   let row: string[] = [];
@@ -156,6 +156,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
   let admin: Sql;
   let runtime: ReturnType<typeof createDb>;
   let app: ReturnType<typeof createApp>;
+  let verifier: ReturnType<typeof createAccessVerifier>;
   let signingKey: CryptoKey;
   let A: Tenant;
   let B: Tenant;
@@ -208,13 +209,20 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
   async function request(
     method: string,
     path: string,
-    opts: { origin?: string; as?: string; body?: unknown; headers?: Record<string, string> } = {},
+    opts: {
+      origin?: string;
+      as?: string;
+      body?: unknown;
+      headers?: Record<string, string>;
+      /** Another app instance, such as one with a lower day report limit. */
+      via?: ReturnType<typeof createApp>;
+    } = {},
   ): Promise<Res> {
     const headers = new Headers(opts.headers);
     if (opts.origin) headers.set("origin", opts.origin);
     if (opts.as) headers.set("cf-access-jwt-assertion", await token(opts.as));
     if (opts.body !== undefined) headers.set("content-type", "application/json");
-    const res = await app.request(
+    const res = await (opts.via ?? app).request(
       `http://localhost${path}`,
       { method, headers, body: opts.body === undefined ? null : JSON.stringify(opts.body) },
       bindings(),
@@ -436,13 +444,12 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
     const pair = await generateKeyPair("RS256", { extractable: true });
     signingKey = pair.privateKey;
     const jwk = { ...(await exportJWK(pair.publicKey)), kid, alg: "RS256", use: "sig" };
-    app = createApp({
-      accessVerifier: createAccessVerifier({
-        teamDomain: TEAM,
-        audience: AUD,
-        keys: createLocalJWKSet({ keys: [jwk] }),
-      }),
+    verifier = createAccessVerifier({
+      teamDomain: TEAM,
+      audience: AUD,
+      keys: createLocalJWKSet({ keys: [jwk] }),
     });
+    app = createApp({ accessVerifier: verifier });
 
     const [a, b] = await Promise.all([
       createCheckoutFixture(admin, runtime.db, "g212c-a", { days: 6 }),
@@ -766,6 +773,8 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       });
       expect(foreign.status).toBe(403);
       expect(foreign.json.error?.code).toBe("origin_not_allowed");
+      // Refused by a guard before the route, and still never cached (review data F2).
+      expect(foreign.headers.get("cache-control")).toBe("no-store");
       for (const body of [
         {},
         { q: "m" },
@@ -948,6 +957,13 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
         expect(col(r, "Booking state")).toBe("confirmed");
         expect(col(r, "Payment state")).toBe("succeeded");
         expect(col(r, "Currency")).toBe("USD");
+        expect(col(r, "Pending refunds")).toBe("0.00");
+        // The departure's exact instant, from the trip (review data F5).
+        const [trip] = await admin<{ at: string }[]>`
+          select to_char(t.starts_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS') as at
+            from public.bookings b join public.scheduled_trips t on t.id = b.trip_id
+           where b.tenant_id = ${A.id} and b.reference = ${col(r, "Booking reference") ?? ""}`;
+        expect(col(r, "Departure at (UTC)")).toBe(trip?.at);
         const [order] = await admin<
           {
             subtotal_amount: number;
@@ -965,7 +981,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
           gross: cents(col(r, "Gross")),
           discounts: cents(col(r, "Discounts")),
           fees: cents(col(r, "Fees")),
-          taxes: cents(col(r, "Taxes")),
+          taxes: cents(col(r, "Added taxes")),
           total: cents(col(r, "Total")),
           included: cents(col(r, "Included tax")),
           net: cents(col(r, "Net")),
@@ -980,7 +996,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
           net: order?.total_amount,
         });
       }
-      const { pendingRefunds: _pending, ...ledger } = await ledgerTotals(A.id, fx.day.d0);
+      const { pendingRefunds, ...ledger } = await ledgerTotals(A.id, fx.day.d0);
       expect(col(total, "Row")).toBe("Total");
       expect({
         bookings: Number(col(total, "Bookings")),
@@ -988,12 +1004,13 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
         gross: cents(col(total, "Gross")),
         discounts: cents(col(total, "Discounts")),
         fees: cents(col(total, "Fees")),
-        taxes: cents(col(total, "Taxes")),
+        taxes: cents(col(total, "Added taxes")),
         total: cents(col(total, "Total")),
         refunds: cents(col(total, "Refunds")),
         net: cents(col(total, "Net")),
         includedTax: cents(col(total, "Included tax")),
       }).toEqual(ledger);
+      expect(cents(col(total, "Pending refunds"))).toBe(pendingRefunds.amount);
       // The on-screen totals and the export's total row are the same figures.
       const shown = BookingDayTotalsResponse.parse(
         (await request("GET", totalsPath(A.id, fx.day.d0), { as: A.finance })).json,
@@ -1014,10 +1031,40 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       const pending = byRef(fx.pending.reference);
       expect(col(pending, "Refund state")).toBe("requested");
       expect(cents(col(pending, "Refunds"))).toBe(0);
+      // Its own column, so the total row carries the screen's pending figure (review UI-5).
+      expect(cents(col(pending, "Pending refunds"))).toBe(cents(col(pending, "Total")));
+      expect(cents(col(refunded, "Pending refunds"))).toBe(0);
       expect(cents(col(pending, "Net"))).toBe(cents(col(pending, "Total")));
       const ledger = await ledgerTotals(A.id, fx.day.d2);
       expect(cents(col(rows.at(-1), "Refunds"))).toBe(ledger.refunds);
+      expect(cents(col(rows.at(-1), "Pending refunds"))).toBe(ledger.pendingRefunds.amount);
       expect(cents(col(rows.at(-1), "Net"))).toBe(ledger.net);
+      const shown = BookingDayTotalsResponse.parse(
+        (await request("GET", totalsPath(A.id, fx.day.d2), { as: A.finance })).json,
+      ).totals;
+      expect(cents(col(rows.at(-1), "Pending refunds"))).toBe(shown.pendingRefunds.amount);
+    });
+
+    it("refuses a day with more bookings than one report holds, with its own code and no audit", async () => {
+      // An app whose limit is one booking, so the rich day's four are too many.
+      const small = createApp({ accessVerifier: verifier, dayReportLimit: 1 });
+      const before = await admin<{ n: number }[]>`
+        select count(*)::int as n from public.audit_events
+         where tenant_id = ${A.id} and action = 'booking_day.exported'`;
+      for (const path of [totalsPath(A.id, fx.day.d0), exportPath(A.id, fx.day.d0)]) {
+        const res = await request("GET", path, { as: A.owner, via: small });
+        expect(res.status, path).toBe(422);
+        expect(res.json.error?.code).toBe("day_too_large");
+        expect(res.headers.get("cache-control")).toBe("no-store");
+        expect(res.headers.get("content-disposition")).toBeNull();
+      }
+      const after = await admin<{ n: number }[]>`
+        select count(*)::int as n from public.audit_events
+         where tenant_id = ${A.id} and action = 'booking_day.exported'`;
+      expect(after[0]?.n).toBe(before[0]?.n);
+      // A day within the limit still answers.
+      const one = await request("GET", totalsPath(A.id, fx.day.empty), { as: A.owner, via: small });
+      expect(one.status).toBe(200);
     });
 
     it("keeps a booker's name from running as a spreadsheet formula", async () => {
@@ -1082,22 +1129,23 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
   // Notes ------------------------------------------------------------------------------------------
 
   describe("notes", () => {
-    it("lets owners and booking staff add notes that every role reads, newest first", async () => {
+    it("lets owners and booking staff add and read notes, newest first", async () => {
       const first = await addNote(A.id, fx.pair.bookingId, A.owner, {
         body: "  Guest called: two more may join.\nAsked about parking.  ",
       });
       expect(first.status, first.text).toBe(201);
       expect(first.headers.get("cache-control")).toBe("no-store");
-      const note = BookingNoteResponse.parse(first.json).note;
-      expect(note.body).toBe("Guest called: two more may join.\nAsked about parking.");
+      const note = BookingNoteCreatedResponse.parse(first.json).note;
       expect(note.author.name).toBe("Olive Owner");
+      // The answer names the note without its text (review code F4).
+      expect(keysOf(first.json).has("body")).toBe(false);
       const second = await addNote(A.id, fx.pair.bookingId, A.staff, {
         body: "Confirmed parking.",
       });
       expect(second.status).toBe(201);
-      expect(BookingNoteResponse.parse(second.json).note.author.name).toBe("Sam Desk");
+      expect(BookingNoteCreatedResponse.parse(second.json).note.author.name).toBe("Sam Desk");
 
-      for (const as of [A.owner, A.staff, A.finance]) {
+      for (const as of [A.owner, A.staff]) {
         const res = await request("GET", notesPath(A.id, fx.pair.bookingId), { as });
         expect(res.status, res.text).toBe(200);
         expect(res.headers.get("cache-control")).toBe("no-store");
@@ -1107,10 +1155,16 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
           "Confirmed parking.",
           "Guest called: two more may join.\nAsked about parking.",
         ]);
+        expect(body.notes[1]?.id).toBe(note.id);
       }
     });
 
-    it("lets finance read notes and never write one", async () => {
+    it("never lets finance read or write a note (the owner's decision of 2026-10-19)", async () => {
+      const read = await request("GET", notesPath(A.id, fx.pair.bookingId), { as: A.finance });
+      expect(read.status).toBe(403);
+      expect(read.json.error?.code).toBe("forbidden");
+      expect(read.headers.get("cache-control")).toBe("no-store");
+      expect(read.text).not.toContain("parking");
       const res = await addNote(A.id, fx.pair.bookingId, A.finance, { body: "Finance note" });
       expect(res.status).toBe(403);
       expect(res.json.error?.code).toBe("forbidden");
@@ -1124,7 +1178,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       const res = await addNote(A.id, fx.single.bookingId, A.staff, {
         body: "Wheelchair access asked.",
       });
-      const note = BookingNoteResponse.parse(res.json).note;
+      const note = BookingNoteCreatedResponse.parse(res.json).note;
       const [row] = await admin<
         { author_user_id: string; email: string; request_id: string | null }[]
       >`
@@ -1158,6 +1212,15 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       const [row] = await admin<{ n: number }[]>`
         select count(*)::int as n from public.booking_notes where booking_id = ${fx.charter.bookingId}`;
       expect(row?.n).toBe(1);
+      // The response kept for the replay holds the note's id, not its text.
+      const kept = await admin<{ response_body: unknown }[]>`
+        select response_body from public.idempotency_keys
+         where tenant_id = ${A.id} and scope = 'bookings.notes.add' and key = ${key}`;
+      expect(kept).toHaveLength(1);
+      expect(JSON.stringify(kept[0]?.response_body)).not.toContain("Cake");
+      expect(JSON.stringify(kept[0]?.response_body)).toContain(
+        BookingNoteCreatedResponse.parse(first.json).note.id,
+      );
       const changed = await addNote(
         A.id,
         fx.charter.bookingId,
@@ -1176,6 +1239,11 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
         { body: "x".repeat(501) },
         { body: "tab\there" },
         { body: "bell\u0007" },
+        // C1 controls, and text that shows nothing (review code F2).
+        { body: "a\u0090b" },
+        { body: "\u0085" },
+        { body: "\u200b" },
+        { body: "\u2060\ufeff" },
         {},
       ]) {
         const res = await addNote(A.id, fx.rich.bookingId, A.owner, body);
@@ -1195,6 +1263,8 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       });
       expect(foreign.status).toBe(403);
       expect(foreign.json.error?.code).toBe("origin_not_allowed");
+      // Refused by a guard before the route, and still never cached (review data F2).
+      expect(foreign.headers.get("cache-control")).toBe("no-store");
       const exact = await addNote(A.id, fx.rich.bookingId, A.owner, { body: "y".repeat(500) });
       expect(exact.status).toBe(201);
     });
@@ -1220,7 +1290,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       const res = await addNote(A.id, fx.formula.bookingId, A.owner, {
         body: "Secret phrase 7731.",
       });
-      const note = BookingNoteResponse.parse(res.json).note;
+      const note = BookingNoteCreatedResponse.parse(res.json).note;
       const rows = await admin<{ action: string; subject_id: string; after_state: unknown }[]>`
         select action, subject_id, after_state from public.audit_events
          where tenant_id = ${A.id} and subject_type = 'booking' and subject_id = ${fx.formula.bookingId}
@@ -1285,7 +1355,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       const res = await addNote(A.id, fx.refunded.bookingId, A.owner, {
         body: "Refund explained.",
       });
-      const id = BookingNoteResponse.parse(res.json).note.id;
+      const id = BookingNoteCreatedResponse.parse(res.json).note.id;
       const ownerId = await userIdOf(A.owner);
       for (const statement of [
         sql`update booking_notes set body = 'Changed' where id = ${id}::uuid`,
@@ -1328,6 +1398,30 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       );
       expect(written.author_user_id).toBe(staffId);
       expect(written.created_at.getUTCFullYear()).toBeGreaterThan(2001);
+    });
+
+    it("refuses C1 controls and text that shows nothing, even past the API", async () => {
+      const ownerId = await userIdOf(A.owner);
+      for (const body of ["a\u0090b", "\u0085", "\u200b", "\u2060\ufeff", "\u3164", " \n "]) {
+        await expect(
+          inTenantTransaction(runtime.db, staffContext(A.id, ownerId), (trx) =>
+            trx
+              .insertInto("booking_notes")
+              .values({ tenant_id: A.id, booking_id: fx.rich.bookingId, body })
+              .execute(),
+          ),
+          JSON.stringify(body),
+        ).rejects.toThrow(/check constraint/);
+      }
+      // Line breaks, accents, and emoji are visible text.
+      for (const body of ["Two lines\nhere", "José Núñez", "👍"]) {
+        await inTenantTransaction(runtime.db, staffContext(A.id, ownerId), (trx) =>
+          trx
+            .insertInto("booking_notes")
+            .values({ tenant_id: A.id, booking_id: fx.rich.bookingId, body })
+            .execute(),
+        );
+      }
     });
 
     it("refuses a note without a staff actor, for every role", async () => {

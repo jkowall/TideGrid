@@ -31,19 +31,13 @@ describe("role permissions", () => {
       "notes.read",
       "notes.write",
     ]);
-    expect(permissionsFor("finance")).toEqual([
-      "audit.read",
-      "catalog.read",
-      "payments.read",
-      "notes.read",
-    ]);
+    expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read", "payments.read"]);
   });
 
-  it("lets every role read a booking's notes and only owners and booking staff write them", () => {
+  it("lets only owners and booking staff read and write a booking's notes, never finance", () => {
     expect(StaffRole.options.filter((r) => can(r, "notes.read"))).toEqual([
       "owner",
       "booking_staff",
-      "finance",
     ]);
     expect(StaffRole.options.filter((r) => can(r, "notes.write"))).toEqual([
       "owner",

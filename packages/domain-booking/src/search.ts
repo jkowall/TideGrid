@@ -10,6 +10,8 @@
  * them: finance's search reads references and dates only, so no answer and no
  * count can depend on a name or an address.
  */
+
+import { bookingReferencePrefix } from "@tidegrid/contracts/references";
 import {
   isUuid,
   type PaymentState,
@@ -68,18 +70,14 @@ export type BookingSearchOutcome =
 
 // Reading the text -----------------------------------------------------------------
 
-const referenceAlphabet = /^[0-9A-HJKMNP-TV-Z]{2,8}$/;
-
 /**
  * The start of a booking reference, read the way a guest quotes one: case,
  * spaces, and hyphens ignored, and O, I, and L as 0, 1, and 1 (Crockford
  * base32). Null when the text cannot begin a reference, or names fewer than
- * two of its characters.
+ * two of its characters. The console's search form reads finance's text with
+ * the same shared function.
  */
-export function referencePrefix(text: string): string | null {
-  const compact = text.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
-  return referenceAlphabet.test(compact) ? compact : null;
-}
+export const referencePrefix = bookingReferencePrefix;
 
 /** A LIKE pattern's own characters, escaped for `ESCAPE '\'`. */
 export function escapeLike(text: string): string {

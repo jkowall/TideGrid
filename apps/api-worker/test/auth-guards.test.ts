@@ -46,6 +46,7 @@ describe("the public entry hides staff and sign-in routes", () => {
       });
       expect(res.status).toBe(404);
       expect(await errorCode(res)).toBe("not_found");
+      expect(res.headers.get("cache-control")).toBe("no-store");
     });
   }
 });
@@ -127,6 +128,7 @@ describe("state-changing staff requests require the console origin", () => {
     });
     expect(res.status).toBe(403);
     expect(await errorCode(res)).toBe("origin_not_allowed");
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });
 

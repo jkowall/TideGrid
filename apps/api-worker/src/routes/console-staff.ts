@@ -2,8 +2,8 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   BookingDayQuery,
   BookingDayTotalsResponse,
+  BookingNoteCreatedResponse,
   BookingNoteCreateRequest,
-  BookingNoteResponse,
   BookingNotesResponse,
   BookingParams,
   BookingSearchRequest,
@@ -60,22 +60,12 @@ function report(outcome: DayReportOutcome) {
 /**
  * Console completion (G2.12c): booking search, a day's control totals, the
  * day's CSV export, and internal booking notes. Every answer carries
- * personal data or money, so no cache keeps any, refusals included.
+ * personal data or money, so no cache keeps any, refusals included: app.ts
+ * marks every staff answer no-store, before the guards run.
  */
-const noStorePaths = [
-  "/v1/staff/tenants/:tenantId/booking-searches",
-  "/v1/staff/tenants/:tenantId/booking-day-totals",
-  "/v1/staff/tenants/:tenantId/booking-day-export",
-  "/v1/staff/tenants/:tenantId/bookings/:bookingId/notes",
-];
-
 export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
-  for (const path of noStorePaths) {
-    app.use(path, async (c, next) => {
-      await next();
-      c.header("Cache-Control", "no-store");
-    });
-  }
+  // A test may lower the day report's limit to reach day_too_large.
+  const limit = deps.dayReportLimit === undefined ? {} : { limit: deps.dayReportLimit };
 
   // Search ------------------------------------------------------------------------
 
@@ -168,7 +158,9 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       deps,
       { tenantId, permission: "payments.read", snapshot: true },
       async (trx) => {
-        const day = report(await buildDayReport(trx, tenantId, { date, withBooker: false }));
+        const day = report(
+          await buildDayReport(trx, tenantId, { date, withBooker: false, ...limit }),
+        );
         return {
           date: day.date,
           generatedAt: day.generatedAt,
@@ -215,7 +207,7 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       { tenantId, permission: "payments.read" },
       async (trx, ctx) => {
         const withBooker = seesBooker(ctx);
-        const day = report(await buildDayReport(trx, tenantId, { date, withBooker }));
+        const day = report(await buildDayReport(trx, tenantId, { date, withBooker, ...limit }));
         await recordAudit(trx, ctx, {
           action: "booking_day.exported",
           subjectType: "booking_day",
@@ -243,7 +235,7 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "A booking's internal notes",
     description:
-      "Every role. The newest 200 notes, newest first, each with its author as this operator names them and when it was written, and how many there are. An unknown id and another tenant's id answer the same 404.",
+      "Owners and booking staff; finance holds no notes.read. The newest 200 notes, newest first, each with its author as this operator names them and when it was written, and how many there are. An unknown id and another tenant's id answer the same 404.",
     security: staffSecurity,
     request: { params: BookingParams },
     responses: {
@@ -293,8 +285,8 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     },
     responses: {
       201: {
-        content: { "application/json": { schema: BookingNoteResponse } },
-        description: "The note",
+        content: { "application/json": { schema: BookingNoteCreatedResponse } },
+        description: "The note, without its text",
       },
       400: errorBody("Invalid request"),
       401: errorBody("Not signed in"),
@@ -326,7 +318,10 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       async (trx, ctx) => {
         const added = await addBookingNote(trx, ctx, { bookingId, body: input.body });
         if (added.kind === "booking_not_found") throw bookingNotFound();
-        return { note: { ...added.note, author: { ...added.note.author } } };
+        // This answer is also the one kept for replaying the key, so it names
+        // the note and leaves its text, which can mention a guest, out.
+        const { id, author, createdAt } = added.note;
+        return { note: { id, author: { ...author }, createdAt } };
       },
     );
     if (result.replayed) c.header("Idempotent-Replayed", "true");
