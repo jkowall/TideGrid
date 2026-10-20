@@ -20,7 +20,7 @@ import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
-import { canSeeGuests, canWriteNotes, roleNames } from "../roles.ts";
+import { canSeeGuests, canUseNotes, roleNames } from "../roles.ts";
 import { loadBooking } from "./api.ts";
 import { MaskedReference } from "./MaskedReference.tsx";
 import {
@@ -157,14 +157,15 @@ export function BookingDetailPage({
           seesGuests={canSeeGuests(role)}
           roleName={roleNames[role]}
           notes={
-            <Notes
-              tenantId={tenantId}
-              tenantName={tenantName}
-              bookingId={booking.id}
-              zone={booking.trip.timeZone}
-              canWrite={canWriteNotes(role)}
-              roleName={roleNames[role]}
-            />
+            // Finance holds no notes.read: no panel, and no request for one.
+            canUseNotes(role) ? (
+              <Notes
+                tenantId={tenantId}
+                tenantName={tenantName}
+                bookingId={booking.id}
+                zone={booking.trip.timeZone}
+              />
+            ) : null
           }
         />
       )}
@@ -181,7 +182,7 @@ function Detail({
   booking: BookingDetail;
   seesGuests: boolean;
   roleName: string;
-  /** The booking's internal notes (G2.12c), last on the page. */
+  /** The booking's internal notes (G2.12c), last on the page; none for finance. */
   notes: ReactNode;
 }) {
   const { trip, location } = booking;
@@ -267,7 +268,7 @@ function Detail({
               <Icon name="eye-off" />
               <span>
                 Not shown to your role, {roleName}. Owners and booking staff see the guest's name
-                and email.
+                and email, and the booking's notes.
               </span>
             </p>
           )}

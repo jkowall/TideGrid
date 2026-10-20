@@ -10,12 +10,20 @@ import { canRetry, failureText } from "./States.tsx";
 
 /**
  * A booking's internal notes (G2.12c): what a guest asked on the phone, what
- * the dock should know. Every role reads them; owners and booking staff add
- * them. A note is never edited or removed, and it names who wrote it and
- * when, on the marina's clock.
+ * the dock should know. Owners and booking staff read and add them; finance
+ * never sees this panel (roles.ts). A note is never edited or removed, and it
+ * names who wrote it and when, on the marina's clock.
  */
 
 export const noteLimit = 500;
+
+/**
+ * How long a note is, as the API counts it: code points, after trimming. An
+ * emoji is one character, and a line break left at the end is none.
+ */
+export function noteLength(body: string): number {
+  return [...body.trim()].length;
+}
 
 type Load =
   | { kind: "loading" }
@@ -27,16 +35,12 @@ export function Notes({
   tenantName,
   bookingId,
   zone,
-  canWrite,
-  roleName,
 }: {
   tenantId: string;
   tenantName: string;
   bookingId: string;
   /** The marina's zone: notes are dated on its clock. */
   zone: string;
-  canWrite: boolean;
-  roleName: string;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -88,19 +92,7 @@ export function Notes({
       <h2 id={headingId} ref={heading} tabIndex={-1}>
         Notes
       </h2>
-      {canWrite ? (
-        <NoteForm
-          tenantId={tenantId}
-          tenantName={tenantName}
-          bookingId={bookingId}
-          onAdded={added}
-        />
-      ) : (
-        <p className="bd-hidden">
-          <Icon name="info" />
-          <span>Your role, {roleName}, reads notes. Owners and booking staff write them.</span>
-        </p>
-      )}
+      <NoteForm tenantId={tenantId} tenantName={tenantName} bookingId={bookingId} onAdded={added} />
       {load.kind === "loading" && (
         <div className="bd-notes__skeleton" aria-hidden="true">
           <Skeleton variant="text" width="min(28rem, 90%)" />
@@ -165,7 +157,8 @@ const noteProblems: Record<NoteFailure, string> = {
   suspended: "While this operator is suspended, notes can't be added.",
   no_access: "You no longer have access to this operator. Ask one of its owners.",
   not_found: "This booking isn't here any more, so the note wasn't added.",
-  rejected: "That note couldn't be added. Use at most 500 characters, without tabs.",
+  rejected:
+    "That note couldn't be added. Use at most 500 characters, with something visible and no tabs.",
   unreadable:
     "TideGrid sent an answer this console can't read. Reload to check the note was added.",
   unreachable: "The note wasn't sent. Check your connection, then add it again.",
@@ -201,7 +194,7 @@ function NoteForm({
   }, []);
 
   const trimmed = body.trim();
-  const left = noteLimit - body.length;
+  const left = noteLimit - noteLength(body);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -211,7 +204,7 @@ function NoteForm({
       field.current?.focus();
       return;
     }
-    if (body.length > noteLimit) {
+    if (left < 0) {
       setProblem(`Shorten the note to ${noteLimit} characters.`);
       field.current?.focus();
       return;
@@ -243,7 +236,8 @@ function NoteForm({
         Add a note
       </label>
       <p className="tg-field__hint" id={`${inputId}-hint`}>
-        For your team at {tenantName}, finance included. A note can't be edited or removed later.
+        Seen by owners and booking staff at {tenantName}, not finance. A note can't be edited or
+        removed later.
       </p>
       <textarea
         ref={field}

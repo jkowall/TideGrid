@@ -800,6 +800,15 @@ export function bookingNote(over: Partial<Note> = {}): Note {
 /** A booking's notes as the API sends them: newest first, and how many there are in all. */
 export const notesBody = (notes: Note[], total = notes.length) => ({ notes, total });
 
+/**
+ * The API's answer to an added note: its id, author, and time, never its text,
+ * which the writer already holds (the idempotency store keeps no copy).
+ */
+export function noteCreatedBody(note: Note) {
+  const { body: _text, ...created } = note;
+  return { note: created };
+}
+
 /** A busy day's control totals that add up: gross, less discounts, plus fees and taxes, is the total; less refunds, the net. */
 export const dayFigures: BookingDayTotals = {
   bookings: 3,

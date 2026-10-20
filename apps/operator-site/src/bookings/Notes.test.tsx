@@ -4,10 +4,9 @@
 process.env.TZ = "Asia/Tokyo";
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { BookingNote, StaffRole } from "@tidegrid/contracts";
+import type { BookingNote } from "@tidegrid/contracts";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { canWriteNotes, roleNames } from "../roles.ts";
 import {
   api,
   apiError,
@@ -19,6 +18,7 @@ import {
   json,
   marinaZone,
   noteAuthors,
+  noteCreatedBody,
   noteIds,
   notesBody,
   route,
@@ -28,7 +28,7 @@ import {
   tenantName,
   text,
 } from "./fixtures.ts";
-import { Notes } from "./Notes.tsx";
+import { Notes, noteLength } from "./Notes.tsx";
 
 const bookingId = bookingIds.maya;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -42,16 +42,10 @@ const samsNote = bookingNote({
 });
 const avasNote = bookingNote();
 
-function renderNotes(role: StaffRole = "owner", options: { strict?: boolean } = {}) {
+/** The panel, as an owner or booking staff sees it: finance never gets it (BookingDetail). */
+function renderNotes(options: { strict?: boolean } = {}) {
   const page = (
-    <Notes
-      tenantId={tenantId}
-      tenantName={tenantName}
-      bookingId={bookingId}
-      zone={marinaZone}
-      canWrite={canWriteNotes(role)}
-      roleName={roleNames[role]}
-    />
+    <Notes tenantId={tenantId} tenantName={tenantName} bookingId={bookingId} zone={marinaZone} />
   );
   return render(options.strict ? <StrictMode>{page}</StrictMode> : page);
 }
@@ -80,7 +74,10 @@ const loaded = () =>
 const keysSent = () =>
   sentTo(route.addNote(bookingId)).map((sent) => sent.headers.get("idempotency-key"));
 const bodiesSent = () => sentTo(route.addNote(bookingId)).map((sent) => sent.body);
-const created = (note: BookingNote) => () => json({ note }, 201);
+/** The API's 201: the note without its text, so what is shown is what was sent. */
+const created = (note: BookingNote) => () => json(noteCreatedBody(note), 201);
+/** An emoji outside the Basic Multilingual Plane: one character, two UTF-16 units. */
+const wave = "\u{1F30A}";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -234,7 +231,7 @@ describe("when the notes do not load", () => {
 
   it("still lets an owner write a note while the notes are not shown", async () => {
     api({ [route.notes(bookingId)]: () => apiError(500, "internal_error") });
-    renderNotes("owner");
+    renderNotes();
     await screen.findByRole("alert");
     expect(field()).toBeTruthy();
     expect(addButton()).toBeTruthy();
@@ -311,31 +308,19 @@ describe("when the notes do not load", () => {
   });
 });
 
-describe("who may write notes", () => {
-  it.each(["owner", "booking_staff"] as const)("gives %s the form", async (role) => {
+describe("the form", () => {
+  it("asks for the note, says who sees it and that it stays, and counts 500 characters", async () => {
     api({});
-    renderNotes(role);
+    renderNotes();
     await loaded();
     expect(field().tagName).toBe("TEXTAREA");
     expect(addButton().getAttribute("type")).toBe("submit");
     expect(text(document.querySelector(".tg-field__hint"))).toBe(
-      `For your team at ${tenantName}, finance included. A note can't be edited or removed later.`,
+      `Seen by owners and booking staff at ${tenantName}, not finance. A note can't be edited or removed later.`,
     );
     expect(count()).toBe("500 characters left");
-    expect(screen.queryByText(/reads notes/)).toBeNull();
-  });
-
-  it("gives finance the notes to read, and a sentence in place of the form", async () => {
-    api({ [route.notes(bookingId)]: () => json(notesBody([samsNote, avasNote])) });
-    renderNotes("finance");
-    await listed();
-    expect(text(document.querySelector(".bd-hidden"))).toBe(
-      "Your role, finance, reads notes. Owners and booking staff write them.",
-    );
-    expect(screen.queryByRole("textbox")).toBeNull();
-    expect(document.querySelector("textarea")).toBeNull();
-    expect(screen.queryByRole("button")).toBeNull();
-    expect(items()).toHaveLength(2);
+    // No read-only branch is left: finance is never given this panel.
+    expect(document.querySelector(".bd-hidden")).toBeNull();
   });
 });
 
@@ -380,6 +365,40 @@ describe("adding a note", () => {
     type("a".repeat(505));
     expect(count()).toBe("5 characters over the limit");
     expect(document.querySelector(".bd-notes__count--over")).not.toBeNull();
+  });
+
+  it("counts as the API does: an emoji is one character, and the spaces around the words none", async () => {
+    expect(noteLength(`  ${wave}a\n`)).toBe(2);
+    api({});
+    renderNotes();
+    await loaded();
+    // 260 emoji are 520 UTF-16 units, and well inside the limit.
+    type(wave.repeat(260));
+    expect(count()).toBe("240 characters left");
+    type(`   ${"a".repeat(500)}\n\n`);
+    expect(count()).toBe("0 characters left");
+    expect(document.querySelector(".bd-notes__count--over")).toBeNull();
+    type(wave.repeat(501));
+    expect(count()).toBe("1 character over the limit");
+  });
+
+  it("sends 500 emoji, and 500 characters with a line break after them, as the API takes both", async () => {
+    api({
+      [route.addNote(bookingId)]: [
+        created(bookingNote({ id: noteIds.second })),
+        created(bookingNote({ id: noteIds.third })),
+      ],
+    });
+    renderNotes();
+    await loaded();
+    type(wave.repeat(500));
+    add();
+    await waitFor(() => expect(liveText()).toBe("Note added."));
+    type(`${"a".repeat(500)}\n`);
+    add();
+    await waitFor(() => expect(items()).toHaveLength(2));
+    expect(bodiesSent()).toEqual([{ body: wave.repeat(500) }, { body: "a".repeat(500) }]);
+    expect(problem()).toBe("");
   });
 
   it("refuses a note over the limit without sending, and says how much to cut", async () => {
@@ -453,7 +472,7 @@ describe("adding a note", () => {
     type("Guest will bring a cake.");
     add();
     await waitFor(() => expect(items()).toHaveLength(2));
-    // The server's note, as it stands, on top of what was there.
+    // The API's id, author, and time, with the words sent (its answer holds none), on top.
     expect(items().map(bodyOf)).toEqual(["Guest will bring a cake.", avasNote.body]);
     expect(items().map(authorOf)).toEqual(["Sam Ortiz", "Ava Marsh"]);
     expect(whenOf(items()[0] as HTMLElement)).toBe("Wed, Nov 4, 12:00 PM EST");
@@ -511,7 +530,7 @@ describe("adding a note", () => {
     fireEvent.submit(field().closest("form") as HTMLFormElement);
     expect(sentTo(route.addNote(bookingId))).toHaveLength(1);
 
-    posted.release(json({ note: bookingNote({ body: "Guest will bring a cake." }) }, 201));
+    posted.release(json(noteCreatedBody(bookingNote({ body: "Guest will bring a cake." })), 201));
     await waitFor(() => expect(liveText()).toBe("Note added."));
     expect(sentTo(route.addNote(bookingId))).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Add note" })).toBe(button);
@@ -521,7 +540,7 @@ describe("adding a note", () => {
   it("adds a note while React runs effects twice in development", async () => {
     // The console's entry point wraps everything in StrictMode, which starts every load twice.
     api({ [route.addNote(bookingId)]: created(bookingNote({ body: "Guest will bring a cake." })) });
-    renderNotes("owner", { strict: true });
+    renderNotes({ strict: true });
     await loaded();
     type("Guest will bring a cake.");
     add();
@@ -652,7 +671,7 @@ describe("a note that was not added", () => {
     [
       "a note the API refused",
       () => apiError(400, "validation_failed"),
-      "That note couldn't be added. Use at most 500 characters, without tabs.",
+      "That note couldn't be added. Use at most 500 characters, with something visible and no tabs.",
     ],
     [
       "a person who is signed out",
