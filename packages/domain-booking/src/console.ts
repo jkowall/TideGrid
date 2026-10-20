@@ -200,6 +200,8 @@ export interface RosterView {
     party: PartyView;
     extras: ExtraView[];
     payment: PaymentStatusView;
+    /** The party as named so far, by place (lane 1, G2.11c). */
+    participants: { position: number; name: string; minor: boolean }[];
   }[];
 }
 
@@ -833,6 +835,22 @@ export async function getTripRoster(
     tenantId,
     rows.map((r) => r.order_id),
   );
+  // The party as its guests have named it (lane 1, G2.11c), by place.
+  const { rows: named } = await sql<{
+    booking_id: string;
+    position: number;
+    full_name: string;
+    is_minor: boolean;
+  }>`
+    select booking_id, position, full_name, is_minor from booking_participants
+     where tenant_id = ${tenantId} and booking_id = any(${rows.map((r) => r.id)}::uuid[])
+     order by booking_id, position`.execute(trx);
+  const participants = new Map<string, { position: number; name: string; minor: boolean }[]>();
+  for (const p of named) {
+    const list = participants.get(p.booking_id) ?? [];
+    list.push({ position: p.position, name: p.full_name, minor: p.is_minor });
+    participants.set(p.booking_id, list);
+  }
   const bookings = rows.map((r) => {
     const own = lines.get(r.order_id) ?? empty;
     return {
@@ -842,6 +860,7 @@ export async function getTripRoster(
       party: partyOf(trip.product_kind, r.party_size, own.service),
       extras: extrasOf(own.addOns),
       payment: paymentStatus(r),
+      participants: participants.get(r.id) ?? [],
     };
   });
   return {

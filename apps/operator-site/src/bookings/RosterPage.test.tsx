@@ -140,20 +140,45 @@ describe("a roster", () => {
     expectNoPersonalDataInAddresses();
   });
 
-  it("says that participants and waivers are not collected yet, rather than printing empty columns", async () => {
+  it("says the names are as guests give them and waivers follow the roster, rather than printing empty columns", async () => {
     api({ [route.roster(tripId)]: () => json(rosterBody()) });
     const { container } = renderPage("owner");
     await loaded();
     const notice = container.querySelector(".roster-notice") as HTMLElement;
     expect(text(notice.querySelector(".tg-notice__title"))).toBe(
-      "Participants and waivers aren't collected yet",
+      "Names as guests give them; waivers follow the roster",
     );
-    expect(text(notice)).toMatch(/Participant names and waiver status arrive with a later build\./);
+    expect(text(notice)).toMatch(/A place not named yet counts in the party only\./);
+    expect(text(notice)).toMatch(
+      /Each person's waiver status is under Waivers, after the roster, and prints with it\./,
+    );
+    // The trip's waiver card follows the sheet, outside it.
+    const card = await screen.findByRole("region", { name: "Waivers" });
+    expect(container.querySelector(".roster")?.contains(card)).toBe(false);
+    expect(
+      container.querySelector(".roster")?.compareDocumentPosition(card) ===
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(true);
     // No announcement of its own: it is part of the page from the start.
     expect(notice.getAttribute("role")).toBeNull();
     // And no column for either.
     const headers = [...document.querySelectorAll(".roster-table thead th")].map((th) => text(th));
     expect(headers.join(" ")).not.toMatch(/waiver|participant/i);
+  });
+
+  it("names each party's guests by place as given so far, marks a minor, and says how many are named", async () => {
+    api({ [route.roster(tripId)]: () => json(rosterBody()) });
+    renderPage("owner");
+    await loaded();
+    const rows = [...document.querySelectorAll(".roster-table tbody tr")];
+    const [maya, luis] = rows;
+    const names = (row: Element | undefined) =>
+      [...(row?.querySelectorAll(".roster-table__names li") ?? [])].map((li) => text(li));
+    expect(names(maya)).toEqual(["Maya Okonkwo", "Ada Okonkwo (under 18)"]);
+    expect(text(maya)).toContain("2 of 3 named");
+    // A party nobody has named yet shows no list, only the count.
+    expect(maya && luis?.querySelector(".roster-table__names")).toBeNull();
+    expect(text(luis)).toContain("0 of 2 named");
   });
 
   it("lists one row per booking, in the order sent, with reference, booker, party, extras, and payment", async () => {
@@ -181,7 +206,7 @@ describe("a roster", () => {
       "1",
       "QKG6ERBF",
       "Maya Okonkwo",
-      "3 guests2 Adult, 1 Child (3 to 12)",
+      "3 guests2 Adult, 1 Child (3 to 12)Maya OkonkwoAda Okonkwo (under 18)2 of 3 named",
       "1 Souvenir photo",
       "Paid",
     ]);
@@ -189,7 +214,7 @@ describe("a roster", () => {
       "2",
       "7HM2P9TW",
       "Luis Fernandez",
-      "2 guests2 Adult",
+      "2 guests2 Adult0 of 2 named",
       "1 Souvenir photo, 2 Drink voucher",
       "Refund pending",
     ]);
@@ -290,6 +315,7 @@ describe("a roster", () => {
           party: priyaBooking.party,
           extras: [],
           payment: { state: "succeeded", refund: null },
+          participants: [],
         },
       ],
     });
@@ -306,7 +332,7 @@ describe("a roster", () => {
       "1",
       "3ZRB8N4C",
       "Priya Raman",
-      "6 guestsWhole boat, up to 12 guests",
+      "6 guestsWhole boat, up to 12 guests0 of 6 named",
       "None",
       "Paid",
     ]);
@@ -561,12 +587,41 @@ describe("the sheet", () => {
     expect(within(tools).getAllByRole("button")).toHaveLength(1);
   });
 
-  it("lets a keyboard reach a scrolling table", async () => {
-    api({ [route.roster(tripId)]: () => json(rosterBody()) });
-    renderPage("owner");
-    await loaded();
-    const region = screen.getByRole("region", { name: "Bookings on this trip" });
-    expect(region.getAttribute("tabindex")).toBe("0");
-    expect(region.querySelector("table")).not.toBeNull();
+  /** jsdom lays nothing out: give the roster's region the widths a browser would. */
+  function withRegionWidths(scrollWidth: number, clientWidth: number) {
+    const proto = HTMLElement.prototype;
+    const scroll = vi.spyOn(proto, "scrollWidth", "get").mockReturnValue(scrollWidth);
+    const client = vi.spyOn(proto, "clientWidth", "get").mockReturnValue(clientWidth);
+    return () => {
+      scroll.mockRestore();
+      client.mockRestore();
+    };
+  }
+
+  it("lets a keyboard reach the table while it scrolls, as on a phone", async () => {
+    const restore = withRegionWidths(640, 343);
+    try {
+      api({ [route.roster(tripId)]: () => json(rosterBody()) });
+      renderPage("owner");
+      await loaded();
+      const region = screen.getByRole("region", { name: "Bookings on this trip" });
+      expect(region.getAttribute("tabindex")).toBe("0");
+      expect(region.querySelector("table")).not.toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves the region out of the tab order when the table fits, as on a desktop (G2.12c)", async () => {
+    const restore = withRegionWidths(900, 900);
+    try {
+      api({ [route.roster(tripId)]: () => json(rosterBody()) });
+      renderPage("owner");
+      await loaded();
+      const region = screen.getByRole("region", { name: "Bookings on this trip" });
+      expect(region.hasAttribute("tabindex")).toBe(false);
+    } finally {
+      restore();
+    }
   });
 });

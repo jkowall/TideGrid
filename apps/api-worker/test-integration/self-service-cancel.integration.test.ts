@@ -4,7 +4,7 @@
  * /v1/public/manage/participants/{position}, and the payment webhook after a
  * cancellation. Contracts: packages/contracts/src/self-service.ts and
  * participants.ts, packages/domain-booking/README.md ("Cancellation within
- * policy"), and migration 0008.
+ * policy"), and migration 0009.
  *
  * A booking is canceled once: a repeat with the same key replays, with any
  * other key answers 200 with the canceled booking; one cancellation row, one

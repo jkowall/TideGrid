@@ -884,6 +884,28 @@ interface SelfServiceTables {
   fake_email_deliveries: FakeEmailDeliveriesTable;
 }
 
+// Console completion (G2.12c) ------------------------------------------------------
+
+/**
+ * An internal note on a booking. Append-only for every role; a trigger sets
+ * the author, request, and time from the transaction, so an insert names only
+ * the tenant, the booking, and the body.
+ */
+export interface BookingNotesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  body: Fixed<string>;
+  author_user_id: ColumnType<string, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+  created_at: CreatedAt;
+}
+
+/** Tables added by the console completion migration (G2.12c), merged into Database below. */
+interface ConsoleTables {
+  booking_notes: BookingNotesTable;
+}
+
 // Waiver evidence (G2.15). Triggers stamp every time and enforce the one-way
 // states; columns typed `never` for update are not granted to the runtime.
 
@@ -1035,7 +1057,12 @@ interface WaiverTables {
   waiver_evidence: WaiverEvidenceTable;
 }
 
-export interface Database extends PricingTables, CheckoutTables, SelfServiceTables, WaiverTables {
+export interface Database
+  extends PricingTables,
+    CheckoutTables,
+    ConsoleTables,
+    SelfServiceTables,
+    WaiverTables {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
   tenant_hostnames: TenantHostnamesTable;

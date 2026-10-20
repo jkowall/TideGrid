@@ -349,6 +349,24 @@ describe("opening the booking", () => {
     expect(callsTo(calls, "open")).toHaveLength(1);
   });
 
+  it("drops an opening's late answer once a newer link arrived in the same tab", async () => {
+    const answer = held();
+    stubManageApi({ open: answer.answer });
+    arrive();
+    fireEvent.click(await openButton());
+    // Before the API answers, the guest opens a newer email's link in this tab.
+    const newer = "test_link_token_".padEnd(43, "N");
+    window.location.hash = `#t=${newer}`;
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    await waitFor(() => expect(window.location.hash).toBe(""));
+    // The first link's answer arrives late: it is about a link this page no longer shows.
+    answer.release(refusal(410, "link_superseded"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByRole("heading", { name: "A newer email replaced this link" })).toBeNull();
+    const button = await openButton();
+    expect(button.getAttribute("aria-busy")).toBeNull();
+  });
+
   it("stores the session for this tab, and reads the booking with it as a bearer token", async () => {
     const calls = await openedFromLink();
     expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null")).toEqual({
@@ -588,6 +606,10 @@ describe("a link that does not open the booking", () => {
     const notice = await noticeTitled("Check your email");
     expect(text(notice)).toContain(
       "If this link belongs to a booking here, we've sent a new one to the email address it was booked with. It can take a minute to arrive.",
+    );
+    // The API answers alike past its hourly limit, so the copy says what that means.
+    expect(text(notice)).toContain(
+      "We send at most three new links an hour: if you've asked several times, use the newest email, or wait an hour and ask again.",
     );
     expect(notice.getAttribute("role")).toBe("status");
     const [renewal] = callsTo(calls, "renew");
@@ -1639,6 +1661,32 @@ describe("coming back later", () => {
     expect(email?.headers.get("content-type")).toBeNull();
     expect(email?.headers.get("authorization")).toBe(`Bearer ${sessionToken}`);
   });
+
+  it.each([
+    ["a sent link", () => json({ status: "accepted" }, 202), "New link sent"],
+    [
+      "the hour's limit",
+      () => refusal(429, "link_email_rate_limited"),
+      "We've already sent three links this hour",
+    ],
+    ["no answer", offline, "We couldn't send a link"],
+  ])(
+    "shows the outcome of %s under the button that asked, and moves focus to it",
+    async (_what, answer, title) => {
+      await shown({ emailLink: answer });
+      fireEvent.click(screen.getByRole("button", { name: "Email me a new link" }));
+      const notice = await noticeTitled(title);
+      const later = card("Coming back later?");
+      // In the card the guest is looking at, after its actions, not at the top of the page.
+      expect(later.contains(notice)).toBe(true);
+      const actions = later.querySelector(".booking-actions");
+      if (!actions) throw new Error("no actions in the card");
+      expect(
+        actions.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      await waitFor(() => expect(notice.closest("[tabindex='-1']")).toBe(document.activeElement));
+    },
+  );
 
   it("shows Sending while the API answers, and sends once", async () => {
     const answer = held();

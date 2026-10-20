@@ -426,7 +426,10 @@ describe("the week", () => {
     api({ [tripsPath()]: [() => apiError(401, "unauthenticated")] });
     render(<CalendarPage membership={membership("owner")} focusHeading={false} />);
     expect(text(await screen.findByRole("alert"))).toContain("You're signed out");
-    expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe("/");
+    // This page again, so signing in comes back here (G2.12c).
+    expect(screen.getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe(
+      `${window.location.pathname}${window.location.search}`,
+    );
   });
 
   it("says when the operator is suspended, not that the role is wrong", async () => {
@@ -648,7 +651,10 @@ describe("changing a trip", () => {
     expect(within(dialog).getByRole("button", { name: button })).toBeTruthy();
     if (status === 401) {
       const signIn = within(dialog).getByRole("link", { name: "Sign in again" });
-      expect(signIn.getAttribute("href")).toBe("/");
+      // This page again, so signing in comes back here (G2.12c).
+      expect(signIn.getAttribute("href")).toBe(
+        `${window.location.pathname}${window.location.search}`,
+      );
       await waitFor(() => expect(document.activeElement).toBe(signIn));
     }
   });

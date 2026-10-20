@@ -678,6 +678,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         guest_access_links: ["INSERT", "SELECT"],
         guest_sessions: ["INSERT", "SELECT"],
         fake_email_deliveries: ["INSERT", "SELECT"],
+        // Console completion (G2.12c): booking notes are append-only.
+        booking_notes: ["INSERT", "SELECT"],
         // Waiver evidence (G2.15).
         waiver_templates: ["INSERT", "SELECT"],
         waiver_template_versions: ["INSERT", "SELECT"],

@@ -15,10 +15,25 @@ export const bookingReferencePattern = /^[0-9A-HJKMNP-TV-Z]{8}$/;
  */
 export function normalizeBookingReference(input: string): string | null {
   if (input.length > 64) return null;
-  const compact = input
-    .toUpperCase()
-    .replace(/[\s-]/g, "")
-    .replace(/O/g, "0")
-    .replace(/[IL]/g, "1");
+  const compact = readAsReference(input);
   return bookingReferencePattern.test(compact) ? compact : null;
+}
+
+/** Case ignored, spaces and hyphens dropped, O as 0, I and L as 1. */
+function readAsReference(input: string): string {
+  return input.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+}
+
+const referencePrefixPattern = /^[0-9A-HJKMNP-TV-Z]{2,8}$/;
+
+/**
+ * The start of a booking reference, read the way a guest quotes one, as
+ * `normalizeBookingReference` reads a whole one (G2.12c): two to eight of its
+ * characters, or null. The API's search and the console's search form both
+ * use it, so they can never read finance's text by different rules.
+ */
+export function bookingReferencePrefix(input: string): string | null {
+  if (input.length > 64) return null;
+  const compact = readAsReference(input);
+  return referencePrefixPattern.test(compact) ? compact : null;
 }

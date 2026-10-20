@@ -157,9 +157,16 @@ export const TripSummary = z.object({
 });
 export type TripSummary = z.infer<typeof TripSummary>;
 
+/**
+ * A date the calendar's query may name (G2.12c). The ISO calendar has a year
+ * 0000; PostgreSQL's dates do not, so the contract refuses it with a 400, as
+ * the day list's query does, before any range check runs.
+ */
+const QueryDate = LocalDate.refine((value) => !value.startsWith("0000-"), "There is no year 0");
+
 export const StaffTripQuery = z.object({
-  from: LocalDate.describe("First local date, inclusive"),
-  to: LocalDate.describe("Last local date, inclusive; at most 92 days after from"),
+  from: QueryDate.describe("First local date, inclusive"),
+  to: QueryDate.describe("Last local date, inclusive; at most 92 days after from"),
 });
 
 export const StaffTripListResponse = z.object({ trips: z.array(StaffTrip) });

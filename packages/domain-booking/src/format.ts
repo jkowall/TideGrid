@@ -54,15 +54,32 @@ export function extrasText(extras: readonly ExtraView[]): string | null {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to remove them.
 const controls = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
 
-/**
- * Text from stored data, made safe for a message: control characters become
- * spaces and anything past `max` is cut with an ellipsis, so a long or odd
- * value can never stop a booking's email from being written.
- */
-export function clean(text: string, max: number): string {
-  const plain = text.replace(controls, " ").trim();
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to remove them.
+const anyControl = /[\u0000-\u001f\u007f-\u009f]+/g;
+
+function fit(plain: string, max: number): string {
   const value = plain.length > 0 ? plain : "-";
   return value.length <= max ? value : `${value.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Text from stored data, made safe for a message's body: control characters
+ * other than tab and newline become spaces and anything past `max` is cut
+ * with an ellipsis, so a long or odd value can never stop a booking's email
+ * from being written. A subject, a preview, or a recipient's name takes
+ * `singleLine` instead.
+ */
+export function clean(text: string, max: number): string {
+  return fit(text.replace(controls, " ").trim(), max);
+}
+
+/**
+ * Text from stored data for a one-line field (a subject, a preview, a
+ * recipient's name): every C0 and C1 control, tab and newline included,
+ * becomes a single space, then as `clean`.
+ */
+export function singleLine(text: string, max: number): string {
+  return fit(text.replace(anyControl, " ").replace(/ {2,}/g, " ").trim(), max);
 }
 
 /** The first name a greeting uses: the first word of the booker's name. */

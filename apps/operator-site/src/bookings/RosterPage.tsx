@@ -16,12 +16,13 @@ import {
   todayIn,
   zoneAbbreviation,
 } from "@tidegrid/design-system/format";
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, roleNames } from "../roles.ts";
+import { TripWaiversCard } from "../waivers/TripWaivers.tsx";
 import { loadRoster } from "./api.ts";
 import {
   bookingsHref,
@@ -39,8 +40,9 @@ import { canRetry, ReadFailed } from "./States.tsx";
  * A trip's roster (G2.12b): every booking with its reference, booker, party,
  * extras, and payment, the guest totals, and when and where to meet, on screen
  * and on paper. It is a booking-management view, not a passenger manifest:
- * participants and waivers are not collected yet, and the page says so rather
- * than printing empty columns. Owners and booking staff only, as the API.
+ * each party lists the names its guests have given so far (lane 1, G2.11c),
+ * and each person's waiver status follows the roster in its own card (G2.15),
+ * which the page says. Owners and booking staff only, as the API.
  */
 
 type Load =
@@ -178,6 +180,8 @@ function Roster({
           />
         ))}
       {roster && <RosterSheet roster={roster} tenantName={tenantName} />}
+      {/* Waivers (G2.15): a self-contained card; this line is its only placement. */}
+      {roster && <TripWaiversCard tenantId={tenantId} tripId={tripId} />}
     </>
   );
 }
@@ -255,11 +259,12 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
         tone="info"
         announce="none"
         className="roster-notice"
-        title="Participants and waivers aren't collected yet"
+        title="Names as guests give them; waivers follow the roster"
       >
         <p>
-          This roster lists each booking and the size of its party, not the names of everyone
-          aboard. Participant names and waiver status arrive with a later build.
+          Each party lists the names its guests have added on their booking page so far. A place not
+          named yet counts in the party only. Each person's waiver status is under Waivers, after
+          the roster, and prints with it.
         </p>
       </Notice>
 
@@ -268,59 +273,7 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
           <p>Bookings appear here as guests book. Print again closer to departure.</p>
         </EmptyState>
       ) : (
-        // On a phone the table can be wider than the screen and scrolls inside
-        // this region, never the page; a keyboard reaches the scroll through it.
-        <section
-          className="roster-table-wrap"
-          aria-label="Bookings on this trip"
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region must take keyboard focus (WCAG 2.1.1).
-          tabIndex={0}
-        >
-          <table className="roster-table">
-            <caption className="tg-visually-hidden">
-              Bookings on {trip.productName}, {dayText(trip.localDate, "full", today)}, {start}
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col" className="roster-table__n">
-                  <VisuallyHidden>Number</VisuallyHidden>
-                  <span aria-hidden="true">#</span>
-                </th>
-                <th scope="col" className="roster-table__pin">
-                  Reference
-                </th>
-                <th scope="col">Booker</th>
-                <th scope="col">Party</th>
-                <th scope="col">Extras</th>
-                <th scope="col">Payment</th>
-              </tr>
-            </thead>
-            <tbody>
-              {roster.bookings.map((b, i) => {
-                const payment = paymentCopy(b.payment);
-                return (
-                  <tr key={b.id}>
-                    <td className="roster-table__n">{i + 1}</td>
-                    <th scope="row" className="roster-table__ref roster-table__pin">
-                      {b.reference}
-                    </th>
-                    <td>{b.booker.name}</td>
-                    <td>
-                      <strong>{guestsText(b.party.guests)}</strong>
-                      <span className="bd-block roster-table__detail">{partyDetail(b.party)}</span>
-                    </td>
-                    <td>{extrasText(b.extras)}</td>
-                    <td>
-                      <StatusBadge tone={payment.tone} icon={payment.icon}>
-                        {payment.label}
-                      </StatusBadge>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
+        <RosterTable roster={roster} today={today} start={start} />
       )}
 
       <p className="roster-foot">
@@ -328,6 +281,131 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
         confirmed bookings as of {instantText(roster.generatedAt, zone)}.
       </p>
     </div>
+  );
+}
+
+/**
+ * Whether an element's content is wider than the element, kept current as
+ * either resizes. Without ResizeObserver it measures once.
+ */
+export function useOverflows(ref: RefObject<HTMLElement | null>): boolean {
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => setOverflows(element.scrollWidth > element.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => observer.disconnect();
+  }, [ref]);
+  return overflows;
+}
+
+/**
+ * The roster's table. On a phone it can be wider than the screen and scrolls
+ * inside its region, never the page; while it scrolls, a keyboard reaches
+ * the scroll through the region (WCAG 2.1.1). When it fits, as on a desktop,
+ * the region is not a tab stop (G2.12c).
+ *
+ * Each booking's party is one cell (PartyCell): the guest count, the tickets
+ * or the charter, and the names given so far.
+ */
+function RosterTable({
+  roster,
+  today,
+  start,
+}: {
+  roster: TripRoster;
+  today: string;
+  start: string;
+}) {
+  const { trip } = roster;
+  const region = useRef<HTMLElement>(null);
+  const scrolls = useOverflows(region);
+  return (
+    <section
+      ref={region}
+      className="roster-table-wrap"
+      aria-label="Bookings on this trip"
+      // A scrolling region takes keyboard focus while it scrolls (WCAG 2.1.1).
+      tabIndex={scrolls ? 0 : undefined}
+    >
+      <table className="roster-table">
+        <caption className="tg-visually-hidden">
+          Bookings on {trip.productName}, {dayText(trip.localDate, "full", today)}, {start}
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col" className="roster-table__n">
+              <VisuallyHidden>Number</VisuallyHidden>
+              <span aria-hidden="true">#</span>
+            </th>
+            <th scope="col" className="roster-table__pin">
+              Reference
+            </th>
+            <th scope="col">Booker</th>
+            <th scope="col">Party</th>
+            <th scope="col">Extras</th>
+            <th scope="col">Payment</th>
+          </tr>
+        </thead>
+        <tbody>
+          {roster.bookings.map((b, i) => {
+            const payment = paymentCopy(b.payment);
+            return (
+              <tr key={b.id}>
+                <td className="roster-table__n">{i + 1}</td>
+                <th scope="row" className="roster-table__ref roster-table__pin">
+                  {b.reference}
+                </th>
+                <td>{b.booker.name}</td>
+                <td>
+                  <PartyCell booking={b} />
+                </td>
+                <td>{extrasText(b.extras)}</td>
+                <td>
+                  <StatusBadge tone={payment.tone} icon={payment.icon}>
+                    {payment.label}
+                  </StatusBadge>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+/**
+ * A booking's party on the roster: the guest count, the tickets or the
+ * charter, and the names its guests have given so far, by place.
+ */
+function PartyCell({ booking }: { booking: TripRoster["bookings"][number] }) {
+  const { participants } = booking;
+  return (
+    <>
+      <strong>{guestsText(booking.party.guests)}</strong>
+      <span className="bd-block roster-table__detail">{partyDetail(booking.party)}</span>
+      {participants.length > 0 && (
+        <ul className="roster-table__names" aria-label="Named so far">
+          {participants.map((p) => (
+            <li key={p.position}>
+              {p.name}
+              {p.minor && <span className="roster-table__detail"> (under 18)</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <span className="bd-block roster-table__detail">
+        {participants.length === booking.party.guests
+          ? "Everyone named"
+          : `${participants.length} of ${booking.party.guests} named`}
+      </span>
+    </>
   );
 }
 

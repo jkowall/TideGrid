@@ -45,4 +45,9 @@ export interface AppDeps {
    * the participant directory (G2.15).
    */
   waiverDeps?: WaiverDeps;
+  /**
+   * The most bookings one day's totals or export holds (G2.12c). Production
+   * keeps the domain's limit; tests lower it to reach `day_too_large`.
+   */
+  dayReportLimit?: number;
 }

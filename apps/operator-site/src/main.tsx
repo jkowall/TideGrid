@@ -2,6 +2,7 @@ import "@tidegrid/design-system/base.css";
 import "./console.css";
 import "./calendar/calendar.css";
 import "./bookings/bookings.css";
+import "./search/search.css";
 import { ErrorBoundary } from "@tidegrid/design-system/components";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

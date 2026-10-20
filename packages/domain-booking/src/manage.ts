@@ -90,10 +90,16 @@ export type OpenCheckoutSessionResult =
   /** The hour after confirmation has passed; the email's link is the way in. */
   | { kind: "window_closed" };
 
+/** At most this many live sessions one checkout's secret keeps open; opening another ends the oldest. */
+export const MAX_CHECKOUT_SESSIONS = 3;
+
 /**
  * Right after paying, the guest's own checkout secret opens a session for the
  * booking it made, within an hour of confirmation, so they can name their
- * party without waiting for the email.
+ * party without waiting for the email. The secret keeps at most
+ * `MAX_CHECKOUT_SESSIONS` live sessions: opening one more ends the oldest, so
+ * a leaked or replayed secret cannot mint sessions without bound. The
+ * checkout's row lock orders concurrent opens.
  */
 export async function openManageSessionFromCheckout(
   trx: TenantTransaction,
@@ -113,7 +119,8 @@ export async function openManageSessionFromCheckout(
       from checkout_sessions s
       left join bookings b on b.tenant_id = s.tenant_id and b.checkout_session_id = s.id
      where s.tenant_id = ${ctx.tenantId} and s.id = ${input.checkoutSessionId}
-       and s.secret_hash = ${secretHash}`.execute(trx);
+       and s.secret_hash = ${secretHash}
+       for no key update of s`.execute(trx);
   const row = rows[0];
   if (!row) return { kind: "not_found" };
   if (!row.booking_id || !row.reference) return { kind: "not_confirmed" };
@@ -122,6 +129,17 @@ export async function openManageSessionFromCheckout(
     checkout: { checkoutSessionId: input.checkoutSessionId, bookingId: row.booking_id },
     ttlSeconds: MANAGE_SESSION_TTL_SECONDS,
   });
+  // Keep the new session and the newest others, up to the limit; end the rest.
+  await sql`
+    update guest_sessions set revoked_at = now()
+     where tenant_id = ${ctx.tenantId} and checkout_session_id = ${input.checkoutSessionId}
+       and revoked_at is null and id <> ${session.sessionId}
+       and id not in (
+         select id from guest_sessions
+          where tenant_id = ${ctx.tenantId} and checkout_session_id = ${input.checkoutSessionId}
+            and revoked_at is null and expires_at > now() and id <> ${session.sessionId}
+          order by created_at desc, id desc
+          limit ${MAX_CHECKOUT_SESSIONS - 1})`.execute(trx);
   return { kind: "opened", session, reference: row.reference };
 }
 
@@ -208,6 +226,11 @@ export async function requestManageLink(
  * names its booking (in this tenant only), and the fresh link goes to the
  * booker's address on file. A token that names nothing answers `not_found`;
  * the API answers every outcome the same way, so tokens cannot be probed.
+ *
+ * A link revoked on purpose (its recipient changed, staff closed it, or its
+ * booking was canceled) renews nothing: each renewal supersedes the booker's
+ * newest link, so whoever still holds that old email could otherwise keep
+ * locking the booker out. It answers `not_found` like an unknown token.
  */
 export async function renewManageLink(
   trx: TenantTransaction,
@@ -223,7 +246,10 @@ export async function renewManageLink(
   const { rows } = await sql<{ booking_id: string }>`
     select booking_id from guest_access_links
      where tenant_id = ${ctx.tenantId} and token_hash = ${tokenHash}
-       and purpose = 'booking_manage'`.execute(trx);
+       and purpose = 'booking_manage'
+       and revoked_reason is distinct from 'recipient_changed'
+       and revoked_reason is distinct from 'staff'
+       and revoked_reason is distinct from 'booking_canceled'`.execute(trx);
   const bookingId = rows[0]?.booking_id;
   if (!bookingId) return { kind: "not_found" };
   return requestManageLink(trx, ctx, { bookingId, requestKey: input.requestKey });

@@ -1,7 +1,7 @@
 /**
  * Adversarial suite for transactional email delivery (lane 1, the G2.16 demo
  * shim), against packages/domain-messaging/README.md ("Enqueueing a message",
- * "Message status", "Delivery", "The fake provider") and migration 0008.
+ * "Message status", "Delivery", "The fake provider") and migration 0009.
  *
  * Invariants under attack: a message is enqueued once per key and tenant; it
  * is sent once, with its id as the provider's idempotency key; a temporary
@@ -549,6 +549,27 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
       last_error_code: null,
     });
     expect(await deliveries(T, messageId)).toEqual({ accepted: 1, unavailable: 1, rejected: 0 });
+  });
+
+  it("reports a canceled message's own reason, or none, never an earlier attempt's error", async () => {
+    const T = await newTenant("adv-msg-cancel-code");
+    const plain = await enqueue(T, "plain", "synthetic.plain+fail-once@example.test");
+    const named = await enqueue(T, "named", "synthetic.named+fail-once@example.test");
+    await deliver(T);
+    expect(await row(plain.messageId)).toMatchObject({
+      state: "queued",
+      last_error_code: "provider_unavailable",
+    });
+    await inTenant(T, (trx, ctx) => cancelMessage(trx, ctx, plain.messageId));
+    await inTenant(T, (trx, ctx) =>
+      cancelMessage(trx, ctx, named.messageId, { code: "recipient_changed" }),
+    );
+    expect(
+      (await inTenant(T, (trx) => getMessageStatus(trx, T, plain.messageId)))?.failureCode,
+    ).toBeNull();
+    expect(
+      (await inTenant(T, (trx) => getMessageStatus(trx, T, named.messageId)))?.failureCode,
+    ).toBe("recipient_changed");
   });
 
   it("fails a bounced recipient at once and never tries it again", async () => {

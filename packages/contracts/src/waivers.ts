@@ -263,7 +263,9 @@ export const TripWaiversResponse = z.object({
       .number()
       .int()
       .min(0)
-      .describe("Participants whose waiver needs staff: no address, a failed email, or no request"),
+      .describe(
+        "Participants whose waiver needs staff: no address, a failed or held email, or no request",
+      ),
     unnamed: z.number().int().min(0),
   }),
 });

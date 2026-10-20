@@ -30,3 +30,13 @@ export function canChangeTrips(role: StaffRole): boolean {
 export function canSeeGuests(role: StaffRole): boolean {
   return role === "owner" || role === "booking_staff";
 }
+
+/**
+ * Who reads and adds a booking's internal notes (G2.12c): owners and booking
+ * staff. Finance does neither, since a note can name a guest (owner decision,
+ * 2026-10-19). This mirrors the API's `notes.read` and `notes.write`
+ * permissions for display only; the API refuses finance either way.
+ */
+export function canUseNotes(role: StaffRole): boolean {
+  return role === "owner" || role === "booking_staff";
+}

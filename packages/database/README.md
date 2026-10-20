@@ -107,24 +107,34 @@ Two more cross-tenant reads join `app.resolve_hostname` and `app.capacity_hold_s
 
 ## Guest self-service and email (lane 1)
 
-The self-service and email migration (`0008_self_service_and_email.sql`, renumbered at merge) adds tenant-owned tables under rules 1 to 10, described in the [booking contract](../domain-booking/README.md#guest-self-service-lane-1-g211c) and the [messaging contract](../domain-messaging/README.md):
+The self-service and email migration (`0009_self_service_and_email.sql`, after the console completion's 0008) adds tenant-owned tables under rules 1 to 10, described in the [booking contract](../domain-booking/README.md#guest-self-service-lane-1-g211c) and the [messaging contract](../domain-messaging/README.md):
 
 - `booking_participants`: one person per place in a booking's party. The runtime may UPDATE the details only (name, minor, emails, guardian); a trigger keeps the booking and place fixed and refuses a place past the party size or a booking that is not confirmed. No role deletes one.
 - `booking_cancellations`: one per booking, append-only for every role. A trigger recomputes the remedy from the booking's policy version on the database clock and refuses any other.
 - `bookings` gains `canceled_at`, and the runtime may UPDATE `state`, from `confirmed` to `canceled` only, with its cancellation; the 0007 append-only trigger is replaced by `bookings_lifecycle`, which keeps every other column fixed for every role.
 - `payment_refunds` gains the reason `booking_canceled`, for exactly what the booking's cancellation computed.
 
+## Booking notes
+
+The console completion migration (G2.12c, numbered 0008 on its branch) adds one tenant-owned table, `booking_notes`, under rules 1 to 10. The commands are in the [checkout contract](../domain-booking/README.md#console-completion-g212c).
+
+- **Append-only for every role.** The runtime keeps the default SELECT and INSERT and receives nothing more. UPDATE, DELETE, and TRUNCATE raise for every role, the owner included (`app.reject_mutation`).
+- **The author is the transaction's.** A trigger (`app.stamp_booking_note`, an invoker function with `search_path` pinned and no EXECUTE for anyone) sets the author from `app.actor_id`, and the request id and the time from the transaction, whatever the insert names. It refuses a note unless the actor is staff with a UUID id (SQLSTATE 42501, `booking_notes_staff_author`), so a guest, the system, or an admin connection without context cannot write one.
+- **Composite keys.** The note names its booking and its author through foreign keys that carry `tenant_id`: a note can name only its own tenant's booking, and only a member of that tenant as its author.
+- **The body** is 1 to 500 characters with at least one visible character; line breaks are allowed and other control characters are not. The CHECK refuses every C0 control but the line break, DEL, and the C1 controls (U+0080 to U+009F), and wants one character outside white space, those controls, and the Unicode spaces, joiners, marks, fillers, and variation selectors that show nothing (the same set as the contract's `invisibleCharacters`). It is text a person typed: it never enters an audit row, an event, a log, or the idempotency store, whose kept answer to an added note holds the note's id, author, and time only.
+- **Who reads it.** Owners and booking staff hold `notes.read` and `notes.write`; finance holds neither (owner decision, 2026-10-19), as a note can name a guest. Row-level security keeps notes to their tenant; the role check is the API's.
+
 ## Waiver evidence (G2.15)
 
-The waiver migration (`*_waivers.sql`, numbered after the self-service migration at merge) adds six tenant-owned tables under rules 1 to 10, described in the [waiver contract](../domain-waivers/README.md):
+The waiver migration (`*_waivers.sql`, after the self-service migration) adds six tenant-owned tables under rules 1 to 10, described in the [waiver contract](../domain-waivers/README.md):
 
 - `waiver_templates` and `waiver_template_versions`: append-only for every role. A trigger numbers each version after the template's highest, keeps its effective start no earlier than now, and computes its content hash from the canonical text, so no writer chooses it.
 - `waiver_requests`: one per participant and version, live (pending or signed) at most once per participant and booking. Its participant is named with the booking in a composite key to `booking_participants`, so a request cannot pair one booking with another's guest. The runtime may UPDATE `state`, `revoked_reason`, and `superseded_by` only; a trigger enforces the one-way states and stamps their times, and a request becomes signed only with its evidence.
-- `waiver_deliveries`: append-only. A trigger numbers generations, holds the resend limits (5 per request; 10 minutes between sends to one address), and requires the generation's own waiver message in `email_messages`.
+- `waiver_deliveries`: append-only. A trigger numbers generations, holds the sending limits (5 generations per request, and `app.waiver_send_refusal`: 10 minutes between sends of one participant's waiver to one address, and caps per participant, address, booking, and tenant), keeps `send_after` no earlier than the insert, and requires the generation's own waiver message in `email_messages`, due no earlier than `send_after`.
 - `waiver_signing_sessions`: opened only by the redemption that consumed a waiver link in `guest_access_links` in the same transaction; afterwards the runtime may only revoke one (`revoked_at`, `revoked_reason`).
 - `waiver_evidence`: append-only for every role, the owner included. A trigger checks the request, session, signer, version, hash, and acknowledgments; a CHECK holds the PDF to its SHA-256; and at commit evidence stands only beside a signed request.
 
-No new function in schema `app` is callable by the runtime: the waiver triggers run as the writer, under its row-level security, and filter by tenant explicitly.
+One new function in schema `app` is callable by the runtime: `app.waiver_send_refusal`, a STABLE invoker function (`search_path` pinned, EXECUTE revoked from PUBLIC and granted to `tidegrid_app` only) that answers whether a waiver email may go now and, if not, when; the service asks it before sending, and the deliveries trigger calls it for every writer. It runs under the caller's row-level security. The waiver triggers run as the writer, under its row-level security, and filter by tenant explicitly.
 
 ## Tests
 

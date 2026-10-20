@@ -107,6 +107,9 @@ export function ManagePage({
   // after the page moved on to a newer link, is dropped; so is one whose own
   // signal was aborted, as development's double-run effects abort the first.
   const latestRead = useRef(0);
+  // The page's latest attempt to open a link: an answer for an older one,
+  // such as a link replaced in the same tab meanwhile, is dropped.
+  const latestOpen = useRef(0);
 
   // The token stays in memory only: out of the address and this history entry now.
   useEffect(() => {
@@ -125,6 +128,7 @@ export function ManagePage({
       forgetLinkToken();
       if (!token) return;
       latestRead.current += 1;
+      latestOpen.current += 1;
       setView({ kind: "landing", token, busy: false, trouble: null });
     };
     window.addEventListener("hashchange", onHash);
@@ -166,9 +170,10 @@ export function ManagePage({
   const open = async () => {
     if (view.kind !== "landing" || view.busy) return;
     const token = view.token;
+    const attempt = ++latestOpen.current;
     setView({ ...view, busy: true, trouble: null });
     const result = await openWithLink(token, alive.current.signal);
-    if (alive.current.signal.aborted) return;
+    if (alive.current.signal.aborted || attempt !== latestOpen.current) return;
     if (result.kind === "ok") {
       const session: StoredSession = {
         token: result.value.token,
@@ -377,7 +382,8 @@ function RenewalNotice({ renewal }: { renewal: Renewal }) {
     return (
       <Notice tone="success" title="Check your email">
         If this link belongs to a booking here, we've sent a new one to the email address it was
-        booked with. It can take a minute to arrive.
+        booked with. It can take a minute to arrive. We send at most three new links an hour: if
+        you've asked several times, use the newest email, or wait an hour and ask again.
       </Notice>
     );
   }
@@ -463,6 +469,12 @@ function BookingView({
     if (done?.focus) doneRef.current?.focus();
   }, [done]);
   const [linkBusy, setLinkBusy] = useState(false);
+  // What asking for a new link did, shown under the button that asked.
+  const [linkOutcome, setLinkOutcome] = useState<Done>(null);
+  const linkOutcomeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (linkOutcome) linkOutcomeRef.current?.focus();
+  }, [linkOutcome]);
   const [closing, setClosing] = useState(false);
   const { trip, location } = booking;
   const when = `${formatDate(trip.localDate, "full")}, ${formatTripTime(trip.localStartTime, trip.startsAt, trip.timeZone)}`;
@@ -477,10 +489,11 @@ function BookingView({
   const sendLink = async () => {
     if (linkBusy) return;
     setLinkBusy(true);
+    setLinkOutcome(null);
     const result = await emailNewLink(session.token);
     setLinkBusy(false);
     if (result.kind === "ok") {
-      setDone({
+      setLinkOutcome({
         tone: "success",
         title: "New link sent",
         body: `We've emailed a new link to ${booking.booker.email}. Links in earlier emails no longer work.`,
@@ -488,13 +501,13 @@ function BookingView({
     } else if (result.kind === "refused" && result.status === 401) {
       onEnded("expired");
     } else if (result.kind === "refused" && result.code === "link_email_rate_limited") {
-      setDone({
+      setLinkOutcome({
         tone: "info",
         title: "We've already sent three links this hour",
         body: "Check your email, including spam, or try again later.",
       });
     } else {
-      setDone({ tone: "info", title: "We couldn't send a link", body: troubleText(result) });
+      setLinkOutcome({ tone: "info", title: "We couldn't send a link", body: troubleText(result) });
     }
   };
 
@@ -658,6 +671,13 @@ function BookingView({
             </Button>
             <DemoMailboxLink />
           </div>
+          {linkOutcome && (
+            <div ref={linkOutcomeRef} tabIndex={-1} className="manage-done">
+              <Notice tone={linkOutcome.tone} title={linkOutcome.title}>
+                {linkOutcome.body}
+              </Notice>
+            </div>
+          )}
         </section>
       </div>
     </>

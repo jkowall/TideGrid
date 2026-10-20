@@ -78,6 +78,10 @@ describe("email rendering", () => {
 
   it("checks content: one subject line, one action, https links, no control characters", () => {
     expect(() => checkContent({ ...content, subject: "Two\nlines" })).toThrow(TypeError);
+    // A tab passed here once, and the database refused it inside the confirming transaction.
+    expect(() => checkContent({ ...content, subject: "Sunset\tCruise" })).toThrow(TypeError);
+    expect(() => checkContent({ ...content, preview: "See you\nsoon" })).toThrow(TypeError);
+    expect(() => checkContent({ ...content, preview: "See you\tsoon" })).toThrow(TypeError);
     expect(() =>
       checkContent({
         subject: "x",

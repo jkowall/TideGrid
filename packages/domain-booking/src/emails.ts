@@ -26,6 +26,7 @@ import {
   partyText,
   receiptRows,
   shortDay,
+  singleLine,
   tripWhen,
 } from "./format.ts";
 
@@ -33,7 +34,9 @@ import {
 export const MANAGE_PATH = "/manage";
 export const CONFIRMATION_TEMPLATE = { key: "booking_confirmation", version: 1 } as const;
 export const MANAGE_LINK_TEMPLATE = { key: "booking_manage_link", version: 1 } as const;
-export const CANCELED_TEMPLATE = { key: "booking_canceled", version: 1 } as const;
+/** Version 2: the refund is on its way, not already back (review M1). */
+export const CANCELED_TEMPLATE = { key: "booking_canceled", version: 2 } as const;
+export const REFUND_FAILED_TEMPLATE = { key: "booking_refund_failed", version: 1 } as const;
 
 /** A management link lasts three days once sent. */
 export const MANAGE_LINK_TTL_SECONDS = DEFAULT_LINK_TTL_SECONDS;
@@ -100,7 +103,7 @@ function receipt(detail: BookingDetailView): EmailBlock {
 
 function subject(prefix: string, detail: BookingDetailView): string {
   const day = shortDay(detail.trip.startsAt, detail.trip.timeZone);
-  return clean(`${prefix}: ${detail.trip.productName}, ${day}`, 200);
+  return singleLine(`${prefix}: ${detail.trip.productName}, ${day}`, 200);
 }
 
 /**
@@ -141,11 +144,11 @@ export async function enqueueConfirmationEmail(
     dedupeKey: `booking.confirmation:${bookingId}`,
     template: CONFIRMATION_TEMPLATE.key,
     templateVersion: CONFIRMATION_TEMPLATE.version,
-    to: { email: detail.booker.email, name: clean(detail.booker.name, 120) },
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
     bookingId,
     content: {
       subject: subject(`Booking ${detail.reference} confirmed`, detail),
-      preview: clean(`See you ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}.`, 200),
+      preview: singleLine(`See you ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}.`, 200),
       blocks,
     },
     accessLink: {
@@ -193,10 +196,10 @@ export async function enqueueManageLinkEmail(
     dedupeKey: `booking.manage_link:${bookingId}:${requestKey}`,
     template: MANAGE_LINK_TEMPLATE.key,
     templateVersion: MANAGE_LINK_TEMPLATE.version,
-    to: { email: detail.booker.email, name: clean(detail.booker.name, 120) },
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
     bookingId,
     content: {
-      subject: clean(`Your link to booking ${detail.reference}`, 200),
+      subject: singleLine(`Your link to booking ${detail.reference}`, 200),
       preview: "Open your booking to name your party or cancel within the policy.",
       blocks,
     },
@@ -221,8 +224,8 @@ export async function enqueueCancellationEmail(
   const refund =
     c.refundAmount > 0
       ? c.refundAmount === c.paidAmount
-        ? `${money(c.refundAmount)}, everything you paid, back to your original payment method`
-        : `${money(c.refundAmount)} of the ${money(c.paidAmount)} you paid, back to your original payment method`
+        ? `${money(c.refundAmount)}, everything you paid, on its way back to your original payment method`
+        : `${money(c.refundAmount)} of the ${money(c.paidAmount)} you paid, on its way back to your original payment method`
       : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking is canceled" },
@@ -245,7 +248,7 @@ export async function enqueueCancellationEmail(
       ? [
           {
             kind: "paragraph",
-            text: "Refunds usually reach your account within 5 to 10 business days.",
+            text: "We've asked the payment provider to return it. Refunds usually reach your account within 5 to 10 business days. If the refund can't be made, we'll email you.",
           } as const,
         ]
       : []),
@@ -255,9 +258,57 @@ export async function enqueueCancellationEmail(
     dedupeKey: `booking.canceled:${bookingId}`,
     template: CANCELED_TEMPLATE.key,
     templateVersion: CANCELED_TEMPLATE.version,
-    to: { email: detail.booker.email, name: clean(detail.booker.name, 120) },
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
     bookingId,
     content: { subject: subject(`Booking ${detail.reference} canceled`, detail), blocks },
+  });
+  return { messageId: result.messageId };
+}
+
+/**
+ * The follow-up when the payment provider refuses a cancellation's refund,
+ * in the transaction that records the refusal, once per booking: the
+ * cancellation email said the refund was on its way.
+ */
+export async function enqueueRefundFailedEmail(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+  amount: number,
+): Promise<{ messageId: string }> {
+  const detail = await detailFor(trx, ctx.tenantId, bookingId);
+  const blocks: EmailBlock[] = [
+    { kind: "heading", text: "Your refund hasn't gone through yet" },
+    {
+      kind: "paragraph",
+      text: clean(
+        `We tried to return ${money(amount)} for canceled booking ${detail.reference}: ${detail.trip.productName}, ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}. The payment provider refused it, so the money has not been returned yet.`,
+        2000,
+      ),
+    },
+    {
+      kind: "details",
+      rows: [
+        { label: "Reference", value: detail.reference },
+        { label: "Refund", value: `${money(amount)}, not returned yet` },
+      ],
+    },
+    {
+      kind: "paragraph",
+      text: "We'll contact you to sort it out. You can also reply to this email.",
+    },
+    { kind: "note", text: demoNote },
+  ];
+  const result = await enqueueMessage(trx, ctx, {
+    dedupeKey: `booking.refund_failed:${bookingId}`,
+    template: REFUND_FAILED_TEMPLATE.key,
+    templateVersion: REFUND_FAILED_TEMPLATE.version,
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
+    bookingId,
+    content: {
+      subject: subject(`Booking ${detail.reference}: refund not sent yet`, detail),
+      blocks,
+    },
   });
   return { messageId: result.messageId };
 }

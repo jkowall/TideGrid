@@ -79,6 +79,8 @@ export function escapeHtml(text: string): string {
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
 const controls = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+const anyControl = /[\u0000-\u001f\u007f-\u009f]/;
 
 function checkText(text: string, what: string, max: number): string {
   if (typeof text !== "string" || text.trim().length === 0 || text.length > max) {
@@ -106,9 +108,15 @@ function checkHttps(href: string): string {
  * errors throw: callers build content in code, never from a request.
  */
 export function checkContent(content: EmailContent): void {
+  // One line each, with no control at all: the database refuses a tab in a subject too.
   const subject = checkText(content.subject, "a subject", 200);
-  if (/[\r\n]/.test(subject)) throw new TypeError("a subject is one line");
-  if (content.preview !== undefined) checkText(content.preview, "a preview", 200);
+  if (anyControl.test(subject))
+    throw new TypeError("a subject is one line, with no control characters");
+  if (content.preview !== undefined) {
+    const preview = checkText(content.preview, "a preview", 200);
+    if (anyControl.test(preview))
+      throw new TypeError("a preview is one line, with no control characters");
+  }
   if (!Array.isArray(content.blocks) || content.blocks.length === 0 || content.blocks.length > 60) {
     throw new TypeError("a message has 1 to 60 blocks");
   }

@@ -1,6 +1,6 @@
 # @tidegrid/domain-messaging
 
-Transactional email for the demo build: a provider-neutral email adapter, a fake provider, branded templates, and outbox-driven delivery (the G2.16 demo shim, lane 1). The design authority is [product scope: transactional email](../../docs/v2/02-product-scope.md#transactional-email-sms-and-replies), [the target architecture](../../docs/v2/04-architecture.md#messaging) (provider-neutral adapter, versioned templates, recorded delivery outcome) and its [retained invariants](../../docs/v2/04-architecture.md#retained-invariants) (domain state and outbox records commit together; external calls never hold a database lock). Tables are in migration `0008_self_service_and_email.sql` and follow the [tenancy contract](../database/README.md).
+Transactional email for the demo build: a provider-neutral email adapter, a fake provider, branded templates, and outbox-driven delivery (the G2.16 demo shim, lane 1). The design authority is [product scope: transactional email](../../docs/v2/02-product-scope.md#transactional-email-sms-and-replies), [the target architecture](../../docs/v2/04-architecture.md#messaging) (provider-neutral adapter, versioned templates, recorded delivery outcome) and its [retained invariants](../../docs/v2/04-architecture.md#retained-invariants) (domain state and outbox records commit together; external calls never hold a database lock). Tables are in migration `0009_self_service_and_email.sql` and follow the [tenancy contract](../database/README.md).
 
 ## The email shim is the demo's email
 
@@ -78,6 +78,7 @@ issueAccessLink(trx, ctx, { bookingId, participantId?, purpose, subjectRef?, mes
 cancelMessage(trx, ctx, messageId, options?: {
   linkReason?: AccessRevocationReason; // why its links stop working; withdrawn by default
   code?: string;                       // why it was canceled, such as recipient_changed
+  revokeLinks?: boolean;               // false keeps its links working; true by default
 }): Promise<
   | { kind: "canceled"; inFlight: boolean; revokedLinks: number }
   | { kind: "not_cancelable"; state } // already sent, failed, or canceled
@@ -90,7 +91,7 @@ interface MessageStatus {
   state: "queued" | "sending" | "sent" | "failed" | "canceled";
   attempts; lastAttemptAt; nextAttemptAt; sentAt; failedAt; canceledAt;
   failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; null once sent;
-                 // for a canceled message, why (recipient_changed, access_withdrawn) when known
+                 // for a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled) or null
   provider; createdAt;
 }
 ```
