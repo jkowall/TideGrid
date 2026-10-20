@@ -32,7 +32,9 @@ Evidence, versions, templates, and deliveries never change for any role. A reque
 
 ### Which version applies
 
-The highest version in effect now, by the database clock, of the product's template, or else of the operator's. A version takes effect no earlier than the moment it is written. A request keeps the version it was assigned: publishing a new version changes nothing already assigned unless the publisher asks to move unsigned work (`reassignUnsigned`), which supersedes each pending request on an older version, for a booking whose trip has not started, with a request for the new version and sends it at once. Signed requests and their evidence never change. At most 500 requests move in one publish.
+The highest version in effect now, by the database clock, of the product's template, or else of the operator's. A version takes effect no earlier than the moment it is written. A request keeps the version it was assigned: publishing a new version (`publishWaiverTemplateVersion`) changes nothing already assigned. To move unsigned work as well, the publisher calls `reassignUnsignedRequests` once the publish has committed. It supersedes each pending request on an older version, for a booking whose trip has not started, with a request for the new version, and sends it at once. Signed requests and their evidence never change. At most 500 requests move in one call.
+
+The move runs in transactions of its own, so an assignment racing the publish cannot keep the older version. Each assignment holds the tenant's assignment key shared, from just before it reads the applicable version until it commits. The move first checks the version is in effect now, then takes the key exclusive for a moment, in a transaction of its own, which waits for every assignment that may have read the older version. Only then does it read its candidates, booking by booking under each booking's lock. Holding the key through the move would deadlock: an assignment holds its booking's lock while it waits for the key.
 
 ## Assignment through the booking hooks
 
@@ -42,18 +44,20 @@ The booking module runs [lifecycle hooks](../domain-booking/src/hooks.ts) inside
 |---|---|
 | `bookingConfirmed` | Assign every participant named so far. Usually there is none yet: the guest names the party afterwards through the management link. |
 | `participantAdded` | Assign the new participant and queue their email. |
-| `participantUpdated` | A change of whether they are a minor (who must sign), or a new name on a signed waiver (who signed), revokes the request (`participant_changed`) and assigns a new one. A corrected address on a pending request sends it there at once. Nothing else changes a request. |
+| `participantUpdated` | A change of whether they are a minor (who must sign), or, on a signed waiver, a new name for the participant or for the guardian who signed for a minor, revokes the request (`participant_changed`) and assigns a new one. A corrected address on a pending request sends it there at once. Nothing else changes a request. |
 | `bookingCanceled` | Revoke every live request on the booking (`booking_canceled`). |
 
 None of them refuses: confirmation and party changes never wait on waivers. Assignment is idempotent: the booking row lock serializes it per booking, a participant with a live request is skipped, and the assignment key refuses a duplicate at the database. A retried confirmation or addition creates nothing and sends nothing. Payment and confirmation never depend on a waiver.
 
 An adult's request goes to their own address; a minor's to the guardian's. A participant without an address gets a request that waits, shown as missing a contact, and goes out as soon as an address is added.
 
+**No booker fallback (owner decision, 2026-10-19).** An adult participant without their own email gets no waiver email until one is added. The request never falls back to the booker's address, so no adult can sign another adult's waiver from their own inbox. The booker sees "Needs an email address" for that person on the management page, and staff see `no_address` in the console.
+
 ## Email and links
 
 The request email is a messaging-module message (template `waiver_request`, version 1) queued in the same transaction, deduplicated by `waiver.request:<request>:<generation>`, with subject `waiver_request:<request>` and a `waiver_sign` access link to `/waiver`. The messaging module's delivery job issues the link when it sends: the raw token travels only in the email, in the URL's fragment, and only its hash is stored. The link lasts 7 days from sending, never past the trip's end; a request whose trip ends within 15 minutes is not sent.
 
-- **Resend.** Staff send a request again with a reason (`waivers.manage`), as a new generation with a new link; the earlier unused link is superseded when the new one is issued, and an earlier generation still queued is canceled. At most 5 generations per request, and to the same address at least 10 minutes apart; the database enforces both. A corrected address goes at once, revokes the old address's links (`recipient_changed`), and ends any session it opened.
+- **Resend.** Staff send a request again with a reason (`waivers.manage`), as a new generation with a new link; the earlier unused link is superseded when the new one is issued, and an earlier generation still queued is canceled. At most 5 generations per request, and to the same address at least 10 minutes apart; the database enforces both. A corrected address goes at once, revokes the old address's links (`recipient_changed`), and ends any session it opened. After the fifth generation, or too near the trip's end to send, a corrected address gets no email, but the old address still loses its links and sessions; staff see the limit.
 - **No duplicates.** A retry of a command finds its generation; a repeated hook finds the live request. Neither queues a second email.
 - **Delivery is not signature.** The status shows the latest email's state (queued, sending, sent, failed, canceled) beside the request's own state. A sent or delivered email never marks anything signed, and a failed one leaves the request pending with a visible exception.
 
@@ -76,7 +80,7 @@ What ends access:
 
 ## Signing
 
-`signWaiver` locks the request, then checks, in order: the request is pending (a second submission from the session that signed returns the same evidence); the content hash the signer was shown is the request's; the participant still requires this signer; every acknowledgment is checked; electronic-signature consent is given; the signer confirms who they are; and the typed signature matches the name the booking gives the signer (the participant's own, or a minor's guardian's), ignoring case and spacing. A guardian also declares whether they are the parent or the legal guardian. Each problem comes back by field. Then, in one transaction: the evidence with its PDF, the request signed, and the request's other access closed.
+`signWaiver` locks the request, then checks, in order: the request is pending (a second submission from the session that signed returns the same evidence); the session is still open (a correction that committed while the signature waited for the lock ends it, and the signature answers as an ended session); the content hash the signer was shown is the request's; the participant still requires this signer; every acknowledgment is checked; electronic-signature consent is given; the signer confirms who they are; and the typed signature matches the name the booking gives the signer (the participant's own, or a minor's guardian's), ignoring case and spacing. A guardian also declares whether they are the parent or the legal guardian. Each problem comes back by field. Then, in one transaction: the evidence with its PDF, the request signed, and the request's other access closed.
 
 ### The PDF
 
@@ -109,7 +113,9 @@ Before real evidence, the pilot moves documents to a private R2 bucket with obje
 
 Each also carries the request (state, signer, version, when assigned), the evidence summary, the latest delivery (generation, masked address, the email's state), and when staff may resend. The trip view adds totals: signed, waiting, needing attention, and places nobody has been named for.
 
-**Who sees what.** Waiver status names people, so the staff reads need `bookings.read` (owners and booking staff), as the roster does; finance is refused. Resending needs `waivers.manage` (owners and booking staff). The signed PDF is for owners and booking staff, and for the signer within their session. Audit rows and events carry ids, versions, and hashes only: never a name, an address, a signature, or the waiver's text.
+**The booker's view.** `listGuestBookingWaivers` gives the management page (lane 1's `/manage`, in its booking session) each named person's status, who signs, the signing day, and where the latest email went, masked. It leaves out ids, evidence, the text, the typed signature and the guardian's name, and the delivery history: the booker named the party but signs only for themselves. `applies` is false when no waiver applies or the booking is canceled, and the page then shows nothing.
+
+**Who sees what.** Waiver status names people, so the staff reads need `bookings.read` (owners and booking staff), as the roster does; finance is refused. Resending needs `waivers.manage` (owners and booking staff). The signed PDF is for owners and booking staff, and for the signer within their session; never for the booker. Audit rows and events carry ids, versions, and hashes only: never a name, an address, a signature, or the waiver's text.
 
 ## API
 
@@ -117,8 +123,9 @@ Each also carries the request (state, signer, version, when assigned), the evide
 |---|---|
 | `POST /v1/public/waiver-sessions` | `{ token }` from the link's fragment. 201 `{ sessionSecret, waiver }`; 404 `waiver_link_invalid`; 409 `waiver_link_expired`, `waiver_link_used`, `waiver_link_replaced`, `waiver_signed`, `waiver_superseded`, `waiver_not_needed`; 429 |
 | `GET /v1/public/waiver-sessions/current` | Bearer session. 200 `{ waiver }`; 401 `waiver_session_required`, `waiver_session_invalid` |
-| `POST /v1/public/waiver-sessions/current/signature` | Bearer session. 201 signed, 200 the same evidence again; 409 `waiver_changed`, `waiver_signed`, `waiver_superseded`, `waiver_not_needed`, `waiver_participant_changed`; 422 `signature_invalid` with `problems` by field; 429 |
+| `POST /v1/public/waiver-sessions/current/signature` | Bearer session. 201 signed, 200 the same evidence again; 401 `waiver_session_invalid`, also when the session ended while the signature waited; 409 `waiver_changed`, `waiver_signed`, `waiver_superseded`, `waiver_not_needed`, `waiver_participant_changed`; 422 `signature_invalid` with `problems` by field; 429 |
 | `GET /v1/public/waiver-sessions/current/document` | Bearer session. 200 `application/pdf`; 404 `waiver_document_not_found` |
+| `GET /v1/public/manage/waivers` | Lane 1's booking session (`manageSession`) as the bearer. 200 `{ waivers: { applies, unnamedPlaces, participants } }`, the booker's view above; 401 `session_required`, `session_expired`; 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/waivers` | Owners and booking staff. 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/waivers` | Owners and booking staff, for the roster. 404 `trip_not_found` |
 | `POST /v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend` | Owners and booking staff; `Idempotency-Key`; `{ reason }`. 201; 404 `waiver_request_not_found`; 409 `waiver_not_pending`, `waiver_no_address`, `waiver_resend_too_soon`, `waiver_resend_limit`, `waiver_trip_over` |
@@ -141,7 +148,7 @@ Public routes resolve the tenant from the verified Origin, as `/v1/public/trips`
 
 ## Lock order
 
-The booking row (`FOR NO KEY UPDATE`, for assignment, revocation, and version moves; inside a booking hook the caller already holds it), then the request (`FOR NO KEY UPDATE`), then the messaging module's message and link rows, then the request's sessions. Redemption reads which request a link names without a lock, locks the request, and only then consumes the link, so redemption and revocation take the same order. Signing locks only the request. Every command needs READ COMMITTED.
+The booking row (`FOR NO KEY UPDATE`, for assignment, revocation, and version moves; inside a booking hook the caller already holds it), then, for an assignment, the tenant's assignment key shared (`pg_advisory_xact_lock_shared`; a version move takes it exclusive only in a transaction that holds nothing else), then the request (`FOR NO KEY UPDATE`), then the messaging module's message and link rows, then the request's sessions. Redemption reads which request a link names without a lock, locks the request, and only then consumes the link, so redemption and revocation take the same order. Signing locks only the request. Every command needs READ COMMITTED.
 
 ## Deferred and known gaps
 
@@ -149,7 +156,8 @@ Recorded as follow-ups; the demo leaves them out:
 
 - **Staff-assisted entry and QR.** Participant QR, the generic dock QR with staff lookup, staff-device signing and its shared-device cleanup, and recording the staff-assisted match method are G2.15 scope beyond the demo. Only `email_link` and `signer_confirmed` exist today.
 - **Reminders.** Scheduled reminders against a completion cutoff are not built; staff resend is the one follow-up send. The messaging module's `notBefore` is the seam.
-- **Guest self-service renewal.** A guest whose link expired or was used asks the operator to resend; a guest-initiated "email me a new link" needs the messaging module to say which subject a spent link named.
+- **Guest self-service renewal.** A guest whose link expired or was used asks the operator to resend; a guest-initiated "email me a new link" needs the messaging module to say which subject a spent link named. The management page shows status but offers no resend; a corrected address there sends at once.
+- **A sixth address.** After five generations a corrected address gets no email (the old address's access still ends). Staff see the limit, and nothing resets the count.
 - **Migration suppression.** Imported bookings do not exist yet, so there is no initial-notification policy.
 - **Removing a participant.** The booking module does not remove participants yet. `revokeParticipantWaivers` is ready for the hook that will.
 - **Reuse across bookings.** The re-sign policy is `every_booking`; reusing a signature needs verified customer identity.
@@ -161,4 +169,5 @@ Recorded as follow-ups; the demo leaves them out:
 
 - `pnpm --filter @tidegrid/domain-waivers test`: the PDF writer, wrapping and escaping, the canonical content, validation, and secrets.
 - `pnpm --filter @tidegrid/domain-waivers test:integration` (a throwaway Neon branch, `TIDEGRID_EPHEMERAL_DB=1`): versions and their hashes, assignment through the real hooks, racing assignments, one-time redemption and two-tenant denial, signing and evidence immutability for every role, the guardian flow, corrections, resend limits, cancellation, and a version change mid-flight. `src/test-fixtures.ts` (exported as `@tidegrid/domain-waivers/testing`) books through the real checkout, names participants through the booking module, and reads links from the messaging module's fake mailbox.
-- `apps/api-worker/test-integration/waivers.integration.test.ts`: every route from two tenants and each role.
+- `src/adversarial/` (the test specialist's suites, same command): assignment under racing hooks and party changes, webhook and sweep confirmations, and a participant added during a version move; links and sessions (one session per link, concurrent redemption, a redemption racing a correction, cancellation and supersede); email delivery (failures, in-flight emails at a correction or a signature, the resend limits at the database, a correction after the fifth generation); signing and evidence (guardians, a guardian renamed after signing, a signature racing a correction, versions and stale hashes, concurrent signatures, immutability for every role, forged evidence).
+- `apps/api-worker/test-integration/waivers.integration.test.ts`: every route from two tenants and each role, and the booker's view in the booking session. `waivers-adversarial.integration.test.ts`: link consumption only by POST, cross-session and cross-operator reach, the PDF's bytes, staff role and 404 rules, and no personal data in audit or outbox rows.

@@ -45,6 +45,16 @@ The API decides; the console mirrors it with `canSeeGuests` in `src/roles.ts`, o
 - **No roster for finance.** The product scope calls the roster a booking-management view. It exists to run a departure: who is coming, how many, and what to prepare. Without the guests' names it would be the bookings list printed again, and finance's reconciliation work is covered by the list, the detail, and the exceptions, which carry the same money. Keeping the roster to `bookings.read` also keeps every sheet that leaves the screen on paper to the roles that manage bookings. The API answers 403 to finance; the console shows a designed explanation and makes no call.
 - **The roster names the booker but prints no email.** The email is one click away on the booking, and a sheet carried to the dock has no use for it.
 
+## Waivers (G2.15)
+
+Two self-contained cards in `src/waivers/`, each loading its own data from the [waiver API](../../packages/domain-waivers/README.md#api), so a page only places them.
+
+- **`BookingWaiversCard`** on a booking's detail, after the booking itself, for roles that see guests. Each named person with their status as an icon and a label (Signed, Waiting for signature, Email failed, No email address, Not requested, No waiver needed, Booking canceled), who signs (the person, or a minor's parent or guardian), the template and version, and either when and by whom it was signed, with the guardian's relationship, or the latest email in words ("Email sent to a•••@example.test (send 2)"). Delivery and signature stay apart: an email that was sent says nothing about a signature. A signed waiver has its PDF, exactly as stored. A summary line counts who has signed and the places nobody is named for yet.
+- **Send again.** For owners and booking staff, on a waiting waiver: a dialog asks for the reason, which the history records, and sends with an `Idempotency-Key` that a retry of the same send reuses. The card says when it can next be sent (10 minutes after the last email to the same address, 5 sends at most), and explains each refusal in the dialog, which stays open.
+- **`TripWaiversCard`** for a trip's roster: signed of named, waiting, needing attention (no address, a failed email, or no request), and not named yet, then each booking's people with their status. It prints with the roster.
+
+Who sees what: waiver status names people, so both cards need `bookings.read` (owners and booking staff), as the roster does; finance is refused by the API and the console does not place the cards. Sending again needs `waivers.manage` (owners and booking staff). Tests: `src/waivers/BookingWaivers.test.tsx`, and the API's role rules in `apps/api-worker/test-integration/waivers.integration.test.ts`.
+
 ## Content security policy
 
 `public/_headers` keeps `style-src 'self'` with no inline styles: React and the design system set styles only through the CSSOM, and print styles live in the stylesheet. `src/static.test.ts` holds this. The console bundles no schema code: it imports only types from `@tidegrid/contracts`, and the reference normalizer from the dependency-free `@tidegrid/contracts/references`.
