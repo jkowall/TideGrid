@@ -705,6 +705,12 @@
 .roster-table__detail {
   color: var(--text-body);
 }
+/* The names a party's guests have given (lane 1, G2.11c), one per line. */
+.roster-table__names {
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
 .roster-foot {
   max-width: var(--measure);
   margin: 0;

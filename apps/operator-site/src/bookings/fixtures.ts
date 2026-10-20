@@ -475,6 +475,10 @@ export function tripRoster(over: Partial<TripRoster> = {}): TripRoster {
         party: mayaBooking.party,
         extras: mayaBooking.extras,
         payment: { state: "succeeded", refund: null },
+        participants: [
+          { position: 1, name: "Maya Okonkwo", minor: false },
+          { position: 3, name: "Ada Okonkwo", minor: true },
+        ],
       },
       {
         id: bookingIds.luis,
@@ -483,6 +487,7 @@ export function tripRoster(over: Partial<TripRoster> = {}): TripRoster {
         party: luisBooking.party,
         extras: luisBooking.extras,
         payment: { state: "succeeded", refund: { state: "requested", amount: 9450 } },
+        participants: [],
       },
     ],
     ...over,

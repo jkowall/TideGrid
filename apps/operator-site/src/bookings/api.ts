@@ -303,7 +303,11 @@ function isRoster(r: Partial<TripRoster> | null | undefined): r is TripRoster {
         isString(b?.booker?.name) &&
         isParty(b?.party) &&
         isExtras(b?.extras) &&
-        isPaymentStatus(b?.payment),
+        isPaymentStatus(b?.payment) &&
+        Array.isArray(b?.participants) &&
+        b.participants.every(
+          (p) => isInt(p?.position) && isString(p?.name) && typeof p?.minor === "boolean",
+        ),
     )
   );
 }

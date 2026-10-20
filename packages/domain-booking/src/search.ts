@@ -13,6 +13,7 @@
 
 import { bookingReferencePrefix } from "@tidegrid/contracts/references";
 import {
+  type BookingState,
   isUuid,
   type PaymentState,
   type ProductKind,
@@ -38,7 +39,7 @@ export interface BookingSearchQuery {
 export interface BookingSearchView {
   id: string;
   reference: string;
-  state: "confirmed";
+  state: BookingState;
   confirmedAt: string;
   trip: {
     tripId: string;
@@ -104,7 +105,7 @@ export function searchFields(withBooker: boolean): BookingSearchField[] {
 interface SearchRow {
   id: string;
   reference: string;
-  state: "confirmed";
+  state: BookingState;
   confirmed_at: Date | string;
   party_size: number;
   trip_id: string;

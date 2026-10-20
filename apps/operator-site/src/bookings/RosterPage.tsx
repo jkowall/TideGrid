@@ -39,8 +39,9 @@ import { canRetry, ReadFailed } from "./States.tsx";
  * A trip's roster (G2.12b): every booking with its reference, booker, party,
  * extras, and payment, the guest totals, and when and where to meet, on screen
  * and on paper. It is a booking-management view, not a passenger manifest:
- * participants and waivers are not collected yet, and the page says so rather
- * than printing empty columns. Owners and booking staff only, as the API.
+ * each party lists the names its guests have given so far (lane 1, G2.11c),
+ * and waivers are not on it yet, which the page says. Owners and booking staff
+ * only, as the API.
  */
 
 type Load =
@@ -255,11 +256,11 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
         tone="info"
         announce="none"
         className="roster-notice"
-        title="Participants and waivers aren't collected yet"
+        title="Names as guests give them; no waivers yet"
       >
         <p>
-          This roster lists each booking and the size of its party, not the names of everyone
-          aboard. Participant names and waiver status arrive with a later build.
+          Each party lists the names its guests have added on their booking page so far. A place not
+          named yet counts in the party only. Waiver status arrives with a later build.
         </p>
       </Notice>
 
@@ -305,8 +306,8 @@ export function useOverflows(ref: RefObject<HTMLElement | null>): boolean {
  * the scroll through the region (WCAG 2.1.1). When it fits, as on a desktop,
  * the region is not a tab stop (G2.12c).
  *
- * Each booking's party is one cell (PartyCell), so the participants' names
- * can join it there when lane 1's participants reach the roster.
+ * Each booking's party is one cell (PartyCell): the guest count, the tickets
+ * or the charter, and the names given so far.
  */
 function RosterTable({
   roster,
@@ -375,12 +376,31 @@ function RosterTable({
   );
 }
 
-/** A booking's party on the roster: the guest count and the tickets or the charter. */
+/**
+ * A booking's party on the roster: the guest count, the tickets or the
+ * charter, and the names its guests have given so far, by place.
+ */
 function PartyCell({ booking }: { booking: TripRoster["bookings"][number] }) {
+  const { participants } = booking;
   return (
     <>
       <strong>{guestsText(booking.party.guests)}</strong>
       <span className="bd-block roster-table__detail">{partyDetail(booking.party)}</span>
+      {participants.length > 0 && (
+        <ul className="roster-table__names" aria-label="Named so far">
+          {participants.map((p) => (
+            <li key={p.position}>
+              {p.name}
+              {p.minor && <span className="roster-table__detail"> (under 18)</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <span className="bd-block roster-table__detail">
+        {participants.length === booking.party.guests
+          ? "Everyone named"
+          : `${participants.length} of ${booking.party.guests} named`}
+      </span>
     </>
   );
 }

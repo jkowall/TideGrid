@@ -332,6 +332,16 @@ export type BookingReferenceResponse = z.infer<typeof BookingReferenceResponse>;
 
 // A trip's roster --------------------------------------------------------------------------
 
+/** One named place in a booking's party, as the roster prints it (lane 1, G2.11c). */
+export const RosterParticipant = z
+  .object({
+    position: z.number().int().min(1).describe("The place in the party, from 1"),
+    name: z.string(),
+    minor: z.boolean().describe("Under 18; a parent or guardian is on the booking"),
+  })
+  .describe("Personal data; the roster needs bookings.read");
+export type RosterParticipant = z.infer<typeof RosterParticipant>;
+
 export const RosterBooking = z.object({
   id: Uuid,
   reference: BookingReference,
@@ -339,6 +349,11 @@ export const RosterBooking = z.object({
   party: BookingParty,
   extras: z.array(BookingExtra),
   payment: BookingPaymentStatus,
+  participants: z
+    .array(RosterParticipant)
+    .describe(
+      "The party as its guests have named it so far, by place; places not named are left out",
+    ),
 });
 export type RosterBooking = z.infer<typeof RosterBooking>;
 

@@ -14,7 +14,13 @@
  * COMMITTED. The booker's name and email are selected only with
  * `withBooker`; otherwise the query never joins the checkout that holds them.
  */
-import type { PaymentState, ProductKind, RefundState, TenantTransaction } from "@tidegrid/database";
+import type {
+  BookingState,
+  PaymentState,
+  ProductKind,
+  RefundState,
+  TenantTransaction,
+} from "@tidegrid/database";
 import { type RawBuilder, sql } from "kysely";
 import { iso } from "./views.ts";
 
@@ -41,7 +47,7 @@ export interface DayReportMoney {
 export interface DayReportRow extends DayReportMoney {
   bookingId: string;
   reference: string;
-  state: "confirmed";
+  state: BookingState;
   confirmedAt: string;
   trip: {
     tripId: string;
@@ -53,8 +59,12 @@ export interface DayReportRow extends DayReportMoney {
     localStartTime: string;
     startsAt: string;
   };
-  /** 1 for a booking that counts on the day. */
+  /**
+   * 1 for a booking that counts on the day, 0 for a canceled one: its seats
+   * went back on sale, while its order and refunds stay in the money.
+   */
   bookings: number;
+  /** The party's size, or 0 for a canceled booking. */
   guests: number;
   paymentState: PaymentState;
   /** The latest refund's state, or null when there is none. */
@@ -81,7 +91,7 @@ export type DayReportOutcome = { kind: "ok"; report: DayReport } | { kind: "too_
 interface ReportRow {
   id: string;
   reference: string;
-  state: "confirmed";
+  state: BookingState;
   confirmed_at: Date | string;
   party_size: number;
   trip_id: string;
@@ -207,8 +217,10 @@ export async function buildDayReport(
         localStartTime: r.local_start_time,
         startsAt: iso(r.starts_at),
       },
-      bookings: 1,
-      guests: r.party_size,
+      // A canceled booking keeps its money (its order and its refunds), and
+      // leaves the counts, as the day list's counts do.
+      bookings: r.state === "canceled" ? 0 : 1,
+      guests: r.state === "canceled" ? 0 : r.party_size,
       gross: r.subtotal_amount,
       discounts: r.discount_amount,
       fees: r.fee_amount,

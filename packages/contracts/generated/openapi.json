@@ -11076,6 +11076,33 @@
                                   "refund"
                                 ],
                                 "description": "Paid is a succeeded charge with no refund"
+                              },
+                              "participants": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "position": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "description": "The place in the party, from 1"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "minor": {
+                                      "type": "boolean",
+                                      "description": "Under 18; a parent or guardian is on the booking"
+                                    }
+                                  },
+                                  "required": [
+                                    "position",
+                                    "name",
+                                    "minor"
+                                  ],
+                                  "description": "Personal data; the roster needs bookings.read"
+                                },
+                                "description": "The party as its guests have named it so far, by place; places not named are left out"
                               }
                             },
                             "required": [
@@ -11084,7 +11111,8 @@
                               "booker",
                               "party",
                               "extras",
-                              "payment"
+                              "payment",
+                              "participants"
                             ]
                           },
                           "description": "Every confirmed booking on the trip, oldest first; canceled ones are not on it. Complete: a trip seats at most 500"
@@ -15136,8 +15164,10 @@
                           "state": {
                             "type": "string",
                             "enum": [
-                              "confirmed"
-                            ]
+                              "confirmed",
+                              "canceled"
+                            ],
+                            "description": "confirmed: booked and holding its seats. canceled: given back, with any refund"
                           },
                           "confirmedAt": {
                             "type": "string",
@@ -15540,12 +15570,12 @@
                         "bookings": {
                           "type": "integer",
                           "minimum": 0,
-                          "description": "Bookings on the day's trips"
+                          "description": "Active bookings on the day's trips; a canceled booking counts in the money, not here"
                         },
                         "guests": {
                           "type": "integer",
                           "minimum": 0,
-                          "description": "Guests across those bookings"
+                          "description": "Guests across those active bookings"
                         },
                         "gross": {
                           "type": "integer",
