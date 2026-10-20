@@ -23,7 +23,7 @@ enqueueMessage(trx, ctx, {
 
 - **In the caller's transaction.** The message row commits or rolls back with the change that causes it: a booking's confirmation, its cancellation, a participant's waiver request. Nothing is sent inside a transaction.
 - **Once per key.** `dedupeKey` is unique per tenant, for ever. A retried command, a replayed webhook, or a hook that runs twice enqueues nothing new and answers `duplicate` with the first message's id. Choose keys that name the logical message: one confirmation per booking, one waiver request per assignment and delivery generation.
-- **Rendered now, branded.** The content is rendered when it is enqueued, into the tenant's branded HTML and plain text, with the tenant's active brand (its name, colors, and contact email as the reply-to address). The rendered subject and bodies are stored with the template version, so what was sent is what the record says. Callers give structured blocks, never markup: every text is escaped, so tenant and guest content cannot inject HTML.
+- **Rendered now, branded.** The content is rendered when it is enqueued, into the tenant's branded HTML and plain text, with the tenant's active brand (its name, colors, and contact email as the reply-to address). The footer names the operator's contact email and phone, a North American number written as the booking site writes it, (305) 555-0142 (`displayPhone` in `src/render.ts`). The rendered subject and bodies are stored with the template version, so what was sent is what the record says. Callers give structured blocks, never markup: every text is escaped, so tenant and guest content cannot inject HTML.
 - **Personal data.** The recipient, the rendered bodies, and the names in them are personal data. They stay in the message row and the provider call. Audit rows and events carry ids only.
 
 ```ts
@@ -88,7 +88,7 @@ interface MessageStatus {
   id; template; templateVersion;
   state: "queued" | "sending" | "sent" | "failed" | "canceled";
   attempts; lastAttemptAt; nextAttemptAt; sentAt; failedAt; canceledAt;
-  failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error;
+  failureCode;   // the last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; null once sent;
                  // for a canceled message, why (recipient_changed, access_withdrawn) when known
   provider; createdAt;
 }

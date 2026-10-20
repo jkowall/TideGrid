@@ -264,7 +264,10 @@ export interface MessageStatus {
   sentAt: string | null;
   failedAt: string | null;
   canceledAt: string | null;
-  /** The last attempt's error, such as provider_unavailable or bounced. */
+  /**
+   * The last attempt's error, such as provider_unavailable or bounced; null
+   * once sent. For a canceled message, why, when known (recipient_changed).
+   */
   failureCode: string | null;
   provider: EmailProviderName | null;
   createdAt: string;

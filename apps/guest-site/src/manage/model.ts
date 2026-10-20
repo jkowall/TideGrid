@@ -125,7 +125,12 @@ export function orderRows(order: ManagedBooking["order"]): LedgerRow[] {
       label: line.name,
       ...(line.kind === "discount"
         ? {}
-        : { detail: `${line.quantity} × ${formatMoney(line.unitAmount)}` }),
+        : {
+            detail:
+              line.unitAmount === 0
+                ? `${line.quantity} at no charge`
+                : `${line.quantity} × ${formatMoney(line.unitAmount)}`,
+          }),
       amount: formatMoney(line.amount),
       kind: line.kind === "discount" ? "adjustment" : "item",
     });
@@ -155,13 +160,15 @@ export function refundSentence(terms: CancellationTerms): string {
     case "percent_refund":
       return `You get ${formatBasisPoints(terms.refundBp)} back: ${formatMoney(terms.refundAmount)} of the ${formatMoney(terms.paidAmount)} you paid.`;
     case "none":
-      return `There's no refund now: the policy refunds nothing ${terms.beforeCutoff ? "for this booking" : "after its cutoff"}.`;
+      return terms.beforeCutoff
+        ? "You get no refund: this booking's policy refunds nothing."
+        : "You get no refund: the cutoff for a refund has passed.";
     case "credit":
       return "The policy gives a credit now, which the operator issues.";
   }
 }
 
-/** When the remedy changes, if it still can: "Until Wed, Oct 7, 6:00 PM, a full refund." */
+/** When the remedy changes, if it still can: "This holds until Wed, Oct 7 at 6:00 PM EDT, New York time." */
 export function cutoffSentence(
   terms: CancellationTerms,
   trip: { timeZone: string; localDate: string; startsAt: string },

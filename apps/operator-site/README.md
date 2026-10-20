@@ -55,6 +55,10 @@ Two self-contained cards in `src/waivers/`, each loading its own data from the [
 
 Who sees what: waiver status names people, so both cards need `bookings.read` (owners and booking staff), as the roster does; finance is refused by the API and the console does not place the cards. Sending again needs `waivers.manage` (owners and booking staff). Tests: `src/waivers/BookingWaivers.test.tsx`, and the API's role rules in `apps/api-worker/test-integration/waivers.integration.test.ts`.
 
+### Canceled bookings (lane 1, G2.11c)
+
+A guest may cancel within the booking's policy from the management page. The console reads it: a canceled booking keeps its place in the day's list with a Canceled badge beside its payment's, while the counts are of active bookings, the ones holding seats, so a trip whose bookings are all canceled says "No active bookings" above them. The booking's detail says who canceled and when, and that the seats went back on sale; a Cancellation block gives the remedy the policy applied on its side of the cutoff, the policy version and cutoff, and the refund due; the Refund block and the history follow the refund. Rosters and counts leave canceled bookings out.
+
 ## Content security policy
 
 `public/_headers` keeps `style-src 'self'` with no inline styles: React and the design system set styles only through the CSSOM, and print styles live in the stylesheet. `src/static.test.ts` holds this. The console bundles no schema code: it imports only types from `@tidegrid/contracts`, and the reference normalizer from the dependency-free `@tidegrid/contracts/references`.

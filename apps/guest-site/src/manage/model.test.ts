@@ -385,6 +385,26 @@ describe("orderRows", () => {
     expect(rows.some((r) => r.kind === "note")).toBe(false);
   });
 
+  it("says a free line is at no charge, as checkout and the console do", () => {
+    const infant: (typeof orderLines)[number] = {
+      lineNo: 9,
+      kind: "service",
+      code: "infant",
+      name: "Infant (under 3)",
+      basis: "per_participant",
+      quantity: 1,
+      unitAmount: 0,
+      amount: 0,
+      taxInclusive: null,
+      taxRatePpm: null,
+    };
+    const rows = orderRows(order([...orderLines, infant]));
+    expect(rows.find((r) => r.id === "l9")).toMatchObject({
+      label: "Infant (under 3)",
+      detail: "1 at no charge",
+    });
+  });
+
   it("shows a tax with no rate without a detail", () => {
     const flat = {
       ...orderLines[6],
@@ -484,10 +504,10 @@ describe("refundSentence", () => {
 
   it("says there is no refund, and whether the cutoff is why", () => {
     expect(refundSentence(terms("none", { beforeCutoff: true }))).toBe(
-      "There's no refund now: the policy refunds nothing for this booking.",
+      "You get no refund: this booking's policy refunds nothing.",
     );
     expect(refundSentence(terms("none"))).toBe(
-      "There's no refund now: the policy refunds nothing after its cutoff.",
+      "You get no refund: the cutoff for a refund has passed.",
     );
   });
 

@@ -275,6 +275,18 @@ Hold transitions keep their own `hold.*` audit rows and `inventory.hold.*` event
 | `GET /v1/staff/tenants/{tenantId}/booking-references/{reference}` | every role (G2.12b); 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/roster` | owners and booking staff (G2.12b); 403 for finance; 404 `trip_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants` | owners and booking staff (lane 1, G2.11c); the party as named so far; 403 for finance; 404 `booking_not_found` |
+| `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/messages` | owners and booking staff (lane 1, G2.11c); each email's delivery state, with no recipient or content; 403 for finance; 404 `booking_not_found` |
+| `POST /v1/public/booking-access` | the management link's explicit redemption, `{ token }` in the body; 201 a booking session; 404 `link_not_found`; 410 `link_expired`, `link_used`, `link_superseded`, `link_revoked`; 429 |
+| `POST /v1/public/booking-access/renewals` | `{ token }` of any earlier link; 202 for every token alike, and mails a new link to the booker on file, at most three an hour; 429 |
+| `POST /v1/public/checkout-sessions/{id}/manage-session` | the checkout secret as a bearer token, within an hour of confirmation; 201 a booking session; 401 `checkout_secret_required`; 404; 409 `checkout_not_confirmed`; 410 `manage_window_closed` |
+| `GET /v1/public/manage/booking` | the booking session as a bearer token; 200 the booking, its receipt, its party, and what canceling now gives; 401 `session_required`, `session_expired` |
+| `PUT /v1/public/manage/participants/{position}` | the session and an idempotency key; 200 `{ participant, created }`; 409 `booking_canceled`, `trip_departed`, or a waiver hook's code; 422 `position_out_of_range`, `idempotency_key_reused` |
+| `GET /v1/public/manage/cancellation` | the session; 200 the terms on the database clock |
+| `POST /v1/public/manage/cancellation` | the session, an idempotency key, and `{ expectedRefundAmount }`; 200 the canceled booking with its refund; 409 `cancellation_terms_changed`, `trip_departed`, `remedy_requires_operator`; 422 `idempotency_key_reused` |
+| `POST /v1/public/manage/link-email` | the session; 202, a new link to the booker's address; 429 `link_email_rate_limited` after three an hour |
+| `POST /v1/public/manage/session/end` | the session; 200, and the session stays ended |
+
+Every guest route resolves the operator from the verified Origin, as the checkout does; another operator's link, session, or checkout answers as unknown. Tokens travel in bodies and `Authorization` headers only, never in a URL, and every answer is `no-store`.
 
 What the guest checkout UI calls:
 
@@ -289,7 +301,7 @@ The checkout secret and the client secret travel in headers and bodies only, nev
 ## Deferred and known gaps
 
 - Deposits and balances (G2.8), credits (G2.9), rescheduling, removing a participant, and staff cancellation are not here. Participants and guest cancellation within policy arrived with lane 1 (G2.11c, above).
-- **A late success gets no priority (owner to decide).** It reacquires only if its seats are still free, and new checkouts queued for the same trip usually take them first: in the test specialist's race with no sweep, 1 of 10 late payments reacquired and 9 were refunded. Every one was handled correctly, but a guest who paid a little late is refunded rather than booked. If that is not acceptable, the remedy is a grace period: hold the seats a few minutes longer than the checkout window the guest is shown, so a payment made at the last moment still finds them.
+- **A late success gets no priority (the owner kept this on 2026-10-19).** It reacquires only if its seats are still free, and new checkouts queued for the same trip usually take them first: in the test specialist's race with no sweep, 1 of 10 late payments reacquired and 9 were refunded. Every one was handled correctly: a guest who paid after the seats were gone is refunded in full, with an exception for the operator. The owner confirmed there is no grace period ([owner confirmations](../../docs/v2/12-demo-build-plan.md#goal-sequence)).
 - Nothing reconciles a payment whose webhook never arrives, other than the provider's own retries (Stripe retries for days; the fake can redeliver). The adapter's `retrievePayment` is the seam for the reconciliation goal (G2.10).
 - The booker's name and email stay on abandoned checkouts. A retention job should clear them after a set time before real guests use the system.
 - Finalization exceptions are listed in the console (G2.12b) but have no resolution workflow yet; G2.12 adds one.
