@@ -171,12 +171,13 @@ export const WaiverStatusCode = z
     "waiting",
     "email_failed",
     "no_address",
+    "email_held",
     "not_assigned",
     "not_required",
     "not_needed",
   ])
   .describe(
-    "signed; waiting: sent, not signed yet; email_failed: the latest email failed; no_address: no address to send to yet; not_assigned: a waiver applies but this participant has no request; not_required: no waiver applies to the trip; not_needed: the booking was canceled",
+    "signed; waiting: sent, not signed yet; email_failed: the latest email failed; no_address: no address to send to yet; email_held: the booking has an address but no working email went to it (a sending limit held it, or the address went and came back); not_assigned: a waiver applies but this participant has no request; not_required: no waiver applies to the trip; not_needed: the booking was canceled",
   );
 export type WaiverStatusCode = z.infer<typeof WaiverStatusCode>;
 
@@ -215,6 +216,9 @@ export const ParticipantWaiver = z.object({
             .string()
             .describe("The address it went to, masked: first character and domain"),
           queuedAt: Instant,
+          sendAfter: Instant.describe(
+            "When the email may first go out: later than queuedAt when a sending limit held it",
+          ),
           message: z
             .object({
               state: WaiverMessageState,
@@ -310,6 +314,9 @@ export const GuestParticipantWaiver = z.object({
     .describe(
       "Where the latest email went, masked: first character and domain; null once signed or when none went out",
     ),
+  sendsAt: Instant.nullable().describe(
+    "When a waiting email is due to go out, when that is later than now; null otherwise",
+  ),
 });
 export type GuestParticipantWaiver = z.infer<typeof GuestParticipantWaiver>;
 

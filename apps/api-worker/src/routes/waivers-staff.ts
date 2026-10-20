@@ -70,6 +70,7 @@ export function bookingWaiversJson(b: BookingWaivers): BookingWaiversJson {
                   kind: p.request.delivery.kind,
                   recipient: p.request.delivery.recipient,
                   queuedAt: iso(p.request.delivery.queuedAt),
+                  sendAfter: iso(p.request.delivery.sendAfter),
                   message: p.request.delivery.message
                     ? {
                         state: p.request.delivery.message.state,
@@ -211,7 +212,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or waiver request (waiver_request_not_found)"),
       409: errorBody(
-        "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); the last send to this address was under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); or the trip has ended (waiver_trip_over)",
+        "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); or the email could not be built (waiver_email_invalid). A refusal is final for its Idempotency-Key: send again with a new key",
       ),
       422: errorBody("idempotency_key_reused"),
     },
@@ -253,41 +254,55 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
           kind: "resend",
           reason: input.reason,
         });
+        // A refusal is answered after the transaction commits, so what the
+        // send already did (closing an old address's access) sticks. The
+        // refusal is the stored answer for this key, so a replay answers the
+        // same.
+        const refuse = (code: string, message: string) => ({ refusal: { code, message } });
         switch (sent.kind) {
           case "sent":
             return {
-              delivery: { generation: sent.generation, queuedAt: sent.queuedAt.toISOString() },
+              delivery: {
+                generation: sent.generation,
+                queuedAt: sent.queuedAt.toISOString(),
+                sendAfter: sent.sendAfter.toISOString(),
+              },
             };
           case "not_pending":
           case "already_sent":
-            throw new ApiError(
-              409,
-              "waiver_not_pending",
-              "This waiver is not waiting for a signature",
-            );
+            return refuse("waiver_not_pending", "This waiver is not waiting for a signature");
           case "no_participant":
           case "no_address":
-            throw new ApiError(
-              409,
-              "waiver_no_address",
-              "The booking has no address for this person yet",
-            );
+            return refuse("waiver_no_address", "The booking has no address for this person yet");
           case "too_soon":
-            throw new ApiError(
-              409,
+            return refuse(
               "waiver_resend_too_soon",
               `It was sent to this address less than 10 minutes ago; try after ${sent.retryAfter.toISOString()}`,
             );
           case "limit_reached":
-            throw new ApiError(409, "waiver_resend_limit", "It has been sent 5 times already");
+            return refuse("waiver_resend_limit", "It has been sent 5 times already");
+          case "rate_limited":
+            return refuse(
+              "waiver_resend_rate_limited",
+              `Waiver email for this ${sent.scope === "tenant" ? "operator" : sent.scope} has reached its sending limit; try after ${sent.retryAfter.toISOString()}`,
+            );
           case "trip_over":
-            throw new ApiError(409, "waiver_trip_over", "The trip ends too soon to send a link");
+            return refuse("waiver_trip_over", "The trip ends too soon to send a link");
+          case "email_invalid":
+            return refuse(
+              "waiver_email_invalid",
+              "TideGrid could not build this email from the booking's details",
+            );
         }
       },
     );
     if (replayed) c.header("Idempotent-Replayed", "true");
+    if ("refusal" in body) {
+      const refusal = body.refusal as { code: string; message: string };
+      throw new ApiError(409, refusal.code, refusal.message);
+    }
     // The new email goes out at once; the cron's sweep sends it if this misses.
-    else deliverAfterCommit(c, deps, tenantId);
+    if (!replayed) deliverAfterCommit(c, deps, tenantId);
     return c.json(body as WaiverResendResponse, 201);
   });
 

@@ -417,7 +417,8 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     expect([tooSoon.status, tooSoon.json.error?.code]).toEqual([409, "waiver_resend_too_soon"]);
     await admin.begin(async (tx) => {
       await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
-      await tx`update public.waiver_deliveries set created_at = created_at - interval '11 minutes'
+      await tx`update public.waiver_deliveries set created_at = created_at - interval '11 minutes',
+                      send_after = send_after - interval '11 minutes'
                 where request_id = ${p.annRequest}`;
       await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
     });

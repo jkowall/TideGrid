@@ -227,7 +227,8 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
   async function ageDeliveries(requestId: string) {
     await admin.begin(async (tx) => {
       await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
-      await tx`update public.waiver_deliveries set created_at = created_at - interval '11 minutes'
+      await tx`update public.waiver_deliveries set created_at = created_at - interval '11 minutes',
+                      send_after = send_after - interval '11 minutes'
                 where request_id = ${requestId}`;
       await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
     });
@@ -438,7 +439,8 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     const replacement = await requestOf(pc.annId);
     const fresh = await open(C, (await linkFor(admin, runtime.db, C.id, replacement)).token);
     expect(fresh.waiver.waiver.version).toBe(2);
-  });
+    // A third tenant, a version move, and mail: more than the default minute.
+  }, 240_000);
 
   it("serves the signed PDF as exactly the stored bytes, to the signer and to owners and booking staff only", async () => {
     const p = await party(A);
@@ -632,7 +634,28 @@ describe.skipIf(!env)("G2.15 adversarial: waivers through the API", () => {
     expect(generations).toEqual([2, 3, 4, 5]);
     await ageDeliveries(p.annRequest);
     expect(code(await resend())).toEqual([409, "waiver_resend_limit"]);
-  });
+
+    // An address changed by a path that skipped the booking hook: the staff
+    // resend's refusal still ends the old address's access, and that sticks.
+    const fifth = async () =>
+      (
+        await admin<{ state: string; code: string | null }[]>`
+          select m.state, m.last_error_code as code
+            from public.waiver_deliveries d
+            join public.email_messages m on m.tenant_id = d.tenant_id and m.id = d.message_id
+           where d.request_id = ${p.annRequest} and d.generation = 5`
+      )[0];
+    expect(await fifth()).toEqual({ state: "queued", code: null });
+    await admin`update public.booking_participants set email = ${"ivy.moved@example.test"}
+                 where id = ${p.annId}`;
+    expect(code(await resend())).toEqual([409, "waiver_resend_limit"]);
+    expect(await fifth()).toEqual({ state: "canceled", code: "recipient_changed" });
+    const [links] = await admin<{ live: number }[]>`
+      select count(*)::int as live from public.guest_access_links
+       where subject_ref = ${`waiver_request:${p.annRequest}`}
+         and consumed_at is null and revoked_at is null and expires_at > now()`;
+    expect(links?.live).toBe(0);
+  }, 240_000);
 
   it("writes no name, address, signature, or waiver text into audit or outbox rows", async () => {
     const people: [ParticipantDetails, ParticipantDetails] = [

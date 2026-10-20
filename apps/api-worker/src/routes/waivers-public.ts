@@ -90,6 +90,7 @@ export function guestWaiversJson(view: GuestBookingWaivers): ManageWaiversRespon
       signer: p.signer,
       signedAt: p.signedAt ? p.signedAt.toISOString() : null,
       sentTo: p.sentTo,
+      sendsAt: p.sendsAt ? p.sendsAt.toISOString() : null,
     })),
   };
 }

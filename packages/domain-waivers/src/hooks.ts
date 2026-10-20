@@ -79,6 +79,7 @@ export async function onParticipantUpdated(
       kind: "resend",
       reason: CORRECTED_ADDRESS_REASON,
       participant,
+      whenAllowed: true,
     });
   }
 }

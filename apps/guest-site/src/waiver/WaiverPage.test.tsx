@@ -257,6 +257,51 @@ describe("the waiver page", () => {
     await screen.findByText("Boating has risks.");
   });
 
+  it("keeps the token after too many tries, and tries again with the same one", async () => {
+    let first = true;
+    const calls = stubApi(() => {
+      if (first) {
+        first = false;
+        return refusal(429, "rate_limited");
+      }
+      return json(201, { sessionSecret: secret, waiver: waiver() });
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+    await screen.findByText("Wait a minute, then try again. Your link still works.");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByText("Boating has risks.");
+    expect(calls.map((c) => c.body)).toEqual([{ token }, { token }]);
+  });
+
+  it("keeps the filled form after too many tries to sign, and signs on the next tap", async () => {
+    let tries = 0;
+    stubApi((call) => {
+      if (call.url.endsWith("/waiver-sessions")) {
+        return json(201, { sessionSecret: secret, waiver: waiver() });
+      }
+      tries += 1;
+      return tries === 1 ? refusal(429, "rate_limited") : json(201, { waiver: signedWaiver() });
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+    await screen.findByText("Boating has risks.");
+    // An empty name names the problem, not the label again.
+    for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+    fireEvent.click(screen.getByRole("button", { name: "Sign waiver" }));
+    expect(screen.getByText("Enter your full name to sign")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Type your full name to sign"), {
+      target: { value: "Ann Adult" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign waiver" }));
+    await screen.findByText("Nothing was signed. Wait a minute, then sign again.");
+    expect((screen.getByLabelText("Type your full name to sign") as HTMLInputElement).value).toBe(
+      "Ann Adult",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Sign waiver" }));
+    await screen.findByRole("heading", { name: "Waiver signed" });
+  });
+
   it("picks a session up again after a reload, and says when there is no link", async () => {
     window.history.replaceState(null, "", "/waiver");
     const calls = stubApi(() => json(200, { waiver: waiver() }));

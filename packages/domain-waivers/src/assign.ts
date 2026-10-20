@@ -166,6 +166,7 @@ export async function assignBookingWaivers(
       kind: "initial",
       reason: null,
       booking,
+      whenAllowed: true,
       participant,
     });
     created.push({ requestId, participantId: participant.id, requiredSigner, delivery });

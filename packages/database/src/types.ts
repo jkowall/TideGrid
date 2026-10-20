@@ -894,7 +894,12 @@ export type WaiverRevokedReason =
   | "participant_removed"
   | "participant_changed"
   | "booking_canceled";
-export type WaiverSessionRevokedReason = WaiverRevokedReason | "superseded" | "recipient_changed";
+export type WaiverSessionRevokedReason =
+  | WaiverRevokedReason
+  | "superseded"
+  | "recipient_changed"
+  /** Another session of the request, when the request was signed. */
+  | "completed";
 export type WaiverDeliveryKind = "initial" | "resend";
 export type GuardianRelationship = "parent" | "legal_guardian";
 
@@ -963,6 +968,8 @@ export interface WaiverDeliveriesTable {
   /** The waiver message this generation queued (email_messages). */
   message_id: Fixed<string>;
   created_at: Stamped;
+  /** When the email may first go out; never before the insert. Its message is due no earlier. */
+  send_after: FixedDefault<Date>;
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;
   api_request_id: ColumnType<string | null, never, never>;

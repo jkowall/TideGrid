@@ -37,8 +37,11 @@ import "./waiver.css";
  */
 
 type Phase =
-  /** `failed`: the last tap got no answer; the token is kept for another try. */
-  | { kind: "start"; token: string; opening: boolean; failed: boolean }
+  /**
+   * `failed`: why the last tap did not open the waiver, when it can be tried
+   * again with the same token: no answer, or too many tries for now.
+   */
+  | { kind: "start"; token: string; opening: boolean; failed: false | "network" | "rate_limited" }
   | { kind: "loading" }
   | { kind: "review"; secret: string; waiver: WaiverSigning }
   | { kind: "signed"; secret: string; waiver: WaiverSigning }
@@ -117,7 +120,7 @@ const stops: Record<string, Stop> = {
     tone: "warning",
     title: "Your signing session ended",
     body: (op) =>
-      `A signing session lasts an hour after you open the link. Ask ${op} to send you a new link.`,
+      `A signing session lasts an hour after you open the link, and ends when the booking changes. If you still need to sign, ask ${op} to send you a new link.`,
   },
   waiver_changed: {
     icon: "refresh",
@@ -286,7 +289,11 @@ function localProblems(
     });
   }
   if (form.signature.trim().length < 2) {
-    problems.push({ field: "signature", code: "required", message: "Type your full name to sign" });
+    problems.push({
+      field: "signature",
+      code: "required",
+      message: "Enter your full name to sign",
+    });
   }
   return problems;
 }
@@ -311,7 +318,7 @@ function ReviewForm({
   const [relationship, setRelationship] = useState("");
   const [problems, setProblems] = useState<WaiverSignProblem[]>([]);
   const [signing, setSigning] = useState(false);
-  const [offline, setOffline] = useState(false);
+  const [offline, setOffline] = useState<false | "network" | "rate_limited">(false);
   const refs = {
     acknowledgments: useRef<HTMLInputElement>(null),
     confirmIdentity: useRef<HTMLInputElement>(null),
@@ -365,9 +372,15 @@ function ReviewForm({
         return;
       case "network":
       case "unreadable":
-        setOffline(true);
+        setOffline("network");
         return;
       case "refused":
+        // Too many tries, or the server failed: nothing was signed, and the
+        // form stays as it is for another try.
+        if (result.status === 429 || result.status >= 500) {
+          setOffline(result.status === 429 ? "rate_limited" : "network");
+          return;
+        }
         onStopped(result.status === 401 ? "waiver_session_invalid" : result.code);
         return;
     }
@@ -466,9 +479,14 @@ function ReviewForm({
             onChange={(e) => setSignature(e.currentTarget.value)}
           />
         </fieldset>
-        {offline && (
+        {offline === "network" && (
           <Notice tone="error" title="We couldn't reach the booking system">
             Nothing was signed. Check your connection, then sign again.
+          </Notice>
+        )}
+        {offline === "rate_limited" && (
+          <Notice tone="warning" title="Too many tries">
+            Nothing was signed. Wait a minute, then sign again.
           </Notice>
         )}
         <Button
@@ -665,12 +683,21 @@ export function WaiverPage({
         expiresAt: result.value.waiver.sessionExpiresAt,
       });
       show(result.value.secret, result.value.waiver);
+    } else if (result.kind === "refused" && (result.status === 429 || result.status >= 500)) {
+      // Too many tries, or the server failed: the link was not spent. Keep
+      // the token for another tap.
+      setPhase({
+        kind: "start",
+        token,
+        opening: false,
+        failed: result.status === 429 ? "rate_limited" : "network",
+      });
     } else if (result.kind === "refused") {
       stop(result.code);
     } else {
       // No answer: the link may or may not be spent. Keep the token and let
       // the guest tap again; a spent link then says so.
-      setPhase({ kind: "start", token, opening: false, failed: true });
+      setPhase({ kind: "start", token, opening: false, failed: "network" });
     }
   };
 
@@ -700,9 +727,14 @@ export function WaiverPage({
             <p className="waiver-fine-print">
               The link in your email opens once, so keep this page open until you've signed.
             </p>
-            {phase.failed && (
+            {phase.failed === "network" && (
               <Notice tone="error" title="We couldn't reach the booking system">
                 Check your connection, then try again.
+              </Notice>
+            )}
+            {phase.failed === "rate_limited" && (
+              <Notice tone="warning" title="Too many tries">
+                Wait a minute, then try again. Your link still works.
               </Notice>
             )}
           </Panel>

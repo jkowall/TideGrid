@@ -13,6 +13,7 @@ export const waiverStatuses: Record<
   waiting: { tone: "pending", icon: "clock", label: "Waiting for signature" },
   email_failed: { tone: "blocked", icon: "x-octagon", label: "Email failed" },
   no_address: { tone: "warning", icon: "alert-triangle", label: "No email address" },
+  email_held: { tone: "warning", icon: "alert-triangle", label: "Email on hold" },
   not_assigned: { tone: "warning", icon: "alert-triangle", label: "Not requested" },
   not_required: { tone: "neutral", icon: "dot", label: "No waiver needed" },
   not_needed: { tone: "neutral", icon: "dot", label: "Booking canceled" },
@@ -31,12 +32,22 @@ const messageWords: Record<string, string> = {
   canceled: "Email canceled",
 };
 
-/** The latest email, in words: what happened to it and where it went. */
-export function deliveryText(waiver: ParticipantWaiver): string | null {
+/**
+ * The latest email, in words: what happened to it and where it went, and,
+ * when a sending limit held it, when it goes out (on the marina's clock).
+ */
+export function deliveryText(
+  waiver: ParticipantWaiver,
+  when: (iso: string) => string,
+  now: number,
+): string | null {
   const delivery = waiver.request?.delivery;
   if (!delivery) return null;
-  const state = delivery.message ? messageWords[delivery.message.state] : "Email queued";
   const nth = delivery.generation > 1 ? ` (send ${delivery.generation})` : "";
+  if (delivery.message?.state === "queued" && Date.parse(delivery.sendAfter) > now) {
+    return `Email goes out ${when(delivery.sendAfter)} to ${delivery.recipient}${nth}`;
+  }
+  const state = delivery.message ? messageWords[delivery.message.state] : "Email queued";
   return `${state ?? "Email queued"} to ${delivery.recipient}${nth}`;
 }
 
@@ -73,6 +84,10 @@ export function resendFailureText(reason: string): string {
       return "It went to this address less than 10 minutes ago. Try again shortly.";
     case "limit":
       return "It has been sent 5 times, the most a waiver request can be.";
+    case "rate_limited":
+      return "Waiver email for this guest, address, or booking has reached its sending limit for now. Try again later.";
+    case "email_invalid":
+      return "TideGrid couldn't build this email from the booking's details.";
     case "no_address":
       return "The booking has no email address for this person yet.";
     case "not_pending":

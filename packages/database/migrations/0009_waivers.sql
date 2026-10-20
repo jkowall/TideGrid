@@ -178,17 +178,23 @@ CREATE UNIQUE INDEX waiver_requests_one_live
 CREATE INDEX waiver_requests_template_pending_idx
   ON public.waiver_requests (tenant_id, template_id, template_version)
   WHERE state = 'pending';
+-- Every request of one participant, for the sending limits.
+CREATE INDEX waiver_requests_participant_idx
+  ON public.waiver_requests (tenant_id, booking_id, participant_id);
 
 -- Deliveries ----------------------------------------------------------------------
 
 -- One intentional send of a request: generation 1 when it is assigned, and
 -- each audited resend after it. It names the message it queued, whose
 -- deduplication key is waiver.request:<request>:<generation>, so a retry of
--- the same generation never queues a second email. Resends are limited here,
--- for every writer: at most 5 generations per request, and a resend to the
--- same address at least 10 minutes after the previous one. The recipient is
--- the address the request went to; the message records whether it was sent or
--- failed.
+-- the same generation never queues a second email. Sends are limited here,
+-- for every writer (app.waiver_send_refusal): at most 5 generations per
+-- request; and across all of a participant's requests, 10 minutes between
+-- sends to one address and 8 sends a day; 10 an hour to one address across
+-- the operator; 40 a day per booking; 1000 an hour per operator. send_after is
+-- when the email may first go out (a send held by the interval is queued for
+-- then); its message is never due earlier. The recipient is the address the
+-- request went to; the message records whether it was sent or failed.
 CREATE TABLE public.waiver_deliveries (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
@@ -202,6 +208,7 @@ CREATE TABLE public.waiver_deliveries (
            AND recipient_email ~ '^[^@]+@[^@]+\.[^@]+$'),
   message_id uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
+  send_after timestamptz NOT NULL DEFAULT now(),
   -- Who asked for this generation, from the transaction's context.
   actor_type text NOT NULL CHECK (actor_type IN ('staff', 'guest', 'system', 'support')),
   actor_id text,
@@ -215,6 +222,11 @@ CREATE TABLE public.waiver_deliveries (
   CHECK ((kind = 'initial') = (generation = 1)),
   CHECK (kind = 'initial' OR reason IS NOT NULL)
 );
+-- For the sending limits: one address across the operator, and the operator.
+CREATE INDEX waiver_deliveries_recipient_idx
+  ON public.waiver_deliveries (tenant_id, recipient_email, send_after);
+CREATE INDEX waiver_deliveries_send_after_idx
+  ON public.waiver_deliveries (tenant_id, send_after);
 
 -- Signing sessions ----------------------------------------------------------------
 
@@ -222,8 +234,9 @@ CREATE TABLE public.waiver_deliveries (
 -- tenant, booking, participant, request, and purpose, for the signer the
 -- request requires. Only the SHA-256 of its secret is stored. It lasts at most
 -- two hours (the service gives it one) and is revoked when its request ends
--- or its address changes. The signer's own session stays open after signing,
--- for the signed copy, until it lapses.
+-- or its address changes. At signing, the signer's own session stays open, for
+-- the signed copy, until it lapses; the request's other sessions end
+-- (completed).
 CREATE TABLE public.waiver_signing_sessions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
@@ -239,7 +252,7 @@ CREATE TABLE public.waiver_signing_sessions (
   revoked_at timestamptz,
   revoked_reason text CHECK (revoked_reason IN (
     'participant_removed', 'participant_changed', 'booking_canceled', 'superseded',
-    'recipient_changed')),
+    'recipient_changed', 'completed')),
   UNIQUE (tenant_id, id),
   -- One session per link: a link opens one session, once.
   CONSTRAINT waiver_signing_sessions_one_per_link UNIQUE (tenant_id, access_link_id),
@@ -404,12 +417,15 @@ BEGIN
       RAISE EXCEPTION 'waiver requests are assigned only for a confirmed booking'
         USING ERRCODE = '23514', CONSTRAINT = 'waiver_requests_booking';
     END IF;
+    -- The wall clock, not the transaction's start: an assignment that began
+    -- before a version was published and reads it after the version move's
+    -- barrier must see that version in effect (see supersede.ts).
     IF NOT EXISTS (
          SELECT 1 FROM public.waiver_template_versions v
           WHERE v.tenant_id = NEW.tenant_id AND v.template_id = NEW.template_id
             AND v.version = NEW.template_version
-            AND v.effective_from <= now()
-            AND (v.effective_until IS NULL OR v.effective_until > now())) THEN
+            AND v.effective_from <= clock_timestamp()
+            AND (v.effective_until IS NULL OR v.effective_until > clock_timestamp())) THEN
       RAISE EXCEPTION 'waiver version %/% is not in effect', NEW.template_id, NEW.template_version
         USING ERRCODE = '23514', CONSTRAINT = 'waiver_requests_version';
     END IF;
@@ -482,26 +498,118 @@ CREATE TRIGGER waiver_requests_check BEFORE INSERT OR UPDATE ON public.waiver_re
 -- message queued for exactly this request, generation, and address. A resend
 -- to the same address follows the previous generation by at least 10
 -- minutes; the generation number caps them at 5.
+-- Why a waiver email may not go out at p_send_after, or no row when it may.
+-- The delivery trigger holds every writer to it; the service asks it first,
+-- so a booking hook queues a send held only by the interval for later and
+-- never fails on a limit. It counts sends that may have reached a mailbox: a
+-- message canceled before any attempt never did. A retry_after is rounded up
+-- to the second, so a send queued for it passes. Counts read committed rows,
+-- so concurrent sends to one address from different bookings may pass a limit
+-- by one; a participant's own sends are serialized by its request's lock.
+CREATE FUNCTION app.waiver_send_refusal(
+    p_tenant uuid, p_booking uuid, p_participant uuid, p_recipient text,
+    p_send_after timestamptz)
+  RETURNS TABLE (code text, retry_after timestamptz)
+  LANGUAGE plpgsql STABLE
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  t timestamptz;
+BEGIN
+  -- One participant, one mailbox: ten minutes between sends, across requests.
+  -- A request the operator's version move superseded is left out: its
+  -- replacement goes at once, and its own link no longer works.
+  SELECT max(d.send_after) INTO t
+    FROM public.waiver_deliveries d
+    JOIN public.waiver_requests r ON r.tenant_id = d.tenant_id AND r.id = d.request_id
+    JOIN public.email_messages m ON m.tenant_id = d.tenant_id AND m.id = d.message_id
+   WHERE d.tenant_id = p_tenant AND r.booking_id = p_booking
+     AND r.participant_id = p_participant AND d.recipient_email = p_recipient
+     AND r.state <> 'superseded'
+     AND d.send_after > p_send_after - interval '10 minutes'
+     AND (m.state <> 'canceled' OR m.attempts > 0);
+  IF t IS NOT NULL THEN
+    RETURN QUERY SELECT 'interval'::text,
+      date_trunc('second', t) + interval '10 minutes 1 second';
+    RETURN;
+  END IF;
+  -- One participant: eight sends a day, across all of their requests.
+  SELECT d.send_after INTO t
+    FROM public.waiver_deliveries d
+    JOIN public.waiver_requests r ON r.tenant_id = d.tenant_id AND r.id = d.request_id
+    JOIN public.email_messages m ON m.tenant_id = d.tenant_id AND m.id = d.message_id
+   WHERE d.tenant_id = p_tenant AND r.booking_id = p_booking
+     AND r.participant_id = p_participant
+     AND d.send_after > p_send_after - interval '24 hours'
+     AND (m.state <> 'canceled' OR m.attempts > 0)
+   ORDER BY d.send_after DESC OFFSET 7 LIMIT 1;
+  IF t IS NOT NULL THEN
+    RETURN QUERY SELECT 'participant'::text,
+      date_trunc('second', t) + interval '24 hours 1 second';
+    RETURN;
+  END IF;
+  -- One address, across the operator's bookings: ten an hour.
+  SELECT d.send_after INTO t
+    FROM public.waiver_deliveries d
+    JOIN public.email_messages m ON m.tenant_id = d.tenant_id AND m.id = d.message_id
+   WHERE d.tenant_id = p_tenant AND d.recipient_email = p_recipient
+     AND d.send_after > p_send_after - interval '1 hour'
+     AND (m.state <> 'canceled' OR m.attempts > 0)
+   ORDER BY d.send_after DESC OFFSET 9 LIMIT 1;
+  IF t IS NOT NULL THEN
+    RETURN QUERY SELECT 'address'::text, date_trunc('second', t) + interval '1 hour 1 second';
+    RETURN;
+  END IF;
+  -- One booking: forty a day.
+  SELECT d.send_after INTO t
+    FROM public.waiver_deliveries d
+    JOIN public.waiver_requests r ON r.tenant_id = d.tenant_id AND r.id = d.request_id
+    JOIN public.email_messages m ON m.tenant_id = d.tenant_id AND m.id = d.message_id
+   WHERE d.tenant_id = p_tenant AND r.booking_id = p_booking
+     AND d.send_after > p_send_after - interval '24 hours'
+     AND (m.state <> 'canceled' OR m.attempts > 0)
+   ORDER BY d.send_after DESC OFFSET 39 LIMIT 1;
+  IF t IS NOT NULL THEN
+    RETURN QUERY SELECT 'booking'::text, date_trunc('second', t) + interval '24 hours 1 second';
+    RETURN;
+  END IF;
+  -- The operator: a thousand an hour.
+  SELECT d.send_after INTO t
+    FROM public.waiver_deliveries d
+   WHERE d.tenant_id = p_tenant AND d.send_after > p_send_after - interval '1 hour'
+   ORDER BY d.send_after DESC OFFSET 999 LIMIT 1;
+  IF t IS NOT NULL THEN
+    RETURN QUERY SELECT 'tenant'::text, date_trunc('second', t) + interval '1 hour 1 second';
+    RETURN;
+  END IF;
+  RETURN;
+END;
+$$;
+
 CREATE FUNCTION app.check_waiver_delivery() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
   AS $$
 DECLARE
   latest record;
+  request record;
+  refusal record;
 BEGIN
   NEW.created_at := now();
+  NEW.send_after := greatest(coalesce(NEW.send_after, now()), now());
   NEW.actor_type := coalesce(app.setting_or_null('app.actor_type'), 'system');
   NEW.actor_id := app.setting_or_null('app.actor_id');
   NEW.api_request_id := app.setting_or_null('app.request_id');
   -- Serializes generations of one request with each other and with signing.
-  PERFORM 1 FROM public.waiver_requests r
+  SELECT r.booking_id, r.participant_id INTO request
+    FROM public.waiver_requests r
     WHERE r.tenant_id = NEW.tenant_id AND r.id = NEW.request_id AND r.state = 'pending'
       FOR NO KEY UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'waiver request % is not pending; nothing to send', NEW.request_id
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_request';
   END IF;
-  SELECT d.generation, d.created_at, d.recipient_email INTO latest
+  SELECT d.generation INTO latest
     FROM public.waiver_deliveries d
    WHERE d.tenant_id = NEW.tenant_id AND d.request_id = NEW.request_id
    ORDER BY d.generation DESC
@@ -511,13 +619,16 @@ BEGIN
       NEW.request_id, coalesce(latest.generation, 0) + 1, NEW.generation
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_sequence';
   END IF;
-  -- The interval protects one mailbox from repeats; a corrected address gets
-  -- its request at once, still within the cap on generations.
-  IF latest.created_at IS NOT NULL AND latest.created_at > now() - interval '10 minutes'
-     AND latest.recipient_email = NEW.recipient_email THEN
-    RAISE EXCEPTION 'waiver request % was sent to this address less than 10 minutes ago',
-      NEW.request_id
+  SELECT * INTO refusal
+    FROM app.waiver_send_refusal(NEW.tenant_id, request.booking_id, request.participant_id,
+                                 NEW.recipient_email, NEW.send_after);
+  IF refusal.code = 'interval' THEN
+    RAISE EXCEPTION 'this participant''s waiver went to this address less than 10 minutes before %',
+      NEW.send_after
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_rate';
+  ELSIF refusal.code IS NOT NULL THEN
+    RAISE EXCEPTION 'waiver sending limit reached (%) until %', refusal.code, refusal.retry_after
+      USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_limit';
   END IF;
   IF NOT EXISTS (
        SELECT 1 FROM public.email_messages m
@@ -526,7 +637,8 @@ BEGIN
                              || NEW.generation::text
           AND m.subject_ref = 'waiver_request:' || NEW.request_id::text
           AND m.link_purpose = 'waiver_sign'
-          AND m.to_email = NEW.recipient_email) THEN
+          AND m.to_email = NEW.recipient_email
+          AND m.next_attempt_at >= NEW.send_after) THEN
     RAISE EXCEPTION 'a delivery names the waiver message queued for its request, generation, and address'
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_deliveries_message';
   END IF;
@@ -570,6 +682,13 @@ BEGIN
       RAISE EXCEPTION 'a signing session needs its waiver link consumed now, for its pending request and signer'
         USING ERRCODE = '23514', CONSTRAINT = 'waiver_signing_sessions_link';
     END IF;
+    -- A link opens one session of any kind: not a guest session as well.
+    IF EXISTS (
+         SELECT 1 FROM public.guest_sessions g
+          WHERE g.tenant_id = NEW.tenant_id AND g.link_id = NEW.access_link_id) THEN
+      RAISE EXCEPTION 'waiver link % already opened a guest session', NEW.access_link_id
+        USING ERRCODE = '23514', CONSTRAINT = 'waiver_signing_sessions_link';
+    END IF;
     RETURN NEW;
   END IF;
 
@@ -599,6 +718,51 @@ CREATE TRIGGER waiver_signing_sessions_check
   BEFORE INSERT OR UPDATE ON public.waiver_signing_sessions
   FOR EACH ROW EXECUTE FUNCTION app.check_waiver_signing_session();
 
+-- On the messaging module's tables, for waiver links only. A guest session
+-- never opens from a link that opened a signing session (the other order is
+-- held above), and a waiver link never outlives its trip, however late the
+-- delivery job sends it: its lifetime was counted when its email was queued.
+-- The clamp runs before the module's own rules (trigger names sort first),
+-- and leaves an ended trip's link a second to live, so it opens nothing.
+CREATE FUNCTION app.check_waiver_guest_session() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF NEW.link_id IS NOT NULL AND EXISTS (
+       SELECT 1 FROM public.waiver_signing_sessions s
+        WHERE s.tenant_id = NEW.tenant_id AND s.access_link_id = NEW.link_id) THEN
+    RAISE EXCEPTION 'link % already opened a waiver signing session', NEW.link_id
+      USING ERRCODE = '23514', CONSTRAINT = 'guest_sessions_waiver_link';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER guest_sessions_a_waiver_link BEFORE INSERT ON public.guest_sessions
+  FOR EACH ROW EXECUTE FUNCTION app.check_waiver_guest_session();
+
+CREATE FUNCTION app.clamp_waiver_link() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  trip_end timestamptz;
+BEGIN
+  IF NEW.purpose = 'waiver_sign' THEN
+    SELECT t.ends_at INTO trip_end
+      FROM public.bookings b
+      JOIN public.scheduled_trips t ON t.tenant_id = b.tenant_id AND t.id = b.trip_id
+     WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id;
+    IF trip_end IS NOT NULL THEN
+      NEW.expires_at := greatest(least(NEW.expires_at, trip_end), now() + interval '1 second');
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER guest_access_links_a_waiver_end BEFORE INSERT ON public.guest_access_links
+  FOR EACH ROW EXECUTE FUNCTION app.clamp_waiver_link();
+
 -- Evidence: written once, for a pending request, by an open session of that
 -- request, for the signer it requires, with the request's exact version, hash,
 -- and acknowledgments. The request's row lock orders it against every other
@@ -627,6 +791,14 @@ BEGIN
      OR r.content_sha256 <> NEW.content_sha256 OR r.required_signer <> NEW.signer_role THEN
     RAISE EXCEPTION 'evidence names its request''s booking, participant, version, hash, and signer'
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_evidence_request';
+  END IF;
+  -- A waiver is signed before its trip ends, whatever a link's lifetime says.
+  IF EXISTS (
+       SELECT 1 FROM public.bookings b
+         JOIN public.scheduled_trips t ON t.tenant_id = b.tenant_id AND t.id = b.trip_id
+        WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id AND t.ends_at <= now()) THEN
+    RAISE EXCEPTION 'the trip of booking % has ended; it takes no signature', NEW.booking_id
+      USING ERRCODE = '23514', CONSTRAINT = 'waiver_evidence_trip_over';
   END IF;
   IF NOT EXISTS (
        SELECT 1 FROM public.waiver_signing_sessions s
@@ -724,3 +896,9 @@ REVOKE ALL ON FUNCTION app.check_waiver_delivery() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_waiver_signing_session() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_waiver_evidence() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_waiver_evidence_signed() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_waiver_guest_session() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.clamp_waiver_link() FROM PUBLIC;
+-- The service asks the sending limits before it queues a send.
+REVOKE ALL ON FUNCTION app.waiver_send_refusal(uuid, uuid, uuid, text, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.waiver_send_refusal(uuid, uuid, uuid, text, timestamptz)
+  TO tidegrid_app;

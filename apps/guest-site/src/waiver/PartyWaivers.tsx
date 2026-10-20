@@ -27,6 +27,7 @@ const statuses: Record<WaiverStatusCode, { tone: StatusTone; icon: IconName; lab
   waiting: { tone: "pending", icon: "clock", label: "Waiting for signature" },
   email_failed: { tone: "blocked", icon: "x-octagon", label: "Email didn't go through" },
   no_address: { tone: "warning", icon: "alert-triangle", label: "Needs an email address" },
+  email_held: { tone: "warning", icon: "alert-triangle", label: "Email on hold" },
   not_assigned: { tone: "warning", icon: "alert-triangle", label: "Not sent yet" },
   not_required: { tone: "neutral", icon: "dot", label: "No waiver needed" },
   not_needed: { tone: "neutral", icon: "dot", label: "Not needed" },
@@ -36,6 +37,19 @@ const statuses: Record<WaiverStatusCode, { tone: StatusTone; icon: IconName; lab
 const REFRESH_AFTER_MS = 10_000;
 
 type Load = { kind: "loading" } | { kind: "ready"; list: PartyWaiverList } | { kind: "failed" };
+
+function timeText(iso: string, timeZone: string): string {
+  const options: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  };
+  try {
+    return new Intl.DateTimeFormat("en-US", { ...options, timeZone }).format(new Date(iso));
+  } catch {
+    return new Intl.DateTimeFormat("en-US", options).format(new Date(iso));
+  }
+}
 
 function dayText(iso: string, timeZone: string): string {
   const options: Intl.DateTimeFormatOptions = { month: "long", day: "numeric" };
@@ -60,6 +74,11 @@ export function partyWaiverDetail(
     }
     case "waiting":
       if (!p.sentTo) return "Their email is on its way.";
+      if (p.sendsAt) {
+        return guardian
+          ? `We'll email the link to their parent or guardian at ${p.sentTo} at ${timeText(p.sendsAt, timeZone)}.`
+          : `We'll email the link to ${p.sentTo} at ${timeText(p.sendsAt, timeZone)}.`;
+      }
       return guardian
         ? `We emailed the link to their parent or guardian at ${p.sentTo}.`
         : `We emailed the link to ${p.sentTo}.`;
@@ -69,6 +88,8 @@ export function partyWaiverDetail(
       return guardian
         ? "Add a parent or guardian's email in Who's coming, and we'll send it."
         : "Add their email in Who's coming, and we'll send their waiver.";
+    case "email_held":
+      return `We can't email this address again just yet. ${operator} can send it once it's allowed.`;
     case "not_assigned":
       return `${operator} hasn't sent this waiver yet. Contact them if your trip is soon.`;
     default:
@@ -200,7 +221,12 @@ export function PartyWaivers({
                     <div className="wv-party__head">
                       <span className="wv-party__name">
                         {p.name}
-                        {p.minor && <span className="wv-party__tag">Under 18</span>}
+                        {p.minor && (
+                          <>
+                            <span className="tg-visually-hidden">, </span>
+                            <span className="wv-party__tag">Under 18</span>
+                          </>
+                        )}
                       </span>
                       <StatusBadge tone={status.tone} icon={status.icon}>
                         {status.label}

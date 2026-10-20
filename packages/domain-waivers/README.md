@@ -57,7 +57,13 @@ An adult's request goes to their own address; a minor's to the guardian's. A par
 
 The request email is a messaging-module message (template `waiver_request`, version 1) queued in the same transaction, deduplicated by `waiver.request:<request>:<generation>`, with subject `waiver_request:<request>` and a `waiver_sign` access link to `/waiver`. The messaging module's delivery job issues the link when it sends: the raw token travels only in the email, in the URL's fragment, and only its hash is stored. The link lasts 7 days from sending, never past the trip's end; a request whose trip ends within 15 minutes is not sent.
 
-- **Resend.** Staff send a request again with a reason (`waivers.manage`), as a new generation with a new link; the earlier unused link is superseded when the new one is issued, and an earlier generation still queued is canceled. At most 5 generations per request, and to the same address at least 10 minutes apart; the database enforces both. A corrected address goes at once, revokes the old address's links (`recipient_changed`), and ends any session it opened. After the fifth generation, or too near the trip's end to send, a corrected address gets no email, but the old address still loses its links and sessions; staff see the limit. An address removed from the booking ends the same way: its unsent email is canceled, its links and sessions end, and the status reads `no_address` until a new one is added.
+- **Resend.** Staff send a request again with a reason (`waivers.manage`), as a new generation with a new link; the earlier unused link is superseded when the new one is issued, and an earlier generation still queued is canceled. At most 5 generations per request. A corrected address revokes the old address's links (`recipient_changed`), ends any session it opened, and goes out at once unless a sending limit holds it.
+- **Sending limits, across requests (from the review of 2026-10-20).** The database holds every writer to `app.waiver_send_refusal`, counted over every request a participant has had, so neither alternating addresses nor flipping a participant between adult and minor (which starts a new request) sends more:
+  - 10 minutes between sends of one participant's waiver to one address (a request the operator's version move superseded is left out, so its replacement goes at once);
+  - 8 sends a day per participant, 10 an hour to one address across the operator, 40 a day per booking, and 1000 an hour per operator.
+
+  It counts sends that may have reached a mailbox; an email canceled before any attempt never did. The service asks first, so a booking hook never fails on a limit: a send no one waits on (a hook, a version move) that only the interval holds is queued for when it is allowed (`send_after`, and the message is never due earlier), and the status says when it goes out; a cap leaves the waiver `email_held` until staff can send it. A staff resend answers `waiver_resend_too_soon` or `waiver_resend_rate_limited`. The same address removed and added back counts as a change: it is sent when the interval allows.
+- **Email content never fails the caller.** The participant, guardian, product, and operator names each allow 120 characters; the subject, preview, and heading bound them (`elide`), so the email always fits the messaging module's limits. The message and its delivery row are queued under a savepoint, and content the messaging module refuses answers `email_invalid` instead of throwing, so a guest's party change or a version move never rolls back on email. After the fifth generation, or too near the trip's end to send, a corrected address gets no email, but the old address still loses its links and sessions; staff see the limit. An address removed from the booking ends the same way: its unsent email is canceled, its links and sessions end, and the status reads `no_address` until a new one is added.
 - **Every recipient change cancels the old message.** A corrected address, a removed one, a resend, and every revocation call the messaging module's `cancelMessage` on each earlier generation in the same transaction, not only `revokeAccessLinks`, so an email still queued (which has no link yet) never goes out to an address that is no longer the signer's.
 - **No duplicates.** A retry of a command finds its generation; a repeated hook finds the live request. Neither queues a second email.
 - **Delivery is not signature.** The status shows the latest email's state (queued, sending, sent, failed, canceled) beside the request's own state. A sent or delivered email never marks anything signed, and a failed one leaves the request pending with a visible exception.
@@ -107,9 +113,10 @@ Before real evidence, the pilot moves documents to a private R2 bucket with obje
 | Status | Meaning |
 |---|---|
 | `signed` | Evidence recorded for this booking |
-| `waiting` | Sent, or about to be; not signed yet |
+| `waiting` | Sent, or about to be (the latest delivery's `sendAfter` says when, if a limit held it); not signed yet |
 | `email_failed` | The latest email failed; staff can resend |
 | `no_address` | The booking has no address for this person yet, or the one it had was removed |
+| `email_held` | The booking has an address, but no working email went to it: a sending limit held it, or its email could not be built. Staff can send it again once the limits allow |
 | `not_assigned` | A waiver applies, but this participant has no request (named before the waiver applied) |
 | `not_required` | No waiver applies to the trip |
 | `not_needed` | The booking was canceled |
@@ -167,6 +174,7 @@ Recorded as follow-ups; the demo leaves them out:
 - **Mailbox verification beyond the link.** Following the emailed link is the mailbox signal; there is no separate code, and a shared family address is not detected.
 - **Typed signatures outside WinAnsi** show a question mark in the PDF (the evidence keeps the exact text). An embedded font fixes it.
 - **R2.** Above.
+- **Field encryption.** ADR 0019 (retained; docs/v2/06) and docs/v2/08 require personal fields to be encrypted with versioned keys before real data. Waiver evidence stores the participant's and signer's names, the typed signature, the relationship, the recipient address, the source address, the user agent, and the PDF in plain columns; lane 1's participant emails and guardian names are the same. Synthetic demo data only until the pilot adds field encryption.
 
 ## Tests
 

@@ -19,6 +19,7 @@ const statusCodes = new Set([
   "waiting",
   "email_failed",
   "no_address",
+  "email_held",
   "not_assigned",
   "not_required",
   "not_needed",
@@ -116,8 +117,16 @@ export type ResendResult =
   | { kind: "sent"; generation: number }
   | {
       kind: "failed";
-      /** too_soon, limit, no_address, not_pending, trip_over, forbidden, signed_out, unreachable, unavailable */
+      /**
+       * too_soon, limit, rate_limited, no_address, not_pending, trip_over,
+       * email_invalid, forbidden, signed_out, unreachable, unavailable
+       */
       reason: string;
+      /**
+       * The API refused this resend: the refusal is the stored answer for its
+       * key, so trying again needs a new one.
+       */
+      final: boolean;
     };
 
 /**
@@ -152,22 +161,26 @@ export async function resendWaiver(
       const generation = body?.delivery?.generation;
       return Number.isSafeInteger(generation)
         ? { kind: "sent", generation: generation as number }
-        : { kind: "failed", reason: "unavailable" };
+        : { kind: "failed", reason: "unavailable", final: false };
     }
     const code = await errorCode(res);
     const known: Record<string, string> = {
       waiver_resend_too_soon: "too_soon",
       waiver_resend_limit: "limit",
+      waiver_resend_rate_limited: "rate_limited",
       waiver_no_address: "no_address",
       waiver_not_pending: "not_pending",
       waiver_trip_over: "trip_over",
+      waiver_email_invalid: "email_invalid",
     };
-    if (code && known[code]) return { kind: "failed", reason: known[code] as string };
-    if (res.status === 401) return { kind: "failed", reason: "signed_out" };
-    if (res.status === 403) return { kind: "failed", reason: "forbidden" };
-    return { kind: "failed", reason: "unavailable" };
+    if (code && known[code]) {
+      return { kind: "failed", reason: known[code] as string, final: true };
+    }
+    if (res.status === 401) return { kind: "failed", reason: "signed_out", final: false };
+    if (res.status === 403) return { kind: "failed", reason: "forbidden", final: false };
+    return { kind: "failed", reason: "unavailable", final: false };
   } catch {
-    return { kind: "failed", reason: "unreachable" };
+    return { kind: "failed", reason: "unreachable", final: false };
   }
 }
 

@@ -22,6 +22,7 @@ function person(
     signer: "participant",
     signedAt: null,
     sentTo: status === "waiting" ? "a•••@example.test" : null,
+    sendsAt: null,
     ...overrides,
   };
 }
@@ -96,6 +97,10 @@ describe("the party's waivers on the management page", () => {
     expect(ann.getByText("Signed on October 6.")).toBeTruthy();
     const kit = within(items[1] as HTMLElement);
     expect(kit.getByText("Under 18")).toBeTruthy();
+    // A screen reader hears the name and the tag apart.
+    expect((items[1] as HTMLElement).querySelector(".wv-party__name")?.textContent).toBe(
+      "Kit Minor, Under 18",
+    );
     expect(kit.getByText("Waiting for signature")).toBeTruthy();
     expect(
       kit.getByText("We emailed the link to their parent or guardian at g•••@example.test."),
@@ -247,5 +252,14 @@ describe("what each status tells the booker", () => {
 
   it("says nothing more for a status with nothing to do", () => {
     expect(detail(person(1, "A", "not_required"))).toBeNull();
+  });
+
+  it("says when a held email goes out, and when one cannot be sent yet", () => {
+    expect(detail(person(1, "A", "waiting", { sendsAt: "2026-10-06T19:14:05.000Z" }))).toBe(
+      "We'll email the link to a•••@example.test at 3:14 PM EDT.",
+    );
+    expect(detail(person(1, "A", "email_held"))).toBe(
+      "We can't email this address again just yet. Demo Reef Divers can send it once it's allowed.",
+    );
   });
 });

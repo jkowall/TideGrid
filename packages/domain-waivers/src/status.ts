@@ -18,7 +18,7 @@ import {
   type WaiverSignerRole,
 } from "@tidegrid/database";
 import { sql } from "kysely";
-import { MAX_GENERATIONS, RESEND_INTERVAL_MINUTES } from "./delivery.ts";
+import { MAX_GENERATIONS } from "./delivery.ts";
 import { maskEmail } from "./render.ts";
 import { findApplicableVersion } from "./templates.ts";
 
@@ -32,6 +32,12 @@ export type WaiverStatusCode =
   | "email_failed"
   /** No address to send to yet. */
   | "no_address"
+  /**
+   * The booking has an address, but no working email went to it: a sending
+   * limit held it, or the address went and came back. Staff can send it again
+   * once the limits allow.
+   */
+  | "email_held"
   /** A waiver applies, but this participant has no request, such as one named before it applied. */
   | "not_assigned"
   /** No waiver applies to this trip. */
@@ -75,6 +81,8 @@ export interface ParticipantWaiver {
       /** The address it went to, masked: its first character and its domain. */
       recipient: string;
       queuedAt: Date;
+      /** When the email may first go out: later than queuedAt when a limit held it. */
+      sendAfter: Date;
       message: MessageStatus;
     };
     /** When staff may send it again; null when it cannot be sent again. */
@@ -122,8 +130,13 @@ interface Row {
   message_state: MessageState | null;
   message_at: Date | null;
   message_error: string | null;
+  send_after: Date | null;
+  /** The latest email's access was closed for a recipient change. */
+  latest_closed: boolean | null;
   /** The address the booking has now for the request's signer; null when it has none. */
   current_recipient: string | null;
+  /** When the sending limits next allow a send to that address; null when they allow it now. */
+  refusal_retry_after: Date | null;
   now: Date;
 }
 
@@ -142,12 +155,15 @@ async function rows(
            r.id as request_id, r.state, r.revoked_reason, r.required_signer,
            t.name as template_name, r.template_version, r.created_at as assigned_at,
            e.id as evidence_id, e.signed_at, e.signer_name, e.guardian_relationship,
-           d.generation, d.kind, d.recipient_email, d.created_at as queued_at,
+           d.generation, d.kind, d.recipient_email, d.created_at as queued_at, d.send_after,
            m.state as message_state,
            coalesce(m.sent_at, m.failed_at, m.canceled_at, m.last_attempt_at) as message_at,
            m.last_error_code as message_error,
-           nullif(btrim(case when r.required_signer = 'guardian' then p.guardian_email
-                             else p.email end), '') as current_recipient,
+           (m.state = 'canceled' and m.last_error_code = 'recipient_changed')
+             or exists (select 1 from guest_access_links l
+                         where l.tenant_id = b.tenant_id and l.message_id = d.message_id
+                           and l.revoked_reason = 'recipient_changed') as latest_closed,
+           cr.address as current_recipient, f.retry_after as refusal_retry_after,
            now() as now
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
@@ -162,12 +178,19 @@ async function rows(
       left join waiver_templates t on t.tenant_id = b.tenant_id and t.id = r.template_id
       left join waiver_evidence e on e.tenant_id = b.tenant_id and e.request_id = r.id
       left join lateral (
-        select y.generation, y.kind, y.recipient_email, y.created_at, y.message_id
+        select y.generation, y.kind, y.recipient_email, y.created_at, y.send_after, y.message_id
           from waiver_deliveries y
          where y.tenant_id = b.tenant_id and y.request_id = r.id
          order by y.generation desc
          limit 1) d on true
       left join email_messages m on m.tenant_id = b.tenant_id and m.id = d.message_id
+      left join lateral (
+        select nullif(lower(btrim(case when r.required_signer = 'guardian' then p.guardian_email
+                                       else p.email end)), '') as address) cr on true
+      left join lateral (
+        select x.retry_after
+          from app.waiver_send_refusal(b.tenant_id, b.id, p.id, cr.address, now()) x
+         where r.state = 'pending' and cr.address is not null) f on true
      where b.tenant_id = ${tenantId} and ${where}
      order by b.confirmed_at, b.id, p.position`.execute(trx);
   return found;
@@ -179,8 +202,16 @@ function statusOf(row: Row, required: boolean): WaiverStatusCode {
     return required ? "not_assigned" : "not_required";
   }
   if (row.state === "signed") return "signed";
-  // Never sent, or the address it went to was removed from the booking.
-  if (row.generation === null || row.current_recipient === null) return "no_address";
+  // No address for the signer: never had one, or it was removed.
+  if (row.current_recipient === null) return "no_address";
+  // An address, but no working email went to it.
+  if (
+    row.generation === null ||
+    row.recipient_email !== row.current_recipient ||
+    row.latest_closed === true
+  ) {
+    return "email_held";
+  }
   if (row.message_state === "failed") return "email_failed";
   return "waiting";
 }
@@ -188,10 +219,9 @@ function statusOf(row: Row, required: boolean): WaiverStatusCode {
 function resendAt(row: Row): Date | null {
   if (row.state !== "pending" || row.booking_state !== "confirmed") return null;
   if (row.current_recipient === null) return null;
-  if (row.generation === null) return row.now;
-  if (row.generation >= MAX_GENERATIONS) return null;
-  const at = (row.queued_at?.getTime() ?? 0) + RESEND_INTERVAL_MINUTES * 60_000;
-  return new Date(Math.max(at, row.now.getTime()));
+  if (row.generation !== null && row.generation >= MAX_GENERATIONS) return null;
+  // The database's sending limits, across the participant's requests.
+  return row.refusal_retry_after ?? row.now;
 }
 
 async function assemble(
@@ -259,6 +289,7 @@ async function assemble(
                       kind: row.kind,
                       recipient: maskEmail(row.recipient_email),
                       queuedAt: row.queued_at,
+                      sendAfter: row.send_after ?? row.queued_at,
                       message: {
                         state: row.message_state,
                         at: row.message_at,
@@ -325,7 +356,10 @@ export async function listTripWaivers(
       waiting: all.filter((p) => p.status === "waiting").length,
       attention: all.filter(
         (p) =>
-          p.status === "no_address" || p.status === "email_failed" || p.status === "not_assigned",
+          p.status === "no_address" ||
+          p.status === "email_failed" ||
+          p.status === "email_held" ||
+          p.status === "not_assigned",
       ).length,
       unnamed: bookings.reduce((n, b) => n + b.unnamedPlaces, 0),
     },
@@ -343,6 +377,8 @@ export interface GuestParticipantWaiver {
   signedAt: Date | null;
   /** Where the latest email went, masked; null once signed or when none went out. */
   sentTo: string | null;
+  /** When a waiting email is due to go out, when that is later than now; else null. */
+  sendsAt: Date | null;
 }
 
 export interface GuestBookingWaivers {
@@ -379,6 +415,12 @@ export async function listGuestBookingWaivers(
       signer: p.request?.requiredSigner ?? null,
       signedAt: p.status === "signed" ? (p.request?.signed?.signedAt ?? null) : null,
       sentTo: p.status === "signed" ? null : (p.request?.delivery?.recipient ?? null),
+      sendsAt:
+        p.status === "waiting" &&
+        p.request?.delivery?.message.state === "queued" &&
+        p.request.delivery.sendAfter.getTime() > Date.now()
+          ? p.request.delivery.sendAfter
+          : null,
     })),
   };
 }

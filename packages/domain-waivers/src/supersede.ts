@@ -160,6 +160,7 @@ async function supersedeUnsignedRequests(
       kind: "initial",
       reason: null,
       participant,
+      whenAllowed: true,
     });
     moved++;
   }

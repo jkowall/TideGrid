@@ -38,6 +38,7 @@ function participant(
         kind: "initial",
         recipient: "a•••@example.test",
         queuedAt: "2026-10-06T14:00:00.000Z",
+        sendAfter: "2026-10-06T14:00:00.000Z",
         message: { state: "sent", at: "2026-10-06T14:00:05.000Z", failureCode: null },
       },
       resendAvailableAt: "2026-10-06T14:10:00.000Z",
@@ -166,6 +167,74 @@ describe("a booking's waivers", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Send again to Ben Waiting" }));
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
     await screen.findByText("It has been sent 5 times, the most a waiver request can be.");
+  });
+
+  it("sends a refused resend's next try with a new key, and a lost answer's with the same", async () => {
+    let answers = [
+      () =>
+        json(409, { error: { code: "waiver_resend_rate_limited", message: "x", requestId: "r" } }),
+      () => json(503, { error: { code: "unavailable", message: "x", requestId: "r" } }),
+      () => json(201, { delivery: { generation: 2, queuedAt: "2026-10-06T16:00:00.000Z" } }),
+    ];
+    const calls = stubApi((url) => {
+      if (!url.endsWith("/resend")) return json(200, { waivers });
+      const [next, ...rest] = answers;
+      answers = rest;
+      return (next ?? answers[0] ?? (() => json(500, {})))();
+    });
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={owner}
+        timeZone="America/New_York"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Send again to Ben Waiting" }));
+    const send = () => fireEvent.click(screen.getByRole("button", { name: "Send again" }));
+    send();
+    await screen.findByText(/has reached its sending limit for now/);
+    send();
+    await screen.findByText("TideGrid didn't send it. Try again in a moment.");
+    send();
+    // The notice sits under the person who was sent again.
+    const items = await screen.findAllByRole("listitem");
+    await within(items[1] as HTMLElement).findByText("Sent again");
+    const keys = calls
+      .filter((c) => c.url.endsWith("/resend"))
+      .map((c) => new Headers(c.init?.headers).get("Idempotency-Key"));
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).not.toBe(keys[0]);
+    expect(keys[2]).toBe(keys[1]);
+  });
+
+  it("says why a held email has no working link, and names a minor apart from the tag", async () => {
+    stubApi(() =>
+      json(200, {
+        waivers: {
+          ...waivers,
+          participants: [
+            { ...participant("Hal Held", "email_held", {}, 1), minor: true },
+            participant("Ben Waiting", "waiting", {}, 2),
+          ],
+        },
+      }),
+    );
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={owner}
+        timeZone="America/New_York"
+      />,
+    );
+    const [hal] = await screen.findAllByRole("listitem");
+    const row = within(hal as HTMLElement);
+    expect(row.getByText("Email on hold")).toBeTruthy();
+    expect(row.getByText(/has no working link yet/)).toBeTruthy();
+    expect((hal as HTMLElement).querySelector(".wv-item__name")?.textContent).toBe(
+      "Hal Held, Minor",
+    );
   });
 });
 

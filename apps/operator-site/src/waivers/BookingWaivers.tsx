@@ -53,7 +53,7 @@ export function BookingWaiversCard({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [resending, setResending] = useState<ParticipantWaiver | null>(null);
-  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [sent, setSent] = useState<{ participantId: string; recipient: string } | null>(null);
 
   useEffect(() => {
     void attempt;
@@ -70,6 +70,14 @@ export function BookingWaiversCard({
   }, [tenantId, bookingId, attempt]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
+
+  // After a resend, read again once the delivery job has had a moment, so the
+  // row says the email went out rather than that it is queued.
+  useEffect(() => {
+    if (!sent) return;
+    const timer = setTimeout(reload, 3000);
+    return () => clearTimeout(timer);
+  }, [sent, reload]);
 
   return (
     <section className="console-card wv-card" aria-labelledby="wv-booking-title">
@@ -107,17 +115,12 @@ export function BookingWaiversCard({
           tenantId={tenantId}
           role={role}
           timeZone={timeZone}
+          sent={sent}
           onResend={(p) => {
-            setSentTo(null);
+            setSent(null);
             setResending(p);
           }}
         />
-      )}
-      {sentTo && (
-        <Notice tone="success" title="Sent again">
-          A new waiver email is on its way to {sentTo}. The earlier link stops working when it
-          arrives.
-        </Notice>
       )}
       {resending?.request && (
         <ResendDialog
@@ -125,7 +128,10 @@ export function BookingWaiversCard({
           participant={resending}
           onClose={() => setResending(null)}
           onSent={() => {
-            setSentTo(resending.request?.delivery?.recipient ?? "the guest");
+            setSent({
+              participantId: resending.participantId,
+              recipient: resending.request?.delivery?.recipient ?? "the guest",
+            });
             setResending(null);
             reload();
           }}
@@ -140,12 +146,15 @@ function WaiverList({
   tenantId,
   role,
   timeZone,
+  sent,
   onResend,
 }: {
   waivers: BookingWaivers;
   tenantId: string;
   role: StaffRole;
   timeZone: string;
+  /** The person just sent again, for a notice under their row. */
+  sent: { participantId: string; recipient: string } | null;
   onResend: (participant: ParticipantWaiver) => void;
 }) {
   const signed = waivers.participants.filter((p) => p.status === "signed").length;
@@ -168,7 +177,7 @@ function WaiverList({
         <ul className="wv-list">
           {waivers.participants.map((p) => {
             const status = waiverStatuses[p.status];
-            const delivery = deliveryText(p);
+            const delivery = deliveryText(p, (iso) => instantText(iso, timeZone), now);
             const resend = resendState(p, now);
             const signedBy = p.request?.signed;
             return (
@@ -176,7 +185,12 @@ function WaiverList({
                 <div className="wv-item__head">
                   <span className="wv-item__name">
                     {p.name}
-                    {p.minor && <span className="wv-tag">Minor</span>}
+                    {p.minor && (
+                      <>
+                        <VisuallyHidden>, </VisuallyHidden>
+                        <span className="wv-tag">Minor</span>
+                      </>
+                    )}
                   </span>
                   <StatusBadge tone={status.tone} icon={status.icon}>
                     {status.label}
@@ -194,6 +208,12 @@ function WaiverList({
                   </p>
                 )}
                 {!signedBy && delivery && <p className="wv-item__line wv-muted">{delivery}</p>}
+                {p.status === "email_held" && (
+                  <p className="wv-item__line wv-muted">
+                    The booking's current address has no working link yet: a sending limit held it,
+                    or the address was removed and added back.
+                  </p>
+                )}
                 {p.status === "no_address" && (
                   <p className="wv-item__line wv-muted">
                     It goes out as soon as the booking has an address for{" "}
@@ -224,6 +244,12 @@ function WaiverList({
                     )}
                   </div>
                 )}
+                {sent?.participantId === p.participantId && (
+                  <Notice tone="success" title="Sent again">
+                    A new waiver email is on its way to {sent.recipient}. The earlier link stops
+                    working when it arrives.
+                  </Notice>
+                )}
               </li>
             );
           })}
@@ -248,7 +274,9 @@ function ResendDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | undefined>();
-  // One key per resend; the same key again when this resend is retried.
+  // One key per resend; the same key again when this resend is retried after
+  // no answer, and a new one after the API refused it, since a refusal is the
+  // stored answer for its key.
   const key = useRef(newResendKey());
   const input = useRef<HTMLInputElement>(null);
   const requestId = participant.request?.id ?? "";
@@ -268,7 +296,10 @@ function ResendDialog({
     const result = await resendWaiver(tenantId, requestId, trimmed, key.current);
     setBusy(false);
     if (result.kind === "sent") onSent();
-    else setError(resendFailureText(result.reason));
+    else {
+      if (result.final) key.current = newResendKey();
+      setError(resendFailureText(result.reason));
+    }
   };
 
   return (
@@ -297,7 +328,7 @@ function ResendDialog({
         <TextField
           ref={input}
           label="Reason"
-          hint="Recorded in the booking's history"
+          hint="Kept in the waiver's audit record"
           maxLength={500}
           value={reason}
           error={fieldError}

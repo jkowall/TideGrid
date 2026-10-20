@@ -22,21 +22,40 @@ export interface WaiverEmailInput {
   kind: "initial" | "resend";
 }
 
+/**
+ * Text cut to `max` characters, ending in an ellipsis when cut, so a line
+ * built from guest and operator names always fits the messaging module's
+ * limits (200 characters for a subject, a preview, or a heading).
+ */
+export function elide(text: string, max: number): string {
+  const chars = [...text];
+  if (chars.length <= max) return text;
+  return `${chars
+    .slice(0, max - 1)
+    .join("")
+    .trimEnd()}\u2026`;
+}
+
 export function waiverRequestEmail(input: WaiverEmailInput): EmailContent {
   const guardian = input.requiredSigner === "guardian";
+  // Names are up to 120 characters each; these bounds keep every one-line
+  // field under 200 whatever the booking holds.
+  const who = elide(input.participantName, 60);
+  const trip = elide(input.trip.name, 80);
+  const operator = elide(input.operatorName, 80);
   const lasts =
     input.linkDays >= 1
       ? `${input.linkDays} day${input.linkDays === 1 ? "" : "s"}`
       : "a short time before the trip";
   return {
-    subject: guardian
-      ? `Sign the waiver for ${input.participantName}: ${input.trip.name}`
-      : `Sign your waiver for ${input.trip.name}`,
-    preview: `${input.operatorName} needs a signed waiver before ${input.trip.when}.`,
+    subject: guardian ? `Sign the waiver for ${who}: ${trip}` : `Sign your waiver for ${trip}`,
+    preview: `${operator} needs a signed waiver before ${elide(input.trip.when, 80)}.`,
     blocks: [
       {
         kind: "heading",
-        text: guardian ? `A waiver for ${input.participantName}` : "Your waiver is ready to sign",
+        text: guardian
+          ? `A waiver for ${elide(input.participantName, 120)}`
+          : "Your waiver is ready to sign",
       },
       {
         kind: "paragraph",

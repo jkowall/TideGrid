@@ -536,7 +536,8 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
     // Ten minutes later (moved back by the owner, with the guard off for that statement only).
     await admin.begin(async (tx) => {
       await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
-      await tx`update public.waiver_deliveries set created_at = created_at - interval '11 minutes'
+      await tx`update public.waiver_deliveries set created_at = created_at - interval '11 minutes',
+                      send_after = send_after - interval '11 minutes'
                 where request_id = ${requestId}`;
       await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
     });

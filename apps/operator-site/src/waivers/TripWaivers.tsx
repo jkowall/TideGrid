@@ -1,5 +1,11 @@
 import type { TripWaiversResponse } from "@tidegrid/contracts";
-import { Button, Notice, Skeleton, StatusBadge } from "@tidegrid/design-system/components";
+import {
+  Button,
+  Notice,
+  Skeleton,
+  StatusBadge,
+  VisuallyHidden,
+} from "@tidegrid/design-system/components";
 import { useEffect, useState } from "react";
 import type { ReadFailure } from "../http.ts";
 import { loadTripWaivers } from "./api.ts";
@@ -108,7 +114,12 @@ function TripWaiverList({ trip }: { trip: TripWaiversResponse }) {
                     <li key={p.participantId}>
                       <span>
                         {p.name}
-                        {p.minor && <span className="wv-tag">Minor</span>}
+                        {p.minor && (
+                          <>
+                            <VisuallyHidden>, </VisuallyHidden>
+                            <span className="wv-tag">Minor</span>
+                          </>
+                        )}
                       </span>
                       <StatusBadge tone={status.tone} icon={status.icon}>
                         {status.label}
