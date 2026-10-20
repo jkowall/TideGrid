@@ -95,7 +95,8 @@ describe("one booking", () => {
     const heading = await loaded();
     expect(text(heading)).toBe("Booking QKG6ERBF");
     expect(text(container.querySelector(".tg-eyebrow"))).toBe(tenantName);
-    expect(calls).toHaveLength(1);
+    // The booking once; its notes are read on their own (G2.12c).
+    expect(calls.filter((c) => !c.path.endsWith("/notes"))).toHaveLength(1);
     expect(calls[0]?.path).toBe(
       `/api/v1/staff/tenants/${membership("owner").tenantId}/bookings/${bookingId}`,
     );
@@ -181,7 +182,7 @@ describe("one booking", () => {
     // The note takes the guest's place, and says why.
     const guest = card("Guest");
     expect(text(guest.querySelector(".bd-hidden"))).toBe(
-      "Not shown to your role, finance. Owners and booking staff see the guest's name and email.",
+      "Not shown to your role, finance. Owners and booking staff see the guest's name and email, and the booking's notes.",
     );
     expect(Object.keys(terms(guest))).toEqual(["Party", "Extras"]);
     expect(screen.queryByText("Booked by")).toBeNull();
@@ -194,6 +195,28 @@ describe("one booking", () => {
     expect(ledger().at(-2)).toEqual(["Total", "", "$131.09"]);
     expect(within(card("Trip")).queryByRole("link", { name: "Roster" })).toBeNull();
     expect(within(card("Trip")).getByRole("link", { name: "Bookings on this trip" })).toBeTruthy();
+  });
+
+  it.each(["owner", "booking_staff"] as const)(
+    "gives %s the booking's notes, read once, last on the page",
+    async (role) => {
+      const calls = api({ [route.booking(bookingId)]: answer(role) });
+      renderDetail(role);
+      await loaded();
+      const notes = await screen.findByRole("heading", { level: 2, name: "Notes" });
+      expect(notes.closest("section")?.querySelector("textarea")).not.toBeNull();
+      expect(calls.filter((c) => c.path.endsWith("/notes"))).toHaveLength(1);
+    },
+  );
+
+  it("gives finance no notes panel, and asks the API for no notes (owner decision, 2026-10-19)", async () => {
+    const calls = api({ [route.booking(bookingId)]: answer("finance") });
+    renderDetail("finance");
+    await loaded();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(screen.queryByRole("heading", { name: "Notes" })).toBeNull();
+    expect(document.querySelector(".bd-notes, textarea")).toBeNull();
+    expect(calls.filter((c) => c.path.endsWith("/notes"))).toEqual([]);
   });
 
   it("shows a charter's guests and what was sold, with no ticket list", async () => {

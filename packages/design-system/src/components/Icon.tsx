@@ -195,6 +195,13 @@ const paths = {
       <path d="M7 14h10v6.5H7Z" />
     </>
   ),
+  // Console completion (G2.12c): the day's CSV export.
+  download: (
+    <>
+      <path d="M12 3.5v11.5m-4.5-4.5 4.5 4.5 4.5-4.5" />
+      <path d="M4 16.5v2A2 2 0 0 0 6 20.5h12a2 2 0 0 0 2-2v-2" />
+    </>
+  ),
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof paths;

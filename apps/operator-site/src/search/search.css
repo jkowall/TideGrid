@@ -1,0 +1,161 @@
+/*
+ * Booking search (G2.12c), on the dark console tokens. A result is a card on
+ * a phone and a row on a wide screen, with the reference leading as it does
+ * on the day's list. Status is a badge with an icon and a label.
+ */
+
+.bs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+  max-width: 72rem;
+}
+
+/* The form ------------------------------------------------------------------ */
+
+.bs-form form {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 44rem;
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.bs-dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  /* A field with an error grows; the field beside it keeps its height and line. */
+  align-items: start;
+  gap: var(--space-2) var(--space-4);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.bs-dates legend {
+  grid-column: 1 / -1;
+  margin-bottom: var(--space-2);
+  padding: 0;
+}
+/* The fields under the legend name their part of the range. */
+.bs-dates .tg-field__label {
+  font-weight: var(--weight-medium);
+  color: var(--text-body);
+}
+.bs-dates .tg-field__input {
+  font-variant-numeric: tabular-nums;
+}
+.bs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+@media (max-width: 29.99rem) {
+  .bs-actions > .tg-button {
+    flex: 1 1 auto;
+  }
+}
+
+/* Results ---------------------------------------------------------------------- */
+
+.bs-results {
+  display: grid;
+  gap: var(--space-3);
+}
+.bs-results__title {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+.bs-results__title:focus {
+  outline: none;
+}
+/* What was searched: the field above may hold other terms by now. */
+.bs-results__terms {
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.bs-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bs-item {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.bs-item__ref {
+  justify-self: start;
+}
+.bs-item__trip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+  margin: 0;
+  color: var(--text-strong);
+}
+.bs-item__when {
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+/* The trip on its own line under when, whatever its length. */
+.bs-item__product {
+  flex-basis: 100%;
+}
+.bs-item__meta {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.bs-item__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+.bs-item__booker {
+  grid-column: span 2;
+}
+@media (max-width: 29.99rem) {
+  .bs-item__booker {
+    grid-column: 1 / -1;
+  }
+}
+.bs-item__email {
+  overflow-wrap: anywhere;
+}
+.bs-item__status {
+  grid-column: 1 / -1;
+}
+@media (min-width: 64rem) {
+  .bs-item {
+    grid-template-columns: 8rem minmax(0, 1.4fr) minmax(0, 2fr);
+    align-items: start;
+    column-gap: var(--space-4);
+  }
+  .bs-item__ref {
+    margin-block: calc((var(--tap-min) - 1.5rem) / -2);
+  }
+  .bs-item__facts {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr) minmax(0, 0.8fr);
+  }
+  .bs-item__booker {
+    grid-column: auto;
+  }
+  .bs-item__status {
+    grid-column: 1 / -1;
+  }
+}
+.bs-list--skeleton .tg-skeleton {
+  --surface-sunken: #34403b;
+  --surface-raised: #4a5852;
+}

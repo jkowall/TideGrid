@@ -25,7 +25,7 @@ import {
 } from "@tidegrid/design-system/format";
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { bookingsHref } from "../bookings/model.ts";
-import { ConsoleLink } from "../navigation.tsx";
+import { ConsoleLink, hereAddress } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canChangeTrips, roleNames } from "../roles.ts";
 import { ActionDialog } from "./ActionDialog.tsx";
@@ -445,7 +445,7 @@ function WeekFailed({
   let action: ReactNode;
   if (reason === "signed_out") {
     action = (
-      <ButtonLink variant="primary" icon="arrow-left" href="/">
+      <ButtonLink variant="primary" icon="arrow-left" href={hereAddress()}>
         Sign in again
       </ButtonLink>
     );

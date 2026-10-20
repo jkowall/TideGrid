@@ -15,12 +15,12 @@ import {
   todayIn,
   zoneCity,
 } from "@tidegrid/design-system/format";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
-import { canSeeGuests, roleNames } from "../roles.ts";
+import { canSeeGuests, canUseNotes, roleNames } from "../roles.ts";
 import { loadBooking } from "./api.ts";
 import { MaskedReference } from "./MaskedReference.tsx";
 import {
@@ -39,6 +39,7 @@ import {
   rosterHref,
   timelineLabel,
 } from "./model.ts";
+import { Notes } from "./Notes.tsx";
 import { canRetry, ReadFailed } from "./States.tsx";
 
 /**
@@ -153,7 +154,22 @@ export function BookingDetailPage({
           />
         ))}
       {booking && (
-        <Detail booking={booking} seesGuests={canSeeGuests(role)} roleName={roleNames[role]} />
+        <Detail
+          booking={booking}
+          seesGuests={canSeeGuests(role)}
+          roleName={roleNames[role]}
+          notes={
+            // Finance holds no notes.read: no panel, and no request for one.
+            canUseNotes(role) ? (
+              <Notes
+                tenantId={tenantId}
+                tenantName={tenantName}
+                bookingId={booking.id}
+                zone={booking.trip.timeZone}
+              />
+            ) : null
+          }
+        />
       )}
     </>
   );
@@ -163,10 +179,13 @@ function Detail({
   booking,
   seesGuests,
   roleName,
+  notes,
 }: {
   booking: BookingDetail;
   seesGuests: boolean;
   roleName: string;
+  /** The booking's internal notes (G2.12c), last on the page; none for finance. */
+  notes: ReactNode;
 }) {
   const { trip, location } = booking;
   const zone = trip.timeZone;
@@ -253,7 +272,7 @@ function Detail({
               <Icon name="eye-off" />
               <span>
                 Not shown to your role, {roleName}. Owners and booking staff see the guest's name
-                and email.
+                and email, and the booking's notes.
               </span>
             </p>
           )}
@@ -385,6 +404,8 @@ function Detail({
             ))}
           </ol>
         </section>
+
+        {notes}
       </div>
     </div>
   );

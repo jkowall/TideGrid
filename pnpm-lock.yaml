@@ -278,6 +278,9 @@ importers:
 
   packages/domain-booking:
     dependencies:
+      '@tidegrid/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@tidegrid/database':
         specifier: workspace:*
         version: link:../database

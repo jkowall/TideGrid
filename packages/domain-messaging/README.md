@@ -1,6 +1,6 @@
 # @tidegrid/domain-messaging
 
-Transactional email for the demo build: a provider-neutral email adapter, a fake provider, branded templates, and outbox-driven delivery (the G2.16 demo shim, lane 1). The design authority is [product scope: transactional email](../../docs/v2/02-product-scope.md#transactional-email-sms-and-replies), [the target architecture](../../docs/v2/04-architecture.md#messaging) (provider-neutral adapter, versioned templates, recorded delivery outcome) and its [retained invariants](../../docs/v2/04-architecture.md#retained-invariants) (domain state and outbox records commit together; external calls never hold a database lock). Tables are in migration `0008_self_service_and_email.sql` and follow the [tenancy contract](../database/README.md).
+Transactional email for the demo build: a provider-neutral email adapter, a fake provider, branded templates, and outbox-driven delivery (the G2.16 demo shim, lane 1). The design authority is [product scope: transactional email](../../docs/v2/02-product-scope.md#transactional-email-sms-and-replies), [the target architecture](../../docs/v2/04-architecture.md#messaging) (provider-neutral adapter, versioned templates, recorded delivery outcome) and its [retained invariants](../../docs/v2/04-architecture.md#retained-invariants) (domain state and outbox records commit together; external calls never hold a database lock). Tables are in migration `0009_self_service_and_email.sql` and follow the [tenancy contract](../database/README.md).
 
 ## The email shim is the demo's email
 

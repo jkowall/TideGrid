@@ -44,6 +44,8 @@ describe("which page an address names", () => {
     ["/", { kind: "overview" }],
     ["/calendar", { kind: "calendar" }],
     ["/bookings", { kind: "bookings" }],
+    // G2.12c: the search page, which carries no terms in its address.
+    ["/bookings/search", { kind: "search" }],
     [`/bookings/${booking}`, { kind: "booking", bookingId: booking }],
     ["/bookings/not-a-uuid", { kind: "not_found" }],
     ["/exceptions", { kind: "exceptions" }],
@@ -68,6 +70,9 @@ describe("which page an address names", () => {
     `/bookings/${booking}x`,
     "/bookings/1",
     "/bookings/%20",
+    "/bookings/search/x",
+    "/bookings/Search",
+    "/search",
     "/trips/not-a-uuid/roster",
     `/trips/${sunset}`,
     `/trips/${sunset}/roster/extra`,
@@ -184,6 +189,12 @@ describe("the navigation", () => {
       "Bookings",
       "Bookings",
       { Overview: none, Calendar: none, Bookings: "page", Exceptions: none },
+    ],
+    [
+      "/bookings/search",
+      "Search bookings",
+      "Search bookings",
+      { Overview: none, Calendar: none, Bookings: "true", Exceptions: none },
     ],
     [
       `/bookings/${booking}`,

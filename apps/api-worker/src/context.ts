@@ -39,4 +39,9 @@ export interface AppDeps {
   emailProvider?: (db: Kysely<Database>, env: Bindings) => EmailProvider | null;
   /** False keeps committed mail queued for the test to deliver; default true. */
   deliverEmailAfterCommit?: boolean;
+  /**
+   * The most bookings one day's totals or export holds (G2.12c). Production
+   * keeps the domain's limit; tests lower it to reach `day_too_large`.
+   */
+  dayReportLimit?: number;
 }

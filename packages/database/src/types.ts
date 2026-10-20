@@ -884,7 +884,29 @@ interface SelfServiceTables {
   fake_email_deliveries: FakeEmailDeliveriesTable;
 }
 
-export interface Database extends PricingTables, CheckoutTables, SelfServiceTables {
+// Console completion (G2.12c) ------------------------------------------------------
+
+/**
+ * An internal note on a booking. Append-only for every role; a trigger sets
+ * the author, request, and time from the transaction, so an insert names only
+ * the tenant, the booking, and the body.
+ */
+export interface BookingNotesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  body: Fixed<string>;
+  author_user_id: ColumnType<string, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+  created_at: CreatedAt;
+}
+
+/** Tables added by the console completion migration (G2.12c), merged into Database below. */
+interface ConsoleTables {
+  booking_notes: BookingNotesTable;
+}
+
+export interface Database extends PricingTables, CheckoutTables, ConsoleTables, SelfServiceTables {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
   tenant_hostnames: TenantHostnamesTable;

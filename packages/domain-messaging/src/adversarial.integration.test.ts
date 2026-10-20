@@ -1,7 +1,7 @@
 /**
  * Adversarial suite for transactional email delivery (lane 1, the G2.16 demo
  * shim), against packages/domain-messaging/README.md ("Enqueueing a message",
- * "Message status", "Delivery", "The fake provider") and migration 0008.
+ * "Message status", "Delivery", "The fake provider") and migration 0009.
  *
  * Invariants under attack: a message is enqueued once per key and tenant; it
  * is sent once, with its id as the provider's idempotency key; a temporary

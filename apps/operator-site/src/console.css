@@ -367,12 +367,12 @@
   font-weight: var(--weight-semibold);
   color: var(--text-strong);
 }
+/* The whole address, wrapped where it must (G2.12c): a cut-off address could
+   be someone else's, and the rail is where a person checks who they are. */
 .console-rail__email {
-  overflow: hidden;
   font-size: var(--text-sm);
   color: var(--text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 /* Content ---------------------------------------------------------------------- */

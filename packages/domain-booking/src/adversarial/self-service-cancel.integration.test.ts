@@ -1,7 +1,7 @@
 /**
  * Adversarial suite for cancellation within policy (lane 1, G2.11c), against
  * the contract in packages/domain-booking/README.md ("Cancellation within
- * policy", "Lock order") and migration 0008. A booking is canceled once, with
+ * policy", "Lock order") and migration 0009. A booking is canceled once, with
  * exactly one cancellation row, one refund row for the computed amount (basis
  * points of what was paid, half up), its hold released, and one cancellation
  * email. A late or duplicate payment event for a canceled booking changes

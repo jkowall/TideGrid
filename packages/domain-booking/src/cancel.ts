@@ -10,7 +10,7 @@
  * the booking canceled, the refund row for the computed amount, the booking's
  * confirmed hold released so the seats return to sale, audit and events, the
  * cancellation email, and the bookingCanceled hook. The database checks every
- * term again (migration 0008). After commit the caller sends the refund
+ * term again (migration 0009). After commit the caller sends the refund
  * through the payment adapter with `settleRefund`; the checkout sweep resends
  * one whose outcome is unknown.
  *

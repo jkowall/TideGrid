@@ -9,6 +9,7 @@ import {
 } from "@tidegrid/design-system/components";
 import { formatCutoff, formatDate } from "@tidegrid/design-system/format";
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { hereAddress } from "../navigation.tsx";
 import { changeSalesState, newIdempotencyKey } from "./api.ts";
 import {
   type ActionFailure,
@@ -117,7 +118,7 @@ export function ActionDialog({
   const footer = finished ? (
     problem.signIn ? (
       <>
-        <ButtonLink ref={signIn} variant="primary" icon="arrow-left" href="/">
+        <ButtonLink ref={signIn} variant="primary" icon="arrow-left" href={hereAddress()}>
           Sign in again
         </ButtonLink>
         <Button onClick={onClose}>Back to calendar</Button>

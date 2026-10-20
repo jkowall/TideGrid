@@ -1,7 +1,7 @@
 /**
  * Adversarial suite for accountless access (lane 1, G2.11c and the G2.16
  * email shim), against packages/domain-messaging/README.md ("Access links in
- * email", "Access links and guest sessions", "Delivery") and migration 0008.
+ * email", "Access links and guest sessions", "Delivery") and migration 0009.
  *
  * Invariants under attack: a link token is stored only as a SHA-256 hash; it
  * is consumed once, atomically, only by an explicit redemption; another
