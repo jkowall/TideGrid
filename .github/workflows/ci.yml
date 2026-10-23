@@ -34,13 +34,29 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    # Same-repository pull requests only: forks cannot read secrets, and the
-    # job must fail rather than skip when the key is missing.
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event_name == 'pull_request' }}
+    # A disposable PostgreSQL 17 container per run, so CI spends no Neon
+    # quota. The image's admin role creates tidegrid_app through migration
+    # 0001, as on Neon, and the image ships btree_gist with contrib.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tidegrid
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tidegrid"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       CI: "true"
-      # Integration suites rotate tidegrid_app's password; this job's branch is disposable.
+      # Integration suites rotate tidegrid_app's password; this database is disposable.
       TIDEGRID_EPHEMERAL_DB: "1"
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tidegrid
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -49,25 +65,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Create expiring Neon branch
-        id: branch
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-        run: |
-          test -n "$NEON_API_KEY" || { echo "NEON_API_KEY secret is not set"; exit 1; }
-          out=$(pnpm --filter @tidegrid/database --silent neon:branch create "ci-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}")
-          echo "::add-mask::$(echo "$out" | jq -r .connectionString)"
-          echo "branch_id=$(echo "$out" | jq -r .branchId)" >> "$GITHUB_OUTPUT"
-          echo "DATABASE_URL=$(echo "$out" | jq -r .connectionString)" >> "$GITHUB_ENV"
       - name: Migrate, seed, and run integration tests
         run: |
           pnpm db:migrate
           pnpm db:seed
           pnpm test:integration
-      - name: Delete Neon branch
-        if: ${{ always() && steps.branch.outputs.branch_id != '' }}
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
-        run: pnpm --filter @tidegrid/database --silent neon:branch delete "${{ steps.branch.outputs.branch_id }}"
