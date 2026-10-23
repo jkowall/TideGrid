@@ -1,7 +1,7 @@
 /**
  * Integration-test harness (Node only). Integration suites run against a
- * throwaway Neon branch: they migrate it, rotate the runtime role's password
- * on that branch, and connect twice, once as the admin role for fixtures and
+ * throwaway database, a disposable PostgreSQL or a Neon branch: they migrate
+ * it, rotate the runtime role's password on it, and connect twice, once as the admin role for fixtures and
  * once as tidegrid_app so row-level security is exercised for real.
  */
 import postgres from "postgres";
@@ -29,7 +29,7 @@ export function integrationAdminUrl(): string | null {
   }
   if (process.env.TIDEGRID_EPHEMERAL_DB !== "1") {
     throw new Error(
-      "Integration suites rotate the runtime role password. Point DATABASE_URL at a throwaway Neon branch and set TIDEGRID_EPHEMERAL_DB=1.",
+      "Integration suites rotate the runtime role password. Point DATABASE_URL at a throwaway database (a disposable PostgreSQL or a Neon branch) and set TIDEGRID_EPHEMERAL_DB=1.",
     );
   }
   return url;
