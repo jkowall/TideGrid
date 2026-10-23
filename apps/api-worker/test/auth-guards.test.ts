@@ -206,6 +206,16 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/booking-day-totals",
         "/v1/staff/tenants/{tenantId}/booking-day-export",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes",
+        // Waiver evidence (G2.15).
+        "/v1/public/waiver-sessions",
+        "/v1/public/waiver-sessions/current",
+        "/v1/public/waiver-sessions/current/signature",
+        "/v1/public/waiver-sessions/current/document",
+        "/v1/public/manage/waivers",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/waivers",
+        "/v1/staff/tenants/{tenantId}/trips/{tripId}/waivers",
+        "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend",
+        "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are
@@ -217,6 +227,8 @@ describe("contract", () => {
       // The guest's booking session (lane 1, G2.11c).
       "manageSession",
       "sessionCookie",
+      // The guest's waiver signing session (G2.15).
+      "waiverSession",
     ]);
   });
 });

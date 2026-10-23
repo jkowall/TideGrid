@@ -21,6 +21,7 @@ import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, canUseNotes, roleNames } from "../roles.ts";
+import { BookingWaiversCard } from "../waivers/BookingWaivers.tsx";
 import { loadBooking } from "./api.ts";
 import { MaskedReference } from "./MaskedReference.tsx";
 import {
@@ -169,6 +170,17 @@ export function BookingDetailPage({
               />
             ) : null
           }
+          waivers={
+            // Waivers (G2.15): a self-contained card, for roles that see guests.
+            canSeeGuests(role) ? (
+              <BookingWaiversCard
+                tenantId={tenantId}
+                bookingId={booking.id}
+                role={role}
+                timeZone={booking.trip.timeZone}
+              />
+            ) : null
+          }
         />
       )}
     </>
@@ -180,12 +192,15 @@ function Detail({
   seesGuests,
   roleName,
   notes,
+  waivers,
 }: {
   booking: BookingDetail;
   seesGuests: boolean;
   roleName: string;
   /** The booking's internal notes (G2.12c), last on the page; none for finance. */
   notes: ReactNode;
+  /** The party's waivers (G2.15), before the notes; none for finance. */
+  waivers: ReactNode;
 }) {
   const { trip, location } = booking;
   const zone = trip.timeZone;
@@ -405,6 +420,7 @@ function Detail({
           </ol>
         </section>
 
+        {waivers}
         {notes}
       </div>
     </div>

@@ -140,16 +140,25 @@ describe("a roster", () => {
     expectNoPersonalDataInAddresses();
   });
 
-  it("says the names are as guests give them and waivers are not on it yet, rather than printing empty columns", async () => {
+  it("says the names are as guests give them and waivers follow the roster, rather than printing empty columns", async () => {
     api({ [route.roster(tripId)]: () => json(rosterBody()) });
     const { container } = renderPage("owner");
     await loaded();
     const notice = container.querySelector(".roster-notice") as HTMLElement;
     expect(text(notice.querySelector(".tg-notice__title"))).toBe(
-      "Names as guests give them; no waivers yet",
+      "Names as guests give them; waivers follow the roster",
     );
     expect(text(notice)).toMatch(/A place not named yet counts in the party only\./);
-    expect(text(notice)).toMatch(/Waiver status arrives with a later build\./);
+    expect(text(notice)).toMatch(
+      /Each person's waiver status is under Waivers, after the roster, and prints with it\./,
+    );
+    // The trip's waiver card follows the sheet, outside it.
+    const card = await screen.findByRole("region", { name: "Waivers" });
+    expect(container.querySelector(".roster")?.contains(card)).toBe(false);
+    expect(
+      container.querySelector(".roster")?.compareDocumentPosition(card) ===
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(true);
     // No announcement of its own: it is part of the page from the start.
     expect(notice.getAttribute("role")).toBeNull();
     // And no column for either.

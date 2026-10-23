@@ -1,0 +1,30 @@
+{
+  "name": "@tidegrid/domain-waivers",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/test-fixtures.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@tidegrid/database": "workspace:*",
+    "@tidegrid/domain-booking": "workspace:*",
+    "@tidegrid/domain-messaging": "workspace:*",
+    "kysely": "^0.29.0"
+  },
+  "devDependencies": {
+    "@tidegrid/domain-inventory": "workspace:*",
+    "@tidegrid/domain-payments": "workspace:*",
+    "@tidegrid/domain-pricing": "workspace:*",
+    "@types/node": "^24.0.0",
+    "postgres": "^3.4.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0"
+  }
+}

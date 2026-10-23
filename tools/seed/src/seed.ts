@@ -21,6 +21,7 @@ import { seedBrands } from "./brands.ts";
 import { seedCatalog } from "./catalog.ts";
 import { seedPaymentAccounts } from "./payments.ts";
 import { seedPricing } from "./pricing.ts";
+import { seedWaivers } from "./waivers.ts";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -106,6 +107,11 @@ try {
   const accounts = await seedPaymentAccounts(sql, demoTenants);
   console.log(
     `seeded fake payment accounts: ${accounts.created} new, ${accounts.existing} already present`,
+  );
+  // Waiver templates (G2.15): one per operator, and Demo Reef's dive waiver.
+  const waivers = await seedWaivers(url, demoTenants);
+  console.log(
+    `seeded waiver templates: ${waivers.templates} new templates, ${waivers.versions} new versions`,
   );
 
   const [summary] = await sql<{ tenants: number; staff: number; memberships: number }[]>`

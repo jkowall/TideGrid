@@ -26,7 +26,9 @@ export type Permission =
   | "payments.read"
   // Console completion (G2.12c).
   | "notes.read"
-  | "notes.write";
+  | "notes.write"
+  // Waivers (G2.15): send a participant's waiver request again.
+  | "waivers.manage";
 
 const matrix: Record<StaffRole, readonly Permission[]> = {
   owner: [
@@ -40,6 +42,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "payments.read",
     "notes.read",
     "notes.write",
+    "waivers.manage",
   ],
   booking_staff: [
     "catalog.read",
@@ -48,6 +51,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "payments.read",
     "notes.read",
     "notes.write",
+    "waivers.manage",
   ],
   finance: ["audit.read", "catalog.read", "payments.read"],
 };

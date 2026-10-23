@@ -475,6 +475,15 @@ export function stubManageApi(
   const apiOrigin = new URL(apiBase).origin;
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
+    // Waiver evidence (G2.15): the page's waiver card reads its own status.
+    // Answered here, as no waiver applying, and not recorded, so these tests
+    // see only the management page's own calls; the card has its own tests.
+    if ((init?.method ?? "GET") === "GET" && url.pathname === "/v1/public/manage/waivers") {
+      return new Response(
+        JSON.stringify({ waivers: { applies: false, unnamedPlaces: 0, participants: [] } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
     const call: ManageCall = {
       method: init?.method ?? "GET",
       url: String(input),

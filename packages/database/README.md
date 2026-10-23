@@ -124,6 +124,18 @@ The console completion migration (G2.12c, numbered 0008 on its branch) adds one 
 - **The body** is 1 to 500 characters with at least one visible character; line breaks are allowed and other control characters are not. The CHECK refuses every C0 control but the line break, DEL, and the C1 controls (U+0080 to U+009F), and wants one character outside white space, those controls, and the Unicode spaces, joiners, marks, fillers, and variation selectors that show nothing (the same set as the contract's `invisibleCharacters`). It is text a person typed: it never enters an audit row, an event, a log, or the idempotency store, whose kept answer to an added note holds the note's id, author, and time only.
 - **Who reads it.** Owners and booking staff hold `notes.read` and `notes.write`; finance holds neither (owner decision, 2026-10-19), as a note can name a guest. Row-level security keeps notes to their tenant; the role check is the API's.
 
+## Waiver evidence (G2.15)
+
+The waiver migration (`*_waivers.sql`, after the self-service migration) adds six tenant-owned tables under rules 1 to 10, described in the [waiver contract](../domain-waivers/README.md):
+
+- `waiver_templates` and `waiver_template_versions`: append-only for every role. A trigger numbers each version after the template's highest, keeps its effective start no earlier than now, and computes its content hash from the canonical text, so no writer chooses it.
+- `waiver_requests`: one per participant and version, live (pending or signed) at most once per participant and booking. Its participant is named with the booking in a composite key to `booking_participants`, so a request cannot pair one booking with another's guest. The runtime may UPDATE `state`, `revoked_reason`, and `superseded_by` only; a trigger enforces the one-way states and stamps their times, and a request becomes signed only with its evidence.
+- `waiver_deliveries`: append-only. A trigger numbers generations, holds the sending limits (5 generations per request, and `app.waiver_send_refusal`: 10 minutes between sends of one participant's waiver to one address, and caps per participant, address, booking, and tenant), keeps `send_after` no earlier than the insert, and requires the generation's own waiver message in `email_messages`, due no earlier than `send_after`.
+- `waiver_signing_sessions`: opened only by the redemption that consumed a waiver link in `guest_access_links` in the same transaction; afterwards the runtime may only revoke one (`revoked_at`, `revoked_reason`).
+- `waiver_evidence`: append-only for every role, the owner included. A trigger checks the request, session, signer, version, hash, and acknowledgments; a CHECK holds the PDF to its SHA-256; and at commit evidence stands only beside a signed request.
+
+One new function in schema `app` is callable by the runtime: `app.waiver_send_refusal`, a STABLE invoker function (`search_path` pinned, EXECUTE revoked from PUBLIC and granted to `tidegrid_app` only) that answers whether a waiver email may go now and, if not, when; the service asks it before sending, and the deliveries trigger calls it for every writer. It runs under the caller's row-level security. The waiver triggers run as the writer, under its row-level security, and filter by tenant explicitly.
+
 ## Tests
 
 - `pnpm test` runs unit tests.

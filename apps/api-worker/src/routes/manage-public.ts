@@ -444,7 +444,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     const { position } = c.req.valid("param");
     const input = c.req.valid("json");
     const key = c.req.valid("header")["idempotency-key"];
-    const { body, replayed } = await withManageSession(
+    const { body, replayed, ctx } = await withManageSession(
       c,
       {
         idempotency: {
@@ -483,6 +483,9 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       },
     );
     if (replayed) c.header("Idempotent-Replayed", "true");
+    // Waiver evidence (G2.15): naming or correcting a person can queue their
+    // waiver email through the booking hooks; send it now, not at the sweep.
+    else deliverAfterCommit(c, deps, ctx.tenantId);
     return c.json(body as ParticipantResponse, 200);
   });
 

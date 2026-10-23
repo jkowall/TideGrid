@@ -22,6 +22,7 @@ import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, roleNames } from "../roles.ts";
+import { TripWaiversCard } from "../waivers/TripWaivers.tsx";
 import { loadRoster } from "./api.ts";
 import {
   bookingsHref,
@@ -40,8 +41,8 @@ import { canRetry, ReadFailed } from "./States.tsx";
  * extras, and payment, the guest totals, and when and where to meet, on screen
  * and on paper. It is a booking-management view, not a passenger manifest:
  * each party lists the names its guests have given so far (lane 1, G2.11c),
- * and waivers are not on it yet, which the page says. Owners and booking staff
- * only, as the API.
+ * and each person's waiver status follows the roster in its own card (G2.15),
+ * which the page says. Owners and booking staff only, as the API.
  */
 
 type Load =
@@ -179,6 +180,8 @@ function Roster({
           />
         ))}
       {roster && <RosterSheet roster={roster} tenantName={tenantName} />}
+      {/* Waivers (G2.15): a self-contained card; this line is its only placement. */}
+      {roster && <TripWaiversCard tenantId={tenantId} tripId={tripId} />}
     </>
   );
 }
@@ -256,11 +259,12 @@ function RosterSheet({ roster, tenantName }: { roster: TripRoster; tenantName: s
         tone="info"
         announce="none"
         className="roster-notice"
-        title="Names as guests give them; no waivers yet"
+        title="Names as guests give them; waivers follow the roster"
       >
         <p>
           Each party lists the names its guests have added on their booking page so far. A place not
-          named yet counts in the party only. Waiver status arrives with a later build.
+          named yet counts in the party only. Each person's waiver status is under Waivers, after
+          the roster, and prints with it.
         </p>
       </Notice>
 
