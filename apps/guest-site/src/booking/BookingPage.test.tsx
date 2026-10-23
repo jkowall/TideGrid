@@ -167,8 +167,15 @@ describe("loading the trip", () => {
     renderPage();
     expect(await heading("We couldn't load this trip")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    const title = await screen.findByRole("heading", { level: 1, name: "Sunset Harbor Cruise" });
-    await waitFor(() => expect(document.activeElement).toBe(title));
+    // Look the heading up on each try, and allow a slow CI runner time for the
+    // load to settle and focus to move.
+    await waitFor(
+      () =>
+        expect(document.activeElement).toBe(
+          screen.getByRole("heading", { level: 1, name: "Sunset Harbor Cruise" }),
+        ),
+      { timeout: 3000 },
+    );
   });
 
   it("treats an offer that breaks the contract, or a zone this browser lacks, as a failed load", async () => {

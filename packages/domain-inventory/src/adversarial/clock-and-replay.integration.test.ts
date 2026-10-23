@@ -153,6 +153,10 @@ describe.skipIf(!env)("G2.6 adversarial clock, replay, and sweep checks", () => 
   };
   /** Let the expiry instant pass now, after any session that already started. */
   const passInstantNow = async (holdId: string) => {
+    // Let the clock move past every transaction already begun. A local
+    // database can begin one in the same millisecond as this update, and the
+    // tests compare instants as JavaScript Dates, which keep milliseconds only.
+    await sleep(5);
     await admin`update public.capacity_holds set expires_at = clock_timestamp() where id = ${holdId}`;
     await sleep(60);
   };
