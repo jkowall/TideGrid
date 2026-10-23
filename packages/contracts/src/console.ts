@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BookingPaymentStatus, BookingReference } from "./bookings.ts";
+import { BookingPaymentStatus, BookingReference, BookingState } from "./bookings.ts";
 import { TripSummary } from "./catalog.ts";
 
 /**
@@ -77,7 +77,7 @@ export type BookingSearchRequest = z.input<typeof BookingSearchRequest>;
 export const BookingSearchResult = z.object({
   id: Uuid,
   reference: BookingReference,
-  state: z.literal("confirmed"),
+  state: BookingState,
   confirmedAt: Instant,
   trip: TripSummary,
   booker: BookerContact,
@@ -115,8 +115,14 @@ export type BookingDayQuery = z.infer<typeof BookingDayQuery>;
 
 export const BookingDayTotals = z
   .object({
-    bookings: z.number().int().min(0).describe("Bookings on the day's trips"),
-    guests: z.number().int().min(0).describe("Guests across those bookings"),
+    bookings: z
+      .number()
+      .int()
+      .min(0)
+      .describe(
+        "Active bookings on the day's trips; a canceled booking counts in the money, not here",
+      ),
+    guests: z.number().int().min(0).describe("Guests across those active bookings"),
     gross: Cents.describe("Trip prices and paid extras, before discounts: the orders' subtotals"),
     discounts: Cents.describe("Promotion discounts, as a positive amount"),
     fees: Cents.describe("Mandatory fees"),

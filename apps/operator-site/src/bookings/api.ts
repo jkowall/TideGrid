@@ -1,4 +1,5 @@
 import type {
+  BookingCancellation,
   BookingDayTrip,
   BookingDetail,
   BookingDetailResponse,
@@ -55,6 +56,7 @@ const timelineKinds = new Set([
   "checkout_opened",
   "paid",
   "confirmed",
+  "canceled",
   "refund_requested",
   "refunded",
   "refund_failed",
@@ -104,6 +106,34 @@ export function isPaymentStatus(p: Partial<BookingPaymentStatus> | null | undefi
   return refund === null || (refundStates.has(refund?.state as string) && isInt(refund?.amount));
 }
 
+/** Confirmed, or canceled by its guest within policy (lane 1, G2.11c). */
+const isBookingState = (v: unknown): v is BookingDetail["state"] =>
+  v === "confirmed" || v === "canceled";
+
+const remedies = new Set(["full_refund", "percent_refund", "none"]);
+const cancelers = new Set(["guest", "staff", "system", "support"]);
+
+function isCancellation(c: Partial<BookingCancellation> | null | undefined): boolean {
+  return (
+    isInstant(c?.canceledAt) &&
+    cancelers.has(c?.by as string) &&
+    remedies.has(c?.remedy as string) &&
+    isInt(c?.refundBp) &&
+    isInt(c?.refundAmount) &&
+    isInt(c?.paidAmount) &&
+    isInstant(c?.cutoffAt) &&
+    typeof c?.beforeCutoff === "boolean" &&
+    isInt(c?.policyVersion)
+  );
+}
+
+/** A canceled booking says when and on what terms; a confirmed one says neither. */
+function isCanceledConsistently(b: Partial<BookingDetail>): boolean {
+  return b.state === "canceled"
+    ? isInstant(b.canceledAt) && isCancellation(b.cancellation)
+    : b.canceledAt === null && b.cancellation === null;
+}
+
 /** A booker, when present, has the fields the role was sent; absent is fine. */
 export function isBooker(b: unknown, withEmail: boolean): boolean {
   if (b === undefined) return true;
@@ -116,7 +146,7 @@ function isListItem(b: Partial<BookingListItem> | null | undefined): boolean {
     isString(b?.id) &&
     isString(b.reference) &&
     isString(b.tripId) &&
-    b.state === "confirmed" &&
+    isBookingState(b.state) &&
     isBooker(b.booker, false) &&
     isParty(b.party) &&
     isExtras(b.extras) &&
@@ -168,8 +198,9 @@ function isDetail(b: Partial<BookingDetail> | null | undefined): b is BookingDet
   return (
     isString(b?.id) &&
     isString(b.reference) &&
-    b.state === "confirmed" &&
+    isBookingState(b.state) &&
     isInstant(b.confirmedAt) &&
+    isCanceledConsistently(b) &&
     isTripSummary(b.trip) &&
     isInstant(b.trip?.endsAt) &&
     isOffsetDateTime(b.trip?.endsAtLocal) &&
@@ -272,7 +303,11 @@ function isRoster(r: Partial<TripRoster> | null | undefined): r is TripRoster {
         isString(b?.booker?.name) &&
         isParty(b?.party) &&
         isExtras(b?.extras) &&
-        isPaymentStatus(b?.payment),
+        isPaymentStatus(b?.payment) &&
+        Array.isArray(b?.participants) &&
+        b.participants.every(
+          (p) => isInt(p?.position) && isString(p?.name) && typeof p?.minor === "boolean",
+        ),
     )
   );
 }

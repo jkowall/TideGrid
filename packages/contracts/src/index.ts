@@ -186,5 +186,8 @@ export * from "./checkout.ts";
 export * from "./console.ts";
 // Capacity and holds (G2.6).
 export * from "./inventory.ts";
+// Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
+export * from "./participants.ts";
 export * from "./pricing.ts";
 export * from "./references.ts";
+export * from "./self-service.ts";

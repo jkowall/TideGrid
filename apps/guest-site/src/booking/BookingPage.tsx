@@ -80,6 +80,7 @@ import {
   Gone,
   Interrupted,
   LoadFailed,
+  type ManageFromCheckout,
   Stopped,
   stopTitle,
   Unfulfilled,
@@ -1734,6 +1735,7 @@ export function BookingPage({
               charter={trip.charter}
               paymentTried={live?.paymentTried ?? false}
               brand={brand}
+              manage={live ? { checkoutSessionId: live.sessionId, secret: live.secret } : null}
               busy={busy === "retry"}
               onRetry={() => {
                 if (load.kind === "ready") void retryAfterDecline();
@@ -1887,6 +1889,7 @@ function OutcomeFor({
   charter,
   paymentTried,
   brand,
+  manage,
   busy,
   onRetry,
   onChangeParty,
@@ -1898,6 +1901,8 @@ function OutcomeFor({
   charter: boolean;
   paymentTried: boolean;
   brand: PublicBrand;
+  /** The checkout that paid, while this page holds its secret (lane 1). */
+  manage: ManageFromCheckout | null;
   busy: boolean;
   onRetry: () => void;
   onChangeParty: () => void;
@@ -1906,7 +1911,9 @@ function OutcomeFor({
 }) {
   switch (session.state) {
     case "confirmed":
-      return summary ? <Confirmed summary={summary} brand={brand} headingRef={headingRef} /> : null;
+      return summary ? (
+        <Confirmed summary={summary} brand={brand} headingRef={headingRef} manage={manage} />
+      ) : null;
     case "failed":
       return (
         <Declined

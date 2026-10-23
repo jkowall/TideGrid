@@ -1,7 +1,10 @@
 import { createDb } from "@tidegrid/database";
 import { sweepCheckouts } from "@tidegrid/domain-booking";
 import { sweepExpiredHolds } from "@tidegrid/domain-inventory";
+import { sweepEmail } from "@tidegrid/domain-messaging";
 import { createLogger, newRequestId } from "@tidegrid/observability";
+import { bookingHooks } from "./booking-hooks.ts";
+import { deliverySettings, emailProvider, emailSettings, sendErrorAttributes } from "./email.ts";
 import { type Bindings, databaseUrl } from "./env.ts";
 import { paymentProvider } from "./payments.ts";
 
@@ -15,13 +18,17 @@ function errorAttributes(error: unknown): Record<string, unknown> {
 
 /**
  * Scheduled work for the API Worker, run by the cron trigger in wrangler.jsonc.
- * Two jobs, in order, on one connection:
+ * Three jobs, in order, on one connection:
  *
  * 1. The hold sweep expires capacity holds whose instant has passed, across
  *    tenants, one tenant transaction at a time.
  * 2. The checkout sweep (G2.7) expires open checkouts past their instant,
  *    processes inbox events a failed request left received, and sends refunds
- *    whose outcome is unknown again with their idempotency keys.
+ *    whose outcome is unknown again with their idempotency keys, a canceled
+ *    booking's refund included.
+ * 3. The email sweep (lane 1, the G2.16 shim) sends due messages, retries
+ *    temporary failures, and finishes attempts whose lease lapsed. Skipped
+ *    when email is off.
  *
  * Correctness never waits for either; they write the facts down, emit the
  * events, and finish interrupted work. A failed job is logged and rethrown, so
@@ -73,6 +80,7 @@ export async function runScheduled(
       const report = await sweepCheckouts(handle.db, {
         runId,
         provider: paymentProvider(env, handle.db),
+        hooks: bookingHooks(env),
         onError: (tenantId, item, error) =>
           checkoutLog.error(`checkout_sweep_${item}_failed`, {
             "tidegrid.tenant_id": tenantId,
@@ -98,6 +106,47 @@ export async function runScheduled(
         duration_ms: Date.now() - started,
       });
       throw error;
+    }
+
+    // 3. Email delivery (lane 1, the G2.16 shim): send due messages, retry
+    //    temporary failures, and finish attempts whose lease lapsed.
+    const provider = emailProvider(env, handle.db);
+    const emailLog = createLogger({ ...base, "event.name": "email_sweep" }, options.log);
+    if (!provider) {
+      emailLog.info("email_sweep_skipped", { "tidegrid.email.reason": emailSettings(env).kind });
+    } else {
+      started = Date.now();
+      try {
+        const report = await sweepEmail(handle.db, {
+          provider,
+          ...deliverySettings(env),
+          runId,
+          onTenantError: (tenantId, error) =>
+            emailLog.error("email_sweep_tenant_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
+          onSendError: (_messageId, error) =>
+            emailLog.error("email_send_error", sendErrorAttributes(error)),
+        });
+        emailLog.info("email_sweep", {
+          "tidegrid.email_sweep.tenant_count": report.tenants,
+          "tidegrid.email_sweep.sent_count": report.sent,
+          "tidegrid.email_sweep.retried_count": report.retried,
+          "tidegrid.email_sweep.failed_count": report.failed,
+          "tidegrid.email_sweep.superseded_count": report.superseded,
+          "tidegrid.email_sweep.canceled_count": report.canceled,
+          "tidegrid.email_sweep.failed_tenant_count": report.failedTenants,
+          "tidegrid.email_sweep.complete": report.complete,
+          duration_ms: Date.now() - started,
+        });
+      } catch (error) {
+        emailLog.error("email_sweep_failed", {
+          ...errorAttributes(error),
+          duration_ms: Date.now() - started,
+        });
+        throw error;
+      }
     }
   } finally {
     await handle.end();

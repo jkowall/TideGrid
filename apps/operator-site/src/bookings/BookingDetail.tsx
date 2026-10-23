@@ -26,6 +26,8 @@ import { MaskedReference } from "./MaskedReference.tsx";
 import {
   bookingStates,
   bookingsHref,
+  cancellationRemedyText,
+  cancelledByText,
   countText,
   dayText,
   extrasText,
@@ -216,6 +218,8 @@ function Detail({
         Booked online by the guest. Confirmed {instantText(booking.confirmedAt, zone)}.
         {booking.reacquired &&
           " The payment arrived after the checkout's hold ran out, and the seats were still free."}
+        {booking.cancellation &&
+          ` Canceled by ${cancelledByText(booking.cancellation.by)} ${instantText(booking.cancellation.canceledAt, zone)}; the seats went back on sale.`}
       </p>
 
       <div className="bd-grid">
@@ -335,6 +339,30 @@ function Detail({
               </>
             )}
           </dl>
+          {booking.cancellation && (
+            <div className="bd-refund">
+              <h3>Cancellation</h3>
+              <dl className="console-dl">
+                <dt>Canceled</dt>
+                <dd>{instantText(booking.cancellation.canceledAt, zone)}</dd>
+                <dt>By</dt>
+                <dd>{cancelledByText(booking.cancellation.by)}</dd>
+                <dt>Policy</dt>
+                <dd>
+                  {cancellationRemedyText(booking.cancellation)}
+                  <span className="bd-block bd-muted bd-small">
+                    Version {booking.cancellation.policyVersion}, cutoff{" "}
+                    {instantText(booking.cancellation.cutoffAt, zone)}
+                  </span>
+                </dd>
+                <dt>Refund due</dt>
+                <dd className="bk-money">
+                  {formatMoney(booking.cancellation.refundAmount)} of{" "}
+                  {formatMoney(booking.cancellation.paidAmount)}
+                </dd>
+              </dl>
+            </div>
+          )}
           {booking.refund && (
             <div className="bd-refund">
               <h3>Refund</h3>

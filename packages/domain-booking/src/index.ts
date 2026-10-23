@@ -1,3 +1,13 @@
+// Guest self-service (lane 1, G2.11c): cancellation, management, and email.
+export {
+  type CancelBookingResult,
+  type CancellationRecord,
+  type CancellationTerms,
+  type CancelRefusal,
+  cancelBooking,
+  previewCancellation,
+  refundFor,
+} from "./cancel.ts";
 export {
   type BookerDetails,
   type CancelCheckoutResult,
@@ -55,6 +65,16 @@ export {
   totalsOf,
 } from "./day-report.ts";
 export {
+  CANCELED_TEMPLATE,
+  CONFIRMATION_TEMPLATE,
+  enqueueCancellationEmail,
+  enqueueConfirmationEmail,
+  enqueueManageLinkEmail,
+  MANAGE_LINK_TEMPLATE,
+  MANAGE_LINK_TTL_SECONDS,
+  MANAGE_PATH,
+} from "./emails.ts";
+export {
   type HandledEvent,
   handleVerifiedEvent,
   type ProcessOutcome,
@@ -63,6 +83,32 @@ export {
   type SettleRefundResult,
   settleRefund,
 } from "./finalize.ts";
+export { clean, money, partyText, receiptRows, tripWhen } from "./format.ts";
+// Booking lifecycle hooks and participants (lane 1, G2.11c).
+export {
+  type BookingCanceledEvent,
+  type BookingConfirmedEvent,
+  BookingHookRefusal,
+  type BookingHooks,
+  noBookingHooks,
+  type ParticipantEvent,
+  type ParticipantField,
+  type ParticipantUpdatedEvent,
+} from "./hooks.ts";
+export {
+  getManagedBooking,
+  MANAGE_SESSION_TTL_SECONDS,
+  MAX_LINK_EMAILS_PER_HOUR,
+  type ManagedBookingView,
+  manageSession,
+  type OpenCheckoutSessionResult,
+  type OpenManageSessionResult,
+  openManageSession,
+  openManageSessionFromCheckout,
+  type RequestLinkResult,
+  renewManageLink,
+  requestManageLink,
+} from "./manage.ts";
 export {
   type AddBookingNoteResult,
   addBookingNote,
@@ -70,6 +116,16 @@ export {
   listBookingNotes,
   NOTES_LIMIT,
 } from "./notes.ts";
+export {
+  listParticipants,
+  MAX_PARTY_SIZE,
+  normalizeParticipant,
+  type ParticipantDetails,
+  type ParticipantListView,
+  type ParticipantView,
+  type PutParticipantResult,
+  putParticipant,
+} from "./participants.ts";
 export {
   type FinalizationExceptionView,
   listFinalizationExceptions,

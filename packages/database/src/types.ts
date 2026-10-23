@@ -500,6 +500,8 @@ export type OrderStatus = "pending" | "paid" | "void";
 export type OrderLineKind = "service" | "add_on" | "fee" | "tax" | "discount";
 export type PaymentState = "pending" | "succeeded" | "failed";
 export type RefundState = "requested" | "succeeded" | "failed";
+export type RefundReason = "unfulfilled_payment" | "booking_canceled";
+export type BookingState = "confirmed" | "canceled";
 export type ProviderEventType = "payment.succeeded" | "payment.failed" | "other";
 export type InboxProcessingState = "received" | "processed";
 export type FinalizationReason =
@@ -639,7 +641,8 @@ export interface PaymentRefundsTable {
   payment_id: Fixed<string>;
   amount: Fixed<number>;
   currency: FixedDefault<"USD">;
-  reason: Fixed<"unfulfilled_payment">;
+  /** unfulfilled_payment (G2.7); booking_canceled, a guest's cancellation within policy (G2.11c). */
+  reason: Fixed<RefundReason>;
   idempotency_key: Fixed<string>;
   provider_refund_id: ColumnType<string | null, never, string>;
   state: ColumnType<RefundState, "requested" | undefined, RefundState>;
@@ -660,10 +663,12 @@ export interface BookingsTable {
   trip_id: Fixed<string>;
   party_size: Fixed<number>;
   source: FixedDefault<"direct">;
-  state: FixedDefault<"confirmed">;
+  /** Created confirmed; canceled once, with its cancellation (G2.11c). */
+  state: ColumnType<BookingState, "confirmed" | undefined, "canceled">;
   reacquired: Fixed<boolean>;
   confirmed_at: Stamped;
   created_at: Stamped;
+  canceled_at: Stamp;
 }
 
 export interface FinalizationExceptionsTable {
@@ -724,6 +729,161 @@ interface CheckoutTables {
   fake_provider_refunds: FakeProviderRefundsTable;
 }
 
+// Guest self-service (lane 1, G2.11c): participants and cancellations. -------------
+// Triggers stamp the times and check the evidence; columns typed `never` for
+// update are not granted to the runtime.
+
+/** One person at one place in a booking's party. Personal data. */
+export interface BookingParticipantsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  /** 1 to the booking's party size; unique per booking. */
+  position: Fixed<number>;
+  full_name: string;
+  is_minor: boolean;
+  email: string | null;
+  guardian_name: string | null;
+  guardian_email: string | null;
+  created_at: Stamped;
+  updated_at: Stamped;
+}
+
+export type CancellationRemedy = "full_refund" | "percent_refund" | "none";
+
+/** One per booking, append-only: the remedy its policy version gave. */
+export interface BookingCancellationsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  payment_id: Fixed<string>;
+  product_id: Fixed<string>;
+  policy_version: Fixed<number>;
+  departs_at: Instant;
+  cutoff_at: Instant;
+  before_cutoff: Fixed<boolean>;
+  remedy: Fixed<CancellationRemedy>;
+  refund_bp: Fixed<number>;
+  paid_amount: Fixed<number>;
+  refund_amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  refund_id: FixedDefault<string | null>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+export type EmailMessageState = "queued" | "sending" | "sent" | "failed" | "canceled";
+export type EmailProviderName = "fake" | "cloudflare";
+export type AccessPurpose = "booking_manage" | "waiver_sign";
+export type AccessRevocationReason =
+  | "superseded"
+  | "completed"
+  | "withdrawn"
+  | "recipient_changed"
+  | "booking_canceled"
+  | "staff";
+
+/**
+ * One transactional email (lane 1, G2.16 shim). Content is fixed at insert;
+ * only the delivery columns move, as the trigger allows.
+ */
+export interface EmailMessagesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  dedupe_key: Fixed<string>;
+  template: Fixed<string>;
+  template_version: Fixed<number>;
+  booking_id: FixedDefault<string | null>;
+  participant_id: FixedDefault<string | null>;
+  subject_ref: FixedDefault<string | null>;
+  to_email: Fixed<string>;
+  to_name: FixedDefault<string | null>;
+  from_name: Fixed<string>;
+  reply_to: FixedDefault<string | null>;
+  subject: Fixed<string>;
+  html_body: Fixed<string>;
+  text_body: Fixed<string>;
+  link_purpose: FixedDefault<AccessPurpose | null>;
+  link_path: FixedDefault<string | null>;
+  link_ttl_seconds: FixedDefault<number | null>;
+  link_slot: FixedDefault<string | null>;
+  state: ColumnType<EmailMessageState, "queued" | undefined, EmailMessageState>;
+  attempts: ColumnType<number, 0 | undefined, number>;
+  next_attempt_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  /** When the latest attempt was claimed; stamped by the trigger. */
+  last_attempt_at: Stamp;
+  lease_expires_at: ColumnType<Date | null, never, Date | string | null>;
+  provider: ColumnType<EmailProviderName | null, never, EmailProviderName | null>;
+  provider_message_id: ColumnType<string | null, never, string | null>;
+  last_error_code: ColumnType<string | null, never, string | null>;
+  created_at: Stamped;
+  sent_at: Stamp;
+  failed_at: Stamp;
+  canceled_at: Stamp;
+  updated_at: Stamped;
+}
+
+/** An accountless access link; only the token's SHA-256 is stored. */
+export interface GuestAccessLinksTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  participant_id: FixedDefault<string | null>;
+  purpose: Fixed<AccessPurpose>;
+  subject_ref: FixedDefault<string | null>;
+  message_id: FixedDefault<string | null>;
+  token_hash: Fixed<string>;
+  created_at: Stamped;
+  expires_at: Instant;
+  consumed_at: ColumnType<Date | null, never, Date | string>;
+  revoked_at: ColumnType<Date | null, never, Date | string>;
+  revoked_reason: ColumnType<AccessRevocationReason | null, never, AccessRevocationReason>;
+}
+
+/** The restricted session a redeemed link opens; only the token's SHA-256 is stored. */
+export interface GuestSessionsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  participant_id: FixedDefault<string | null>;
+  purpose: Fixed<AccessPurpose>;
+  subject_ref: FixedDefault<string | null>;
+  link_id: FixedDefault<string | null>;
+  checkout_session_id: FixedDefault<string | null>;
+  token_hash: Fixed<string>;
+  created_at: Stamped;
+  expires_at: Instant;
+  revoked_at: ColumnType<Date | null, never, Date | string>;
+}
+
+/** The fake email provider's record of every send it answered; append-only. */
+export interface FakeEmailDeliveriesTable {
+  id: Fixed<string>;
+  tenant_id: TenantColumn;
+  idempotency_key: Fixed<string>;
+  result: Fixed<"accepted" | "unavailable" | "rejected">;
+  from_address: Fixed<string>;
+  from_name: Fixed<string>;
+  reply_to: FixedDefault<string | null>;
+  to_address: Fixed<string>;
+  to_name: FixedDefault<string | null>;
+  subject: Fixed<string>;
+  html_body: Fixed<string>;
+  text_body: Fixed<string>;
+  created_at: CreatedAt;
+}
+
+interface SelfServiceTables {
+  booking_participants: BookingParticipantsTable;
+  booking_cancellations: BookingCancellationsTable;
+  email_messages: EmailMessagesTable;
+  guest_access_links: GuestAccessLinksTable;
+  guest_sessions: GuestSessionsTable;
+  fake_email_deliveries: FakeEmailDeliveriesTable;
+}
+
 // Console completion (G2.12c) ------------------------------------------------------
 
 /**
@@ -746,7 +906,7 @@ interface ConsoleTables {
   booking_notes: BookingNotesTable;
 }
 
-export interface Database extends PricingTables, CheckoutTables, ConsoleTables {
+export interface Database extends PricingTables, CheckoutTables, ConsoleTables, SelfServiceTables {
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
   tenant_hostnames: TenantHostnamesTable;

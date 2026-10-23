@@ -44,6 +44,8 @@ import {
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
+import { enqueueConfirmationEmail, enqueueRefundFailedEmail } from "./emails.ts";
+import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import { newBookingReference } from "./secrets.ts";
 import { record } from "./views.ts";
 
@@ -136,14 +138,16 @@ async function findPayment(
 /**
  * Act on one recorded inbox event, once. Locks the inbox row first; an event
  * already processed returns its recorded outcome and changes nothing. With
- * `skipLocked`, an event another transaction is processing returns null.
+ * `skipLocked`, an event another transaction is processing returns null. A
+ * booking it confirms runs `hooks.bookingConfirmed` in this transaction.
  */
 export async function processProviderEvent(
   trx: TenantTransaction,
   ctx: TenantContext,
   inboxId: string,
-  options: { skipLocked?: boolean } = {},
+  options: { skipLocked?: boolean; hooks?: BookingHooks | undefined } = {},
 ): Promise<ProcessResult | null> {
+  const hooks = options.hooks ?? noBookingHooks;
   if (options.skipLocked) {
     const { rows } = await sql<{ id: string }>`
       select id from provider_events where tenant_id = ${ctx.tenantId} and id = ${inboxId}
@@ -157,7 +161,7 @@ export async function processProviderEvent(
   }
   const outcome =
     event.eventType === "payment.succeeded"
-      ? await onSuccess(trx, ctx, event)
+      ? await onSuccess(trx, ctx, event, hooks)
       : event.eventType === "payment.failed"
         ? await onFailure(trx, ctx, event)
         : result("ignored_event_type");
@@ -229,6 +233,7 @@ async function onSuccess(
   trx: TenantTransaction,
   ctx: TenantContext,
   event: InboxEvent,
+  hooks: BookingHooks,
 ): Promise<ProcessResult> {
   const locked = await lockCheckout(trx, ctx, event);
   if (locked.kind === "unmatched") return result("unmatched_payment");
@@ -248,7 +253,7 @@ async function onSuccess(
         ownerRef: ownerRefFor(session.id),
       });
       if (confirmed.kind === "confirmed") {
-        return book(trx, ctx, event, session, payment, confirmed.reacquired);
+        return book(trx, ctx, event, session, payment, confirmed.reacquired, hooks);
       }
       if (confirmed.kind === "capacity_lost") {
         return unfulfilled(trx, ctx, event, session, payment, confirmed.reason);
@@ -333,6 +338,7 @@ async function book(
   session: SessionRow,
   payment: PaymentRow,
   reacquired: boolean,
+  hooks: BookingHooks,
 ): Promise<ProcessResult> {
   await markSucceeded(trx, ctx, event, payment);
   let booking: { id: string; reference: string } | undefined;
@@ -392,6 +398,45 @@ async function book(
     subjectId: session.id,
     before: { state: session.state },
     after: { state: "confirmed", bookingId: booking.id, orderStatus: "paid", reacquired },
+  });
+  // The confirmation email with its receipt and management link (lane 1),
+  // enqueued with the booking, once per booking; the delivery job sends it.
+  // An email problem must never undo a paid booking: it is written under a
+  // savepoint, and a failure leaves the booking confirmed, with an audited
+  // event for staff, and no email.
+  await sql`savepoint confirmation_email`.execute(trx);
+  try {
+    await enqueueConfirmationEmail(trx, ctx, booking.id);
+    await sql`release savepoint confirmation_email`.execute(trx);
+  } catch (error) {
+    await sql`rollback to savepoint confirmation_email`.execute(trx);
+    const code = (error as { code?: unknown } | null)?.code;
+    await record(trx, ctx, {
+      action: "booking.confirmation_email_failed",
+      subjectType: "booking",
+      subjectId: booking.id,
+      after: {
+        error: error instanceof Error ? error.name : "unknown",
+        ...(typeof code === "string" ? { code } : {}),
+      },
+      topic: "booking.confirmation_email_failed",
+      payload: { bookingId: booking.id },
+    });
+  }
+  // Lane 1 contract: in-transaction work other modules attach to a new
+  // booking (waiver assignment, G2.15) commits or rolls back with it.
+  const { rows: products } = await sql<{ product_id: string }>`
+    select product_id from orders
+     where tenant_id = ${ctx.tenantId} and id = ${payment.order_id}`.execute(trx);
+  const productId = products[0]?.product_id;
+  if (!productId) throw new Error("a booking's order was not found");
+  await hooks.bookingConfirmed?.(trx, ctx, {
+    bookingId: booking.id,
+    checkoutSessionId: session.id,
+    tripId: session.trip_id,
+    productId,
+    partySize: session.party_size,
+    reacquired,
   });
   return result(reacquired ? "confirmed_reacquired" : "confirmed", {
     checkoutSessionId: session.id,
@@ -567,6 +612,7 @@ export type SettleRefundResult =
 interface RefundRow {
   id: string;
   payment_id: string;
+  reason: string;
   amount: number;
   idempotency_key: string;
   state: string;
@@ -588,8 +634,8 @@ export async function settleRefund(
 ): Promise<SettleRefundResult> {
   const refund = await inTenantTransaction(db, ctx, async (trx) => {
     const { rows } = await sql<RefundRow>`
-      select r.id, r.payment_id, r.amount, r.idempotency_key, r.state, p.provider, p.account_ref,
-             p.provider_payment_id
+      select r.id, r.payment_id, r.reason, r.amount, r.idempotency_key, r.state, p.provider,
+             p.account_ref, p.provider_payment_id
         from payment_refunds r
         join payments p on p.tenant_id = r.tenant_id and p.id = r.payment_id
        where r.tenant_id = ${ctx.tenantId} and r.id = ${refundId}`.execute(trx);
@@ -642,10 +688,45 @@ export async function settleRefund(
       topic: outcome.state === "succeeded" ? "payment.refund.succeeded" : "payment.refund.failed",
       payload: { refundId: refund.id, paymentId: refund.payment_id },
     });
+    if (outcome.state === "failed" && refund.reason === "booking_canceled") {
+      await followUpRefusedRefund(trx, ctx, refund);
+    }
     return outcome.state === "succeeded"
       ? { kind: "succeeded" as const, providerRefundId: outcome.ref }
       : { kind: "failed" as const, failureCode: outcome.code };
   });
+}
+
+/**
+ * A canceled booking's refund was refused: the cancellation email said it was
+ * on its way, so the guest is told it is not, once. Written under a
+ * savepoint, so an email problem never undoes the recorded refusal; a
+ * failure is audited for staff instead.
+ */
+async function followUpRefusedRefund(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  refund: RefundRow,
+): Promise<void> {
+  const { rows } = await sql<{ id: string }>`
+    select id from bookings where tenant_id = ${ctx.tenantId} and payment_id = ${refund.payment_id}`.execute(
+    trx,
+  );
+  const bookingId = rows[0]?.id;
+  if (!bookingId) return;
+  await sql`savepoint refund_failed_email`.execute(trx);
+  try {
+    await enqueueRefundFailedEmail(trx, ctx, bookingId, refund.amount);
+    await sql`release savepoint refund_failed_email`.execute(trx);
+  } catch (error) {
+    await sql`rollback to savepoint refund_failed_email`.execute(trx);
+    await record(trx, ctx, {
+      action: "booking.refund_failed_email_failed",
+      subjectType: "booking",
+      subjectId: bookingId,
+      after: { error: error instanceof Error ? error.name : "unknown" },
+    });
+  }
 }
 
 // The webhook path ---------------------------------------------------------------------
@@ -675,7 +756,7 @@ export async function handleVerifiedEvent(
   db: Kysely<Database>,
   provider: PaymentProvider,
   event: VerifiedProviderEvent,
-  meta: { requestId: string | null; sourceIp?: string | null },
+  meta: { requestId: string | null; sourceIp?: string | null; hooks?: BookingHooks | undefined },
 ): Promise<HandledEvent> {
   const account = await resolvePaymentAccount(db, event.provider, event.accountRef);
   if (!account) return { kind: "unknown_account" };
@@ -711,7 +792,7 @@ export async function handleVerifiedEvent(
     };
   }
   const processed = await inTenantTransaction(db, ctx, (trx) =>
-    processProviderEvent(trx, ctx, recorded.inboxId),
+    processProviderEvent(trx, ctx, recorded.inboxId, { hooks: meta.hooks }),
   );
   if (!processed) throw new Error("an inbox event was skipped without skipLocked");
   let refund: SettleRefundResult | null = null;

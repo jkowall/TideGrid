@@ -1,0 +1,156 @@
+/*
+ * The booking's management page (lane 1, G2.11c). It reuses the booking
+ * page's band, outcome, summary, and action styles; these are its own: the
+ * cards, the party's places, and the quiet notes. Tenant values arrive only
+ * through the --brand-* properties applyBrandTheme sets on <html>.
+ */
+
+/* The page's column keeps the band's left edge, and a reading width. */
+.manage-layout {
+  display: grid;
+  gap: var(--space-6);
+  padding-block: var(--space-6) var(--space-16);
+}
+.manage-layout > * {
+  width: 100%;
+  max-width: 46rem;
+}
+
+.manage-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.manage-status__ref {
+  margin: 0;
+  color: var(--text-muted);
+}
+.manage-status__ref strong {
+  color: var(--text-strong);
+}
+
+.manage-card {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.manage-card > p {
+  margin: 0;
+  max-width: 65ch;
+}
+.manage-card--quiet {
+  background: transparent;
+}
+.manage-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+.manage-card__head .booking-section-title {
+  margin: 0;
+}
+.manage-card .booking-section-title {
+  margin: 0;
+}
+
+.manage-quiet {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.manage-block {
+  display: block;
+  margin-top: var(--space-1);
+}
+.manage-refund {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  font-weight: var(--weight-semibold);
+}
+.manage-refund .tg-icon {
+  margin-top: 0.15em;
+}
+
+/* The party: one row per place, the place's number set off in the brand's accent rule. */
+.manage-party {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.manage-party__slot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.manage-party__slot:first-child {
+  border-top: 0;
+}
+.manage-party__slot > .tg-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+@media (min-width: 30rem) {
+  .manage-party__slot {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+  .manage-party__slot > .tg-button {
+    grid-column: auto;
+  }
+}
+.manage-party__slot--editing {
+  display: block;
+}
+.manage-party__place {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border: 2px solid var(--brand-accent);
+  border-radius: 50%;
+  color: var(--text-strong);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+.manage-party__who {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.manage-party__name {
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+}
+
+.manage-editor .booking-group {
+  background: var(--surface-page, transparent);
+}
+
+.manage-skeleton {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.manage-alone .booking-outcome__body > p {
+  max-width: 65ch;
+}
+
+/* A focus target once something happened, such as a cancellation, not a control. */
+.manage-done:focus {
+  outline: none;
+}

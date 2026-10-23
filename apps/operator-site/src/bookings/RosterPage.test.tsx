@@ -140,20 +140,36 @@ describe("a roster", () => {
     expectNoPersonalDataInAddresses();
   });
 
-  it("says that participants and waivers are not collected yet, rather than printing empty columns", async () => {
+  it("says the names are as guests give them and waivers are not on it yet, rather than printing empty columns", async () => {
     api({ [route.roster(tripId)]: () => json(rosterBody()) });
     const { container } = renderPage("owner");
     await loaded();
     const notice = container.querySelector(".roster-notice") as HTMLElement;
     expect(text(notice.querySelector(".tg-notice__title"))).toBe(
-      "Participants and waivers aren't collected yet",
+      "Names as guests give them; no waivers yet",
     );
-    expect(text(notice)).toMatch(/Participant names and waiver status arrive with a later build\./);
+    expect(text(notice)).toMatch(/A place not named yet counts in the party only\./);
+    expect(text(notice)).toMatch(/Waiver status arrives with a later build\./);
     // No announcement of its own: it is part of the page from the start.
     expect(notice.getAttribute("role")).toBeNull();
     // And no column for either.
     const headers = [...document.querySelectorAll(".roster-table thead th")].map((th) => text(th));
     expect(headers.join(" ")).not.toMatch(/waiver|participant/i);
+  });
+
+  it("names each party's guests by place as given so far, marks a minor, and says how many are named", async () => {
+    api({ [route.roster(tripId)]: () => json(rosterBody()) });
+    renderPage("owner");
+    await loaded();
+    const rows = [...document.querySelectorAll(".roster-table tbody tr")];
+    const [maya, luis] = rows;
+    const names = (row: Element | undefined) =>
+      [...(row?.querySelectorAll(".roster-table__names li") ?? [])].map((li) => text(li));
+    expect(names(maya)).toEqual(["Maya Okonkwo", "Ada Okonkwo (under 18)"]);
+    expect(text(maya)).toContain("2 of 3 named");
+    // A party nobody has named yet shows no list, only the count.
+    expect(maya && luis?.querySelector(".roster-table__names")).toBeNull();
+    expect(text(luis)).toContain("0 of 2 named");
   });
 
   it("lists one row per booking, in the order sent, with reference, booker, party, extras, and payment", async () => {
@@ -181,7 +197,7 @@ describe("a roster", () => {
       "1",
       "QKG6ERBF",
       "Maya Okonkwo",
-      "3 guests2 Adult, 1 Child (3 to 12)",
+      "3 guests2 Adult, 1 Child (3 to 12)Maya OkonkwoAda Okonkwo (under 18)2 of 3 named",
       "1 Souvenir photo",
       "Paid",
     ]);
@@ -189,7 +205,7 @@ describe("a roster", () => {
       "2",
       "7HM2P9TW",
       "Luis Fernandez",
-      "2 guests2 Adult",
+      "2 guests2 Adult0 of 2 named",
       "1 Souvenir photo, 2 Drink voucher",
       "Refund pending",
     ]);
@@ -290,6 +306,7 @@ describe("a roster", () => {
           party: priyaBooking.party,
           extras: [],
           payment: { state: "succeeded", refund: null },
+          participants: [],
         },
       ],
     });
@@ -306,7 +323,7 @@ describe("a roster", () => {
       "1",
       "3ZRB8N4C",
       "Priya Raman",
-      "6 guestsWhole boat, up to 12 guests",
+      "6 guestsWhole boat, up to 12 guests0 of 6 named",
       "None",
       "Paid",
     ]);

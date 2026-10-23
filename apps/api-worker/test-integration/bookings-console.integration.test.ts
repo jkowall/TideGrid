@@ -11,11 +11,11 @@
  * full provider id in any response.
  *
  * Two fixtures rewrite stored bookings, which the database otherwise keeps
- * append-only, because no request can produce them on demand: confirmation
- * instants that tie exactly or share one millisecond, and one reference that
- * holds 0 and 1 and that both tenants issued. The append-only trigger is off
- * only inside the admin transaction that makes the change, and the setup
- * checks that it is on again afterward.
+ * immutable but for cancellation, because no request can produce them on
+ * demand: confirmation instants that tie exactly or share one millisecond, and
+ * one reference that holds 0 and 1 and that both tenants issued. The lifecycle
+ * trigger is off only inside the admin transaction that makes the change, and
+ * the setup checks that it is on again afterward.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -553,19 +553,21 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
   }
 
   /**
-   * Change stored bookings that the database keeps append-only. The trigger
-   * is off only inside this one admin transaction; afterward it must be on.
+   * Change stored bookings that the database keeps immutable (since lane 1's
+   * G2.11c only the move to canceled is allowed, by bookings_lifecycle). The
+   * trigger is off only inside this one admin transaction; afterward it must
+   * be on.
    */
   async function rewriteBookings(work: (tx: postgres.TransactionSql) => Promise<void>) {
     await admin.begin(async (tx) => {
-      await tx`alter table public.bookings disable trigger bookings_append_only`;
+      await tx`alter table public.bookings disable trigger bookings_lifecycle`;
       await work(tx);
-      await tx`alter table public.bookings enable trigger bookings_append_only`;
+      await tx`alter table public.bookings enable trigger bookings_lifecycle`;
     });
     const [trigger] = await admin<{ enabled: string }[]>`
       select tgenabled as enabled from pg_trigger
-       where tgname = 'bookings_append_only' and tgrelid = 'public.bookings'::regclass`;
-    if (trigger?.enabled !== "O") throw new Error("the bookings append-only trigger is not on");
+       where tgname = 'bookings_lifecycle' and tgrelid = 'public.bookings'::regclass`;
+    if (trigger?.enabled !== "O") throw new Error("the bookings lifecycle trigger is not on");
   }
 
   beforeAll(async () => {

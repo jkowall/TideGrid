@@ -342,6 +342,8 @@ export function bookingDetail(over: Partial<BookingDetail> = {}): BookingDetail 
     reacquired: false,
     // 2:17 PM in New York; already Oct 7 in Tokyo.
     confirmedAt: "2026-10-06T18:17:00.000Z",
+    canceledAt: null,
+    cancellation: null,
     trip: {
       tripId: tripIds.sunset,
       productName: "Sunset Harbor Cruise",
@@ -473,6 +475,10 @@ export function tripRoster(over: Partial<TripRoster> = {}): TripRoster {
         party: mayaBooking.party,
         extras: mayaBooking.extras,
         payment: { state: "succeeded", refund: null },
+        participants: [
+          { position: 1, name: "Maya Okonkwo", minor: false },
+          { position: 3, name: "Ada Okonkwo", minor: true },
+        ],
       },
       {
         id: bookingIds.luis,
@@ -481,6 +487,7 @@ export function tripRoster(over: Partial<TripRoster> = {}): TripRoster {
         party: luisBooking.party,
         extras: luisBooking.extras,
         payment: { state: "succeeded", refund: { state: "requested", amount: 9450 } },
+        participants: [],
       },
     ],
     ...over,

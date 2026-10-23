@@ -671,6 +671,13 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         fake_provider_payments: ["INSERT", "SELECT"],
         fake_provider_events: ["INSERT", "SELECT"],
         fake_provider_refunds: ["INSERT", "SELECT"],
+        // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
+        booking_participants: ["INSERT", "SELECT"],
+        booking_cancellations: ["INSERT", "SELECT"],
+        email_messages: ["INSERT", "SELECT"],
+        guest_access_links: ["INSERT", "SELECT"],
+        guest_sessions: ["INSERT", "SELECT"],
+        fake_email_deliveries: ["INSERT", "SELECT"],
         // Console completion (G2.12c): booking notes are append-only.
         booking_notes: ["INSERT", "SELECT"],
       };
@@ -703,6 +710,22 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         payments: ["failed_event_id", "provider_payment_id", "state", "succeeded_event_id"],
         payment_refunds: ["failure_code", "provider_refund_id", "state"],
         provider_events: ["outcome", "processing_state"],
+        // Guest self-service (lane 1, G2.11c): a participant's details may be
+        // corrected, and a booking may move to canceled with its cancellation.
+        booking_participants: ["email", "full_name", "guardian_email", "guardian_name", "is_minor"],
+        bookings: ["state"],
+        // A message's delivery moves, a link is used or revoked, a session is revoked.
+        email_messages: [
+          "attempts",
+          "last_error_code",
+          "lease_expires_at",
+          "next_attempt_at",
+          "provider",
+          "provider_message_id",
+          "state",
+        ],
+        guest_access_links: ["consumed_at", "revoked_at", "revoked_reason"],
+        guest_sessions: ["revoked_at"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

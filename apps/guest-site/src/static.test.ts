@@ -72,9 +72,10 @@ describe("static files", () => {
       // Any use in code, not a mention in a comment.
       const local = /\b(localStorage|indexedDB)\s*[.[]|document\.cookie/.test(source);
       expect({ name, local }).toEqual({ name, local: false });
-      // Only resume.ts touches sessionStorage: one open checkout, and the last confirmation.
-      if (name !== join("booking", "resume.ts")) {
-        const session = /\bsessionStorage\s*[.[]/.test(source);
+      // Only resume.ts touches sessionStorage (one open checkout, and the last
+      // confirmation), and manage/session.ts (one booking session, lane 1).
+      if (name !== join("booking", "resume.ts") && name !== join("manage", "session.ts")) {
+        const session = /\bsessionStorage\s*[.[?]/.test(source);
         expect({ name, session }).toEqual({ name, session: false });
       }
     }
