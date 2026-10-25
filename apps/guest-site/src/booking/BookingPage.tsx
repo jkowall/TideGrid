@@ -428,7 +428,11 @@ export function BookingPage({
 
   // Focus moves to each new step's heading, once it is on screen. Not while
   // the trip is loading again: the place asked for is not drawn yet.
-  useEffect(() => {
+  // A layout effect, so it runs inside its own commit. A passive one can
+  // still be pending when the next click sets a target, and would then judge
+  // that target by the render before it: "Try again" would focus the
+  // failure's heading, which the loaded trip then removes.
+  useLayoutEffect(() => {
     const target = focusTarget.current;
     if (!target || load.kind === "loading" || (load.kind === "failed" && load.retrying)) return;
     const named: Record<string, HTMLElement | null> = {
