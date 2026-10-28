@@ -2,15 +2,11 @@ import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
 import { TripAvailabilityQuery, TripAvailabilityResponse } from "@tidegrid/contracts";
 import { inTenantTransaction } from "@tidegrid/database";
 import { checkRange, findAvailableTrips } from "@tidegrid/domain-catalog";
-import { normalizeHostname } from "@tidegrid/domain-identity";
-import { sql } from "kysely";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
+import { resolvePublicTenant } from "../public-tenant.ts";
 import { errorBody } from "./responses.ts";
-
-const notPublished = () =>
-  new ApiError(404, "tenant_not_found", "No operator is published at this address");
 
 export function registerCatalogPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
   const availabilityRoute = createRoute({
@@ -31,7 +27,16 @@ export function registerCatalogPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
     },
   });
 
+  // Resolve before the query is validated (G2.14b): an unknown origin gets
+  // the shared 404 even with an invalid range, as on every other public route,
+  // so the answer never tells an unpublished site which inputs are valid.
+  app.use(availabilityRoute.path, async (c, next) => {
+    if (c.req.method === "GET") await resolvePublicTenant(c);
+    await next();
+  });
+
   app.openapi(availabilityRoute, async (c) => {
+    const tenantId = await resolvePublicTenant(c);
     const query = c.req.valid("query");
     const problem = checkRange(query.from, query.to);
     if (problem === "range_too_large") {
@@ -44,14 +49,7 @@ export function registerCatalogPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
         "Use dates from 2000-01-02 to 2099-12-30, with from on or before to",
       );
     }
-    const host = normalizeHostname(c.req.header("origin"));
-    if (!host) throw notPublished();
     const db = getDb(c);
-    const { rows } = await sql<{ tenant_id: string }>`
-      select tenant_id from app.resolve_hostname(${host})
-    `.execute(db);
-    const tenantId = rows[0]?.tenant_id;
-    if (!tenantId) throw notPublished();
     const trips = await inTenantTransaction(
       db,
       {

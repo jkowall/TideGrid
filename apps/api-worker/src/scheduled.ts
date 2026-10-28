@@ -1,11 +1,13 @@
 import { createDb } from "@tidegrid/database";
 import { sweepCheckouts } from "@tidegrid/domain-booking";
+import { type CustomHostnameProvider, sweepHostnames } from "@tidegrid/domain-hostnames";
 import { sweepExpiredHolds } from "@tidegrid/domain-inventory";
 import { sweepEmail } from "@tidegrid/domain-messaging";
 import { createLogger, newRequestId } from "@tidegrid/observability";
 import { bookingHooks } from "./booking-hooks.ts";
 import { deliverySettings, emailProvider, emailSettings, sendErrorAttributes } from "./email.ts";
 import { type Bindings, databaseUrl } from "./env.ts";
+import { hostnameProvider, hostnameSettings } from "./hostnames.ts";
 import { paymentProvider } from "./payments.ts";
 
 function errorAttributes(error: unknown): Record<string, unknown> {
@@ -18,7 +20,7 @@ function errorAttributes(error: unknown): Record<string, unknown> {
 
 /**
  * Scheduled work for the API Worker, run by the cron trigger in wrangler.jsonc.
- * Three jobs, in order, on one connection:
+ * Four jobs, in order, on one connection:
  *
  * 1. The hold sweep expires capacity holds whose instant has passed, across
  *    tenants, one tenant transaction at a time.
@@ -29,15 +31,23 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  * 3. The email sweep (lane 1, the G2.16 shim) sends due messages, retries
  *    temporary failures, and finishes attempts whose lease lapsed. Skipped
  *    when email is off.
+ * 4. The hostname sweep (G2.14b) reads the custom-hostname provider for every
+ *    hostname whose check is due and records the reading in that tenant's
+ *    own transaction, which demotes a hostname that is no longer servable
+ *    and never promotes one. Skipped when custom hostnames are off.
  *
- * Correctness never waits for either; they write the facts down, emit the
+ * Correctness never waits for any of them; they write the facts down, emit the
  * events, and finish interrupted work. A failed job is logged and rethrown, so
  * the cron invocation that awaits it fails too, and the next run starts over.
  */
 export async function runScheduled(
   _controller: Pick<ScheduledController, "cron">,
   env: Bindings,
-  options: { log?: (line: string) => void } = {},
+  options: {
+    log?: (line: string) => void;
+    /** A test's or the admin CLI's provider; the configured fake reads only this. */
+    hostnameProvider?: CustomHostnameProvider;
+  } = {},
 ): Promise<void> {
   const runId = newRequestId();
   const base = { "tidegrid.request_id": runId, "tidegrid.environment": env.ENVIRONMENT };
@@ -142,6 +152,49 @@ export async function runScheduled(
         });
       } catch (error) {
         emailLog.error("email_sweep_failed", {
+          ...errorAttributes(error),
+          duration_ms: Date.now() - started,
+        });
+        throw error;
+      }
+    }
+
+    // 4. Custom hostnames (G2.14b): read the provider for every hostname whose
+    //    check is due and record it, demoting what is no longer servable.
+    //    Skipped when custom hostnames are off.
+    const hostnameLog = createLogger({ ...base, "event.name": "hostname_sweep" }, options.log);
+    const hostnames = hostnameProvider(env, options.hostnameProvider);
+    if (!hostnames) {
+      const settings = hostnameSettings(env);
+      hostnameLog.info("hostname_sweep_skipped", {
+        "tidegrid.hostname.reason": "reason" in settings ? settings.reason : "fake_not_injected",
+      });
+    } else {
+      started = Date.now();
+      try {
+        const report = await sweepHostnames(handle.db, {
+          provider: hostnames,
+          runId,
+          onTenantError: (tenantId, error) =>
+            hostnameLog.error("hostname_sweep_tenant_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
+          onExpiring: (tenantId) =>
+            hostnameLog.warn("hostname_certificate_expiring", { "tidegrid.tenant_id": tenantId }),
+        });
+        hostnameLog.info("hostname_sweep", {
+          "tidegrid.hostname_sweep.tenant_count": report.tenants,
+          "tidegrid.hostname_sweep.checked_count": report.checked,
+          "tidegrid.hostname_sweep.demoted_count": report.demoted,
+          "tidegrid.hostname_sweep.expired_count": report.expired,
+          "tidegrid.hostname_sweep.failed_tenant_count": report.failedTenants,
+          "tidegrid.hostname_sweep.throttled": report.throttled,
+          "tidegrid.hostname_sweep.complete": report.complete,
+          duration_ms: Date.now() - started,
+        });
+      } catch (error) {
+        hostnameLog.error("hostname_sweep_failed", {
           ...errorAttributes(error),
           duration_ms: Date.now() - started,
         });
