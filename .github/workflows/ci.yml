@@ -140,6 +140,11 @@ jobs:
           E2E_DISABLE_HOST: reef-e2e.book.localhost
           E2E_ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tidegrid
         run: pnpm --filter @tidegrid/guest-site e2e
+      - name: TEMPORARY D11 update checks, repeated ten times (G2.14b follow-up; revert before merge)
+        if: ${{ !cancelled() }}
+        env:
+          E2E_MODE: full
+        run: pnpm --filter @tidegrid/guest-site exec playwright test --repeat-each=10 --grep "D11" --project desktop
       - name: API log
         if: failure()
         run: cat api.log || true
