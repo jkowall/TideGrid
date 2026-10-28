@@ -17,10 +17,15 @@ const DAY_MS = 86_400_000;
  * hour apart for most of the year. Generation skips and names such departures
  * instead of storing a guessed time. This list only keeps new drift from
  * arriving unnoticed; a zone that stops drifting may be removed.
+ * (2026-10-28: Node 24.22.1 with ICU 78.3 against CI's postgres:17 image added
+ * Winnipeg, with its alias Rainy_River, and Inuvik. The image was unchanged;
+ * Node 24.21.0 had agreed on both.)
  */
 const KNOWN_DRIFT = new Set([
   "America/Vancouver",
   "America/Edmonton",
+  "America/Winnipeg",
+  "America/Inuvik",
   "Africa/Casablanca",
   "Africa/El_Aaiun",
 ]);
