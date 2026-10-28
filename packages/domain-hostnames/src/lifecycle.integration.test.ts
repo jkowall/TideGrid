@@ -526,8 +526,7 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
   }
 
   /** A tenant of its own, so a sweep limited to it reads exactly the hostnames under test. */
-  async function isolatedTenant(label: string): Promise<string> {
-    const id = randomUUID();
+  async function isolatedTenant(label: string, id: string = randomUUID()): Promise<string> {
     await admin`insert into public.tenants (id, slug, display_name)
       values (${id}, ${`hn-${label}-${run}`}, ${`Hostname ${label}`})`;
     return id;
@@ -660,6 +659,107 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     // Before the R1 fix a missing record read as deleted and demoted this row.
     expect(await checkRow(host)).toEqual(before);
     expect(await resolves(host)).toBe(tenant);
+  });
+
+  it("treats any 401 or 403 as account-level, whatever code it carries (R1)", async () => {
+    for (const status of [401, 403]) {
+      const tenant = await isolatedTenant(`status-${status}`);
+      const host = name(`status-${status}`);
+      await activeHost(shared, tenant, host);
+      await due(tenant);
+      const before = await checkRow(host);
+      const report = await sweepHostnames(runtimeDb.db, {
+        provider: readsWith(async () => {
+          throw new HostnameProviderRejectedError("cloudflare_1234", undefined, status);
+        }),
+        runId: `sweep-${run}`,
+        onlyTenants: [tenant],
+      });
+      // Before this fix, cloudflare_1234 was off the list and read as one bad record.
+      expect({ status, fault: report.providerFault, unread: report.unread }).toEqual({
+        status,
+        fault: "cloudflare_1234",
+        unread: 0,
+      });
+      expect(await checkRow(host)).toEqual(before);
+    }
+  });
+
+  /** A pending reservation with a provider record, its claim ending at `claimEnds`. */
+  async function pendingHost(tenant: string, host: string, claimEnds: string) {
+    await admin.begin(async (tx) => {
+      await tx`insert into public.tenant_hostnames (hostname, tenant_id, kind, status)
+        values (${host}, ${tenant}, 'custom', 'pending')`;
+      await tx`insert into public.tenant_hostname_provisioning
+          (tenant_id, hostname, provider, claim_expires_at)
+        values (${tenant}, ${host}, 'fake', now() + ${claimEnds}::interval)`;
+    });
+    shared.plantRecord(host);
+    const providerId = shared.records().find((r) => r.hostname === host)?.providerId ?? null;
+    await admin`select app.hostname_attach_provider(${tenant}::uuid, ${host}, ${providerId}, '[]'::jsonb)`;
+  }
+
+  it("backs a pending hostname off when its one record gives no reading", async () => {
+    const tenant = await isolatedTenant("pend-unread");
+    const host = name("pend-unread");
+    await pendingHost(tenant, host, "7 days");
+    const refusing = readsWith(async () => {
+      throw new HostnameProviderRejectedError("malformed_response");
+    });
+    const delays: number[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await due(tenant);
+      const before = await checkRow(host);
+      const started = Date.now();
+      await sweepHostnames(runtimeDb.db, {
+        provider: refusing,
+        runId: `sweep-${run}`,
+        onlyTenants: [tenant],
+      });
+      const after = await checkRow(host);
+      expect(after).toMatchObject({
+        status: "pending",
+        hostname_state: before.hostname_state,
+        certificate_state: before.certificate_state,
+        last_error_code: "malformed_response",
+        attempts: before.attempts + 1,
+      });
+      delays.push(Math.round((after.next.getTime() - started) / 1000));
+    }
+    // 60 seconds, then doubling, the provider's own schedule while pending.
+    for (const [i, expected] of [60, 120, 240].entries()) {
+      expect(Math.abs((delays[i] ?? 0) - expected)).toBeLessThanOrEqual(5);
+    }
+  });
+
+  it("expires a claim that ran out without reading the provider, even after an account-level refusal", async () => {
+    // Tenant ids that sort first and last, so the refusal comes before the expiry.
+    const first = await isolatedTenant("exp-first", `00000000-0000-4000-8000-${run}0000`);
+    const last = await isolatedTenant("exp-last", `ffffffff-ffff-4fff-bfff-${run}ffff`);
+    const refusedHost = name("exp-refused");
+    const endedHost = name("exp-ended");
+    const ownEnded = name("exp-own");
+    await activeHost(shared, first, refusedHost);
+    await pendingHost(first, ownEnded, "-1 minute");
+    await pendingHost(last, endedHost, "-1 minute");
+    await due(first);
+    const read: string[] = [];
+    const report = await sweepHostnames(runtimeDb.db, {
+      provider: readsWith(async (_id, expected) => {
+        read.push(expected);
+        throw new HostnameProviderRejectedError("http_401", undefined, 401);
+      }),
+      runId: `sweep-${run}`,
+      onlyTenants: [first, last],
+    });
+    expect(report.providerFault).toBe("http_401");
+    // Only the active hostname was read; neither ended claim needed the provider.
+    expect(read).toEqual([refusedHost]);
+    expect(report.expired).toBe(2);
+    for (const h of [ownEnded, endedHost]) {
+      expect(await checkRow(h)).toMatchObject({ status: "disabled", last_error_code: "expired" });
+    }
+    expect(await checkRow(refusedHost)).toMatchObject({ status: "active" });
   });
 
   it("refuses a check with one state, or with no reading and no error code", async () => {

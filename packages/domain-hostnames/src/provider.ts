@@ -107,6 +107,8 @@ export class HostnameProviderRejectedError extends Error {
   constructor(
     readonly code: string,
     message = `the custom-hostname provider refused the request: ${code}`,
+    /** The HTTP status of the refusal, when it came from an HTTP answer. */
+    readonly httpStatus: number | null = null,
   ) {
     super(message);
     this.name = "HostnameProviderRejectedError";

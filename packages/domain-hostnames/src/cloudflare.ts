@@ -218,7 +218,9 @@ class CloudflareHostnameProvider implements CustomHostnameProvider {
     const search = new URLSearchParams({ "hostname.exact": name });
     const answer = await this.#request("GET", "", { search });
     // An empty list is the answer for no match. A 404 here means the zone itself is missing.
-    if (answer.kind === "not_found") throw new HostnameProviderRejectedError("http_404");
+    if (answer.kind === "not_found") {
+      throw new HostnameProviderRejectedError("http_404", undefined, 404);
+    }
     if (!Array.isArray(answer.result)) throw malformed();
     // Keep only exact matches, whatever the filter returned.
     const matches = answer.result.map(parseCustomHostname).filter((h) => h.hostname === name);
@@ -345,6 +347,8 @@ class CloudflareHostnameProvider implements CustomHostnameProvider {
       }
       throw new HostnameProviderRejectedError(
         code === null ? `http_${status}` : `cloudflare_${code}`,
+        undefined,
+        status,
       );
     }
     if (status < 200 || status >= 300 || !envelope || !envelope.success) throw malformed();

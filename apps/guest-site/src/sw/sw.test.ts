@@ -21,8 +21,8 @@ function fakeScope(network: (url: string) => Promise<Response>) {
   const stores = new Map<string, Map<string, Response>>();
   const puts: { cache: string; key: string }[] = [];
   const skipped = { count: 0 };
-  /** The site's open windows, as clients.matchAll would report them. */
-  const windows = { count: 1 };
+  /** The site's open windows by client id, as clients.matchAll would report them. */
+  const windows = { ids: ["asker"] };
   const keyOf = (r: RequestInfo | string) => (typeof r === "string" ? r : r.url);
   const scope: ServiceWorkerScopeLike = {
     location: { origin: ORIGIN },
@@ -61,7 +61,7 @@ function fakeScope(network: (url: string) => Promise<Response>) {
     },
     fetch: (r) => network(typeof r === "string" ? r : r.url),
     clients: {
-      matchAll: async () => Array.from({ length: windows.count }, (_, i) => ({ id: `w${i}` })),
+      matchAll: async () => windows.ids.map((id) => ({ id })),
     },
     skipWaiting: async () => {
       skipped.count += 1;
@@ -86,9 +86,14 @@ function fakeScope(network: (url: string) => Promise<Response>) {
     });
     return answer === undefined ? "passed" : await answer;
   }
-  async function message(data: unknown) {
+  /** A message from the window `from` (default: the asking page). */
+  async function message(data: unknown, from: string | null = "asker") {
     const waits: Promise<unknown>[] = [];
-    listeners.get("message")?.({ data, waitUntil: (p: Promise<unknown>) => waits.push(p) });
+    listeners.get("message")?.({
+      data,
+      source: from === null ? null : { id: from },
+      waitUntil: (p: Promise<unknown>) => waits.push(p),
+    });
     await Promise.all(waits);
   }
   return { scope, stores, puts, skipped, windows, dispatch, fetchEvent, message };
@@ -267,12 +272,38 @@ describe("service worker update policy (G2.14b, D11(a))", () => {
       { takeOverChecksMs: [0, 1, 1] },
     );
     await sw.dispatch("install");
-    sw.windows.count = 2;
+    sw.windows.ids = ["asker", "installed-app"];
     await sw.message({ type: SKIP_WAITING });
     expect(sw.skipped.count).toBe(0);
-    sw.windows.count = 1;
+    sw.windows.ids = ["asker"];
     await sw.message({ type: SKIP_WAITING });
     expect(sw.skipped.count).toBe(1);
+  });
+
+  it("takes over only for the window that asked, never for another one left alone", async () => {
+    const sw = fakeScope(async (url) => ok(`body of ${url}`));
+    installServiceWorker(
+      sw.scope,
+      { precache: PRECACHE, buildId: "b6" },
+      { takeOverChecksMs: [0, 5, 5] },
+    );
+    await sw.dispatch("install");
+    // The one window open is not the one that asked.
+    sw.windows.ids = ["other"];
+    await sw.message({ type: SKIP_WAITING });
+    expect(sw.skipped.count).toBe(0);
+    // A message with no source, or from no window, never takes over.
+    sw.windows.ids = ["asker"];
+    await sw.message({ type: SKIP_WAITING }, null);
+    expect(sw.skipped.count).toBe(0);
+    // The asker leaves while a different window stays: no take-over.
+    sw.windows.ids = ["asker", "other"];
+    const asked = sw.message({ type: SKIP_WAITING });
+    setTimeout(() => {
+      sw.windows.ids = ["other"];
+    }, 2);
+    await asked;
+    expect(sw.skipped.count).toBe(0);
   });
 
   it("looks again for a moment, so a window that just closed does not hold it back", async () => {
@@ -283,11 +314,11 @@ describe("service worker update policy (G2.14b, D11(a))", () => {
       { takeOverChecksMs: [0, 5, 5] },
     );
     await sw.dispatch("install");
-    sw.windows.count = 2;
+    sw.windows.ids = ["asker", "just-closed"];
     const asked = sw.message({ type: SKIP_WAITING });
-    // The closed window leaves the client list after the first look.
+    // The closed window leaves the client list after the first look; the asker stays.
     setTimeout(() => {
-      sw.windows.count = 1;
+      sw.windows.ids = ["asker"];
     }, 2);
     await asked;
     expect(sw.skipped.count).toBe(1);

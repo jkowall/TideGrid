@@ -255,6 +255,20 @@ describe("the Cloudflare for SaaS client", () => {
     );
   });
 
+  it("keeps the HTTP status on a refusal, so a 401 or 403 reads as account-level", async () => {
+    const { provider, fixture } = harness();
+    const envelope = (code: unknown) =>
+      JSON.stringify({ success: false, errors: [{ code, message: "x" }], result: null });
+    for (const status of [401, 403, 400]) {
+      fixture.answerNext({ status, body: envelope(1234) });
+      const error = (await caught(provider.get("abc", host))) as HostnameProviderRejectedError;
+      expect({ code: error.code, httpStatus: error.httpStatus }).toEqual({
+        code: "cloudflare_1234",
+        httpStatus: status,
+      });
+    }
+  });
+
   it("reads retry-after only as whole seconds", async () => {
     const { provider, fixture } = harness();
     fixture.answerNext({

@@ -258,6 +258,8 @@ export const DEFAULT_HOSTNAME_SWEEP_BUDGET_MS = 20_000;
 interface DueHostname {
   hostname: string;
   provider_hostname_id: string;
+  /** A pending hostname whose claim has run out: expired from the database alone. */
+  claim_ended: boolean;
 }
 
 class Throttled extends Error {
@@ -268,9 +270,9 @@ class Throttled extends Error {
 
 /**
  * Refusals about the account, the token, or the zone rather than one record:
- * an expired, rotated, or mis-scoped token (401, 403, Cloudflare's
- * authentication codes), and an exact-name lookup that cannot find the zone
- * (404). Every other hostname would get the same answer, so the run stops and
+ * any HTTP 401 or 403, whatever Cloudflare code it carries (an expired,
+ * rotated, or mis-scoped token), these Cloudflare codes in addition, and an
+ * exact-name lookup that cannot find the zone (404). Every other hostname would get the same answer, so the run stops and
  * records nothing. The Cloudflare codes are its authentication and routing
  * errors as remembered from its API (invalid or missing token, bad
  * Authorization header, an object identifier that routes nowhere); they are
@@ -345,7 +347,7 @@ async function readHostname(
       throw new Throttled(error.retryAfterSeconds);
     }
     if (!(error instanceof HostnameProviderRejectedError)) throw error;
-    if (accountLevel(error.code)) {
+    if (error.httpStatus === 401 || error.httpStatus === 403 || accountLevel(error.code)) {
       throw new HostnameSweepFault(error.code, item.provider_hostname_id);
     }
     return { kind: "no_reading", errorCode: error.code };
@@ -423,11 +425,15 @@ export async function sweepHostnames(
   let calls = 0;
   const stop = () => calls >= maxCalls || clock() - started >= budgetMs;
 
+  // After a throttle or an account-level refusal the run reads the provider
+  // no more, but it still expires claims that ran out: that is the
+  // database's own fact and needs no provider answer.
+  let expiryOnly = false;
   for (const { tenant_id: tenantId } of rows) {
     if (options.onlyTenants && !options.onlyTenants.includes(tenantId)) continue;
-    if (stop()) {
+    if (!expiryOnly && stop()) {
       report.complete = false;
-      break;
+      expiryOnly = true;
     }
     report.tenants += 1;
     const ctx: TenantContext = {
@@ -439,7 +445,8 @@ export async function sweepHostnames(
     try {
       const due = await inTenantTransaction(db, ctx, async (trx) => {
         const { rows: found } = await sql<DueHostname>`
-          select p.hostname, p.provider_hostname_id
+          select p.hostname, p.provider_hostname_id,
+                 (h.status = 'pending' and p.claim_expires_at <= now()) as claim_ended
             from public.tenant_hostname_provisioning p
             join public.tenant_hostnames h
               on h.hostname = p.hostname and h.tenant_id = p.tenant_id
@@ -449,15 +456,28 @@ export async function sweepHostnames(
              and p.provider_hostname_id is not null
              and ((h.status = 'pending' and (p.next_check_at <= now() or p.claim_expires_at <= now()))
                   or (h.status = 'active' and p.next_check_at <= now()))
-           order by p.next_check_at, p.hostname
+           order by claim_ended desc, p.next_check_at, p.hostname
            limit ${perTenant}`.execute(trx);
         return found;
       });
       if (due.length === perTenant) report.complete = false;
       for (const item of due) {
+        if (item.claim_ended) {
+          // No provider call: record_check with no reading expires it.
+          const outcome = await inTenantTransaction(db, ctx, async (trx) => {
+            const { rows: result } = await sql<{ outcome: string }>`
+              select app.hostname_record_check(${tenantId}::uuid, ${item.hostname},
+                ${item.provider_hostname_id}, null, null, 'claim_ended') as outcome`.execute(trx);
+            return result[0]?.outcome;
+          });
+          if (outcome === "expired") report.expired += 1;
+          continue;
+        }
+        if (expiryOnly) continue;
         if (stop()) {
           report.complete = false;
-          break;
+          expiryOnly = true;
+          continue;
         }
         calls += 1;
         const reading = await readHostname(options.provider, item, () => {
@@ -486,17 +506,20 @@ export async function sweepHostnames(
         report.throttled = true;
         report.retryAfterSeconds = error.retryAfterSeconds;
         report.complete = false;
-        break;
+        expiryOnly = true;
+        continue;
       }
       if (error instanceof HostnameSweepFault) {
         // A refusal about the account, the token, or the zone, not one
-        // hostname: stop, record nothing, and let the next run try again.
+        // hostname: read the provider no more, record nothing for this
+        // hostname, and let the next run try again.
         report.providerFault = error.code;
         report.providerFaultHostnameId = error.providerHostnameId;
         report.failedTenants += 1;
         report.complete = false;
         options.onTenantError?.(tenantId, error);
-        break;
+        expiryOnly = true;
+        continue;
       }
       report.failedTenants += 1;
       report.complete = false;

@@ -21,11 +21,13 @@
  * - Cache names carry the build id; activation deletes every other cache.
  * - Update policy (G2.14b, D11(a)): a new version installs and waits. The
  *   next page load finds it waiting and asks it to take over, with a
- *   SKIP_WAITING message. It takes over only when that page is the only open
- *   window of the site: skipping waiting would switch every open window to
- *   the new worker at once, and its activation deletes the old build's cache.
- *   With another tab or the installed app open, it keeps waiting until they
- *   close (or until the next page load finds itself alone). That page load
+ *   SKIP_WAITING message. It takes over only when the window that asked is
+ *   the site's only open window, looking for up to 15 seconds after the ask:
+ *   skipping waiting would switch every open window to the new worker at
+ *   once, and its activation deletes the old build's cache. With another tab
+ *   or the installed app still open after that, it keeps waiting, until the
+ *   browser activates it when they all close, or a later page load asks
+ *   again and finds itself alone. That page load
  *   came from the network (navigations go network first), so it is already
  *   the new build the new worker precached.
  */
@@ -108,8 +110,14 @@ interface ExtendableEventLike {
   waitUntil(promise: Promise<unknown>): void;
 }
 
+interface ClientLike {
+  id: string;
+}
+
 interface MessageEventLike {
   data: unknown;
+  /** The client that posted the message: the asking page's window. */
+  source?: ClientLike | null;
   waitUntil?(promise: Promise<unknown>): void;
 }
 
@@ -129,7 +137,7 @@ export interface ServiceWorkerScopeLike {
     matchAll(options: {
       type: "window";
       includeUncontrolled: boolean;
-    }): Promise<readonly unknown[]>;
+    }): Promise<readonly ClientLike[]>;
   };
   fetch(request: RequestInfo | string, init?: RequestInit): Promise<Response>;
   skipWaiting(): Promise<void>;
@@ -141,15 +149,16 @@ export interface ServiceWorkerScopeLike {
   addEventListener(type: "message", listener: (event: MessageEventLike) => void): void;
 }
 
-/** Install the worker's listeners on a scope: the real one in sw.js, a fake in tests. */
 /**
- * How long a page load's take-over request looks for the site to be down to
- * one window: a window that just closed, or the document a reload replaced,
- * can stay on the browser's client list for a moment. A window that is really
- * open stays on it, and the worker keeps waiting.
+ * When a page load's take-over request looks for the site to be down to the
+ * asking window alone: at once, then 1, 3, 7, and 15 seconds after the ask. A
+ * window that just closed, or the document a reload replaced, can stay on the
+ * browser's client list for a moment. A window that is really open stays on
+ * it, and the worker keeps waiting; so does it when the asker leaves.
  */
-export const TAKE_OVER_CHECKS_MS: readonly number[] = [0, 1_000, 2_000, 4_000];
+export const TAKE_OVER_CHECKS_MS: readonly number[] = [0, 1_000, 2_000, 4_000, 8_000];
 
+/** Install the worker's listeners on a scope: the real one in sw.js, a fake in tests. */
 export function installServiceWorker(
   scope: ServiceWorkerScopeLike,
   config: ServiceWorkerConfig,
@@ -179,15 +188,20 @@ export function installServiceWorker(
     );
   });
 
-  // D11(a): only a page's load asks a waiting worker to take over, and only
-  // a page that is the site's one open window gets it.
+  // D11(a): only a page's load asks a waiting worker to take over, and it
+  // does so only when the asking window is the site's one open window.
   scope.addEventListener("message", (event) => {
     if ((event.data as { type?: unknown } | null)?.type !== SKIP_WAITING) return;
+    const asker = event.source?.id;
+    if (!asker) return;
     const takeOver = (async () => {
       for (const delay of checks) {
         if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
         const windows = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
-        if (windows.length <= 1) {
+        const ids = windows.map((w) => w.id);
+        // The asker left (it closed, or navigated away): nobody is asking any more.
+        if (!ids.includes(asker)) return;
+        if (ids.length === 1) {
           await scope.skipWaiting();
           return;
         }

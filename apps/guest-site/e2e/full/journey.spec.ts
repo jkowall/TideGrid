@@ -166,15 +166,19 @@ async function checkForUpdate(page: Page) {
 
 test("a new service worker installs, waits, and takes over on the next navigation (D11(a))", async ({
   page,
+  context,
 }) => {
   // Edits the served dist/sw.js, so it runs once, at one width.
   test.skip(test.info().project.name !== "desktop", "runs once");
+  test.setTimeout(120_000);
   const tenant = tenants[0];
   if (!tenant) return;
   const host = localHost(tenant.slug);
   const original = readFileSync(swFile, "utf8");
   try {
     await loadControlled(page, hostUrl(host), tenant.name);
+    // Exactly one window, the one that will ask.
+    expect(context.pages()).toHaveLength(1);
     const before = await workerState(page);
     expect(before.caches).toHaveLength(1);
     const oldCache = before.caches[0] ?? "";
@@ -187,11 +191,14 @@ test("a new service worker installs, waits, and takes over on the next navigatio
       .toBe("installed");
     expect((await workerState(page)).caches).toContain(oldCache);
 
-    // The next navigation's page load asks it to take over; this is the one window.
+    // The next navigation's page load asks it to take over; this is the one
+    // window. The worker looks for up to 15 seconds for the document the
+    // reload replaced to leave the browser's client list.
     await page.reload();
     await waitForReady(page, tenant.name);
+    expect(context.pages()).toHaveLength(1);
     await expect
-      .poll(async () => workerState(page), { timeout: 20_000 })
+      .poll(async () => workerState(page), { timeout: 30_000 })
       .toEqual({
         active: "activated",
         waiting: null,
@@ -208,6 +215,7 @@ test("a waiting service worker does not take over while another window is open (
   context,
 }) => {
   test.skip(test.info().project.name !== "desktop", "runs once");
+  test.setTimeout(120_000);
   const tenant = tenants[0];
   if (!tenant) return;
   const host = localHost(tenant.slug);
@@ -231,26 +239,21 @@ test("a waiting service worker does not take over while another window is open (
     // and the other window keeps build N's worker and cache.
     await page.reload();
     await waitForReady(page, tenant.name);
-    await page.waitForTimeout(2_000);
+    // Past the worker's whole re-check schedule (15 seconds after the ask).
+    await page.waitForTimeout(17_000);
     const held = await workerState(page);
     expect(held).toMatchObject({ active: "activated", waiting: "installed" });
     expect(held.caches).toContain(oldCache);
     expect((await workerState(other)).caches).toContain(oldCache);
 
-    // Once it is the only window, a page load gets the new worker. The
-    // browser may take a moment to forget the closed window, so each try is
-    // a fresh page load, which asks again.
+    // Once it is the only window, the next page load gets the new worker,
+    // within the worker's 15-second re-check schedule.
     await other.close();
+    expect(context.pages()).toHaveLength(1);
+    await page.reload();
+    await waitForReady(page, tenant.name);
     await expect
-      .poll(
-        async () => {
-          await page.reload();
-          await waitForReady(page, tenant.name);
-          await page.waitForTimeout(500);
-          return workerState(page);
-        },
-        { timeout: 45_000, intervals: [1_000] },
-      )
+      .poll(async () => workerState(page), { timeout: 30_000 })
       .toEqual({
         active: "activated",
         waiting: null,
