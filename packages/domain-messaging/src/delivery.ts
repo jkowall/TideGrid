@@ -77,9 +77,13 @@ export const DEADLINE_MARGIN_MS = 2_000;
 /** Why a message whose outcome nobody knows fails on a provider that does not deduplicate. */
 export const OUTCOME_UNKNOWN = "outcome_unknown";
 
-/** Whether a repeat with the same key is safe on this provider (unset means it is). */
+/**
+ * Whether a repeat with the same key is safe on this provider: only when it
+ * says so. Unset means it does not, so a provider that forgets the flag gets
+ * at-most-once delivery, never a second copy (review note S2).
+ */
 export function providerDeduplicates(provider: Pick<EmailProvider, "deduplicates">): boolean {
-  return provider.deduplicates !== false;
+  return provider.deduplicates === true;
 }
 /** The default guest-site origin for a tenant: its preview hostname. */
 export const DEFAULT_GUEST_LINK_ORIGIN = "https://{slug}.book.tidegrid.us";
@@ -476,12 +480,15 @@ export async function deliverTenantMessages(
         | { kind: "retry"; code: string }
         | { kind: "failed"; code: string };
       let accountFault = false;
+      // Whether the provider was called at all: a throw before it is a known
+      // "not sent" on every provider (review note F2).
+      let attempted = false;
       try {
         const html =
           row.link_slot && url ? fillLinkSlot(row.html_body, row.link_slot, url) : row.html_body;
         const text =
           row.link_slot && url ? fillLinkSlot(row.text_body, row.link_slot, url) : row.text_body;
-        const sent = await options.provider.send({
+        const email = {
           idempotencyKey: row.id,
           tenantId,
           from: { email: options.fromAddress, name: row.from_name },
@@ -490,7 +497,9 @@ export async function deliverTenantMessages(
           subject: row.subject,
           html,
           text,
-        });
+        };
+        attempted = true;
+        const sent = await options.provider.send(email);
         result = { kind: "sent", providerMessageId: sent.providerMessageId };
       } catch (error) {
         const dedupes = providerDeduplicates(options.provider);
@@ -505,12 +514,14 @@ export async function deliverTenantMessages(
               ? { kind: "retry", code: error.code }
               : { kind: "failed", code: OUTCOME_UNKNOWN };
         } else {
-          // Not the provider's answer: nobody knows whether it was sent.
-          // Retried with the same key only where a repeat is safe.
+          // Not the provider's answer. Before the call, nothing was sent, so
+          // it retries anywhere; after it, nobody knows, so it retries with
+          // the same key only where a repeat is safe.
           options.onSendError?.(row.id, error);
-          result = dedupes
-            ? { kind: "retry", code: "send_error" }
-            : { kind: "failed", code: OUTCOME_UNKNOWN };
+          result =
+            !attempted || dedupes
+              ? { kind: "retry", code: "send_error" }
+              : { kind: "failed", code: OUTCOME_UNKNOWN };
         }
       }
       item = await record(db, ctx, row, result);

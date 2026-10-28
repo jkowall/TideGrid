@@ -16,7 +16,7 @@
  *   unknown outcome. An answer that arrives later is logged, never thrown.
  * - No personal data in errors or logs. A provider error's message is never
  *   read; only its documented code is. Port errors carry TideGrid's code.
- *   Logs carry event names, codes, the message id, and hashes.
+ *   Logs carry event names, codes, the message id, and opaque provider ids.
  *
  * Provider docs, fetched 2026-10-28:
  * https://developers.cloudflare.com/email-service/api/send-emails/workers-api/
@@ -60,7 +60,7 @@ export type SendEmailBinding = {
 /** Who may receive email: an explicit list, or anyone (production only). */
 export type RecipientPolicy = { kind: "only"; addresses: ReadonlySet<string> } | { kind: "any" };
 
-/** A structured log line. Attribute values are codes, ids, hashes, and flags only. */
+/** A structured log line. Attribute values are codes, opaque ids, and flags only. */
 export type EmailProviderLog = (
   event: string,
   attributes: Record<string, string | number | boolean>,
@@ -85,6 +85,18 @@ export const MESSAGE_ID_HEADER = "X-TideGrid-Message-Id";
 const keyPattern = /^[A-Za-z0-9_.:-]{1,200}$/;
 /** One address: no whitespace, exactly one @, something on each side. */
 const addressPattern = /^[^\s@]+@[^\s@]+$/;
+/** C0 and C1 control characters, DEL included: CR and LF among them. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the point is to find them
+const controlPattern = /[\u0000-\u001f\u007f-\u009f]/;
+
+function hasControl(value: string): boolean {
+  return typeof value !== "string" || controlPattern.test(value);
+}
+
+/** One address of printable characters, as the message table admits. */
+function isAddress(value: string): boolean {
+  return typeof value === "string" && !hasControl(value) && addressPattern.test(value);
+}
 
 const encoder = new TextEncoder();
 
@@ -171,6 +183,20 @@ export class CloudflareEmailProvider implements EmailProvider {
       throw new EmailProviderRejectedError("invalid_message");
     }
     const to = normalizeRecipient(email.to.email);
+    // No control character in a name or the subject, and one address in
+    // each address field, checked here rather than left to the message
+    // table's CHECKs or the provider's encoding (review notes F8, S3).
+    if (
+      hasControl(email.from.name) ||
+      (email.to.name !== null && hasControl(email.to.name)) ||
+      hasControl(email.subject) ||
+      !isAddress(email.from.email) ||
+      !isAddress(to) ||
+      (email.replyTo !== null && !isAddress(email.replyTo))
+    ) {
+      this.#emit("email_invalid_message", { "tidegrid.email.message_id": key });
+      throw new EmailProviderRejectedError("invalid_message");
+    }
     if (this.#only && !this.#only.has(to)) {
       this.#emit("email_recipient_not_allowed", { "tidegrid.email.message_id": key });
       throw new EmailProviderRejectedError("recipient_not_allowed");
@@ -244,7 +270,7 @@ export class CloudflareEmailProvider implements EmailProvider {
    * One binding call raced against the timeout. Handlers go on the call's own
    * promise before the race, so an answer after the timeout is observed:
    * a late rejection is swallowed and logged by code only, and a late
-   * acceptance is logged with the message id and a hash of the provider id.
+   * acceptance is logged with the message id and the normalized provider id.
    */
   #call(builder: CloudflareEmailBuilder, key: string): Promise<Answer> {
     let pending: Promise<unknown>;
@@ -285,17 +311,24 @@ export class CloudflareEmailProvider implements EmailProvider {
     });
   }
 
+  /**
+   * A delivered copy the message table never records (it ended
+   * `outcome_unknown`): log its provider id as it would have been stored,
+   * normalized, so a future events consumer can join on it (review note F7).
+   */
   async #lateAccept(result: unknown, key: string): Promise<void> {
-    let hash = "none";
+    let id = "none";
     try {
       const raw = (result as { messageId?: unknown } | null)?.messageId;
-      if (typeof raw === "string") hash = (await sha256Hex(raw)).slice(0, 40);
+      if (typeof raw === "string" && raw.length > 0) {
+        id = (await normalizeCloudflareMessageId(raw)).id;
+      }
     } catch {
-      hash = "none";
+      id = "none";
     }
     this.#emit("email_send_late_accept", {
       "tidegrid.email.message_id": key,
-      "tidegrid.email.provider_message_hash": hash,
+      "tidegrid.email.provider_message_id": id,
     });
   }
 }

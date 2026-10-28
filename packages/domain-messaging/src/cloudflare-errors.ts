@@ -29,6 +29,11 @@ const rejected = (code: string): CloudflareErrorRule => ({
   class: "rejected",
   scope: "message",
 });
+const notSent = (code: string): CloudflareErrorRule => ({
+  code,
+  class: "unavailable",
+  scope: "message",
+});
 const account = (code: string): CloudflareErrorRule => ({
   code,
   class: "unavailable",
@@ -56,16 +61,28 @@ export const cloudflareErrorTable: ReadonlyMap<string, CloudflareErrorRule> = ne
   ["E_HEADERS_TOO_MANY", rejected("invalid_message")],
   ["E_RECIPIENT_SUPPRESSED", rejected("recipient_suppressed")],
   ["E_RECIPIENT_NOT_ALLOWED", rejected("recipient_not_allowed")],
+  // A rate limit is known not sent and "must be retried later", but it is
+  // not an account fault: the lifecycle page says the stage "checks sending
+  // limits per account, domain, and recipient", with this one code for all
+  // three. So it retries its own message and the run goes on (review note
+  // fidelity F2). https://developers.cloudflare.com/email-service/concepts/email-lifecycle/
+  ["E_RATE_LIMIT_EXCEEDED", notSent("provider_rate_limited")],
   // Account-level faults retry, so one misconfiguration does not fail the
   // whole queue at once, and stop the run (D2).
-  ["E_RATE_LIMIT_EXCEEDED", account("provider_rate_limited")],
   ["E_DAILY_LIMIT_EXCEEDED", account("provider_quota_exceeded")],
   ["E_SENDER_NOT_VERIFIED", account("sender_not_verified")],
   ["E_SENDER_DOMAIN_NOT_AVAILABLE", account("sender_not_verified")],
   ["E_ACCOUNT_SUSPENDED", account("provider_account_suspended")],
-  // "Could not deliver the email" and "Internal service error" do not say
-  // whether anything was transmitted (coordinator default for D1).
+  // E_DELIVERY_FAILED: description "Could not deliver the email", common
+  // causes "SMTP delivery failure, recipient server rejection". A rejection by
+  // the recipient's server means something was transmitted and refused, which
+  // points toward Rejected; an SMTP failure does not say. It stays ambiguous
+  // (coordinator default for D1), the safe direction: never sent again.
+  // Whether a Rejected code (such as recipient_rejected) would serve staff
+  // better is on the G2.16-live checklist.
   ["E_DELIVERY_FAILED", ambiguous],
+  // E_INTERNAL_SERVER_ERROR: "Internal service error", common cause "Email
+  // Service temporarily unavailable"; whether the email was taken is unknown.
   ["E_INTERNAL_SERVER_ERROR", ambiguous],
 ]);
 

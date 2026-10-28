@@ -35,9 +35,10 @@ export interface EmailProvider {
   name: EmailProviderName;
   /**
    * Whether a repeat with the same key answers with the first email instead
-   * of sending another. Unset means it does, as the fake does. A provider
-   * that cannot promise it says false, and delivery then never repeats a
-   * send whose outcome is unknown (G2.16a, at most once).
+   * of sending another. Only true promises it, as the fake does. Unset or
+   * false means it does not, and delivery then never repeats a send whose
+   * outcome is unknown (G2.16a, at most once), so a provider that forgets
+   * the flag fails safe.
    */
   readonly deduplicates?: boolean;
   /**
