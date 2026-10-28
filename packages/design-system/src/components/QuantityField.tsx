@@ -1,4 +1,4 @@
-import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, type Ref, useId, useRef, useState } from "react";
 import { cx } from "./cx.ts";
 import { Icon } from "./Icon.tsx";
 
@@ -97,9 +97,14 @@ export function QuantityField({
   // The person has typed since the field last settled; leaving it commits the count.
   const typed = useRef(false);
 
-  useEffect(() => {
+  // A new count from the caller replaces the draft during render, not in an
+  // effect. A passive effect runs in a later task, so a keystroke could land
+  // first and the effect would then put the old count back.
+  const [shown, setShown] = useState(value);
+  if (shown !== value) {
+    setShown(value);
     setDraft(String(value));
-  }, [value]);
+  }
 
   const top = Math.max(min, max);
   const canDecrement = !disabled && value > min;
