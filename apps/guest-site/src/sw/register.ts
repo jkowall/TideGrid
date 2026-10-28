@@ -32,16 +32,13 @@ export async function registerServiceWorker(): Promise<void> {
   if (!import.meta.env.PROD) return;
   try {
     if (!("serviceWorker" in navigator)) return;
-    await navigator.serviceWorker.register("/sw.js", {
+    // TEMPORARY EXPERIMENT: the pre-6d39d11 ask, from the registration
+    // register() resolves with. Reverted in the next commit.
+    const registration = await navigator.serviceWorker.register("/sw.js", {
       scope: "/",
       updateViaCache: "none",
     });
-    // The registration register() hands back can still be catching up with
-    // the browser's worker states, so read it again once a worker is ready:
-    // a worker that was already waiting when this page loaded shows by then.
-    await navigator.serviceWorker.ready;
-    const current = await navigator.serviceWorker.getRegistration("/");
-    if (current) activateWaitingWorker(current);
+    activateWaitingWorker(registration);
   } catch {
     // Private browsing, a blocked script, or no support: no offline page, nothing else.
   }
