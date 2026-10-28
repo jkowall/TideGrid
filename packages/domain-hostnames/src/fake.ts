@@ -96,6 +96,12 @@ export interface FakeHostnameOptions {
   clock?: () => Date;
   /** The CNAME target. Defaults to `customers.tidegrid.us`. */
   routingTarget?: string;
+  /**
+   * The start of every id, `fake-ch` by default. The database keeps provider
+   * ids unique, so a fake in a process that shares a database with earlier
+   * fakes (the admin CLI) passes a prefix of its own.
+   */
+  idPrefix?: string;
 }
 
 export interface FakeHostnameProvider extends CustomHostnameProvider, HostnameProviderControls {
@@ -141,8 +147,13 @@ class ScriptedHostnameProvider implements FakeHostnameProvider {
   readonly #faults: Fault[] = [];
   #loseNextCreate = false;
   #sequence = 0;
+  readonly #idPrefix: string;
 
   constructor(options: FakeHostnameOptions) {
+    this.#idPrefix = options.idPrefix ?? "fake-ch";
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(this.#idPrefix)) {
+      throw new TypeError("a fake id prefix is 1 to 40 letters, digits, hyphens, or underscores");
+    }
     this.#clock = options.clock ?? (() => new Date());
     this.#target = checkProviderHostname(options.routingTarget ?? "customers.tidegrid.us");
   }
@@ -267,7 +278,7 @@ class ScriptedHostnameProvider implements FakeHostnameProvider {
   #store(hostname: string, certificateValidation: CertificateValidation, foreign: boolean) {
     this.#sequence += 1;
     const record: FakeHostnameRecord & { sequence: number } = {
-      providerId: `fake-ch-${String(this.#sequence).padStart(4, "0")}`,
+      providerId: `${this.#idPrefix}-${String(this.#sequence).padStart(4, "0")}`,
       hostname,
       hostnameStatus: fakeRawStatus.hostname.pending,
       certificateStatus: fakeRawStatus.certificate.pending,

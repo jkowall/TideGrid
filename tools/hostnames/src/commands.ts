@@ -203,7 +203,9 @@ async function fakeLifecycle(
       "fake-lifecycle runs only against a throwaway database (TIDEGRID_EPHEMERAL_DB=1)",
     );
   }
-  const fake = createFakeHostnameProvider();
+  // A prefix of its own: provider ids are unique across the database, and
+  // earlier fake runs may have used the default sequence.
+  const fake = createFakeHostnameProvider({ idPrefix: `fake-cli-${randomUUID().slice(0, 8)}` });
   const lines: string[] = [];
   const requested = await requestCustomHostname(db, fake, { tenantId, hostname, actor });
   lines.push(`request: ${requested.kind}`);
