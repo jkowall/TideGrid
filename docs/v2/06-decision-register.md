@@ -20,6 +20,20 @@ Dated decisions that changed scope, wording, or process. Each entry records the 
 - **D10: the console's browser proof runs in CI.** A console browser job of its own runs the journey at 375 and 1280 on both synthetic operators, under the console Worker's CSP, against a disposable PostgreSQL 17.
 - **Also taken by default:** a channel column (phone, email, or walk-up; D4), participants named by the guest through the management link (D6), a limit of three open checkouts per staff member (D8), the confirmation email unchanged (D9), one combined independent review on the stronger configuration plus a UI review (D11), merge when green covering migration `0012` once the review is accepted (D12), one promotion code and no manual discount (D13), the staff member's name on a booking visible to every role that reads it, finance included (D14), and no staff bookings in the demo seed (D15).
 
+### Pending owner confirmation: Stripe adapter (coordinator defaults, 2026-10-28)
+
+**Status:** Coordinator defaults for the Stripe adapter, standing goal item 3, pending owner confirmation. The owner's standing goal of 2026-10-28 said "go, include the Stripe and email adapters" and did not answer the goal packet's decisions. They bind the demo build only, and only until the owner confirms or replaces them. The full list, with the reasons, is the [Stripe adapter narrowing](12-demo-build-plan.md#goal-sequence) in the demo build plan. The adapter stays off in every deployed configuration; Stripe-live, with real test-mode calls, needs the owner's inputs and approval under the external-action rule below.
+
+- **D1 (a): local first.** The adapter, its recorded-shape fixture, and the API wiring are built and tested with no Stripe account, call, CLI, or install. The wiring is off.
+- **D2 (a): Stripe redelivery dedupe by a canonical projection hash** that leaves out `pending_webhooks` and `request`, in the adapter. No inbox or finalize change.
+- **D3 (a): refunds are looked up by key before they are created,** and a pending refund is an unknown outcome. This defers the [product scope](02-product-scope.md)'s pending, succeeded, and failed refund states and its actionable failed side effects to G2.9. Known risk: refunds stuck pending can fill the front of each sweep batch; fair ordering and an exception after some hours are proposed G2.9 follow-ups.
+- **D4 (a): no `cancelPayment` on the port** until G2.9 or G2.10. A late success on an intent that could have been canceled is refunded, and the operator loses its processing fee.
+- **D5 (a) card only; D6 (a) PaymentIntents; D7 (a) `fetch` and hand parsers, no SDK.**
+- **D8 (a): live keys and live events refused everywhere** until the Core live gate, and test keys refused in production. This adds a production refusal for the Stripe adapter like the fake's.
+- **D9 (a): staff bookings stay on the shim.** Under Stripe the staff test payment answers 404, and a staff checkout opens an intent nothing can pay until a follow-up.
+- **D10 (a) one webhook secret; D11 (a) API version `2026-09-30.endive` pinned; D12 (a) a restricted `rk_test_` key.** Open for the live step: whether a restricted key may act through `Stripe-Account`.
+- **Also taken by default:** configuration and account error codes (13 from Stripe's list), a 401, a 403, and any refused refund lookup never settle a refund as failed; G2.7's Stripe proof line is met for Stripe-local by the CI integration suite over the recorded fixture, and for Stripe-live by a sandbox replay after the owner's approval; the adapter lives in `packages/domain-payments`, narrowing the [hosting plan](08-build-hosting-and-operations.md)'s proposed `provider-*/` layout for the demo.
+
 ### Pending owner confirmation: G2.14b demo narrowings (coordinator defaults, 2026-10-27)
 
 **Status:** Coordinator defaults for the G2.14b local-first pass, pending owner confirmation. They bind the demo build only, and only until the owner confirms or replaces them. The full list, with the reasons, is the [hostnames and PWA narrowing](12-demo-build-plan.md#goal-sequence) in the demo build plan.

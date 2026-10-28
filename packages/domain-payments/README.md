@@ -70,7 +70,7 @@ The API's demo controls over it are listed in the [checkout contract](../domain-
 
 ## The Stripe adapter (proposed, off by default)
 
-Standing goal item 3. Every design choice here is a coordinator default of 2026-10-28, pending the owner's confirmation; the decisions D1 to D12 are recorded in the [decision register](../../docs/v2/06-decision-register.md) and the [demo build plan](../../docs/v2/12-demo-build-plan.md). No live Stripe call has been made. The adapter was built and tested against recorded-shape fixtures only: modeled on Stripe's documentation, unverified against live.
+Standing goal item 3. Every design choice here is a coordinator default of 2026-10-28, pending the owner's confirmation; the decisions D1 to D12 are recorded in the [decision register](../../docs/v2/06-decision-register.md#decision-log) and the [demo build plan](../../docs/v2/12-demo-build-plan.md#goal-sequence), with the API wiring that lands with them. No live Stripe call has been made. The adapter was built and tested against recorded-shape fixtures only: modeled on Stripe's documentation, unverified against live.
 
 `createStripePaymentProvider` in `src/stripe.ts` builds a Stripe Connect direct-charge adapter behind `PaymentProvider`. It lives in this package because only this package can mint the verified-event brand. That narrows the hosting plan's proposed `provider-*/` layout for the demo.
 
@@ -91,6 +91,7 @@ createStripePaymentProvider({
 - `checkStripeConfig` and the constructor apply the same rules, so the API's settings and the adapter each refuse on their own.
 - A missing key or webhook secret means off: `stripe_key_missing`, `stripe_webhook_secret_missing`.
 - These are refused: a live key of any kind (`sk_live_`, `rk_live_`, `pk_live_`) in every environment until the Core live gate (`live_key`); a key that fails `^(sk|rk)_test_[A-Za-z0-9]{24,}$` (`key_malformed`); a test key with `ENVIRONMENT=production`, because test cards would confirm real bookings with no money moving (`stripe_test_in_production`); a `whsec_` that fails its shape check (`webhook_secret_malformed`).
+- The fixture's credentials (`rk_test_fixture_...`, `whsec_fixture_...`) fail both shape checks on purpose, so they can never configure a deployment. The constructor takes them only as a pair, only with an injected `fetch`, which no deployment passes, and never in production.
 - The API base is never read from the environment. It must be an `https` origin with no path or credentials, and anything but `https://api.stripe.com` needs an injected `fetch`.
 - The key and the webhook secret are Worker secrets only, never vars and never in the repository.
 
@@ -114,6 +115,7 @@ Stripe may forget an idempotency key after 24 hours and run a reused key as a ne
 
 - A match returns the refund's current status; a match with another amount is refused as `idempotency_key_reused`.
 - If the five-page bound runs out with no match, the outcome is unknown, and nothing is created blind.
+- A refused lookup (any 4xx on the list call) is no answer about the refund. It is unknown (`stripe_refund_lookup_refused`), and the refund stays requested. That includes another account's intent, which reads as missing there.
 - A POST answered `charge_already_refunded` triggers a second lookup. It is never a final failure: the refund may be this one, created by an attempt whose answer was lost.
 - Two callers inside 24 hours that both find nothing are deduplicated by the key; the second gets a replay or a 409, which is unknown.
 
@@ -122,8 +124,9 @@ Stripe may forget an idempotency key after 24 hours and run a reused key as a ne
 | Condition | Result |
 |---|---|
 | Network error, timeout, 5xx (even with `Stripe-Should-Retry: false`), 409, 429, `Stripe-Should-Retry: true`, an answer that does not parse | `ProviderUnavailableError` |
-| 401; 403; `api_key_expired`, `platform_api_key_expired`, `secret_key_required`, `account_invalid`, `livemode_mismatch` | `ProviderUnavailableError` with the stable message `stripe_auth` (401) or `stripe_config` |
-| `error.type` `idempotency_error` | `ProviderRejectedError("idempotency_key_reused")` |
+| 401; 403; a key, platform, or account code from [Stripe's list](https://docs.stripe.com/error-codes): `api_key_expired`, `platform_api_key_expired`, `secret_key_required`, `account_invalid`, `livemode_mismatch`, `platform_account_required`, `capability_not_active`, `action_blocked`, `testmode_charges_only`, `tls_version_unsupported`, `anomalous_money_movement_request`, `account_country_invalid_address`, `progressive_onboarding_limit_exceeded` | `ProviderUnavailableError` with the stable message `stripe_auth` (401) or `stripe_config` |
+| A "not now" code: `lock_timeout`, `rate_limit`, `idempotency_key_in_use`, `balance_insufficient`, `charge_exceeds_source_limit`, `payment_method_not_available` | `ProviderUnavailableError` (`stripe_retry`) |
+| `error.type` `idempotency_error` with any other code | `ProviderRejectedError("idempotency_key_reused")` |
 | 400, 402, 404 with another code | `ProviderRejectedError(<code>)`, or `http_<status>` when the code is not snake case |
 | Any other status | `ProviderUnavailableError` |
 
@@ -155,11 +158,12 @@ Mapping:
 - **Inline processing.** The webhook route records and processes inline. Stripe advises a quick 2xx first. The inbox and the sweep make Stripe's retry safe.
 - **Signature only.** The route trusts the signature alone. Allowlisting Stripe's webhook IPs is a proposed follow-up.
 - **Restricted keys.** Whether an `rk_test_` key needs extra permission to act through `Stripe-Account` is unconfirmed. If it does, the 403 is unknown, so refunds wait rather than fail.
+- **Metadata cleared in the Dashboard.** An intent without TideGrid's payment id is recorded as `other`, so if the account's owner clears that metadata, a late success is ignored rather than refunded. G2.10 reconciliation, reading pending payments past their hold through `retrievePayment`, is the recovery.
 - **No logger.** The adapter adds no log site. Operator-visible logs for `refund.failed` and disputes are a G2.9 and G2.10 follow-up, and such a log never carries `data.object`.
 
 ### The fixture and its capture rules
 
-`src/stripe-fixture.ts` is an in-memory server for the endpoints above: intents, charges, and refunds per connected account; idempotent POSTs with replays, key reuse, and `pruneKeys()`; scripted answers and timeouts; and signed snapshot events. Its bodies are recorded-shape: modeled on the API reference, unverified against live. Synthetic ids, keys, and the two accounts `acct_1TestHarbor0000` and `acct_1TestReef00000` only. Outside the package it is reachable only as `@tidegrid/domain-payments/testing`, which exports `createStripeFixture` and nothing else.
+`src/stripe-fixture.ts` is an in-memory server for the endpoints above: intents, charges, and refunds per connected account; idempotent POSTs with replays, key reuse, and `pruneKeys()`; scripted answers and timeouts; and signed snapshot events. Its bodies are recorded-shape: modeled on the API reference, unverified against live. Synthetic ids, keys, and the two accounts `acct_1TestHarbor0000` and `acct_1TestReef00000` only. Like Stripe, it saves an idempotent answer only once a request has executed, so a parameter-validation error is not replayed, and a declined attempt leaves a failed charge as the intent's latest charge. One behavior is a test tripwire, not Stripe's: a call with no `Stripe-Account` header is refused, where Stripe would run it on the platform account; the adapter's own check is the real guard. An account the key cannot reach answers 403 `account_invalid`. Outside the package it is reachable only as `@tidegrid/domain-payments/testing`, which exports `createStripeFixture` and nothing else.
 
 Replacing these bodies with sandbox captures is a later step, after the owner approves real test-mode calls. Raw captures stay in the owner's private location. Before anything is committed, scrub:
 
@@ -168,13 +172,13 @@ Replacing these bodies with sandbox captures is a later step, after the owner ap
 - from Events: `request.id` and `request.idempotency_key`;
 - everywhere: every `acct_`, `ch_`, `pi_`, `re_`, `evt_`, and `txn_` id, replaced with synthetic ids.
 
-`stripe-fixture-hygiene.test.ts` enforces the scrub on every fixture file and every body the fixture serves or signs. Keep each event under the route's 64 KiB cap.
+`stripe-fixture-hygiene.test.ts` enforces the scrub on every fixture file and every body the fixture serves or signs. It also refuses any `shipping` or `address` object with a value, and any `name`, `phone`, `customer`, `description`, or `network_transaction_id` that is set, wherever it appears. Keep each event under the route's 64 KiB cap.
 
 ## Follow-ups for the Stripe adapter
 
 Recorded from the G2.7 independent review. Both are now closed by the Stripe adapter, as follows.
 
-- **Inbox provenance.** The database cannot tell where an inbox row came from; the `VerifiedProviderEvent` brand, which only an adapter's `verifyWebhook` sets, is the only guard on what reaches `recordProviderEvent`. The [checkout contract](../domain-booking/README.md#the-rule) says so too. Closed by `provenance.test.ts`: it scans `apps/`, `packages/`, and `tools/` and fails on any use of the minting function or a cast to the brand outside `adapter.ts` and the `verifyWebhook` bodies of the fake and Stripe adapters, on any relative import into this package's source from outside it, and on any runtime import of the Stripe fixture. A guard inside the database would still need the signing secret there, or a separate inbox-writer role; both remain outside the demo.
+- **Inbox provenance.** The database cannot tell where an inbox row came from; the `VerifiedProviderEvent` brand, which only an adapter's `verifyWebhook` sets, is the only guard on what reaches `recordProviderEvent`. The [checkout contract](../domain-booking/README.md#the-rule) says so too. Closed by `provenance.test.ts`: it scans `apps/`, `packages/`, and `tools/` and fails on any use of the minting function or a cast to the brand outside `adapter.ts` and the `verifyWebhook` bodies of the fake and Stripe adapters, on any relative import into this package's source from outside it, and on any runtime import of the Stripe fixture, by package path or by relative path inside the package. It also catches the cast-free forgeries the compiler allows when they name the type: an object literal, a parse, or an `any` value given the type, `satisfies`, and a function typed to return the brand that returns a literal. An unannotated spread of a real verified event keeps the brand and is not caught by a text scan; a runtime brand checked by the inbox would close it, and is a proposed follow-up. A guard inside the database would still need the signing secret there, or a separate inbox-writer role; both remain outside the demo.
 - **Stripe retries can change the body.** Stripe signs every delivery afresh, and `pending_webhooks` falls as other endpoints succeed ([the event object](https://docs.stripe.com/api/events/object)), so two deliveries of one event need not be byte for byte the same. With a raw-body hash such a retry would read as `samePayload: false` and stop at `payload_mismatch`. Closed by the canonical projection hash above (D2): a redelivery hashes the same, so the inbox records it as the same payload. Stripe also says it sometimes sends two separate events for one change; processing is already idempotent per payment (`already_succeeded`, `already_failed`), so a second event id for the same outcome changes nothing.
 
 ## Tests
