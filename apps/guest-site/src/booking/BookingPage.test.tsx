@@ -1285,6 +1285,35 @@ describe("typing a count", () => {
     });
   });
 
+  it("keeps a count emptied before the party step's effects have run", async () => {
+    // React runs a commit's passive effects in a later task. A mutation
+    // observer runs between the two, so the keystroke lands in that gap, as
+    // it did on a slow CI runner.
+    const calls = stubApi();
+    let emptied = false;
+    const observer = new MutationObserver(() => {
+      const child = screen.queryByRole("spinbutton", { name: "Child (3 to 12)" });
+      if (emptied || !child) return;
+      emptied = true;
+      fireEvent.change(child, { target: { value: "" } });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      renderPage("?t.adult=2&t.child=1");
+      await heading("Who's coming");
+    } finally {
+      observer.disconnect();
+    }
+    expect(emptied).toBe(true);
+    const child = screen.getByRole("spinbutton", { name: "Child (3 to 12)" }) as HTMLInputElement;
+    expect(child.value).toBe("");
+    fireEvent.submit(child.form as HTMLFormElement);
+    await heading("Your details");
+    expect(callsTo(calls, "createQuote")[0]?.body).toMatchObject({
+      party: { kind: "tickets", tickets: [{ code: "adult", quantity: 2 }] },
+    });
+  });
+
   it("says aloud when a smaller party lowers an extra", async () => {
     stubApi();
     renderPage("?t.adult=2&a.drinks=4");
