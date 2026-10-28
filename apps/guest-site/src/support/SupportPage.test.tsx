@@ -4,7 +4,7 @@ import type { PublicBrand } from "@tidegrid/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrandedShell } from "../BrandedShell.tsx";
 import { NavigationProvider } from "../navigation.tsx";
-import { activateWaitingWorker, followExperience } from "../sw/register.ts";
+import { activateWaitingWorker, followExperience, pageSettled } from "../sw/register.ts";
 
 const tenant = { slug: "demo-reef", name: "Demo Reef Divers" };
 const brand = {
@@ -104,6 +104,38 @@ describe("service worker registration (G2.14b)", () => {
     activateWaitingWorker({ waiting: { postMessage } }, pageLoad);
     expect(postMessage).toHaveBeenCalledTimes(1);
     expect(() => activateWaitingWorker({ waiting: null }, { asked: false })).not.toThrow();
+  });
+
+  it("asks only after the load event, two frames, and the fonts those frames requested (D11(a))", async () => {
+    let load = () => {};
+    const frames: (() => void)[] = [];
+    let fontsLoaded = () => {};
+    const page = {
+      document: {
+        readyState: "loading",
+        fonts: { ready: new Promise<void>((resolve) => (fontsLoaded = resolve)) },
+      },
+      addEventListener: (_type: "load", listener: () => void) => {
+        load = listener;
+      },
+      requestAnimationFrame: (callback: () => void) => frames.push(callback),
+    };
+    let settled = false;
+    void pageSettled(page).then(() => (settled = true));
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+
+    await tick();
+    expect(frames).toHaveLength(0);
+    load();
+    await tick();
+    frames.shift()?.();
+    await tick();
+    frames.shift()?.();
+    await tick();
+    expect(settled).toBe(false);
+    fontsLoaded();
+    await tick();
+    expect(settled).toBe(true);
   });
 
   it("clears workers and caches only on a readable not-published answer", async () => {

@@ -20,8 +20,8 @@
  * - Navigations go to the network first and fall back to the offline page.
  * - Cache names carry the build id; activation deletes every other cache.
  * - Update policy (G2.14b, D11(a)): a new version installs and waits. The
- *   next page load finds it waiting and asks it to take over, with a
- *   SKIP_WAITING message. It takes over only when the window that asked is
+ *   next page load, once it has settled (register.ts), finds it waiting and
+ *   asks it to take over, with a SKIP_WAITING message. It takes over only when the window that asked is
  *   the site's only open window, looking for up to 60 seconds after the ask:
  *   skipping waiting would switch every open window to the new worker at
  *   once, and its activation deletes the old build's cache. With another tab

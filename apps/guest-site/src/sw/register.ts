@@ -11,12 +11,12 @@ const SKIP_WAITING = "SKIP_WAITING";
  *   "none", so the browser always asks the network for the script, and the
  *   guest Worker can swap in the kill switch for a host that stopped
  *   resolving. Production builds only: the dev server serves no sw.js.
- * - On that same page load, once, a worker waiting when the registration is
- *   read after `ready` is asked to take over. That is usually a new build an
- *   earlier visit's update check found; rarely it is one this load's own
- *   update check finished installing first, so a page of the old build may
- *   ask a newer worker. The worker takes over only when this is the site's
- *   one open window (G2.14b, D11(a)).
+ * - On that same page load, once, after the page has settled (see
+ *   pageSettled), a worker waiting then is asked to take over. That is
+ *   usually a new build an earlier visit's update check found; rarely it is
+ *   one this load's own update check finished installing first, so a page of
+ *   the old build may ask a newer worker. The worker takes over only when
+ *   this is the site's one open window (G2.14b, D11(a)).
  *   "Try again" after a failed bootstrap never asks again.
  * - When the API says no operator is published here (a readable
  *   tenant_not_found), unregister every worker and delete every cache: the
@@ -39,15 +39,40 @@ export async function registerServiceWorker(): Promise<void> {
       scope: "/",
       updateViaCache: "none",
     });
-    // The registration register() hands back can still be catching up with
-    // the browser's worker states, so read it again once a worker is ready:
-    // a worker that was already waiting when this page loaded shows by then.
-    await navigator.serviceWorker.ready;
+    await pageSettled();
     const current = await navigator.serviceWorker.getRegistration("/");
     if (current) activateWaitingWorker(current);
   } catch {
     // Private browsing, a blocked script, or no support: no offline page, nothing else.
   }
+}
+
+/** The parts of window that pageSettled reads; a fake in tests. */
+export interface SettlingPage {
+  document: { readyState: string; fonts?: { ready: Promise<unknown> } };
+  addEventListener(type: "load", listener: () => void, options: { once: true }): void;
+  requestAnimationFrame(callback: () => void): unknown;
+}
+
+/**
+ * Resolves once this page load has stopped asking the old worker for files:
+ * the load event has fired, two frames have run, so the ready page has
+ * rendered and requested the brand's web fonts, and those fonts have loaded.
+ * The bootstrap calls followExperience before that render. When the page
+ * asked before it, in CI the new worker sometimes skipped waiting, Chromium
+ * stopped the old one, and the old one restarted within milliseconds (most
+ * likely for those font requests) and was still running 75 seconds later,
+ * with the new worker still waiting (verification log, G2.14b follow-up).
+ * A hidden tab runs no frames, so it asks once it is shown.
+ */
+export async function pageSettled(page: SettlingPage = window): Promise<void> {
+  if (page.document.readyState !== "complete") {
+    await new Promise<void>((resolve) => page.addEventListener("load", resolve, { once: true }));
+  }
+  for (let frame = 0; frame < 2; frame++) {
+    await new Promise<void>((resolve) => page.requestAnimationFrame(resolve));
+  }
+  await page.document.fonts?.ready;
 }
 
 /** Whether this page load has already asked; module state lives as long as the page. */

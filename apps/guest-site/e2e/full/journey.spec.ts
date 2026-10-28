@@ -123,21 +123,28 @@ for (const tenant of tenants) {
 const swFile = new URL("../../dist/sw.js", import.meta.url);
 
 /**
- * The worker's own view of a take-over request, for the update checks'
- * diagnostics: prepended to build N+1 only, it logs each SKIP_WAITING with
- * the id of the client that posted it, each clients.matchAll answer the
- * take-over loop gets (the only caller), and each skipWaiting call. It wraps
- * and never changes what the worker does. Lines go to the worker's console,
+ * Each worker's own view of a take-over request, for the update checks'
+ * diagnostics: prepended to build N ("old") and build N+1 ("new"), it logs
+ * each evaluation of the script (a restart logs again), each fetch event
+ * the worker gets, each SKIP_WAITING with the id of the client that posted
+ * it, each clients.matchAll answer the take-over loop gets (the only
+ * caller), and each skipWaiting call. "at" is the browser's clock, so the
+ * old worker's fetches line up with the new one's skipWaiting. It wraps and
+ * never changes what the worker does. Lines go to the worker's console,
  * which the test collects as they happen, and to self.__d11 as a fallback.
  */
-const workerDiagnostics = `(() => {
+const workerDiagnostics = (role: "old" | "new") => `(() => {
   const started = Date.now();
   const log = (self.__d11 = []);
   const note = (entry) => {
-    const line = { ms: Date.now() - started, ...entry };
+    const line = { role: "${role}", at: Date.now(), ms: Date.now() - started, ...entry };
     log.push(line);
     console.log("D11 worker " + JSON.stringify(line));
   };
+  self.addEventListener("fetch", (event) => {
+    const url = new URL(event.request.url);
+    note({ fetch: url.origin === self.location.origin ? url.pathname : url.origin });
+  });
   self.addEventListener("message", (event) =>
     note({ message: event.data && event.data.type, source: (event.source && event.source.id) || null }),
   );
@@ -162,7 +169,7 @@ const workerDiagnostics = `(() => {
 function shipNewWorker(original: string, buildId: string): void {
   const next = original.replace(/buildId:`[^`]+`/, `buildId:\`${buildId}\``);
   if (next === original) throw new Error("dist/sw.js has no build id to change");
-  writeFileSync(swFile, workerDiagnostics + next);
+  writeFileSync(swFile, workerDiagnostics("new") + next);
 }
 
 async function workerState(page: Page) {
@@ -274,6 +281,7 @@ test("a new service worker installs, waits, and takes over on the next navigatio
   const original = readFileSync(swFile, "utf8");
   const diagnose = await attachDiagnostics(page, context);
   try {
+    writeFileSync(swFile, workerDiagnostics("old") + original);
     await loadControlled(page, hostUrl(host), tenant.name);
     // Exactly one window, the one that will ask.
     expect(context.pages()).toHaveLength(1);
@@ -326,6 +334,7 @@ test("a waiting service worker does not take over while another window is open (
   const original = readFileSync(swFile, "utf8");
   const diagnose = await attachDiagnostics(page, context);
   try {
+    writeFileSync(swFile, workerDiagnostics("old") + original);
     await loadControlled(page, hostUrl(host), tenant.name);
     const other = await context.newPage();
     await other.goto(hostUrl(host, "/support"));
