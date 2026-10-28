@@ -11,7 +11,11 @@ import {
   requestCustomHostname,
   sweepHostnames,
 } from "./lifecycle.ts";
-import { type CustomHostnameProvider, HostnameProviderRejectedError } from "./provider.ts";
+import {
+  type CustomHostnameProvider,
+  HostnameProviderRejectedError,
+  HostnameProviderUnavailableError,
+} from "./provider.ts";
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -553,7 +557,7 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     return row;
   }
 
-  it("records nothing and stops the run on an account-level refusal, for the hostname it read (R1)", async () => {
+  it("records nothing for the hostname it read and ends the provider reads on an account-level refusal (R1)", async () => {
     for (const code of ["http_401", "http_403", "cloudflare_10000", "cloudflare_9109"]) {
       const tenant = await isolatedTenant(`acct-${code.replace("_", "")}`);
       const host = name(`acct-${code.replace("_", "")}`);
@@ -732,34 +736,140 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     }
   });
 
-  it("expires a claim that ran out without reading the provider, even after an account-level refusal", async () => {
-    // Tenant ids that sort first and last, so the refusal comes before the expiry.
-    const first = await isolatedTenant("exp-first", `00000000-0000-4000-8000-${run}0000`);
-    const last = await isolatedTenant("exp-last", `ffffffff-ffff-4fff-bfff-${run}ffff`);
-    const refusedHost = name("exp-refused");
-    const endedHost = name("exp-ended");
-    const ownEnded = name("exp-own");
-    await activeHost(shared, first, refusedHost);
-    await pendingHost(first, ownEnded, "-1 minute");
+  /**
+   * A tenant limit above every tenant in the database, so a sweep limited by
+   * onlyTenants reaches tenants whose ids sort last however many earlier
+   * cases left due hostnames behind.
+   */
+  async function everyTenant(): Promise<number> {
+    const [row] = await admin<{ n: number }[]>`select count(*)::int as n from public.tenants`;
+    return (row?.n ?? 0) + 1;
+  }
+
+  it("expires a claim that ran out without reading the provider, even after an account-level refusal or a throttle", async () => {
+    const stops = [
+      {
+        label: "refusal",
+        error: () => new HostnameProviderRejectedError("http_401", undefined, 401),
+      },
+      { label: "throttle", error: () => new HostnameProviderUnavailableError(429, 300) },
+    ];
+    for (const [i, stop] of stops.entries()) {
+      // Tenant ids that sort first and last, so the stop comes before the expiry.
+      const first = await isolatedTenant(
+        `exp-first-${stop.label}`,
+        `00000000-0000-4000-8000-${run}000${i}`,
+      );
+      const last = await isolatedTenant(
+        `exp-last-${stop.label}`,
+        `ffffffff-ffff-4fff-bfff-${run}fff${i}`,
+      );
+      const refusedHost = name(`exp-refused-${stop.label}`);
+      const endedHost = name(`exp-ended-${stop.label}`);
+      const ownEnded = name(`exp-own-${stop.label}`);
+      await activeHost(shared, first, refusedHost);
+      await pendingHost(first, ownEnded, "-1 minute");
+      await pendingHost(last, endedHost, "-1 minute");
+      await due(first);
+      const read: string[] = [];
+      const report = await sweepHostnames(runtimeDb.db, {
+        provider: readsWith(async (_id, expected) => {
+          read.push(expected);
+          throw stop.error();
+        }),
+        runId: `sweep-${run}`,
+        onlyTenants: [first, last],
+        tenantLimit: await everyTenant(),
+      });
+      if (stop.label === "refusal") expect(report.providerFault).toBe("http_401");
+      else
+        expect(report).toMatchObject({
+          throttled: true,
+          retryAfterSeconds: 300,
+          providerFault: null,
+        });
+      // Only the active hostname was read; neither ended claim needed the provider.
+      expect(read).toEqual([refusedHost]);
+      expect(report.expired).toBe(2);
+      for (const h of [ownEnded, endedHost]) {
+        expect(await checkRow(h)).toMatchObject({ status: "disabled", last_error_code: "expired" });
+      }
+      expect(await checkRow(refusedHost)).toMatchObject({ status: "active" });
+    }
+  });
+
+  it("ends the run at its budget, expiries included, after the provider reads stopped", async () => {
+    const first = await isolatedTenant("budget-first", `00000000-0000-4000-8000-${run}00b0`);
+    const last = await isolatedTenant("budget-last", `ffffffff-ffff-4fff-bfff-${run}ffb0`);
+    const throttledHost = name("budget-throttled");
+    const endedHost = name("budget-ended");
+    await activeHost(shared, first, throttledHost);
     await pendingHost(last, endedHost, "-1 minute");
     await due(first);
-    const read: string[] = [];
+    // The clock passes the budget while the provider answers 429.
+    let now = 0;
     const report = await sweepHostnames(runtimeDb.db, {
-      provider: readsWith(async (_id, expected) => {
-        read.push(expected);
-        throw new HostnameProviderRejectedError("http_401", undefined, 401);
+      provider: readsWith(async () => {
+        now = 30_000;
+        throw new HostnameProviderUnavailableError(429, 300);
       }),
       runId: `sweep-${run}`,
       onlyTenants: [first, last],
+      tenantLimit: await everyTenant(),
+      budgetMs: 20_000,
+      clock: () => now,
     });
-    expect(report.providerFault).toBe("http_401");
-    // Only the active hostname was read; neither ended claim needed the provider.
-    expect(read).toEqual([refusedHost]);
-    expect(report.expired).toBe(2);
-    for (const h of [ownEnded, endedHost]) {
-      expect(await checkRow(h)).toMatchObject({ status: "disabled", last_error_code: "expired" });
-    }
-    expect(await checkRow(refusedHost)).toMatchObject({ status: "active" });
+    expect(report).toMatchObject({ throttled: true, complete: false, expired: 0, tenants: 1 });
+    expect(await checkRow(endedHost)).toMatchObject({ status: "pending" });
+
+    // The next run, within its budget, expires it with no provider read.
+    const read: string[] = [];
+    const next = await sweepHostnames(runtimeDb.db, {
+      provider: readsWith(async (_id, expected) => {
+        read.push(expected);
+        throw new HostnameProviderUnavailableError(429, 300);
+      }),
+      runId: `sweep-${run}`,
+      onlyTenants: [last],
+      tenantLimit: await everyTenant(),
+    });
+    expect(read).toEqual([]);
+    expect(next.expired).toBe(1);
+    expect(await checkRow(endedHost)).toMatchObject({
+      status: "disabled",
+      last_error_code: "expired",
+    });
+  });
+
+  it("keeps expiring ended claims after the call limit, without another provider call", async () => {
+    const first = await isolatedTenant("cap-first", `00000000-0000-4000-8000-${run}00c0`);
+    const last = await isolatedTenant("cap-last", `ffffffff-ffff-4fff-bfff-${run}ffc0`);
+    const readHost = name("cap-read");
+    const unreadHost = name("cap-unread");
+    const endedHost = name("cap-ended");
+    await activeHost(shared, first, readHost);
+    await activeHost(shared, last, unreadHost);
+    await pendingHost(last, endedHost, "-1 minute");
+    await due(first);
+    await due(last);
+    const read: string[] = [];
+    const report = await sweepHostnames(runtimeDb.db, {
+      provider: readsWith(async (id, expected) => {
+        read.push(expected);
+        return shared.get(id, expected);
+      }),
+      runId: `sweep-${run}`,
+      onlyTenants: [first, last],
+      tenantLimit: await everyTenant(),
+      maxProviderCalls: 1,
+    });
+    expect(read).toEqual([readHost]);
+    expect(report).toMatchObject({ checked: 1, expired: 1, complete: false });
+    expect(await checkRow(endedHost)).toMatchObject({
+      status: "disabled",
+      last_error_code: "expired",
+    });
+    expect(await checkRow(unreadHost)).toMatchObject({ status: "active" });
   });
 
   it("refuses a check with one state, or with no reading and no error code", async () => {

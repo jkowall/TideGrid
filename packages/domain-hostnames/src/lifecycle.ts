@@ -210,9 +210,14 @@ export interface HostnameSweepOptions {
   /**
    * Provider calls per run. Cloudflare allows 1,200 requests per 5 minutes
    * for the whole account; a run every 15 minutes stays far below that.
+   * Past the limit the run reads the provider no more, but ended claims
+   * still expire until the budget runs out.
    */
   maxProviderCalls?: number;
-  /** No new hostname starts after this many milliseconds. */
+  /**
+   * The run ends after this many milliseconds: no provider read and no claim
+   * expiry starts after it.
+   */
   budgetMs?: number;
   onTenantError?: (tenantId: string, error: unknown) => void;
   /** Check only these tenants, as the admin CLI's fake run does. */
@@ -233,12 +238,17 @@ export interface HostnameSweepReport {
   demoted: number;
   expired: number;
   failedTenants: number;
-  /** The provider asked to wait (429 or 5xx); the run stopped early. */
+  /**
+   * The provider asked to wait (429 or 5xx). The run read the provider no
+   * more after it; earlier readings stand and ended claims still expired.
+   */
   throttled: boolean;
   /**
    * The provider refused for the whole account (401 or 403, an
-   * authentication code, a missing zone): the code, and the run stopped
-   * early. Nothing was recorded, so nothing was demoted.
+   * authentication code, a missing zone): the code. Nothing was recorded for
+   * the hostname being read, and the run read the provider no more. Readings
+   * recorded before it stand, and ended claims still expired, so `expired`
+   * can be above zero in the same run.
    */
   providerFault: string | null;
   /** The provider record being read when the account-level refusal came. */
@@ -272,8 +282,9 @@ class Throttled extends Error {
  * Refusals about the account, the token, or the zone rather than one record:
  * any HTTP 401 or 403, whatever Cloudflare code it carries (an expired,
  * rotated, or mis-scoped token), these Cloudflare codes in addition, and an
- * exact-name lookup that cannot find the zone (404). Every other hostname would get the same answer, so the run stops and
- * records nothing. The Cloudflare codes are its authentication and routing
+ * exact-name lookup that cannot find the zone (404). Every other hostname
+ * would get the same answer, so the run records nothing for the hostname it
+ * was reading and reads the provider no more. The Cloudflare codes are its authentication and routing
  * errors as remembered from its API (invalid or missing token, bad
  * Authorization header, an object identifier that routes nowhere); they are
  * unverified against live Cloudflare and listed for G2.14b-live. Any code not
@@ -291,7 +302,10 @@ const accountLevelRefusals = new Set([
   "cloudflare_7003",
 ]);
 
-/** The provider refused for the whole account: stop the run and record nothing. */
+/**
+ * The provider refused for the whole account: record nothing for this
+ * hostname and read the provider no more this run.
+ */
 export class HostnameSweepFault extends Error {
   constructor(
     readonly code: string,
@@ -324,10 +338,11 @@ const recordGone = (errorCode: string): Reading => ({
  * - no record by id, confirmed by an exact-name lookup that answers normally:
  *   gone (or replaced by a record with another id).
  *
- * Anything else is not a reading. 429 and 5xx throttle the run. An
- * account-level refusal (see accountLevelRefusals, and a lookup's 404, which
- * means the zone itself is missing or out of the token's reach) throws
- * HostnameSweepFault, which stops the run and records nothing. Any other
+ * Anything else is not a reading. 429 and 5xx throttle the run: it reads the
+ * provider no more. An account-level refusal (see accountLevelRefusals, and a
+ * lookup's 404, which means the zone itself is missing or out of the token's
+ * reach) throws HostnameSweepFault, which records nothing for this hostname
+ * and ends the run's provider reads. Any other
  * refusal is about this record (a malformed answer for it, an ambiguous name,
  * another 4xx for its id): it is recorded as no reading, which keeps the
  * states, backs the next check off, and lets the run go on to the next
@@ -392,10 +407,13 @@ async function readHostname(
  * rule): ownership moved, blocked, or deleted, or the certificate failed. A
  * record the provider no longer has, confirmed by an exact-name lookup, and a
  * record that names another hostname read as deleted. An account-level
- * refusal records nothing and stops the run (`providerFault`); a refusal
- * about one record is recorded with no change (`unread`) and the run goes
- * on; a 429 or 5xx stops the run, which honors `retry-after` because the next
- * run is 15 minutes away.
+ * refusal records nothing for the hostname being read and ends the provider
+ * reads (`providerFault`); a refusal about one record is recorded with no
+ * change (`unread`) and the run goes on; a 429 or 5xx ends the provider
+ * reads, which honors `retry-after` because the next run is 15 minutes away.
+ * After any of these, and after the call limit, readings already recorded
+ * stand and the run still expires pending claims that ran out, which needs no
+ * provider answer. The budget ends the run, expiries included.
  */
 export async function sweepHostnames(
   db: Kysely<Database>,
@@ -423,15 +441,20 @@ export async function sweepHostnames(
     complete: rows.length < tenantLimit,
   };
   let calls = 0;
-  const stop = () => calls >= maxCalls || clock() - started >= budgetMs;
+  const outOfTime = () => clock() - started >= budgetMs;
 
-  // After a throttle or an account-level refusal the run reads the provider
-  // no more, but it still expires claims that ran out: that is the
-  // database's own fact and needs no provider answer.
+  // After a throttle, an account-level refusal, or the call limit the run
+  // reads the provider no more, but it still expires claims that ran out:
+  // that is the database's own fact and needs no provider answer. The budget
+  // ends the run, expiries included.
   let expiryOnly = false;
   for (const { tenant_id: tenantId } of rows) {
     if (options.onlyTenants && !options.onlyTenants.includes(tenantId)) continue;
-    if (!expiryOnly && stop()) {
+    if (outOfTime()) {
+      report.complete = false;
+      break;
+    }
+    if (calls >= maxCalls) {
       report.complete = false;
       expiryOnly = true;
     }
@@ -456,12 +479,18 @@ export async function sweepHostnames(
              and p.provider_hostname_id is not null
              and ((h.status = 'pending' and (p.next_check_at <= now() or p.claim_expires_at <= now()))
                   or (h.status = 'active' and p.next_check_at <= now()))
+             and (not ${expiryOnly}::boolean
+                  or (h.status = 'pending' and p.claim_expires_at <= now()))
            order by claim_ended desc, p.next_check_at, p.hostname
            limit ${perTenant}`.execute(trx);
         return found;
       });
       if (due.length === perTenant) report.complete = false;
       for (const item of due) {
+        if (outOfTime()) {
+          report.complete = false;
+          break;
+        }
         if (item.claim_ended) {
           // No provider call: record_check with no reading expires it.
           const outcome = await inTenantTransaction(db, ctx, async (trx) => {
@@ -474,7 +503,7 @@ export async function sweepHostnames(
           continue;
         }
         if (expiryOnly) continue;
-        if (stop()) {
+        if (calls >= maxCalls) {
           report.complete = false;
           expiryOnly = true;
           continue;
