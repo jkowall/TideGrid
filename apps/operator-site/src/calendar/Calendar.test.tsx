@@ -960,6 +960,41 @@ describe("roles", () => {
     ).toBeTruthy();
   });
 
+  it.each([
+    ["owner", true],
+    ["booking_staff", true],
+    ["finance", false],
+  ] as const)(
+    "offers %s a staff booking only on trips on sale before their cutoff (G2.12d)",
+    async (role, books) => {
+      // Thursday's sunset trip without its blackout: on sale, before its cutoff.
+      const onSale = week.map((t) => (t === nov5Sunset ? { ...t, blackedOut: false } : t));
+      api({ [tripsPath()]: [() => json({ trips: onSale })] });
+      render(<CalendarPage membership={membership(role)} focusHeading={false} />);
+      await screen.findByRole("region", { name: /^Sunday, November 1/ });
+      const book = (li: HTMLElement) => within(li).queryAllByRole("link", { name: /^Book / });
+      // On sale and before the cutoff.
+      const open = book(rowOn("Thursday, November 5", /Sunset/));
+      expect(open).toHaveLength(books ? 1 : 0);
+      if (books) {
+        expect(open[0]?.getAttribute("href")).toMatch(/^\/trips\/[0-9a-f-]{36}\/book$/);
+        expect(text(open[0])).toMatch(/^Book Sunset/);
+      }
+      // Closed, draft, departed, or past the cutoff: none.
+      expect(book(rowOn("Friday, November 6", /Sunset/))).toHaveLength(0);
+      expect(book(rowOn("Saturday, November 7", /Charter/))).toHaveLength(0);
+      expect(book(rowOn("Sunday, November 1", /Charter/))).toHaveLength(0);
+      expect(book(rowOn("Monday, November 2", /Sunset/))).toHaveLength(0);
+    },
+  );
+
+  it("offers no staff booking on a blacked-out trip", async () => {
+    api({ [tripsPath()]: [() => json({ trips: week })] });
+    render(<CalendarPage membership={membership("booking_staff")} focusHeading={false} />);
+    await screen.findByRole("region", { name: /^Sunday, November 1/ });
+    expect(screen.queryAllByRole("link", { name: /^Book / })).toHaveLength(0);
+  });
+
   it.each(["owner", "booking_staff"] as const)("lets %s change trips", async (role) => {
     api({ [tripsPath()]: [() => json({ trips: week })] });
     render(<CalendarPage membership={membership(role)} focusHeading={false} />);

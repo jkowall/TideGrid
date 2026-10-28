@@ -230,13 +230,16 @@ function NewBooking({
   useEffect(() => {
     if (step !== 4 || !checkout || checkout.state !== "open" || polls >= POLL_LIMIT) return;
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      void readCheckout(tenantId, checkout.id, controller.signal).then((result) => {
-        if (controller.signal.aborted) return;
-        if (result.kind === "ok") setCheckout(result.value);
-        setPolls((n) => n + 1);
-      });
-    }, POLL_MS);
+    const timer = setTimeout(
+      () => {
+        void readCheckout(tenantId, checkout.id, controller.signal).then((result) => {
+          if (controller.signal.aborted) return;
+          if (result.kind === "ok") setCheckout(result.value);
+          setPolls((n) => n + 1);
+        });
+      },
+      polls === 0 ? 0 : POLL_MS,
+    );
     return () => {
       clearTimeout(timer);
       controller.abort();

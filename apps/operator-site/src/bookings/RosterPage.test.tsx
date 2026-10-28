@@ -339,6 +339,32 @@ describe("a roster", () => {
     expect(terms(container.querySelector(".roster-facts"))["Extras to prepare"]).toBe("None");
   });
 
+  it("marks a staff booking under its booker, and offers New booking on a trip on sale (G2.12d)", async () => {
+    const base = tripRoster();
+    const [first, ...rest] = base.bookings;
+    if (!first) throw new Error("fixture roster has no booking");
+    const roster = tripRoster({
+      bookings: [{ ...first, source: "staff_assisted", channel: "walk_up" }, ...rest],
+    });
+    api({ [route.roster(tripId)]: () => json(rosterBody(roster)) });
+    renderPage("booking_staff");
+    await loaded();
+    const [booker] = cellsOf(rows()[0] as HTMLElement).slice(2);
+    expect(booker).toBe(`${first.booker.name}Staff booking, walk-up`);
+    // A guest's own booking says nothing extra.
+    expect(cellsOf(rows()[1] as HTMLElement)[2]).toBe(rest[0]?.booker.name);
+    const book = screen.getByRole("link", { name: "New booking" });
+    expect(book.getAttribute("href")).toBe(`/trips/${tripId}/book`);
+  });
+
+  it("offers no New booking on a trip that is not on sale", async () => {
+    const closed = tripRoster({ trip: { ...tripRoster().trip, salesState: "closed" } });
+    api({ [route.roster(tripId)]: () => json(rosterBody(closed)) });
+    renderPage("owner");
+    await loaded();
+    expect(screen.queryByRole("link", { name: "New booking" })).toBeNull();
+  });
+
   it("reads the trip's own zone, not the viewer's, in its header and footer", async () => {
     const dive = tripRoster({
       generatedAt: "2026-11-04T15:00:00.000Z",
@@ -584,10 +610,11 @@ describe("the sheet", () => {
     expect(tools.querySelector(".roster-head")).toBeNull();
     expect(sheet().querySelector(".roster-head")).not.toBeNull();
     // The back link and, for a trip on sale, a staff booking (G2.12d).
-    expect(within(tools).getAllByRole("link").map((l) => text(l))).toEqual([
-      expect.stringContaining("Bookings on"),
-      "New booking",
-    ]);
+    expect(
+      within(tools)
+        .getAllByRole("link")
+        .map((l) => text(l)),
+    ).toEqual([expect.stringContaining("Bookings on"), "New booking"]);
     expect(within(tools).getAllByRole("button")).toHaveLength(1);
   });
 
