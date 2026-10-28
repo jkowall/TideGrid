@@ -38,6 +38,7 @@ export {
   createCloudflareEmailProvider,
   DEFAULT_CLOUDFLARE_SEND_TIMEOUT_MS,
   type EmailProviderLog,
+  isAddress as isEmailAddress,
   MESSAGE_ID_HEADER,
   normalizeCloudflareMessageId,
   normalizeRecipient,

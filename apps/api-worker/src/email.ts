@@ -7,6 +7,7 @@ import {
   type EmailProvider,
   type EmailProviderLog,
   FakeEmailProvider,
+  isEmailAddress,
   normalizeRecipient,
   type RecipientPolicy,
   type SendEmailBinding,
@@ -47,7 +48,12 @@ export type EmailSettings =
   | { kind: "off"; reason: "unset" | "binding_missing" | "allowlist_missing" }
   | {
       kind: "refused";
-      reason: "fake_outside_local" | "fake_with_binding" | "allowlist_invalid" | "unknown_provider";
+      reason:
+        | "fake_outside_local"
+        | "fake_with_binding"
+        | "allowlist_invalid"
+        | "from_address_invalid"
+        | "unknown_provider";
     };
 
 /** A TideGrid-controlled sender, as the demo build plan says; the display name is the brand's. */
@@ -59,9 +65,6 @@ export const CLOUDFLARE_SEND_TIMEOUT_MS = 10_000;
  * response; stopping new claims well before leaves the rest to the cron.
  */
 export const AFTER_COMMIT_BUDGET_MS = 18_000;
-
-/** One address: no whitespace, exactly one @, something on each side. */
-const addressPattern = /^[^\s@]+@[^\s@]+$/;
 
 /**
  * The recipient allowlist, parsed: entries trimmed, empties dropped, and
@@ -77,10 +80,19 @@ export function parseAllowedRecipients(value: string | undefined): Set<string> |
     .filter((entry) => entry.length > 0);
   for (const entry of entries) {
     const address = normalizeRecipient(entry);
-    if (!addressPattern.test(address)) return null;
+    if (!isEmailAddress(address)) return null;
     out.add(address);
   }
   return out;
+}
+
+/**
+ * Whether the sender is one address. EMAIL_FROM_ADDRESS is checked here, with
+ * the adapter's own rule, so a typo turns email off as a configuration fault
+ * instead of failing every message as invalid_message.
+ */
+function senderIsValid(env: Bindings): boolean {
+  return isEmailAddress(env.EMAIL_FROM_ADDRESS || DEFAULT_FROM_ADDRESS);
 }
 
 function origins(env: Bindings) {
@@ -96,6 +108,7 @@ export function emailSettings(env: Bindings): EmailSettings {
   if (name === "fake") {
     if (env.EMAIL) return { kind: "refused", reason: "fake_with_binding" };
     if (env.ENVIRONMENT !== "local") return { kind: "refused", reason: "fake_outside_local" };
+    if (!senderIsValid(env)) return { kind: "refused", reason: "from_address_invalid" };
     return { kind: "fake", ...origins(env) };
   }
   if (name === "cloudflare") {
@@ -105,6 +118,7 @@ export function emailSettings(env: Bindings): EmailSettings {
     if (allowed.size === 0 && env.ENVIRONMENT !== "production") {
       return { kind: "off", reason: "allowlist_missing" };
     }
+    if (!senderIsValid(env)) return { kind: "refused", reason: "from_address_invalid" };
     return {
       kind: "cloudflare",
       ...origins(env),

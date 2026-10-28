@@ -43,7 +43,10 @@ export interface Bindings {
    * Cloudflare email off there.
    */
   EMAIL_ALLOWED_RECIPIENTS?: string;
-  /** The sender address; the display name is the operator's brand. */
+  /**
+   * The sender address; the display name is the operator's brand. A value
+   * that is not one address refuses email (from_address_invalid).
+   */
   EMAIL_FROM_ADDRESS?: string;
   /**
    * The guest site's origin for links in email, with {slug} for the tenant's

@@ -93,8 +93,12 @@ function hasControl(value: string): boolean {
   return typeof value !== "string" || controlPattern.test(value);
 }
 
-/** One address of printable characters, as the message table admits. */
-function isAddress(value: string): boolean {
+/**
+ * One address of printable characters, as the message table admits: no
+ * whitespace or control character, exactly one @, something on each side.
+ * The API checks its sender with the same rule (EMAIL_FROM_ADDRESS).
+ */
+export function isAddress(value: string): boolean {
   return typeof value === "string" && !hasControl(value) && addressPattern.test(value);
 }
 

@@ -173,6 +173,43 @@ describe("email provider selection (G2.16a)", () => {
     expect(emailSettings(fenced)).toMatchObject({ recipients: { kind: "only" } });
   });
 
+  it("refuses a sender that is not one address, so a typo turns email off instead of failing every message", () => {
+    for (const value of [
+      "bookings",
+      "bookings@@tidegrid.us",
+      "book ings@tidegrid.us",
+      "bookings@tidegrid.us\r\nBcc: x@example.test",
+      "@tidegrid.us",
+      "bookings@",
+    ]) {
+      for (const settings of [
+        cloudflare({ EMAIL_FROM_ADDRESS: value }),
+        cloudflare({ ENVIRONMENT: "production", EMAIL_FROM_ADDRESS: value }),
+        {
+          ...base,
+          ENVIRONMENT: "local" as const,
+          EMAIL_PROVIDER: "fake",
+          EMAIL_FROM_ADDRESS: value,
+        },
+      ]) {
+        expect(emailSettings(settings), JSON.stringify(value)).toEqual({
+          kind: "refused",
+          reason: "from_address_invalid",
+        });
+        expect(emailProvider(settings, db)).toBeNull();
+        expect(deliversAfterCommit(settings, {})).toBe(false);
+      }
+    }
+    // Unset or empty falls back to the default sender, which is one address.
+    expect(emailSettings(cloudflare({ EMAIL_FROM_ADDRESS: "" }))).toMatchObject({
+      kind: "cloudflare",
+      fromAddress: "bookings@tidegrid.us",
+    });
+    expect(
+      emailSettings(cloudflare({ EMAIL_FROM_ADDRESS: "Bookings@Mail.TideGrid.us" })),
+    ).toMatchObject({ kind: "cloudflare", fromAddress: "Bookings@Mail.TideGrid.us" });
+  });
+
   it("refuses an unknown provider name", () => {
     for (const name of ["stripe", "Cloudflare", "FAKE", "resend"]) {
       expect(emailSettings({ ...base, EMAIL_PROVIDER: name })).toEqual({
