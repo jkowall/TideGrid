@@ -352,6 +352,8 @@ function NewBooking({
     setOpenUnknown(false);
     setQuote(null);
     setAttest({ email: false, policy: false });
+    // A new checkout needs a new quote, even for the same party: the old one is used.
+    quoteKey.forget();
     openKey.forget();
     payKey.forget();
     setStep(0);

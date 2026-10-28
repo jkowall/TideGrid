@@ -373,10 +373,14 @@ describe("after the checkout is asked for", () => {
     expect(opens).toHaveLength(2);
     expect(opens[1]?.headers.get("idempotency-key")).toBe(opens[0]?.headers.get("idempotency-key"));
     expect(sentTo(newRoute.cancel())).toHaveLength(1);
-    // Fresh inputs: price, review, attest, and open again.
-    await click("Add one Adult");
+    // Fresh inputs: price the same party again (a new quote, so a new key), review, attest, and open.
     await click("Price and continue");
     await stepHeading("The guest");
+    const quotes = sentTo(newRoute.quote);
+    expect(quotes[1]?.body).toEqual(quotes[0]?.body);
+    expect(quotes[1]?.headers.get("idempotency-key")).not.toBe(
+      quotes[0]?.headers.get("idempotency-key"),
+    );
     await click("Review");
     await stepHeading("Review with the guest");
     expect(

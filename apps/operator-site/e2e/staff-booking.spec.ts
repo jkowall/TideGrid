@@ -82,14 +82,22 @@ async function go(page: Page, path: string) {
 }
 
 /** The first trip this week, or in the next few, that offers Book. */
+/** A week's trips, loaded: real rows carry their sales state; the skeleton's do not. */
+async function weekLoaded(page: Page) {
+  await expect(page.getByRole("heading", { level: 1, name: "Calendar" })).toBeVisible();
+  await page.locator(".cal-trip[data-state]").first().waitFor({ timeout: 20_000 });
+  await expect(page.locator(".cal-trip--skeleton")).toHaveCount(0);
+}
+
 async function firstBookable(page: Page) {
   await go(page, "/calendar");
   for (let week = 0; week < 6; week++) {
-    await expect(page.getByRole("heading", { level: 1, name: "Calendar" })).toBeVisible();
-    await page.locator(".cal-trip").first().waitFor({ timeout: 20_000 });
+    await weekLoaded(page);
     const book = page.getByRole("link", { name: /^Book / });
     if ((await book.count()) > 0) return book.first();
+    const range = (await page.locator(".cal-bar__range").textContent()) ?? "";
     await page.getByRole("button", { name: /Next/ }).click();
+    await expect(page.locator(".cal-bar__range")).not.toHaveText(range);
   }
   throw new Error("no bookable trip in six weeks");
 }
@@ -180,7 +188,7 @@ test("gives finance no way to book", async ({ page }) => {
   const violations = cspViolations(page);
   await signIn(page, finance);
   await go(page, "/calendar");
-  await page.locator(".cal-trip").first().waitFor({ timeout: 20_000 });
+  await weekLoaded(page);
   await expect(page.getByRole("link", { name: /^Book / })).toHaveCount(0);
   // The page itself refuses, and asks nothing of the API.
   const asked: string[] = [];
