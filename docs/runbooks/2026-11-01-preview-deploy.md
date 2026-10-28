@@ -92,7 +92,7 @@ Each is one small commit. Its pull request targets `main` when the owner opens i
 | `nov1/c6-cron-pause` | `triggers.crons: []`. Built on C1 | P11, A19 | `git revert -m 1 <C6 merge>` |
 | `nov1/c7-prototype-release-demo` | Remove the `demo.tidegrid.us` route from `wrangler.prototype.jsonc` (repo root, not `prototypes/guest-flow`) | P8, A10 | `git revert -m 1 <C7 merge>` |
 
-C2, C3, C5, and C6 sit on C1 because they edit the same block of `apps/api-worker/wrangler.jsonc`. After C1 merges, rebase each on `main` before its pull request, so its diff is its own lines only. Every branch passed `pnpm release:dry` and the phase guard for its phase on 2026-10-28 (C7: the JSONC parses; its own dry run needs `npx wrangler@4.125.0`, which would download, so it was not run). Each was also applied on top of the goal branch, with `tools/release` present, and `pnpm test` passed on each: the `tools/release` suite reads committed fixture configs, never the tree's, so a merged config branch cannot turn main red.
+C2, C3, C5, and C6 sit on C1. C1 lays out the API's vars so that every later change adds or edits its own lines only: C5 edits the `PAYMENT_PROVIDER` line, C2 adds lines after the email comment and the binding after `vars`, C3 adds lines after the custom-hostnames comment, C6 edits `triggers`, and `PUBLIC_CORS` stays the last key. So each pull request merges cleanly in the runbook's order with no rebase. That order (C1, C2, C4, C7, C5, the C5 revert, C3, C6) was simulated on 2026-10-28 on main plus #34: every merge and the revert applied cleanly, the phase guard passed for each step's phase, `pnpm test` passed at every step, and `pnpm release:dry` passed on the final tree. Every branch passed `pnpm release:dry` and the phase guard for its phase on 2026-10-28 (C7: the JSONC parses; its own dry run needs `npx wrangler@4.125.0`, which would download, so it was not run). Each was also applied on top of the goal branch, with `tools/release` present, and `pnpm test` passed on each: the `tools/release` suite reads committed fixture configs, never the tree's, so a merged config branch cannot turn main red.
 
 The docs pull request (`docs/nov1-runbook-v2`: the decision-register entry and the doc 12 drift fixes) must not be opened before #34 merges. Rebase it onto main first, so its diff is those two files only.
 
@@ -176,11 +176,11 @@ Rules for the day apply. Run it right after P2.4.
 
 **P3.3 Secrets (A2).** `nov1 secrets preview --generate FAKE_PAYMENT_WEBHOOK_SECRET --phase p3 --live --go A2`, then `nov1 secrets preview --list --live --go A2`. Every secret change names the current phase with `--phase`: a put is guarded against that phase, and a delete (feature off) runs in any phase.
 - Command it runs: `sh -c 'openssl rand -hex 32 | pnpm exec wrangler secret put FAKE_PAYMENT_WEBHOOK_SECRET'` in `apps/api-worker`. The value goes from openssl into wrangler and never through `nov1`. At least 32 characters (`apps/api-worker/src/env.ts:27`).
-- Expect: the list shows `DATABASE_URL` and `FAKE_PAYMENT_WEBHOOK_SECRET`, and nothing for Stripe, email, or SaaS. The journal records the new version id as the rollback anchor (a secret put deploys the running code).
+- Expect: the list shows `DATABASE_URL` and `FAKE_PAYMENT_WEBHOOK_SECRET`, and nothing for Stripe, email, or SaaS. The journal records the version ids before and after (a secret put deploys the running code). A secret change is not a rollback anchor: `--rollback` undoes releases only.
 
 **P3 rollback, in order.**
 1. Feature off: `nov1 secrets preview --delete FAKE_PAYMENT_WEBHOOK_SECRET --phase <current> --live --go A2`. Checkout then answers 503. A delete is never refused by the phase guard, whatever config is merged.
-2. Code: `nov1 release api --phase p3 --rollback --live --go A4`, to the version recorded before P3.2 (b87e269, which P0.2 proved schema-compatible). `nov1` prints the anchor with the release it undoes (phase, time, result) and asks for the Worker name and the anchor's first 8 characters. The anchor is the version live before the most recent release of that Worker, failed releases included.
+2. Code: `nov1 release api --phase p3 --rollback --live --go A4`, to the version recorded before P3.2 (b87e269, which P0.2 proved schema-compatible). `nov1` prints the anchor with the release it undoes (phase, time, result) and asks for the Worker name and the anchor's first 8 characters. The anchor is the version live before the most recent release of that Worker that changed the live version, failed postconditions included; a release that failed before upload is skipped, and a rollback to the version already live is refused.
 3. Config: revert C1, then release. Static CORS is the documented rollback (12:168).
 - After a code rollback, a secret change fails with error 10215 (cli.js:299145); `nov1 secrets` refuses and prints the `wrangler versions secret put` then `wrangler versions deploy` path.
 - A rollback leaves bound resources unchanged (cli.js:349363). Whether it changes crons or secrets is not documented (unverified).
@@ -242,9 +242,9 @@ Rules for the day apply. Go/no-go: **D11**, then **D6**. Prompt: *"Sender `<addr
 - Input: the sender address itself (C2's `EMAIL_FROM_ADDRESS` and its one `allowed_sender_addresses` entry must both equal it; amend C2's placeholder if needed; `nov1 preflight --offline --phase p7` checks it); the DMARC `rua` mailbox; the exact allowlist (each booker and adult participant address, each plus-alias separately, `packages/domain-messaging/src/cloudflare.ts:126-128`); the dashboard settings "Drop suppressed recipients" off and "Email preview" off; whether destination verification is required (A9 settles it).
 - Commands, in order:
   1. Onboard the domain in the dashboard (A6, owner; writes DNS).
-  2. Merge C2 (rebased on main), then `nov1 approve-sha <merge> --go A8`.
+  2. Merge C2, then `nov1 approve-sha <merge> --go A8`.
   3. `nov1 release api --phase p7 --live --go A8`.
-  4. `nov1 secrets email --put EMAIL_ALLOWED_RECIPIENTS --phase p7 --live --go A7` (the owner types the list at wrangler's prompt), while the new release is the deployed one. The journal records the new anchor.
+  4. `nov1 secrets email --put EMAIL_ALLOWED_RECIPIENTS --phase p7 --live --go A7` (the owner types the list at wrangler's prompt), while the new release is the deployed one. The journal records the version ids.
 - Expect: health ok; `nov1 db outbox-summary --live --go A1` shows the P6 backlog ending `failed recipient_not_allowed`, with no provider call (12:198-199), before any step 3 booking.
 - **A9:** one booking from one allowlisted address. It settles whether non-verified destinations are accepted, before steps 3 and 8.
 - Verify:
@@ -269,7 +269,7 @@ G2.16-live checklist (12:206-212) on Nov 1:
 Rules for the day apply. Go/no-go: **D11**, then **D8**. Prompt: *"P6 had no fail. Cut demo.tidegrid.us over to demo-harbor, permanently? Go / no-go."* The tenant can never change later (`0011_custom_hostname_lifecycle.sql:91-94,104`).
 
 1. Merge C4 and C7, then `nov1 approve-sha <each merge> --go A10`.
-2. `nov1 db platform demo-harbor --live --go A10` (type the database host, `demo-harbor`, and `demo.tidegrid.us` back). It refuses unless the journal shows step 6 passed and a C4 merge approved under A10. One transaction: the active, verified `platform` row and its `hostname.platform_added` audit event.
+2. `nov1 db platform demo-harbor --live --go A10` (type the database host, `demo-harbor`, and `demo.tidegrid.us` back). It refuses unless the journal shows step 6 passed, this tree carries the C4 cutover config, and HEAD (that tree) is approved under A10. A C7 approval alone never unlocks it. One transaction: the active, verified `platform` row and its `hostname.platform_added` audit event.
 3. Detach `demo.tidegrid.us` from `tidegrid-prototype` in the dashboard.
 4. `nov1 release guest --phase p8 --live --go A10`, on the terminal, so any origin conflict prompts. The journal records the cutover as soon as wrangler exits 0, so a slow certificate never blocks later phases. If the 20-minute host poll times out, wait, then run `nov1 release guest --phase p8 --verify --live --go A10`, which re-checks the hosts only and records the result.
 5. `nov1 smoke --profile preview --base https://api.tidegrid.us --hosts demo.tidegrid.us=demo-harbor --live --go A10`.
@@ -289,18 +289,18 @@ Rules for the day apply. Go/no-go: **D11**, **D7** (after acceptance, not overla
 - Input: the test key in `STRIPE_SECRET_KEY` (`sk_test_` or `rk_test_`; whether `rk_test_` can act through `Stripe-Account` is unconfirmed); the two connected account ids as `STRIPE_ACCT_DEMO_HARBOR` and `STRIPE_ACCT_DEMO_REEF`, with `fees_collector=stripe` and `losses_collector=stripe` confirmed; a Connect-scope webhook endpoint at `https://api.tidegrid.us/v1/webhooks/payments/stripe` with snapshot payloads, API version `2026-09-30.endive`, and the five mapped `payment_intent.*` types; its signing secret.
 - Commands:
   1. `nov1 payment-account set demo-harbor stripe --live --go A12`, and the same for demo-reef. The id is read from the environment and redacted in every line.
-  2. Merge C5 (rebased on main), then `nov1 approve-sha <merge> --go A13`.
+  2. Merge C5, then `nov1 approve-sha <merge> --go A13`.
   3. `nov1 release api --phase p9 --live --go A13`.
-  4. `nov1 secrets stripe --put STRIPE_SECRET_KEY --phase p9 --live --go A13`, then `--put STRIPE_WEBHOOK_SECRET` (typed at wrangler's prompt). The journal records the anchor.
+  4. `nov1 secrets stripe --put STRIPE_SECRET_KEY --phase p9 --live --go A13`, then `--put STRIPE_WEBHOOK_SECRET` (typed at wrangler's prompt). The journal records the version ids.
   5. `nov1 stripe-smoke --tenant demo-harbor --live --go A11`.
 - What `stripe-smoke` does: refuses any key not `sk_test_` or `rk_test_`; `GET /v1/account` first, to see the key belongs to the platform; a guest checkout with a preview Origin; confirm the PaymentIntent on the connected account with a declining card, then `pm_card_visa`; wait for the webhook to confirm the booking; cancel through the from-checkout management session and wait for the refund. It spawns nothing, so `--api-key` and `--live` never appear.
 - **A14**, the owner's own command: `STRIPE_API_KEY="$STRIPE_SECRET_KEY" stripe events resend <evt_id printed by stripe-smoke> --account <the connected account id>`. Never `--api-key`, never `--live`. Whether the installed CLI honors `STRIPE_API_KEY` is unverified. Expect no `payload_mismatch`.
 - Verify: one inbox row per event, the booking confirmed, the refund succeeded. Capture and scrub fixtures per `packages/domain-payments/README.md`.
-- Rollback: the same as the close below, at any point. Leave the account rows.
+- Rollback, feature off first (Rule 6): `nov1 secrets stripe --delete STRIPE_SECRET_KEY --phase p9 --live --go A13`, then the same for `STRIPE_WEBHOOK_SECRET`. Stripe is off as soon as either is missing (`apps/api-worker/src/payments.ts:67-73`). Then P9.6 steps 1 and 2, then step 4 (D3). Leave the account rows.
 - **P9.6 Close the Stripe window (always, success or not).** The phase guard refuses `PAYMENT_PROVIDER=stripe` outside P9, so P10 and P11 cannot release until this is done.
   1. Revert C5 through a reviewed pull request (back to the fake), then `nov1 approve-sha <revert merge> --go A13`.
   2. `nov1 release api --phase p9 --live --go A13`.
-  3. Go/no-go: *"Delete the Stripe secrets now? Go / no-go."* If yes, `nov1 secrets stripe --delete STRIPE_SECRET_KEY --phase p9 --live --go A13`, then the same for `STRIPE_WEBHOOK_SECRET`. They are unused while the provider is the fake.
+  3. Success path only (a rollback already deleted them). Go/no-go: *"Delete the Stripe secrets now? Go / no-go."* If yes, `nov1 secrets stripe --delete STRIPE_SECRET_KEY --phase p9 --live --go A13`, then the same for `STRIPE_WEBHOOK_SECRET`. They are unused while the provider is the fake.
   4. Go/no-go **D3**: *"Turn the fake off now? Go / no-go."* If yes, `nov1 secrets preview --delete FAKE_PAYMENT_WEBHOOK_SECRET --phase p9 --live --go A2`. Checkout then answers 503 until the fake secret is put again.
 
 ## P10. Cloudflare for SaaS (deferred by default, D9)
@@ -311,14 +311,14 @@ Rules for the day apply. Precondition: P9.6 is done (C5 reverted and released), 
 - Commands: fallback origin `saas-fallback.tidegrid.us`, AAAA `100::`, proxied, then `PUT fallback_origin` (A16); fill `CF_SAAS_ZONE_ID` in C3, merge it, `nov1 approve-sha <merge> --go A17`, `nov1 release api --phase p10 --live --go A17`, `nov1 secrets saas --put CF_SAAS_API_TOKEN --phase p10 --live --go A17`; then `hostnames request`, the owner publishes the records, `activate`, `status` (A18, `tools/hostnames/README.md`).
 - Open: per-hostname routes versus `*/*`; a `*/*` route may shadow the api, console, and demo domains. No command creates per-hostname routes.
 - Not taken while P10 is deferred: verifying which Cloudflare authentication error codes the hostname sweep treats as account-level (doc 12's "Before any G2.14b-live release" list). It is done with the first real `hostnames request` here, by recording the code a rotated or wrong-zone token returns.
-- Rollback: delete the custom hostname at Cloudflare; `nov1 hostname-disable <slug> <throwaway custom name> --live --go A18` (it refuses any preview or platform name, and any row that is not `custom`); revert C3.
+- Rollback: delete the custom hostname at Cloudflare; `nov1 hostname-disable <slug> <throwaway custom name> --live --go A18` (it refuses any preview or platform name, and any row that is not `custom`); revert C3 through a reviewed pull request, `nov1 approve-sha <revert merge> --go A17`, then `nov1 release api --phase p10 --live --go A17`, so the API runs without custom hostnames again.
 
 ## P11. Neon guard and cron pause (A19)
 
 Rules for the day apply. Precondition: P9.6 is done (C5 reverted and released), or P9 was skipped; with C5 still on main the phase guard refuses this release.
 
 - The owner reads Neon consumption at +2 h and +24 h.
-- Go/no-go **D5**: *"Pause the cron between windows? Go / no-go."* If yes: merge C6 (rebased on main), `nov1 approve-sha <merge> --go A19`, `nov1 release api --phase p11 --live --go A19`. The journal records the pause, and the phase guard warns if a later release from main brings the cron back. Whether `triggers.crons: []` removes the schedules is per the Cloudflare docs and unverified locally.
+- Go/no-go **D5**: *"Pause the cron between windows? Go / no-go."* If yes: merge C6, `nov1 approve-sha <merge> --go A19`, `nov1 release api --phase p11 --live --go A19`. The journal records the pause, and the phase guard warns if a later release from main brings the cron back. Whether `triggers.crons: []` removes the schedules is per the Cloudflare docs and unverified locally.
 - Correctness does not depend on the sweeps (`apps/api-worker/src/scheduled.ts`), but hold expiry events, email retries, and refund resends lag while paused.
 - Watch 15 idle minutes after P3 to see whether Hyperdrive's idle pool blocks autosuspend (unverified).
 
