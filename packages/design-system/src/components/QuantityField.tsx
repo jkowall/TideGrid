@@ -99,9 +99,10 @@ export function QuantityField({
 
   // A new count from the caller replaces the draft during render, not in an
   // effect. A passive effect runs in a later task, so a keystroke could land
-  // first and the effect would then put the old count back.
+  // first and the effect would then put the old count back. Object.is matches
+  // React's own comparison, so a NaN count settles instead of looping.
   const [shown, setShown] = useState(value);
-  if (shown !== value) {
+  if (!Object.is(shown, value)) {
     setShown(value);
     setDraft(String(value));
   }
