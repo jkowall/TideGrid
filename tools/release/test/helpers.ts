@@ -1,9 +1,61 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Deps, Env, ExecOptions, ExecResult, SqlClient } from "../src/core.ts";
+import { type Configs, parseJsonc } from "../src/phase.ts";
 
 export const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
+
+/**
+ * The api and guest wrangler.jsonc as main had them before any Nov 1 config
+ * branch (main 90dd41e), committed as fixtures so no test reads the tree's
+ * configs: a merged C1 to C6 must never turn this suite red.
+ */
+export function fixtureConfigs(): Configs {
+  const read = (name: string) =>
+    parseJsonc(readFileSync(join(import.meta.dirname, "fixtures", name), "utf8")) as Configs["api"];
+  return { api: read("api.wrangler.jsonc"), guest: read("guest.wrangler.jsonc") };
+}
+
+/** Each Nov 1 config branch's change, applied to a copy of the fixture. */
+export const configDeltas = {
+  c1: (c: Configs) => {
+    c.api.vars = { ...c.api.vars, PUBLIC_CORS: "dynamic", PAYMENT_PROVIDER: "fake" };
+  },
+  c2: (c: Configs) => {
+    c.api.vars = {
+      ...c.api.vars,
+      EMAIL_PROVIDER: "cloudflare",
+      EMAIL_FROM_ADDRESS: "bookings@mail.tidegrid.us",
+    };
+    c.api.send_email = [{ name: "EMAIL", allowed_sender_addresses: ["bookings@mail.tidegrid.us"] }];
+  },
+  c3: (c: Configs) => {
+    c.api.vars = { ...c.api.vars, HOSTNAME_PROVIDER: "cloudflare_saas", CF_SAAS_ZONE_ID: "zone" };
+  },
+  c4: (c: Configs) => {
+    c.guest.routes = [
+      ...(c.guest.routes ?? []),
+      { pattern: "demo.tidegrid.us", custom_domain: true },
+    ];
+    c.guest.workers_dev = false;
+  },
+  c5: (c: Configs) => {
+    c.api.vars = { ...c.api.vars, PAYMENT_PROVIDER: "stripe" };
+  },
+  c6: (c: Configs) => {
+    c.api.triggers = { crons: [] };
+  },
+} as const;
+
+export type ConfigBranch = keyof typeof configDeltas;
+
+/** The fixture with these branches merged, in order. */
+export function configsWith(...branches: ConfigBranch[]): Configs {
+  const c = fixtureConfigs();
+  for (const b of branches) configDeltas[b](c);
+  return c;
+}
 
 export interface ExecCall {
   cmd: string;
@@ -27,6 +79,8 @@ export interface FakeOptions {
   fetch?: (call: FetchCall) => Response | undefined;
   sql?: (url: string) => SqlClient;
   now?: Date;
+  /** The Worker configs; default: the committed fixture (main before any config branch). */
+  configs?: Configs;
 }
 
 export const headSha = "a".repeat(40);
@@ -99,6 +153,7 @@ export function fakeDeps(o: FakeOptions = {}) {
         throw new Error("unexpected database connection");
       }),
     nodeVersion: "24.22.1",
+    configs: () => structuredClone(o.configs ?? fixtureConfigs()),
   };
   return { deps, execs, fetches, printed, prompts };
 }

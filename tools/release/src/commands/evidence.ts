@@ -67,6 +67,10 @@ export function renderEvidence(journal: Journal, trees: TreeCheck[], now: Date):
     );
   }
   lines.push("");
+  lines.push(
+    "**Step 6, what it shows.** No oversell through the deployed stack, with the racers serialized through one client address by the checkout's per-client lock (`packages/domain-booking/src/checkout.ts:177`). Concurrent hold acquisition is proven by the database race suites, not by this run.",
+  );
+  lines.push("");
   lines.push("**Step 9, tree equality (D10(a)).**");
   if (trees.length === 0) lines.push("- Not shown: no --ci pairs given.");
   for (const t of trees) {

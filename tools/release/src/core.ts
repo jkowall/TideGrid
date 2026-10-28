@@ -6,6 +6,7 @@
  * a dry run makes no exec or fetch to a provider, and that a live run spawns
  * wrangler on the owner's terminal with a clean environment.
  */
+import type { Configs } from "./phase.ts";
 import { redact } from "./redact.ts";
 
 export type Env = Record<string, string | undefined>;
@@ -68,6 +69,11 @@ export interface Deps {
   /** An admin database client. Only db, payment-account, and stripe-smoke use it. */
   sql: (url: string) => SqlClient;
   nodeVersion: string;
+  /**
+   * The Worker configs wrangler is about to deploy, read from the tree. Tests
+   * inject fixtures, so the suite never depends on what main's configs say.
+   */
+  configs: () => Configs;
 }
 
 /** A refusal: the command stops and changes nothing. Exit code 3. */

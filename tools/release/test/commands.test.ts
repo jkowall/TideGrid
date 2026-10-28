@@ -232,7 +232,17 @@ describe("secrets", () => {
     saveJournal(deps, j);
     expect(
       await main(
-        ["secrets", "preview", "--generate", "FAKE_PAYMENT_WEBHOOK_SECRET", "--live", "--go", "A2"],
+        [
+          "secrets",
+          "preview",
+          "--generate",
+          "FAKE_PAYMENT_WEBHOOK_SECRET",
+          "--phase",
+          "p3",
+          "--live",
+          "--go",
+          "A2",
+        ],
         deps,
       ),
     ).toBe(0);
@@ -254,7 +264,17 @@ describe("secrets", () => {
     saveJournal(deps, j);
     expect(
       await main(
-        ["secrets", "email", "--delete", "EMAIL_ALLOWED_RECIPIENTS", "--live", "--go", "A7"],
+        [
+          "secrets",
+          "email",
+          "--delete",
+          "EMAIL_ALLOWED_RECIPIENTS",
+          "--phase",
+          "p7",
+          "--live",
+          "--go",
+          "A7",
+        ],
         deps,
       ),
     ).toBe(3);

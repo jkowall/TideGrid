@@ -12,8 +12,16 @@ import { banner, type Deps, Failure, out, type Plan, poll, printPlan, Refusal } 
 import { assertNoBuildLeak } from "../env.ts";
 import { confirmYes, liveGate } from "../gate.ts";
 import { assertReleasable, git } from "../git.ts";
-import { lastDone, loadJournal, record, updateFlags, type Worker } from "../journal.ts";
-import { loadConfigs, type Phase, parsePhase, phaseGuard } from "../phase.ts";
+import {
+  type Entry,
+  type Journal,
+  lastDone,
+  loadJournal,
+  record,
+  updateFlags,
+  type Worker,
+} from "../journal.ts";
+import { isCutoverConfig, isSaasConfig, type Phase, parsePhase, phaseGuard } from "../phase.ts";
 import {
   deployedVersions,
   onTerminal,
@@ -169,7 +177,7 @@ async function postcondition(deps: Deps, worker: Worker, buildId: string): Promi
       (res.headers.get("location") ?? "").includes(accessTeamDomain)
     );
   }
-  const hosts = loadConfigs(deps.repoRoot).guest.routes?.map((r) => r.pattern) ?? [];
+  const hosts = deps.configs().guest.routes?.map((r) => r.pattern) ?? [];
   for (const host of hosts) {
     const ok = await poll(
       deps,
@@ -200,8 +208,20 @@ function gatesFor(phase: Phase, rollback: boolean): string[] {
   return rollback && gate !== "A4" ? [gate, "A4"] : [gate];
 }
 
+/**
+ * The rollback anchor: the version that was live before the most recent
+ * release of this Worker, whatever that release's result. A release whose
+ * deploy went out but whose postcondition failed is the one to undo, so it is
+ * never skipped (review F3).
+ */
+export function rollbackAnchor(journal: Journal, worker: Worker): Entry | undefined {
+  return [...journal.entries]
+    .reverse()
+    .find((e) => e.step === "release" && e.worker === worker && (e.versionBefore?.length ?? 0) > 0);
+}
+
 export async function release(deps: Deps, args: Args): Promise<number> {
-  onlyFlags(args, ["live", "go", "phase", "rollback", "to", "kill-switch", "again"]);
+  onlyFlags(args, ["live", "go", "phase", "rollback", "to", "kill-switch", "again", "verify"]);
   const worker = parseWorker(args.positional[0]);
   const phase = parsePhase(flag(args, "phase"));
   const rollback = has(args, "rollback");
@@ -215,23 +235,62 @@ export async function release(deps: Deps, args: Args): Promise<number> {
   if (killSwitch && worker !== "guest")
     throw new Refusal("--kill-switch is for the guest release only");
 
+  const verify = has(args, "verify");
+  if (verify && rollback) throw new Refusal("--verify and --rollback contradict");
+
+  // The anchor is shown, with the release it undoes, before the owner types it back.
+  let anchor: string | undefined;
+  if (rollback) {
+    const entry = rollbackAnchor(loadJournal(deps), worker);
+    anchor = flag(args, "to") ?? entry?.versionBefore?.[0];
+    if (!anchor || !/^[0-9a-f-]{36}$/.test(anchor)) {
+      throw new Refusal(`no recorded version to roll ${w.name} back to; pass --to <version id>`);
+    }
+    out(
+      deps,
+      entry && !flag(args, "to")
+        ? `rollback anchor ${anchor}: the version live before the ${entry.phase} release at ${entry.at} (${entry.result}${entry.sha ? `, ${entry.sha.slice(0, 12)}` : ""})`
+        : `rollback anchor ${anchor} (from --to)`,
+    );
+  }
+
   const gate = await liveGate(
     deps,
     { live: true, go: flag(args, "go") },
     {
       gates: gatesFor(phase, rollback),
-      confirm: [w.name],
-      action: rollback ? `roll back ${w.name}` : `deploy ${w.name} from this tree`,
+      confirm: verify ? [] : rollback ? [w.name, (anchor as string).slice(0, 8)] : [w.name],
+      action: verify
+        ? `re-check ${w.name}'s postcondition (read-only)`
+        : rollback
+          ? `roll back ${w.name} to ${anchor}`
+          : `deploy ${w.name} from this tree`,
+      readOnly: verify,
     },
   );
 
-  if (rollback) return doRollback(deps, worker, phase, gate, flag(args, "to"));
+  if (rollback) return doRollback(deps, worker, phase, gate, anchor as string);
+  if (verify) {
+    const buildId = await git(deps, ["describe", "--always", "--dirty"]);
+    const ok = await postcondition(deps, worker, buildId);
+    record(deps, {
+      phase,
+      step: "release-verify",
+      gate,
+      worker,
+      buildId,
+      result: ok ? "done" : "failed",
+    });
+    if (!ok) throw new Failure(`${w.name}'s postcondition is still not met`);
+    out(deps, `${w.name}: postcondition met`);
+    return 0;
+  }
 
   // Invariants 3, 7, and 11, again, just before acting.
   const state = await assertReleasable(deps);
   assertNoBuildLeak(deps, killSwitch ? ["GUEST_SW_KILL_SWITCH"] : []);
   const journal = loadJournal(deps);
-  const guard = phaseGuard(phase, loadConfigs(deps.repoRoot), journal);
+  const guard = phaseGuard(phase, deps.configs(), journal);
   for (const warning of guard.warnings) out(deps, `WARN ${warning}`);
   if (guard.refusals.length) throw new Refusal(`phase guard: ${guard.refusals.join("; ")}`);
 
@@ -300,15 +359,23 @@ export async function release(deps: Deps, args: Args): Promise<number> {
     result: took ? "done" : "failed",
     versionBefore: before,
     versionAfter: after,
-    ...(took ? {} : { note: "postcondition not met" }),
+    ...(took ? {} : { note: "deployed; postcondition not met (re-check with --verify)" }),
   });
+  // The flags follow what was deployed (wrangler exited 0), not the poll: a
+  // slow certificate must not leave later phases refused (review F3).
+  const deployed = deps.configs();
   updateFlags(deps, (f) => {
     f.rolledBack = (f.rolledBack ?? []).filter((x) => x !== worker);
-    if (phase === "p8" && worker === "guest" && took) f.cutoverDone = true;
+    if (phase === "p8" && worker === "guest") f.cutoverDone = isCutoverConfig(deployed);
+    if (phase === "p10" && worker === "api") f.saasEnabled = isSaasConfig(deployed);
     if (phase === "p11" && worker === "api")
-      f.cronPaused = (loadConfigs(deps.repoRoot).api.triggers?.crons ?? []).length === 0;
+      f.cronPaused = (deployed.api.triggers?.crons ?? []).length === 0;
   });
-  if (!took) throw new Failure(`${w.name} deployed but its postcondition failed; see the journal`);
+  if (!took) {
+    throw new Failure(
+      `${w.name} deployed but its postcondition failed. When the hosts serve, run: nov1 release ${worker} --phase ${phase} --verify --live --go ${gate}`,
+    );
+  }
   out(deps, `${w.name} released: ${after.join(", ")}`);
   return 0;
 }
@@ -318,14 +385,9 @@ async function doRollback(
   worker: Worker,
   phase: Phase,
   gate: string,
-  to?: string,
+  anchor: string,
 ): Promise<number> {
   const w = workers[worker];
-  const journal = loadJournal(deps);
-  const anchor = to ?? lastDone(journal, "release", worker)?.versionBefore?.[0];
-  if (!anchor || !/^[0-9a-f-]{36}$/.test(anchor)) {
-    throw new Refusal(`no recorded version to roll ${w.name} back to; pass --to <version id>`);
-  }
   out(
     deps,
     "Invariant 9: turn the feature off by secret first, while the latest version is still the deployed one.",

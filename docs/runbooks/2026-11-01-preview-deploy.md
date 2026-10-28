@@ -92,7 +92,9 @@ Each is one small commit. Its pull request targets `main` when the owner opens i
 | `nov1/c6-cron-pause` | `triggers.crons: []`. Built on C1 | P11, A19 | `git revert -m 1 <C6 merge>` |
 | `nov1/c7-prototype-release-demo` | Remove the `demo.tidegrid.us` route from `wrangler.prototype.jsonc` (repo root, not `prototypes/guest-flow`) | P8, A10 | `git revert -m 1 <C7 merge>` |
 
-C2, C3, C5, and C6 sit on C1 because they edit the same block of `apps/api-worker/wrangler.jsonc`. After C1 merges, rebase each on `main` before its pull request, so its diff is its own lines only. Every branch passed `pnpm release:dry` and the phase guard for its phase on 2026-10-28 (C7: the JSONC parses; its own dry run needs `npx wrangler@4.125.0`, which would download, so it was not run).
+C2, C3, C5, and C6 sit on C1 because they edit the same block of `apps/api-worker/wrangler.jsonc`. After C1 merges, rebase each on `main` before its pull request, so its diff is its own lines only. Every branch passed `pnpm release:dry` and the phase guard for its phase on 2026-10-28 (C7: the JSONC parses; its own dry run needs `npx wrangler@4.125.0`, which would download, so it was not run). Each was also applied on top of the goal branch, with `tools/release` present, and `pnpm test` passed on each: the `tools/release` suite reads committed fixture configs, never the tree's, so a merged config branch cannot turn main red.
+
+The docs pull request (`docs/nov1-runbook-v2`: the decision-register entry and the doc 12 drift fixes) must not be opened before #34 merges. Rebase it onto main first, so its diff is those two files only.
 
 ## P0. Prep, Oct 29 to 31 (no live calls)
 
@@ -172,13 +174,13 @@ Rules for the day apply. Run it right after P2.4.
 - Expect: the API goes first, because the guest Worker binds `tidegrid-api#GuestGateway`.
 - Verify: `GET https://api.tidegrid.us/v1/health` shows `version` = the build id, `environment` preview, `database` ok, `migrations.latest` = the tree's last file (memoized 10 s). `nov1` polls it as the release's postcondition.
 
-**P3.3 Secrets (A2).** `nov1 secrets preview --generate FAKE_PAYMENT_WEBHOOK_SECRET --live --go A2`, then `nov1 secrets preview --list --live --go A2`.
+**P3.3 Secrets (A2).** `nov1 secrets preview --generate FAKE_PAYMENT_WEBHOOK_SECRET --phase p3 --live --go A2`, then `nov1 secrets preview --list --live --go A2`. Every secret change names the current phase with `--phase`: a put is guarded against that phase, and a delete (feature off) runs in any phase.
 - Command it runs: `sh -c 'openssl rand -hex 32 | pnpm exec wrangler secret put FAKE_PAYMENT_WEBHOOK_SECRET'` in `apps/api-worker`. The value goes from openssl into wrangler and never through `nov1`. At least 32 characters (`apps/api-worker/src/env.ts:27`).
 - Expect: the list shows `DATABASE_URL` and `FAKE_PAYMENT_WEBHOOK_SECRET`, and nothing for Stripe, email, or SaaS. The journal records the new version id as the rollback anchor (a secret put deploys the running code).
 
 **P3 rollback, in order.**
-1. Feature off: `nov1 secrets preview --delete FAKE_PAYMENT_WEBHOOK_SECRET --live --go A2`. Checkout then answers 503.
-2. Code: `nov1 release api --phase p3 --rollback --live --go A4`, to the version recorded before P3.2 (b87e269, which P0.2 proved schema-compatible).
+1. Feature off: `nov1 secrets preview --delete FAKE_PAYMENT_WEBHOOK_SECRET --phase <current> --live --go A2`. Checkout then answers 503. A delete is never refused by the phase guard, whatever config is merged.
+2. Code: `nov1 release api --phase p3 --rollback --live --go A4`, to the version recorded before P3.2 (b87e269, which P0.2 proved schema-compatible). `nov1` prints the anchor with the release it undoes (phase, time, result) and asks for the Worker name and the anchor's first 8 characters. The anchor is the version live before the most recent release of that Worker, failed releases included.
 3. Config: revert C1, then release. Static CORS is the documented rollback (12:168).
 - After a code rollback, a secret change fails with error 10215 (cli.js:299145); `nov1 secrets` refuses and prints the `wrangler versions secret put` then `wrangler versions deploy` path.
 - A rollback leaves bound resources unchanged (cli.js:349363). Whether it changes crons or secrets is not documented (unverified).
@@ -221,7 +223,7 @@ Before steps 5 and 7, go/no-go: **D4**. Prompt: *"Add the D4 address to the Acce
 | 1 | P5, then `E2E_BASE_URL='https://{slug}.book.tidegrid.us' nov1 accept guest --grep 'brand|CacheStorage' --live --go A5` (journey at 375 and 1280) | installability JSON lines; screenshots in `$NOV1_PRIVATE_DIR/traces` |
 | 2 and 4 | `E2E_BASE_URL='https://{slug}.book.tidegrid.us' nov1 accept guest --grep 'Demo Reef|Demo Harbor' --project desktop --live --go A5`: a Demo Reef dive at least 3 days out with REEF25; a Demo Harbor charter at least 8 days out on a weekend; parties named through the from-checkout management session; the shim's "Simulate successful payment"; then the dive canceled within policy, asserting `full_refund` (dive cutoff 2880 min, charter 10 080 min, `tools/seed/src/pricing.ts`) | two booking JSON lines; the Reef line also carries `bookingId`, `tripId`, `localDate` for step 7 |
 | 5 | `E2E_BASE_URL=https://console.tidegrid.us E2E_STORAGE_STATE="$NOV1_PRIVATE_DIR/access-state.json" E2E_OPERATOR='Demo Harbor Charters' E2E_STAFF_NAME='Harbor Desk Owner' nov1 accept console --grep walk-up --live --go A5` (plus the step 7 variables below, which the console suite reads at load): calendar, search, day CSV, control totals | totals match |
-| 6 | `nov1 last-seat --profile preview --api https://api.tidegrid.us --hosts demo-harbor.book.tidegrid.us,demo-reef.book.tidegrid.us --live --go A5` | two JSON lines, each `pass` with `{"201 opened":1,"409 insufficient_capacity":7}` |
+| 6 | `nov1 last-seat --profile preview --api https://api.tidegrid.us --hosts demo-harbor.book.tidegrid.us,demo-reef.book.tidegrid.us --live --go A5` | two JSON lines, each `pass` with `{"201 opened":1,"409 insufficient_capacity":7}`. Record it as "no oversell, serialized through one address"; `nov1 evidence` words it that way |
 | 7 | `E2E_FOREIGN_TENANT_ID=7d1e5b3a-1c2f-4a8e-9b61-0a1c2e3f4a02 E2E_FOREIGN_BOOKING_ID=<Reef bookingId> E2E_FOREIGN_TRIP_ID=<Reef tripId> E2E_FOREIGN_REFERENCE=<Reef reference> E2E_FOREIGN_DATE=<Reef localDate> nov1 accept console --grep 'one-tenant identity' --live --go A5` (with the step 5 variables), then `nov1 isolation --profile preview --api https://api.tidegrid.us --hosts demo-harbor.book.tidegrid.us,demo-reef.book.tidegrid.us --live --go A5` | `memberships.length === 1`, then the probe table: one 403 or 404 shape, no tenant B data |
 | 9 | The four job URLs and the tree check (P0.1) for each SHA deployed today | `nov1 evidence --ci <sha>=<merge>` |
 
@@ -242,14 +244,14 @@ Rules for the day apply. Go/no-go: **D11**, then **D6**. Prompt: *"Sender `<addr
   1. Onboard the domain in the dashboard (A6, owner; writes DNS).
   2. Merge C2 (rebased on main), then `nov1 approve-sha <merge> --go A8`.
   3. `nov1 release api --phase p7 --live --go A8`.
-  4. `nov1 secrets email --put EMAIL_ALLOWED_RECIPIENTS --live --go A7` (the owner types the list at wrangler's prompt), while the new release is the deployed one. The journal records the new anchor.
+  4. `nov1 secrets email --put EMAIL_ALLOWED_RECIPIENTS --phase p7 --live --go A7` (the owner types the list at wrangler's prompt), while the new release is the deployed one. The journal records the new anchor.
 - Expect: health ok; `nov1 db outbox-summary --live --go A1` shows the P6 backlog ending `failed recipient_not_allowed`, with no provider call (12:198-199), before any step 3 booking.
 - **A9:** one booking from one allowlisted address. It settles whether non-verified destinations are accepted, before steps 3 and 8.
 - Verify:
   - **Step 3:** a booking from an allowlisted address delivers a confirmation, and its management link opens the booking.
   - **Step 8:** waiver requests arrive, and a participant signs on the owner's phone at 375 px. The link is single-use: the phone or Playwright, not both.
   - SPF, DKIM, and DMARC results, recorded in P12.
-- Rollback: first `nov1 secrets email --delete EMAIL_ALLOWED_RECIPIENTS --live --go A7`. An empty fence means email is off (`apps/api-worker/src/email.ts:114-126`), and mail stays queued. Then, if needed, revert C2 and release. Leave the DNS records.
+- Rollback: first `nov1 secrets email --delete EMAIL_ALLOWED_RECIPIENTS --phase <current> --live --go A7`. An empty fence means email is off (`apps/api-worker/src/email.ts:114-126`), and mail stays queued. Then, if needed, revert C2 and release. Leave the DNS records.
 
 G2.16-live checklist (12:206-212) on Nov 1:
 
@@ -269,12 +271,16 @@ Rules for the day apply. Go/no-go: **D11**, then **D8**. Prompt: *"P6 had no fai
 1. Merge C4 and C7, then `nov1 approve-sha <each merge> --go A10`.
 2. `nov1 db platform demo-harbor --live --go A10` (type the database host, `demo-harbor`, and `demo.tidegrid.us` back). It refuses unless the journal shows step 6 passed and a C4 merge approved under A10. One transaction: the active, verified `platform` row and its `hostname.platform_added` audit event.
 3. Detach `demo.tidegrid.us` from `tidegrid-prototype` in the dashboard.
-4. `nov1 release guest --phase p8 --live --go A10`, on the terminal, so any origin conflict prompts.
+4. `nov1 release guest --phase p8 --live --go A10`, on the terminal, so any origin conflict prompts. The journal records the cutover as soon as wrangler exits 0, so a slow certificate never blocks later phases. If the 20-minute host poll times out, wait, then run `nov1 release guest --phase p8 --verify --live --go A10`, which re-checks the hosts only and records the result.
 5. `nov1 smoke --profile preview --base https://api.tidegrid.us --hosts demo.tidegrid.us=demo-harbor --live --go A10`.
 6. Rerun step 1: `E2E_BASE_URL=https://demo.tidegrid.us E2E_TENANT=demo-harbor nov1 accept guest --live --go A10`.
 
 - Verify: `demo.tidegrid.us` shows the demo-harbor brand; the workers.dev host answers 404 (12:155); a docs pull request follows for the copy that depends on the cutover (`README.md:26`, `docs/customer/follow-up-message-drafts.md:14-20`).
-- Rollback: revert C4 and C7, run `pnpm deploy:demo` on a terminal to reattach the domain to the prototype (wrangler 4.125.0; its non-TTY behavior is unverified), then `nov1 release guest`. Keep the platform row active: disabling it is permanent.
+- Rollback, through `nov1` only (Rule 1; no `pnpm deploy:demo`, no download, no env-file token in a raw wrangler):
+  1. Revert C4 and C7 through reviewed pull requests, then `nov1 approve-sha <each revert merge> --go A10`.
+  2. `nov1 release guest --phase p8 --live --go A10`. The guest config is the preview set again, so this release drops `demo.tidegrid.us` from the guest Worker and turns workers.dev back on; the journal clears the cutover flag.
+  3. Reattach `demo.tidegrid.us` to `tidegrid-prototype` in the dashboard (owner, A10). The prototype is not redeployed.
+  4. Keep the platform row active: disabling it is permanent.
 
 ## P9. Stripe-live window
 
@@ -285,24 +291,31 @@ Rules for the day apply. Go/no-go: **D11**, **D7** (after acceptance, not overla
   1. `nov1 payment-account set demo-harbor stripe --live --go A12`, and the same for demo-reef. The id is read from the environment and redacted in every line.
   2. Merge C5 (rebased on main), then `nov1 approve-sha <merge> --go A13`.
   3. `nov1 release api --phase p9 --live --go A13`.
-  4. `nov1 secrets stripe --put STRIPE_SECRET_KEY --live --go A13`, then `--put STRIPE_WEBHOOK_SECRET` (typed at wrangler's prompt). The journal records the anchor.
+  4. `nov1 secrets stripe --put STRIPE_SECRET_KEY --phase p9 --live --go A13`, then `--put STRIPE_WEBHOOK_SECRET` (typed at wrangler's prompt). The journal records the anchor.
   5. `nov1 stripe-smoke --tenant demo-harbor --live --go A11`.
 - What `stripe-smoke` does: refuses any key not `sk_test_` or `rk_test_`; `GET /v1/account` first, to see the key belongs to the platform; a guest checkout with a preview Origin; confirm the PaymentIntent on the connected account with a declining card, then `pm_card_visa`; wait for the webhook to confirm the booking; cancel through the from-checkout management session and wait for the refund. It spawns nothing, so `--api-key` and `--live` never appear.
 - **A14**, the owner's own command: `STRIPE_API_KEY="$STRIPE_SECRET_KEY" stripe events resend <evt_id printed by stripe-smoke> --account <the connected account id>`. Never `--api-key`, never `--live`. Whether the installed CLI honors `STRIPE_API_KEY` is unverified. Expect no `payload_mismatch`.
 - Verify: one inbox row per event, the booking confirmed, the refund succeeded. Capture and scrub fixtures per `packages/domain-payments/README.md`.
-- Rollback: delete the Stripe secrets if Stripe stays off; revert C5 and release with the fake. `FAKE_PAYMENT_WEBHOOK_SECRET` stays set until the end of P9 (D3). Leave the account rows.
-- End of P9, go/no-go **D3**: *"Turn the fake off now? Go / no-go."* If yes, `nov1 secrets preview --delete FAKE_PAYMENT_WEBHOOK_SECRET --live --go A2`.
+- Rollback: the same as the close below, at any point. Leave the account rows.
+- **P9.6 Close the Stripe window (always, success or not).** The phase guard refuses `PAYMENT_PROVIDER=stripe` outside P9, so P10 and P11 cannot release until this is done.
+  1. Revert C5 through a reviewed pull request (back to the fake), then `nov1 approve-sha <revert merge> --go A13`.
+  2. `nov1 release api --phase p9 --live --go A13`.
+  3. Go/no-go: *"Delete the Stripe secrets now? Go / no-go."* If yes, `nov1 secrets stripe --delete STRIPE_SECRET_KEY --phase p9 --live --go A13`, then the same for `STRIPE_WEBHOOK_SECRET`. They are unused while the provider is the fake.
+  4. Go/no-go **D3**: *"Turn the fake off now? Go / no-go."* If yes, `nov1 secrets preview --delete FAKE_PAYMENT_WEBHOOK_SECRET --phase p9 --live --go A2`. Checkout then answers 503 until the fake secret is put again.
 
 ## P10. Cloudflare for SaaS (deferred by default, D9)
 
-Rules for the day apply. Go/no-go: **D11** and **D9**. Default: not today.
+Rules for the day apply. Precondition: P9.6 is done (C5 reverted and released), or P9 was skipped. Go/no-go: **D11** and **D9**. Default: not today.
 
 - Input: a second domain the owner controls (a custom name has three or more labels and must not end in `tidegrid.us` or `test`, `0011:340-371`); payment details to enable Custom Hostnames (A15); a zone-scoped token typed only into `wrangler secret put`.
-- Commands: fallback origin `saas-fallback.tidegrid.us`, AAAA `100::`, proxied, then `PUT fallback_origin` (A16); fill `CF_SAAS_ZONE_ID` in C3, merge it, `nov1 approve-sha <merge> --go A17`, `nov1 release api --phase p10 --live --go A17`, `nov1 secrets saas --put CF_SAAS_API_TOKEN --live --go A17`; then `hostnames request`, the owner publishes the records, `activate`, `status` (A18, `tools/hostnames/README.md`).
+- Commands: fallback origin `saas-fallback.tidegrid.us`, AAAA `100::`, proxied, then `PUT fallback_origin` (A16); fill `CF_SAAS_ZONE_ID` in C3, merge it, `nov1 approve-sha <merge> --go A17`, `nov1 release api --phase p10 --live --go A17`, `nov1 secrets saas --put CF_SAAS_API_TOKEN --phase p10 --live --go A17`; then `hostnames request`, the owner publishes the records, `activate`, `status` (A18, `tools/hostnames/README.md`).
 - Open: per-hostname routes versus `*/*`; a `*/*` route may shadow the api, console, and demo domains. No command creates per-hostname routes.
+- Not taken while P10 is deferred: verifying which Cloudflare authentication error codes the hostname sweep treats as account-level (doc 12's "Before any G2.14b-live release" list). It is done with the first real `hostnames request` here, by recording the code a rotated or wrong-zone token returns.
 - Rollback: delete the custom hostname at Cloudflare; `nov1 hostname-disable <slug> <throwaway custom name> --live --go A18` (it refuses any preview or platform name, and any row that is not `custom`); revert C3.
 
 ## P11. Neon guard and cron pause (A19)
+
+Rules for the day apply. Precondition: P9.6 is done (C5 reverted and released), or P9 was skipped; with C5 still on main the phase guard refuses this release.
 
 - The owner reads Neon consumption at +2 h and +24 h.
 - Go/no-go **D5**: *"Pause the cron between windows? Go / no-go."* If yes: merge C6 (rebased on main), `nov1 approve-sha <merge> --go A19`, `nov1 release api --phase p11 --live --go A19`. The journal records the pause, and the phase guard warns if a later release from main brings the cron back. Whether `triggers.crons: []` removes the schedules is per the Cloudflare docs and unverified locally.

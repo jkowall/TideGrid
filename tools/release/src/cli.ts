@@ -32,6 +32,7 @@ import { stripeSmoke } from "./commands/stripe-smoke.ts";
 import { type Deps, Failure, out, Refusal, type SqlClient } from "./core.ts";
 import { DeployedGateRefusal } from "./deployed-gate.ts";
 import { nodeLocalFetch } from "./http.ts";
+import { loadConfigs } from "./phase.ts";
 import { redact } from "./redact.ts";
 
 export const commands: Record<string, (deps: Deps, args: Args) => Promise<number>> = {
@@ -55,8 +56,8 @@ export const usage = `nov1 <command> [options]   (dry run unless --live on a liv
   preflight [--phase pN] [--offline | --network --go A0] [--allow-branch] [--skip-build]
   db status|backup|migrate|seed|outbox-summary [--url-env NEON_DATABASE_URL] [--d14 a|b] --live --go A1
   db platform <slug> [--url-env NAME] --live --go A10
-  secrets preview|email|stripe|saas [--list | --put NAME | --generate NAME | --delete NAME] --live --go <gate>
-  release api|console|guest --phase pN [--rollback [--to <version id>]] [--kill-switch] [--again] --live --go <gate>
+  secrets preview|email|stripe|saas [--list | --put NAME | --generate NAME | --delete NAME] --phase pN --live --go <gate>
+  release api|console|guest --phase pN [--rollback [--to <version id>] | --verify] [--kill-switch] [--again] --live --go <gate>
   smoke --profile local|preview --base <api> --hosts h1,h2 [--build <id>] [--live --go A0]
   last-seat --profile local|preview --api <api> --hosts h1,h2 [--live --go A5]
   isolation --profile local|preview --api <api> --hosts A,B [--live --go A5]
@@ -119,6 +120,7 @@ export function realDeps(): Deps {
       join(homedir(), ".claude/projects/-Users-jkowall-TideGrid/handoff/nov1"),
     sql: sqlClient,
     nodeVersion: process.versions.node,
+    configs: () => loadConfigs(repoRoot),
   };
 }
 

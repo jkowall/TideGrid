@@ -13,7 +13,7 @@ import { assertNoBuildLeak, buildLeakNames, childEnv, present, strippedNames } f
 import { liveGate } from "../gate.ts";
 import { releaseState, releaseStateProblems } from "../git.ts";
 import { loadJournal } from "../journal.ts";
-import { loadConfigs, type Phase, parsePhase, phaseGuard } from "../phase.ts";
+import { type Phase, parsePhase, phaseGuard } from "../phase.ts";
 import { assertArgvSafe } from "../redact.ts";
 import { deployedVersions } from "../wrangler.ts";
 
@@ -121,7 +121,7 @@ export async function preflight(deps: Deps, args: Args): Promise<number> {
       : `HEAD ${state.head.slice(0, 12)} is approved origin/main, clean`,
   });
 
-  const guard = phaseGuard(phase, loadConfigs(deps.repoRoot), journal);
+  const guard = phaseGuard(phase, deps.configs(), journal);
   add({
     name: `phase guard ${phase} (invariant 11)`,
     ok: guard.refusals.length === 0,

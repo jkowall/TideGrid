@@ -34,6 +34,7 @@ export function parsePhase(raw: string | undefined): Phase {
 }
 
 const order = (p: Phase) => phases.indexOf(p);
+export const phaseIndex = order;
 
 /** JSON with comments and trailing commas, as wrangler.jsonc allows. */
 export function parseJsonc(text: string): unknown {
@@ -106,7 +107,9 @@ export function phaseGuard(phase: Phase, configs: Configs, journal: Journal): Gu
   const vars = configs.api.vars ?? {};
 
   if (vars.PAYMENT_PROVIDER === "stripe" && phase !== "p9") {
-    refusals.push("PAYMENT_PROVIDER is stripe outside P9 (C5 belongs to the Stripe window only)");
+    refusals.push(
+      "PAYMENT_PROVIDER is stripe outside P9: C5 belongs to the Stripe window only. At the end of P9, revert C5 and release the API with the fake (runbook P9.6)",
+    );
   }
 
   const email = configs.api.send_email ?? [];
@@ -126,9 +129,8 @@ export function phaseGuard(phase: Phase, configs: Configs, journal: Journal): Gu
     }
   }
 
-  const routes = (configs.guest.routes ?? []).map((r) => r.pattern).sort();
-  const isPreview = same(routes, previewHostnames) && configs.guest.workers_dev === true;
-  const isCutover = same(routes, cutoverHostnames) && configs.guest.workers_dev === false;
+  const isPreview = isPreviewConfig(configs);
+  const isCutover = isCutoverConfig(configs);
   const cutoverAllowed = phase === "p8" || journal.flags.cutoverDone === true;
   if (isCutover && !cutoverAllowed) {
     refusals.push("the guest config carries the demo.tidegrid.us cutover (C4) outside P8");
@@ -138,7 +140,7 @@ export function phaseGuard(phase: Phase, configs: Configs, journal: Journal): Gu
     );
   }
 
-  const saasOn = vars.HOSTNAME_PROVIDER !== undefined || vars.CF_SAAS_ZONE_ID !== undefined;
+  const saasOn = isSaasConfig(configs);
   if (saasOn && phase !== "p10" && journal.flags.saasEnabled !== true) {
     refusals.push("HOSTNAME_PROVIDER or CF_SAAS_ZONE_ID is set outside P10 (C3 is deferred, D9)");
   }
@@ -156,6 +158,23 @@ export function phaseGuard(phase: Phase, configs: Configs, journal: Journal): Gu
     );
   }
   return { refusals, warnings };
+}
+
+const guestRoutes = (c: Configs) => (c.guest.routes ?? []).map((r) => r.pattern).sort();
+
+/** The guest config before the cutover: the two preview names, workers.dev on. */
+export function isPreviewConfig(c: Configs): boolean {
+  return same(guestRoutes(c), previewHostnames) && c.guest.workers_dev === true;
+}
+
+/** The reviewed cutover set (C4): the preview names and demo.tidegrid.us, workers.dev off. */
+export function isCutoverConfig(c: Configs): boolean {
+  return same(guestRoutes(c), cutoverHostnames) && c.guest.workers_dev === false;
+}
+
+export function isSaasConfig(c: Configs): boolean {
+  const vars = c.api.vars ?? {};
+  return vars.HOSTNAME_PROVIDER !== undefined || vars.CF_SAAS_ZONE_ID !== undefined;
 }
 
 function same(a: readonly string[], b: readonly string[]): boolean {

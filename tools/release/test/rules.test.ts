@@ -3,9 +3,9 @@ import { renderEvidence } from "../src/commands/evidence.ts";
 import { budget, publicLimitPerMinute, racePlans, racers } from "../src/commands/last-seat.ts";
 import { healthExpect, smokeProfiles } from "../src/commands/smoke.ts";
 import { emptyJournal } from "../src/journal.ts";
-import { type Configs, loadConfigs, parseJsonc, phaseGuard } from "../src/phase.ts";
+import { type Configs, parseJsonc, phaseGuard } from "../src/phase.ts";
 import { assertArgvSafe, redact } from "../src/redact.ts";
-import { repoRoot } from "./helpers.ts";
+import { fixtureConfigs } from "./helpers.ts";
 
 describe("redaction (invariants 6 and 12)", () => {
   const secrets: [string, string][] = [
@@ -96,7 +96,7 @@ describe("smoke profiles (pinned)", () => {
 });
 
 describe("the phase guard (invariant 11)", () => {
-  const base = (): Configs => loadConfigs(repoRoot);
+  const base = (): Configs => fixtureConfigs();
   const guard = (c: Configs, phase: Parameters<typeof phaseGuard>[0], flags = {}) =>
     phaseGuard(phase, c, { ...emptyJournal(), flags });
 
@@ -182,5 +182,7 @@ describe("the evidence draft (P12)", () => {
     const draft = renderEvidence(j, [], new Date("2026-11-01T20:00:00Z"));
     for (const m of draft.matchAll(/[^\s@|]+@([^\s|]+)/g)) expect(m[1]).toMatch(/\.test$/);
     expect(draft).not.toContain("acct_1Real");
+    // Review note F5: the draft never overstates step 6.
+    expect(draft).toMatch(/serialized through one client address/);
   });
 });

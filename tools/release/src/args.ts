@@ -14,6 +14,7 @@ const booleanFlags = new Set([
   "skip-build",
   "list",
   "resend",
+  "verify",
   "help",
 ]);
 
