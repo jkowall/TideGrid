@@ -56,7 +56,7 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
   let A: string;
   let B: string;
   const run = randomUUID().slice(0, 8);
-  const addr = (label: string) => `cf.${label}.${run}@example.test`;
+  const addr = (label: string) => `cf.${run}.${label}@example.test`;
 
   const ctxFor = (tenantId: string): TenantContext => ({
     tenantId,
@@ -192,8 +192,8 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
       subject: "Synthetic ok",
       headers: { "Auto-Submitted": "auto-generated" },
     });
-    expect(sent?.builder.html).toContain("Synthetic");
-    expect(sent?.builder.text).toContain("Synthetic");
+    expect(sent?.builder.html).toContain("A synthetic message");
+    expect(sent?.builder.text).toContain("A synthetic message");
     const status = await inTenant(A, (trx) => getMessageStatus(trx, A, id));
     expect(status).toMatchObject({ state: "sent", provider: "cloudflare", failureCode: null });
   });
