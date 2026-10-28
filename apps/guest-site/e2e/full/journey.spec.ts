@@ -141,6 +141,22 @@ async function workerState(page: Page) {
   });
 }
 
+/**
+ * Load the page until its worker controls it. A first visit registers the
+ * worker but is not controlled (no clients.claim), and a worker with no
+ * controlled window never waits. Reloads, not new navigations: a reload never
+ * leaves the previous document in the back/forward cache, where it could
+ * count as another open window.
+ */
+async function loadControlled(page: Page, url: string, name: string) {
+  await page.goto(url);
+  await waitForReady(page, name);
+  await controlled(page);
+  await page.reload();
+  await waitForReady(page, name);
+  expect(await page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
+}
+
 /** The browser's own update check, made now rather than at some later navigation. */
 async function checkForUpdate(page: Page) {
   await page.evaluate(async () => {
@@ -158,9 +174,7 @@ test("a new service worker installs, waits, and takes over on the next navigatio
   const host = localHost(tenant.slug);
   const original = readFileSync(swFile, "utf8");
   try {
-    await page.goto(hostUrl(host));
-    await waitForReady(page, tenant.name);
-    expect(await controlled(page)).toBe(true);
+    await loadControlled(page, hostUrl(host), tenant.name);
     const before = await workerState(page);
     expect(before.caches).toHaveLength(1);
     const oldCache = before.caches[0] ?? "";
@@ -174,7 +188,7 @@ test("a new service worker installs, waits, and takes over on the next navigatio
     expect((await workerState(page)).caches).toContain(oldCache);
 
     // The next navigation's page load asks it to take over; this is the one window.
-    await page.goto(hostUrl(host));
+    await page.reload();
     await waitForReady(page, tenant.name);
     await expect
       .poll(async () => workerState(page), { timeout: 20_000 })
@@ -199,9 +213,7 @@ test("a waiting service worker does not take over while another window is open (
   const host = localHost(tenant.slug);
   const original = readFileSync(swFile, "utf8");
   try {
-    await page.goto(hostUrl(host));
-    await waitForReady(page, tenant.name);
-    expect(await controlled(page)).toBe(true);
+    await loadControlled(page, hostUrl(host), tenant.name);
     const other = await context.newPage();
     await other.goto(hostUrl(host, "/support"));
     await expect(other.getByRole("heading", { level: 1, name: "Help and support" })).toBeVisible({
@@ -217,7 +229,7 @@ test("a waiting service worker does not take over while another window is open (
 
     // A page load asks, but the other window is open: the new worker keeps waiting,
     // and the other window keeps build N's worker and cache.
-    await page.goto(hostUrl(host));
+    await page.reload();
     await waitForReady(page, tenant.name);
     await page.waitForTimeout(2_000);
     const held = await workerState(page);
@@ -225,12 +237,20 @@ test("a waiting service worker does not take over while another window is open (
     expect(held.caches).toContain(oldCache);
     expect((await workerState(other)).caches).toContain(oldCache);
 
-    // Once it is the only window, the next page load gets the new worker.
+    // Once it is the only window, a page load gets the new worker. The
+    // browser may take a moment to forget the closed window, so each try is
+    // a fresh page load, which asks again.
     await other.close();
-    await page.goto(hostUrl(host));
-    await waitForReady(page, tenant.name);
     await expect
-      .poll(async () => workerState(page), { timeout: 20_000 })
+      .poll(
+        async () => {
+          await page.reload();
+          await waitForReady(page, tenant.name);
+          await page.waitForTimeout(500);
+          return workerState(page);
+        },
+        { timeout: 30_000, intervals: [1_000] },
+      )
       .toEqual({
         active: "activated",
         waiting: null,
