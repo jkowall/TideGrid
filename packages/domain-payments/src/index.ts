@@ -23,6 +23,11 @@ export {
   type WebhookVerification,
 } from "./adapter.ts";
 export {
+  isTestPaymentEnvironment,
+  TEST_PAYMENT_ENVIRONMENTS,
+  type TestPaymentEnvironment,
+} from "./environments.ts";
+export {
   createFakePaymentProvider,
   FAKE_MINIMUM_AMOUNT,
   FAKE_SECRET_MIN_LENGTH,

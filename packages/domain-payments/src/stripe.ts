@@ -43,6 +43,7 @@ import {
   verifiedEvent,
   type WebhookVerification,
 } from "./adapter.ts";
+import { isTestPaymentEnvironment } from "./environments.ts";
 import { DEFAULT_TOLERANCE_SECONDS, sha256Hex, verifySignature } from "./signature.ts";
 
 /** The pinned API version (D11). The webhook endpoint is created with the same one. */
@@ -126,18 +127,21 @@ export type StripeConfigProblem =
         | "live_key"
         | "key_malformed"
         | "stripe_test_in_production"
+        | "environment_unknown"
         | "webhook_secret_malformed";
     };
 
 /**
  * Whether a key, webhook secret, and environment may build the adapter. Null
  * when they may. The API's settings and the constructor both apply it, so a
- * refusal holds even if one of them is bypassed.
+ * refusal holds even if one of them is bypassed. A test key runs only in
+ * local, preview, and staging; any other environment, unset included, is
+ * refused.
  */
 export function checkStripeConfig(input: {
   secretKey?: string | undefined;
   webhookSecret?: string | undefined;
-  environment: string;
+  environment: string | undefined;
 }): StripeConfigProblem | null {
   const key = input.secretKey;
   if (typeof key !== "string" || key.length === 0) {
@@ -148,6 +152,10 @@ export function checkStripeConfig(input: {
   // Test cards would confirm real bookings with no money moving.
   if (input.environment === "production") {
     return { kind: "refused", reason: "stripe_test_in_production" };
+  }
+  // Fail closed: an unset or unknown environment is never taken for a test one.
+  if (!isTestPaymentEnvironment(input.environment)) {
+    return { kind: "refused", reason: "environment_unknown" };
   }
   const secret = input.webhookSecret;
   if (typeof secret !== "string" || secret.length === 0) {
@@ -450,6 +458,9 @@ export class StripePaymentProvider implements PaymentProvider {
     if (fixture) {
       if (options.environment === "production") {
         throw new TypeError("the Stripe adapter is refused: stripe_test_in_production");
+      }
+      if (!isTestPaymentEnvironment(options.environment)) {
+        throw new TypeError("the Stripe adapter is refused: environment_unknown");
       }
       if (
         typeof options.webhookSecret !== "string" ||

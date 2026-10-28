@@ -10,6 +10,13 @@ import {
 } from "./stripe-fixture.ts";
 
 const nowMs = Date.UTC(2026, 9, 28, 15, 0, 0);
+const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+/** Another endpoint's secret, random per run, so no committed literal passes the deployment checks. */
+const otherSecret = () =>
+  [
+    "whsec",
+    Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => alphabet[b % 62]).join(""),
+  ].join("_");
 const harbor = STRIPE_FIXTURE_ACCOUNTS.harbor;
 const reef = STRIPE_FIXTURE_ACCOUNTS.reef;
 
@@ -83,11 +90,7 @@ describe("Stripe webhook verification", () => {
     const tampered = delivery.body.replace('"amount": 5000', '"amount": 1');
     expect(tampered).not.toBe(delivery.body);
     expect(rejection(await verify({ ...delivery, body: tampered }))).toBe("signature_mismatch");
-    const other = await signatureHeaderValue(
-      ["whsec", "AnotherSecretAnotherSecretAnoth"].join("_"),
-      nowMs,
-      delivery.body,
-    );
+    const other = await signatureHeaderValue(otherSecret(), nowMs, delivery.body);
     expect(rejection(await verify({ ...delivery, header: other }))).toBe("signature_mismatch");
     expect(rejection(await verify({ ...delivery, nowMs: nowMs + 301_000 }))).toBe(
       "timestamp_out_of_tolerance",
@@ -119,11 +122,7 @@ describe("Stripe webhook verification", () => {
     expect(rejection(await verify({ body: "not json", header: "t=1,v1=00", nowMs }))).toBe(
       "malformed_signature",
     );
-    const forged = await signatureHeaderValue(
-      ["whsec", "AnotherSecretAnotherSecretAnoth"].join("_"),
-      nowMs,
-      "not json",
-    );
+    const forged = await signatureHeaderValue(otherSecret(), nowMs, "not json");
     expect(rejection(await verify({ body: "not json", header: forged, nowMs }))).toBe(
       "signature_mismatch",
     );
@@ -133,7 +132,7 @@ describe("Stripe webhook verification", () => {
     const { fixture, verify, intent } = harness();
     const { ref } = await intent();
     const delivery = await fixture.event("payment_intent.succeeded", fixture.succeed(ref), {
-      extraV1: ["whsec", "TheNextSecretTheNextSecretTheNe"].join("_"),
+      extraV1: otherSecret(),
     });
     expect(delivery.header.match(/v1=/g)).toHaveLength(2);
     expect(accepted(await verify(delivery)).eventId).toBe(delivery.id);

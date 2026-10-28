@@ -5,6 +5,7 @@ import {
   createStripePaymentProvider,
   FAKE_SECRET_MIN_LENGTH,
   type FakePaymentProvider,
+  isTestPaymentEnvironment,
   type PaymentProvider,
 } from "@tidegrid/domain-payments";
 import type { Context } from "hono";
@@ -16,7 +17,9 @@ import type { Bindings } from "./env.ts";
 /**
  * Which payment provider this deployment uses (G2.7). The demo runs the fake
  * provider, the owner's decision of 2026-10-05. The fake is refused outright
- * in a production configuration, whatever else is set.
+ * in a production configuration, whatever else is set, and both test-mode
+ * providers fail closed on any ENVIRONMENT but local, preview, or staging,
+ * unset included (environment_unknown).
  *
  * The Stripe adapter (standing goal item 3, a coordinator default of
  * 2026-10-28 pending the owner) is built but off: no deployed configuration
@@ -42,6 +45,7 @@ export type PaymentSettings =
         | "live_key"
         | "stripe_test_in_production"
         | "key_malformed"
+        | "environment_unknown"
         | "webhook_secret_malformed";
     };
 
@@ -50,6 +54,10 @@ export function paymentSettings(env: Bindings): PaymentSettings {
   if (!name) return { kind: "off", reason: "unset" };
   if (name === "fake") {
     if (env.ENVIRONMENT === "production") return { kind: "refused", reason: "fake_in_production" };
+    // Fail closed: only local, preview, and staging run a test-mode provider.
+    if (!isTestPaymentEnvironment(env.ENVIRONMENT)) {
+      return { kind: "refused", reason: "environment_unknown" };
+    }
     const secret = env.FAKE_PAYMENT_WEBHOOK_SECRET;
     if (!secret || secret.length < FAKE_SECRET_MIN_LENGTH) {
       return { kind: "off", reason: "secret_missing" };

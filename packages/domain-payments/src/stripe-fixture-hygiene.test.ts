@@ -5,11 +5,15 @@
  * replaced with sandbox captures, this test is what stops an unscrubbed one.
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
-import { createStripePaymentProvider } from "./stripe.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createStripePaymentProvider,
+  stripeSecretKeyPattern,
+  stripeWebhookSecretPattern,
+} from "./stripe.ts";
 import {
   createStripeFixture,
   STRIPE_FIXTURE_ACCOUNTS,
@@ -23,6 +27,60 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 /** Every Stripe fixture file. A new one must be added here. */
 const fixtureFiles = ["stripe-fixture.ts", "testing.ts"];
+
+/** Every test source that could hold a Stripe credential: this package's and the API's. */
+function testSources(): string[] {
+  const own = readdirSync(here)
+    .filter((f) => /\.(?:test|contract)\.ts$/.test(f))
+    .map((f) => join(here, f));
+  const api = [
+    "../../../apps/api-worker/test",
+    "../../../apps/api-worker/test-integration",
+  ].flatMap((dir) =>
+    readdirSync(resolve(here, dir))
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => resolve(here, dir, f)),
+  );
+  return [...own, ...api];
+}
+
+/**
+ * Every value a deployment would accept as a Stripe key or webhook secret
+ * that a text spells out, alone or as adjacent string literals joined with
+ * "_" or with nothing, the way a test splits one to dodge a scanner.
+ */
+function deployableCredentials(text: string): string[] {
+  const out: string[] = [];
+  const literal = /"((?:[^"\\\n]|\\.)*)"/g;
+  const run = /"(?:[^"\\\n]|\\.)*"(?:\s*,\s*"(?:[^"\\\n]|\\.)*")*/g;
+  for (const [sequence] of text.matchAll(run)) {
+    const parts = [...sequence.matchAll(literal)].map((m) => m[1] ?? "");
+    for (let i = 0; i < parts.length; i++) {
+      for (let j = i + 1; j <= parts.length; j++) {
+        for (const separator of ["_", ""]) {
+          const value = parts.slice(i, j).join(separator);
+          if (stripeSecretKeyPattern.test(value) || stripeWebhookSecretPattern.test(value)) {
+            out.push(value);
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+let realFetchCalls = 0;
+beforeEach(() => {
+  realFetchCalls = 0;
+  vi.stubGlobal("fetch", async () => {
+    realFetchCalls += 1;
+    throw new Error("the real fetch was reached");
+  });
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  expect(realFetchCalls).toBe(0);
+});
 
 const syntheticAccounts = new Set<string>(Object.values(STRIPE_FIXTURE_ACCOUNTS));
 const syntheticKeys = new Set([STRIPE_FIXTURE_SECRET_KEY, STRIPE_FIXTURE_WEBHOOK_SECRET]);
@@ -182,6 +240,37 @@ async function servedBodies(): Promise<string[]> {
   expect(bodies.length).toBeGreaterThan(20);
   return bodies;
 }
+
+describe("Stripe credentials in test sources", () => {
+  it("spells out no key or webhook secret a deployment would accept", () => {
+    const sources = testSources();
+    expect(sources.length).toBeGreaterThan(10);
+    expect(sources.some((s) => s.endsWith("stripe-settings.test.ts"))).toBe(true);
+    for (const source of sources) {
+      expect(deployableCredentials(readFileSync(source, "utf8")), source).toEqual([]);
+    }
+  });
+
+  it("catches one split into literals", () => {
+    const tail = "A".repeat(28);
+    const quoted = (...parts: string[]) => parts.map((p) => `"${p}"`).join(", ");
+    for (const text of [
+      `const k = keyOf(${quoted("sk", "test", tail)});`,
+      `const s = [${quoted("whsec", tail)}].join("_");`,
+      `const k = ${quoted(["rk", "test", tail].join("_"))};`,
+      `const k = [${quoted("rk_test", "_", tail)}].join("");`,
+    ]) {
+      expect(deployableCredentials(text), text).not.toEqual([]);
+    }
+    for (const text of [
+      `keyOf(${quoted("sk", "test", "short")})`,
+      `keyOf(${quoted("sk", "live", tail)})`,
+      `[${quoted("rk", "test", "fixture", tail)}].join("_")`,
+    ]) {
+      expect(deployableCredentials(text), text).toEqual([]);
+    }
+  });
+});
 
 describe("Stripe fixture hygiene", () => {
   it("keeps every fixture file synthetic", () => {

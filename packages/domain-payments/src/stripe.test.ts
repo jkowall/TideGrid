@@ -9,8 +9,13 @@ import {
 } from "./stripe.ts";
 import { createStripeFixture, STRIPE_FIXTURE_ACCOUNTS } from "./stripe-fixture.ts";
 
-// Key-shaped strings are joined at run time so secret scanners do not flag them.
+// Key-shaped strings are joined at run time so secret scanners do not flag
+// them. A value that would pass the deployment checks takes a random tail per
+// run, so no committed literal does (stripe-fixture-hygiene.test.ts checks).
 const keyOf = (...parts: string[]) => parts.join("_");
+const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const randomTail = (length = 32) =>
+  Array.from(crypto.getRandomValues(new Uint8Array(length)), (b) => alphabet[b % 62]).join("");
 const harbor = STRIPE_FIXTURE_ACCOUNTS.harbor;
 const reef = STRIPE_FIXTURE_ACCOUNTS.reef;
 
@@ -528,7 +533,7 @@ describe("no secret leaves through an error", () => {
     try {
       createStripePaymentProvider({
         secretKey: key,
-        webhookSecret: keyOf("whsec", "SyntheticSyntheticSynthetic01"),
+        webhookSecret: keyOf("whsec", randomTail()),
         environment: "local",
       });
     } catch (e) {
@@ -900,8 +905,8 @@ describe("two tenants", () => {
 });
 
 describe("configuration", () => {
-  const webhookSecret = keyOf("whsec", "SyntheticSyntheticSynthetic01");
-  const testKey = keyOf("sk", "test", "SyntheticSyntheticSynth01");
+  const webhookSecret = keyOf("whsec", randomTail());
+  const testKey = keyOf("sk", "test", randomTail());
   const build = (options: Partial<StripeProviderOptions>) => () =>
     createStripePaymentProvider({
       secretKey: testKey,
@@ -928,8 +933,43 @@ describe("configuration", () => {
     expect(build({ webhookSecret: "" })).toThrow(/stripe_webhook_secret_missing/);
     expect(build({ webhookSecret: keyOf("whsec", "short") })).toThrow(/webhook_secret_malformed/);
     expect(build({ webhookSecret: testKey })).toThrow(/webhook_secret_malformed/);
-    expect(build({ secretKey: keyOf("rk", "test", "SyntheticSyntheticSynth01") })).not.toThrow();
+    expect(build({ secretKey: keyOf("rk", "test", randomTail()) })).not.toThrow();
     expect(build({ environment: "staging" })).not.toThrow();
+  });
+
+  it("takes a test key only in local, preview, and staging, failing closed on anything else", () => {
+    for (const environment of ["prod", "Production", "production ", "", "dev", "test"]) {
+      expect(build({ environment }), JSON.stringify(environment)).toThrow(/environment_unknown/);
+    }
+    // An unset ENVIRONMENT, which the type forbids and the runtime does not.
+    expect(() =>
+      createStripePaymentProvider({
+        secretKey: testKey,
+        webhookSecret,
+        fetch: async () => new Response("{}"),
+      } as unknown as StripeProviderOptions),
+    ).toThrow(/environment_unknown/);
+    expect(
+      checkStripeConfig({ secretKey: testKey, webhookSecret, environment: undefined }),
+    ).toEqual({ kind: "refused", reason: "environment_unknown" });
+    expect(checkStripeConfig({ secretKey: testKey, webhookSecret, environment: "prod" })).toEqual({
+      kind: "refused",
+      reason: "environment_unknown",
+    });
+    const fixture = createStripeFixture();
+    for (const environment of ["prod", undefined]) {
+      expect(() =>
+        createStripePaymentProvider({
+          secretKey: fixture.secretKey,
+          webhookSecret: fixture.webhookSecret,
+          environment,
+          fetch: fixture.fetch,
+        } as unknown as StripeProviderOptions),
+      ).toThrow(/environment_unknown/);
+    }
+    for (const environment of ["local", "preview", "staging"]) {
+      expect(build({ environment })).not.toThrow();
+    }
   });
 
   it("refuses the fixture's credentials anywhere but over an injected fetch", () => {
@@ -970,7 +1010,7 @@ describe("configuration", () => {
     const check = (
       secretKey: string | undefined,
       secret: string | undefined,
-      environment = "dev",
+      environment = "local",
     ) => checkStripeConfig({ secretKey, webhookSecret: secret, environment });
     expect(check(testKey, webhookSecret)).toBeNull();
     expect(check(undefined, webhookSecret)).toEqual({ kind: "off", reason: "stripe_key_missing" });

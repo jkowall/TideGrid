@@ -1,6 +1,6 @@
 import { createExecutionContext, env } from "cloudflare:test";
 import { StripePaymentProvider, signatureHeaderValue } from "@tidegrid/domain-payments";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import example from "../.dev.vars.example?raw";
 import { createApp } from "../src/app.ts";
 import type { Bindings } from "../src/env.ts";
@@ -9,13 +9,30 @@ import { paymentProvider, paymentSettings } from "../src/payments.ts";
 
 // The Stripe adapter's configuration in the Workers runtime, with no database:
 // everything here is decided before any database is reached. No test here
-// reaches Stripe: a configured adapter is built, never called.
+// reaches Stripe: a configured adapter is built, never called, and the global
+// fetch fails the test if anything reaches it.
 
-// Key-shaped strings are joined at run time so secret scanners do not flag them.
 const keyOf = (...parts: string[]) => parts.join("_");
-const secretKey = keyOf("sk", "test", "SyntheticSyntheticSynth01");
-const webhookSecret = keyOf("whsec", "SyntheticSyntheticSynthetic01");
+const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+/** Letters and digits, random per run, so no committed value passes the key checks. */
+const randomTail = (length = 32) =>
+  Array.from(crypto.getRandomValues(new Uint8Array(length)), (b) => alphabet[b % 62]).join("");
+const secretKey = keyOf("sk", "test", randomTail());
+const webhookSecret = keyOf("whsec", randomTail());
 const app = createApp();
+
+let realFetchCalls = 0;
+beforeEach(() => {
+  realFetchCalls = 0;
+  vi.stubGlobal("fetch", async () => {
+    realFetchCalls += 1;
+    throw new Error("the real fetch was reached");
+  });
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  expect(realFetchCalls).toBe(0);
+});
 
 const stripeEnv = (overrides: Partial<Bindings> = {}): Bindings => ({
   ...(env as Bindings),
@@ -75,6 +92,28 @@ describe("Stripe payment settings", () => {
     for (const environment of ["local", "preview", "staging"] as const) {
       expect(paymentSettings(stripeEnv({ ENVIRONMENT: environment })).kind).toBe("stripe");
     }
+  });
+
+  it("fails closed on an unset or unknown ENVIRONMENT, for Stripe and the fake", () => {
+    const { ENVIRONMENT: _e, ...unset } = stripeEnv();
+    const fake = {
+      ...unset,
+      PAYMENT_PROVIDER: "fake",
+      FAKE_PAYMENT_WEBHOOK_SECRET: "workers-test-fake-provider-secret-0123456789",
+    };
+    const refused = { kind: "refused", reason: "environment_unknown" };
+    expect(paymentSettings(unset as Bindings)).toEqual(refused);
+    expect(paymentSettings(fake as Bindings)).toEqual(refused);
+    for (const environment of ["prod", "Production", "production ", "", "dev"]) {
+      const bindings = { ENVIRONMENT: environment } as unknown as Partial<Bindings>;
+      expect(paymentSettings(stripeEnv(bindings)), environment).toEqual(refused);
+      expect(paymentSettings({ ...fake, ...bindings } as Bindings), environment).toEqual(refused);
+    }
+    expect(
+      paymentProvider(unset as Bindings, () => {
+        throw new Error("the database was opened");
+      }),
+    ).toBeNull();
   });
 
   it("refuses the placeholders in .dev.vars.example", () => {

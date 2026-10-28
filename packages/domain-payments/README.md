@@ -58,7 +58,7 @@ Stripe's scheme: a header `t=<unix seconds>,v1=<hex>`, where v1 is HMAC-SHA256 o
 
 `FakePaymentProvider` keeps its own append-only tables, tenant-owned under the tenancy contract like everything else: `fake_provider_payments`, `fake_provider_events` (one outcome per payment, stored as the exact text delivered), and `fake_provider_refunds`. It never reads or writes TideGrid's checkout tables.
 
-- **Exists only under `PAYMENT_PROVIDER=fake`.** Its constructor refuses `ENVIRONMENT=production` and a secret shorter than 32 characters, and the API's configuration refuses the fake in production before it is ever built.
+- **Exists only under `PAYMENT_PROVIDER=fake`.** Its constructor refuses `ENVIRONMENT=production`, any environment but `local`, `preview`, or `staging` (an unset or misspelled one included; since the Stripe adapter's Phase B review), and a secret shorter than 32 characters. The API's configuration refuses the fake in production, and as `environment_unknown` anywhere else outside that list, before it is ever built.
 - **Confirms bookings without money.** Anyone who opens a checkout holds the client secret and can "pay". That is the point of a demo shim, and the reason it belongs only on synthetic tenants: never turn it on where a real guest could reach it.
 - **Creating** is idempotent by key per tenant. The client secret is derived, `<paymentRef>_secret_<HMAC>`, never stored, and checked in constant time.
 - **Settling** (the demo's pay page) moves a pending payment to succeeded or failed, once; a second attempt keeps the first outcome. Its event is stored first, then delivered, or held back for a later, late, duplicate, or reordered delivery.
@@ -90,7 +90,7 @@ createStripePaymentProvider({
 
 - `checkStripeConfig` and the constructor apply the same rules, so the API's settings and the adapter each refuse on their own.
 - A missing key or webhook secret means off: `stripe_key_missing`, `stripe_webhook_secret_missing`.
-- These are refused: a live key of any kind (`sk_live_`, `rk_live_`, `pk_live_`) in every environment until the Core live gate (`live_key`); a key that fails `^(sk|rk)_test_[A-Za-z0-9]{24,}$` (`key_malformed`); a test key with `ENVIRONMENT=production`, because test cards would confirm real bookings with no money moving (`stripe_test_in_production`); a `whsec_` that fails its shape check (`webhook_secret_malformed`).
+- These are refused: a live key of any kind (`sk_live_`, `rk_live_`, `pk_live_`) in every environment until the Core live gate (`live_key`); a key that fails `^(sk|rk)_test_[A-Za-z0-9]{24,}$` (`key_malformed`); a test key with `ENVIRONMENT=production`, because test cards would confirm real bookings with no money moving (`stripe_test_in_production`); a test key with any `ENVIRONMENT` but `local`, `preview`, or `staging`, unset or misspelled included (`environment_unknown`), the same allowlist the fake uses; a `whsec_` that fails its shape check (`webhook_secret_malformed`).
 - The fixture's credentials (`rk_test_fixture_...`, `whsec_fixture_...`) fail both shape checks on purpose, so they can never configure a deployment. The constructor takes them only as a pair, only with an injected `fetch`, which no deployment passes, and never in production.
 - The API base is never read from the environment. It must be an `https` origin with no path or credentials, and anything but `https://api.stripe.com` needs an injected `fetch`.
 - The key and the webhook secret are Worker secrets only, never vars and never in the repository.
@@ -154,7 +154,7 @@ Mapping:
 
 - **Create replay after pruning.** `ensureProviderPayment` calls `createPayment` on every replay. After Stripe forgets the key, a replay could create a second intent. The 15-minute hold makes that unlikely, and checkout fails closed on a different payment id.
 - **A cached 500.** Stripe replays a saved 500 for up to 24 hours. For refunds the lookup makes that safe. For a create it costs a 503 until the hold expires.
-- **Pending refunds can starve the sweep.** The sweep takes requested refunds oldest first in batches, and a refund stuck pending only counts as pending. A pending state, or an exception after some hours, is a proposed G2.9 follow-up, with fair ordering.
+- **Pending refunds and refused lookups can starve the sweep.** The sweep takes requested refunds oldest first in batches, and a refund stuck pending only counts as pending. A refund whose lookup is refused for good (an account or payment id that no longer matches) stays requested the same way, forever, with no word to the guest or the operator. A pending state, or an exception after some hours that covers both cases, is a proposed G2.9 follow-up, with fair ordering.
 - **Inline processing.** The webhook route records and processes inline. Stripe advises a quick 2xx first. The inbox and the sweep make Stripe's retry safe.
 - **Signature only.** The route trusts the signature alone. Allowlisting Stripe's webhook IPs is a proposed follow-up.
 - **Restricted keys.** Whether an `rk_test_` key needs extra permission to act through `Stripe-Account` is unconfirmed. If it does, the 403 is unknown, so refunds wait rather than fail.
