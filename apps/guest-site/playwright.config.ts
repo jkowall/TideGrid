@@ -11,13 +11,19 @@ import { defineConfig, devices } from "@playwright/test";
  *                  with the API on :8961 against a disposable PostgreSQL 17,
  *                  seeded with SEED_LOCAL_HOSTNAMES=1. CI starts the API;
  *                  E2E_ADMIN_DATABASE_URL lets the suite disable a host.
- *   E2E_CHANNEL    "chrome" uses an installed Google Chrome instead of the
- *                  downloaded Chromium, for local runs.
+ *   E2E_CHANNEL    the browser channel. Outside CI it defaults to "chrome", an
+ *                  installed Google Chrome, so a local run never needs a
+ *                  browser download; never run `playwright install` on the
+ *                  owner's machine. CI uses the Chromium its job installs.
+ *
+ * Port 5361 must be free: the suite starts its own server and fails at once,
+ * naming the port, when something else (the Vite dev server, an old
+ * `wrangler dev`) holds it, rather than testing the wrong server.
  *
  * Build first: `VITE_API_BASE=http://localhost:8961 GUEST_LOCAL_API=http://localhost:8961 pnpm build`.
  */
 const mode = process.env.E2E_MODE === "full" ? "full" : "stub";
-const channel = process.env.E2E_CHANNEL;
+const channel = process.env.CI ? process.env.E2E_CHANNEL : (process.env.E2E_CHANNEL ?? "chrome");
 
 export default defineConfig({
   testDir: `./e2e/${mode}`,
@@ -38,7 +44,7 @@ export default defineConfig({
   webServer: {
     command: mode === "full" ? "pnpm dev:worker" : "pnpm dev:stub",
     url: "http://localhost:5361/favicon.svg",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
     stdout: "pipe",
   },

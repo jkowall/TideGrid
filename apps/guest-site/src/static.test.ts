@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { previewHostnameFor } from "@tidegrid/tenant-config";
 import { loadTenantManifests } from "@tidegrid/tenant-config/node";
 import { describe, expect, it } from "vitest";
+import { precacheFrom } from "../vite.config.ts";
 
 describe("static files", () => {
   it("serves a neutral favicon so /favicon.ico is never a 404", () => {
@@ -146,6 +147,29 @@ describe("static files", () => {
     expect(main).toMatch(
       /<ErrorBoundary fallback=\{<CrashedState \/>\}>\s*<App \/>\s*<\/ErrorBoundary>/,
     );
+  });
+});
+
+describe("service worker precache list (G2.14b)", () => {
+  it("lists only hashed assets the build writes, never an empty CSS-entry chunk", () => {
+    expect(
+      precacheFrom({
+        "index.html": { type: "asset" },
+        "assets/index-a1.js": { type: "chunk", code: "console.log(1)" },
+        "assets/index-a1.css": { type: "asset" },
+        "assets/offline-b2.js": { type: "chunk", code: "\n" },
+        "assets/offline-b2.css": { type: "asset" },
+        "assets/index-a1.js.map": { type: "asset" },
+        "assets/inter-c3.woff2": { type: "asset" },
+      }),
+    ).toEqual(["/assets/index-a1.css", "/assets/index-a1.js", "/assets/offline-b2.css"]);
+  });
+
+  it("checks every precache entry against dist/ in every build", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    for (const script of ["build", "release", "release:dry"]) {
+      expect(pkg.scripts[script]).toMatch(/^vite build && node scripts\/check-precache\.mjs && /);
+    }
   });
 });
 

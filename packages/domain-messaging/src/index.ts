@@ -34,6 +34,7 @@ export {
   type DeliveryOptions,
   type DeliveryOutcome,
   deliverTenantMessages,
+  deliveryEnvironment,
   type EmailSweepOptions,
   type EmailSweepReport,
   guestOriginFor,

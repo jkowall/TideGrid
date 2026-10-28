@@ -17,4 +17,16 @@ DATABASE_URL=... TIDEGRID_EPHEMERAL_DB=1 pnpm --filter @tidegrid/hostnames-cli h
 - `disable` turns any hostname off; a disabled name stays reserved.
 - `fake-lifecycle` runs request, a refused early activation, validation, activation, a demotion after the CNAME moves, and disable, because the fake's records live in memory and cannot outlive one process.
 
+## Runbook: a request interrupted between the provider and the database
+
+`request` reserves the name in the database, creates the provider's record, then stores its id. If the process dies after the provider created the record and before the id is stored, the row stays pending with no provider id. Running `request` again finds the reservation and tries to create again; the provider answers `already_exists`, and the adoption rule refuses to adopt a record it cannot prove this request made. The sweep never reads a row without an id, so the seven-day claim does not expire it. To recover (proposed; a `release` command is a follow-up):
+
+1. In the Cloudflare dashboard (or the API), find the custom hostname by its exact name, confirm it was created at the time of the interrupted run, and delete it.
+2. Run `request` again: the reservation resumes, the create succeeds, and the id is stored.
+3. If the name should not be retried, run `disable` with a reason instead. A disabled name stays reserved.
+
+## Deploying (G2.14b-live)
+
+Release the API before the guest site: the guest Worker binds to the API's `GuestGateway` entrypoint, and a guest release before it exists fails on that binding. A guest release attaches every route in `apps/guest-site/wrangler.jsonc` as a Workers Custom Domain, which creates DNS records for `<slug>.book.tidegrid.us` in the `tidegrid.us` zone.
+
 Secrets come from the environment only. The token is never printed; errors print their type and code.

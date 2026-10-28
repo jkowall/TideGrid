@@ -72,8 +72,8 @@ export interface DeliveryOptions {
   /**
    * The deployment environment, which decides whether a link origin may use
    * http, a port, or a `*.localhost` name (G2.14b): only in "local". The API
-   * Worker always passes its ENVIRONMENT. Omitted, the local rules apply, as
-   * they did before G2.14b, so in-process tests on `*.localhost` keep working.
+   * Worker always passes its ENVIRONMENT. Omitted, the strict deployed rules
+   * apply, so a caller that forgets it can never mint a loopback link.
    */
   environment?: DeploymentEnvironment;
   /** Correlates the run's writes, like a request id. */
@@ -199,12 +199,23 @@ function backoffFor(attempt: number): number {
  * (G2.14b): https only, no port, no path, no trailing dot, and no
  * `*.localhost` name, except in local development.
  */
+/**
+ * The host rules a delivery run mints links under: the caller's environment,
+ * or the strict deployed rules when it names none (G2.14b). Never the local
+ * rules by default.
+ */
+export function deliveryEnvironment(
+  options: Pick<DeliveryOptions, "environment">,
+): DeploymentEnvironment {
+  return options.environment ?? "production";
+}
+
 export async function guestOriginFor(
   db: Kysely<Database>,
   tenantId: string,
   slug: string,
   template: string,
-  environment: DeploymentEnvironment = "local",
+  environment: DeploymentEnvironment,
 ): Promise<string | null> {
   const parsed = parseBrowserOrigin(template.replaceAll("{slug}", slug), { environment });
   if (!parsed) return null;
@@ -374,7 +385,7 @@ export async function deliverTenantMessages(
     return rows[0]?.slug ?? null;
   });
   const origin = slug
-    ? await guestOriginFor(db, tenantId, slug, template, options.environment ?? "local")
+    ? await guestOriginFor(db, tenantId, slug, template, deliveryEnvironment(options))
     : null;
 
   const report: TenantDeliveryReport = {

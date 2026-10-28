@@ -7,6 +7,7 @@ import {
   precacheEntries,
   routeRequest,
   type ServiceWorkerScopeLike,
+  SKIP_WAITING,
 } from "./sw.ts";
 
 const ORIGIN = "https://demo-harbor.book.tidegrid.us";
@@ -19,6 +20,7 @@ function fakeScope(network: (url: string) => Promise<Response>) {
   const listeners = new Map<string, Listener>();
   const stores = new Map<string, Map<string, Response>>();
   const puts: { cache: string; key: string }[] = [];
+  const skipped = { count: 0 };
   const keyOf = (r: RequestInfo | string) => (typeof r === "string" ? r : r.url);
   const scope: ServiceWorkerScopeLike = {
     location: { origin: ORIGIN },
@@ -56,6 +58,9 @@ function fakeScope(network: (url: string) => Promise<Response>) {
       },
     },
     fetch: (r) => network(typeof r === "string" ? r : r.url),
+    skipWaiting: async () => {
+      skipped.count += 1;
+    },
     addEventListener: ((type: string, listener: Listener) => {
       listeners.set(type, listener);
     }) as ServiceWorkerScopeLike["addEventListener"],
@@ -76,7 +81,10 @@ function fakeScope(network: (url: string) => Promise<Response>) {
     });
     return answer === undefined ? "passed" : await answer;
   }
-  return { scope, stores, puts, dispatch, fetchEvent };
+  function message(data: unknown) {
+    listeners.get("message")?.({ data });
+  }
+  return { scope, stores, puts, skipped, dispatch, fetchEvent, message };
 }
 
 const ok = (body: string, type = "text/plain") =>
@@ -227,6 +235,21 @@ describe("service worker caching (G2.14b)", () => {
     await sw.dispatch("install");
     await sw.dispatch("activate");
     expect(await sw.scope.caches.keys()).toEqual([cacheNameFor("b2")]);
+  });
+});
+
+describe("service worker update policy (G2.14b, D11(a))", () => {
+  it("never skips waiting by itself, and takes over only when a page load asks", async () => {
+    const sw = fakeScope(async (url) => ok(`body of ${url}`));
+    installServiceWorker(sw.scope, { precache: PRECACHE, buildId: "b3" });
+    await sw.dispatch("install");
+    expect(sw.skipped.count).toBe(0);
+    sw.message({ type: "something-else" });
+    sw.message(null);
+    sw.message("SKIP_WAITING");
+    expect(sw.skipped.count).toBe(0);
+    sw.message({ type: SKIP_WAITING });
+    expect(sw.skipped.count).toBe(1);
   });
 });
 

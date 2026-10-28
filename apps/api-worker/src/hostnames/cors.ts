@@ -10,18 +10,21 @@ import { publicOrigin, tenantForHost, tenantForOrigin } from "../public-tenant.t
  * grants nothing, and CORS never grants credentials.
  *
  * - Every route: the configured ALLOWED_ORIGINS, as before.
- * - `/v1/public/*` and `/v1/fake-provider/*`, unless PUBLIC_CORS is "static"
- *   (the rollback):
+ * - `/v1/public/*` and `/v1/fake-provider/*`, only when PUBLIC_CORS is
+ *   "dynamic" (env.dev and env.test say so; unset or anything else is the
+ *   static allowlist, the deployed default and the rollback):
  *   - `/v1/public/tenant` echoes any origin the strict parser accepts. Its 200
  *     is that same host's public brand and its 404 is one constant body, and
  *     the guest page can show "not published" (and clear its service worker)
  *     only from a 404 it can read.
  *   - any other public route echoes an origin only when it is canonical and
- *     its host resolves to an active, verified hostname. The route and this
- *     check share one lookup per request.
- *   - a preflight is answered from an in-isolate projection (below), so an
- *     OPTIONS flood costs at most one lookup per host per 30 seconds, behind a
- *     per-address limiter.
+ *     its host resolves to an active, verified hostname. A preflight and a
+ *     simple request alike are answered from an in-isolate projection
+ *     (below), so a flood of either costs at most one lookup per origin per
+ *     30 seconds, and a lookup the projection cannot answer goes through a
+ *     per-address limiter. A simple request's lookup is the route's own, so
+ *     a request still costs at most one. The route always resolves the tenant
+ *     afresh: the projection decides CORS only, never which tenant's data.
  * - Staff routes stay on STAFF_ORIGINS through their own guard.
  */
 /**
@@ -35,23 +38,20 @@ const guestRoutePrefixes = ["/v1/public/", "/v1/fake-provider/"] as const;
 export async function allowedOrigin(origin: string, c: Context<AppEnv>): Promise<string | null> {
   if (!origin) return null;
   if (allowedOrigins(c.env).includes(origin)) return origin;
-  if (c.env.PUBLIC_CORS === "static") return null;
+  if (c.env.PUBLIC_CORS !== "dynamic") return null;
   const path = new URL(c.req.url).pathname;
   if (!guestRoutePrefixes.some((prefix) => path.startsWith(prefix))) return null;
   const parsed = publicOrigin(c);
   if (!parsed) return null;
   if (path === "/v1/public/tenant") return parsed.origin;
-  if (c.req.method === "OPTIONS") {
-    return (await preflightAllows(c, parsed.origin, parsed.host)) ? parsed.origin : null;
-  }
-  return (await tenantForOrigin(c)) ? parsed.origin : null;
+  return (await originResolves(c, parsed.origin, parsed.host)) ? parsed.origin : null;
 }
 
 /**
- * The preflight projection: whether a canonical origin's host resolved, kept
- * in this isolate's memory for at most 30 seconds, positive or negative, and
- * at most 1,000 origins, least recently used first out. It answers CORS
- * preflights only; tenant selection for data is never cached across requests.
+ * The CORS projection: whether a canonical origin's host resolved, kept in
+ * this isolate's memory for at most 30 seconds, positive or negative, and at
+ * most 1,000 origins, least recently used first out. It answers CORS only;
+ * tenant selection for data is never cached across requests.
  *
  * The target architecture allows a cache of a "signed, short-lived
  * projection". This one never leaves the isolate: it crosses no process,
@@ -101,19 +101,23 @@ export class PreflightProjection {
 
 export const preflightProjection = new PreflightProjection();
 
-async function preflightAllows(c: Context<AppEnv>, origin: string, host: string) {
+async function originResolves(c: Context<AppEnv>, origin: string, host: string) {
   const now = Date.now();
   const cached = preflightProjection.get(origin, now);
   if (cached !== undefined) return cached;
   // A lookup the projection cannot answer is limited per client address, so
-  // a flood of distinct origins cannot turn preflights into database load.
+  // a flood of distinct origins, on real paths or made-up ones, cannot turn
+  // CORS into database load.
   const limiter = c.env.PUBLIC_RATE_LIMITER;
   if (limiter) {
     const ip = c.req.header("cf-connecting-ip") ?? "unknown";
-    const { success } = await limiter.limit({ key: `preflight:${ip}` });
+    const { success } = await limiter.limit({ key: `cors:${ip}` });
     if (!success) return false;
   }
-  const allowed = (await tenantForHost(getDb(c), host)) !== null;
+  const allowed =
+    c.req.method === "OPTIONS"
+      ? (await tenantForHost(getDb(c), host)) !== null
+      : (await tenantForOrigin(c)) !== null;
   preflightProjection.set(origin, allowed, now);
   return allowed;
 }

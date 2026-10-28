@@ -151,7 +151,7 @@ Functions, all SECURITY DEFINER under rule 7, with explicit tenant predicates:
 | Function | Effect | Runtime EXECUTE |
 |---|---|---|
 | `app.hostname_sweep_tenants(limit)` | Tenant ids with a provisioned custom hostname whose check is due, or whose pending claim ran out. At most 1,000. STABLE | Yes |
-| `app.hostname_record_check(tenant, hostname, provider_id, hostname_state, certificate_state, error_code)` | Records a reading for the transaction's own tenant, only when the provider id equals the stored one. May demote (an active hostname whose reading is not servable, or a pending one past its claim, becomes disabled) and never promotes. Backs off from 60 seconds to 4 hours while pending; hourly while active | Yes |
+| `app.hostname_record_check(tenant, hostname, provider_id, hostname_state, certificate_state, error_code)` | Records a reading for the transaction's own tenant, only when the provider id equals the stored one. May demote and never promotes: an active hostname is disabled only on a definitive negative (ownership `moved`, `blocked`, or `deleted`, or the certificate `failed`), and a pending one past its claim expires. A `pending` or `unknown` reading, such as a certificate renewing, is recorded and changes nothing. Backs off from 60 seconds to 4 hours while pending; hourly while active | Yes |
 | `app.hostname_request(tenant, hostname, provider)` | A pending custom row and its provisioning row, after the name rules; refuses a name any tenant holds in any status | No |
 | `app.hostname_attach_provider(tenant, hostname, provider_id, instructions)` | Stores the provider's record id and DNS instructions once, for a pending row | No |
 | `app.hostname_activate(tenant, hostname, provider_id, hostname_state, certificate_state)` | Pending to active, with both states `active`, a matching provider id, and the claim still open | No |
@@ -160,6 +160,8 @@ Functions, all SECURITY DEFINER under rule 7, with explicit tenant predicates:
 Every transition writes an `audit_events` row in the same transaction. Activation is admin-only: if the runtime both wrote provider states and activated, the "both active" check would only repeat what the runtime itself wrote.
 
 **Residual trust.** Provider truth is whatever the adapter reports to the admin CLI or the sweep. The database guards tenant scope, the provider id match, and the transitions; it cannot prove a reading.
+
+**Disabled is terminal, by design.** No function moves a disabled hostname back, and the name stays reserved, so a false demotion cannot be undone from the runtime or the CLI. That is why only a definitive negative demotes, and why the sweep records nothing when the provider refuses to answer (a rotated token, another 4xx, a malformed answer, a missing zone). If a disabled hostname ever has to come back, the recovery path is a reviewed migration `0012` with an admin-only re-enable function and its audit, not a manual update, which the trigger refuses for every role.
 
 `app.hostname_sweep_tenants` has the same argument as the hold sweep's: it returns tenant ids only, capped at 1,000, read-only and STABLE, and every read and write that follows runs in `inTenantTransaction` under forced row-level security. It reveals that some tenant has a custom hostname with a check due, a weaker signal than the shared id sequences already give.
 

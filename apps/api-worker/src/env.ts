@@ -38,10 +38,11 @@ export interface Bindings {
    */
   GUEST_LINK_ORIGIN?: string;
   /**
-   * How public routes answer CORS (G2.14b). "static" keeps only
-   * ALLOWED_ORIGINS, the rollback; anything else, unset included, also echoes
-   * a verified tenant origin and lets any strictly parsed origin read the
-   * bootstrap. The deployed configuration says "static" until the live step.
+   * How public routes answer CORS (G2.14b). "dynamic" also echoes a verified
+   * tenant origin and lets any strictly parsed origin read the bootstrap; it
+   * is set in env.dev and env.test. Unset or anything else keeps only
+   * ALLOWED_ORIGINS: the deployed default until the live step, and the
+   * rollback.
    */
   PUBLIC_CORS?: string;
   /**

@@ -296,9 +296,11 @@ export function BrandedShell({
   // until its trip loads, so it moves focus itself.
   useEffect(() => {
     if (focusHeading && page.kind !== "book" && page.kind !== "manage" && page.kind !== "waiver") {
-      main.current?.querySelector<HTMLElement>("h1")?.focus();
+      (main.current ?? document).querySelector<HTMLElement>("h1")?.focus();
     }
   }, []);
+  // The offline explainer is neutral: no operator header, footer, or contact (G2.14b).
+  if (page.kind === "offline") return <OfflinePage />;
   return (
     <div className="guest" data-tenant={tenant.slug}>
       <a className="tg-skip-link" href="#main">
@@ -333,7 +335,6 @@ export function BrandedShell({
         )}
         {page.kind === "waiver" && <WaiverPage brand={brand} focusOnArrival={focusHeading} />}
         {page.kind === "support" && <SupportPage brand={brand} />}
-        {page.kind === "offline" && <OfflinePage />}
         {page.kind === "not-found" && <NotFoundPage brand={brand} />}
       </main>
       <Footer brand={brand} inCheckout={page.kind === "book" || page.kind === "waiver"} />

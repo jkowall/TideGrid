@@ -133,13 +133,79 @@ describe("preflight flood (G2.14b)", () => {
       expect(res.headers.get("access-control-allow-origin")).toBeNull();
     }
     expect(keys).toHaveLength(50);
-    expect(new Set(keys)).toEqual(new Set(["preflight:203.0.113.9"]));
+    expect(new Set(keys)).toEqual(new Set(["cors:203.0.113.9"]));
     // Unparsable origins never reach the limiter or the database.
     for (const origin of ["http://10.0.0.1", "https://x.example.com:443", "null"]) {
       await preflight(origin);
     }
     expect(keys).toHaveLength(50);
     expect(preflightProjection.size).toBe(0);
+  });
+});
+
+describe("simple-request flood (G2.14b, R5)", () => {
+  it("limits CORS lookups for simple requests too, even on paths that do not exist", async () => {
+    const app = createApp();
+    const keys: string[] = [];
+    const limited = {
+      ...base,
+      PUBLIC_RATE_LIMITER: {
+        limit: async ({ key }: { key: string }) => {
+          keys.push(key);
+          return { success: false };
+        },
+      },
+    };
+    preflightProjection.clear();
+    for (let i = 0; i < 20; i++) {
+      // No database is configured: a lookup would answer 500. The limiter refuses first.
+      const res = await app.request(
+        "https://api.test/v1/public/does-not-exist",
+        {
+          headers: { origin: `https://simple-${i}.example.com`, "cf-connecting-ip": "203.0.113.7" },
+        },
+        limited,
+        createExecutionContext(),
+      );
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("not_found");
+      expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    }
+    expect(keys).toEqual(Array.from({ length: 20 }, () => "cors:203.0.113.7"));
+  });
+});
+
+describe("the PUBLIC_CORS rollback (G2.14b, R6)", () => {
+  it("keeps only the static allowlist unless PUBLIC_CORS is dynamic", async () => {
+    const app = createApp();
+    for (const PUBLIC_CORS of [undefined, "static", "on", "Dynamic"]) {
+      const env = { ...base } as Bindings;
+      if (PUBLIC_CORS === undefined) delete env.PUBLIC_CORS;
+      else env.PUBLIC_CORS = PUBLIC_CORS;
+      const res = await app.request(
+        "https://api.test/v1/public/tenant",
+        {
+          method: "OPTIONS",
+          headers: { origin: "https://book.example.com", "access-control-request-method": "GET" },
+        },
+        env,
+        createExecutionContext(),
+      );
+      expect({ PUBLIC_CORS, acao: res.headers.get("access-control-allow-origin") }).toEqual({
+        PUBLIC_CORS,
+        acao: null,
+      });
+    }
+    const allowlisted = await app.request(
+      "https://api.test/v1/public/tenant",
+      {
+        method: "OPTIONS",
+        headers: { origin: "https://guest.test", "access-control-request-method": "GET" },
+      },
+      { ...base, PUBLIC_CORS: "static" },
+      createExecutionContext(),
+    );
+    expect(allowlisted.headers.get("access-control-allow-origin")).toBe("https://guest.test");
   });
 });
 

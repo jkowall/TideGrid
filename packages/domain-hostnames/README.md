@@ -31,11 +31,15 @@ One parser for every caller: each public route, the bootstrap included, CORS, th
 ## The lifecycle (`src/lifecycle.ts`)
 
 - **Admin connection only:** `requestCustomHostname` reserves the name in the database first, then creates the provider's record and stores its id once. **Adoption rule:** after a lost create answer, an exact-name lookup may find the record this same request created; it is adopted only then, before any id is stored, and audited. Any other record of that name is `already_exists`, because nothing marks a record in the zone as TideGrid's without Enterprise custom metadata. `activateCustomHostname` re-reads the provider at call time; `disableHostname` turns any hostname off.
-- **Runtime:** `sweepHostnames` lists due tenants with `app.hostname_sweep_tenants`, reads each due hostname from the provider between short tenant transactions, and records the reading with `app.hostname_record_check`, which may demote and never promotes. A missing record reads as deleted and a mismatched one as unknown, both fail closed. A 429 or 5xx stops the run; the next cron run is 15 minutes away, past Cloudflare's `retry-after`. At most 200 provider calls a run, far below the account's 1,200 requests per 5 minutes.
+- **Runtime:** `sweepHostnames` lists due tenants with `app.hostname_sweep_tenants`, reads each due hostname from the provider between short tenant transactions, and records the reading with `app.hostname_record_check`, which may demote and never promotes. Only a reading the provider actually gave changes anything:
+  - a record that names another hostname, or no record by id confirmed by an exact-name lookup, reads as deleted, which demotes;
+  - a refusal (401 or 403 from a rotated token, another 4xx, a malformed answer, or a lookup that cannot find the zone, so a wrong zone id never reads as every hostname deleted) records nothing and stops the run as `providerFault`;
+  - a 429 or 5xx stops the run; the next cron run is 15 minutes away, past Cloudflare's `retry-after`.
+  At most 200 provider calls a run, far below the account's 1,200 requests per 5 minutes. The database demotes only on a definitive negative, so a pending or unknown reading, such as a renewing certificate, keeps an active hostname serving.
 
 ## Known gaps
 
 - Provider truth is whatever the adapter reports; the database guards tenant scope, the provider id, and the transitions only.
 - A disabled name stays reserved; reuse needs TXT pre-validation, a kill-switch window on the host, and a removal runbook first (D4).
 - A pending row whose provider record was never attached is not swept; the admin disables it.
-- The Cloudflare client has never called the real API. G2.14b-live proves it on a test domain the owner controls.
+- The Cloudflare client has never called the real API. G2.14b-live proves it on a test domain the owner controls, including what a routine certificate renewal reports: the fixture case for an active hostname with `ssl.status` `pending_validation` is unverified against live Cloudflare.

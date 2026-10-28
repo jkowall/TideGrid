@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
 import {
   collectCspViolations,
@@ -67,7 +68,8 @@ for (const tenant of tenants) {
       await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible({
         timeout: 20_000,
       });
-      if (path !== "/offline") await expect(page.locator("footer")).toContainText(tenant.name);
+      if (path === "/offline") await expect(page.locator("body")).not.toContainText(tenant.name);
+      else await expect(page.locator("footer")).toContainText(tenant.name);
       for (const other of tenants.filter((t) => t.slug !== tenant.slug)) {
         await expect(page.locator("body")).not.toContainText(other.name);
       }
@@ -117,6 +119,56 @@ for (const tenant of tenants) {
     }
   });
 }
+
+test("a new service worker waits through the visit and takes over on the next navigation (D11(a))", async ({
+  page,
+}) => {
+  // Edits the served dist/sw.js, so it runs once, at one width.
+  test.skip(test.info().project.name !== "desktop", "runs once");
+  const tenant = tenants[0];
+  if (!tenant) return;
+  const host = localHost(tenant.slug);
+  const file = new URL("../../dist/sw.js", import.meta.url);
+  const original = readFileSync(file, "utf8");
+  const registration = () =>
+    page.evaluate(async () => {
+      const r = await navigator.serviceWorker.getRegistration("/");
+      return {
+        active: r?.active?.state ?? null,
+        waiting: r?.waiting?.state ?? null,
+        installing: r?.installing?.state ?? null,
+      };
+    });
+  try {
+    await page.goto(hostUrl(host));
+    await waitForReady(page, tenant.name);
+    expect(await controlled(page)).toBe(true);
+    // Build N+1 ships a changed worker.
+    writeFileSync(file, `${original}\n// e2e update ${Date.now()}\n`);
+    // The browser's update check on this navigation installs it. It waits
+    // unless this load already found it waiting; the worker never skips
+    // waiting by itself (unit tests hold that).
+    await page.reload();
+    await waitForReady(page, tenant.name);
+    await expect
+      .poll(
+        async () => {
+          const r = await registration();
+          return r.waiting === "installed" || (r.active === "activated" && !r.installing);
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+    // The next navigation's page load asks a waiting worker to take over.
+    await page.goto(hostUrl(host));
+    await waitForReady(page, tenant.name);
+    await expect
+      .poll(registration, { timeout: 20_000 })
+      .toEqual({ active: "activated", waiting: null, installing: null });
+  } finally {
+    writeFileSync(file, original);
+  }
+});
 
 test("an unknown host shows the not-published screen and installs nothing", async ({ page }) => {
   const host = "nobody.book.localhost";

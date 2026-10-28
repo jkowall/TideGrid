@@ -58,6 +58,8 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
       BUILD_ID: "integration",
       DATABASE_URL: env?.runtimeUrl ?? "",
       ALLOWED_ORIGINS: "https://console.test",
+      // Verified-origin CORS is opt-in; unset is the static allowlist.
+      PUBLIC_CORS: "dynamic",
       PAYMENT_PROVIDER: "fake",
       FAKE_PAYMENT_WEBHOOK_SECRET: "g214b-integration-fake-secret-0123456789abcdef",
     };

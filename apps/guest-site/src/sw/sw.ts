@@ -19,9 +19,12 @@
  *   The manifest, the icons, and sw.js pass through to the network too.
  * - Navigations go to the network first and fall back to the offline page.
  * - Cache names carry the build id; activation deletes every other cache.
- * - Update policy: a new version waits for the next navigation (no
- *   skipWaiting), so a page never runs a mix of two builds' chunks (G2.14b,
- *   D11).
+ * - Update policy (G2.14b, D11(a)): a new version installs and waits. The
+ *   next page load finds it waiting and asks it to take over, with a
+ *   SKIP_WAITING message; the worker never skips waiting on its own, so a page
+ *   that is already open never has its worker swapped mid-session. That page
+ *   load came from the network (navigations go network first), so it is
+ *   already the new build the new worker precached.
  */
 
 export interface ServiceWorkerConfig {
@@ -102,6 +105,13 @@ interface ExtendableEventLike {
   waitUntil(promise: Promise<unknown>): void;
 }
 
+interface MessageEventLike {
+  data: unknown;
+}
+
+/** What a page posts to its waiting worker on load (src/sw/register.ts). */
+export const SKIP_WAITING = "SKIP_WAITING";
+
 interface FetchEventLike extends ExtendableEventLike {
   request: Request;
   respondWith(response: Promise<Response> | Response): void;
@@ -112,11 +122,13 @@ export interface ServiceWorkerScopeLike {
   location: { origin: string };
   caches: CacheStorageLike;
   fetch(request: RequestInfo | string, init?: RequestInit): Promise<Response>;
+  skipWaiting(): Promise<void>;
   addEventListener(
     type: "install" | "activate",
     listener: (event: ExtendableEventLike) => void,
   ): void;
   addEventListener(type: "fetch", listener: (event: FetchEventLike) => void): void;
+  addEventListener(type: "message", listener: (event: MessageEventLike) => void): void;
 }
 
 /** Install the worker's listeners on a scope: the real one in sw.js, a fake in tests. */
@@ -142,6 +154,11 @@ export function installServiceWorker(scope: ServiceWorkerScopeLike, config: Serv
         }
       })(),
     );
+  });
+
+  // D11(a): only a page's load asks a waiting worker to take over.
+  scope.addEventListener("message", (event) => {
+    if ((event.data as { type?: unknown } | null)?.type === SKIP_WAITING) void scope.skipWaiting();
   });
 
   scope.addEventListener("activate", (event) => {

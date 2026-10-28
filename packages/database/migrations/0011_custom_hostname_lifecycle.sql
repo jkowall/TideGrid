@@ -234,9 +234,12 @@ CREATE FUNCTION app.hostname_sweep_tenants(p_limit integer)
 -- Record one provider reading for a hostname of the transaction's own tenant.
 -- It refuses unless the tenant is the transaction's, the row is that tenant's,
 -- and the provider id equals the one stored. It may demote and never
--- promotes: an active custom hostname whose reading is not servable (ownership
--- active and a valid certificate, `expiring` included, G2.14b D10) becomes
--- disabled, and a pending one past its claim becomes disabled as expired. The
+-- promotes. Disabled is terminal, so only a definitive negative demotes an
+-- active custom hostname: ownership moved, blocked, or deleted, or the
+-- certificate failed. A pending or unknown reading (a certificate renewing,
+-- a state the mapping does not know) is recorded and changes nothing; it
+-- would only block an activation. A pending hostname past its claim becomes
+-- disabled as expired. The
 -- next check backs off from 60 seconds to 4 hours while pending, the provider's
 -- own schedule, and comes hourly while active. Returns 'recorded', 'demoted',
 -- or 'expired'.
@@ -257,7 +260,7 @@ DECLARE
   v_provider_id text;
   v_claim timestamptz;
   v_attempts integer;
-  v_servable boolean;
+  v_definitive_negative boolean;
 BEGIN
   IF p_tenant_id IS NULL OR p_tenant_id IS DISTINCT FROM app.current_tenant_id() THEN
     RAISE EXCEPTION 'a hostname check runs in its own tenant''s transaction'
@@ -277,7 +280,8 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  v_servable := p_hostname_state = 'active' AND p_certificate_state IN ('active', 'expiring');
+  v_definitive_negative := p_hostname_state IN ('moved', 'blocked', 'deleted')
+                           OR p_certificate_state = 'failed';
   UPDATE public.tenant_hostname_provisioning
      SET hostname_state = p_hostname_state,
          certificate_state = p_certificate_state,
@@ -291,7 +295,7 @@ BEGIN
          END
    WHERE tenant_id = p_tenant_id AND hostname = p_hostname;
 
-  IF v_status = 'active' AND NOT v_servable THEN
+  IF v_status = 'active' AND v_definitive_negative THEN
     UPDATE public.tenant_hostnames SET status = 'disabled'
      WHERE tenant_id = p_tenant_id AND hostname = p_hostname;
     INSERT INTO public.audit_events

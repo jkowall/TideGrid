@@ -122,6 +122,7 @@ describe.skipIf(!env)("accountless access links and guest sessions against a rea
       provider: mail,
       fromAddress: "bookings@tidegrid.test",
       guestLinkOrigin: "http://{slug}.book.localhost:5301",
+      environment: "local",
       runId: `run-${randomUUID()}`,
     });
     expect(run.items.find((i) => i.messageId === enqueued.messageId)?.outcome).toBe("sent");

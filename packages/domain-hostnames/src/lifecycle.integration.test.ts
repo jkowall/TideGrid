@@ -11,6 +11,7 @@ import {
   requestCustomHostname,
   sweepHostnames,
 } from "./lifecycle.ts";
+import { type CustomHostnameProvider, HostnameProviderRejectedError } from "./provider.ts";
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -506,6 +507,149 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
       actor,
     });
     expect(resumed).toMatchObject({ kind: "requested", adopted: false });
+  });
+
+  /** The shared fake, with its reads replaced: a provider that answers but gives no reading. */
+  function readsWith(
+    get: CustomHostnameProvider["get"],
+    findByHostname?: CustomHostnameProvider["findByHostname"],
+  ): CustomHostnameProvider {
+    return {
+      name: "fake",
+      routingTarget: () => shared.routingTarget(),
+      create: (input) => shared.create(input),
+      get,
+      findByHostname: findByHostname ?? ((h) => shared.findByHostname(h)),
+      refreshValidation: (id, h) => shared.refreshValidation(id, h),
+      remove: (id) => shared.remove(id),
+    };
+  }
+
+  it("records nothing and demotes nothing when the provider refuses to give a reading (R1)", async () => {
+    const host = name("refused-b");
+    await activeHost(shared, B.id, host);
+    for (const code of [
+      "http_401",
+      "http_403",
+      "cloudflare_10000",
+      "http_400",
+      "malformed_response",
+    ]) {
+      await due(B.id);
+      const [before] = await admin<{ checked: Date | null }[]>`
+        select last_checked_at as checked from public.tenant_hostname_provisioning where hostname = ${host}`;
+      const failures: unknown[] = [];
+      const report = await sweepHostnames(runtimeDb.db, {
+        provider: readsWith(async () => {
+          throw new HostnameProviderRejectedError(code);
+        }),
+        runId: `sweep-${run}`,
+        onlyTenants: [B.id],
+        onTenantError: (_t, e) => failures.push(e),
+      });
+      expect({ code, fault: report.providerFault, demoted: report.demoted }).toEqual({
+        code,
+        fault: code,
+        demoted: 0,
+      });
+      expect(failures).toHaveLength(1);
+      expect(await state(host)).toMatchObject({ status: "active", hostname_state: "active" });
+      const [after] = await admin<{ checked: Date | null }[]>`
+        select last_checked_at as checked from public.tenant_hostname_provisioning where hostname = ${host}`;
+      expect(after?.checked?.getTime()).toBe(before?.checked?.getTime());
+      expect(await resolves(host)).toBe(B.id);
+    }
+  });
+
+  it("never reads a wrong zone (every lookup 404) as every hostname deleted (R1)", async () => {
+    const host = name("zone-a");
+    await activeHost(shared, A.id, host);
+    await due(A.id);
+    const report = await sweepHostnames(runtimeDb.db, {
+      provider: readsWith(
+        async () => null,
+        async () => {
+          throw new HostnameProviderRejectedError("http_404");
+        },
+      ),
+      runId: `sweep-${run}`,
+      onlyTenants: [A.id],
+    });
+    expect(report).toMatchObject({ providerFault: "http_404", demoted: 0 });
+    expect(await state(host)).toMatchObject({ status: "active" });
+    expect(await resolves(host)).toBe(A.id);
+  });
+
+  it("keeps an active hostname whose certificate is renewing or whose state is unknown (R1)", async () => {
+    const renewing = name("renewing-b");
+    const unknown = name("unknown-b");
+    await activeHost(shared, B.id, renewing);
+    await activeHost(shared, B.id, unknown);
+    // A renewal may read as a pending certificate (unverified against live
+    // Cloudflare; listed for G2.14b-live). Neither is a definitive negative.
+    shared.advance(renewing, { certificateState: "pending" });
+    shared.advance(unknown, { hostnameState: "unknown", certificateState: "unknown" });
+    await due(B.id);
+    const report = await sweepHostnames(runtimeDb.db, {
+      provider: shared,
+      runId: `sweep-${run}`,
+      onlyTenants: [B.id],
+    });
+    expect(report.demoted).toBe(0);
+    expect(await state(renewing)).toMatchObject({ status: "active", certificate_state: "pending" });
+    expect(await state(unknown)).toMatchObject({
+      status: "active",
+      hostname_state: "unknown",
+      certificate_state: "unknown",
+    });
+    expect(await resolves(renewing)).toBe(B.id);
+    // The database holds the same rule whoever records the reading.
+    const providerId = (await state(unknown))?.provider_hostname_id;
+    const [outcome] = await asTenant(
+      B.id,
+      (tx) => tx<{ o: string }[]>`select app.hostname_record_check(${B.id}::uuid, ${unknown},
+        ${providerId ?? null}, 'pending', 'unknown', null) as o`,
+    );
+    expect(outcome?.o).toBe("recorded");
+    expect(await state(unknown)).toMatchObject({ status: "active" });
+  });
+
+  it("still demotes on definitive negatives: blocked, a record that names another host, a replaced record (R1)", async () => {
+    const blocked = name("blocked-a");
+    const mismatched = name("mismatch-a");
+    const replaced = name("replaced-a");
+    for (const h of [blocked, mismatched, replaced]) await activeHost(shared, A.id, h);
+    shared.advance(blocked, { hostnameState: "blocked" });
+    await due(A.id);
+    const ids = new Map<string, string>();
+    for (const h of [mismatched, replaced]) {
+      ids.set(h, (await state(h))?.provider_hostname_id ?? "");
+    }
+    await sweepHostnames(runtimeDb.db, {
+      provider: readsWith(
+        async (id, expected) => {
+          if (expected === mismatched) throw new HostnameProviderRejectedError("hostname_mismatch");
+          if (expected === replaced) return null;
+          return shared.get(id, expected);
+        },
+        async (h) => {
+          const found = await shared.findByHostname(h);
+          return found && h === replaced ? { ...found, providerId: "fake-ch-other" } : found;
+        },
+      ),
+      runId: `sweep-${run}`,
+      onlyTenants: [A.id],
+    });
+    expect(await state(blocked)).toMatchObject({ status: "disabled", hostname_state: "blocked" });
+    expect(await state(mismatched)).toMatchObject({
+      status: "disabled",
+      last_error_code: "hostname_mismatch",
+    });
+    expect(await state(replaced)).toMatchObject({
+      status: "disabled",
+      last_error_code: "provider_record_replaced",
+    });
+    for (const h of [blocked, mismatched, replaced]) expect(await resolves(h)).toBeNull();
   });
 
   it("stops the sweep on a provider 429 storm and stays within its call budget", async () => {

@@ -4,7 +4,7 @@ import type { PublicBrand } from "@tidegrid/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrandedShell } from "../BrandedShell.tsx";
 import { NavigationProvider } from "../navigation.tsx";
-import { followExperience } from "../sw/register.ts";
+import { activateWaitingWorker, followExperience } from "../sw/register.ts";
 
 const tenant = { slug: "demo-reef", name: "Demo Reef Divers" };
 const brand = {
@@ -52,8 +52,13 @@ describe("support pages (G2.14b)", () => {
     expect(main.getByRole("link", { name: "Privacy notice" }).getAttribute("href")).toBe(
       "https://demo-reef.test/privacy",
     );
+    // Links on their own line are 44 px tap targets, as the footer's are (UI-1).
+    for (const name of ["Terms of booking", "Privacy notice"]) {
+      expect(main.getByRole("link", { name }).className).toContain("tap-target");
+    }
+    expect(screen.getByRole("main").textContent).not.toMatch(/by email/);
     expect(screen.getByRole("main").textContent).toMatch(/synthetic operator/);
-    expect(screen.getByRole("main").textContent).toMatch(/Proposed platform support hours/);
+    expect(screen.getByRole("main").textContent).toMatch(/proposed platform support hours/i);
     expect(document.title).toBe("Help and support · Demo Reef Divers");
   });
 
@@ -74,6 +79,10 @@ describe("support pages (G2.14b)", () => {
     );
     expect(main.textContent).not.toContain("Demo Reef");
     expect(main.textContent).toMatch(/Booking needs a connection/);
+    // Neutral: no operator header, footer, or contact anywhere on the page (UI-2).
+    expect(document.body.textContent).not.toContain("Demo Reef");
+    expect(document.body.textContent).not.toContain("555-0199");
+    expect(document.querySelector('a[href^="tel:"], a[href^="mailto:"]')).toBeNull();
   });
 
   it("links to support from the footer", () => {
@@ -86,6 +95,13 @@ describe("support pages (G2.14b)", () => {
 });
 
 describe("service worker registration (G2.14b)", () => {
+  it("asks a waiting worker to take over on page load, and does nothing without one (D11(a))", () => {
+    const postMessage = vi.fn();
+    activateWaitingWorker({ waiting: { postMessage } });
+    expect(postMessage).toHaveBeenCalledWith({ type: "SKIP_WAITING" });
+    expect(() => activateWaitingWorker({ waiting: null })).not.toThrow();
+  });
+
   it("clears workers and caches only on a readable not-published answer", async () => {
     const unregister = vi.fn(async () => true);
     const register = vi.fn(async () => ({}));

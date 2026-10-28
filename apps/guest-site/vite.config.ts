@@ -15,55 +15,71 @@ import { killSwitchSource } from "./src/sw/kill-switch.ts";
 //                         host: the rollback for a bad service worker (G2.14b)
 const port = Number(process.env.GUEST_DEV_PORT ?? 5173);
 
+/** The parts of an output bundle entry the precache list reads. */
+interface BundleEntry {
+  type: string;
+  code?: string;
+}
+
+/**
+ * The precache list: this build's content-hashed /assets/*.js and *.css
+ * files, and only files the build writes. An empty script chunk (the one a
+ * CSS-only HTML entry such as neutral-offline.html leaves) is never listed.
+ */
+export function precacheFrom(bundle: Record<string, BundleEntry>): string[] {
+  return Object.entries(bundle)
+    .filter(([file]) => /^assets\/[^/]+\.(?:js|css)$/.test(file))
+    .filter(([, output]) => output.type !== "chunk" || (output.code ?? "").trim().length > 0)
+    .map(([file]) => `/${file}`)
+    .sort();
+}
+
+async function buildServiceWorker(precache: string[]): Promise<string> {
+  if (process.env.GUEST_SW_KILL_SWITCH === "1") return killSwitchSource;
+  const buildId = createHash("sha256").update(JSON.stringify(precache)).digest("hex").slice(0, 16);
+  const result = await build({
+    configFile: false,
+    logLevel: "warn",
+    define: { __TIDEGRID_SW__: JSON.stringify({ precache, buildId }) },
+    build: {
+      write: false,
+      emptyOutDir: false,
+      minify: true,
+      sourcemap: false,
+      lib: {
+        entry: fileURLToPath(new URL("./src/sw/sw.ts", import.meta.url)),
+        formats: ["iife"],
+        name: "tidegridServiceWorker",
+        fileName: () => "sw.js",
+      },
+    },
+  });
+  const outputs = Array.isArray(result) ? result : [result];
+  const chunk = outputs
+    .flatMap((o) => ("output" in o ? o.output : []))
+    .find((o) => o.type === "chunk");
+  if (chunk?.type !== "chunk") throw new Error("the service worker did not build");
+  return chunk.code;
+}
+
 /**
  * Builds src/sw/sw.ts into an unhashed /sw.js at the root scope (G2.14b), as
- * a classic script with no imports, and injects this build's precache list:
- * its content-hashed /assets/*.js and /assets/*.css files. The build id is a
- * hash of that list, so a new build renames the cache and its activation
- * deletes the old one.
+ * a classic script with no imports, and injects this build's precache list.
+ * The build id is a hash of that list, so a new build renames the cache and
+ * its activation deletes the old one. It runs after Vite's own hooks, which
+ * drop the empty script chunk of a CSS-only HTML entry, and
+ * scripts/check-precache.mjs checks the list against dist/ after every build.
  */
 function serviceWorker(): Plugin {
   return {
     name: "tidegrid-service-worker",
     apply: "build",
-    async generateBundle(_options, bundle) {
-      const precache = Object.keys(bundle)
-        .filter((file) => /^assets\/[^/]+\.(?:js|css)$/.test(file))
-        .sort()
-        .map((file) => `/${file}`);
-      const buildId = createHash("sha256")
-        .update(JSON.stringify(precache))
-        .digest("hex")
-        .slice(0, 16);
-      let source: string;
-      if (process.env.GUEST_SW_KILL_SWITCH === "1") {
-        source = killSwitchSource;
-      } else {
-        const result = await build({
-          configFile: false,
-          logLevel: "warn",
-          define: { __TIDEGRID_SW__: JSON.stringify({ precache, buildId }) },
-          build: {
-            write: false,
-            emptyOutDir: false,
-            minify: true,
-            sourcemap: false,
-            lib: {
-              entry: fileURLToPath(new URL("./src/sw/sw.ts", import.meta.url)),
-              formats: ["iife"],
-              name: "tidegridServiceWorker",
-              fileName: () => "sw.js",
-            },
-          },
-        });
-        const outputs = Array.isArray(result) ? result : [result];
-        const chunk = outputs
-          .flatMap((o) => ("output" in o ? o.output : []))
-          .find((o) => o.type === "chunk");
-        if (chunk?.type !== "chunk") throw new Error("the service worker did not build");
-        source = chunk.code;
-      }
-      this.emitFile({ type: "asset", fileName: "sw.js", source });
+    generateBundle: {
+      order: "post",
+      async handler(_options, bundle) {
+        const source = await buildServiceWorker(precacheFrom(bundle));
+        this.emitFile({ type: "asset", fileName: "sw.js", source });
+      },
     },
   };
 }

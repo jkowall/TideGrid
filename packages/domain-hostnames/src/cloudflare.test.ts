@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { createCloudflareHostnameProvider } from "./cloudflare.ts";
 import { createCloudflareFixture } from "./cloudflare-fixture.ts";
 import { describeProviderContract } from "./provider.contract.ts";
-import { HostnameProviderRejectedError, HostnameProviderUnavailableError } from "./provider.ts";
+import {
+  HostnameProviderRejectedError,
+  HostnameProviderUnavailableError,
+  isActivatable,
+} from "./provider.ts";
 
 const zoneId = "023e105f4ecef8ad9ca31a8372d0c353";
 const apiToken = "test-token-Zq7Kx2Lm9Pw4Rt6Vb8Nc";
@@ -322,6 +326,31 @@ describe("the Cloudflare for SaaS client", () => {
     expect(((await caught(provider.findByHostname(host))) as { code: string }).code).toBe(
       "malformed_response",
     );
+  });
+
+  // UNVERIFIED against live Cloudflare: whether a routine renewal reports
+  // ssl.status pending_validation while the current certificate still serves.
+  // Listed for G2.14b-live. Whatever the answer, a pending certificate is not
+  // a definitive negative, so the sweep records it and demotes nothing.
+  it("reads a certificate renewal on an active hostname as pending, not failed", async () => {
+    const { provider, fixture } = harness();
+    fixture.answerNext({
+      status: 200,
+      body: JSON.stringify({
+        success: true,
+        errors: [],
+        messages: [],
+        result: {
+          id: "renewing",
+          hostname: host,
+          status: "active",
+          ssl: { status: "pending_validation", validation_records: [] },
+        },
+      }),
+    });
+    const read = await provider.get("renewing", host);
+    expect(read).toMatchObject({ hostnameState: "active", certificateState: "pending" });
+    expect(read && isActivatable(read)).toBe(false);
   });
 
   it("allows extra fields and maps unknown statuses fail-closed", async () => {

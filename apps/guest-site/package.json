@@ -5,15 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/local-headers.mjs",
+    "build": "vite build && node scripts/check-precache.mjs && node scripts/local-headers.mjs",
     "preview": "vite preview",
     "dev:worker": "wrangler dev --env dev --port 5361 --inspector-port 9361",
     "dev:stub": "wrangler dev --env test -c wrangler.jsonc -c worker/stub-gateway.wrangler.jsonc --port 5361 --inspector-port 9361",
     "e2e": "playwright test",
     "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p worker/tsconfig.json && tsc -p e2e/tsconfig.json",
     "test": "vitest run && vitest run --config vitest.workers.config.ts",
-    "release": "vite build && wrangler deploy",
-    "release:dry": "vite build && wrangler deploy --dry-run"
+    "release": "vite build && node scripts/check-precache.mjs && wrangler deploy",
+    "release:dry": "vite build && node scripts/check-precache.mjs && wrangler deploy --dry-run"
   },
   "dependencies": {
     "@tidegrid/contracts": "workspace:*",

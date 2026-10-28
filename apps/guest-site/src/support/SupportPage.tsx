@@ -24,11 +24,27 @@ function Section({ id, title, children }: { id: string; title: string; children:
   );
 }
 
-/** A brand link: same-origin paths move in place, https links leave the site. */
-function PolicyLink({ href, children }: { href: string; children: ReactNode }) {
+/**
+ * A brand link: same-origin paths move in place, https links leave the site.
+ * A link on its own line is a 44 px tap target, as the footer's are; a link
+ * inside a sentence stays inline.
+ */
+function PolicyLink({
+  href,
+  standalone = false,
+  children,
+}: {
+  href: string;
+  standalone?: boolean;
+  children: ReactNode;
+}) {
   const linkClick = useLinkClick();
   return (
-    <a href={href} onClick={href.startsWith("/") ? linkClick : undefined}>
+    <a
+      className={standalone ? "tap-target" : undefined}
+      href={href}
+      onClick={href.startsWith("/") ? linkClick : undefined}
+    >
       {children}
     </a>
   );
@@ -83,16 +99,20 @@ export function SupportPage({ brand }: { brand: PublicBrand }) {
 
       <Section id="about" title="About this booking site">
         <p>
-          Online booking by TideGrid. Proposed platform support hours: 9:00 a.m. to 5:00 p.m.
-          Eastern Time on US business days, by email. TideGrid runs the booking site; {brand.name}{" "}
-          runs the trips.
+          Online booking by TideGrid. TideGrid runs the booking site and {brand.name} runs the
+          trips, so guests contact {brand.name} first. TideGrid supports operators, with proposed
+          platform support hours of 9:00 a.m. to 5:00 p.m. Eastern Time on US business days.
         </p>
         <ul className="support-links">
           <li>
-            <PolicyLink href={brand.legal.terms}>Terms of booking</PolicyLink>
+            <PolicyLink href={brand.legal.terms} standalone>
+              Terms of booking
+            </PolicyLink>
           </li>
           <li>
-            <PolicyLink href={brand.legal.privacy}>Privacy notice</PolicyLink>
+            <PolicyLink href={brand.legal.privacy} standalone>
+              Privacy notice
+            </PolicyLink>
           </li>
         </ul>
       </Section>
@@ -102,23 +122,37 @@ export function SupportPage({ brand }: { brand: PublicBrand }) {
 
 /**
  * /offline: what the booking site says about working without a connection.
- * It names no operator and shows no booking: the service worker's own
- * offline page (neutral-offline.html) is the one a guest sees with no network.
+ * Neutral, like the service worker's own offline page (neutral-offline.html),
+ * which is the one a guest sees with no network: the shell renders it without
+ * the operator's header and footer, so it shows no tenant name or contact.
  */
 export function OfflinePage() {
   useTitle("Using this site offline");
   const linkClick = useLinkClick();
   return (
-    <div className="guest-container guest-content guest-page">
-      <h1 tabIndex={-1}>Using this site offline</h1>
-      <p>
-        Booking needs a connection. Without one, this site shows a short offline page instead:
-        nothing can be booked, paid, changed, or canceled until you're back online, and nothing on
-        your phone confirms seats or a booking.
-      </p>
-      <ButtonLink variant="secondary" icon="arrow-left" href="/" onClick={linkClick}>
-        Back to the trips
-      </ButtonLink>
+    <div className="guest guest--neutral">
+      <main id="main" className="guest-state">
+        <div className="guest-state__panel">
+          <h1 className="guest-state__title" tabIndex={-1}>
+            Using this site offline
+          </h1>
+          <div className="guest-state__body">
+            <p>
+              Booking needs a connection. Without one, this site shows a short offline page instead:
+              nothing can be booked, paid, changed, or canceled until you're back online, and
+              nothing on your phone confirms seats or a booking.
+            </p>
+          </div>
+          <div className="guest-state__action">
+            <ButtonLink variant="secondary" icon="arrow-left" href="/" onClick={linkClick}>
+              Back to the booking site
+            </ButtonLink>
+          </div>
+        </div>
+      </main>
+      <footer className="guest-state__footer">
+        <p>Online booking by TideGrid. Demo build with synthetic operators.</p>
+      </footer>
     </div>
   );
 }

@@ -230,6 +230,12 @@ export interface HostnameSweepReport {
   failedTenants: number;
   /** The provider asked to wait (429 or 5xx); the run stopped early. */
   throttled: boolean;
+  /**
+   * The provider refused to answer (401 or 403, another 4xx, a malformed
+   * answer, a missing zone): the code, and the run stopped early. Nothing was
+   * recorded for the hostname it was reading, so nothing was demoted.
+   */
+  providerFault: string | null;
   retryAfterSeconds: number | null;
   /** False when the budget, the call limit, the tenant limit, or throttling cut the run short. */
   complete: boolean;
@@ -251,15 +257,94 @@ class Throttled extends Error {
   }
 }
 
+/** The provider could not give a reading at all; the run stops and records nothing. */
+class ProviderFault extends Error {
+  constructor(readonly refusal: HostnameProviderRejectedError) {
+    super(`the custom-hostname provider gave no reading: ${refusal.code}`);
+    this.name = "ProviderFault";
+  }
+}
+
+interface Reading {
+  hostnameState: string;
+  certificateState: string;
+  errorCode: string | null;
+}
+
+const recordGone = (errorCode: string): Reading => ({
+  hostnameState: "deleted",
+  certificateState: "failed",
+  errorCode,
+});
+
+/**
+ * One hostname's reading, or a throw that records nothing. Only a reading the
+ * provider actually gave about this record may change the hostname:
+ *
+ * - the record, mapped;
+ * - the record now names another hostname: gone for this hostname;
+ * - no record by id, confirmed by an exact-name lookup that answers normally:
+ *   gone (or replaced by a record with another id).
+ *
+ * Anything else is not a reading: 429 and 5xx throttle the run, and a refusal
+ * (401 or 403 from a rotated token, another 4xx, a malformed answer, or a
+ * lookup that cannot find the zone) stops the run as a provider fault. A
+ * wrong zone id answers 404 by id and 404 for the lookup too, so it can never
+ * read as every hostname deleted.
+ */
+async function readHostname(
+  provider: CustomHostnameProvider,
+  item: DueHostname,
+  countCall: () => void,
+): Promise<Reading> {
+  const refuse = (error: unknown): never => {
+    if (error instanceof HostnameProviderUnavailableError) {
+      throw new Throttled(error.retryAfterSeconds);
+    }
+    if (error instanceof HostnameProviderRejectedError) throw new ProviderFault(error);
+    throw error;
+  };
+  let reading: ProviderHostname | null;
+  try {
+    reading = await provider.get(item.provider_hostname_id, item.hostname);
+  } catch (error) {
+    if (error instanceof HostnameProviderRejectedError && error.code === "hostname_mismatch") {
+      return recordGone("hostname_mismatch");
+    }
+    return refuse(error);
+  }
+  if (!reading) {
+    countCall();
+    let found: ProviderHostname | null;
+    try {
+      found = await provider.findByHostname(item.hostname);
+    } catch (error) {
+      return refuse(error);
+    }
+    if (!found) return recordGone("provider_record_missing");
+    if (found.providerId !== item.provider_hostname_id) {
+      return recordGone("provider_record_replaced");
+    }
+    reading = found;
+  }
+  return {
+    hostnameState: reading.hostnameState,
+    certificateState: reading.certificateState,
+    errorCode: reading.errors[0] ?? null,
+  };
+}
+
 /**
  * Check every custom hostname that is due, for the API Worker's cron, as the
  * runtime role. The tenant list comes from app.hostname_sweep_tenants (tenant
  * ids only). Each tenant's due rows are read, and each reading recorded,
- * inside that tenant's own transaction; the provider is read between them. A
- * hostname the provider no longer has reads as deleted, and a record that
- * names another hostname as unknown: both fail closed, which demotes an
- * active hostname. A 429 or 5xx stops the run, which honors `retry-after`
- * because the next run is 15 minutes away.
+ * inside that tenant's own transaction; the provider is read between them.
+ * Only a definitive negative demotes an active hostname (the database's
+ * rule): ownership moved, blocked, or deleted, or the certificate failed. A
+ * record the provider no longer has, confirmed by an exact-name lookup, and a
+ * record that names another hostname read as deleted. A refusal records
+ * nothing and stops the run (`providerFault`), and a 429 or 5xx stops it
+ * too, which honors `retry-after` because the next run is 15 minutes away.
  */
 export async function sweepHostnames(
   db: Kysely<Database>,
@@ -281,6 +366,7 @@ export async function sweepHostnames(
     failedTenants: 0,
     throttled: false,
     retryAfterSeconds: null,
+    providerFault: null,
     complete: rows.length < tenantLimit,
   };
   let calls = 0;
@@ -323,32 +409,14 @@ export async function sweepHostnames(
           break;
         }
         calls += 1;
-        let hostnameState: string;
-        let certificateState: string;
-        let errorCode: string | null = null;
-        try {
-          const reading = await options.provider.get(item.provider_hostname_id, item.hostname);
-          if (!reading) {
-            hostnameState = "deleted";
-            certificateState = "failed";
-            errorCode = "provider_record_missing";
-          } else {
-            hostnameState = reading.hostnameState;
-            certificateState = reading.certificateState;
-            errorCode = reading.errors[0] ?? null;
-            if (reading.certificateState === "expiring") {
-              options.onExpiring?.(tenantId, item.hostname);
-            }
-          }
-        } catch (error) {
-          if (error instanceof HostnameProviderUnavailableError) {
-            throw new Throttled(error.retryAfterSeconds);
-          }
-          if (!(error instanceof HostnameProviderRejectedError)) throw error;
-          hostnameState = "unknown";
-          certificateState = "unknown";
-          errorCode = error.code;
-        }
+        const { hostnameState, certificateState, errorCode } = await readHostname(
+          options.provider,
+          item,
+          () => {
+            calls += 1;
+          },
+        );
+        if (certificateState === "expiring") options.onExpiring?.(tenantId, item.hostname);
         const outcome = await inTenantTransaction(db, ctx, async (trx) => {
           const { rows: result } = await sql<{ outcome: string }>`
             select app.hostname_record_check(${tenantId}::uuid, ${item.hostname},
@@ -365,6 +433,15 @@ export async function sweepHostnames(
         report.throttled = true;
         report.retryAfterSeconds = error.retryAfterSeconds;
         report.complete = false;
+        break;
+      }
+      if (error instanceof ProviderFault) {
+        // A refusal is about the account, the token, or the zone, not one
+        // hostname: stop, record nothing, and let the next run try again.
+        report.providerFault = error.refusal.code;
+        report.failedTenants += 1;
+        report.complete = false;
+        options.onTenantError?.(tenantId, error);
         break;
       }
       report.failedTenants += 1;
