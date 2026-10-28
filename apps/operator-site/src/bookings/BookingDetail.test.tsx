@@ -184,7 +184,8 @@ describe("one booking", () => {
     expect(text(guest.querySelector(".bd-hidden"))).toBe(
       "Not shown to your role, finance. Owners and booking staff see the guest's name and email, and the booking's notes.",
     );
-    expect(Object.keys(terms(guest))).toEqual(["Party", "Extras"]);
+    // Where it came from shows to every role (G2.12d).
+    expect(Object.keys(terms(guest))).toEqual(["Source", "Party", "Extras"]);
     expect(screen.queryByText("Booked by")).toBeNull();
     // No part of the guest is anywhere on the page, in text or in markup.
     const page = `${container.innerHTML} ${container.textContent}`.toLowerCase();

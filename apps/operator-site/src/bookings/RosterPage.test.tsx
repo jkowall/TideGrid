@@ -583,7 +583,11 @@ describe("the sheet", () => {
     const tools = sheet().querySelector(".roster-tools") as HTMLElement;
     expect(tools.querySelector(".roster-head")).toBeNull();
     expect(sheet().querySelector(".roster-head")).not.toBeNull();
-    expect(within(tools).getAllByRole("link")).toHaveLength(1);
+    // The back link and, for a trip on sale, a staff booking (G2.12d).
+    expect(within(tools).getAllByRole("link").map((l) => text(l))).toEqual([
+      expect.stringContaining("Bookings on"),
+      "New booking",
+    ]);
     expect(within(tools).getAllByRole("button")).toHaveLength(1);
   });
 

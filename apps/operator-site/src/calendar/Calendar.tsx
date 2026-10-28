@@ -691,9 +691,7 @@ function TripRow({
   const place = showZone ? ` ${zoneCity(trip.timeZone)} time` : "";
   return (
     <li
-      className={
-        actions.length > 0 || bookable ? "cal-trip" : "cal-trip cal-trip--no-actions"
-      }
+      className={actions.length > 0 || bookable ? "cal-trip" : "cal-trip cal-trip--no-actions"}
       data-state={trip.salesState}
     >
       {/* Read once, inside the heading. */}
