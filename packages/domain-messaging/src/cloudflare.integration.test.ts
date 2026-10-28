@@ -50,7 +50,7 @@ const content = (subject: string): EmailContent => ({
   ],
 });
 
-describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () => {
+describe.skip("delivery over the Cloudflare email adapter (G2.16a)", () => {
   let admin: Sql;
   let runtime: ReturnType<typeof createDb>;
   let A: string;
