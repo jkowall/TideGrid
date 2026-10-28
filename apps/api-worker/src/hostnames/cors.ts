@@ -10,7 +10,8 @@ import { publicOrigin, tenantForHost, tenantForOrigin } from "../public-tenant.t
  * grants nothing, and CORS never grants credentials.
  *
  * - Every route: the configured ALLOWED_ORIGINS, as before.
- * - `/v1/public/*`, unless PUBLIC_CORS is "static" (the rollback):
+ * - `/v1/public/*` and `/v1/fake-provider/*`, unless PUBLIC_CORS is "static"
+ *   (the rollback):
  *   - `/v1/public/tenant` echoes any origin the strict parser accepts. Its 200
  *     is that same host's public brand and its 404 is one constant body, and
  *     the guest page can show "not published" (and clear its service worker)
@@ -23,12 +24,20 @@ import { publicOrigin, tenantForHost, tenantForOrigin } from "../public-tenant.t
  *     per-address limiter.
  * - Staff routes stay on STAFF_ORIGINS through their own guard.
  */
+/**
+ * The routes a guest page calls, each of which selects its tenant from the
+ * Origin through the same resolver: the public routes, and the demo's fake
+ * payment provider, which the page's pay step calls from the tenant's own
+ * origin (G2.14b; the fake exists only where payments are the fake).
+ */
+const guestRoutePrefixes = ["/v1/public/", "/v1/fake-provider/"] as const;
+
 export async function allowedOrigin(origin: string, c: Context<AppEnv>): Promise<string | null> {
   if (!origin) return null;
   if (allowedOrigins(c.env).includes(origin)) return origin;
   if (c.env.PUBLIC_CORS === "static") return null;
   const path = new URL(c.req.url).pathname;
-  if (!path.startsWith("/v1/public/")) return null;
+  if (!guestRoutePrefixes.some((prefix) => path.startsWith(prefix))) return null;
   const parsed = publicOrigin(c);
   if (!parsed) return null;
   if (path === "/v1/public/tenant") return parsed.origin;
