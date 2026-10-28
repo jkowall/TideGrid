@@ -29,7 +29,7 @@
     // Payments on the preview (Nov 1 runbook C1, D3(a)): the fake provider,
     // with FAKE_PAYMENT_WEBHOOK_SECRET as a Wrangler secret. A production
     // configuration refuses the fake. C5 changes only the next line.
-    "PAYMENT_PROVIDER": "fake",
+    "PAYMENT_PROVIDER": "stripe",
     // Email (G2.16-live, C2): when on, EMAIL_PROVIDER and EMAIL_FROM_ADDRESS
     // are the lines right after this comment, and the send_email binding
     // follows "vars". Without them email is off and messages stay queued.
