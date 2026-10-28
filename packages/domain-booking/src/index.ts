@@ -21,6 +21,7 @@ export {
   getCheckoutSession,
   MAX_OPEN_CHECKOUTS_PER_CLIENT,
   ownerRefFor,
+  type StaffCheckoutDetails,
 } from "./checkout.ts";
 // Console reads (G2.12b).
 export {
@@ -151,6 +152,21 @@ export {
   hashCheckoutSecret,
   newBookingReference,
 } from "./secrets.ts";
+// Staff-assisted booking (G2.12d).
+export {
+  cancelStaffCheckout,
+  getStaffCheckout,
+  type OpenStaffCheckoutInput,
+  openStaffCheckout,
+  recordStaffTestPaymentSuperseded,
+  requestStaffTestPayment,
+  type StaffCheckoutView,
+  type StaffTestPaymentOutcome,
+  type StaffTestPaymentRequestResult,
+  staffCheckoutPaymentRef,
+  staffClientAddress,
+  staffViewOf,
+} from "./staff-checkout.ts";
 export {
   type CheckoutSweepItem,
   type CheckoutSweepOptions,

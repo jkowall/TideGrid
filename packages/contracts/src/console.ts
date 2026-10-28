@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BookingPaymentStatus, BookingReference, BookingState } from "./bookings.ts";
 import { TripSummary } from "./catalog.ts";
+import { BookingSource } from "./checkout.ts";
 
 /**
  * Console completion (G2.12c): booking search, a day's control totals and its
@@ -78,6 +79,7 @@ export const BookingSearchResult = z.object({
   id: Uuid,
   reference: BookingReference,
   state: BookingState,
+  source: BookingSource.optional().describe("Where the booking came from (G2.12d); always sent"),
   confirmedAt: Instant,
   trip: TripSummary,
   booker: BookerContact,
@@ -151,6 +153,9 @@ export type BookingDayTotalsResponse = z.infer<typeof BookingDayTotalsResponse>;
 /**
  * The day's CSV export, column by column. Stable: a role that may see guests
  * gets the two booker columns after these, and no role gets any other.
+ * G2.12d appended Source (direct or staff_assisted) after Generated at, a
+ * contract change: a reader that takes columns by position still finds every
+ * earlier column where it was.
  */
 export const bookingDayExportColumns = [
   "Row",
@@ -179,6 +184,7 @@ export const bookingDayExportColumns = [
   "Currency",
   "Confirmed at (UTC)",
   "Generated at (UTC)",
+  "Source",
 ] as const;
 
 /** The columns only roles that hold bookings.read receive, after the rest. */

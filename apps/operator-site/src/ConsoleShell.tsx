@@ -15,6 +15,7 @@ import { RosterPage } from "./bookings/RosterPage.tsx";
 import { CalendarPage } from "./calendar/Calendar.tsx";
 import { Wordmark } from "./Gate.tsx";
 import { ConsoleLink, NavigationProvider } from "./navigation.tsx";
+import { NewBookingPage } from "./new-booking/NewBookingPage.tsx";
 import { type FocusOnArrival, PageHeader } from "./PageHeader.tsx";
 import { roleLabels } from "./roles.ts";
 import { SearchPage } from "./search/SearchPage.tsx";
@@ -37,10 +38,12 @@ export type Route =
   | { kind: "booking"; bookingId: string }
   | { kind: "exceptions" }
   | { kind: "roster"; tripId: string }
+  | { kind: "new_booking"; tripId: string }
   | { kind: "not_found" };
 
 const bookingPath = /^\/bookings\/([^/]+)$/;
 const rosterPath = /^\/trips\/([^/]+)\/roster$/;
+const newBookingPath = /^\/trips\/([^/]+)\/book$/;
 
 export function routeOf(path: string): Route {
   if (path === "/") return { kind: "overview" };
@@ -53,6 +56,9 @@ export function routeOf(path: string): Route {
   if (booking && isUuid(booking)) return { kind: "booking", bookingId: booking.toLowerCase() };
   const roster = rosterPath.exec(path)?.[1];
   if (roster && isUuid(roster)) return { kind: "roster", tripId: roster.toLowerCase() };
+  // G2.12d: a staff booking for a guest, on one trip.
+  const book = newBookingPath.exec(path)?.[1];
+  if (book && isUuid(book)) return { kind: "new_booking", tripId: book.toLowerCase() };
   return { kind: "not_found" };
 }
 
@@ -64,6 +70,7 @@ const placeOf: Record<Route["kind"], { section: string | null; title: string }> 
   search: { section: "/bookings", title: "Search bookings" },
   booking: { section: "/bookings", title: "Booking" },
   roster: { section: "/bookings", title: "Roster" },
+  new_booking: { section: "/calendar", title: "New booking" },
   exceptions: { section: "/exceptions", title: "Payment exceptions" },
   not_found: { section: null, title: "Not found" },
 };
@@ -371,6 +378,16 @@ export function ConsoleShell({
     case "roster":
       page = (
         <RosterPage
+          key={selected.tenantId}
+          membership={selected}
+          tripId={route.tripId}
+          focusHeading={focusPage}
+        />
+      );
+      break;
+    case "new_booking":
+      page = (
+        <NewBookingPage
           key={selected.tenantId}
           membership={selected}
           tripId={route.tripId}

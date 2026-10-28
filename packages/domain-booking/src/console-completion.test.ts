@@ -52,6 +52,7 @@ function row(over: Partial<Omit<DayReportRow, "net">> = {}): DayReportRow {
     bookingId: "3c1f6a52-9d44-4e0b-8a6f-2b7d5c9e0a11",
     reference: "QKG6ERBF",
     state: "confirmed",
+    source: "direct",
     confirmedAt: "2026-10-06T18:17:00.123Z",
     trip: {
       tripId: "bc5f3492-d330-487d-8078-7221db331801",
@@ -159,6 +160,7 @@ describe("a day's export", () => {
     total: 11200,
     refunds: 11200,
     refundState: "succeeded",
+    source: "staff_assisted",
     booker: { name: "=cmd|' /C calc'!A0", email: "luis, fernandez@guest.example" },
   });
   const pending = row({
@@ -202,6 +204,11 @@ describe("a day's export", () => {
     const finance = parseCsv(renderDayExport(day, { name: "Demo Harbor" }, { withBooker: false }));
     expect(staff[0]).toEqual([...bookingDayExportColumns, ...bookingDayExportGuestColumns]);
     expect(finance[0]).toEqual([...bookingDayExportColumns]);
+    // Source was appended by G2.12d: after Generated at, before the booker's columns.
+    expect(staff[0]?.slice(-3)).toEqual(["Source", "Booker name", "Booker email"]);
+    expect(finance[0]?.at(-1)).toBe("Source");
+    expect(staff[0]).toHaveLength(29);
+    expect(finance[0]).toHaveLength(27);
     for (const rows of [staff, finance]) {
       for (const r of rows) expect(r).toHaveLength(rows[0]?.length ?? 0);
     }
@@ -234,6 +241,8 @@ describe("a day's export", () => {
     expect(at(first, "Net")).toBe("128.40");
     expect(at(first, "Confirmed at (UTC)")).toBe("2026-10-06 18:17:00");
     expect(at(first, "Generated at (UTC)")).toBe("2026-11-04 19:03:22");
+    expect(at(first, "Source")).toBe("direct");
+    expect(at(rows[2], "Source")).toBe("staff_assisted");
     expect(at(first, "Booker name")).toBe("Maya Okonkwo");
 
     const total = rows.at(-1);

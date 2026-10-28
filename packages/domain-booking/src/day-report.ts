@@ -15,6 +15,7 @@
  * `withBooker`; otherwise the query never joins the checkout that holds them.
  */
 import type {
+  BookingSource,
   BookingState,
   PaymentState,
   ProductKind,
@@ -48,6 +49,8 @@ export interface DayReportRow extends DayReportMoney {
   bookingId: string;
   reference: string;
   state: BookingState;
+  /** Where the booking came from (G2.12d), so a report keeps the sources apart. */
+  source: BookingSource;
   confirmedAt: string;
   trip: {
     tripId: string;
@@ -92,6 +95,7 @@ interface ReportRow {
   id: string;
   reference: string;
   state: BookingState;
+  source: BookingSource;
   confirmed_at: Date | string;
   party_size: number;
   trip_id: string;
@@ -168,7 +172,7 @@ export async function buildDayReport(
     ? sql`join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id`
     : sql``;
   const { rows } = await sql<ReportRow>`
-    select b.id, b.reference, b.state, b.confirmed_at, b.party_size,
+    select b.id, b.reference, b.state, b.source, b.confirmed_at, b.party_size,
            t.id as trip_id, p.name as product_name, p.kind as product_kind,
            bt.name as boat_name, t.time_zone,
            to_char(t.local_date, 'YYYY-MM-DD') as local_date,
@@ -206,6 +210,7 @@ export async function buildDayReport(
       bookingId: r.id,
       reference: r.reference,
       state: r.state,
+      source: r.source,
       confirmedAt: iso(r.confirmed_at),
       trip: {
         tripId: r.trip_id,

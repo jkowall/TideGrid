@@ -3,6 +3,7 @@
  * need an operator. Read-only, under the caller's tenant transaction.
  */
 import {
+  type BookingSource,
   type BookingState,
   isUuid,
   type OrderStatus,
@@ -21,7 +22,8 @@ export interface StaffBooking {
   partySize: number;
   /** Canceled since lane 1 (G2.11c): a guest's cancellation within policy. */
   state: BookingState;
-  source: "direct";
+  /** Stamped from the checkout (G2.12d). */
+  source: BookingSource;
   reacquired: boolean;
   confirmedAt: string;
   booker: { name: string; email: string };
@@ -48,6 +50,7 @@ export async function listTripBookings(
     reference: string;
     trip_id: string;
     state: BookingState;
+    source: BookingSource;
     party_size: number;
     reacquired: boolean;
     confirmed_at: Date | string;
@@ -61,7 +64,7 @@ export async function listTripBookings(
     payment_state: PaymentState;
     amount: number;
   }>`
-    select b.id, b.reference, b.trip_id, b.state, b.party_size, b.reacquired, b.confirmed_at,
+    select b.id, b.reference, b.trip_id, b.state, b.source, b.party_size, b.reacquired, b.confirmed_at,
            s.booker_name, s.booker_email,
            o.id as order_id, o.status as order_status, o.total_amount,
            p.id as payment_id, p.provider, p.state as payment_state, p.amount
@@ -77,7 +80,7 @@ export async function listTripBookings(
     tripId: r.trip_id,
     partySize: r.party_size,
     state: r.state,
-    source: "direct" as const,
+    source: r.source,
     reacquired: r.reacquired,
     confirmedAt: iso(r.confirmed_at),
     booker: { name: r.booker_name, email: r.booker_email },

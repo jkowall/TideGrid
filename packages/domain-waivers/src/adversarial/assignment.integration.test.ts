@@ -9,12 +9,13 @@
  * - No duplicate delivery generation and no second email for a generation; a
  *   retried hook creates and sends nothing.
  * - The booking-source matrix: a booking confirmed by the webhook route and one
- *   the checkout sweep confirmed from a received event assign identically.
- *   Staff-entered and imported bookings do not exist yet (a recorded gap).
+ *   the checkout sweep confirmed from a received event assign identically, and
+ *   so does a staff-assisted booking on each path (G2.12d). Imported bookings
+ *   do not exist yet (a recorded gap).
  * - A participant assigned while a publish that moves unsigned work commits.
  */
 import { randomUUID } from "node:crypto";
-import { inTenantTransaction } from "@tidegrid/database";
+import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import {
   type BookingConfirmedEvent,
@@ -22,6 +23,7 @@ import {
   createCheckoutSession,
   ensureProviderPayment,
   handleVerifiedEvent,
+  openStaffCheckout,
   type ParticipantDetails,
   putParticipant,
   sweepCheckouts,
@@ -34,6 +36,7 @@ import {
   verifiedFakeEvent,
 } from "@tidegrid/domain-booking/testing";
 import { FAKE_MINIMUM_AMOUNT } from "@tidegrid/domain-payments";
+import { createQuote } from "@tidegrid/domain-pricing";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
   assignBookingWaivers,
@@ -392,6 +395,154 @@ describe.skipIf(!env)("G2.15 adversarial: assignment", () => {
     });
     expect(duplicate).toMatchObject({ kind: "processed", duplicate: true });
     expect(JSON.stringify(await ledger(viaSweep))).toBe(before);
+  }, 240_000);
+
+  it("assigns a staff-assisted booking exactly as a direct one, through the webhook and through the sweep (G2.12d)", async () => {
+    const staffId = randomUUID();
+    await world.admin`insert into public.staff_users (id, email, display_name)
+      values (${staffId}, ${`wva-desk-${staffId.slice(0, 8)}@example.test`}, 'Desk')`;
+    await world.admin`insert into public.tenant_memberships (tenant_id, user_id, role, display_name)
+      values (${T.id}, ${staffId}, 'booking_staff', 'Ben Desk')`;
+    const provider = fakeProvider(world.db);
+    // One trip for all three parties of three: ten seats hold them.
+    const tripId = nextTrip();
+
+    /** A staff checkout paid at the fake provider, with its signed event not yet delivered. */
+    async function staffPaid() {
+      const ctx: TenantContext = {
+        tenantId: T.id,
+        actorType: "staff",
+        actorId: staffId,
+        requestId: `req-${randomUUID()}`,
+        sourceIp: null,
+      };
+      const quoted = await inTenantTransaction(world.db, ctx, (trx) =>
+        createQuote(trx, ctx, {
+          tripId,
+          party: { kind: "tickets", tickets: [{ code: "adult", quantity: 3 }] },
+          addOns: [],
+          promotionCode: null,
+          now: new Date(),
+        }),
+      );
+      if (quoted.kind !== "created") throw new Error(JSON.stringify(quoted));
+      const opened = await inTenantTransaction(world.db, ctx, (trx) =>
+        openStaffCheckout(trx, ctx, {
+          quoteId: quoted.quote.quoteId,
+          acceptedPolicyVersion: quoted.quote.policy.version,
+          booker: { name: "Synthetic Caller", email: "synthetic.caller@example.test" },
+          channel: "phone",
+          attestations: { policyToldToGuest: true, emailReadBack: true },
+          provider: "fake",
+          minimumAmount: FAKE_MINIMUM_AMOUNT,
+        }),
+      );
+      if (opened.kind !== "created") throw new Error(JSON.stringify(opened));
+      const ready = await ensureProviderPayment(world.db, provider, ctx, opened.session.id);
+      if (ready.kind !== "ready") throw new Error(JSON.stringify(ready));
+      const settled = await provider.settlePayment(T.id, ready.paymentRef, "succeeded", Date.now());
+      if (settled.kind === "not_found") throw new Error("payment did not settle");
+      return {
+        sessionId: opened.session.id,
+        event: await verifiedFakeEvent(provider, settled.event.body),
+      };
+    }
+    const bookingOf = async (sessionId: string) => {
+      const [row] = await world.admin<{ id: string; source: string }[]>`
+        select id, source from public.bookings where checkout_session_id = ${sessionId}`;
+      if (!row) throw new Error(`no booking for ${sessionId}`);
+      return row;
+    };
+
+    // The webhook path.
+    const hooked = await staffPaid();
+    expect(
+      await handleVerifiedEvent(world.db, provider, hooked.event, {
+        requestId: `wh-${randomUUID()}`,
+        hooks,
+      }),
+    ).toMatchObject({ kind: "processed", outcome: "confirmed" });
+    const viaWebhook = await bookingOf(hooked.sessionId);
+
+    // The sweep path: the worker recorded the event and stopped while confirming it.
+    const swept = await staffPaid();
+    await expect(
+      handleVerifiedEvent(world.db, provider, swept.event, {
+        requestId: `wh-${randomUUID()}`,
+        hooks: {
+          async bookingConfirmed() {
+            throw new Error("the worker stopped after recording the event");
+          },
+        },
+      }),
+    ).rejects.toThrow(/worker stopped/);
+    const report = await sweepCheckouts(world.db, {
+      runId: `sweep-${randomUUID()}`,
+      provider,
+      hooks,
+      graceSeconds: 0,
+      budgetMs: 90_000,
+    });
+    expect(report.reprocessed).toBeGreaterThanOrEqual(1);
+    const viaSweep = await bookingOf(swept.sessionId);
+
+    // A direct booking on the same trip, for the reference shape.
+    const direct = await book(world, T, tripId, 3, hooks);
+    expect([
+      viaWebhook.source,
+      viaSweep.source,
+      (await bookingOf(direct.checkoutSessionId)).source,
+    ]).toEqual(["staff_assisted", "staff_assisted", "direct"]);
+
+    // The same party on each, with its own addresses so no sending limit is shared.
+    const shape = async (bookingId: string) => {
+      const mae = uniqueEmail("staff-mae");
+      const gil = uniqueEmail("staff-gil");
+      const party: ParticipantDetails[] = [
+        adult("Mae Staffed", mae),
+        minor("Moe Staffed", { name: "Gil Staffed", email: gil }),
+        adult("Noa Staffed", null),
+      ];
+      for (const [i, details] of party.entries()) {
+        await nameParticipant(world.db, T.id, bookingId, i + 1, details, hooks);
+      }
+      const l = await ledger(bookingId);
+      expectConsistent(l);
+      const who = (email: string) =>
+        email === mae ? "participant" : email === gil ? "guardian" : email;
+      return l.participants.map((p) => {
+        const request = l.requests.find((r) => r.participant_id === p.id);
+        return {
+          position: p.position,
+          signer: request?.required_signer,
+          state: request?.state,
+          version: request?.v,
+          sends: l.deliveries
+            .filter((d) => d.request_id === request?.id)
+            .map((d) => [d.generation, d.kind, who(d.recipient_email), d.state]),
+        };
+      });
+    };
+    const directShape = await shape(direct.bookingId);
+    expect(directShape).toEqual([
+      {
+        position: 1,
+        signer: "participant",
+        state: "pending",
+        version: 1,
+        sends: [[1, "initial", "participant", "queued"]],
+      },
+      {
+        position: 2,
+        signer: "guardian",
+        state: "pending",
+        version: 1,
+        sends: [[1, "initial", "guardian", "queued"]],
+      },
+      { position: 3, signer: "participant", state: "pending", version: 1, sends: [] },
+    ]);
+    expect(await shape(viaWebhook.id)).toEqual(directShape);
+    expect(await shape(viaSweep.id)).toEqual(directShape);
   }, 240_000);
 
   it("moves a participant assigned while a publish that moves unsigned work commits to the new version too", async () => {

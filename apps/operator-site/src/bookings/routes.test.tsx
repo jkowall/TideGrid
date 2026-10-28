@@ -50,6 +50,9 @@ describe("which page an address names", () => {
     ["/bookings/not-a-uuid", { kind: "not_found" }],
     ["/exceptions", { kind: "exceptions" }],
     [`/trips/${sunset}/roster`, { kind: "roster", tripId: sunset }],
+    // G2.12d: a staff booking on one trip.
+    [`/trips/${sunset}/book`, { kind: "new_booking", tripId: sunset }],
+    [`/trips/${sunset.toUpperCase()}/book`, { kind: "new_booking", tripId: sunset }],
   ])("reads %s", (path, expected) => {
     expect(routeOf(path)).toEqual(expected);
   });
@@ -77,6 +80,11 @@ describe("which page an address names", () => {
     `/trips/${sunset}`,
     `/trips/${sunset}/roster/extra`,
     "/trips//roster",
+    "/trips/not-a-uuid/book",
+    `/trips/${sunset}/book/extra`,
+    `/trips/${sunset}/Book`,
+    "/trips//book",
+    "/book",
     "/roster",
     "/booking",
     "/Bookings",

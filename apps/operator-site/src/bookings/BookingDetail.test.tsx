@@ -175,6 +175,32 @@ describe("one booking", () => {
     expect(roster.getAttribute("href")).toBe(`/trips/${tripIds.sunset}/roster`);
   });
 
+  it.each(["owner", "finance"] as const)(
+    "shows %s a staff booking's source, channel, and who took it (G2.12d)",
+    async (role) => {
+      const staffBooked = bookingDetail({
+        source: "staff_assisted",
+        channel: "phone",
+        openedBy: { userId: "5f0c3a52-2a55-4f8a-9d7e-5d6f0f1b2a02", displayName: "Ben Desk" },
+      });
+      api({ [route.booking(bookingId)]: answer(role, staffBooked) });
+      renderDetail(role);
+      await loaded();
+      const facts = terms(card("Guest"));
+      expect(facts.Source).toBe("Staff booking, phone");
+      expect(facts["Taken by"]).toBe("Ben Desk");
+    },
+  );
+
+  it("says a guest's own booking came online, with no one taking it", async () => {
+    api({ [route.booking(bookingId)]: answer("owner") });
+    renderDetail("owner");
+    await loaded();
+    const facts = terms(card("Guest"));
+    expect(facts.Source).toBe("Online, by the guest");
+    expect(facts["Taken by"]).toBeUndefined();
+  });
+
   it("shows finance the booking without the guest: a note in place of a name and email, and no roster", async () => {
     api({ [route.booking(bookingId)]: answer("finance") });
     const { container } = renderDetail("finance");
@@ -184,7 +210,8 @@ describe("one booking", () => {
     expect(text(guest.querySelector(".bd-hidden"))).toBe(
       "Not shown to your role, finance. Owners and booking staff see the guest's name and email, and the booking's notes.",
     );
-    expect(Object.keys(terms(guest))).toEqual(["Party", "Extras"]);
+    // Where it came from shows to every role (G2.12d).
+    expect(Object.keys(terms(guest))).toEqual(["Source", "Party", "Extras"]);
     expect(screen.queryByText("Booked by")).toBeNull();
     // No part of the guest is anywhere on the page, in text or in markup.
     const page = `${container.innerHTML} ${container.textContent}`.toLowerCase();

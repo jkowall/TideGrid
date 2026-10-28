@@ -19,6 +19,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
+import { sourceText } from "../new-booking/model.ts";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, canUseNotes, roleNames } from "../roles.ts";
 import { BookingWaiversCard } from "../waivers/BookingWaivers.tsx";
@@ -292,6 +293,15 @@ function Detail({
             </p>
           )}
           <dl className="console-dl">
+            {/* Where the booking came from (G2.12d); every role sees it and who took it. */}
+            <dt>Source</dt>
+            <dd>{sourceText(booking.source, booking.channel)}</dd>
+            {booking.openedBy && (
+              <>
+                <dt>Taken by</dt>
+                <dd>{booking.openedBy.displayName}</dd>
+              </>
+            )}
             <dt>Party</dt>
             <dd>
               {guestsText(booking.party.guests)}
