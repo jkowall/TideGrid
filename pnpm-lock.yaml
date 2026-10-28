@@ -19,7 +19,7 @@ importers:
     dependencies:
       '@hono/zod-openapi':
         specifier: ^1.1.0
-        version: 1.6.3(hono@4.13.11)(zod@4.6.5)
+        version: 1.6.3(hono@4.13.11)(zod@4.6.6)
       '@tidegrid/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -63,8 +63,8 @@ importers:
         specifier: ^0.29.0
         version: 0.29.6
       zod:
-        specifier: ^4.1.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.22.0
@@ -103,8 +103,8 @@ importers:
         specifier: ^19.1.0
         version: 19.3.0(react@19.3.0)
       zod:
-        specifier: ^4.1.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@testing-library/dom':
         specifier: ^10.4.0
@@ -186,8 +186,8 @@ importers:
   packages/contracts:
     dependencies:
       zod:
-        specifier: ^4.1.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -524,8 +524,8 @@ importers:
         specifier: workspace:*
         version: link:../contracts
       zod:
-        specifier: ^4.1.0
-        version: 4.6.5
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -2257,8 +2257,8 @@ packages:
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
-  zod@4.6.5:
-    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
 snapshots:
 
@@ -2277,10 +2277,10 @@ snapshots:
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.5.3
 
-  '@asteasolutions/zod-to-openapi@9.1.0(zod@4.6.5)':
+  '@asteasolutions/zod-to-openapi@9.1.0(zod@4.6.6)':
     dependencies:
       openapi3-ts: 4.6.1
-      zod: 4.6.5
+      zod: 4.6.6
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -2593,18 +2593,18 @@ snapshots:
 
   '@fontsource-variable/source-sans-3@5.3.0': {}
 
-  '@hono/zod-openapi@1.6.3(hono@4.13.11)(zod@4.6.5)':
+  '@hono/zod-openapi@1.6.3(hono@4.13.11)(zod@4.6.6)':
     dependencies:
-      '@asteasolutions/zod-to-openapi': 9.1.0(zod@4.6.5)
-      '@hono/zod-validator': 0.9.1(hono@4.13.11)(zod@4.6.5)
+      '@asteasolutions/zod-to-openapi': 9.1.0(zod@4.6.6)
+      '@hono/zod-validator': 0.9.1(hono@4.13.11)(zod@4.6.6)
       hono: 4.13.11
       openapi3-ts: 4.6.1
-      zod: 4.6.5
+      zod: 4.6.6
 
-  '@hono/zod-validator@0.9.1(hono@4.13.11)(zod@4.6.5)':
+  '@hono/zod-validator@0.9.1(hono@4.13.11)(zod@4.6.6)':
     dependencies:
       hono: 4.13.11
-      zod: 4.6.5
+      zod: 4.6.6
 
   '@img/colour@1.1.0': {}
 
@@ -3580,4 +3580,4 @@ snapshots:
 
   zod@4.4.3: {}
 
-  zod@4.6.5: {}
+  zod@4.6.6: {}

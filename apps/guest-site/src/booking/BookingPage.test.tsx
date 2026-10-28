@@ -162,12 +162,7 @@ describe("loading the trip", () => {
     expect(text(facts)).toContain("Times are local to Harbor Marina, Dock C (New York).");
   });
 
-  // On CI this sometimes ends with focus on the body, never on the heading.
-  // It has not failed locally or with focus tracing on, and a real browser
-  // focuses the heading. Retried until the cause is found.
-  it("offers Try again when the trip does not load, and focuses the trip once it does", {
-    retry: 2,
-  }, async () => {
+  it("offers Try again when the trip does not load, and focuses the trip once it does", async () => {
     stubApi({ offer: inOrder(offline, () => json({ offer })) });
     renderPage();
     expect(await heading("We couldn't load this trip")).toBeTruthy();
@@ -178,6 +173,32 @@ describe("loading the trip", () => {
         screen.getByRole("heading", { level: 1, name: "Sunset Harbor Cruise" }),
       ),
     );
+  });
+
+  it("focuses the trip even when Try again is pressed before the failure's effects have run", async () => {
+    // React runs a commit's passive effects in a later task. A mutation
+    // observer runs between the two, so the press lands in that gap, as it
+    // did on slow CI runners.
+    stubApi({ offer: inOrder(offline, () => json({ offer })) });
+    let pressed = false;
+    const observer = new MutationObserver(() => {
+      const retry = screen.queryByRole("button", { name: "Try again" });
+      if (pressed || !retry) return;
+      pressed = true;
+      retry.click();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      renderPage();
+      await waitFor(() =>
+        expect(document.activeElement).toBe(
+          screen.getByRole("heading", { level: 1, name: "Sunset Harbor Cruise" }),
+        ),
+      );
+      expect(pressed).toBe(true);
+    } finally {
+      observer.disconnect();
+    }
   });
 
   it("treats an offer that breaks the contract, or a zone this browser lacks, as a failed load", async () => {
