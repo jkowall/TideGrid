@@ -14,3 +14,5 @@ FAKE_PAYMENT_WEBHOOK_SECRET=change-me
 # the fake provider; read it at http://localhost:<port>/v1/fake-email/mailbox.
 # Point links in email at your guest site's port if it is not 5173.
 # GUEST_LINK_ORIGIN=http://{slug}.book.localhost:5173
+# The Cloudflare Email Service adapter (G2.16a) stays off locally: the dev
+# environment has no send_email binding. Never set "remote": true on one.

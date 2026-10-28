@@ -65,6 +65,7 @@ describe.skipIf(!env)("adversarial: the email a cancellation leaves behind", () 
   /** A provider that cannot be reached, as during an outage. */
   const down: EmailProvider = {
     name: "fake",
+    deduplicates: true,
     send: async () => {
       throw new EmailProviderUnavailableError("provider_unavailable");
     },

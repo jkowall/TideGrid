@@ -7,10 +7,11 @@ import type { Bindings } from "./env.ts";
 /**
  * Which custom-hostname provider this deployment's sweep reads (G2.14b).
  * Custom hostnames are off unless HOSTNAME_PROVIDER names one. The fake is
- * stricter than the payment and email fakes, which are refused only in a
- * production configuration: the deployed API runs ENVIRONMENT "preview", so
- * that rule would admit a hostname fake on api.tidegrid.us. This one is
- * accepted only in local development, and never beside a real SaaS zone.
+ * stricter than the payment fake, which is refused only in a production
+ * configuration: the deployed API runs ENVIRONMENT "preview", so that rule
+ * would admit a hostname fake on api.tidegrid.us. This one is accepted only
+ * in local development, and never beside a real SaaS zone; the email fake
+ * follows the same rule since G2.16a (src/email.ts).
  */
 export type HostnameSettings =
   | { kind: "fake" }
