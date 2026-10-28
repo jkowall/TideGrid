@@ -176,11 +176,16 @@ describe("service worker precache list (G2.14b)", () => {
 describe("guest Worker configuration (G2.14b)", () => {
   const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
 
-  it("routes exactly each synthetic tenant's preview hostname, and nothing else", async () => {
+  it("routes exactly each synthetic tenant's preview hostname and the platform name, and nothing else", async () => {
     const top = wrangler.slice(0, wrangler.indexOf('"env"'));
     const patterns = [...top.matchAll(/"pattern":\s*"([^"]+)"/g)].map((m) => m[1]);
     const tenants = await loadTenantManifests();
-    expect(patterns.sort()).toEqual(tenants.map((t) => previewHostnameFor(t.manifest.slug)).sort());
+    // The demo.tidegrid.us cutover (Nov 1 runbook C4): the one platform name
+    // 0011 admits, and workers.dev off.
+    expect(patterns.sort()).toEqual(
+      [...tenants.map((t) => previewHostnameFor(t.manifest.slug)), "demo.tidegrid.us"].sort(),
+    );
+    expect(top).toMatch(/"workers_dev": false/);
     for (const t of tenants)
       expect(t.manifest.previewHostname).toBe(previewHostnameFor(t.manifest.slug));
     expect(top).toMatch(/"custom_domain": true/);
