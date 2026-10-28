@@ -33,6 +33,11 @@
     // Email (G2.16-live, C2): when on, EMAIL_PROVIDER and EMAIL_FROM_ADDRESS
     // are the lines right after this comment, and the send_email binding
     // follows "vars". Without them email is off and messages stay queued.
+    // The sender is the binding's one allowed address (D6; a placeholder
+    // until the owner names it). The recipient allowlist is the
+    // EMAIL_ALLOWED_RECIPIENTS secret.
+    "EMAIL_PROVIDER": "cloudflare",
+    "EMAIL_FROM_ADDRESS": "bookings@mail.tidegrid.us",
     //
     // Custom hostnames (G2.14b-live, C3, deferred): when on,
     // HOSTNAME_PROVIDER and CF_SAAS_ZONE_ID are the lines right after this
@@ -43,6 +48,9 @@
     // its own lines without touching another's.
     "PUBLIC_CORS": "dynamic"
   },
+  // Cloudflare Email Service (G2.16-live, C2). Named environments do not
+  // inherit the binding.
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["bookings@mail.tidegrid.us"] }],
   // DATABASE_URL is a secret (wrangler secret put DATABASE_URL) holding the
   // tidegrid_app role's direct Neon connection string. It is the fallback; the
   // code prefers the Hyperdrive binding below (query caching disabled at the
