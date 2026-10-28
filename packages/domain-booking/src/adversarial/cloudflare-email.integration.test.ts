@@ -202,26 +202,27 @@ describe.skipIf(!env)("booking email over the Cloudflare email adapter (G2.16a)"
 
   it("sends no second copy after a lapsed lease, so the delivered link is the message's only one", async () => {
     const rec = recorder();
-    const cf = cloudflare(rec);
     const b = await book(world, A, trips.shared(), 1, { booker: booker() });
+    // Built after the booking, so the new booker is on the allowlist.
+    const cf = cloudflare(rec);
+    const [confirmation] = await messagesOf(world.admin, b.bookingId);
+    if (!confirmation) throw new Error("setup: no confirmation");
     let second: Awaited<ReturnType<typeof deliverMail>> | undefined;
     const stalling: EmailProvider = {
       name: "cloudflare",
       deduplicates: false,
       send: async (email) => {
         const sent = await cf.send(email);
-        if (!second) {
+        if (email.idempotencyKey === confirmation.id && !second) {
           await world.admin`update public.email_messages
                                set lease_expires_at = now() - interval '1 second'
-                             where id = ${email.idempotencyKey}`;
+                             where id = ${confirmation.id}`;
           second = await deliverMail(world, A.id, cf);
         }
         return sent;
       },
     };
     await deliverMail(world, A.id, stalling);
-    const [confirmation] = await messagesOf(world.admin, b.bookingId);
-    if (!confirmation) throw new Error("setup: no confirmation");
     expect(second?.items.find((i) => i.messageId === confirmation.id)).toMatchObject({
       outcome: "failed",
       code: "outcome_unknown",
