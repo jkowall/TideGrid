@@ -124,7 +124,7 @@ nov1 preflight --offline --phase p3
 nov1 preflight --network --go A0
 ```
 
-- Expect: every check PASS; `CLOUDFLARE_API_TOKEN stripped` if the env file was sourced; the login type is OAuth; the pending migrations listed from the tree (0003 to 0013 at `e93f0aa`); the deployed version ids of the three Workers.
+- Expect: every check PASS; `CLOUDFLARE_API_TOKEN stripped` if the env file was sourced; the login type is OAuth; the pending migrations listed from the tree (0003 to 0013 on main at `894839e`; read from the tree, so a later migration shows up); the deployed version ids of the three Workers.
 - Verify: `dig` shows no record for `demo-harbor.book.tidegrid.us` or `demo-reef.book.tidegrid.us`. A record on either is a hard stop for P4.2: a non-TTY deploy would override it (cli.js:153833-153836), and `nov1` always deploys on the terminal so wrangler would prompt.
 - Rollback: not applicable.
 
@@ -142,7 +142,7 @@ Rules for the day apply. Go/no-go: **D1** (Neon main as the preview database). T
 - Rollback: deleting the branch later takes its own approval. This is the only branch create today.
 
 **P2.3 Migrate.** `nov1 db migrate --live --go A1`.
-- Expect: each file in its own transaction (`migrate.ts`), under the advisory lock, with `lock_timeout 5000 ms` and `statement_timeout 120000 ms` per file (08:190; override with `TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS` and `TIDEGRID_MIGRATE_STATEMENT_TIMEOUT_MS`); the role assertions pass; `applied 11 migration(s)` at `e93f0aa`.
+- Expect: each file in its own transaction (`migrate.ts`), under the advisory lock, with `lock_timeout 5000 ms` and `statement_timeout 120000 ms` per file (08:190; override with `TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS` and `TIDEGRID_MIGRATE_STATEMENT_TIMEOUT_MS`); the role assertions pass; `applied 11 migration(s)` on main at `894839e` (more if a later migration lands).
 - Verify: `nov1 db status --live --go A1` shows every file applied.
 - Rollback: there are no down migrations. A timeout rolls back that file only, and main stays at an intermediate version. Do not release the API until a forward fix lands, or restore from P2.2 (its own approval; it resets everything written after the restore point).
 
