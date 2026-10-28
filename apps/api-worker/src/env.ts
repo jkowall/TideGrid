@@ -24,11 +24,25 @@ export interface Bindings {
   /** Secret. Signs and verifies the fake provider's webhooks; at least 32 characters. */
   FAKE_PAYMENT_WEBHOOK_SECRET?: string;
   /**
-   * The email provider transactional email uses (lane 1, the G2.16 shim).
-   * "fake" is the demo shim, refused in a production configuration; unset
-   * means email stays queued and nothing is sent.
+   * The email provider transactional email uses (src/email.ts). Unset means
+   * email stays queued and nothing is sent. "fake" is the demo shim, accepted
+   * only when ENVIRONMENT is "local" and no EMAIL binding is set.
+   * "cloudflare" (G2.16a) needs the EMAIL binding and, outside production, a
+   * non-empty EMAIL_ALLOWED_RECIPIENTS.
    */
   EMAIL_PROVIDER?: string;
+  /**
+   * The Cloudflare Email Service `send_email` binding (G2.16a). No
+   * configuration in the repository declares it; the live step adds it with
+   * `allowed_sender_addresses` only.
+   */
+  EMAIL?: SendEmail;
+  /**
+   * Secret. Comma-separated exact addresses Cloudflare email may go to
+   * outside production; never in the repository. Unset or empty keeps
+   * Cloudflare email off there.
+   */
+  EMAIL_ALLOWED_RECIPIENTS?: string;
   /** The sender address; the display name is the operator's brand. */
   EMAIL_FROM_ADDRESS?: string;
   /**
