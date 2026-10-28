@@ -194,7 +194,7 @@ export const MessageStatus = z
       .string()
       .nullable()
       .describe(
-        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled) or null",
+        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled) or null",
       ),
     provider: z.enum(["fake", "cloudflare"]).nullable(),
     createdAt: Instant,
