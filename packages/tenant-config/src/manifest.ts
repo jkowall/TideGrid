@@ -1,6 +1,6 @@
 import { BrandConfig, type LogoMediaType } from "@tidegrid/contracts";
 import { z } from "zod";
-import { previewHostnameFor, slugPattern } from "./hostnames.ts";
+import { previewHostnameFor, slugPattern, slugProblem } from "./hostnames.ts";
 
 /**
  * A synthetic tenant manifest in config/tenants: the tenant's identity, its
@@ -39,6 +39,18 @@ export const TenantManifest = z
   })
   .superRefine((manifest, ctx) => {
     if (!slugPattern.test(manifest.slug)) return;
+    const problem = slugProblem(manifest.slug);
+    if (problem) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["slug"],
+        message:
+          problem === "reserved"
+            ? `${manifest.slug} is reserved for the platform; choose another slug`
+            : "A slug may not be a punycode (xn--) label",
+      });
+      return;
+    }
     const expected = previewHostnameFor(manifest.slug);
     if (manifest.previewHostname !== expected) {
       ctx.addIssue({

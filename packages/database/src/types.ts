@@ -34,16 +34,48 @@ export interface TenantsTable {
   created_at: CreatedAt;
 }
 
-export type HostnameKind = "preview" | "custom";
+/** `platform` is admitted for an explicit allowlist only (0011, G2.14b D19). */
+export type HostnameKind = "preview" | "custom" | "platform";
 export type HostnameStatus = "pending" | "active" | "disabled";
 
+/** Read-only for the runtime: no INSERT, no UPDATE. Admin functions in schema `app` write it. */
 export interface TenantHostnamesTable {
-  hostname: string;
-  tenant_id: string;
-  kind: HostnameKind;
-  status: Generated<HostnameStatus>;
-  verified_at: Date | null;
+  hostname: ColumnType<string, never, never>;
+  tenant_id: ColumnType<string, never, never>;
+  kind: ColumnType<HostnameKind, never, never>;
+  status: ColumnType<HostnameStatus, never, never>;
+  verified_at: ColumnType<Date | null, never, never>;
   created_at: CreatedAt;
+}
+
+export type ProvisioningHostnameState =
+  | "pending"
+  | "active"
+  | "moved"
+  | "blocked"
+  | "deleted"
+  | "unknown";
+export type ProvisioningCertificateState = "pending" | "active" | "expiring" | "failed" | "unknown";
+
+/**
+ * A custom hostname's provider record and latest reading (0011, G2.14b).
+ * Read-only for the runtime; it writes through app.hostname_record_check only.
+ */
+export interface TenantHostnameProvisioningTable {
+  tenant_id: ColumnType<string, never, never>;
+  hostname: ColumnType<string, never, never>;
+  provider: ColumnType<"fake" | "cloudflare_saas", never, never>;
+  provider_hostname_id: ColumnType<string | null, never, never>;
+  hostname_state: ColumnType<ProvisioningHostnameState, never, never>;
+  certificate_state: ColumnType<ProvisioningCertificateState, never, never>;
+  instructions: ColumnType<unknown[], never, never>;
+  last_error_code: ColumnType<string | null, never, never>;
+  last_checked_at: ColumnType<Date | null, never, never>;
+  next_check_at: ColumnType<Date, never, never>;
+  check_attempts: ColumnType<number, never, never>;
+  claim_expires_at: ColumnType<Date, never, never>;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, never>;
 }
 
 export type StaffUserStatus = "active" | "disabled";
@@ -1066,6 +1098,7 @@ export interface Database
   schema_migrations: SchemaMigrationsTable;
   tenants: TenantsTable;
   tenant_hostnames: TenantHostnamesTable;
+  tenant_hostname_provisioning: TenantHostnameProvisioningTable;
   staff_users: StaffUsersTable;
   tenant_memberships: TenantMembershipsTable;
   audit_events: AuditEventsTable;

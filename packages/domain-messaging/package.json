@@ -14,7 +14,8 @@
   "dependencies": {
     "@tidegrid/contracts": "workspace:*",
     "@tidegrid/database": "workspace:*",
-    "kysely": "^0.29.0"
+    "kysely": "^0.29.0",
+    "@tidegrid/domain-hostnames": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
