@@ -241,7 +241,6 @@ describe.skipIf(!env)("the checkout sweep takes fair turns across tenants", () =
     const hogs = await lapsed(hog, 3);
     const [mine] = await lapsed(victim, 1);
     const { runId, turns } = await sweep([hog.id, victim.id], { batchSize: 1 });
-    expect(turns.slice(0, 3)).toEqual([`${hog.id}@1`, `${victim.id}@1`, `${hog.id}@2`]);
     // Before 0013 the hog's three checkouts were all expired first.
     expect(await written(runId, "checkout.session_expired", [...hogs, mine ?? ""])).toEqual([
       hogs[0],
@@ -249,6 +248,7 @@ describe.skipIf(!env)("the checkout sweep takes fair turns across tenants", () =
       hogs[1],
       hogs[2],
     ]);
+    expect(turns.slice(0, 3)).toEqual([`${hog.id}@1`, `${victim.id}@1`, `${hog.id}@2`]);
   });
 
   it("processes the high-id tenant's event before the low-id tenant's second", async () => {
@@ -256,13 +256,13 @@ describe.skipIf(!env)("the checkout sweep takes fair turns across tenants", () =
     const hogs = await received(hog, 3);
     const [mine] = await received(victim, 1);
     const { turns, report } = await sweep([hog.id, victim.id], { turnItems: 1 });
-    expect(turns.slice(0, 3)).toEqual([`${hog.id}@1`, `${victim.id}@1`, `${hog.id}@2`]);
     expect(report.reprocessed).toBeGreaterThanOrEqual(4);
     const order = await admin<{ id: string }[]>`
       select id from public.provider_events
        where id in ${admin([...hogs, mine ?? ""])} and processing_state = 'processed'
        order by processed_at, id`;
     expect(order.map((r) => r.id)).toEqual([hogs[0], mine, hogs[1], hogs[2]]);
+    expect(turns.slice(0, 3)).toEqual([`${hog.id}@1`, `${victim.id}@1`, `${hog.id}@2`]);
   });
 
   it("settles the high-id tenant's refund before the low-id tenant's second", async () => {
@@ -270,12 +270,12 @@ describe.skipIf(!env)("the checkout sweep takes fair turns across tenants", () =
     const hogs = await requested(hog, 2);
     const [mine] = await requested(victim, 1);
     const { runId, turns } = await sweep([hog.id, victim.id], { turnItems: 1 });
-    expect(turns.slice(0, 3)).toEqual([`${hog.id}@1`, `${victim.id}@1`, `${hog.id}@2`]);
     expect(await written(runId, "payment_refund.succeeded", [...hogs, mine ?? ""])).toEqual([
       hogs[0],
       mine,
       hogs[1],
     ]);
+    expect(turns.slice(0, 3)).toEqual([`${hog.id}@1`, `${victim.id}@1`, `${hog.id}@2`]);
   });
 
   it("moves a tenant whose expiry always fails behind a tenant it has never served", async () => {

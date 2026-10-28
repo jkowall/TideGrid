@@ -106,17 +106,17 @@ describe.skipIf(!env)("the hold sweep takes fair turns across tenants", () => {
     const ours = [hog.id, victim.id];
     const { runId, turns, report } = await sweep(ours, { batchSize: 1 });
     expect(report.failedTenants).toBe(0);
-    // Pass 1 gives each one batch; pass 2 goes back to the hog.
-    expect(turns.slice(0, 3)).toEqual([`${hog.id}@1`, `${victim.id}@1`, `${hog.id}@2`]);
-    expect(turns.filter((t) => t.startsWith(hog.id))).toHaveLength(4);
-    // The writes agree, whatever ran them: before 0013 the hog's three holds
-    // were all expired first.
+    // The writes, whatever ran them: before 0013 the hog's three holds were
+    // all expired first.
     expect(await expiryOrder(runId, [...hogHolds, victimHold ?? ""])).toEqual([
       hogHolds[0],
       victimHold,
       hogHolds[1],
       hogHolds[2],
     ]);
+    // Pass 1 gives each one batch; pass 2 goes back to the hog.
+    expect(turns.slice(0, 3)).toEqual([`${hog.id}@1`, `${victim.id}@1`, `${hog.id}@2`]);
+    expect(turns.filter((t) => t.startsWith(hog.id))).toHaveLength(4);
     expect(await listed(ours)).toEqual([]);
   });
 
