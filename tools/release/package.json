@@ -1,0 +1,24 @@
+{
+  "name": "@tidegrid/release",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Nov 1 runbook commands (nov1). Dry run by default; live steps need --live, a go, a terminal, and a typed target.",
+  "exports": {
+    "./deployed-gate": "./src/deployed-gate.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "nov1": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.0"
+  }
+}

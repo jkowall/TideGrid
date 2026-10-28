@@ -36,6 +36,7 @@
     "wrangler": "^4.135.0",
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@playwright/test": "1.64.0",
-    "@tidegrid/tenant-config": "workspace:*"
+    "@tidegrid/tenant-config": "workspace:*",
+    "@tidegrid/release": "workspace:*"
   }
 }

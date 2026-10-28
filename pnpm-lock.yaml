@@ -124,6 +124,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.0
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tidegrid/release':
+        specifier: workspace:*
+        version: link:../../tools/release
       '@tidegrid/tenant-config':
         specifier: workspace:*
         version: link:../../packages/tenant-config
@@ -179,6 +182,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.0
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tidegrid/release':
+        specifier: workspace:*
+        version: link:../../tools/release
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.6
@@ -609,6 +615,25 @@ importers:
       kysely:
         specifier: ^0.29.0
         version: 0.29.6
+      postgres:
+        specifier: ^3.4.0
+        version: 3.4.9
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.6
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.13
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.11(@types/node@24.13.6)(jsdom@30.1.1)(vite@8.3.3(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
+  tools/release:
+    dependencies:
       postgres:
         specifier: ^3.4.0
         version: 3.4.9
