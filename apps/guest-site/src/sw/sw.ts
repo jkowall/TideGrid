@@ -22,7 +22,7 @@
  * - Update policy (G2.14b, D11(a)): a new version installs and waits. The
  *   next page load finds it waiting and asks it to take over, with a
  *   SKIP_WAITING message. It takes over only when the window that asked is
- *   the site's only open window, looking for up to 15 seconds after the ask:
+ *   the site's only open window, looking for up to 60 seconds after the ask:
  *   skipping waiting would switch every open window to the new worker at
  *   once, and its activation deletes the old build's cache. With another tab
  *   or the installed app still open after that, it keeps waiting, until the
@@ -151,12 +151,14 @@ export interface ServiceWorkerScopeLike {
 
 /**
  * When a page load's take-over request looks for the site to be down to the
- * asking window alone: at once, then 1, 3, 7, and 15 seconds after the ask. A
- * window that just closed, or the document a reload replaced, can stay on the
- * browser's client list for a moment. A window that is really open stays on
+ * asking window alone: at once, then 1, 3, 7, 15, 30, and 60 seconds after the ask. A
+ * window that just closed, or a document a reload replaced, can stay on the
+ * browser's client list for a while (tens of seconds in headless Chromium). A window that is really open stays on
  * it, and the worker keeps waiting; so does it when the asker leaves.
  */
-export const TAKE_OVER_CHECKS_MS: readonly number[] = [0, 1_000, 2_000, 4_000, 8_000];
+export const TAKE_OVER_CHECKS_MS: readonly number[] = [
+  0, 1_000, 2_000, 4_000, 8_000, 15_000, 30_000,
+];
 
 /** Install the worker's listeners on a scope: the real one in sw.js, a fake in tests. */
 export function installServiceWorker(
