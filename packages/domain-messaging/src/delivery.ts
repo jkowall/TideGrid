@@ -53,6 +53,8 @@ import {
   type AccessRevocationReason,
   type Database,
   inTenantTransaction,
+  recordSweepTurn,
+  runFairSweep,
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
@@ -541,10 +543,24 @@ export async function deliverTenantMessages(
 
 export interface EmailSweepOptions extends DeliveryOptions {
   tenantLimit?: number;
-  /** Stop starting tenants after this long. */
+  /**
+   * No tenant's turn starts after this long, and no message is claimed
+   * unless its send fits before it: the sweep passes deliverTenantMessages a
+   * deadline of the run's start plus the budget, or the caller's deadline if
+   * that is earlier (D9 B).
+   */
   budgetMs?: number;
+  /** Messages a tenant's turn may send; `limit` (25 by default) stays the cap for its run. */
+  turnMessages?: number;
   /** One tenant's run failed; the sweep moves on. */
   onTenantError?: (tenantId: string, error: unknown) => void;
+  /**
+   * A turn's stamp failed; the turn still runs. Without it, onTenantError
+   * hears the failure. Either way it counts in stampFailures, not failedTenants.
+   */
+  onStampError?: (tenantId: string, error: unknown) => void;
+  /** Called as each tenant's turn starts, for tests and logs. */
+  onTurnStart?: (tenantId: string, pass: number) => void;
 }
 
 export interface EmailSweepReport {
@@ -559,14 +575,30 @@ export interface EmailSweepReport {
   complete: boolean;
   /** An account-level provider fault stopped the sweep (G2.16a, D2). */
   accountFault: boolean;
+  /** Tenant turns started. */
+  turns: number;
+  /** Passes over the tenants: the first gives each a quantum, later ones go round those with more. */
+  passes: number;
+  /** Tenants listed that the run left for the next one. */
+  deferredTenants: number;
+  /** Tenants whose stamp failed; each still took its turn. */
+  stampFailures: number;
 }
+
+export const DEFAULT_EMAIL_SWEEP_TURN_MESSAGES = 5;
 
 /**
  * The cron's delivery run: every tenant with due mail, as
- * `app.email_delivery_tenants` names them (tenant ids only), each in its own
- * transactions under row-level security. A tenant whose run fails is
+ * `app.email_delivery_tenants` names them (tenant ids only, least recently
+ * served first since 0013), each in its own transactions under row-level
+ * security. Tenants take fair turns (`runFairSweep`, pre-pilot hardening item
+ * 5, Part C): a turn sends up to five messages, the first pass gives each
+ * listed tenant one turn, and later passes go round the tenants whose turn was
+ * full, up to `limit` messages a tenant a run. A tenant whose run fails is
  * reported and skipped; the next run retries it. An account-level provider
- * fault, or a run's deadline, ends the sweep (G2.16a).
+ * fault, or a run's deadline, ends the sweep (G2.16a). The deadline is the
+ * caller's, or the run's start plus its budget if that is earlier, so a run's
+ * sends end within its budget (D9 B).
  */
 export async function sweepEmail(
   db: Kysely<Database>,
@@ -576,8 +608,15 @@ export async function sweepEmail(
   const started = clock();
   const budget = options.budgetMs ?? 20_000;
   const tenantLimit = options.tenantLimit ?? 100;
-  const { rows } = await sql<{ tenant_id: string }>`
-    select tenant_id from app.email_delivery_tenants(${tenantLimit})`.execute(db);
+  const perTenant = options.limit ?? 25;
+  if (!Number.isInteger(perTenant) || perTenant < 1 || perTenant > 500) {
+    throw new RangeError("limit is a whole number from 1 to 500");
+  }
+  const quantum = options.turnMessages ?? DEFAULT_EMAIL_SWEEP_TURN_MESSAGES;
+  if (!Number.isInteger(quantum) || quantum < 1 || quantum > 500) {
+    throw new RangeError("turnMessages is a whole number from 1 to 500");
+  }
+  const deadline = Math.min(options.deadline ?? Number.POSITIVE_INFINITY, started + budget);
   const report: EmailSweepReport = {
     tenants: 0,
     claimed: 0,
@@ -587,35 +626,66 @@ export async function sweepEmail(
     canceled: 0,
     superseded: 0,
     failedTenants: 0,
-    complete: rows.length < tenantLimit,
+    complete: false,
     accountFault: false,
+    turns: 0,
+    passes: 0,
+    deferredTenants: 0,
+    stampFailures: 0,
   };
-  for (const { tenant_id: tenantId } of rows) {
-    if (clock() - started >= budget) {
-      report.complete = false;
-      break;
-    }
-    report.tenants += 1;
-    try {
-      const done = await deliverTenantMessages(db, tenantId, options);
+  const claimedBy = new Map<string, number>();
+  const contextOf = (tenantId: string): TenantContext => ({
+    tenantId,
+    actorType: "system",
+    actorId: "email-delivery",
+    requestId: options.runId,
+  });
+
+  const fair = await runFairSweep({
+    listTenants: async () => {
+      const { rows } = await sql<{ tenant_id: string }>`
+        select tenant_id from app.email_delivery_tenants(${tenantLimit})`.execute(db);
+      return rows.map((r) => r.tenant_id);
+    },
+    tenantLimit,
+    stamp: (tenantId) => recordSweepTurn(db, contextOf(tenantId), "email"),
+    turn: async (tenantId) => {
+      const before = claimedBy.get(tenantId) ?? 0;
+      const limit = Math.min(quantum, perTenant - before);
+      const done = await deliverTenantMessages(db, tenantId, { ...options, limit, deadline });
+      claimedBy.set(tenantId, before + done.claimed);
       report.claimed += done.claimed;
       report.sent += done.sent;
       report.retried += done.retried;
       report.failed += done.failed;
       report.canceled += done.canceled;
       report.superseded += done.superseded;
+      // An account-level fault meets every tenant alike (D2 B); a passed
+      // deadline leaves the rest to the next run.
       if (done.stopped !== null) {
-        // An account-level fault meets every tenant alike (D2 B); a passed
-        // deadline leaves the rest to the next run.
         report.accountFault = done.stopped === "account_fault";
-        report.complete = false;
-        break;
+        return { units: done.claimed, more: true, stop: true };
       }
-    } catch (error) {
-      report.failedTenants += 1;
-      report.complete = false;
-      options.onTenantError?.(tenantId, error);
-    }
-  }
+      return {
+        units: done.claimed,
+        more: done.claimed === limit && before + done.claimed < perTenant,
+      };
+    },
+    budgetMs: budget,
+    clock,
+    startedAt: started,
+    ...(options.onTurnStart ? { onTurnStart: options.onTurnStart } : {}),
+    onTenantError: (tenantId, error, during) => {
+      if (during === "stamp" && options.onStampError) options.onStampError(tenantId, error);
+      else options.onTenantError?.(tenantId, error);
+    },
+  });
+  report.tenants = fair.tenants;
+  report.failedTenants = fair.failedTenants;
+  report.complete = fair.complete;
+  report.turns = fair.turns;
+  report.passes = fair.passes;
+  report.deferredTenants = fair.deferredTenants;
+  report.stampFailures = fair.stampFailures;
   return report;
 }

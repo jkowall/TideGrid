@@ -92,10 +92,10 @@ describe.skipIf(!env)("the email sweep takes fair turns across tenants", () => {
       runId: `fair-${randomUUID()}`,
       tenantLimit: 1000,
       budgetMs: options.budgetMs ?? 60_000,
-      onTurnStart: (tenantId: string, pass: number) => {
+      onTurnStart: (tenantId, pass) => {
         if (ours.includes(tenantId)) turns.push(`${tenantId}@${pass}`);
       },
-    } as Parameters<typeof sweepEmail>[1]);
+    });
     return { turns, report };
   }
 
