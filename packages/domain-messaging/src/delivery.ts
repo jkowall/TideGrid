@@ -425,27 +425,52 @@ export async function deliverTenantMessages(
   tenantId: string,
   options: DeliveryOptions,
 ): Promise<TenantDeliveryReport> {
+  deliveryLimit(options);
+  return deliverWithOrigin(db, tenantId, options, await tenantOrigin(db, tenantId, options));
+}
+
+function deliveryLimit(options: Pick<DeliveryOptions, "limit">): number {
   const limit = options.limit ?? 25;
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
     throw new RangeError("limit is a whole number from 1 to 500");
   }
-  const ctx: TenantContext = {
-    tenantId,
-    actorType: "system",
-    actorId: "email-delivery",
-    requestId: options.runId,
-  };
-  // Where links point, resolved once and before any claim: a claim's
-  // transaction holds the connection, and a Worker's pool has only one.
+  return limit;
+}
+
+function deliveryContext(tenantId: string, options: Pick<DeliveryOptions, "runId">): TenantContext {
+  return { tenantId, actorType: "system", actorId: "email-delivery", requestId: options.runId };
+}
+
+/**
+ * Where a tenant's links point, resolved before any claim: a claim's
+ * transaction holds the connection, and a Worker's pool has only one. The
+ * sweep resolves it once a tenant a run and reuses it across that tenant's
+ * turns.
+ */
+async function tenantOrigin(
+  db: Kysely<Database>,
+  tenantId: string,
+  options: DeliveryOptions,
+): Promise<string | null> {
   const template = options.guestLinkOrigin ?? DEFAULT_GUEST_LINK_ORIGIN;
-  const slug = await inTenantTransaction(db, ctx, async (trx) => {
+  const slug = await inTenantTransaction(db, deliveryContext(tenantId, options), async (trx) => {
     const { rows } = await sql<{ slug: string }>`
       select slug from tenants where id = ${tenantId}`.execute(trx);
     return rows[0]?.slug ?? null;
   });
-  const origin = slug
+  return slug
     ? await guestOriginFor(db, tenantId, slug, template, deliveryEnvironment(options))
     : null;
+}
+
+async function deliverWithOrigin(
+  db: Kysely<Database>,
+  tenantId: string,
+  options: DeliveryOptions,
+  origin: string | null,
+): Promise<TenantDeliveryReport> {
+  const limit = deliveryLimit(options);
+  const ctx = deliveryContext(tenantId, options);
 
   const report: TenantDeliveryReport = {
     claimed: 0,
@@ -588,6 +613,27 @@ export interface EmailSweepReport {
 export const DEFAULT_EMAIL_SWEEP_TURN_MESSAGES = 5;
 
 /**
+ * A sweep's two clocks (D9 B). `deadline` bounds every send: the caller's, or
+ * the run's start plus its budget if that is earlier. `budgetMs` is how long
+ * tenants' turns may start: until a claim, which reserves the provider's send
+ * bound and the margin, can no longer fit before the deadline. So the sweep
+ * never stamps or counts a tenant its turn could not send anything for.
+ */
+export function sweepWindow(input: {
+  started: number;
+  budgetMs: number;
+  deadline?: number | undefined;
+  sendTimeoutMs?: number | undefined;
+}): { deadline: number; budgetMs: number } {
+  const deadline = Math.min(
+    input.deadline ?? Number.POSITIVE_INFINITY,
+    input.started + input.budgetMs,
+  );
+  const reserve = (input.sendTimeoutMs ?? 0) + DEADLINE_MARGIN_MS;
+  return { deadline, budgetMs: Math.max(0, deadline - input.started - reserve) };
+}
+
+/**
  * The cron's delivery run: every tenant with due mail, as
  * `app.email_delivery_tenants` names them (tenant ids only, least recently
  * served first since 0013), each in its own transactions under row-level
@@ -598,7 +644,8 @@ export const DEFAULT_EMAIL_SWEEP_TURN_MESSAGES = 5;
  * reported and skipped; the next run retries it. An account-level provider
  * fault, or a run's deadline, ends the sweep (G2.16a). The deadline is the
  * caller's, or the run's start plus its budget if that is earlier, so a run's
- * sends end within its budget (D9 B).
+ * sends end within its budget (D9 B), and no turn starts once a claim cannot
+ * fit before it (`sweepWindow`). A tenant's link origin is read once a run.
  */
 export async function sweepEmail(
   db: Kysely<Database>,
@@ -616,7 +663,13 @@ export async function sweepEmail(
   if (!Number.isInteger(quantum) || quantum < 1 || quantum > 500) {
     throw new RangeError("turnMessages is a whole number from 1 to 500");
   }
-  const deadline = Math.min(options.deadline ?? Number.POSITIVE_INFINITY, started + budget);
+  const window = sweepWindow({
+    started,
+    budgetMs: budget,
+    deadline: options.deadline,
+    sendTimeoutMs: options.provider.sendTimeoutMs,
+  });
+  const deadline = window.deadline;
   const report: EmailSweepReport = {
     tenants: 0,
     claimed: 0,
@@ -634,6 +687,8 @@ export async function sweepEmail(
     stampFailures: 0,
   };
   const claimedBy = new Map<string, number>();
+  /** Each tenant's link origin, resolved at its first turn and reused for the run. */
+  const origins = new Map<string, string | null>();
   const contextOf = (tenantId: string): TenantContext => ({
     tenantId,
     actorType: "system",
@@ -652,7 +707,12 @@ export async function sweepEmail(
     turn: async (tenantId) => {
       const before = claimedBy.get(tenantId) ?? 0;
       const limit = Math.min(quantum, perTenant - before);
-      const done = await deliverTenantMessages(db, tenantId, { ...options, limit, deadline });
+      let origin = origins.get(tenantId);
+      if (origin === undefined) {
+        origin = await tenantOrigin(db, tenantId, options);
+        origins.set(tenantId, origin);
+      }
+      const done = await deliverWithOrigin(db, tenantId, { ...options, limit, deadline }, origin);
       claimedBy.set(tenantId, before + done.claimed);
       report.claimed += done.claimed;
       report.sent += done.sent;
@@ -671,7 +731,7 @@ export async function sweepEmail(
         more: done.claimed === limit && before + done.claimed < perTenant,
       };
     },
-    budgetMs: budget,
+    budgetMs: window.budgetMs,
     clock,
     startedAt: started,
     ...(options.onTurnStart ? { onTurnStart: options.onTurnStart } : {}),

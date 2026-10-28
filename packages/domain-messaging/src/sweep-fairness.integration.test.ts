@@ -154,8 +154,25 @@ describe.skipIf(!env)("the email sweep takes fair turns across tenants", () => {
       sendTimeoutMs: 10_000,
       send: (email) => fake.send(email),
     };
-    const { report } = await sweep([t], { provider: slow, budgetMs: 5_000 });
+    const { report, turns } = await sweep([t], { provider: slow, budgetMs: 5_000 });
     expect(report.complete).toBe(false);
     expect(await states(ids)).toEqual(["queued", "queued", "queued"]);
+    // No turn starts at all, ours included, so nobody is stamped or counted as
+    // served for a turn that could send nothing; every listed tenant waits.
+    expect(turns).toEqual([]);
+    expect(report).toMatchObject({ tenants: 0, turns: 0, claimed: 0 });
+    expect(report.deferredTenants).toBeGreaterThanOrEqual(1);
+    const [stamps] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.sweep_turns where tenant_id = ${t} and sweep = 'email'`;
+    expect(stamps?.n).toBe(0);
+    expect((await listed([t]))[0]).toBe(t);
+  });
+
+  it("delivers a tenant's backlog across several turns of one run", async () => {
+    const t = await tenant("fair-mail-origin");
+    const ids = await due(t, 12);
+    const { turns } = await sweep([t]);
+    expect(turns.length).toBeGreaterThanOrEqual(3);
+    expect((await states(ids)).filter((s) => s === "sent")).toHaveLength(12);
   });
 });
