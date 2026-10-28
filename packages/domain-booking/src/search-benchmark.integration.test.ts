@@ -28,7 +28,7 @@ import {
 type Sql = ReturnType<typeof postgres>;
 
 const env = inject("integrationDb");
-const on = true; // THROWAWAY: one benchmark run, reverted next commit
+const on = process.env.TIDEGRID_SEARCH_BENCH === "1";
 const N = Number(process.env.BENCH_BOOKINGS ?? 50_000);
 
 /** Per table, the columns a clone must change; every other column is copied from the template. */
