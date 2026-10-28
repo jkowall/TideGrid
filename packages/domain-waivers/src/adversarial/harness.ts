@@ -373,6 +373,7 @@ export function holdingProvider(db: Db, messageId: string) {
   let holding = true;
   const provider: EmailProvider = {
     name: "fake",
+    deduplicates: true,
     async send(email) {
       if (holding && email.idempotencyKey === messageId) {
         holding = false;

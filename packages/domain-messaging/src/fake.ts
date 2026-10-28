@@ -77,6 +77,8 @@ const iso = (v: Date | string) => (typeof v === "string" ? new Date(v) : v).toIS
 
 export class FakeEmailProvider implements EmailProvider {
   readonly name = "fake" as const;
+  /** A repeat with the same key answers with the first accepted delivery. */
+  readonly deduplicates = true;
   readonly #db: () => Kysely<Database>;
 
   constructor(options: FakeEmailOptions) {

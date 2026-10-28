@@ -192,6 +192,7 @@ describe.skipIf(!env)("adversarial: a corrected address against email in flight"
     // email is in its hands, and then it reports a temporary failure.
     const slow: EmailProvider = {
       name: "fake",
+      deduplicates: true,
       send: async (email) => {
         if (email.idempotencyKey === old) {
           oldCalls += 1;
@@ -405,6 +406,7 @@ describe.skipIf(!env)("adversarial: a corrected address against email in flight"
     // The first attempt fails for a while, leaving a link and a retry.
     const down: EmailProvider = {
       name: "fake",
+      deduplicates: true,
       send: async () => {
         throw new EmailProviderUnavailableError("provider_unavailable");
       },
@@ -437,6 +439,7 @@ describe.skipIf(!env)("adversarial: a corrected address against email in flight"
     const old = await enqueueSigning(scope, "withdrawn@example.test", 1);
     const down: EmailProvider = {
       name: "fake",
+      deduplicates: true,
       send: async () => {
         throw new EmailProviderUnavailableError("provider_unavailable");
       },
