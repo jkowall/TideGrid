@@ -1,4 +1,5 @@
 import { type PublicBrand, PublicExperienceResponse } from "@tidegrid/contracts";
+import { followExperience } from "./sw/register.ts";
 
 /**
  * Where the page finds the API. Production calls api.tidegrid.us across
@@ -60,13 +61,20 @@ export async function loadExperience(
       // Only the API's own answer means "no operator here". Any other 404,
       // such as a proxy or a missing route, is a failure to load.
       const code = (body as { error?: { code?: unknown } } | undefined)?.error?.code;
-      return code === "tenant_not_found" ? { kind: "not-published" } : { kind: "failed" };
+      if (code !== "tenant_not_found") return { kind: "failed" };
+      // The page's half of the service worker kill switch (G2.14b): only this
+      // readable answer clears it, never a failure to load.
+      followExperience({ kind: "not-published" });
+      return { kind: "not-published" };
     }
     if (!res.ok) return { kind: "failed" };
     const parsed = PublicExperienceResponse.safeParse(body);
     if (!parsed.success) return { kind: "failed" };
     const { tenant, brand } = parsed.data;
-    return brand ? { kind: "ready", tenant, brand } : { kind: "not-ready", tenant };
+    if (!brand) return { kind: "not-ready", tenant };
+    const ready: Experience = { kind: "ready", tenant, brand };
+    followExperience(ready);
+    return ready;
   } catch {
     return { kind: "failed" };
   } finally {

@@ -1,0 +1,9 @@
+{
+  // Unit tests for the guest Worker in workerd (G2.14b). No assets directory
+  // and no service binding: each test hands the Worker a stub ASSETS and a
+  // stub GuestGateway, so the tests need no dist/ build and no API.
+  "name": "tidegrid-guest-unit",
+  "main": "index.ts",
+  "compatibility_date": "2026-08-22",
+  "workers_dev": false
+}

@@ -1,0 +1,8 @@
+/*
+ * The offline page's styles (G2.14b): the design system's base and the guest
+ * site's neutral state screens, the same frame as "There's no booking site at
+ * this address". Built into a hashed /assets/*.css file the service worker
+ * precaches, so the page renders with no network.
+ */
+@import "@tidegrid/design-system/base.css";
+@import "../guest.css";

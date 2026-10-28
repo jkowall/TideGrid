@@ -5,10 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/local-headers.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "dev:worker": "wrangler dev --env dev --port 5361 --inspector-port 9361",
+    "dev:stub": "wrangler dev --env test -c wrangler.jsonc -c worker/stub-gateway.wrangler.jsonc --port 5361 --inspector-port 9361",
+    "e2e": "playwright test",
+    "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p worker/tsconfig.json",
+    "test": "vitest run && vitest run --config vitest.workers.config.ts",
     "release": "vite build && wrangler deploy",
     "release:dry": "vite build && wrangler deploy --dry-run"
   },
@@ -31,6 +34,7 @@
     "vitest": "^4.1.0",
     "wrangler": "^4.135.0",
     "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@playwright/test": "1.64.0"
+    "@playwright/test": "1.64.0",
+    "@tidegrid/tenant-config": "workspace:*"
   }
 }

@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { previewHostnameFor } from "@tidegrid/tenant-config";
+import { loadTenantManifests } from "@tidegrid/tenant-config/node";
 import { describe, expect, it } from "vitest";
 
 describe("static files", () => {
@@ -60,15 +62,68 @@ describe("static files", () => {
     );
     expect(directives.get("form-action")).toBe("'self'");
     expect(directives.get("frame-ancestors")).toBe("'none'");
+    // G2.14b: explicit, so neither falls back to script-src and admits the
+    // analytics host as a worker or manifest source.
+    expect(directives.get("worker-src")).toBe("'self'");
+    expect(directives.get("manifest-src")).toBe("'self'");
+  });
+
+  it("serves sw.js uncached and hashed assets immutable (G2.14b)", () => {
+    const headers = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
+    expect(headers).toMatch(
+      /\n\/sw\.js\n {2}Cache-Control: no-cache\n {2}Content-Type: text\/javascript/,
+    );
+    expect(headers).toMatch(
+      /\n\/assets\/\*\n {2}Cache-Control: public, max-age=31536000, immutable\n/,
+    );
+    const index = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+    expect(index).toContain('<link rel="manifest" href="/manifest.webmanifest" />');
+    // No apple-touch-icon under D3(a): the Worker serves SVG icons only.
+    expect(index).not.toContain("apple-touch-icon");
+  });
+
+  it("keeps the offline page neutral: no tenant, no script, no API (G2.14b)", () => {
+    const offline = readFileSync(new URL("../offline.html", import.meta.url), "utf8");
+    expect(offline).not.toMatch(/<script|api\.tidegrid\.us|demo-harbor|demo-reef|{{/);
+    expect(offline).toContain("Booking needs a connection");
+  });
+
+  /** Every non-test source the guest site ships: the page and the edge Worker. */
+  function shippedSources(): { name: string; source: string }[] {
+    const roots = [new URL("./", import.meta.url), new URL("../worker/", import.meta.url)];
+    return roots.flatMap((root) =>
+      readdirSync(root, { recursive: true })
+        .map(String)
+        .filter((name) => /\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$|fixtures\.ts$/.test(name))
+        .map((name) => ({
+          name: root.pathname.endsWith("/worker/") ? join("..", "worker", name) : name,
+          source: readFileSync(new URL(name, root), "utf8"),
+        })),
+    );
+  }
+
+  it("scans the edge Worker as well as the page", () => {
+    const names = shippedSources().map((s) => s.name);
+    expect(names).toContain(join("..", "worker", "index.ts"));
+    expect(names).toContain(join("sw", "sw.ts"));
+  });
+
+  it("confines the service worker and cache APIs to the service worker and its registration (G2.14b)", () => {
+    const allowed = new Set([
+      join("sw", "sw.ts"),
+      join("sw", "kill-switch.ts"),
+      join("sw", "register.ts"),
+    ]);
+    for (const { name, source } of shippedSources()) {
+      const uses = /\bcaches\s*\.|navigator\.serviceWorker|\bserviceWorker\s*\./.test(source);
+      expect({ name, uses }).toEqual({ name, uses: uses && allowed.has(name) });
+    }
   });
 
   it("keeps checkout secrets out of storage that outlives the tab", () => {
-    const sources = readdirSync(new URL("./", import.meta.url), { recursive: true })
-      .map(String)
-      .filter((name) => /\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$|fixtures\.ts$/.test(name));
+    const sources = shippedSources();
     expect(sources.length).toBeGreaterThan(10);
-    for (const name of sources) {
-      const source = readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
+    for (const { name, source } of sources) {
       // Any use in code, not a mention in a comment.
       const local = /\b(localStorage|indexedDB)\s*[.[]|document\.cookie/.test(source);
       expect({ name, local }).toEqual({ name, local: false });
@@ -90,6 +145,40 @@ describe("static files", () => {
     const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8");
     expect(main).toMatch(
       /<ErrorBoundary fallback=\{<CrashedState \/>\}>\s*<App \/>\s*<\/ErrorBoundary>/,
+    );
+  });
+});
+
+describe("guest Worker configuration (G2.14b)", () => {
+  const wrangler = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
+
+  it("routes exactly each synthetic tenant's preview hostname, and nothing else", async () => {
+    const top = wrangler.slice(0, wrangler.indexOf('"env"'));
+    const patterns = [...top.matchAll(/"pattern":\s*"([^"]+)"/g)].map((m) => m[1]);
+    const tenants = await loadTenantManifests();
+    expect(patterns.sort()).toEqual(tenants.map((t) => previewHostnameFor(t.manifest.slug)).sort());
+    for (const t of tenants)
+      expect(t.manifest.previewHostname).toBe(previewHostnameFor(t.manifest.slug));
+    expect(top).toMatch(/"custom_domain": true/);
+  });
+
+  it("keeps named environments off the preview hostnames", () => {
+    const envs = wrangler.slice(wrangler.indexOf('"env"'));
+    expect(envs).not.toMatch(/"pattern"/);
+    expect(envs.match(/"routes": \[\]/g)).toHaveLength(2);
+  });
+
+  it("runs the Worker first only for the PWA paths, bound to the API's GuestGateway", () => {
+    const first = [...wrangler.matchAll(/"run_worker_first": (\[[^\]]*\])/g)].map((m) =>
+      JSON.parse(m[1] ?? "[]"),
+    );
+    expect(first.length).toBe(3);
+    for (const list of first) {
+      expect(list).toEqual(["/manifest.webmanifest", "/icons/*", "/sw.js"]);
+    }
+    const top = wrangler.slice(0, wrangler.indexOf('"env"'));
+    expect(top).toMatch(
+      /"services": \[\s*\{ "binding": "GuestGateway", "service": "tidegrid-api", "entrypoint": "GuestGateway" \}\s*\]/,
     );
   });
 });

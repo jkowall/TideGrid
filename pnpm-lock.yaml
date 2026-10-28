@@ -124,6 +124,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.0
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tidegrid/tenant-config':
+        specifier: workspace:*
+        version: link:../../packages/tenant-config
       '@types/react':
         specifier: ^19.1.0
         version: 19.3.0

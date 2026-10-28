@@ -7,6 +7,7 @@ import { formatPhone, type Tenant } from "./bootstrap.ts";
 import { ManagePage } from "./manage/ManagePage.tsx";
 import { useLinkClick } from "./navigation.tsx";
 import { useTitle } from "./States.tsx";
+import { OfflinePage, SupportPage } from "./support/SupportPage.tsx";
 import { UpcomingTrips } from "./UpcomingTrips.tsx";
 import { WaiverPage } from "./waiver/WaiverPage.tsx";
 
@@ -17,9 +18,15 @@ import { WaiverPage } from "./waiver/WaiverPage.tsx";
  * style, or a script.
  */
 
+const terms = { title: "Terms of booking", placeholder: "These terms are a placeholder" };
+const privacy = { title: "Privacy notice", placeholder: "This notice is a placeholder" };
 const legalPages: Record<string, { title: string; placeholder: string }> = {
-  "/legal/terms": { title: "Terms of booking", placeholder: "These terms are a placeholder" },
-  "/legal/privacy": { title: "Privacy notice", placeholder: "This notice is a placeholder" },
+  "/legal/terms": terms,
+  "/legal/privacy": privacy,
+  // The stable public paths an operator's pages use (G2.14b), rendered in
+  // place, never redirected: no path on this site accepts a redirect target.
+  "/terms": terms,
+  "/privacy": privacy,
 };
 
 type Page =
@@ -30,6 +37,9 @@ type Page =
   | { kind: "legal"; title: string; placeholder: string }
   // Waiver signing (G2.15): the email link's page.
   | { kind: "waiver" }
+  // Help and support, and the offline explainer (G2.14b).
+  | { kind: "support" }
+  | { kind: "offline" }
   | { kind: "not-found" };
 
 function pageFor(path: string): Page {
@@ -37,6 +47,8 @@ function pageFor(path: string): Page {
   if (clean === "/") return { kind: "home" };
   if (clean === "/manage") return { kind: "manage" };
   if (clean === "/waiver") return { kind: "waiver" };
+  if (clean === "/support") return { kind: "support" };
+  if (clean === "/offline") return { kind: "offline" };
   const tripId = tripIdOf(clean);
   if (tripId) return { kind: "book", tripId };
   const legal = Object.hasOwn(legalPages, clean) ? legalPages[clean] : undefined;
@@ -238,6 +250,11 @@ function Footer({ brand, inCheckout }: { brand: PublicBrand; inCheckout: boolean
             <h2 className="tg-eyebrow">Policies</h2>
             <ul className="guest-footer__list">
               <li>
+                <FooterLink href="/support" newTab={inCheckout}>
+                  Help and support
+                </FooterLink>
+              </li>
+              <li>
                 <FooterLink href={brand.legal.terms} newTab={inCheckout}>
                   Terms of booking
                 </FooterLink>
@@ -315,6 +332,8 @@ export function BrandedShell({
           <LegalPage brand={brand} title={page.title} placeholder={page.placeholder} />
         )}
         {page.kind === "waiver" && <WaiverPage brand={brand} focusOnArrival={focusHeading} />}
+        {page.kind === "support" && <SupportPage brand={brand} />}
+        {page.kind === "offline" && <OfflinePage />}
         {page.kind === "not-found" && <NotFoundPage brand={brand} />}
       </main>
       <Footer brand={brand} inCheckout={page.kind === "book" || page.kind === "waiver"} />
