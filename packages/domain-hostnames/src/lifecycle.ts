@@ -213,6 +213,8 @@ export interface HostnameSweepOptions {
   /** No new hostname starts after this many milliseconds. */
   budgetMs?: number;
   onTenantError?: (tenantId: string, error: unknown) => void;
+  /** Check only these tenants, as the admin CLI's fake run does. */
+  onlyTenants?: readonly string[];
   /** A servable hostname whose certificate is close to expiry (G2.14b, D10). */
   onExpiring?: (tenantId: string, hostname: string) => void;
   clock?: () => number;
@@ -283,6 +285,7 @@ export async function sweepHostnames(
   const stop = () => calls >= maxCalls || clock() - started >= budgetMs;
 
   for (const { tenant_id: tenantId } of rows) {
+    if (options.onlyTenants && !options.onlyTenants.includes(tenantId)) continue;
     if (stop()) {
       report.complete = false;
       break;

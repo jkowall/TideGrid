@@ -627,6 +627,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         schema_migrations: ["SELECT"],
         tenants: ["SELECT"],
         tenant_hostnames: ["SELECT"],
+        // Custom hostname lifecycle (0011, G2.14b): written through app functions only.
+        tenant_hostname_provisioning: ["SELECT"],
         staff_users: [],
         tenant_memberships: ["INSERT", "SELECT"],
         audit_events: ["INSERT", "SELECT"],
@@ -781,6 +783,28 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
           });
         }
       }
+    });
+
+    it("lets the runtime execute only the hostname functions its cron needs (0011)", async () => {
+      const rows = await admin`
+        select p.proname, p.prosecdef,
+               has_function_privilege('tidegrid_app', p.oid, 'EXECUTE') as runtime_execute
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'app'
+           and (p.proname like 'hostname\\_%' or p.proname in (
+             'resolve_hostname', 'check_tenant_hostname_update', 'check_hostname_provisioning'))
+         order by p.proname`;
+      expect(rows.map((r) => ({ ...r }))).toEqual([
+        { proname: "check_hostname_provisioning", prosecdef: false, runtime_execute: false },
+        { proname: "check_tenant_hostname_update", prosecdef: false, runtime_execute: false },
+        { proname: "hostname_activate", prosecdef: true, runtime_execute: false },
+        { proname: "hostname_attach_provider", prosecdef: true, runtime_execute: false },
+        { proname: "hostname_disable", prosecdef: true, runtime_execute: false },
+        { proname: "hostname_record_check", prosecdef: true, runtime_execute: true },
+        { proname: "hostname_request", prosecdef: true, runtime_execute: false },
+        { proname: "hostname_sweep_tenants", prosecdef: true, runtime_execute: true },
+        { proname: "resolve_hostname", prosecdef: true, runtime_execute: true },
+      ]);
     });
 
     it("keeps the membership role constraint equal to the API contract", async () => {
