@@ -175,6 +175,33 @@ test("a new service worker installs, waits, and takes over on the next navigatio
   if (!tenant) return;
   const host = localHost(tenant.slug);
   const original = readFileSync(swFile, "utf8");
+  // Diagnostics, printed only on failure: what the page posted, and what
+  // Chromium reports about the registration's workers and their clients.
+  await page.addInitScript(() => {
+    const posts: unknown[] = [];
+    (window as unknown as { __swPosts: unknown[] }).__swPosts = posts;
+    const post = ServiceWorker.prototype.postMessage;
+    ServiceWorker.prototype.postMessage = function (this: ServiceWorker, ...args: unknown[]) {
+      posts.push({ state: this.state, message: args[0], at: Date.now() });
+      return (post as (...a: unknown[]) => void).apply(this, args);
+    };
+  });
+  const cdp = await context.newCDPSession(page);
+  const events: unknown[] = [];
+  cdp.on("ServiceWorker.workerVersionUpdated", (e) => events.push({ at: Date.now(), ...e }));
+  await cdp.send("ServiceWorker.enable");
+  const diagnose = async () => {
+    const targets = await cdp.send("Target.getTargets").catch(() => null);
+    console.log(
+      `D11 diagnostics: ${JSON.stringify({
+        posts: await page.evaluate(() => (window as unknown as { __swPosts: unknown }).__swPosts),
+        versions: events.slice(-12),
+        targets: (
+          targets as { targetInfos?: { type: string; url: string }[] } | null
+        )?.targetInfos?.map((t) => `${t.type} ${t.url}`),
+      })}`,
+    );
+  };
   try {
     await loadControlled(page, hostUrl(host), tenant.name);
     // Exactly one window, the one that will ask.
@@ -197,14 +224,19 @@ test("a new service worker installs, waits, and takes over on the next navigatio
     await page.reload();
     await waitForReady(page, tenant.name);
     expect(context.pages()).toHaveLength(1);
-    await expect
-      .poll(async () => workerState(page), { timeout: 75_000 })
-      .toEqual({
-        active: "activated",
-        waiting: null,
-        installing: null,
-        caches: ["tidegrid-guest-e2e-single"],
-      });
+    try {
+      await expect
+        .poll(async () => workerState(page), { timeout: 75_000 })
+        .toEqual({
+          active: "activated",
+          waiting: null,
+          installing: null,
+          caches: ["tidegrid-guest-e2e-single"],
+        });
+    } catch (error) {
+      await diagnose();
+      throw error;
+    }
   } finally {
     writeFileSync(swFile, original);
   }
