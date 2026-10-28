@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import {
   collectCspViolations,
   hostUrl,
@@ -157,6 +157,41 @@ async function loadControlled(page: Page, url: string, name: string) {
   expect(await page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
 }
 
+/**
+ * Diagnostics for the update checks, printed only on failure: what each page
+ * posted to a worker, and Chromium's worker version events with their
+ * clients, over DevTools.
+ */
+async function attachDiagnostics(page: Page, context: BrowserContext) {
+  await context.addInitScript(() => {
+    const posts: unknown[] = [];
+    (window as unknown as { __swPosts: unknown[] }).__swPosts = posts;
+    const post = ServiceWorker.prototype.postMessage;
+    ServiceWorker.prototype.postMessage = function (this: ServiceWorker, ...args: unknown[]) {
+      posts.push({ state: this.state, message: args[0], at: Date.now() });
+      return (post as (...a: unknown[]) => void).apply(this, args);
+    };
+  });
+  const cdp = await context.newCDPSession(page);
+  const events: unknown[] = [];
+  cdp.on("ServiceWorker.workerVersionUpdated", (e) => events.push({ at: Date.now(), ...e }));
+  await cdp.send("ServiceWorker.enable");
+  return async () => {
+    const targets = await cdp.send("Target.getTargets").catch(() => null);
+    console.log(
+      `D11 diagnostics: ${JSON.stringify({
+        posts: await page
+          .evaluate(() => (window as unknown as { __swPosts: unknown }).__swPosts)
+          .catch(() => null),
+        versions: events.slice(-12),
+        targets: (
+          targets as { targetInfos?: { type: string; url: string }[] } | null
+        )?.targetInfos?.map((t) => `${t.type} ${t.url}`),
+      })}`,
+    );
+  };
+}
+
 /** The browser's own update check, made now rather than at some later navigation. */
 async function checkForUpdate(page: Page) {
   await page.evaluate(async () => {
@@ -175,33 +210,7 @@ test("a new service worker installs, waits, and takes over on the next navigatio
   if (!tenant) return;
   const host = localHost(tenant.slug);
   const original = readFileSync(swFile, "utf8");
-  // Diagnostics, printed only on failure: what the page posted, and what
-  // Chromium reports about the registration's workers and their clients.
-  await page.addInitScript(() => {
-    const posts: unknown[] = [];
-    (window as unknown as { __swPosts: unknown[] }).__swPosts = posts;
-    const post = ServiceWorker.prototype.postMessage;
-    ServiceWorker.prototype.postMessage = function (this: ServiceWorker, ...args: unknown[]) {
-      posts.push({ state: this.state, message: args[0], at: Date.now() });
-      return (post as (...a: unknown[]) => void).apply(this, args);
-    };
-  });
-  const cdp = await context.newCDPSession(page);
-  const events: unknown[] = [];
-  cdp.on("ServiceWorker.workerVersionUpdated", (e) => events.push({ at: Date.now(), ...e }));
-  await cdp.send("ServiceWorker.enable");
-  const diagnose = async () => {
-    const targets = await cdp.send("Target.getTargets").catch(() => null);
-    console.log(
-      `D11 diagnostics: ${JSON.stringify({
-        posts: await page.evaluate(() => (window as unknown as { __swPosts: unknown }).__swPosts),
-        versions: events.slice(-12),
-        targets: (
-          targets as { targetInfos?: { type: string; url: string }[] } | null
-        )?.targetInfos?.map((t) => `${t.type} ${t.url}`),
-      })}`,
-    );
-  };
+  const diagnose = await attachDiagnostics(page, context);
   try {
     await loadControlled(page, hostUrl(host), tenant.name);
     // Exactly one window, the one that will ask.
@@ -252,6 +261,7 @@ test("a waiting service worker does not take over while another window is open (
   if (!tenant) return;
   const host = localHost(tenant.slug);
   const original = readFileSync(swFile, "utf8");
+  const diagnose = await attachDiagnostics(page, context);
   try {
     await loadControlled(page, hostUrl(host), tenant.name);
     const other = await context.newPage();
@@ -284,14 +294,19 @@ test("a waiting service worker does not take over while another window is open (
     expect(context.pages()).toHaveLength(1);
     await page.reload();
     await waitForReady(page, tenant.name);
-    await expect
-      .poll(async () => workerState(page), { timeout: 75_000 })
-      .toEqual({
-        active: "activated",
-        waiting: null,
-        installing: null,
-        caches: ["tidegrid-guest-e2e-multi"],
-      });
+    try {
+      await expect
+        .poll(async () => workerState(page), { timeout: 75_000 })
+        .toEqual({
+          active: "activated",
+          waiting: null,
+          installing: null,
+          caches: ["tidegrid-guest-e2e-multi"],
+        });
+    } catch (error) {
+      await diagnose();
+      throw error;
+    }
   } finally {
     writeFileSync(swFile, original);
   }
