@@ -34,7 +34,10 @@ describe.skipIf(!env)("the hold sweep takes fair turns across tenants", () => {
     return one.id < two.id ? [one, two] : [two, one];
   }
 
-  /** `n` due holds on the tenant's first shared trip. */
+  /**
+   * `n` due holds on the tenant's first shared trip. All are acquired before
+   * any is backdated: acquisition expires its trip's due holds itself.
+   */
   async function dueHolds(tenant: TenantFixture, n: number): Promise<string[]> {
     const ids: string[] = [];
     const tripId = tenant.trips.shared[0] ?? "";
@@ -49,9 +52,9 @@ describe.skipIf(!env)("the hold sweep takes fair turns across tenants", () => {
         }),
       );
       if (result.kind !== "acquired") throw new Error(`expected acquired, got ${result.kind}`);
-      await backdateHold(admin, result.hold.id);
       ids.push(result.hold.id);
     }
+    for (const id of ids) await backdateHold(admin, id);
     return ids;
   }
 
