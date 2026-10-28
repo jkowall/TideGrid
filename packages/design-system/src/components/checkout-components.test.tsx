@@ -58,6 +58,10 @@ describe("QuantityField", () => {
       />,
     );
 
+  it("renders a count that is not a number instead of re-rendering forever", () => {
+    expect(() => quantity({ value: Number.NaN })).not.toThrow();
+  });
+
   it("ties its label to the input", () => {
     const out = quantity();
     expect(out).toContain('<label class="tg-field__label" for="adult">Adult</label>');

@@ -1,6 +1,6 @@
 import { createExecutionContext, env, SELF } from "cloudflare:test";
 import { signatureHeaderValue } from "@tidegrid/domain-payments";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { Bindings } from "../src/env.ts";
 import { paymentSettings } from "../src/payments.ts";
@@ -127,7 +127,27 @@ describe("the payment webhook refuses before touching the database", () => {
   });
 
   it("refuses a missing, wrong, stale, or future signature", async () => {
-    const now = Date.now();
+    // The route reads Date.now() itself. Freeze it so the window is measured
+    // from the same instant the test signs at. On a live clock, a whole second
+    // can pass before the route runs, and the future signature then sits
+    // inside the window.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-10-28T12:00:00.500Z"));
+      await refusesOutsideTheWindow(Date.now());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  async function refusesOutsideTheWindow(now: number) {
+    // The edges verify and reach the database, which this suite leaves
+    // unconfigured. So the refusals below are the window's, not another check's.
+    for (const edge of [now - 300_000, now + 300_000]) {
+      expect(
+        await post({ "fake-signature": await signatureHeaderValue(secret, edge, eventBody) }),
+      ).toEqual({ status: 503, code: "database_unconfigured" });
+    }
     expect(await post({})).toEqual({ status: 400, code: "signature_invalid" });
     expect(
       await post({
@@ -148,7 +168,7 @@ describe("the payment webhook refuses before touching the database", () => {
     expect(await post({ "fake-signature": await signatureHeaderValue(secret, now, "{}") })).toEqual(
       { status: 400, code: "signature_invalid" },
     );
-  });
+  }
 
   it("refuses a signed body that is not an event, and an oversized one", async () => {
     const notAnEvent = '{"hello":"world"}';
