@@ -320,6 +320,39 @@ describe("runFairSweep", () => {
       });
     });
 
+    it("is false when the list is full at the clamped limit, whatever limit was asked", async () => {
+      const ids = Array.from({ length: 1000 }, (_, i) => tenant(i));
+      const report = await runFairSweep({
+        listTenants: async () => ids,
+        tenantLimit: 2000,
+        stamp: async () => {},
+        turn: async () => ({ units: 1, more: false }),
+        budgetMs: 1,
+        clock: () => 0,
+        onTenantError: () => {},
+      });
+      expect(report).toMatchObject({ tenants: 1000, deferredTenants: 0, complete: false });
+    });
+
+    it("fails only the turn when the turn observer throws", async () => {
+      const errors: string[] = [];
+      const report = await runFairSweep({
+        listTenants: async () => [HOG, VICTIM],
+        tenantLimit: 100,
+        stamp: async () => {},
+        turn: async () => ({ units: 1, more: false }),
+        budgetMs: 1000,
+        clock: () => 0,
+        onTurnStart: (t) => {
+          if (t === HOG) throw new Error("observer");
+        },
+        onTenantError: (t, error, during) =>
+          errors.push(`${t}:${during}:${(error as Error).message}`),
+      });
+      expect(errors).toEqual([`${HOG}:turn:observer`]);
+      expect(report).toMatchObject({ tenants: 2, turns: 2, failedTenants: 1, complete: false });
+    });
+
     it("is false when a tenant failed", async () => {
       const world = new World();
       world.add(HOG, 1);

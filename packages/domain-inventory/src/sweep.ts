@@ -17,11 +17,14 @@ export interface SweepOptions {
   batchSize?: number;
   /** No new batch starts after this many milliseconds. */
   budgetMs?: number;
-  /**
-   * Called when one tenant's batch fails, and the sweep moves on to the next
-   * tenant; or when a turn's stamp fails, and the turn still runs.
-   */
+  /** Called when one tenant's batch fails; the sweep moves on to the next tenant. */
   onTenantError?: (tenantId: string, error: unknown) => void;
+  /**
+   * Called when a turn's stamp fails; the turn still runs. Without it,
+   * onTenantError hears the failure, so it is never silent. Either way it is
+   * counted in stampFailures, not in failedTenants.
+   */
+  onStampError?: (tenantId: string, error: unknown) => void;
   /** Milliseconds clock for the budget; tests pin it. Expiry itself uses the database clock. */
   clock?: () => number;
   /** Called as each turn (one batch for one tenant) starts, for tests and logs. */
@@ -41,6 +44,8 @@ export interface SweepReport {
   passes: number;
   /** Tenants listed that the budget left for the next run. */
   deferredTenants: number;
+  /** Stamps that failed; each tenant still took its turn. */
+  stampFailures: number;
 }
 
 export const DEFAULT_SWEEP_TENANT_LIMIT = 100;
@@ -99,7 +104,10 @@ export async function sweepExpiredHolds(
     clock,
     startedAt: started,
     ...(options.onTurnStart ? { onTurnStart: options.onTurnStart } : {}),
-    onTenantError: (tenantId, error) => options.onTenantError?.(tenantId, error),
+    onTenantError: (tenantId, error, during) => {
+      if (during === "stamp" && options.onStampError) options.onStampError(tenantId, error);
+      else options.onTenantError?.(tenantId, error);
+    },
   });
   return {
     tenants: fair.tenants,
@@ -109,5 +117,6 @@ export async function sweepExpiredHolds(
     turns: fair.turns,
     passes: fair.passes,
     deferredTenants: fair.deferredTenants,
+    stampFailures: fair.stampFailures,
   };
 }

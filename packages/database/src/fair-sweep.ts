@@ -63,7 +63,10 @@ export interface FairSweepReport {
 export interface FairSweepOptions {
   /** Due tenants, already least recently served first (the 0013 list functions). */
   listTenants: () => Promise<readonly string[]>;
-  /** The limit the list was asked for; a full list means more tenants may wait. */
+  /**
+   * The limit the list was asked for; a full list means more tenants may wait.
+   * The list functions clamp it to 1 to 1,000, and so does the check here.
+   */
   tenantLimit: number;
   /** Move the tenant to the back of the next run's list. */
   stamp: (tenantId: string) => Promise<void>;
@@ -92,6 +95,8 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
   const started = options.startedAt ?? clock();
   const overBudget = () => budgetMs <= 0 || clock() - started >= budgetMs;
   const maxPasses = Math.max(1, options.maxPasses ?? DEFAULT_FAIR_SWEEP_MAX_PASSES);
+  // The bound the list functions apply: greatest(1, least(limit, 1000)).
+  const tenantLimit = Math.min(1000, Math.max(1, Math.trunc(options.tenantLimit) || 1));
 
   // A tenant listed twice would take two first turns; the list functions never
   // repeat one, but the scheduler does not depend on it.
@@ -109,10 +114,11 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
   let stalled = false;
   /** One turn; true when the tenant wants another. */
   const take = async (tenantId: string, pass: number): Promise<boolean> => {
-    options.onTurnStart?.(tenantId, pass);
     report.turns += 1;
     report.passes = Math.max(report.passes, pass);
     try {
+      // Inside the try: an observer that throws fails this turn, not the run.
+      options.onTurnStart?.(tenantId, pass);
       const { units, more } = await options.turn(tenantId, pass);
       if (!more) return false;
       // A turn that did nothing yet asks for more would spin until the budget
@@ -172,7 +178,7 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
   }
 
   report.complete =
-    listed.length < options.tenantLimit &&
+    listed.length < tenantLimit &&
     report.deferredTenants === 0 &&
     waiting.length === 0 &&
     !stalled &&
@@ -182,7 +188,8 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
 
 /**
  * Stamp one tenant's turn for one sweep, in a transaction of its own under
- * that tenant's context, so a turn that fails afterwards cannot undo it. The
+ * that tenant's context, so a turn that fails afterwards cannot undo it. A
+ * stamp never moves back: of two overlapping runs, the later time stays. The
  * run id is kept for an operator reading the table; it is cut to 128
  * characters, the column's bound.
  */
@@ -197,6 +204,7 @@ export async function recordSweepTurn(
       insert into sweep_turns (tenant_id, sweep, run_id)
       values (${ctx.tenantId}, ${sweep}, ${runId})
       on conflict (tenant_id, sweep)
-        do update set last_turn_at = now(), run_id = excluded.run_id`.execute(trx);
+        do update set last_turn_at = greatest(sweep_turns.last_turn_at, now()),
+                      run_id = excluded.run_id`.execute(trx);
   });
 }

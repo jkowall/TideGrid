@@ -32,7 +32,8 @@ CREATE POLICY tenant_isolation ON public.sweep_turns
   WITH CHECK (tenant_id = (SELECT app.current_tenant_id()));
 
 -- No role deletes or truncates a stamp, the owner included. Not the audit
--- trigger's BEFORE UPDATE OR DELETE: a stamp is updated every turn.
+-- trigger's BEFORE UPDATE OR DELETE: a stamp is updated every turn. The shared
+-- app.reject_mutation says "is append-only"; here that means rows stay.
 CREATE TRIGGER sweep_turns_no_delete
   BEFORE DELETE ON public.sweep_turns
   FOR EACH ROW EXECUTE FUNCTION app.reject_mutation();

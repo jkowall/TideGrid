@@ -93,7 +93,7 @@ export interface CheckoutSweepReport {
    * provider, no answer, a failed attempt, or out of budget. Each once.
    */
   refundsPending: number;
-  /** Tenants whose expiry step failed. */
+  /** Tenants whose expiry step failed, or (only if an onError callback throws) whose turn did. */
   failedTenants: number;
   failedEvents: number;
   failedRefunds: number;
@@ -104,6 +104,8 @@ export interface CheckoutSweepReport {
   passes: number;
   /** Tenants listed that the budget left for the next run. */
   deferredTenants: number;
+  /** Stamps that failed (each reported as item "stamp"); each tenant still took its turn. */
+  stampFailures: number;
 }
 
 export const DEFAULT_CHECKOUT_SWEEP_BATCH = 100;
@@ -300,7 +302,6 @@ interface TenantRun {
   skipped: Set<string>;
   inconsistent: Set<string>;
   eventsAttempted: Set<string>;
-  eventsReadFailed: boolean;
   /** Refunds the run's reprocessed events requested, in order, not yet attempted. */
   handedRefunds: string[];
   /** Every refund this run read or was handed. */
@@ -346,6 +347,7 @@ export async function runCheckoutSweep(
     turns: 0,
     passes: 0,
     deferredTenants: 0,
+    stampFailures: 0,
   };
   let failures = false;
   const onError: NonNullable<CheckoutSweepOptions["onError"]> = (tenantId, item, error, id) => {
@@ -365,7 +367,6 @@ export async function runCheckoutSweep(
         skipped: new Set(),
         inconsistent: new Set(),
         eventsAttempted: new Set(),
-        eventsReadFailed: false,
         handedRefunds: [],
         refundsSeen: new Set(),
         refundsAttempted: new Set(),
@@ -423,7 +424,6 @@ export async function runCheckoutSweep(
       });
     } catch (error) {
       report.failedEvents += 1;
-      run.eventsReadFailed = true;
       run.inbox = "done";
       onError(tenantId, "inbox_event", error);
       return 0;
@@ -535,6 +535,7 @@ export async function runCheckoutSweep(
   report.turns = fair.turns;
   report.passes = fair.passes;
   report.deferredTenants = fair.deferredTenants;
+  report.stampFailures = fair.stampFailures;
   report.complete = fair.complete && !failures;
   return report;
 }
