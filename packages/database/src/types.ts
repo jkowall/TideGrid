@@ -1104,6 +1104,21 @@ interface WaiverTables {
   waiver_evidence: WaiverEvidenceTable;
 }
 
+/** The cron's cross-tenant sweeps that take fair turns (0013). */
+export type SweepName = "hold" | "checkout" | "email" | "hostname";
+
+/**
+ * When a sweep last started a turn for a tenant (0013, pre-pilot hardening).
+ * The runtime inserts the row and may move only the time and the run id.
+ * Housekeeping: no audit or outbox row. Nobody deletes one.
+ */
+export interface SweepTurnsTable {
+  tenant_id: TenantColumn;
+  sweep: Fixed<SweepName>;
+  last_turn_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  run_id: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
 export interface Database
   extends PricingTables,
     CheckoutTables,
@@ -1130,6 +1145,8 @@ export interface Database
   brand_activations: BrandActivationsTable;
   // Capacity and holds (G2.6).
   capacity_holds: CapacityHoldsTable;
+  // Sweep fairness (0013).
+  sweep_turns: SweepTurnsTable;
 }
 
 export type { Generated, GeneratedAlways };
