@@ -24,7 +24,7 @@ Boundaries:
 | Runtime | Cloudflare Workers on the existing account, Workers Paid | Hyperdrive requires Workers Paid |
 | API | TypeScript and Hono on a Worker | One modular monolith, one versioned API |
 | Data access | Kysely over the postgres.js driver, with reviewed SQL migrations | postgres.js is ESM and runs in Workers and Node; node-postgres could not be bundled for the Workers test runtime. Migrations are hand-written SQL applied by a repo script |
-| Database | PostgreSQL 17 on a Neon nonproduction project, through Hyperdrive with query caching disabled | Direct, unpooled Neon endpoint behind Hyperdrive; one branch per pull request, one long-lived staging branch. The Hyperdrive binding is in place since September 22; the `DATABASE_URL` secret remains the fallback |
+| Database | PostgreSQL 17 on a Neon nonproduction project, through Hyperdrive with query caching disabled | Direct, unpooled Neon endpoint behind Hyperdrive; one long-lived staging branch, and throwaway branches for occasional manual runs. CI's integration database is a PostgreSQL 17 container ([CI narrowing](#goal-sequence)). The Hyperdrive binding is in place since September 22; the `DATABASE_URL` secret remains the fallback |
 | Guest web | React and Vite PWA on Workers Static Assets | One build serves every tenant from server-provided brand configuration |
 | Operator web | React and Vite on a separate Workers Static Assets deployment | Different CSP and release cadence from the guest surface |
 | Contracts | Zod schemas generating OpenAPI, shared through `packages/contracts` | Generated client for both web apps |
@@ -35,7 +35,7 @@ Boundaries:
 | Async work | Idempotency keys and a PostgreSQL outbox table from the first migration; a cron-triggered sweep on the API Worker for hold expiry and outbox delivery | Cloudflare Queues and a dedicated async Worker are deferred with G2.3 |
 | Object storage | Private R2 bucket | Needed from G2.15 for waiver evidence. The demo keeps each signed PDF in PostgreSQL with its evidence row instead (see the G2.15 status); the bucket, with object lock, is a pre-pilot follow-up |
 | Infrastructure as code | Wrangler configuration checked in; no Terraform for the demo | Terraform enters with the pilot readiness gate |
-| CI | GitHub Actions: typecheck, lint, unit, integration against a Neon branch, browser journeys | Preview deploys per pull request |
+| CI | GitHub Actions: typecheck, lint, unit, integration against a PostgreSQL 17 service container, browser journeys | Preview deploys per pull request |
 | Telemetry | Workers Logs plus structured request logs with tenant and request identifiers; OpenTelemetry export destination open | Attribute naming follows OpenTelemetry semantic conventions |
 
 Hostnames on `tidegrid.us`:
@@ -136,6 +136,12 @@ The adapter and the shim are in [packages/domain-payments](../../packages/domain
 
 The adapter, the shim, and the delivery job are in [packages/domain-messaging](../../packages/domain-messaging/README.md).
 
+**CI database (narrowing decided by the owner on 2026-10-27).** The Neon project ran out of its free plan's monthly allowance on 2026-10-20. CI's integration job therefore runs on a PostgreSQL 17 service container, not a Neon branch, since pull request 17. The owner kept that, recorded it here, and stays on the free plan.
+
+- Each run migrates a fresh, empty database, seeds it, and runs every integration suite with `TIDEGRID_EPHEMERAL_DB=1`. The suites' rules are unchanged.
+- Demo acceptance step 9 is met by that container. A container does not prove Neon-specific behavior: Hyperdrive, branch compute limits, autosuspend, or the direct endpoint.
+- Neon serves the deployed preview and occasional manual throwaway branches. A run on a Neon branch comes back before the pilot readiness gate, or sooner if a Neon-specific defect appears.
+
 **Owner confirmations, 2026-10-19.** The owner kept the current behavior on each of these:
 
 - A late payment that arrives after the seats are gone is refunded in full and raises an exception for the operator. There is no grace period.
@@ -158,7 +164,7 @@ The build is demo-complete when, on a preview deployment with two synthetic tena
 6. A concurrent last-seat test run against the deployment shows no oversell.
 7. A signed-in operator of tenant A cannot reach any tenant B booking, link, search result, or export.
 8. Waiver requests go out automatically after confirmation and a participant signs on a phone-width screen.
-9. All checks run green in CI on a fresh Neon branch.
+9. All checks run green in CI on a fresh PostgreSQL 17 database (a service container, per the [CI narrowing](#goal-sequence)).
 
 None of this is a gate. It is the point at which the code can be shown to an operator and taken toward the Core live gate when the [Validation gate](05-roadmap-validation.md#validation-gate) or the proposed Core pilot gate passes.
 
