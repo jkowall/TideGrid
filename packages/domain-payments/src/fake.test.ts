@@ -41,6 +41,16 @@ describe("the fake provider", () => {
     expect(() =>
       createFakePaymentProvider({ db: noDatabase, secret: "short", environment: "local" }),
     ).toThrow(RangeError);
+    // Fail closed: only local, preview, and staging run the fake.
+    for (const environment of ["prod", "Production", "", "dev", undefined]) {
+      expect(() =>
+        createFakePaymentProvider({
+          db: noDatabase,
+          secret,
+          environment: environment as string,
+        }),
+      ).toThrow(/environment/);
+    }
   });
 
   it("reads its own events into provider-neutral ones", () => {
