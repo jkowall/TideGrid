@@ -8,6 +8,19 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### Pending owner confirmation: Nov 1 runbook (coordinator defaults, 2026-10-28)
+
+**Status:** Coordinator defaults for the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md), standing goal item 6, pending owner confirmation. The runbook is prepared and dry-run only. Every live step on Nov 1 is the owner's own, after a go given at the time, under the external-action rule below.
+
+Build-time defaults, applied to the prepared scripts:
+
+- **D10 (a): step 9 evidence by tree equality.** The deployed SHA's tree must equal the tree of the green pull request run's test merge commit, because the repository merges with merge commits and the integration, browser, and console-browser jobs run only on pull requests. Adding `workflow_dispatch` (D10 (b)) is the only route to a run on the exact SHA, after #26 releases `ci.yml`.
+- **D12 (a): the upgrade is proven by a CI test only.** This narrows the hosting plan's rule "Test each migration on a production-shaped Neon branch" ([08](08-build-hosting-and-operations.md#database-migration-and-rollback-policy)) for Nov 1: `migrate-upgrade.integration.test.ts` applies 0001 and 0002, a b87e269-era seed, and the b87e269 query set, then migrates to the tree's last file on PostgreSQL 17. A 10-minute copy-on-write Neon branch (D12 (b)) stays an option if that test surprises.
+- **D13 (a): the runbook lives in `docs/runbooks/`,** outside the numbered authority documents.
+- **D14 (a): `SEED_DEMO_BOOKINGS` stays off on Neon main.**
+
+Run-time decisions, each asked as a go/no-go prompt at its step with the default shown: D1 (a) Neon main as the preview database; D2 (b) the release SHA frozen on Oct 31 with #32, with #26 an owner call; D3 (a) fake payments on the public preview from P3 to the end of P9; D4 (a) a third Access-allowed address owning demo-harbor only; D5 (b) pause the `*/15` cron between windows; D6 (a) a subdomain sender; D7 (a) a Stripe-live window after acceptance; D8 (a) the cutover after a clean acceptance, to demo-harbor; D9 (a) accept one database connection per GuestGateway call for owner-only traffic, with Cloudflare for SaaS deferred; D11 (a) no external human review for synthetic test mode, with (b) kept for the Core live gate; D15 (a) accept inline, signature-only webhook processing for the test-mode window; D16 (a) the existing `sk_test_` key unless `rk_test_` is confirmed to act through `Stripe-Account`.
+
 ### Pending owner confirmation: G2.16a email adapter (coordinator defaults, 2026-10-28)
 
 **Status:** Coordinator defaults for G2.16a, the Cloudflare Email Service adapter, pending owner confirmation. The owner's standing goal of 2026-10-28 said "go, include the Stripe and email adapters" and did not answer the goal packet's decisions. They bind the demo build only, and only until the owner confirms or replaces them. The full list, with the reasons, is the [email adapter narrowing](12-demo-build-plan.md#goal-sequence) in the demo build plan. The adapter stays off in every deployed configuration; switching it on is a separately authorized operational goal, G2.16-live (proposed), under the external-action rule below.

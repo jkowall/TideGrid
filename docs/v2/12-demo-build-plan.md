@@ -24,7 +24,7 @@ Boundaries:
 | Runtime | Cloudflare Workers on the existing account, Workers Paid | Hyperdrive requires Workers Paid |
 | API | TypeScript and Hono on a Worker | One modular monolith, one versioned API |
 | Data access | Kysely over the postgres.js driver, with reviewed SQL migrations | postgres.js is ESM and runs in Workers and Node; node-postgres could not be bundled for the Workers test runtime. Migrations are hand-written SQL applied by a repo script |
-| Database | PostgreSQL 17 on a Neon nonproduction project, through Hyperdrive with query caching disabled | Direct, unpooled Neon endpoint behind Hyperdrive; one long-lived staging branch, and throwaway branches for occasional manual runs. CI's integration database is a PostgreSQL 17 container ([CI narrowing](#goal-sequence)). The Hyperdrive binding is in place since September 22; the `DATABASE_URL` secret remains the fallback |
+| Database | PostgreSQL 17 on a Neon nonproduction project, through Hyperdrive with query caching disabled | Direct, unpooled Neon endpoint behind Hyperdrive. The preview database is the Neon main branch, where Hyperdrive and the `DATABASE_URL` secret already point; no long-lived staging branch exists (D1(a) of the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md), a coordinator default pending the owner). Throwaway branches serve occasional manual runs. CI's integration database is a PostgreSQL 17 container ([CI narrowing](#goal-sequence)). The Hyperdrive binding is in place since September 22; the `DATABASE_URL` secret remains the fallback |
 | Guest web | React and Vite PWA on Workers Static Assets | One build serves every tenant from server-provided brand configuration |
 | Operator web | React and Vite on a separate Workers Static Assets deployment | Different CSP and release cadence from the guest surface |
 | Contracts | Zod schemas generating OpenAPI, shared through `packages/contracts` | Generated client for both web apps |
@@ -35,7 +35,7 @@ Boundaries:
 | Async work | Idempotency keys and a PostgreSQL outbox table from the first migration; a cron-triggered sweep on the API Worker for hold expiry and outbox delivery | Cloudflare Queues and a dedicated async Worker are deferred with G2.3 |
 | Object storage | Private R2 bucket | Needed from G2.15 for waiver evidence. The demo keeps each signed PDF in PostgreSQL with its evidence row instead (see the G2.15 status); the bucket, with object lock, is a pre-pilot follow-up |
 | Infrastructure as code | Wrangler configuration checked in; no Terraform for the demo | Terraform enters with the pilot readiness gate |
-| CI | GitHub Actions: typecheck, lint, unit, integration against a PostgreSQL 17 service container, browser journeys | Preview deploys per pull request |
+| CI | GitHub Actions: typecheck, lint, unit, integration against a PostgreSQL 17 service container, browser journeys | No preview deploys per pull request: CI dry-runs the three Workers (`pnpm release:dry`), and deploys run only through the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md) (proposed), each with the owner's go |
 | Telemetry | Workers Logs plus structured request logs with tenant and request identifiers; OpenTelemetry export destination open | Attribute naming follows OpenTelemetry semantic conventions |
 
 Hostnames on `tidegrid.us`:
@@ -223,6 +223,8 @@ Parallel work runs only on accepted interfaces and disjoint paths: the design sy
 
 ## Demo acceptance
 
+The Nov 1 run of these steps, with its gates, owner inputs, and rollbacks, is the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md) (proposed, prepared and dry-run only).
+
 The build is demo-complete when, on a preview deployment with two synthetic tenants:
 
 1. A guest opens each tenant's preview hostname and sees that tenant's brand only.
@@ -252,7 +254,7 @@ These exist outside the repository and only the owner can create them. Values go
 | Token budget per goal | Each goal | Set at goal start; the lead reports at the four checkpoints |
 | Commit and pull request authorization | Each goal | One reviewed pull request per goal; merge is the owner's action |
 
-Local tooling on the build machine: Node 24 and pnpm are present. Docker, the Stripe CLI, and `psql` are not installed; the Stripe CLI is needed for the Stripe adapter (no longer for G2.7, which runs on the payment shim) and `psql` is convenient for migrations.
+Local tooling on the build machine: Node 24, pnpm, and the Stripe CLI (`/opt/homebrew/bin/stripe`, observed 2026-10-28) are present. Docker and `psql` are not installed; `psql` is convenient for migrations. Using the Stripe CLI against an account is its own owner approval (gate A14 in the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md)).
 
 ## What this build does not prove
 
