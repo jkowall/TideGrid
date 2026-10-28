@@ -4,6 +4,12 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-10-28
 
+### G2.12d Manual staff booking verification, October 28, 2026
+
+- Built on branch `build/g2.12d-manual-booking` from `main` at `a6f07d5`. Draft pull request 28 runs CI on every push. The scope and the coordinator defaults behind it, each pending owner confirmation, are the [manual booking narrowing](v2/12-demo-build-plan.md#goal-sequence) in the demo build plan and its entry in the [decision register](v2/06-decision-register.md#decision-log).
+- **Migration number.** `0012` went to staff bookings (`0012_staff_bookings.sql`). The G2.14b entry below names a reviewed `0012` as the hostname recovery path; that path now takes a later number. The G2.14b entry is history and is not edited.
+- Evidence is being recorded; the final CI runs, counts, and gaps follow in this section.
+
 ### G2.14b Hostnames and PWA local-first verification, October 28, 2026
 
 - Built on branch `build/g2.14b-hostnames-and-pwa` from `main` at `c0b540a`, merged forward to `eaaaf11` (the Node pin, zod, and vite updates), as the local-first pass of G2.14b. Draft pull request 25 runs CI on every push. The scope and the coordinator defaults behind it, each pending owner confirmation, are the [hostnames and PWA narrowing](v2/12-demo-build-plan.md#goal-sequence) in the demo build plan. No deploy, no Neon, no Cloudflare API call, and no DNS change were made.

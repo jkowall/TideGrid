@@ -69,6 +69,8 @@ async function signIn(page: Page, email: string) {
   await page.getByLabel("Work email").fill(email);
   await page.getByRole("button", { name: "Email me a sign-in link" }).click();
   await page.getByRole("link", { name: "Open the local sign-in link" }).click();
+  // The link opens a confirmation, so a mail scanner's visit signs no one in.
+  await page.getByRole("button", { name: "Continue signing in" }).click();
   await expect(page.getByRole("navigation", { name: "Console" })).toBeAttached({
     timeout: 30_000,
   });

@@ -13,6 +13,7 @@ The operator console for the demo build: one React and Vite build on Workers Sta
 | `/bookings/<bookingId>` | One booking, with its internal notes |
 | `/exceptions` | Payment exceptions: payments that could not become bookings |
 | `/trips/<tripId>/roster` | A trip's printable roster |
+| `/trips/<tripId>/book` | A staff booking for a guest on one trip: owners and booking staff (G2.12d) |
 
 Addresses carry dates, ids, and booking references only, never a person's name or email, and page titles name the page and the operator, never a guest. A search's terms never enter the address either (see Search below). A day missing from the address is today on the marina's clock, read from the catalog's location zone as the calendar does. Today's list leaves the day out, so its address always opens today; a trip filter always carries its day, so a link to one trip's bookings still works tomorrow. The shell moves between pages in place through the History API; Back and Forward work, a new page starts at its top, and its heading takes focus. A link to the address already showing does nothing.
 
@@ -81,6 +82,21 @@ Who sees what: waiver status names people, so both cards need `bookings.read` (o
 
 A guest may cancel within the booking's policy from the management page. The console reads it: a canceled booking keeps its place in the day's list with a Canceled badge beside its payment's, while the counts are of active bookings, the ones holding seats, so a trip whose bookings are all canceled says "No active bookings" above them. The booking's detail says who canceled and when, and that the seats went back on sale; a Cancellation block gives the remedy the policy applied on its side of the cutoff, the policy version and cutoff, and the refund due; the Refund block and the history follow the refund. Rosters and counts leave canceled bookings out.
 
+## Staff-assisted booking (G2.12d)
+
+Owners and booking staff book a guest who phoned, emailed, or walked up, from Book on a calendar trip that is on sale, not blacked out, and before its cutoff, or from New booking on a trip's roster. Finance sees neither, and on the page itself gets a refusal with no request. The API decides either way (`bookings.create`). The contract is [packages/contracts/src/staff-booking.ts](../../packages/contracts/src/staff-booking.ts); the narrowings behind it are in the [demo build plan](../../docs/v2/12-demo-build-plan.md#goal-sequence).
+
+The page goes Party, Guest, Review, Payment, with the Steps component:
+
+1. **Party.** A count per ticket type, or a charter's guests aboard, the add-ons within their limits, and one optional promotion code. The server prices it.
+2. **Guest.** The booker's name, their email (required: the confirmation, the management link, and waiver requests go there), and how they reached staff.
+3. **Review.** The server's quote as a ledger, the policy text with its version, and the email shown large to read back. Two checkboxes, "I read the email address back to the guest" and "I told the guest the cancellation policy (version N)", must both be checked before the seats are held.
+4. **Payment.** A demo test payment: Take test payment or Decline, with the amount and the hold's end on the marina's clock. Cancel booking asks in a danger dialog and is unavailable while a payment is in flight.
+
+The outcome reads the checkout until its state is decided: booked (with the reference and a link to the booking), declined, refunded in full because the payment came after the hold ended, the hold ended, or canceled. Once the checkout has been asked for, the earlier steps are frozen and the request keeps its Idempotency-Key, so Try again after a provider timeout sends the same request. Change details cancels a held checkout first (asking again with the same key to learn it, after a timeout), then prices the party again and opens a new checkout with a new key. Each command keeps its key for the same body and takes a new one when the body changes. The address carries the trip's id only.
+
+A booking's detail shows its Source ("Staff booking, phone", or "Online, by the guest") and, for a staff booking, who took it, to every role. The roster marks a staff booking under its booker. The day's CSV carries a `Source` column. The bookings list's source badge and its trip header link wait for the console flake fixes to land.
+
 ## Content security policy
 
 `public/_headers` keeps `style-src 'self'` with no inline styles: React and the design system set styles only through the CSSOM, and print styles live in the stylesheet. `src/static.test.ts` holds this. The console bundles no schema code: it imports only types from `@tidegrid/contracts`, and the reference normalizer from the dependency-free `@tidegrid/contracts/references`.
@@ -102,8 +118,12 @@ pnpm --filter @tidegrid/operator-site dev     # the console on :5174, /api forwa
 
 `pnpm --filter @tidegrid/operator-site test` runs the console's unit tests in jsdom against a fake API, with the viewer in Tokyo and the marinas in New York and Honolulu, so every time must stay the marina's. The fake API answers a booking's notes (none) and a day's totals (zero) unless a test says otherwise. The API's role and tenancy rules for the booking reads are covered by `apps/api-worker/test-integration/bookings-console.integration.test.ts`, and for search, the day's totals and export, and notes by `apps/api-worker/test-integration/console-completion.integration.test.ts`.
 
+### Browser checks (G2.12d)
+
+`pnpm --filter @tidegrid/operator-site e2e` runs the staff-assisted booking journey in Playwright at 375 and 1280, on both synthetic operators, against the built `dist/` under the console Worker (`wrangler dev --env dev` on port 5382, so `public/_headers` and its CSP apply), bound to the API's ConsoleGateway (`wrangler dev --env dev` on port 8981, `STAFF_ORIGINS=http://localhost:5382`). CI's `console-browser` job seeds a disposable PostgreSQL 17, adds a booking staff member at Demo Reef, and starts the API. Outside CI it uses an installed Google Chrome (`E2E_CHANNEL=chrome`); never run `playwright install` on the owner's machine.
+
 ## Not yet
 
 - Resolving an exception (marking it followed up), cancellation, refunds, and edits belong to later G2.9, G2.11, and G2.12 work; apart from notes, every view here is read-only.
 - Equipment on the roster arrives with the staged modules.
-- Staff manual booking stays with a later goal: it touches confirmation.
+- Staff booking covers staff-assisted bookings paid through the test payment (G2.12d). Cash, check, and complimentary bookings, overrides, staff cancellation of a confirmed booking, and filtering by source are later work.

@@ -27,6 +27,7 @@ import {
   staffCheckoutPaymentRef,
   staffViewOf,
 } from "@tidegrid/domain-booking";
+import { ProviderUnavailableError } from "@tidegrid/domain-payments";
 import { createQuote, getTripOffer, type QuoteProblem } from "@tidegrid/domain-pricing";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
@@ -557,12 +558,19 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           throw checkoutNotFound();
       }
     }
-    const settled = await fake.settlePayment(
-      tenantId,
-      paymentRef,
-      input.outcome === "succeed" ? "succeeded" : "failed",
-      Date.now(),
-    );
+    let settled: Awaited<ReturnType<typeof fake.settlePayment>>;
+    try {
+      settled = await fake.settlePayment(
+        tenantId,
+        paymentRef,
+        input.outcome === "succeed" ? "succeeded" : "failed",
+        Date.now(),
+      );
+    } catch (err) {
+      // The request is recorded; the provider's storage did not answer. Same key again.
+      if (err instanceof ProviderUnavailableError) throw providerUnavailable();
+      throw err;
+    }
     if (settled.kind === "not_found") throw checkoutNotFound();
     const delivery = await deliverFakeEvent(app, c, fake, settled.event);
     if (result.replayed) c.header("Idempotent-Replayed", "true");
