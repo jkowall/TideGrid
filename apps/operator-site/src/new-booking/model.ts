@@ -169,7 +169,7 @@ export type BookingCommand = "quote" | "open" | "pay" | "cancel" | "edit";
 export const commandFailureTitles: Record<BookingCommand, string> = {
   quote: "The party couldn't be priced",
   open: "The seats couldn't be held",
-  pay: "The test payment didn't go through",
+  pay: "The test payment may not have gone through",
   cancel: "The hold couldn't be released",
   edit: "The details couldn't be changed",
 };
@@ -177,8 +177,8 @@ export const commandFailureTitles: Record<BookingCommand, string> = {
 export function refusalOf(code: string | undefined, command?: BookingCommand): Refusal {
   if (code === "payment_provider_unavailable" && command === "pay") {
     return {
-      title: "The test payment didn't go through",
-      body: "The payment provider didn't answer. Try again: the same request is sent, so the guest is never charged twice.",
+      title: "The test payment may not have gone through",
+      body: "The payment provider didn't answer, so it may have gone through or not. Try again: the same request is sent, so the guest is never charged twice.",
       next: "retry",
     };
   }
@@ -287,7 +287,7 @@ export function refusalOf(code: string | undefined, command?: BookingCommand): R
         };
       }
       return {
-        title: "That didn't work",
+        title: command ? commandFailureTitles[command] : "That didn't work",
         body: "TideGrid couldn't finish this. Try again in a moment.",
         next: "retry",
       };

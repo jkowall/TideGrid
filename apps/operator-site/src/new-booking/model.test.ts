@@ -134,7 +134,7 @@ describe("words for the desk", () => {
 
   it("says what a provider timeout means on the payment step, and how held seats are released (review UI-13)", () => {
     expect(refusalOf("payment_provider_unavailable", "pay")).toMatchObject({
-      title: "The test payment didn't go through",
+      title: "The test payment may not have gone through",
       next: "retry",
     });
     expect(refusalOf("payment_provider_unavailable", "pay").body).not.toContain("held");

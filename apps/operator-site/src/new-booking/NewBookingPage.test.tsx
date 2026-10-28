@@ -501,7 +501,7 @@ describe("outcomes", () => {
     expect(await stepHeading("The payment came too late")).toBeTruthy();
     expect(
       screen.getByText(
-        "The payment came through after the hold ended. It is refunded in full. Tell the guest.",
+        "The payment came through after the hold ended or the booking was canceled. It is refunded in full. Tell the guest.",
       ),
     ).toBeTruthy();
   });
@@ -687,8 +687,10 @@ describe("review fixes (G2.12d review)", () => {
   it("UI-3 and UI-4: a cancel after an unanswered payment warns it may have gone through, and the outcome shows no stale error", async () => {
     api({
       ...base(),
-      [newRoute.pay()]: dropped,
+      // The cancel's follow-up asks on the payment's own key and is refused: nothing settled.
+      [newRoute.pay()]: [dropped, () => apiError(409, "checkout_not_open")],
       [newRoute.cancel()]: () => json({ checkout: staffCheckout({ state: "canceled" }) }),
+      [newRoute.read()]: () => json({ checkout: staffCheckout({ state: "canceled" }) }),
     });
     renderPage();
     await toPayment();
@@ -702,6 +704,209 @@ describe("review fixes (G2.12d review)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
     expect(await stepHeading("Booking canceled")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("recheck 1: an unanswered Take test payment leaves Decline unavailable and Try again on its own key", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped, () => json(paid())],
+      [newRoute.read()]: () => json({ checkout: confirmed() }),
+    });
+    renderPage();
+    await toPayment();
+    await click("Take test payment");
+    const alert = await screen.findByRole("alert");
+    expect(text(alert)).toContain("may not have gone through");
+    await settle();
+    expect(screen.getByRole("button", { name: "Decline" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+    expect(sentTo(newRoute.pay())).toHaveLength(1);
+    await click("Try again");
+    await stepHeading("Booked");
+    const [first, second] = sentTo(newRoute.pay());
+    expect(second?.body).toEqual({ outcome: "succeed" });
+    expect(second?.headers.get("idempotency-key")).toBe(first?.headers.get("idempotency-key"));
+  });
+
+  it("recheck 1: a refusal as already settled stays on screen, and Try again sends the settled outcome", async () => {
+    api({
+      ...base(),
+      // Declined elsewhere first: this Take test payment is refused, and the decline still needs delivering.
+      [newRoute.pay()]: [
+        () => apiError(409, "test_payment_settled"),
+        () =>
+          json(
+            paid({
+              outcome: "fail",
+              alreadySettled: true,
+              delivery: { status: 200, outcome: "released", duplicate: false },
+            }),
+          ),
+      ],
+      [newRoute.read()]: () =>
+        json({ checkout: staffCheckout({ state: "failed", paymentState: "failed" }) }),
+    });
+    renderPage();
+    await toPayment();
+    await click("Take test payment");
+    expect(text(await screen.findByRole("alert"))).toContain(
+      "The test payment was already declined",
+    );
+    expect(screen.getByRole("heading", { level: 2, name: "Payment" })).toBeTruthy();
+    await settle();
+    for (const name of ["Take test payment", "Decline", "Cancel booking", "Change details"]) {
+      expect(screen.getByRole("button", { name }).getAttribute("aria-disabled")).toBe("true");
+    }
+    await click("Try again");
+    expect(await stepHeading("The test payment was declined")).toBeTruthy();
+    expect(sentTo(newRoute.pay()).map((p) => p.body)).toEqual([
+      { outcome: "succeed" },
+      { outcome: "fail" },
+    ]);
+  });
+
+  it("recheck 1: Try again after an unanswered payment books whether its event reached the inbox or not", async () => {
+    for (const duplicate of [true, false]) {
+      api({
+        ...base(),
+        [newRoute.pay()]: [
+          dropped,
+          () =>
+            json(
+              paid({
+                alreadySettled: true,
+                delivery: { status: 200, outcome: "confirmed", duplicate },
+              }),
+            ),
+        ],
+        [newRoute.read()]: () => json({ checkout: confirmed() }),
+      });
+      const view = renderPage();
+      await toPayment();
+      await click("Take test payment");
+      await screen.findByRole("alert");
+      await click("Try again");
+      expect(await stepHeading("Booked")).toBeTruthy();
+      const [first, second] = sentTo(newRoute.pay());
+      expect(second?.headers.get("idempotency-key")).toBe(first?.headers.get("idempotency-key"));
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("recheck 3: a cancel after an unanswered payment says it may have gone through, delivers a settled result, and shows the refund", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [
+        dropped,
+        // The payment's own key after the cancel: the settled success is delivered, and refunded.
+        () =>
+          json(
+            paid({
+              alreadySettled: true,
+              delivery: { status: 200, outcome: "refund_required", duplicate: true },
+            }),
+          ),
+      ],
+      [newRoute.cancel()]: () => json({ checkout: staffCheckout({ state: "canceled" }) }),
+      [newRoute.read()]: () =>
+        json({
+          checkout: staffCheckout({
+            state: "unfulfilled",
+            paymentState: "succeeded",
+            refund: { state: "succeeded", amount: 9630 },
+          }),
+        }),
+    });
+    renderPage();
+    await toPayment();
+    await click("Take test payment");
+    await screen.findByRole("alert");
+    await click("Cancel booking");
+    const dialog = await screen.findByRole("dialog", { name: "Cancel this booking?" });
+    await settle();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
+    expect(await stepHeading("The payment came too late")).toBeTruthy();
+    expect(screen.getByText("Refunded in full")).toBeTruthy();
+    const [first, second] = sentTo(newRoute.pay());
+    expect(second?.headers.get("idempotency-key")).toBe(first?.headers.get("idempotency-key"));
+  });
+
+  it("recheck 3: a canceled outcome after an unanswered payment never says nothing was charged, and offers Check again", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped, dropped],
+      [newRoute.cancel()]: () => json({ checkout: staffCheckout({ state: "canceled" }) }),
+      [newRoute.read()]: [
+        () => json({ checkout: staffCheckout({ state: "canceled" }) }),
+        () =>
+          json({
+            checkout: staffCheckout({
+              state: "unfulfilled",
+              paymentState: "succeeded",
+              refund: { state: "succeeded", amount: 9630 },
+            }),
+          }),
+      ],
+    });
+    renderPage();
+    await toPayment();
+    await click("Take test payment");
+    await screen.findByRole("alert");
+    await click("Cancel booking");
+    const dialog = await screen.findByRole("dialog", { name: "Cancel this booking?" });
+    await settle();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    const page = text(document.querySelector(".nb-page"));
+    expect(page).not.toContain("Nothing was charged");
+    expect(page).toContain("may have gone through");
+    await click("Check again");
+    expect(await stepHeading("The payment came too late")).toBeTruthy();
+  });
+
+  it("recheck 2: a retried edit cancels the checkout the re-ask found, never dropping it", async () => {
+    api({
+      ...base(),
+      [newRoute.open]: [() => apiError(503, "payment_provider_unavailable"), openAnswer],
+      [newRoute.cancel()]: [
+        () => apiError(503, "unavailable"),
+        () => json({ checkout: staffCheckout({ state: "canceled" }) }),
+      ],
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByRole("alert");
+    await click("Change details");
+    expect(text(await screen.findByRole("alert"))).toContain("The details couldn't be changed");
+    expect(screen.getByRole("heading", { level: 2, name: "Review with the guest" })).toBeTruthy();
+    await click("Try again");
+    await stepHeading("Who is coming");
+    expect(sentTo(newRoute.cancel())).toHaveLength(2);
+    expect(sentTo(newRoute.open)).toHaveLength(2);
+  });
+
+  it("recheck note: an edit whose re-ask is refused outright goes straight on, with no held-seats notice", async () => {
+    api({
+      ...base(),
+      [newRoute.open]: [
+        () => apiError(503, "payment_provider_unavailable"),
+        () => apiError(409, "quote_expired"),
+      ],
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByRole("alert");
+    await click("Change details");
+    await stepHeading("Who is coming");
+    expect(screen.queryByText("The earlier hold couldn't be released yet")).toBeNull();
+    expect(sentTo(newRoute.cancel())).toHaveLength(0);
   });
 
   it("UI-5: marks Payment done only for a confirmed booking", async () => {

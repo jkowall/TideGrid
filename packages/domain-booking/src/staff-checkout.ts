@@ -240,6 +240,14 @@ export async function recordStaffTestPaymentSuperseded(
   },
 ): Promise<void> {
   assertStaff(ctx);
+  // Once per checkout and outcome asked for: a replayed losing request
+  // answers the same way and adds no row.
+  const { rows } = await sql<{ n: number }>`
+    select count(*)::int as n from audit_events
+     where tenant_id = ${ctx.tenantId} and subject_type = 'checkout_session'
+       and subject_id = ${input.sessionId} and action = 'checkout.test_payment_superseded'
+       and after_state ->> 'requested' = ${input.requested}`.execute(trx);
+  if ((rows[0]?.n ?? 0) > 0) return;
   await record(trx, ctx, {
     action: "checkout.test_payment_superseded",
     subjectType: "checkout_session",

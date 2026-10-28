@@ -82,10 +82,13 @@ async function go(page: Page, path: string) {
 }
 
 /** The first trip this week, or in the next few, that offers Book. */
-/** A week's trips, loaded: real rows carry their sales state; the skeleton's do not. */
+/**
+ * A week, loaded: real rows carry their sales state and the skeleton's do
+ * not; a week with no trips shows its empty state instead.
+ */
 async function weekLoaded(page: Page) {
   await expect(page.getByRole("heading", { level: 1, name: "Calendar" })).toBeVisible();
-  await page.locator(".cal-trip[data-state]").first().waitFor({ timeout: 20_000 });
+  await page.locator(".cal-trip[data-state], .cal .tg-empty").first().waitFor({ timeout: 20_000 });
   await expect(page.locator(".cal-trip--skeleton")).toHaveCount(0);
 }
 
@@ -100,8 +103,13 @@ async function nextWeek(page: Page) {
 /**
  * A trip that offers Book and is far from its cutoff: from next week on, so a
  * departure today cannot close between the calendar and the checkout, and
- * the week's last such trip. The seeded season ends on 2027-05-31
- * (tools/seed/src/catalog.ts), so this finds nothing after mid-May 2027.
+ * the week's last such trip.
+ *
+ * The seeded season ends on Monday 2027-05-31 (tools/seed/src/catalog.ts).
+ * From Sunday 2027-05-23 the next week holds only that Sunday and Monday,
+ * where the phone run's charter can take the last Book the desktop run picks;
+ * from Sunday 2027-05-30 the following weeks hold no trips at all. The job
+ * needs a later season, or dates relative to the run, before 2027-05-23.
  */
 async function firstBookable(page: Page) {
   await go(page, "/calendar");

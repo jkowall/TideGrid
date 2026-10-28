@@ -127,6 +127,27 @@ export function NewBookingPage({
 }
 
 /** A reusable key for one request body: the same body keeps its key, another gets a new one. */
+/**
+ * Keys for several request bodies at once: each body keeps its own key, so
+ * asking for one test payment outcome never loses the other's (recheck 1).
+ */
+function useKeysFor() {
+  const sent = useRef(new Map<string, string>());
+  return {
+    keyFor(body: unknown): string {
+      const text = JSON.stringify(body);
+      const known = sent.current.get(text);
+      if (known) return known;
+      const key = newKey();
+      sent.current.set(text, key);
+      return key;
+    },
+    forget() {
+      sent.current.clear();
+    },
+  };
+}
+
 function useKeyFor() {
   const sent = useRef<{ body: string; key: string } | null>(null);
   return {
@@ -197,7 +218,7 @@ function NewBooking({
 
   const quoteKey = useKeyFor();
   const openKey = useKeyFor();
-  const payKey = useKeyFor();
+  const payKey = useKeysFor();
   const stepHeading = useRef<HTMLHeadingElement>(null);
   const nameField = useRef<HTMLInputElement>(null);
   const emailField = useRef<HTMLInputElement>(null);
@@ -371,8 +392,15 @@ function NewBooking({
     if (!held && openUnknown && quote) {
       // The checkout may exist without its id reaching here: ask again with the same key.
       const again = await sendOpen(quote);
-      if (again.kind === "ok") held = again.value.checkout;
-      else {
+      if (again.kind === "ok") {
+        // Keep it, so a retry of this edit cancels the same checkout (recheck 2).
+        held = again.value.checkout;
+        setCheckout(held);
+      } else if (
+        again.reason !== "refused" ||
+        again.code === undefined ||
+        again.code === "payment_provider_unavailable"
+      ) {
         // Still no answer: the seats may be held. Say so, and keep the request to retry.
         setBusy(null);
         setProblem({
@@ -435,10 +463,28 @@ function NewBooking({
       setStep(4);
       return;
     }
-    if (
-      result.reason === "refused" &&
-      (result.code === "checkout_not_open" || result.code === "test_payment_settled")
-    ) {
+    if (result.reason === "refused" && result.code === "test_payment_settled") {
+      // The provider settled it the other way, and its result may not have
+      // reached TideGrid. Keep that payment's own request, and offer only it.
+      const settledAs: StaffTestPaymentOutcome = outcome === "succeed" ? "fail" : "succeed";
+      setBusy(null);
+      setLastPay(settledAs);
+      setSettledUndelivered(true);
+      setProblem({
+        kind: "refusal",
+        command: "pay",
+        refusal: {
+          title:
+            settledAs === "succeed"
+              ? "The test payment already went through"
+              : "The test payment was already declined",
+          body: "It was decided before this request, so this one was refused. Try again to make sure TideGrid has that result.",
+          next: "retry",
+        },
+      });
+      return;
+    }
+    if (result.reason === "refused" && result.code === "checkout_not_open") {
       if (await showCheckout(checkout.id)) return;
     }
     setBusy(null);
@@ -469,6 +515,22 @@ function NewBooking({
     const result = await cancelCheckout(tenantId, checkout.id, newKey());
     setConfirmCancel(false);
     if (result.kind === "ok") {
+      if (payUncertain) {
+        // The payment may have gone through. Its own request again, on its
+        // key, delivers a settled result so the refund follows, and settles
+        // nothing on the canceled checkout otherwise (recheck 3).
+        const settled = await takeTestPayment(
+          tenantId,
+          checkout.id,
+          lastPay,
+          payKey.keyFor(lastPay),
+        );
+        // Refused as no longer open: nothing had settled, so nothing was charged.
+        if (settled.kind === "failed" && settled.code === "checkout_not_open") {
+          setPayUncertain(false);
+        }
+        if (await showCheckout(checkout.id)) return;
+      }
       setBusy(null);
       setProblem(null);
       setCheckout(result.value);
@@ -799,7 +861,11 @@ function NewBooking({
                 icon="credit-card"
                 busy={busy === "succeed"}
                 busyLabel="Taking payment…"
-                disabled={settledUndelivered || (busy !== null && busy !== "succeed")}
+                disabled={
+                  settledUndelivered ||
+                  (payUncertain && lastPay !== "succeed") ||
+                  (busy !== null && busy !== "succeed")
+                }
                 onClick={() => void pay("succeed")}
               >
                 Take test payment
@@ -808,7 +874,11 @@ function NewBooking({
                 icon="x-octagon"
                 busy={busy === "fail"}
                 busyLabel="Declining…"
-                disabled={settledUndelivered || (busy !== null && busy !== "fail")}
+                disabled={
+                  settledUndelivered ||
+                  (payUncertain && lastPay !== "fail") ||
+                  (busy !== null && busy !== "fail")
+                }
                 onClick={() => void pay("fail")}
               >
                 Decline
@@ -845,7 +915,9 @@ function NewBooking({
               checkout={checkout}
               outcome={outcomeOf(checkout)}
               stalled={polls >= POLL_LIMIT}
+              uncertain={payUncertain}
               onCheck={() => setPolls(0)}
+              onRecheck={() => void showCheckout(checkout.id)}
             />
           </section>
         )}
@@ -1009,13 +1081,23 @@ function OutcomeBody({
   checkout,
   outcome,
   stalled,
+  uncertain,
   onCheck,
+  onRecheck,
 }: {
   checkout: StaffCheckout;
   outcome: Outcome;
   stalled: boolean;
+  /** A test payment got no answer before this outcome: it may have gone through. */
+  uncertain: boolean;
   onCheck: () => void;
+  onRecheck: () => void;
 }) {
+  const recheck = (
+    <Button variant="primary" icon="refresh" onClick={onRecheck}>
+      Check again
+    </Button>
+  );
   const again = (
     <ButtonLink href={hereAddress()} icon="refresh">
       Start a new booking
@@ -1075,20 +1157,37 @@ function OutcomeBody({
       return (
         <Notice tone="warning" title="Refunded in full" actions={again}>
           <p>
-            The payment came through after the hold ended. It is refunded in full. Tell the guest.
+            The payment came through after the hold ended or the booking was canceled. It is
+            refunded in full. Tell the guest.
           </p>
         </Notice>
       );
     case "expired":
       return (
-        <Notice tone="warning" title="The seats were released" actions={again}>
-          <p>The payment wasn't taken before the hold ended. Start again to book the guest.</p>
+        <Notice
+          tone="warning"
+          title="The seats were released"
+          actions={uncertain ? recheck : again}
+        >
+          <p>
+            {uncertain
+              ? "The hold ended before the test payment's result arrived. It may have gone through; if it did, it is refunded in full, and Check again shows the refund."
+              : "The payment wasn't taken before the hold ended. Start again to book the guest."}
+          </p>
         </Notice>
       );
     case "canceled":
       return (
-        <Notice tone="info" title="The held seats went back on sale" actions={again}>
-          <p>Nothing was charged.</p>
+        <Notice
+          tone="info"
+          title="The held seats went back on sale"
+          actions={uncertain ? recheck : again}
+        >
+          <p>
+            {uncertain
+              ? "The test payment may have gone through before the cancel. If it did, it is refunded in full, and Check again shows the refund here; the operator also sees an exception."
+              : "Nothing was charged."}
+          </p>
           <p>
             <ConsoleLink href="/calendar" className="tap-target">
               Back to calendar

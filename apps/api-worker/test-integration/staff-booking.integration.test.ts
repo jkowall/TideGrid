@@ -52,7 +52,7 @@ import {
   quoteFor,
   TEST_FAKE_SECRET,
 } from "@tidegrid/domain-booking/testing";
-import { changeTripSalesState } from "@tidegrid/domain-catalog";
+import { changeTripSalesState, createBlackout } from "@tidegrid/domain-catalog";
 import { systemContext, tripAllocator } from "@tidegrid/domain-inventory/testing";
 import { deliverTenantMessages, FakeEmailProvider } from "@tidegrid/domain-messaging";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
@@ -1094,23 +1094,100 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
     expect(retry.json.delivery).toMatchObject({ status: 200, outcome: "confirmed" });
   });
 
-  it("lets one of two opposite test payments sent at once stand, and records the other as superseded", async () => {
-    for (let round = 0; round < 4; round++) {
+  it("records the losing one of two opposite test payments as superseded, once, and R4 says what stood", async () => {
+    const tripId = tripsA.shared();
+    const q = await staffQuote(A, A.owner, tickets(tripId, 1));
+    const opened = await open(A.id, A.owner, openBody(q, booker("both")));
+    const id = opened.json.checkout.id as string;
+    const yesKey = key("yes");
+    const noKey = key("no");
+    // Both requests pass phase 1 before either settles: the fake's storage refuses both settles.
+    await admin`revoke insert on public.fake_provider_events from tidegrid_app`;
+    let first: Res[];
+    try {
+      first = [
+        await testPay(A.id, A.owner, id, "succeed", yesKey),
+        await testPay(A.id, A.owner, id, "fail", noKey),
+      ];
+    } finally {
+      await admin`grant insert on public.fake_provider_events to tidegrid_app`;
+    }
+    expect(first.map((r) => [r.status, r.json.error?.code])).toEqual([
+      [503, "payment_provider_unavailable"],
+      [503, "payment_provider_unavailable"],
+    ]);
+    // The success settles and books; the decline's replay finds it and is superseded.
+    const won = await testPay(A.id, A.owner, id, "succeed", yesKey);
+    expect(won.json.delivery).toMatchObject({ status: 200, outcome: "confirmed" });
+    for (let i = 0; i < 2; i++) {
+      const lost = await testPay(A.id, A.owner, id, "fail", noKey);
+      expect([lost.status, lost.json.error?.code]).toEqual([409, "test_payment_settled"]);
+    }
+    const rows = await admin<{ action: string; after: Record<string, string> }[]>`
+      select action, after_state as after from public.audit_events
+       where subject_id = ${id} and action like 'checkout.test_payment_%' order by id`;
+    expect(rows.map((r) => [r.action, r.after.requested ?? null, r.after.outcome])).toEqual([
+      ["checkout.test_payment_requested", null, "succeed"],
+      ["checkout.test_payment_requested", null, "fail"],
+      ["checkout.test_payment_superseded", "fail", "succeed"],
+    ]);
+    const now = (await read(A.id, A.owner, id)).json.checkout;
+    expect(now).toMatchObject({ state: "confirmed", lastTestPayment: { outcome: "succeed" } });
+  });
+
+  it("refuses a second outcome in phase 1 once the first settled, whichever comes second", async () => {
+    for (const [firstOutcome, secondOutcome, state] of [
+      ["succeed", "fail", "confirmed"],
+      ["fail", "succeed", "failed"],
+    ] as const) {
       const tripId = tripsA.shared();
       const q = await staffQuote(A, A.owner, tickets(tripId, 1));
-      const opened = await open(A.id, A.owner, openBody(q, booker("both")));
+      const opened = await open(A.id, A.owner, openBody(q, booker("second")));
       const id = opened.json.checkout.id as string;
-      const [yes, no] = await Promise.all([
-        testPay(A.id, A.owner, id, "succeed"),
-        testPay(A.id, A.owner, id, "fail"),
-      ]);
-      const won = yes.status === 200 ? "succeed" : "fail";
-      const lost = won === "succeed" ? no : yes;
-      expect([yes.status, no.status].sort()).toEqual([200, 409]);
-      expect(lost.json.error?.code).toBe("test_payment_settled");
+      expect((await testPay(A.id, A.owner, id, firstOutcome)).status).toBe(200);
+      const second = await testPay(A.id, A.owner, id, secondOutcome);
+      // Decided and closed: refused as not open, or as settled; never delivered.
+      expect(second.status).toBe(409);
+      expect(["checkout_not_open", "test_payment_settled"]).toContain(second.json.error?.code);
       const now = (await read(A.id, A.owner, id)).json.checkout;
-      expect(now.lastTestPayment.outcome).toBe(won);
-      expect(now.state).toBe(won === "succeed" ? "confirmed" : "failed");
+      expect(now).toMatchObject({ state, lastTestPayment: { outcome: firstOutcome } });
+    }
+  });
+
+  it("gives the roster the calendar's Book rule inputs: a blacked-out trip and one past its cutoff", async () => {
+    const ctx = systemContext(A.id, "g212d-roster");
+    const blacked = tripsA.shared();
+    const date = await dateOf(blacked);
+    await inTenantTransaction(runtime.db, ctx, (trx) =>
+      createBlackout(trx, ctx, {
+        scope: { kind: "product", productId: A.products.shared },
+        startsOn: date,
+        endsOn: date,
+        reason: "g212d roster check",
+      }),
+    );
+    const late = A.trips.late[1] ?? "";
+    for (const [tripId, expected] of [
+      [blacked, { blackedOut: true }],
+      [late, { blackedOut: false }],
+    ] as const) {
+      const res = await request("GET", `${base(A.id)}/trips/${tripId}/roster`, { as: A.staff });
+      expect(res.status, res.text).toBe(200);
+      const trip = TripRosterResponse.parse(res.json).roster.trip;
+      expect(trip).toMatchObject(expected);
+      const [closes] = await admin<{ at: Date }[]>`
+        select t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as at
+          from public.scheduled_trips t join public.products p on p.id = t.product_id
+         where t.id = ${tripId}`;
+      expect(trip.salesCloseAt).toBe(closes?.at.toISOString());
+    }
+    // The late trip is always inside its seven-day cutoff: its sales have closed.
+    const lateRoster = await request("GET", `${base(A.id)}/trips/${late}/roster`, { as: A.staff });
+    const lateTrip = TripRosterResponse.parse(lateRoster.json).roster.trip;
+    expect(Date.parse(lateTrip.salesCloseAt ?? "")).toBeLessThan(Date.now());
+    // And the API refuses both, as the roster's hidden New booking says it would.
+    for (const tripId of [blacked, late]) {
+      expect((await offer(A.id, A.staff, tripId)).json.error?.code).toBe("trip_not_bookable");
     }
   });
 
