@@ -219,9 +219,46 @@ describe("runFairSweep", () => {
         deferredTenants: 2,
         failedTenants: 0,
         stampFailures: 0,
+        stopped: false,
         complete: false,
       });
       expect(world.stamps.size).toBe(0);
+    }
+  });
+
+  it("ends the run when a turn says stop, in either pass", async () => {
+    for (const stopAt of [1, 2]) {
+      const turns: string[] = [];
+      const report = await runFairSweep({
+        listTenants: async () => [tenant(1), tenant(2), tenant(3)],
+        tenantLimit: 100,
+        stamp: async () => {},
+        turn: async (t, pass) => {
+          turns.push(`${t}@${pass}`);
+          return { units: 1, more: true, stop: t === tenant(2) && pass === stopAt };
+        },
+        budgetMs: 1000,
+        clock: () => 0,
+        onTenantError: () => {},
+      });
+      expect({ stopAt, turns }).toEqual({
+        stopAt,
+        turns:
+          stopAt === 1
+            ? [`${tenant(1)}@1`, `${tenant(2)}@1`]
+            : [
+                `${tenant(1)}@1`,
+                `${tenant(2)}@1`,
+                `${tenant(3)}@1`,
+                `${tenant(1)}@2`,
+                `${tenant(2)}@2`,
+              ],
+      });
+      expect(report).toMatchObject({
+        stopped: true,
+        complete: false,
+        deferredTenants: stopAt === 1 ? 1 : 0,
+      });
     }
   });
 

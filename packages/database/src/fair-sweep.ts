@@ -42,6 +42,11 @@ export interface FairTurnResult {
   units: number;
   /** Another quantum could do more for this tenant now. */
   more: boolean;
+  /**
+   * End the whole run after this turn: no further turn starts for any tenant,
+   * such as when a provider refuses at the account level (Part C).
+   */
+  stop?: boolean;
 }
 
 export interface FairSweepReport {
@@ -56,10 +61,12 @@ export interface FairSweepReport {
   failedTenants: number;
   /** Tenants whose stamp failed this run; each still took its turn. */
   stampFailures: number;
+  /** A turn ended the run (FairTurnResult.stop). */
+  stopped: boolean;
   /**
    * False when a listed tenant got no turn, a tenant still had more at the end
    * (or asked for more without doing anything), the list reached the tenant
-   * limit, or a tenant failed.
+   * limit, a tenant failed, or a turn stopped the run.
    */
   complete: boolean;
 }
@@ -112,6 +119,7 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
     deferredTenants: 0,
     failedTenants: 0,
     stampFailures: 0,
+    stopped: false,
     complete: false,
   };
 
@@ -131,7 +139,11 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
     try {
       // Inside the try: an observer that throws fails this turn, not the run.
       options.onTurnStart?.(tenantId, pass);
-      const { units, more } = await options.turn(tenantId, pass);
+      const { units, more, stop } = await options.turn(tenantId, pass);
+      if (stop) {
+        report.stopped = true;
+        return false;
+      }
       if (!more) return false;
       // A turn that did nothing yet asks for more would spin until the budget
       // ran out. It gets no further turn, and the run does not claim to be done.
@@ -170,11 +182,15 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
     if (overBudget()) break;
     report.tenants += 1;
     if (await take(tenantId, 1)) waiting.push(tenantId);
+    if (report.stopped) {
+      index += 1;
+      break;
+    }
   }
   report.deferredTenants = listed.length - index;
 
   let pass = 1;
-  let stopped = report.deferredTenants > 0;
+  let stopped = report.deferredTenants > 0 || report.stopped;
   while (!stopped && waiting.length > 0 && pass < maxPasses) {
     pass += 1;
     const next: string[] = [];
@@ -197,6 +213,11 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
         }
       }
       if (await take(tenantId, pass)) next.push(tenantId);
+      if (report.stopped) {
+        stopped = true;
+        next.push(...waiting.slice(i + 1));
+        break;
+      }
     }
     waiting = next;
   }
@@ -206,6 +227,7 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
     report.deferredTenants === 0 &&
     waiting.length === 0 &&
     !stalled &&
+    !report.stopped &&
     report.failedTenants === 0;
   return report;
 }
