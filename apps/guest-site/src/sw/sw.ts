@@ -142,7 +142,20 @@ export interface ServiceWorkerScopeLike {
 }
 
 /** Install the worker's listeners on a scope: the real one in sw.js, a fake in tests. */
-export function installServiceWorker(scope: ServiceWorkerScopeLike, config: ServiceWorkerConfig) {
+/**
+ * How long a page load's take-over request looks for the site to be down to
+ * one window: a window that just closed, or the document a reload replaced,
+ * can stay on the browser's client list for a moment. A window that is really
+ * open stays on it, and the worker keeps waiting.
+ */
+export const TAKE_OVER_CHECKS_MS: readonly number[] = [0, 1_000, 2_000, 4_000];
+
+export function installServiceWorker(
+  scope: ServiceWorkerScopeLike,
+  config: ServiceWorkerConfig,
+  options: { takeOverChecksMs?: readonly number[] } = {},
+) {
+  const checks = options.takeOverChecksMs ?? TAKE_OVER_CHECKS_MS;
   const name = cacheNameFor(config.buildId);
   const entries = precacheEntries(config.precache);
   const precached = new Set(entries);
@@ -171,8 +184,14 @@ export function installServiceWorker(scope: ServiceWorkerScopeLike, config: Serv
   scope.addEventListener("message", (event) => {
     if ((event.data as { type?: unknown } | null)?.type !== SKIP_WAITING) return;
     const takeOver = (async () => {
-      const windows = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
-      if (windows.length <= 1) await scope.skipWaiting();
+      for (const delay of checks) {
+        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+        const windows = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
+        if (windows.length <= 1) {
+          await scope.skipWaiting();
+          return;
+        }
+      }
     })();
     event.waitUntil?.(takeOver);
   });

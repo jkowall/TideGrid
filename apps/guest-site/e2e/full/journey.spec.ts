@@ -249,7 +249,7 @@ test("a waiting service worker does not take over while another window is open (
           await page.waitForTimeout(500);
           return workerState(page);
         },
-        { timeout: 30_000, intervals: [1_000] },
+        { timeout: 45_000, intervals: [1_000] },
       )
       .toEqual({
         active: "activated",

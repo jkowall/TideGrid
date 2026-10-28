@@ -261,13 +261,35 @@ describe("service worker update policy (G2.14b, D11(a))", () => {
 
   it("keeps waiting while another window or the installed app is open", async () => {
     const sw = fakeScope(async (url) => ok(`body of ${url}`));
-    installServiceWorker(sw.scope, { precache: PRECACHE, buildId: "b4" });
+    installServiceWorker(
+      sw.scope,
+      { precache: PRECACHE, buildId: "b4" },
+      { takeOverChecksMs: [0, 1, 1] },
+    );
     await sw.dispatch("install");
     sw.windows.count = 2;
     await sw.message({ type: SKIP_WAITING });
     expect(sw.skipped.count).toBe(0);
     sw.windows.count = 1;
     await sw.message({ type: SKIP_WAITING });
+    expect(sw.skipped.count).toBe(1);
+  });
+
+  it("looks again for a moment, so a window that just closed does not hold it back", async () => {
+    const sw = fakeScope(async (url) => ok(`body of ${url}`));
+    installServiceWorker(
+      sw.scope,
+      { precache: PRECACHE, buildId: "b5" },
+      { takeOverChecksMs: [0, 5, 5] },
+    );
+    await sw.dispatch("install");
+    sw.windows.count = 2;
+    const asked = sw.message({ type: SKIP_WAITING });
+    // The closed window leaves the client list after the first look.
+    setTimeout(() => {
+      sw.windows.count = 1;
+    }, 2);
+    await asked;
     expect(sw.skipped.count).toBe(1);
   });
 });
