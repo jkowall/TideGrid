@@ -7,7 +7,18 @@
  * bodies follow the API reference, trimmed to the fields that matter, and no
  * body here was captured from Stripe. Synthetic ids, keys, and accounts only.
  * Thin events are unsupported: they carry no `data.object`, and the adapter
- * refuses them. The rules for replacing these bodies with sanitized sandbox
+ * refuses them.
+ *
+ * Like Stripe, a POST with an idempotency key saves its answer only once it
+ * has executed: a parameter-validation error is not saved, so the same key
+ * runs again once the request is fixed. A declined confirmation leaves a
+ * failed charge as the intent's latest charge. One behavior is not Stripe's:
+ * a call with no Stripe-Account header is refused as a test tripwire
+ * (`fixture_tripwire_stripe_account_missing`), where Stripe would run it on the
+ * platform account. The adapter's own check is the real guard. An account the
+ * key cannot reach answers 403 `account_invalid`.
+ *
+ * The rules for replacing these bodies with sanitized sandbox
  * captures are in the package README, and `stripe-fixture-hygiene.test.ts`
  * enforces them.
  *
@@ -31,16 +42,13 @@ import {
   STRIPE_MINIMUM_AMOUNT,
 } from "./stripe.ts";
 
-// The constants are joined at load time so secret scanners do not read a
-// synthetic value as a credential. None of them works anywhere.
-/** A synthetic restricted test key. */
-export const STRIPE_FIXTURE_SECRET_KEY = ["rk", "test", "TideGridSyntheticFixtureKey0001"].join(
-  "_",
-);
-/** A synthetic webhook signing secret. */
-export const STRIPE_FIXTURE_WEBHOOK_SECRET = ["whsec", "TideGridSyntheticFixtureSecret01"].join(
-  "_",
-);
+// The fixture's credentials have a shape no deployment accepts: the
+// configuration check refuses both as malformed in every environment, and the
+// adapter takes them only as a pair over an injected fetch. None works anywhere.
+/** A synthetic restricted test key, fixture-shaped. */
+export const STRIPE_FIXTURE_SECRET_KEY = "rk_test_fixture_TideGridSynthetic0001";
+/** A synthetic webhook signing secret, fixture-shaped. */
+export const STRIPE_FIXTURE_WEBHOOK_SECRET = "whsec_fixture_TideGridSynthetic0001";
 /** The two synthetic connected accounts, modeled on demo-harbor and demo-reef. */
 export const STRIPE_FIXTURE_ACCOUNTS = {
   harbor: "acct_1TestHarbor0000",
@@ -184,7 +192,9 @@ interface Intent {
   metadata: Record<string, string>;
   created: number;
   sequence: number;
+  /** The latest charge, as latest_charge names it. */
   chargeId: string | null;
+  chargeStatus: "succeeded" | "failed" | null;
   paymentMethodId: string | null;
   amountReceived: number;
   lastPaymentError: Record<string, unknown> | null;
@@ -264,17 +274,19 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
     return total;
   };
 
+  /** The intent's latest charge: succeeded once paid, failed after a declined attempt. */
   const renderCharge = (intent: Intent) => {
-    const refunded = refundedOn(intent);
+    const paid = intent.chargeStatus === "succeeded";
+    const refunded = paid ? refundedOn(intent) : 0;
     return {
       id: intent.chargeId,
       object: "charge",
       amount: intent.amount,
-      amount_captured: intent.amount,
+      amount_captured: paid ? intent.amount : 0,
       amount_refunded: refunded,
       application_fee: null,
       application_fee_amount: null,
-      balance_transaction: intent.chargeId?.replace(/^ch_/, "txn_") ?? null,
+      balance_transaction: paid ? (intent.chargeId?.replace(/^ch_/, "txn_") ?? null) : null,
       billing_details: {
         address: {
           city: null,
@@ -288,17 +300,18 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         name: null,
         phone: null,
       },
-      captured: true,
+      captured: paid,
       created: intent.created,
       currency: "usd",
       customer: null,
       description: null,
       disputed: false,
+      failure_code: paid ? null : "card_declined",
       livemode: false,
       metadata: {},
       on_behalf_of: null,
       outcome: null,
-      paid: true,
+      paid,
       payment_intent: intent.id,
       payment_method: intent.paymentMethodId,
       payment_method_details: {
@@ -317,8 +330,8 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
       receipt_email: null,
       receipt_number: null,
       receipt_url: STRIPE_FIXTURE_RECEIPT_URL,
-      refunded: refunded === intent.amount,
-      status: "succeeded",
+      refunded: paid && refunded === intent.amount,
+      status: paid ? "succeeded" : "failed",
       transfer_data: null,
       transfer_group: null,
     };
@@ -431,8 +444,21 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
     return { fields, metadata, lists };
   };
 
+  /**
+   * Answers refused while Stripe validates parameters, before execution. Stripe
+   * saves no idempotent result for them (https://docs.stripe.com/api/idempotent_requests).
+   */
+  const validationFailures = new WeakSet<Response>();
+  const invalid = (status: number, body: unknown) => {
+    const response = json(status, body);
+    validationFailures.add(response);
+    return response;
+  };
+  const duplicate = () =>
+    invalid(400, errorBody("invalid_request_error", null, "Duplicate parameter"));
+
   const unknownParameter = (name: string) =>
-    json(
+    invalid(
       400,
       errorBody(
         "invalid_request_error",
@@ -460,7 +486,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
   ): Response => {
     if (method === "POST" && path === "/v1/payment_intents") {
       const read = readForm(form);
-      if (!read) return json(400, errorBody("invalid_request_error", null, "Duplicate parameter"));
+      if (!read) return duplicate();
       for (const name of read.fields.keys()) {
         if (name !== "amount" && name !== "currency") return unknownParameter(name);
       }
@@ -469,13 +495,13 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
       }
       const amount = parseAmount(read.fields.get("amount"));
       if (amount === null) {
-        return json(
+        return invalid(
           400,
           errorBody("invalid_request_error", "parameter_missing", "Missing amount", "amount"),
         );
       }
       if (read.fields.get("currency") !== "usd") {
-        return json(
+        return invalid(
           400,
           errorBody(
             "invalid_request_error",
@@ -486,7 +512,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         );
       }
       if (amount < STRIPE_MINIMUM_AMOUNT) {
-        return json(
+        return invalid(
           400,
           errorBody(
             "invalid_request_error",
@@ -497,7 +523,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         );
       }
       if (amount > STRIPE_MAXIMUM_AMOUNT) {
-        return json(
+        return invalid(
           400,
           errorBody(
             "invalid_request_error",
@@ -517,6 +543,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         created: seconds(),
         sequence,
         chargeId: null,
+        chargeStatus: null,
         paymentMethodId: null,
         amountReceived: 0,
         lastPaymentError: null,
@@ -540,7 +567,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
 
     if (method === "POST" && path === "/v1/refunds") {
       const read = readForm(form);
-      if (!read) return json(400, errorBody("invalid_request_error", null, "Duplicate parameter"));
+      if (!read) return duplicate();
       for (const name of read.fields.keys()) {
         if (name !== "payment_intent" && name !== "amount") return unknownParameter(name);
       }
@@ -550,7 +577,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
       if (!intent || intent.account !== account) {
         return missing("payment_intent", id, "payment_intent");
       }
-      if (intent.status !== "succeeded" || !intent.chargeId) {
+      if (intent.status !== "succeeded" || intent.chargeStatus !== "succeeded") {
         return json(
           400,
           errorBody(
@@ -678,10 +705,21 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         return json(400, errorBody("invalid_request_error", null, "Invalid Stripe API version"));
       }
       const account = recorded.stripeAccount;
-      // Direct charges only: every call names a connected account.
-      if (account === null || !accounts.has(account)) {
+      // A test tripwire, not Stripe's behavior: Stripe would run this call on
+      // the platform account, as a platform charge. The adapter must never send it.
+      if (account === null) {
         return json(
           400,
+          errorBody(
+            "invalid_request_error",
+            "fixture_tripwire_stripe_account_missing",
+            "Fixture tripwire: every adapter call must name a connected account.",
+          ),
+        );
+      }
+      if (!accounts.has(account)) {
+        return json(
+          403,
           errorBody(
             "invalid_request_error",
             "account_invalid",
@@ -717,8 +755,11 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         }
         return (async () => {
           const response = execute(method, path, url, account, form);
-          const body = await response.clone().text();
-          keys.set(`${account}\u0000${key}`, { signature, status: response.status, body });
+          // Only an executed request is saved under its key.
+          if (!validationFailures.has(response)) {
+            const body = await response.clone().text();
+            keys.set(`${account}\u0000${key}`, { signature, status: response.status, body });
+          }
           return response;
         })();
       }
@@ -791,6 +832,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
       intent.status = "succeeded";
       intent.amountReceived = intent.amount;
       intent.chargeId = nextId("ch");
+      intent.chargeStatus = "succeeded";
       intent.paymentMethodId = nextId("pm");
       intent.lastPaymentError = null;
       return renderIntent(intent);
@@ -801,6 +843,8 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         throw new Error(`the intent is already ${intent.status}`);
       }
       intent.status = "requires_payment_method";
+      intent.chargeId = nextId("ch");
+      intent.chargeStatus = "failed";
       intent.lastPaymentError = {
         type: "card_error",
         code,
@@ -860,6 +904,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         created: seconds(),
         sequence,
         chargeId: null,
+        chargeStatus: null,
         paymentMethodId: null,
         amountReceived: 0,
         lastPaymentError: null,

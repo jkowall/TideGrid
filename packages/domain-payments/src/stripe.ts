@@ -79,9 +79,10 @@ const codePattern = /^[a-z][a-z0-9_]{0,63}$/;
 const eventTypePattern = /^[a-z][a-z0-9_.]{0,99}$/;
 
 /**
- * Stripe error codes that mean the request never ran because of a key,
- * account, or mode fault. They are configuration faults: retried after the
- * fix, never final (https://docs.stripe.com/error-low-level).
+ * Stripe error codes about the key, the platform, or the connected account,
+ * not about the request (https://docs.stripe.com/error-codes). They are
+ * configuration faults: retried after the fix, never final. A refund must
+ * never settle as failed on one (https://docs.stripe.com/error-low-level).
  */
 const configurationCodes = new Set([
   "api_key_expired",
@@ -89,7 +90,33 @@ const configurationCodes = new Set([
   "secret_key_required",
   "account_invalid",
   "livemode_mismatch",
+  "platform_account_required",
+  "capability_not_active",
+  "action_blocked",
+  "testmode_charges_only",
+  "tls_version_unsupported",
+  "anomalous_money_movement_request",
+  "account_country_invalid_address",
+  "progressive_onboarding_limit_exceeded",
 ]);
+
+/** Stripe error codes that mean "not now": the same request may succeed later. */
+const transientCodes = new Set([
+  "lock_timeout",
+  "rate_limit",
+  "idempotency_key_in_use",
+  "balance_insufficient",
+  "charge_exceeds_source_limit",
+  "payment_method_not_available",
+]);
+
+/**
+ * The fixture's credentials. They fail the shape checks above on purpose, so
+ * they can never configure a deployment; the constructor takes them only as a
+ * pair and only with an injected fetch, which no deployment passes.
+ */
+const fixtureKeyPattern = /^rk_test_fixture_[A-Za-z0-9]{8,}$/;
+const fixtureWebhookSecretPattern = /^whsec_fixture_[A-Za-z0-9]{8,}$/;
 
 export type StripeConfigProblem =
   | { kind: "off"; reason: "stripe_key_missing" | "stripe_webhook_secret_missing" }
@@ -416,8 +443,24 @@ export class StripePaymentProvider implements PaymentProvider {
   readonly #toleranceSeconds: number;
 
   constructor(options: StripeProviderOptions) {
-    const problem = checkStripeConfig(options);
-    if (problem) throw new TypeError(`the Stripe adapter is refused: ${problem.reason}`);
+    const fixture =
+      options.fetch !== undefined &&
+      typeof options.secretKey === "string" &&
+      fixtureKeyPattern.test(options.secretKey);
+    if (fixture) {
+      if (options.environment === "production") {
+        throw new TypeError("the Stripe adapter is refused: stripe_test_in_production");
+      }
+      if (
+        typeof options.webhookSecret !== "string" ||
+        !fixtureWebhookSecretPattern.test(options.webhookSecret)
+      ) {
+        throw new TypeError("the Stripe adapter is refused: webhook_secret_malformed");
+      }
+    } else {
+      const problem = checkStripeConfig(options);
+      if (problem) throw new TypeError(`the Stripe adapter is refused: ${problem.reason}`);
+    }
     const apiBase = options.apiBase ?? STRIPE_API_BASE;
     let url: URL;
     try {
@@ -673,7 +716,8 @@ export class StripePaymentProvider implements PaymentProvider {
       search.set("limit", "100");
       if (startingAfter !== null) search.set("starting_after", startingAfter);
       const sent = await this.#send("GET", "/v1/refunds", account, search);
-      if (!sent.ok) throw rejected(sent.refusal);
+      // A refused lookup is no answer about the refund, so it is never final.
+      if (!sent.ok) throw unavailable("stripe_refund_lookup_refused");
       const { object, data, has_more } = sent.body;
       if (object !== "list" || !Array.isArray(data) || typeof has_more !== "boolean") {
         throw malformed();
@@ -755,6 +799,7 @@ export class StripePaymentProvider implements PaymentProvider {
     const error = isRecord(json) && isRecord(json.error) ? json.error : null;
     const code = safeCode(error?.code);
     if (code !== null && configurationCodes.has(code)) throw unavailable("stripe_config");
+    if (code !== null && transientCodes.has(code)) throw unavailable("stripe_retry");
     if (error?.type === "idempotency_error") {
       throw new ProviderRejectedError(
         "idempotency_key_reused",

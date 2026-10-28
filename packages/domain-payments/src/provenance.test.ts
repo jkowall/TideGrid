@@ -3,9 +3,18 @@
  *
  * The brand on VerifiedProviderEvent is type-only, and `verifiedEvent` is a
  * plain cast, so the compiler alone cannot stop a forged event. These scans
- * do: `verifyWebhook` stays the only producer of the brand, nothing outside
- * this package reaches into its source, and no runtime code imports the
- * test fixture.
+ * narrow the ways to forge one: `verifyWebhook` stays the only caller of the
+ * minting function; no file casts to the brand, gives the type to an object
+ * literal, a parse, or an `any` value, or returns a literal from a function
+ * typed to return it; nothing outside this package reaches into its source;
+ * and no runtime code reaches the test fixture, by package path or relative.
+ *
+ * Limits, recorded: a scan reads text, not types. An unannotated spread of a
+ * real verified event (`{ ...event, accountRef }`) keeps the brand and is not
+ * caught here, nor is an `any` that never meets the type's name. Review and
+ * the `noExplicitAny` lint rule cover those. A runtime brand (a private
+ * WeakSet checked by the inbox) would close them; the inbox is outside this
+ * goal, so it is a proposed follow-up.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -46,6 +55,11 @@ function verifyWebhookBody(text: string): [number, number] | null {
   if (start < 0) return null;
   const open = text.indexOf("{", text.indexOf(")", start));
   if (open < 0) return null;
+  return bodyFrom(text, open);
+}
+
+/** The braced block opening at `open`, as a [start, end) range, skipping strings and comments. */
+function bodyFrom(text: string, open: number): [number, number] | null {
   let depth = 0;
   let quote: string | null = null;
   for (let i = open; i < text.length; i++) {
@@ -72,9 +86,20 @@ function brandFindings(rel: string, text: string): string[] {
   const casts = [
     new RegExp(`\\bas\\s+(?:unknown\\s+as\\s+)?${brandName}\\b`, "g"),
     new RegExp(`(?:^|[^\\w$.])<${brandName}>(?!\\s*[=;,)\\]|])`, "gm"),
+    // Cast-free forgeries: a literal, a parse, or an any value given the type.
+    new RegExp(`:\\s*${brandName}\\s*=\\s*(?:\\{|JSON\\.parse\\b|[^;\\n]*\\bas\\s+any\\b)`, "g"),
+    new RegExp(`\\bsatisfies\\s+${brandName}\\b`, "g"),
   ];
   const line = (offset: number) => text.slice(0, offset).split("\n").length;
   const castHits = casts.flatMap((re) => [...text.matchAll(re)]);
+  // A function typed to return the brand that returns a literal or a parse.
+  const returning = new RegExp(`\\)\\s*:\\s*(?:Promise\\s*<\\s*)?${brandName}\\s*>?\\s*\\{`, "g");
+  for (const hit of text.matchAll(returning)) {
+    const open = hit.index + hit[0].length - 1;
+    const range = bodyFrom(text, open);
+    const body = range ? text.slice(range[0], range[1]) : text.slice(open);
+    if (/\breturn\s*(?:\{|\(\s*\{|JSON\.parse\b)/.test(body)) castHits.push(hit);
+  }
   const mintHits = [...text.matchAll(mint)];
   if (rel === `${payments}adapter.ts`) {
     // The definition, and its one cast.
@@ -139,6 +164,16 @@ function importFindings(rel: string, text: string): string[] {
     if (fixture && runtime && rel !== `${payments}testing.ts`) {
       problems.push(`${rel}: runtime code imports the Stripe fixture through ${spec}`);
     }
+    // A relative path resolved, inside the package too, with or without an extension.
+    if (spec.startsWith(".") && runtime && rel !== `${payments}testing.ts`) {
+      const bare = relative(root, resolve(root, dirname(rel), spec))
+        .split(sep)
+        .join("/")
+        .replace(/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/, "");
+      if (bare === `${payments}testing` || bare === `${payments}stripe-fixture`) {
+        problems.push(`${rel}: runtime code reaches test support through ${spec}`);
+      }
+    }
   }
   return problems;
 }
@@ -174,6 +209,12 @@ describe("verified-event provenance", () => {
       `const e = x as unknown as ${brandName};`,
       `const e = <${brandName}>x;`,
       `import { ${mintName} as mint } from "./adapter.ts";`,
+      // Cast-free forgeries the compiler allows.
+      `const e: ${brandName} = { ...verified, accountRef: "acct_other" };`,
+      `const e: ${brandName} = JSON.parse(body);`,
+      `const e = { ...verified, payment: null } satisfies ${brandName};`,
+      `function f(): ${brandName} {\n  return { ...verified, accountRef: "x" };\n}`,
+      `const e: ${brandName} = raw as any;`,
     ];
     for (const text of forged) {
       expect(brandFindings("apps/api-worker/src/x.ts", text), text).not.toEqual([]);
@@ -210,6 +251,12 @@ describe("fixture and source boundaries", () => {
       ["packages/domain-payments/src/index.ts", `export * from "./stripe-fixture.ts";`],
       ["apps/guest-site/worker/x.ts", `import "@tidegrid/domain-payments/testing";`],
       ["apps/api-worker/src/x.ts", `import { x } from "@tidegrid/domain-payments/src/stripe.ts";`],
+      // Inside the package, by relative path, with or without an extension.
+      ["packages/domain-payments/src/stripe.ts", `import { x } from "./testing.ts";`],
+      ["packages/domain-payments/src/stripe.ts", `import { x } from "./testing.js";`],
+      ["packages/domain-payments/src/helper.ts", `export * from "./testing";`],
+      ["packages/domain-payments/src/deep/helper.ts", `export * from "../stripe-fixture";`],
+      ["packages/domain-payments/src/index.ts", `export * from "./testing";`],
     ];
     for (const [rel, text] of bad) {
       expect(importFindings(rel, text), `${rel}: ${text}`).not.toEqual([]);

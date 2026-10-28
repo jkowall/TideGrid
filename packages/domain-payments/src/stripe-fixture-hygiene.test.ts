@@ -26,7 +26,11 @@ const fixtureFiles = ["stripe-fixture.ts", "testing.ts"];
 
 const syntheticAccounts = new Set<string>(Object.values(STRIPE_FIXTURE_ACCOUNTS));
 const syntheticKeys = new Set([STRIPE_FIXTURE_SECRET_KEY, STRIPE_FIXTURE_WEBHOOK_SECRET]);
-const scrubbedCard = ["fingerprint", "last4", "exp_month", "exp_year"];
+const scrubbedCard = ["fingerprint", "last4", "exp_month", "exp_year", "network_transaction_id"];
+/** Fields that name or describe a guest, wherever they appear: always null in a fixture. */
+const guestFields = ["name", "phone", "customer", "description", "receipt_email", "outcome"];
+/** Objects that hold a guest's details, wherever they appear: every leaf null. */
+const guestObjects = ["billing_details", "shipping", "address"];
 
 /** What is wrong with one text, as a fixture file or a body. */
 function textFindings(text: string): string[] {
@@ -40,7 +44,7 @@ function textFindings(text: string): string[] {
       problems.push("a client secret that is not synthetic");
     }
   }
-  for (const [key] of text.matchAll(/\b(?:(?:sk|rk|pk)_(?:test|live)|whsec)_[A-Za-z0-9]*/g)) {
+  for (const [key] of text.matchAll(/\b(?:(?:sk|rk|pk)_(?:test|live)|whsec)_[A-Za-z0-9_]*/g)) {
     if (!syntheticKeys.has(key)) problems.push(`a key that is not a synthetic constant`);
   }
   if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(text))
@@ -66,12 +70,13 @@ function jsonFindings(value: unknown, path = "$"): string[] {
   const problems: string[] = [];
   for (const [key, child] of Object.entries(value)) {
     const at = `${path}.${key}`;
-    if (key === "billing_details" && !allNull(child)) problems.push(`${at} is not empty`);
+    if (guestObjects.includes(key) && !allNull(child)) problems.push(`${at} is not empty`);
     if (key === "receipt_url" && child !== null && child !== STRIPE_FIXTURE_RECEIPT_URL) {
       problems.push(`${at} is not the placeholder`);
     }
-    if (key === "receipt_email" && child !== null) problems.push(`${at} is set`);
-    if (key === "outcome" && child !== null) problems.push(`${at} is set`);
+    if (guestFields.includes(key) && child !== null && child !== undefined) {
+      problems.push(`${at} is set`);
+    }
     if (key === "card" && typeof child === "object" && child !== null) {
       for (const field of scrubbedCard) {
         const v = (child as Record<string, unknown>)[field];
@@ -212,6 +217,17 @@ describe("Stripe fixture hygiene", () => {
       client_secret: "pi_3QxLiveLooking0000000000_secret_RealLookingSecret",
       request: { id: "req_RealLooking", idempotency_key: "key" },
       key: ["sk", "live", "RealLookingRealLooking0000"].join("_"),
+      shipping: {
+        name: "A Guest",
+        phone: "+1 555 0100",
+        address: { line1: "1 Harbor Way", city: null },
+      },
+      customer: "cus_RealLooking000000",
+      description: "Charter for A Guest",
+      latest_charge: {
+        payment_method_details: { card: { network_transaction_id: "123456789012345" } },
+      },
+      account_holder: { name: "A Guest", phone: null, address: { postal_code: "33062" } },
     };
     const problems = bodyFindings(JSON.stringify(capture));
     for (const expected of [
@@ -228,6 +244,12 @@ describe("Stripe fixture hygiene", () => {
       "$.payment_method_details.card.last4 is set",
       "$.payment_method_details.card.exp_month is set",
       "$.request names a request",
+      "$.shipping is not empty",
+      "$.customer is set",
+      "$.description is set",
+      "$.latest_charge.payment_method_details.card.network_transaction_id is set",
+      "$.account_holder.name is set",
+      "$.account_holder.address is not empty",
     ]) {
       expect(
         problems.some((p) => p.startsWith(expected)),

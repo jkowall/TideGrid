@@ -72,6 +72,35 @@ async function rejectedCode(promise: Promise<unknown>): Promise<string> {
   return (error as ProviderRejectedError).code;
 }
 
+/**
+ * Stripe's documented codes for a key, account, or mode fault
+ * (https://docs.stripe.com/error-codes). None is about the request itself.
+ */
+const configurationCodes = [
+  "api_key_expired",
+  "platform_api_key_expired",
+  "secret_key_required",
+  "account_invalid",
+  "livemode_mismatch",
+  "platform_account_required",
+  "capability_not_active",
+  "action_blocked",
+  "testmode_charges_only",
+  "tls_version_unsupported",
+  "anomalous_money_movement_request",
+  "account_country_invalid_address",
+  "progressive_onboarding_limit_exceeded",
+];
+/** Codes that say "not now": the same request may succeed later. */
+const transientCodes = [
+  "lock_timeout",
+  "rate_limit",
+  "idempotency_key_in_use",
+  "balance_insufficient",
+  "charge_exceeds_source_limit",
+  "payment_method_not_available",
+];
+
 const stripeError = (type: string, code?: string, message = "Stripe's own words") =>
   JSON.stringify({ error: { type, ...(code ? { code } : {}), message } });
 
@@ -250,6 +279,31 @@ describe("idempotent creation", () => {
     expect(fixture.intentIds()).toHaveLength(1);
   });
 
+  it("lets a key refused by validation run again, as Stripe caches only executed requests", async () => {
+    const fixture = createStripeFixture();
+    const post = (body: string) =>
+      fixture.fetch("https://api.stripe.com/v1/payment_intents", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${fixture.secretKey}`,
+          "stripe-version": STRIPE_API_VERSION,
+          "stripe-account": harbor,
+          "idempotency-key": "checkout_payment:validation-then-fixed",
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body,
+      });
+    const small = await post("amount=10&currency=usd");
+    expect(small.status).toBe(400);
+    const unknown = await post("amount=5000&currency=usd&application_fee_amount=1");
+    expect(unknown.status).toBe(400);
+    const fixed = await post("amount=5000&currency=usd");
+    expect(fixed.status).toBe(200);
+    expect(fixed.headers.get("idempotent-replayed")).toBeNull();
+    const again = await post("amount=5000&currency=usd");
+    expect(again.headers.get("idempotent-replayed")).toBe("true");
+  });
+
   it("refuses what Stripe would refuse before asking it", async () => {
     const { fixture, provider } = harness();
     expect(await rejectedCode(provider.createPayment(createInput({ amount: 49 })))).toBe(
@@ -351,18 +405,22 @@ describe("Stripe's errors", () => {
     }
   });
 
-  it("treats every configuration code as an unknown outcome", async () => {
-    for (const code of [
-      "api_key_expired",
-      "platform_api_key_expired",
-      "secret_key_required",
-      "account_invalid",
-      "livemode_mismatch",
-    ]) {
+  it("treats every configuration and transient code as an unknown outcome", async () => {
+    for (const code of configurationCodes) {
+      for (const status of [400, 402, 404]) {
+        const error = await scripted(status, stripeError("invalid_request_error", code));
+        expect(error, `${status} ${code}`).toBeInstanceOf(ProviderUnavailableError);
+        expect((error as Error).message).toBe("stripe_config");
+      }
+    }
+    for (const code of transientCodes) {
       const error = await scripted(400, stripeError("invalid_request_error", code));
       expect(error, code).toBeInstanceOf(ProviderUnavailableError);
-      expect((error as Error).message).toBe("stripe_config");
+      expect((error as Error).message).toBe("stripe_retry");
     }
+    // A key still in flight is not a reused key.
+    const inUse = await scripted(400, stripeError("idempotency_error", "idempotency_key_in_use"));
+    expect(inUse).toBeInstanceOf(ProviderUnavailableError);
   });
 
   it("never echoes Stripe's words", async () => {
@@ -438,7 +496,7 @@ describe("no secret leaves through an error", () => {
     errors.push(await caught(provider.refundPayment(refundInput(ref))));
     // A wrong key.
     const wrong = createStripePaymentProvider({
-      secretKey: keyOf("sk", "test", "WrongWrongWrongWrongWrong0"),
+      secretKey: keyOf("rk", "test", "fixture", "WrongWrongWrong01"),
       webhookSecret: fixture.webhookSecret,
       environment: "local",
       fetch: fixture.fetch,
@@ -595,23 +653,48 @@ describe("refunds", () => {
   it("leaves a refund unknown on authentication, permission, and account faults", async () => {
     const { fixture, provider } = harness();
     const created = await paid(fixture, provider);
-    for (const method of ["GET", "POST"]) {
-      for (const [status, code, expected] of [
-        [401, undefined, "stripe_auth"],
-        [403, undefined, "stripe_config"],
-        [400, "account_invalid", "stripe_config"],
-        [400, "api_key_expired", "stripe_config"],
-      ] as const) {
-        fixture.answerNext(
-          { status, body: stripeError("invalid_request_error", code) },
-          { method, path: "/v1/refunds" },
-        );
-        expect(await unavailable(provider.refundPayment(refundInput(created.paymentRef)))).toBe(
-          expected,
-        );
-      }
+    const cases: [number, string | undefined, string][] = [
+      [401, undefined, "stripe_auth"],
+      [403, undefined, "stripe_config"],
+      ...configurationCodes.map((code): [number, string, string] => [400, code, "stripe_config"]),
+      ...transientCodes.map((code): [number, string, string] => [400, code, "stripe_retry"]),
+    ];
+    for (const [status, code, expected] of cases) {
+      // The POST: the lookup runs for real and finds nothing.
+      fixture.answerNext(
+        { status, body: stripeError("invalid_request_error", code) },
+        { method: "POST", path: "/v1/refunds" },
+      );
+      expect(
+        await unavailable(provider.refundPayment(refundInput(created.paymentRef))),
+        `POST ${status} ${code}`,
+      ).toBe(expected);
     }
     expect(fixture.refundIds(created.paymentRef)).toHaveLength(0);
+  });
+
+  it("never settles a refund on a refused lookup, which is not an answer about the refund", async () => {
+    const { fixture, provider } = harness();
+    const created = await paid(fixture, provider);
+    for (const [status, code] of [
+      [401, undefined],
+      [403, undefined],
+      [400, "account_invalid"],
+      [400, "capability_not_active"],
+      [400, "parameter_unknown"],
+      [404, "resource_missing"],
+      [404, undefined],
+      [402, "card_declined"],
+    ] as const) {
+      fixture.answerNext(
+        { status, body: stripeError("invalid_request_error", code) },
+        { method: "GET", path: "/v1/refunds" },
+      );
+      const error = await caught(provider.refundPayment(refundInput(created.paymentRef)));
+      expect(error, `GET ${status} ${code}`).toBeInstanceOf(ProviderUnavailableError);
+    }
+    const posts = fixture.requests.filter((r) => r.method === "POST" && r.path === "/v1/refunds");
+    expect(posts).toEqual([]);
   });
 
   it("refuses a reused key with another amount, and refunds that cannot happen", async () => {
@@ -689,9 +772,13 @@ describe("reading a payment", () => {
       currency: "USD",
       amountRefunded: 0,
     });
-    fixture.decline(created.paymentRef);
-    expect((await read())?.status).toBe("pending");
-    fixture.succeed(created.paymentRef);
+    const declined = fixture.decline(created.paymentRef);
+    // Stripe points latest_charge at the failed charge of a declined attempt.
+    expect(declined.latest_charge).toMatch(/^ch_/);
+    expect(await read()).toMatchObject({ status: "pending", amountRefunded: 0 });
+    const paidIntent = fixture.succeed(created.paymentRef);
+    expect(paidIntent.latest_charge).toMatch(/^ch_/);
+    expect(paidIntent.latest_charge).not.toBe(declined.latest_charge);
     expect(await read()).toMatchObject({ status: "succeeded", amountRefunded: 0 });
     await provider.refundPayment(refundInput(created.paymentRef, { amount: 1200 }));
     expect(await read()).toMatchObject({ status: "succeeded", amountRefunded: 1200 });
@@ -740,11 +827,13 @@ describe("two tenants", () => {
     expect(
       await provider.retrievePayment({ accountRef: harbor, paymentRef: created.paymentRef }),
     ).toMatchObject({ status: "succeeded" });
+    // Another account's intent does not exist there. The lookup is refused, and
+    // a refused lookup is never a final answer about the refund.
     expect(
-      await rejectedCode(
+      await unavailable(
         provider.refundPayment({ ...refundInput(created.paymentRef), accountRef: reef }),
       ),
-    ).toBe("resource_missing");
+    ).toBe("stripe_refund_lookup_refused");
     expect(fixture.refundIds(created.paymentRef)).toHaveLength(0);
     const theirs = await provider.createPayment(createInput({ account: reef }));
     expect(fixture.requests.at(-1)?.stripeAccount).toBe(reef);
@@ -753,8 +842,19 @@ describe("two tenants", () => {
     ).toBeNull();
   });
 
-  it("is enforced by the fixture, which refuses a call without a known account", async () => {
-    const fixture = createStripeFixture();
+  it("sends Stripe-Account on every call; the fixture trips on a missing one", async () => {
+    // Real Stripe runs a call without the header on the platform account, as a
+    // platform charge. The adapter's own check is the guard; the fixture's
+    // refusal is a test tripwire, not Stripe's behavior.
+    const { fixture, provider } = harness();
+    const created = await paid(fixture, provider);
+    await provider.retrievePayment({ accountRef: harbor, paymentRef: created.paymentRef });
+    await provider.refundPayment(refundInput(created.paymentRef));
+    await provider.createPayment(createInput({ account: reef }));
+    expect(fixture.requests.length).toBeGreaterThan(4);
+    for (const request of fixture.requests) {
+      expect(request.stripeAccount === harbor || request.stripeAccount === reef).toBe(true);
+    }
     const response = await fixture.fetch("https://api.stripe.com/v1/payment_intents", {
       method: "POST",
       headers: {
@@ -765,6 +865,24 @@ describe("two tenants", () => {
       body: "amount=5000&currency=usd",
     });
     expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+      "fixture_tripwire_stripe_account_missing",
+    );
+  });
+
+  it("is refused 403 for an account the key cannot reach", async () => {
+    const fixture = createStripeFixture();
+    const response = await fixture.fetch("https://api.stripe.com/v1/payment_intents", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${fixture.secretKey}`,
+        "stripe-version": STRIPE_API_VERSION,
+        "stripe-account": "acct_1TestNobody0000",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: "amount=5000&currency=usd",
+    });
+    expect(response.status).toBe(403);
     expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
       "account_invalid",
     );
@@ -812,6 +930,39 @@ describe("configuration", () => {
     expect(build({ webhookSecret: testKey })).toThrow(/webhook_secret_malformed/);
     expect(build({ secretKey: keyOf("rk", "test", "SyntheticSyntheticSynth01") })).not.toThrow();
     expect(build({ environment: "staging" })).not.toThrow();
+  });
+
+  it("refuses the fixture's credentials anywhere but over an injected fetch", () => {
+    const fixture = createStripeFixture();
+    for (const environment of ["local", "preview", "staging", "production"]) {
+      expect(
+        checkStripeConfig({
+          secretKey: fixture.secretKey,
+          webhookSecret: webhookSecret,
+          environment,
+        }),
+      ).toMatchObject({ kind: "refused" });
+      expect(
+        checkStripeConfig({
+          secretKey: testKey,
+          webhookSecret: fixture.webhookSecret,
+          environment,
+        }),
+      ).toMatchObject({ kind: "refused" });
+    }
+    const real = () =>
+      createStripePaymentProvider({
+        secretKey: fixture.secretKey,
+        webhookSecret: fixture.webhookSecret,
+        environment: "staging",
+      });
+    expect(real).toThrow(/key_malformed/);
+    expect(
+      build({ secretKey: fixture.secretKey, webhookSecret: fixture.webhookSecret }),
+    ).not.toThrow();
+    // A fixture key never pairs with a real secret, or the other way round.
+    expect(build({ secretKey: fixture.secretKey })).toThrow(/webhook_secret_malformed/);
+    expect(build({ webhookSecret: fixture.webhookSecret })).toThrow(/webhook_secret_malformed/);
   });
 
   it("reports each settings branch", () => {
