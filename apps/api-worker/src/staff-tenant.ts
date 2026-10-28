@@ -46,6 +46,8 @@ export interface IdempotentCommand {
  * (404 otherwise, so tenants cannot be probed), check the named permission
  * (403), optionally claim an idempotency key, run the command, store its
  * response for replay, and commit. Any thrown error rolls everything back.
+ * The staff context is returned for work after commit, such as creating a
+ * provider payment (G2.12d), which opens its own transactions.
  */
 export async function withStaffTenant<T extends JsonObject>(
   c: Context<AppEnv>,
@@ -62,7 +64,7 @@ export async function withStaffTenant<T extends JsonObject>(
     snapshot?: true;
   },
   run: (trx: TenantTransaction, ctx: StaffTenantContext) => Promise<T>,
-): Promise<{ body: T; status: number; replayed: boolean }> {
+): Promise<{ body: T; status: number; replayed: boolean; ctx: TenantContext }> {
   if (options.snapshot && options.idempotency) {
     throw new TypeError("a snapshot read takes no idempotency key: it never writes");
   }
@@ -106,14 +108,14 @@ export async function withStaffTenant<T extends JsonObject>(
         if (claim && idem) {
           const claimed = await claimIdempotencyKey(trx, ctx, claim);
           if (claimed.kind === "replay") {
-            return { body: claimed.body as T, status: claimed.status, replayed: true };
+            return { body: claimed.body as T, status: claimed.status, replayed: true, ctx };
           }
         }
         const body = await run(trx, { ...ctx, principal, access });
         if (claim && idem) {
           await completeIdempotencyKey(trx, ctx, claim, { status: idem.successStatus, body });
         }
-        return { body, status: idem?.successStatus ?? 200, replayed: false };
+        return { body, status: idem?.successStatus ?? 200, replayed: false, ctx };
       },
       options.snapshot ? snapshotRead : undefined,
     );

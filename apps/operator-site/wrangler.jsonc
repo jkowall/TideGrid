@@ -17,5 +17,25 @@
   // The console calls the API same-origin under /api. Access injects its
   // assertion on every request to this hostname; the Worker forwards /api/* to
   // the API's ConsoleGateway entrypoint, the only place staff routes answer.
-  "services": [{ "binding": "API", "service": "tidegrid-api", "entrypoint": "ConsoleGateway" }]
+  "services": [{ "binding": "API", "service": "tidegrid-api", "entrypoint": "ConsoleGateway" }],
+  // Named environments inherit routes; an empty list keeps them off
+  // console.tidegrid.us. Bindings are not inherited, so each names its own.
+  "env": {
+    // Local and CI browser checks (G2.12d): `wrangler dev --env dev` on the
+    // built dist/, so public/_headers and its CSP apply, beside the API's dev
+    // environment, which the dev registry names tidegrid-api-dev.
+    "dev": {
+      "routes": [],
+      "workers_dev": false,
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*"]
+      },
+      "services": [
+        { "binding": "API", "service": "tidegrid-api-dev", "entrypoint": "ConsoleGateway" }
+      ]
+    }
+  }
 }

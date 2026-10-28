@@ -165,6 +165,15 @@ Every transition writes an `audit_events` row in the same transaction. Activatio
 
 `app.hostname_sweep_tenants` has the same argument as the hold sweep's: it returns tenant ids only, capped at 1,000, read-only and STABLE, and every read and write that follows runs in `inTenantTransaction` under forced row-level security. It reveals that some tenant has a custom hostname with a check due, a weaker signal than the shared id sequences already give.
 
+## Staff-assisted bookings (G2.12d)
+
+Migration `0012_staff_bookings.sql` records where a checkout and its booking came from. It adds no table and changes no grant. The commands are in the [checkout contract](../domain-booking/README.md#staff-assisted-booking-g212d). The number `0012` went to this migration, so the hostname recovery path named above takes a later one.
+
+- **`checkout_sessions` gains `source`, `channel`, and `opened_by`.** A trigger (`app.stamp_checkout_source`, an invoker function with `search_path` pinned) stamps `source` and `opened_by` from `app.actor_type` and `app.actor_id` on insert, whatever the insert names: a staff actor with a UUID id opens a `staff_assisted` checkout as its opener, and a guest, the system, or a connection without context opens a `direct` one, with no channel and no opener. The channel (`phone`, `email`, or `walk_up`) is the staff member's input, required on a staff-assisted checkout and null otherwise (CHECK constraints). The opener names a member of the checkout's own tenant in a composite foreign key to `tenant_memberships`. On update the trigger refuses any change to the three, for every role (`checkout_sessions_source_immutable`); the runtime's UPDATE stays on `state` only.
+- **`bookings.source` widens to `staff_assisted`.** A trigger (`app.stamp_booking_source`, named `bookings_a_source` to fire before `bookings_evidence` and `bookings_lifecycle`) sets each new booking's source from its checkout, so the confirmation code inserts the default and cannot forge it. `app.check_booking` is not replaced and does not read the source; an integration test holds that. The source stays immutable under `bookings_lifecycle` (0009).
+- **Rules unchanged.** The runtime's table-level INSERT on `checkout_sessions` covers the new columns. Forced row-level security, the no-DELETE rule, and the chain of custody stand as they were. Both trigger functions have EXECUTE revoked from PUBLIC.
+- **Tests.** `packages/domain-booking/src/staff-source.integration.test.ts` proves the stamping as the runtime and the admin, the immutability, and the booking's source after a verified event.
+
 ## Tests
 
 - `pnpm test` runs unit tests.

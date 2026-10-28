@@ -93,4 +93,10 @@ describe("the day's export columns (G2.12c)", () => {
     expect(at("Included tax")).toBeGreaterThan(-1);
     expect(at("Taxes")).toBe(-1);
   });
+
+  it("end with Source, appended by G2.12d so every earlier column keeps its place", () => {
+    expect(bookingDayExportColumns).toHaveLength(27);
+    expect(bookingDayExportColumns.at(-2)).toBe("Generated at (UTC)");
+    expect(bookingDayExportColumns.at(-1)).toBe("Source");
+  });
 });

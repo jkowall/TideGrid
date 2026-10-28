@@ -216,6 +216,13 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/waivers",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend",
         "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document",
+        // Staff-assisted booking (G2.12d).
+        "/v1/staff/tenants/{tenantId}/trips/{tripId}/offer",
+        "/v1/staff/tenants/{tenantId}/quotes",
+        "/v1/staff/tenants/{tenantId}/checkouts",
+        "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}",
+        "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/cancel",
+        "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/test-payment",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are

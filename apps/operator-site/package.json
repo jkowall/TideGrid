@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p worker/tsconfig.json",
+    "dev:worker": "wrangler dev --env dev --port 5382 --inspector-port 9382",
+    "e2e": "playwright test",
+    "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p worker/tsconfig.json && tsc -p e2e/tsconfig.json",
     "test": "vitest run",
     "release": "vite build && wrangler deploy",
     "release:dry": "vite build && wrangler deploy --dry-run"
@@ -19,8 +21,10 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^6.1.0",

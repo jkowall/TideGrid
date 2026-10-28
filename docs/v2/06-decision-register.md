@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### Pending owner confirmation: G2.12d manual booking narrowings (coordinator defaults, 2026-10-28)
+
+**Status:** Coordinator defaults for G2.12d, manual staff booking, pending owner confirmation. The owner said "keep going, G2.12 manual staff booking, merge when green" and did not answer the goal packet's decisions one by one. They bind the demo build only, and only until the owner confirms or replaces them. The full list, with the reasons, is the [manual booking narrowing](12-demo-build-plan.md#goal-sequence) in the demo build plan.
+
+- **D1: what "manual booking" means in the demo.** Staff-assisted only: an owner or booking staff member books a guest who phoned, emailed, or walked up, and the payment goes through the payment shim's test control and its verified event, like a guest's. Cash, check, and other external tender (G2.10), complimentary bookings, and imported or OTA records stay open. This narrows the [product scope](02-product-scope.md)'s staff booking list. Reason: every other kind relaxes the chain of custody, under which a booking confirms only from a verified payment event.
+- **D2: no overrides.** Staff follow the guest's sales rules: no booking after the cutoff, on a closed trip, or past capacity, and no price override. This narrows the product scope's owner or manager override with a reason. Reason: an override changes the capacity hold trigger, the most reviewed rule in the build.
+- **D3: the booker's email is required.** Staff read it back to the guest and attest that they did. The confirmation, the management link, and waiver requests go to it. Residual risk: a mistyped address sends the management link to a stranger, and staff cannot correct it after booking.
+- **D5: the policy is staff-attested.** Staff tell the guest the policy of the quote's version and check a box saying so; the audit row records it as staff-attested. The guest first sees the policy text in the confirmation email. This narrows the product scope's rule that the guest sees and accepts the policy before payment. The accepted version is still snapshotted on the booking.
+- **D7: the day's CSV gains a Source column.** `Source` (`direct` or `staff_assisted`) follows Generated at, before the booker's columns. A contract change to columns the product scope calls stable; every earlier column keeps its place.
+- **D10: the console's browser proof runs in CI.** A console browser job of its own runs the journey at 375 and 1280 on both synthetic operators, under the console Worker's CSP, against a disposable PostgreSQL 17.
+- **Also taken by default:** a channel column (phone, email, or walk-up; D4), participants named by the guest through the management link (D6), a limit of three open checkouts per staff member (D8), the confirmation email unchanged (D9), one combined independent review on the stronger configuration plus a UI review (D11), merge when green covering migration `0012` once the review is accepted (D12), one promotion code and no manual discount (D13), the staff member's name on a booking visible to every role that reads it, finance included (D14), and no staff bookings in the demo seed (D15).
+
 ### Pending owner confirmation: G2.14b demo narrowings (coordinator defaults, 2026-10-27)
 
 **Status:** Coordinator defaults for the G2.14b local-first pass, pending owner confirmation. They bind the demo build only, and only until the owner confirms or replaces them. The full list, with the reasons, is the [hostnames and PWA narrowing](12-demo-build-plan.md#goal-sequence) in the demo build plan.
