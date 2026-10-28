@@ -2,6 +2,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { createApp } from "./app.ts";
 import type { Bindings } from "./env.ts";
 import { markConsoleGateway } from "./gateway.ts";
+import { type GuestHostAnswer, resolveGuestHost } from "./hostnames/guest-gateway.ts";
 import { runScheduled } from "./scheduled.ts";
 
 const app = createApp();
@@ -27,5 +28,17 @@ export default {
 export class ConsoleGateway extends WorkerEntrypoint<Bindings> {
   override async fetch(request: Request): Promise<Response> {
     return app.fetch(request, markConsoleGateway(this.env), this.ctx);
+  }
+}
+
+/**
+ * Reachable only through the guest Worker's service binding (G2.14b). One
+ * typed method, nothing else: it never forwards a request into the app and
+ * never carries the console mark, so no staff or sign-in route is reachable
+ * through it. See src/hostnames/guest-gateway.ts.
+ */
+export class GuestGateway extends WorkerEntrypoint<Bindings> {
+  async resolveHost(host: unknown): Promise<GuestHostAnswer> {
+    return resolveGuestHost(this.env, host);
   }
 }

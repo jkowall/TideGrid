@@ -5,12 +5,18 @@
  */
 export { type BrandConfig, brandSchemaVersion } from "@tidegrid/contracts";
 export {
+  type CustomHostnameProblem,
+  customHostnameMaxLength,
+  customHostnameProblem,
   isLoopbackOnlyHostname,
   localHostnameFor,
   localHostSuffix,
   previewHostnameFor,
   previewHostSuffix,
+  refusedCustomHostnameSuffixes,
+  reservedSlugs,
   slugPattern,
+  slugProblem,
 } from "./hostnames.ts";
 export {
   brandConfigFromManifest,

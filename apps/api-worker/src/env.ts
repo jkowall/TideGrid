@@ -37,6 +37,27 @@ export interface Bindings {
    * active, verified hostname of the tenant.
    */
   GUEST_LINK_ORIGIN?: string;
+  /**
+   * How public routes answer CORS (G2.14b). "dynamic" also echoes a verified
+   * tenant origin and lets any strictly parsed origin read the bootstrap; it
+   * is set in env.dev and env.test. Unset or anything else keeps only
+   * ALLOWED_ORIGINS: the deployed default until the live step, and the
+   * rollback.
+   */
+  PUBLIC_CORS?: string;
+  /**
+   * The custom-hostname provider the cron's sweep reads (G2.14b). Unset means
+   * custom hostnames are off. "fake" is accepted only when ENVIRONMENT is
+   * "local" and no CF_SAAS_ZONE_ID is set; "cloudflare_saas" needs the zone
+   * and the token.
+   */
+  HOSTNAME_PROVIDER?: string;
+  /** The Cloudflare for SaaS zone id (a var, not a secret). */
+  CF_SAAS_ZONE_ID?: string;
+  /** Secret. A zone-scoped token for custom hostnames; never in the repository. */
+  CF_SAAS_API_TOKEN?: string;
+  /** The CNAME target operators point at; default customers.tidegrid.us. */
+  CF_SAAS_ROUTING_TARGET?: string;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {

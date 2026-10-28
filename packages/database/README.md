@@ -80,7 +80,7 @@ The capacity and holds migration adds `capacity_holds` under rules 1 to 10. The 
 - The trigger runs as the caller. It reads the trip under the caller's row-level security and filters by the hold's tenant, so a hold can never name another tenant's trip; the composite foreign key backs that up.
 - `app.trip_capacity_usage(tenant, trip)` is an invoker function. Row-level security applies inside it, and it filters by tenant explicitly.
 
-`app.capacity_hold_sweep_tenants(limit)` lets the cron sweep find the tenants with holds past their expiry instant. It is the one cross-tenant read the runtime has beyond sign-in and hostname resolution. The argument for it:
+`app.capacity_hold_sweep_tenants(limit)` lets the cron sweep find the tenants with holds past their expiry instant. It was the first of the runtime's cross-tenant sweep reads, beside sign-in and hostname resolution; `app.checkout_sweep_tenants` (0007), `app.email_delivery_tenants` (0009), and `app.hostname_sweep_tenants` (0011) follow the same argument:
 
 - It returns tenant ids and nothing else: no hold, trip, owner, or count. An id grants nothing. Every read and write that follows runs in `inTenantTransaction` under forced row-level security, and tenant ids already appear in staff URLs.
 - What it reveals is that some tenant has at least one stale hold. That is a weaker activity signal than the shared audit and outbox id sequences already give (see the known gaps above).
@@ -135,6 +135,35 @@ The waiver migration (`*_waivers.sql`, after the self-service migration) adds si
 - `waiver_evidence`: append-only for every role, the owner included. A trigger checks the request, session, signer, version, hash, and acknowledgments; a CHECK holds the PDF to its SHA-256; and at commit evidence stands only beside a signed request.
 
 One new function in schema `app` is callable by the runtime: `app.waiver_send_refusal`, a STABLE invoker function (`search_path` pinned, EXECUTE revoked from PUBLIC and granted to `tidegrid_app` only) that answers whether a waiver email may go now and, if not, when; the service asks it before sending, and the deliveries trigger calls it for every writer. It runs under the caller's row-level security. The waiver triggers run as the writer, under its row-level security, and filter by tenant explicitly.
+
+## Custom hostname lifecycle (G2.14b)
+
+Migration `0011_custom_hostname_lifecycle.sql` adds the lifecycle of a custom hostname. Resolution still reads only `tenant_hostnames.status`; the provider's detail lives beside it. The adapter and the service are in [packages/domain-hostnames](../domain-hostnames/README.md).
+
+- **`tenant_hostname_provisioning`**, tenant-owned, under rules 1 to 10: one row per custom hostname, with the provider (`fake` or `cloudflare_saas`), the provider's record id (unique per provider, stored once), the mapped ownership and certificate states, the public DNS instructions, the last error code, when it was checked and is next due, and the claim's end (seven days, the provider's validation window). It names its hostname with its tenant in a composite foreign key to a new unique key on `tenant_hostnames (hostname, tenant_id)`. The runtime holds SELECT only: 0001's default INSERT is revoked, and no UPDATE is granted. DELETE and TRUNCATE raise for every role, the owner included. A trigger refuses a row for anything but a pending custom hostname of the same tenant, keeps the tenant, name, provider, claim, and a stored provider id fixed, and stamps the times.
+- **Transitions on `tenant_hostnames`**, for every role, by trigger: a hostname keeps its name, tenant, kind, and creation time; pending moves to active only for a custom hostname, with its verification time, while its provisioning row holds both provider states `active`; pending or active moves to disabled; a disabled name never moves again, so it stays reserved. No existing fixture updates these rows, so none changed.
+- **The `platform` kind**, for an explicit allowlist (`demo.tidegrid.us`) only, written by the admin connection, never swept (G2.14b D19(b), a coordinator default pending owner confirmation).
+- **`app.resolve_hostname`** keeps its signature and also requires `verified_at IS NOT NULL` for an active row, a second guard on the CHECK in 0002.
+- **Name rules.** There is no name-shape trigger on insert, so every existing fixture stays valid. `app.hostname_request`, the only writer of new custom rows, refuses a name that is not normalized, is over 200 characters (an audit subject holds 200), has fewer than three labels, carries a punycode label, or equals or ends on a label boundary in `tidegrid.us`, `workers.dev`, `pages.dev`, `localhost`, `test`, `example`, `invalid`, `onion`, `local`, `internal`, `arpa`, or `alt`. `packages/tenant-config` holds the same rules for the CLI.
+
+Functions, all SECURITY DEFINER under rule 7, with explicit tenant predicates:
+
+| Function | Effect | Runtime EXECUTE |
+|---|---|---|
+| `app.hostname_sweep_tenants(limit)` | Tenant ids with a provisioned custom hostname whose check is due, or whose pending claim ran out. At most 1,000. STABLE | Yes |
+| `app.hostname_record_check(tenant, hostname, provider_id, hostname_state, certificate_state, error_code)` | Records a reading for the transaction's own tenant, only when the provider id equals the stored one. May demote and never promotes: an active hostname is disabled only on a definitive negative (ownership `moved`, `blocked`, or `deleted`, or the certificate `failed`), and a pending one past its claim expires. A `pending` or `unknown` reading, such as a certificate renewing, is recorded and changes nothing. With both states NULL and an error code it records that the provider gave no reading for this one record: the stored states stay, the code is kept, nothing is demoted, and an ended claim still expires; one state NULL, or both with no code, raises 22023. The next check backs off from 60 seconds to 4 hours while pending and comes an hour later while active | Yes |
+| `app.hostname_request(tenant, hostname, provider)` | A pending custom row and its provisioning row, after the name rules; refuses a name any tenant holds in any status | No |
+| `app.hostname_attach_provider(tenant, hostname, provider_id, instructions)` | Stores the provider's record id and DNS instructions once, for a pending row | No |
+| `app.hostname_activate(tenant, hostname, provider_id, hostname_state, certificate_state)` | Pending to active, with both states `active`, a matching provider id, and the claim still open | No |
+| `app.hostname_disable(tenant, hostname, reason)` | Any kind to disabled; false when already disabled | No |
+
+Every transition writes an `audit_events` row in the same transaction. Activation is admin-only: if the runtime both wrote provider states and activated, the "both active" check would only repeat what the runtime itself wrote.
+
+**Residual trust.** Provider truth is whatever the adapter reports to the admin CLI or the sweep. The database guards tenant scope, the provider id match, and the transitions; it cannot prove a reading.
+
+**Disabled is terminal, by design.** No function moves a disabled hostname back, and the name stays reserved, so a false demotion cannot be undone from the runtime or the CLI. That is why only a definitive negative demotes, and why the sweep records nothing when the provider refuses to answer (a rotated token, another 4xx, a malformed answer, a missing zone). If a disabled hostname ever has to come back, the recovery path is a reviewed migration `0012` with an admin-only re-enable function and its audit, not a manual update, which the trigger refuses for every role.
+
+`app.hostname_sweep_tenants` has the same argument as the hold sweep's: it returns tenant ids only, capped at 1,000, read-only and STABLE, and every read and write that follows runs in `inTenantTransaction` under forced row-level security. It reveals that some tenant has a custom hostname with a check due, a weaker signal than the shared id sequences already give.
 
 ## Tests
 

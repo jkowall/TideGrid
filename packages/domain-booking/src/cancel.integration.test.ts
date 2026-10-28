@@ -61,6 +61,7 @@ describe.skipIf(!env)("cancellation within policy, management, and booking email
       provider: mail,
       fromAddress: "bookings@tidegrid.test",
       guestLinkOrigin: "http://{slug}.book.localhost:5301",
+      environment: "local",
       runId: `run-${randomUUID()}`,
     });
   async function seatsUsed(tripId: string) {

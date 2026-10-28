@@ -12,6 +12,25 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@tidegrid/operator-site", "dev"],
       "port": 5174
+    },
+    {
+      "name": "guest",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "GUEST_DEV_PORT=5361",
+        "VITE_API_BASE=http://localhost:8961",
+        "pnpm",
+        "--filter",
+        "@tidegrid/guest-site",
+        "dev"
+      ],
+      "port": 5361
+    },
+    {
+      "name": "guest-worker",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@tidegrid/guest-site", "dev:stub"],
+      "port": 5361
     }
   ]
 }

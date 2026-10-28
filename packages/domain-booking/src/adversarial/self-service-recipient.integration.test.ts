@@ -502,6 +502,7 @@ describe.skipIf(!env)("adversarial: a corrected address against email in flight"
         provider: new FakeEmailProvider({ db: single.db, environment: "local" }),
         fromAddress: FROM_ADDRESS,
         guestLinkOrigin: LINK_ORIGIN,
+        environment: "local",
         runId: `run-${randomUUID()}`,
       });
       const outcome = await Promise.race([

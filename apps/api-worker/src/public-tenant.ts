@@ -1,6 +1,8 @@
+import { BrandConfig, brandSchemaVersion, PublicExperienceResponse } from "@tidegrid/contracts";
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
+  type Database,
   IdempotencyKeyMismatchError,
   inTenantTransaction,
   type JsonObject,
@@ -8,11 +10,12 @@ import {
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
-import { normalizeHostname } from "@tidegrid/domain-identity";
+import { type HostPolicy, type ParsedOrigin, parseBrowserOrigin } from "@tidegrid/domain-hostnames";
 import type { Context } from "hono";
-import { sql } from "kysely";
+import { type Kysely, sql } from "kysely";
 import type { AppEnv } from "./context.ts";
 import { getDb } from "./db.ts";
+import type { Bindings } from "./env.ts";
 import { ApiError } from "./errors.ts";
 
 /**
@@ -23,7 +26,8 @@ import { ApiError } from "./errors.ts";
  */
 export const GUEST_PRINCIPAL = "guest:public";
 
-const notPublished = () =>
+/** Every miss, whatever its cause, answers this same 404. */
+export const notPublished = () =>
   new ApiError(404, "tenant_not_found", "No operator is published at this address");
 
 /**
@@ -52,20 +56,110 @@ export interface PublicCommand {
   successStatus: number;
 }
 
+/** The host rules for this deployment: local development may use http, ports, and *.localhost. */
+export function hostPolicy(env: Bindings): HostPolicy {
+  return { environment: env.ENVIRONMENT };
+}
+
 /**
- * The tenant the browser Origin resolves to: an active, verified hostname of
- * an active tenant, as /v1/public/trips does. Anything else answers the same
- * 404. Opens no transaction.
+ * The calling page's origin under the strict origin parser (G2.14b), or null.
+ * Only the Origin header is read: never Host, X-Forwarded-Host, or Referer.
  */
-export async function resolvePublicTenant(c: Context<AppEnv>): Promise<string> {
-  const host = normalizeHostname(c.req.header("origin"));
-  if (!host) throw notPublished();
+export function publicOrigin(c: Context<AppEnv>): ParsedOrigin | null {
+  return parseBrowserOrigin(c.req.header("origin"), hostPolicy(c.env));
+}
+
+/** One lookup per request, shared by the CORS check and the route. */
+const resolutions = new WeakMap<Request, Promise<string | null>>();
+
+/** The tenant an active, verified hostname maps to, or null. */
+export async function tenantForHost(db: Kysely<Database>, host: string): Promise<string | null> {
   const { rows } = await sql<{ tenant_id: string }>`
     select tenant_id from app.resolve_hostname(${host})
-  `.execute(getDb(c));
-  const tenantId = rows[0]?.tenant_id;
+  `.execute(db);
+  return rows[0]?.tenant_id ?? null;
+}
+
+/**
+ * The tenant this request's Origin resolves to, or null, looked up at most
+ * once per request: the CORS middleware and the route share the answer, so
+ * they always agree. A non-canonical origin never reaches the database.
+ */
+export function tenantForOrigin(c: Context<AppEnv>): Promise<string | null> {
+  const key = c.req.raw;
+  let resolution = resolutions.get(key);
+  if (!resolution) {
+    const parsed = publicOrigin(c);
+    resolution = parsed ? tenantForHost(getDb(c), parsed.host) : Promise.resolve(null);
+    resolutions.set(key, resolution);
+  }
+  return resolution;
+}
+
+/**
+ * The tenant the browser Origin resolves to: an active, verified hostname of
+ * an active tenant. Anything else, a non-canonical origin included, answers
+ * the same 404. Opens no transaction.
+ */
+export async function resolvePublicTenant(c: Context<AppEnv>): Promise<string> {
+  const tenantId = await tenantForOrigin(c);
   if (!tenantId) throw notPublished();
   return tenantId;
+}
+
+interface ResolvedBrandRow {
+  tenant_id: string;
+  tenant_slug: string;
+  tenant_name: string;
+  brand_version: number | null;
+  brand_schema_version: number | null;
+  brand_config: unknown;
+}
+
+export type PublicExperience =
+  | { kind: "found"; tenantId: string; experience: PublicExperienceResponse }
+  | { kind: "miss" }
+  /** The stored identity or brand failed validation and is withheld. */
+  | { kind: "withheld"; tenantId: string; version: number | null; reason: string };
+
+/**
+ * The public experience for a normalized hostname: the tenant's identity and
+ * its active brand, validated on the way out as well as on the way in. The
+ * stored config must pass the stored shape exactly (a config that names its
+ * own version, or carries any other extra field, fails), and the whole answer
+ * must pass the public contract, identity included. The bootstrap route and
+ * the guest Worker's gateway both read it here.
+ */
+export async function loadPublicExperience(
+  db: Kysely<Database>,
+  host: string,
+): Promise<PublicExperience> {
+  const { rows } = await sql<ResolvedBrandRow>`
+    select tenant_id, tenant_slug, tenant_name, brand_version, brand_schema_version, brand_config
+      from app.resolve_public_brand(${host})
+  `.execute(db);
+  const row = rows[0];
+  if (!row) return { kind: "miss" };
+  const withheld = (reason: string): PublicExperience => ({
+    kind: "withheld",
+    tenantId: row.tenant_id,
+    version: row.brand_version,
+    reason,
+  });
+  let body: unknown = { tenant: { slug: row.tenant_slug, name: row.tenant_name } };
+  if (row.brand_version !== null) {
+    if (row.brand_schema_version !== brandSchemaVersion)
+      return withheld("BrandSchemaVersionUnknown");
+    const stored = BrandConfig.safeParse(row.brand_config);
+    if (!stored.success) return withheld("BrandConfigInvalid");
+    body = {
+      tenant: { slug: row.tenant_slug, name: row.tenant_name },
+      brand: { ...stored.data, version: row.brand_version },
+    };
+  }
+  const response = PublicExperienceResponse.safeParse(body);
+  if (!response.success) return withheld("PublicExperienceInvalid");
+  return { kind: "found", tenantId: row.tenant_id, experience: response.data };
 }
 
 /** A guest's context in the tenant the Origin resolved to. */

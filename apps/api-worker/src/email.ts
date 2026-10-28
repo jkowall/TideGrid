@@ -61,14 +61,27 @@ export function fakeEmailProviderFor(c: Context<AppEnv>): FakeEmailProvider | nu
   return fakeEmailProvider(c.env, () => getDb(c));
 }
 
-/** Where a sent link points and who sends, for a test's override or the configured fake. */
-export function deliverySettings(env: Bindings): { fromAddress: string; guestLinkOrigin: string } {
+/**
+ * Where a sent link points and who sends, for a test's override or the
+ * configured fake. The environment goes along so the link origin passes the
+ * strict origin parser under this deployment's rules (G2.14b).
+ */
+export function deliverySettings(env: Bindings): {
+  fromAddress: string;
+  guestLinkOrigin: string;
+  environment: Bindings["ENVIRONMENT"];
+} {
   const settings = emailSettings(env);
   return settings.kind === "fake"
-    ? { fromAddress: settings.fromAddress, guestLinkOrigin: settings.guestLinkOrigin }
+    ? {
+        fromAddress: settings.fromAddress,
+        guestLinkOrigin: settings.guestLinkOrigin,
+        environment: env.ENVIRONMENT,
+      }
     : {
         fromAddress: env.EMAIL_FROM_ADDRESS || DEFAULT_FROM_ADDRESS,
         guestLinkOrigin: env.GUEST_LINK_ORIGIN || DEFAULT_GUEST_LINK_ORIGIN,
+        environment: env.ENVIRONMENT,
       };
 }
 

@@ -29,7 +29,9 @@
     "@tidegrid/domain-payments": "workspace:*",
     "@tidegrid/domain-waivers": "workspace:*",
     "jose": "^6.2.0",
-    "kysely": "^0.29.0"
+    "kysely": "^0.29.0",
+    "@tidegrid/domain-hostnames": "workspace:*",
+    "@tidegrid/tenant-config": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",

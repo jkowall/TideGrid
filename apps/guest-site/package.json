@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-precache.mjs && node scripts/local-headers.mjs",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run",
-    "release": "vite build && wrangler deploy",
-    "release:dry": "vite build && wrangler deploy --dry-run"
+    "dev:worker": "wrangler dev --env dev --port 5361 --inspector-port 9361",
+    "dev:stub": "wrangler dev --env test -c wrangler.jsonc -c worker/stub-gateway.wrangler.jsonc --port 5361 --inspector-port 9361",
+    "e2e": "playwright test",
+    "typecheck": "wrangler types >/dev/null && tsc -p tsconfig.json && tsc -p worker/tsconfig.json && tsc -p e2e/tsconfig.json",
+    "test": "vitest run && vitest run --config vitest.workers.config.ts",
+    "release": "vite build && node scripts/check-precache.mjs && wrangler deploy",
+    "release:dry": "vite build && node scripts/check-precache.mjs && wrangler deploy --dry-run"
   },
   "dependencies": {
     "@tidegrid/contracts": "workspace:*",
@@ -22,6 +25,7 @@
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.0",
+    "@types/node": "^24.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^6.1.0",
@@ -29,6 +33,9 @@
     "typescript": "^5.9.0",
     "vite": "^8.3.3",
     "vitest": "^4.1.0",
-    "wrangler": "^4.135.0"
+    "wrangler": "^4.135.0",
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@playwright/test": "1.64.0",
+    "@tidegrid/tenant-config": "workspace:*"
   }
 }

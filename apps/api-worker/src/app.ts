@@ -6,9 +6,9 @@ import { HTTPException } from "hono/http-exception";
 import { requireStaffOrigin } from "./auth/guards.ts";
 import type { AppDeps, AppEnv } from "./context.ts";
 import { releaseDb } from "./db.ts";
-import { allowedOrigins } from "./env.ts";
 import { ApiError } from "./errors.ts";
 import { requireConsoleGateway } from "./gateway.ts";
+import { allowedOrigin } from "./hostnames/cors.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
 import { registerBookingStaffRoutes } from "./routes/bookings-staff.ts";
 import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
@@ -76,20 +76,21 @@ export function createApp(deps: AppDeps = {}) {
     });
   });
 
-  // Browser origins are an explicit allowlist. G2.14 adds verified tenant
-  // hostnames; until then only configured origins may call from a browser.
-  app.use("*", async (c, next) => {
-    const origins = allowedOrigins(c.env);
-    return cors({
-      origin: (origin) => (origins.includes(origin) ? origin : null),
+  // Browser origins: the configured allowlist, plus verified tenant hostnames
+  // on the public routes (G2.14b; see src/hostnames/cors.ts). Credentials are
+  // never allowed. Vary: Origin goes on every answer, preflights included.
+  app.use(
+    "*",
+    cors({
+      origin: allowedOrigin,
       allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       // Authorization carries a guest's checkout secret (G2.7); staff routes
       // authenticate with Access or the session cookie, never with it.
       allowHeaders: ["Content-Type", "Idempotency-Key", "X-Request-Id", "Authorization"],
       exposeHeaders: ["X-Request-Id", "Idempotent-Replayed"],
       maxAge: 600,
-    })(c, next);
-  });
+    }),
+  );
 
   // Staff and sign-in answers are private, and no cache keeps any of them:
   // registered before the guards, so their refusals are no-store too (G2.12c).

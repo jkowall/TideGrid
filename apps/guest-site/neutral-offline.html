@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#f6f7f6" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/sw/offline.css" />
+    <title>You're offline</title>
+  </head>
+  <body>
+    <!--
+      The service worker's offline page (G2.14b). Neutral on purpose: it names
+      no operator, holds no booking state, and works for every host. Booking
+      needs a connection; nothing here confirms seats, money, or a booking.
+    -->
+    <div class="guest guest--neutral">
+      <main id="main" class="guest-state">
+        <div class="guest-state__panel">
+          <h1 class="guest-state__title">You're offline</h1>
+          <div class="guest-state__body">
+            <p>
+              Booking needs a connection, so nothing can be booked or paid while you're offline.
+              Reconnect, then reload this page.
+            </p>
+          </div>
+        </div>
+      </main>
+      <footer class="guest-state__footer">
+        <p>Online booking by TideGrid. Demo build with synthetic operators.</p>
+      </footer>
+    </div>
+  </body>
+</html>

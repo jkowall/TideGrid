@@ -304,6 +304,7 @@ export function deliverMail(
     provider,
     fromAddress: FROM_ADDRESS,
     guestLinkOrigin: LINK_ORIGIN,
+    environment: "local",
     runId: `run-${randomUUID()}`,
     ...extra,
   });
