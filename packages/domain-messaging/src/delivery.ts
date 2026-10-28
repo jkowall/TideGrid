@@ -87,6 +87,16 @@ export interface DeliveryOptions {
    * this is for the log.
    */
   onSendError?: (messageId: string, error: unknown) => void;
+  /**
+   * A wall-clock instant (epoch ms) by which every attempt of this run must
+   * be over, such as the end of a request's `waitUntil` budget (G2.16a). A
+   * new message is claimed only while there is room for the provider's
+   * `sendTimeoutMs` and a margin before it. Unset, the run is bounded by
+   * `limit` alone.
+   */
+  deadline?: number;
+  /** The wall clock the deadline is read with; tests pin it. */
+  clock?: () => number;
 }
 
 export type DeliveryOutcome =
@@ -110,6 +120,9 @@ export interface DeliveryItem {
   code: string | null;
 }
 
+/** Why a run stopped before it ran out of due messages or its limit, or null. */
+export type DeliveryStop = "deadline" | "account_fault";
+
 export interface TenantDeliveryReport {
   claimed: number;
   sent: number;
@@ -118,6 +131,7 @@ export interface TenantDeliveryReport {
   canceled: number;
   superseded: number;
   items: DeliveryItem[];
+  stopped: DeliveryStop | null;
 }
 
 interface ClaimedRow {
@@ -396,6 +410,7 @@ export async function deliverTenantMessages(
     canceled: 0,
     superseded: 0,
     items: [],
+    stopped: null,
   };
   for (let i = 0; i < limit; i++) {
     const claimed = await claimOne(db, ctx, options, origin);
@@ -460,7 +475,6 @@ export interface EmailSweepOptions extends DeliveryOptions {
   budgetMs?: number;
   /** One tenant's run failed; the sweep moves on. */
   onTenantError?: (tenantId: string, error: unknown) => void;
-  clock?: () => number;
 }
 
 export interface EmailSweepReport {
@@ -473,6 +487,8 @@ export interface EmailSweepReport {
   superseded: number;
   failedTenants: number;
   complete: boolean;
+  /** An account-level provider fault stopped the sweep (G2.16a, D2). */
+  accountFault: boolean;
 }
 
 /**
@@ -501,6 +517,7 @@ export async function sweepEmail(
     superseded: 0,
     failedTenants: 0,
     complete: rows.length < tenantLimit,
+    accountFault: false,
   };
   for (const { tenant_id: tenantId } of rows) {
     if (clock() - started >= budget) {

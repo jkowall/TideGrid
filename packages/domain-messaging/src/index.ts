@@ -20,19 +20,43 @@ export {
   revokeGuestSessions,
 } from "./access.ts";
 export {
+  type EmailFaultScope,
   type EmailProvider,
   type EmailProviderName,
   EmailProviderRejectedError,
   EmailProviderUnavailableError,
+  type EmailSendOutcome,
   type OutgoingEmail,
+  providerMessageIdPattern,
 } from "./adapter.ts";
 export { loadEmailBrand } from "./brand.ts";
+export {
+  type CloudflareEmailAddress,
+  type CloudflareEmailBuilder,
+  type CloudflareEmailOptions,
+  CloudflareEmailProvider,
+  createCloudflareEmailProvider,
+  DEFAULT_CLOUDFLARE_SEND_TIMEOUT_MS,
+  type EmailProviderLog,
+  MESSAGE_ID_HEADER,
+  normalizeCloudflareMessageId,
+  normalizeRecipient,
+  type RecipientPolicy,
+  type SendEmailBinding,
+} from "./cloudflare.ts";
+export {
+  type CloudflareErrorClass,
+  type CloudflareErrorRule,
+  classifyCloudflareError,
+  cloudflareErrorTable,
+} from "./cloudflare-errors.ts";
 export {
   DEFAULT_GUEST_LINK_ORIGIN,
   DEFAULT_LEASE_SECONDS,
   type DeliveryItem,
   type DeliveryOptions,
   type DeliveryOutcome,
+  type DeliveryStop,
   deliverTenantMessages,
   deliveryEnvironment,
   type EmailSweepOptions,
