@@ -357,6 +357,33 @@ describe("a roster", () => {
     expect(book.getAttribute("href")).toBe(`/trips/${tripId}/book`);
   });
 
+  it.each([
+    ["departed", { startsAt: "2026-11-04T16:00:00.000Z" }],
+    ["past its cutoff", { salesCloseAt: "2026-11-04T16:59:00.000Z" }],
+    ["blacked out", { blackedOut: true }],
+  ] as const)(
+    "offers no New booking on a trip that is %s, as the calendar's Book rule says",
+    async (_label, over) => {
+      const trip = { ...tripRoster().trip, salesCloseAt: "2026-11-04T22:00:00.000Z", ...over };
+      api({ [route.roster(tripId)]: () => json(rosterBody(tripRoster({ trip }))) });
+      renderPage("booking_staff");
+      await loaded();
+      expect(screen.queryByRole("link", { name: "New booking" })).toBeNull();
+    },
+  );
+
+  it("offers New booking before the cutoff on a trip on sale", async () => {
+    const trip = {
+      ...tripRoster().trip,
+      salesCloseAt: "2026-11-04T22:00:00.000Z",
+      blackedOut: false,
+    };
+    api({ [route.roster(tripId)]: () => json(rosterBody(tripRoster({ trip }))) });
+    renderPage("booking_staff");
+    await loaded();
+    expect(screen.getByRole("link", { name: "New booking" })).toBeTruthy();
+  });
+
   it("offers no New booking on a trip that is not on sale", async () => {
     const closed = tripRoster({ trip: { ...tripRoster().trip, salesState: "closed" } });
     api({ [route.roster(tripId)]: () => json(rosterBody(closed)) });

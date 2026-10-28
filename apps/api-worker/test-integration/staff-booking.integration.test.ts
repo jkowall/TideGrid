@@ -487,9 +487,17 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
         const roster = await request("GET", `${base(t.id)}/trips/${m.tripId}/roster`, {
           as: t.staff,
         });
-        const listed = TripRosterResponse.parse(roster.json).roster.bookings.find(
-          (b) => b.id === m.bookingId,
-        );
+        const parsed = TripRosterResponse.parse(roster.json).roster;
+        // The roster carries the calendar's Book rule inputs (review UI-7).
+        const [closes] = await admin<{ at: Date }[]>`
+          select t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as at
+            from public.scheduled_trips t join public.products p on p.id = t.product_id
+           where t.id = ${m.tripId}`;
+        expect(parsed.trip).toMatchObject({
+          blackedOut: false,
+          salesCloseAt: closes?.at.toISOString(),
+        });
+        const listed = parsed.bookings.find((b) => b.id === m.bookingId);
         expect(listed).toMatchObject({ source: "staff_assisted", channel: m.channel });
       }
     }
@@ -1019,6 +1027,90 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
           exceptions: 1,
         });
       }
+    }
+  });
+
+  // Review fixes (R6 replay, R3) ---------------------------------------------------------------
+
+  it("settles nothing on a replay after the checkout was canceled, when the first settle never happened", async () => {
+    const tripId = tripsA.shared();
+    const q = await staffQuote(A, A.staff, tickets(tripId, 1));
+    const opened = await open(A.id, A.staff, openBody(q, booker("replay")));
+    const id = opened.json.checkout.id as string;
+    const pKey = key("replay");
+    // The fake's storage refuses the settle: phase 1 is recorded, phase 2 answers 503.
+    await admin`revoke insert on public.fake_provider_events from tidegrid_app`;
+    let first: Res;
+    try {
+      first = await testPay(A.id, A.staff, id, "succeed", pKey);
+    } finally {
+      await admin`grant insert on public.fake_provider_events to tidegrid_app`;
+    }
+    expect([first.status, first.json.error?.code]).toEqual([503, "payment_provider_unavailable"]);
+    expect((await cancel(A.id, A.staff, id)).json.checkout.state).toBe("canceled");
+    // The same key again is a replay: phase 1 does not run, so phase 2 checks.
+    const replay = await testPay(A.id, A.staff, id, "succeed", pKey);
+    expect([replay.status, replay.json.error?.code]).toEqual([409, "checkout_not_open"]);
+    const [state] = await admin<{ events: number; refunds: number; state: string }[]>`
+      select (select count(*)::int from public.fake_provider_events e
+                join public.payments p on p.provider_payment_id = e.payment_id
+               where p.checkout_session_id = ${id}) as events,
+             (select count(*)::int from public.payment_refunds r
+                join public.payments p on p.id = r.payment_id
+               where p.checkout_session_id = ${id}) as refunds,
+             (select state from public.checkout_sessions where id = ${id}) as state`;
+    expect(state).toEqual({ events: 0, refunds: 0, state: "canceled" });
+  });
+
+  it("refuses the other outcome once a test payment settled, and keeps the record true", async () => {
+    let calls = 0;
+    const flakyApp = createApp({
+      accessVerifier: verifier,
+      deliverEmailAfterCommit: false,
+      bookingHooks: {
+        bookingConfirmed: async () => {
+          calls += 1;
+          if (calls === 1) throw new Error("injected: the first delivery fails");
+        },
+      },
+    });
+    const tripId = tripsA.shared();
+    const q = await staffQuote(A, A.staff, tickets(tripId, 1));
+    const opened = await open(A.id, A.staff, openBody(q, booker("opposite")));
+    const id = opened.json.checkout.id as string;
+    const pKey = key("opposite");
+    const paid = await testPay(A.id, A.staff, id, "succeed", pKey, flakyApp);
+    expect(paid.json.delivery.status).toBeGreaterThanOrEqual(500);
+    // Decline under a new key: refused, recording nothing, delivering nothing.
+    const declined = await testPay(A.id, A.staff, id, "fail", key("decline"), flakyApp);
+    expect([declined.status, declined.json.error?.code]).toEqual([409, "test_payment_settled"]);
+    const asked = await admin<{ outcome: string }[]>`
+      select after_state ->> 'outcome' as outcome from public.audit_events
+       where subject_id = ${id} and action = 'checkout.test_payment_requested'`;
+    expect(asked.map((a) => a.outcome)).toEqual(["succeed"]);
+    expect((await read(A.id, A.staff, id)).json.checkout.lastTestPayment.outcome).toBe("succeed");
+    // The original key still delivers the payment that went through.
+    const retry = await testPay(A.id, A.staff, id, "succeed", pKey, flakyApp);
+    expect(retry.json.delivery).toMatchObject({ status: 200, outcome: "confirmed" });
+  });
+
+  it("lets one of two opposite test payments sent at once stand, and records the other as superseded", async () => {
+    for (let round = 0; round < 4; round++) {
+      const tripId = tripsA.shared();
+      const q = await staffQuote(A, A.owner, tickets(tripId, 1));
+      const opened = await open(A.id, A.owner, openBody(q, booker("both")));
+      const id = opened.json.checkout.id as string;
+      const [yes, no] = await Promise.all([
+        testPay(A.id, A.owner, id, "succeed"),
+        testPay(A.id, A.owner, id, "fail"),
+      ]);
+      const won = yes.status === 200 ? "succeed" : "fail";
+      const lost = won === "succeed" ? no : yes;
+      expect([yes.status, no.status].sort()).toEqual([200, 409]);
+      expect(lost.json.error?.code).toBe("test_payment_settled");
+      const now = (await read(A.id, A.owner, id)).json.checkout;
+      expect(now.lastTestPayment.outcome).toBe(won);
+      expect(now.state).toBe(won === "succeed" ? "confirmed" : "failed");
     }
   });
 

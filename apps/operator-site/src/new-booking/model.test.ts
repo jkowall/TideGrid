@@ -132,6 +132,21 @@ describe("words for the desk", () => {
     expect(refusalOf(code).next).toBe(next);
   });
 
+  it("says what a provider timeout means on the payment step, and how held seats are released (review UI-13)", () => {
+    expect(refusalOf("payment_provider_unavailable", "pay")).toMatchObject({
+      title: "The test payment didn't go through",
+      next: "retry",
+    });
+    expect(refusalOf("payment_provider_unavailable", "pay").body).not.toContain("held");
+    expect(refusalOf("payment_provider_unavailable", "open").body).toContain("The seats are held");
+    expect(refusalOf("too_many_checkouts").body).toContain("released within 15 minutes");
+    expect(refusalOf("too_many_checkouts").body).not.toContain(
+      "Finish or cancel one of them first",
+    );
+    expect(refusalOf("checkout_not_cancelable").next).toBe("stop");
+    expect(refusalOf("test_payment_settled").next).toBe("stop");
+  });
+
   it("reads every checkout state as an outcome", () => {
     expect(
       (["open", "confirmed", "failed", "unfulfilled", "expired", "canceled"] as const).map(

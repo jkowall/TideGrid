@@ -11,6 +11,7 @@ import {
   apiError,
   callsTo,
   deferred,
+  dropped,
   json,
   membership,
   sentTo,
@@ -555,5 +556,226 @@ describe("outcomes", () => {
     const [first, second] = sentTo(newRoute.quote);
     expect(second?.headers.get("idempotency-key")).not.toBe(first?.headers.get("idempotency-key"));
     void checkoutId;
+  });
+});
+
+describe("review fixes (G2.12d review)", () => {
+  const base = () => ({
+    [newRoute.offer()]: offerAnswer(),
+    [newRoute.quote]: quoteAnswer,
+    [newRoute.open]: openAnswer,
+  });
+
+  it("UI-1: Try again after a failed cancel retries the cancel, never a payment", async () => {
+    api({
+      ...base(),
+      [newRoute.cancel()]: [
+        () => apiError(503, "unavailable"),
+        () => json({ checkout: staffCheckout({ state: "canceled" }) }),
+      ],
+    });
+    renderPage();
+    await toPayment();
+    await click("Cancel booking");
+    const dialog = await screen.findByRole("dialog", { name: "Cancel this booking?" });
+    await settle();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
+    const alert = await screen.findByRole("alert");
+    expect(text(alert)).toContain("Try again");
+    await click("Try again");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    expect(sentTo(newRoute.cancel())).toHaveLength(2);
+    expect(sentTo(newRoute.pay())).toHaveLength(0);
+  });
+
+  it("UI-1: a cancel refused because the payment was decided shows where the booking stands, with no payment", async () => {
+    api({
+      ...base(),
+      [newRoute.cancel()]: () => apiError(409, "checkout_not_cancelable"),
+      [newRoute.read()]: () => json({ checkout: confirmed() }),
+    });
+    renderPage();
+    await toPayment();
+    await click("Cancel booking");
+    const dialog = await screen.findByRole("dialog", { name: "Cancel this booking?" });
+    await settle();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
+    expect(await stepHeading("Booked")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(sentTo(newRoute.pay())).toHaveLength(0);
+  });
+
+  it("UI-2: clears both attestations when the review is left and the address changes", async () => {
+    api(base());
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Change details");
+    await stepHeading("Who is coming");
+    await click("Price and continue");
+    await stepHeading("The guest");
+    fireEvent.change(screen.getByLabelText("Booker's email"), {
+      target: { value: "someone.else@guest.example" },
+    });
+    await click("Review");
+    await stepHeading("Review with the guest");
+    expect(text(document.querySelector(".nb-readback__email"))).toBe("someone.else@guest.example");
+    for (const label of [
+      "I read the email address back to the guest",
+      "I told the guest the cancellation policy (version 3)",
+    ]) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).checked).toBe(false);
+    }
+    await click("Hold seats and take payment");
+    expect(sentTo(newRoute.open)).toHaveLength(0);
+  });
+
+  it("UI-2: a new quote after the old one expired clears the policy attestation", async () => {
+    api({
+      ...base(),
+      [newRoute.quote]: [
+        quoteAnswer,
+        () => json({ quote: quoteFor({ quoteId: "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a62" }) }, 201),
+      ],
+      [newRoute.open]: () => apiError(409, "quote_expired"),
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByRole("alert");
+    await click("Price again");
+    await waitFor(() => expect(sentTo(newRoute.quote)).toHaveLength(2));
+    await stepHeading("Review with the guest");
+    await settle();
+    const policy = screen.getByLabelText(
+      "I told the guest the cancellation policy (version 3)",
+    ) as HTMLInputElement;
+    expect(policy.checked).toBe(false);
+  });
+
+  it("UI-10: an attestation's error goes once its box is checked", async () => {
+    api(base());
+    renderPage();
+    await toReview();
+    await click("Hold seats and take payment");
+    expect(screen.getByText("Read the address back first.")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("I read the email address back to the guest"));
+    expect(screen.queryByText("Read the address back first.")).toBeNull();
+    expect(screen.getByText("Tell the guest the policy first.")).toBeTruthy();
+  });
+
+  it("UI-3: after a settled payment whose result was lost, only Try again is offered", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: () =>
+        json(paid({ delivery: { status: 502, outcome: null, duplicate: null } })),
+    });
+    renderPage();
+    await toPayment();
+    await click("Take test payment");
+    await screen.findByRole("alert");
+    await settle();
+    for (const name of ["Take test payment", "Decline", "Cancel booking", "Change details"]) {
+      expect(screen.getByRole("button", { name }).getAttribute("aria-disabled")).toBe("true");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Cancel booking" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("UI-3 and UI-4: a cancel after an unanswered payment warns it may have gone through, and the outcome shows no stale error", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: dropped,
+      [newRoute.cancel()]: () => json({ checkout: staffCheckout({ state: "canceled" }) }),
+    });
+    renderPage();
+    await toPayment();
+    await click("Take test payment");
+    await screen.findByRole("alert");
+    await click("Cancel booking");
+    const dialog = await screen.findByRole("dialog", { name: "Cancel this booking?" });
+    expect(text(dialog)).toContain("may already have gone through");
+    expect(text(dialog)).not.toContain("Nothing has been charged");
+    await settle();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("UI-5: marks Payment done only for a confirmed booking", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: () =>
+        json(
+          paid({
+            outcome: "fail",
+            delivery: { status: 200, outcome: "released", duplicate: false },
+          }),
+        ),
+      [newRoute.read()]: () =>
+        json({ checkout: staffCheckout({ state: "failed", paymentState: "failed" }) }),
+    });
+    renderPage();
+    await toPayment();
+    await click("Decline");
+    await stepHeading("The test payment was declined");
+    const steps = screen.getByRole("list", { name: "Booking steps" });
+    const payment = [...steps.querySelectorAll("li")].at(-1);
+    expect(text(payment)).not.toContain("done");
+    expect(payment?.getAttribute("aria-current")).toBe("step");
+  });
+
+  it("UI-8: an edit after two provider timeouts keeps the request and says the seats may be held", async () => {
+    api({
+      ...base(),
+      [newRoute.open]: [
+        () => apiError(503, "payment_provider_unavailable"),
+        () => apiError(503, "payment_provider_unavailable"),
+      ],
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByRole("alert");
+    await click("Change details");
+    expect(await screen.findByText("The earlier hold couldn't be released yet")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Review with the guest" })).toBeTruthy();
+    expect(sentTo(newRoute.cancel())).toHaveLength(0);
+    const opens = sentTo(newRoute.open);
+    expect(opens).toHaveLength(2);
+    expect(opens[1]?.headers.get("idempotency-key")).toBe(opens[0]?.headers.get("idempotency-key"));
+  });
+
+  it("UI-9: names the command that failed", async () => {
+    api({ [newRoute.offer()]: offerAnswer(), [newRoute.quote]: dropped });
+    renderPage();
+    await stepHeading("Who is coming");
+    await click("Add one Adult");
+    await click("Price and continue");
+    const alert = await screen.findByRole("alert");
+    expect(text(alert)).toContain("The party couldn't be priced");
+    expect(text(alert)).not.toContain("didn't load");
+  });
+
+  it("UI-11 and UI-12: one guest reads as one, and the address breaks only after an @ or a dot", async () => {
+    api(base());
+    renderPage();
+    await stepHeading("Who is coming");
+    await click("Add one Adult");
+    expect(text(document.querySelector(".nb-status"))).toBe("1 guest");
+    await click("Add one Adult");
+    expect(text(document.querySelector(".nb-status"))).toBe("2 guests");
+    await click("Price and continue");
+    await stepHeading("The guest");
+    fireEvent.change(screen.getByLabelText("Booker's name"), { target: { value: caller.name } });
+    fireEvent.change(screen.getByLabelText("Booker's email"), { target: { value: caller.email } });
+    await click("Review");
+    await stepHeading("Review with the guest");
+    const email = document.querySelector(".nb-readback__email") as HTMLElement;
+    expect(text(email)).toBe(caller.email);
+    expect(email.querySelectorAll("wbr")).toHaveLength(3);
   });
 });
