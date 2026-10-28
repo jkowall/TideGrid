@@ -13,9 +13,13 @@
  * - Limits: https://developers.cloudflare.com/email-service/platform/limits/
  *
  * Which code a refused sender gets is not documented; the fixture answers
- * E_SENDER_NOT_VERIFIED. The id format is not documented either; the
- * fixture answers `<36 alphanumerics@sender domain>`, as the local
- * simulation does.
+ * E_SENDER_NOT_VERIFIED. The id format is not documented either. The
+ * fixture answers the shape of the event-subscriptions examples
+ * (`0101018f7d0c4d9a-msg-deadbeef`, 16 hex, `-msg-`, then 16 hex here):
+ * https://developers.cloudflare.com/email-service/reference/event-subscriptions/
+ * Whether `send()` returns that same id, and in that form, is unverified;
+ * the local simulation answers `<36 alphanumerics@sender domain>` instead.
+ * G2.16-live compares the two before the join rule is settled.
  *
  * Every scripted failure's message carries the recipient address, the
  * display names, the subject and the tenant id, as a careless provider
@@ -156,12 +160,15 @@ type Script =
   | { kind: "reject_late"; code: string; ms: number }
   | { kind: "accept_late"; ms: number };
 
-const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+function hex(bytes: number): string {
+  return [...crypto.getRandomValues(new Uint8Array(bytes))]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
 
-function randomId(domain: string): string {
-  let out = "";
-  for (const b of crypto.getRandomValues(new Uint8Array(36))) out += alphabet[b % 62];
-  return `<${out}@${domain}>`;
+/** An id in the shape of the event-subscriptions examples. */
+function randomId(): string {
+  return `${hex(8)}-msg-${hex(8)}`;
 }
 
 function addressOf(value: string | { email: string; name?: string }): string {
@@ -282,7 +289,7 @@ export function createCloudflareEmailFixture(
           }
           case "accept_late": {
             record.outcome = { kind: "late", settles: "accept" };
-            const messageId = ids.shift() ?? randomId(addressOf(builder.from).split("@")[1] ?? "x");
+            const messageId = ids.shift() ?? randomId();
             return new Promise((resolve) => setTimeout(() => resolve({ messageId }), script.ms));
           }
         }
@@ -292,7 +299,7 @@ export function createCloudflareEmailFixture(
         record.outcome = { kind: "error", code: refused };
         throw error(refused, builder);
       }
-      const messageId = ids.shift() ?? randomId(addressOf(builder.from).split("@")[1] ?? "x");
+      const messageId = ids.shift() ?? randomId();
       record.outcome = { kind: "accepted", messageId };
       return { messageId };
     },

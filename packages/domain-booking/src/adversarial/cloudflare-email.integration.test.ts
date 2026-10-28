@@ -64,7 +64,7 @@ function recorder(): Recorder {
         if (code)
           throw Object.assign(new Error(`${code} for ${JSON.stringify(builder.to)}`), { code });
         n += 1;
-        return { messageId: `<cfmsg${String(n).padStart(31, "0")}@tidegrid.test>` };
+        return { messageId: `0101018f7d0c4d9a-msg-${String(n).padStart(8, "0")}` };
       },
     },
   };
@@ -154,7 +154,7 @@ describe.skipIf(!env)("booking email over the Cloudflare email adapter (G2.16a)"
       select provider, provider_message_id from public.email_messages where id = ${confirmation.id}`;
     expect(stored).toEqual({
       provider: "cloudflare",
-      provider_message_id: expect.stringMatching(/^<cfmsg\d{31}@tidegrid\.test>$/),
+      provider_message_id: expect.stringMatching(/^0101018f7d0c4d9a-msg-\d{8}$/),
     });
   });
 

@@ -63,6 +63,7 @@ export {
   type EmailSweepReport,
   guestOriginFor,
   MAX_DELIVERY_ATTEMPTS,
+  providerDeduplicates,
   RETRY_BACKOFF_SECONDS,
   sweepEmail,
   type TenantDeliveryReport,

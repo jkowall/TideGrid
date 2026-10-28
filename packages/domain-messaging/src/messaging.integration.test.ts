@@ -250,6 +250,7 @@ describe.skipIf(!env)(
       const lost = await enqueue(A, "lost");
       const losing: EmailProvider = {
         name: "fake",
+        deduplicates: true,
         send: async (email) => {
           await fake.send(email);
           throw new Error("connection reset after the provider accepted");
@@ -272,6 +273,7 @@ describe.skipIf(!env)(
       let second: Awaited<ReturnType<typeof deliver>> | undefined;
       const stalling: EmailProvider = {
         name: "fake",
+        deduplicates: true,
         send: async (email) => {
           const sent = await fake.send(email);
           if (email.idempotencyKey === stalled.messageId && !second) {

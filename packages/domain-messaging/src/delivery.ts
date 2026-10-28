@@ -78,7 +78,7 @@ export const DEADLINE_MARGIN_MS = 2_000;
 export const OUTCOME_UNKNOWN = "outcome_unknown";
 
 /** Whether a repeat with the same key is safe on this provider (unset means it is). */
-function deduplicates(provider: EmailProvider): boolean {
+export function providerDeduplicates(provider: Pick<EmailProvider, "deduplicates">): boolean {
   return provider.deduplicates !== false;
 }
 /** The default guest-site origin for a tenant: its preview hostname. */
@@ -306,7 +306,7 @@ async function claimOne(
         } as const;
       }
     }
-    if (found.state === "sending" && !deduplicates(options.provider)) {
+    if (found.state === "sending" && !providerDeduplicates(options.provider)) {
       // A lapsed lease: the attempt crashed or was canceled, maybe after the
       // provider accepted. Without deduplication another send could deliver
       // a second copy with a second working link, so it ends here, unsent
@@ -493,7 +493,7 @@ export async function deliverTenantMessages(
         });
         result = { kind: "sent", providerMessageId: sent.providerMessageId };
       } catch (error) {
-        const dedupes = deduplicates(options.provider);
+        const dedupes = providerDeduplicates(options.provider);
         if (error instanceof EmailProviderRejectedError) {
           result = { kind: "failed", code: error.code };
         } else if (error instanceof EmailProviderUnavailableError) {

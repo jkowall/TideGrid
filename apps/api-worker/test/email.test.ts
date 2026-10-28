@@ -25,7 +25,7 @@ function stub() {
   const binding = {
     send: async (builder: CloudflareEmailBuilder) => {
       sends.push(builder);
-      return { messageId: "<StubStubStubStubStubStubStubStubStub@tidegrid.test>" };
+      return { messageId: "0101018f7d0c4d9a-msg-stub0001" };
     },
   };
   return { binding: binding as unknown as SendEmail, sends };
@@ -156,7 +156,7 @@ describe("email provider selection (G2.16a)", () => {
       text: "Synthetic",
     };
     await expect(provider?.send(email)).resolves.toEqual({
-      providerMessageId: "<StubStubStubStubStubStubStubStubStub@tidegrid.test>",
+      providerMessageId: "0101018f7d0c4d9a-msg-stub0001",
     });
     await expect(
       provider?.send({ ...email, to: { email: "someone@example.test", name: null } }),

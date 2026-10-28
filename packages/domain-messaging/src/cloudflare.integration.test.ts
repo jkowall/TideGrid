@@ -183,7 +183,7 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
     expect(report.items.find((i) => i.messageId === id)).toMatchObject({ outcome: "sent" });
     const stored = await row(id);
     expect(stored).toMatchObject({ state: "sent", attempts: 1, provider: "cloudflare" });
-    expect(stored.provider_message_id).toMatch(/^<[A-Za-z0-9]{36}@tidegrid\.test>$/);
+    expect(stored.provider_message_id).toMatch(/^[0-9a-f]{16}-msg-[0-9a-f]{16}$/);
     expect(cf.callsFor(id)).toBe(1);
     const sent = cf.fixture.sends.find((s) => s.builder.headers["X-TideGrid-Message-Id"] === id);
     expect(sent?.builder).toMatchObject({
@@ -346,10 +346,11 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
     it("leaves the fake's path unchanged: an unknown outcome retries with the same key", async () => {
       const fake = new FakeEmailProvider({ db: runtime.db, environment: "local" });
       const id = await enqueue(A, "fake", addr("fake"));
-      // A deduplicating provider (the fake, or a double that says nothing)
+      // A provider that says it deduplicates (the fake, or a double standing for it)
       // answers an unknown outcome: it is queued again, as before G2.16a.
       const lost: EmailProvider = {
         name: "fake",
+        deduplicates: true,
         send: async (email) => {
           await fake.send(email);
           throw new EmailProviderUnavailableError();

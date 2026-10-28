@@ -205,7 +205,9 @@ const TABLE: [string, "rejected" | "unavailable", string, "not_sent" | "unknown"
     ["E_HEADERS_TOO_MANY", "rejected", "invalid_message", null, "message"],
     ["E_RECIPIENT_SUPPRESSED", "rejected", "recipient_suppressed", null, "message"],
     ["E_RECIPIENT_NOT_ALLOWED", "rejected", "recipient_not_allowed", null, "message"],
-    ["E_RATE_LIMIT_EXCEEDED", "unavailable", "provider_rate_limited", "not_sent", "account"],
+    // Cloudflare rate-limits per account, domain, and recipient with one code, so it is a
+    // message-scope retry, not an account fault (review note fidelity F2).
+    ["E_RATE_LIMIT_EXCEEDED", "unavailable", "provider_rate_limited", "not_sent", "message"],
     ["E_DAILY_LIMIT_EXCEEDED", "unavailable", "provider_quota_exceeded", "not_sent", "account"],
     ["E_SENDER_NOT_VERIFIED", "unavailable", "sender_not_verified", "not_sent", "account"],
     ["E_SENDER_DOMAIN_NOT_AVAILABLE", "unavailable", "sender_not_verified", "not_sent", "account"],
@@ -326,31 +328,81 @@ describe("the Cloudflare email adapter: errors", () => {
     }
   });
 
-  it("logs an acceptance that arrives after the timeout with a hash of the provider id only", async () => {
-    const h = harness({ timeoutMs: 15 });
-    const late = "<LateLateLateLateLateLateLateLate0001@tidegrid.test>";
-    h.fixture.answerId(late);
-    h.fixture.acceptLate(40);
-    const error = await caught(h.provider.send(outgoing()));
-    expect(error).toMatchObject({ outcome: "unknown" });
-    await sleep(80);
-    const entry = h.logs.find((l) => l.event === "email_send_late_accept");
-    expect(entry?.attributes).toEqual({
-      "event.name": "email_send_late_accept",
-      "tidegrid.email.message_id": "0f6c1d2e-3a4b-4c5d-8e9f-a0b1c2d3e4f5",
-      "tidegrid.email.provider_message_hash": expect.stringMatching(/^[0-9a-f]{40}$/),
-    });
-    expect(JSON.stringify(h.logs)).not.toContain("LateLate");
-    expectNoPersonalData(error, h.logs);
+  it("logs an acceptance that arrives after the timeout with the normalized provider id, the join key", async () => {
+    for (const late of ["0101018f7d0c4d9a-msg-latelate", "{an odd late id}"]) {
+      const h = harness({ timeoutMs: 15 });
+      h.fixture.answerId(late);
+      h.fixture.acceptLate(40);
+      const error = await caught(h.provider.send(outgoing()));
+      expect(error).toMatchObject({ outcome: "unknown" });
+      await sleep(80);
+      const entry = h.logs.find((l) => l.event === "email_send_late_accept");
+      expect(entry?.attributes).toEqual({
+        "event.name": "email_send_late_accept",
+        "tidegrid.email.message_id": "0f6c1d2e-3a4b-4c5d-8e9f-a0b1c2d3e4f5",
+        "tidegrid.email.provider_message_id": (await normalizeCloudflareMessageId(late)).id,
+      });
+      expectNoPersonalData(error, h.logs);
+    }
+  });
+});
+
+describe("the Cloudflare email adapter: control characters", () => {
+  const bad = ["\r", "\n", "\r\n", "\u0000", "\t", "\u007f", "\u0085"];
+  it("refuses a control character in a display name or the subject, with no provider call", async () => {
+    for (const c of bad) {
+      for (const email of [
+        outgoing({ to: { email: "reef.guest@example.test", name: `Evil${c}Bcc: x@example.test` } }),
+        outgoing({ from: { email: FROM, name: `Harbor${c}X-Inj: 1` } }),
+        outgoing({ subject: `Hello${c}X-Inj: 1` }),
+      ]) {
+        const h = harness();
+        const error = await caught(h.provider.send(email));
+        expect(error).toBeInstanceOf(EmailProviderRejectedError);
+        expect((error as EmailProviderRejectedError).code).toBe("invalid_message");
+        expect(h.calls()).toBe(0);
+      }
+    }
+  });
+
+  it("refuses a sender, recipient, or reply-to that is not one address, with no provider call", async () => {
+    for (const email of [
+      outgoing({ replyTo: "hello@harbor.test\r\nBcc: x@example.test" }),
+      outgoing({ replyTo: "two@at@example.test" }),
+      outgoing({ replyTo: "not an address" }),
+      outgoing({ from: { email: "bookings@tidegrid.test\nBcc: x@y.test", name: "Harbor" } }),
+    ]) {
+      const h = harness();
+      const error = await caught(h.provider.send(email));
+      expect((error as EmailProviderRejectedError).code).toBe("invalid_message");
+      expect(h.calls()).toBe(0);
+    }
+    const open = harness({ recipients: { kind: "any" }, environment: "production" });
+    const error = await caught(
+      open.provider.send(outgoing({ to: { email: "a\r\n@example.test", name: null } })),
+    );
+    expect((error as EmailProviderRejectedError).code).toBe("invalid_message");
+    expect(open.calls()).toBe(0);
+  });
+
+  it("still sends ordinary punctuation and non-ASCII names", async () => {
+    const h = harness();
+    await h.provider.send(
+      outgoing({
+        to: { email: "reef.guest@example.test", name: "Zoë O'Brien-Núñez, Jr." },
+        subject: "Your booking: Sat 9:00 (2 guests), confirmed & paid",
+      }),
+    );
+    expect(h.calls()).toBe(1);
   });
 });
 
 describe("the Cloudflare email adapter: provider ids", () => {
   it("keeps an id that fits the message table", async () => {
     const h = harness();
-    h.fixture.answerId("<AbCdEf0123456789AbCdEf0123456789AbCd@tidegrid.test>");
+    h.fixture.answerId("0101018f7d0c4d9a-msg-deadbeef");
     const sent = await h.provider.send(outgoing());
-    expect(sent.providerMessageId).toBe("<AbCdEf0123456789AbCdEf0123456789AbCd@tidegrid.test>");
+    expect(sent.providerMessageId).toBe("0101018f7d0c4d9a-msg-deadbeef");
     expect(h.logs).toEqual([]);
   });
 
@@ -534,7 +586,8 @@ describe("the recorded fixture", () => {
     const fixture = createCloudflareEmailFixture({ tenantId: TENANT });
     const result = await fixture.binding.send(builder());
     expect(Object.keys(result)).toEqual(["messageId"]);
-    expect(result.messageId).toMatch(/^<[A-Za-z0-9]{36}@tidegrid\.test>$/);
+    // The shape of the event-subscriptions examples; what send() returns is unverified.
+    expect(result.messageId).toMatch(/^[0-9a-f]{16}-msg-[0-9a-f]{16}$/);
     for (const code of CLOUDFLARE_ERROR_CODES) {
       fixture.failNext(code);
       const error = await caught(fixture.binding.send(builder()));
@@ -553,6 +606,6 @@ describe("the recorded fixture", () => {
     expect(await caught(fixture.binding.send(flaky))).toMatchObject({
       code: "E_RATE_LIMIT_EXCEEDED",
     });
-    expect((await fixture.binding.send(flaky)).messageId).toMatch(/^</);
+    expect((await fixture.binding.send(flaky)).messageId).toMatch(/-msg-/);
   });
 });

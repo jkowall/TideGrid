@@ -125,7 +125,7 @@ export function describeEmailProviderContract(
       const message = email(h, contractAddresses(h.run).ok);
       const first = await h.provider.send(message);
       const again = await h.provider.send(message);
-      if (h.provider.deduplicates === false) {
+      if (h.provider.deduplicates !== true) {
         // Sent twice: delivery must never repeat a send whose outcome is unknown.
         expect(again.providerMessageId).not.toBe(first.providerMessageId);
       } else {
