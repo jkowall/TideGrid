@@ -196,7 +196,12 @@ export interface BookingDetailView {
 
 export interface RosterView {
   generatedAt: string;
-  trip: TripTimingView & { seats: number };
+  /**
+   * `salesCloseAt` and `blackedOut` say whether the trip still takes a
+   * booking, as the calendar reads them (G2.12d): the console offers a staff
+   * booking from the roster only then.
+   */
+  trip: TripTimingView & { seats: number; salesCloseAt: string; blackedOut: boolean };
   location: LocationView;
   totals: {
     bookings: number;
@@ -824,10 +829,22 @@ export async function getTripRoster(
       meeting_point: string;
       meeting_instructions: string;
       generated_at: Date | string;
+      sales_close_at: Date | string;
+      blacked_out: boolean;
     }
   >`
     select ${tripColumns},
            t.ends_at, t.end_utc_offset_minutes, t.duration_minutes, t.seat_capacity,
+           t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as sales_close_at,
+           exists (
+             select 1 from blackouts x
+              where x.tenant_id = t.tenant_id
+                and x.starts_at < t.ends_at and t.starts_at < x.ends_at
+                and (   (x.location_id is null and x.product_id is null and x.boat_id is null)
+                     or x.location_id = p.location_id
+                     or x.product_id = t.product_id
+                     or x.boat_id = t.boat_id)
+           ) as blacked_out,
            l.name as location_name, l.meeting_point, l.meeting_instructions,
            now() as generated_at
       from scheduled_trips t
@@ -894,7 +911,12 @@ export async function getTripRoster(
   });
   return {
     generatedAt: iso(trip.generated_at),
-    trip: { ...tripTiming(trip), seats: trip.seat_capacity },
+    trip: {
+      ...tripTiming(trip),
+      seats: trip.seat_capacity,
+      salesCloseAt: iso(trip.sales_close_at),
+      blackedOut: trip.blacked_out,
+    },
     location: {
       name: trip.location_name,
       meetingPoint: trip.meeting_point,

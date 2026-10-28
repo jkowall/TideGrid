@@ -158,6 +158,7 @@ export {
   getStaffCheckout,
   type OpenStaffCheckoutInput,
   openStaffCheckout,
+  recordStaffTestPaymentSuperseded,
   requestStaffTestPayment,
   type StaffCheckoutView,
   type StaffTestPaymentOutcome,

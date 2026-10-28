@@ -23,8 +23,8 @@ import {
 } from "@tidegrid/design-system/components";
 import { formatDate, formatMoney, formatTripTime } from "@tidegrid/design-system/format";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
-import { bookingHref, instantText } from "../bookings/model.ts";
-import { canRetry, ReadFailed } from "../bookings/States.tsx";
+import { bookingHref, guestsText, instantText } from "../bookings/model.ts";
+import { canRetry, failureText, ReadFailed } from "../bookings/States.tsx";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink, hereAddress } from "../navigation.tsx";
@@ -42,9 +42,11 @@ import {
 import {
   addOnLimit,
   type BookerDraft,
+  type BookingCommand,
   bookerProblems,
   channelOptions,
   cleanBooker,
+  commandFailureTitles,
   emptyParty,
   guestsOf,
   newKey,
@@ -84,11 +86,15 @@ type OfferLoad =
   | { kind: "off_sale"; code: string | undefined }
   | { kind: "failed"; reason: ReadFailure; failures: number; retrying: boolean };
 
-/** A message about the last command, with what can be done about it. */
+/**
+ * A message about the last command, with what can be done about it. Each
+ * carries the command it came from, so Try again repeats that command and
+ * nothing else: a failed cancel is never retried as a payment.
+ */
 type Problem =
-  | { kind: "refusal"; refusal: Refusal }
-  | { kind: "failure"; reason: ReadFailure }
-  | { kind: "delivery" };
+  | { kind: "refusal"; command: BookingCommand; refusal: Refusal }
+  | { kind: "failure"; command: BookingCommand; reason: ReadFailure }
+  | { kind: "delivery"; command: "pay" };
 
 export function NewBookingPage({
   membership,
@@ -135,11 +141,18 @@ function useKeyFor() {
   };
 }
 
-function problemOf(failure: CommandFailure): Problem {
+function problemOf(failure: CommandFailure, command: BookingCommand): Problem {
   if (failure.reason === "refused" || failure.reason === "key_reused") {
-    return { kind: "refusal", refusal: refusalOf(failure.code) };
+    return { kind: "refusal", command, refusal: refusalOf(failure.code, command) };
   }
-  return { kind: "failure", reason: failure.reason };
+  return { kind: "failure", command, reason: failure.reason };
+}
+
+/** An address with a break opportunity after each @ and dot, so it never wraps mid-word. */
+function breakable(email: string): ReactNode[] {
+  return email
+    .split(/(?<=[@.])/)
+    .flatMap((part, i) => (i === 0 ? [part] : [<wbr key={i} />, part]));
 }
 
 function NewBooking({
@@ -174,6 +187,13 @@ function NewBooking({
   const [polls, setPolls] = useState(0);
   /** The outcome the last test payment asked for, so a retry sends the same request. */
   const [lastPay, setLastPay] = useState<StaffTestPaymentOutcome>("succeed");
+  /**
+   * The provider settled the payment but its result did not reach TideGrid:
+   * only Try again, on the same request, is offered until it does.
+   */
+  const [settledUndelivered, setSettledUndelivered] = useState(false);
+  /** A test payment got no answer: it may have gone through. */
+  const [payUncertain, setPayUncertain] = useState(false);
 
   const quoteKey = useKeyFor();
   const openKey = useKeyFor();
@@ -226,6 +246,21 @@ function NewBooking({
     if (focusIsLost()) stepHeading.current?.focus();
   }, [step]);
 
+  // An attestation is for one address, one channel, and one quote's policy, on
+  // the review in front of the guest: leaving the review, or a new quote,
+  // clears both boxes, so they are checked again for what is shown.
+  useEffect(() => {
+    if (step === 2) return;
+    setAttest({ email: false, policy: false });
+    setAttestErrors({ email: false, policy: false });
+  }, [step]);
+  useEffect(() => {
+    void quote?.quoteId;
+    void quote?.policy.version;
+    setAttest({ email: false, policy: false });
+    setAttestErrors({ email: false, policy: false });
+  }, [quote?.quoteId, quote?.policy.version]);
+
   // After a test payment, read the checkout until it is decided.
   useEffect(() => {
     if (step !== 4 || !checkout || checkout.state !== "open" || polls >= POLL_LIMIT) return;
@@ -266,7 +301,7 @@ function NewBooking({
       return;
     }
     if (result.reason === "key_reused") quoteKey.forget();
-    setProblem(problemOf(result));
+    setProblem(problemOf(result, "quote"));
   };
 
   const toReview = () => {
@@ -322,7 +357,7 @@ function NewBooking({
       setStep(3);
       return;
     }
-    const failed = problemOf(result);
+    const failed = problemOf(result, "open");
     setProblem(failed);
     // Refused with a reason: nothing is held, and the details can change again.
     if (failed.kind === "refusal" && failed.refusal.next !== "retry") setFrozen(false);
@@ -337,12 +372,31 @@ function NewBooking({
       // The checkout may exist without its id reaching here: ask again with the same key.
       const again = await sendOpen(quote);
       if (again.kind === "ok") held = again.value.checkout;
+      else {
+        // Still no answer: the seats may be held. Say so, and keep the request to retry.
+        setBusy(null);
+        setProblem({
+          kind: "refusal",
+          command: "edit",
+          refusal: {
+            title: "The earlier hold couldn't be released yet",
+            body: "TideGrid hasn't confirmed whether the seats were held. Try again to release them before changing anything. If you leave this page, any held seats are released within 15 minutes.",
+            next: "retry",
+          },
+        });
+        return;
+      }
     }
     if (held && held.state === "open") {
       const canceled = await cancelCheckout(tenantId, held.id, newKey());
-      if (canceled.kind === "failed" && !(canceled.reason === "refused")) {
+      if (canceled.kind === "failed") {
+        if (canceled.reason === "refused" && canceled.code === "checkout_not_cancelable") {
+          // Its payment was decided first: show where it stands, not a fresh start.
+          await showCheckout(held.id);
+          return;
+        }
         setBusy(null);
-        setProblem(problemOf(canceled));
+        setProblem(problemOf(canceled, "edit"));
         return;
       }
     }
@@ -350,6 +404,8 @@ function NewBooking({
     setCheckout(null);
     setFrozen(false);
     setOpenUnknown(false);
+    setPayUncertain(false);
+    setSettledUndelivered(false);
     setQuote(null);
     setAttest({ email: false, policy: false });
     // A new checkout needs a new quote, even for the same party: the old one is used.
@@ -367,41 +423,64 @@ function NewBooking({
     const result = await takeTestPayment(tenantId, checkout.id, outcome, payKey.keyFor(outcome));
     if (result.kind === "ok") {
       setBusy(null);
+      setPayUncertain(false);
       if (result.value.delivery.status !== 200) {
         // The provider has the payment; its result did not reach TideGrid. Same key again.
-        setProblem({ kind: "delivery" });
+        setSettledUndelivered(true);
+        setProblem({ kind: "delivery", command: "pay" });
         return;
       }
+      setSettledUndelivered(false);
       setPolls(0);
       setStep(4);
       return;
     }
-    if (result.reason === "refused" && result.code === "checkout_not_open") {
-      const now = await readCheckout(tenantId, checkout.id);
-      setBusy(null);
-      if (now.kind === "ok") {
-        setCheckout(now.value);
-        setStep(4);
-        return;
-      }
+    if (
+      result.reason === "refused" &&
+      (result.code === "checkout_not_open" || result.code === "test_payment_settled")
+    ) {
+      if (await showCheckout(checkout.id)) return;
     }
     setBusy(null);
     if (result.reason === "key_reused") payKey.forget();
-    setProblem(problemOf(result));
+    // No answer, or the provider's: the payment may have gone through.
+    if (result.reason !== "refused" || result.code === "payment_provider_unavailable") {
+      setPayUncertain(true);
+    }
+    setProblem(problemOf(result, "pay"));
   };
+
+  /** Read the checkout and show where it stands on the outcome step. False when it can't be read. */
+  async function showCheckout(id: string): Promise<boolean> {
+    const now = await readCheckout(tenantId, id);
+    setBusy(null);
+    if (now.kind !== "ok") return false;
+    setProblem(null);
+    setCheckout(now.value);
+    setPolls(0);
+    setStep(4);
+    return true;
+  }
 
   const cancelBooking = async () => {
     if (!checkout) return;
     setBusy("cancel");
+    setProblem(null);
     const result = await cancelCheckout(tenantId, checkout.id, newKey());
-    setBusy(null);
     setConfirmCancel(false);
     if (result.kind === "ok") {
+      setBusy(null);
+      setProblem(null);
       setCheckout(result.value);
       setStep(4);
       return;
     }
-    setProblem(problemOf(result));
+    if (result.reason === "refused" && result.code === "checkout_not_cancelable") {
+      // Its payment was decided first: show where it stands.
+      if (await showCheckout(checkout.id)) return;
+    }
+    setBusy(null);
+    setProblem(problemOf(result, "cancel"));
   };
 
   // Rendering ------------------------------------------------------------------------------
@@ -496,7 +575,13 @@ function NewBooking({
           <p className="nb-trip__name">{trip.product.name}</p>
           <p className="nb-trip__when">{when}</p>
         </section>
-        <Steps steps={stepNames} current={step} label="Booking steps" className="nb-steps" />
+        <Steps
+          steps={stepNames}
+          // Payment shows as done only for a confirmed booking.
+          current={step === 4 && checkout && outcomeOf(checkout) !== "confirmed" ? 3 : step}
+          label="Booking steps"
+          className="nb-steps"
+        />
         {problem && (
           <ProblemNotice
             problem={problem}
@@ -568,7 +653,7 @@ function NewBooking({
               disabled={locked}
             />
             <p className="nb-status" role="status">
-              {partyError ?? `${guestsOf(trip, draft)} guests`}
+              {partyError ?? guestsText(guestsOf(trip, draft))}
             </p>
             <div className="nb-actions">
               <Button
@@ -638,14 +723,17 @@ function NewBooking({
             </div>
             <div className="nb-readback">
               <p className="nb-readback__label">Read this address back to the guest</p>
-              <p className="nb-readback__email">{cleanBooker(booker).email}</p>
+              <p className="nb-readback__email">{breakable(cleanBooker(booker).email)}</p>
               <p className="nb-readback__hint">It cannot be changed after booking.</p>
             </div>
             <CheckboxField
               ref={emailCheck}
               label="I read the email address back to the guest"
               checked={attest.email}
-              onChange={(e) => setAttest({ ...attest, email: e.target.checked })}
+              onChange={(e) => {
+                setAttest({ ...attest, email: e.target.checked });
+                if (e.target.checked) setAttestErrors({ ...attestErrors, email: false });
+              }}
               error={attestErrors.email ? "Read the address back first." : undefined}
               disabled={locked}
             />
@@ -653,7 +741,10 @@ function NewBooking({
               ref={policyCheck}
               label={`I told the guest the cancellation policy (version ${quote.policy.version})`}
               checked={attest.policy}
-              onChange={(e) => setAttest({ ...attest, policy: e.target.checked })}
+              onChange={(e) => {
+                setAttest({ ...attest, policy: e.target.checked });
+                if (e.target.checked) setAttestErrors({ ...attestErrors, policy: false });
+              }}
               error={attestErrors.policy ? "Tell the guest the policy first." : undefined}
               disabled={locked}
             />
@@ -708,7 +799,7 @@ function NewBooking({
                 icon="credit-card"
                 busy={busy === "succeed"}
                 busyLabel="Taking payment…"
-                disabled={busy !== null && busy !== "succeed"}
+                disabled={settledUndelivered || (busy !== null && busy !== "succeed")}
                 onClick={() => void pay("succeed")}
               >
                 Take test payment
@@ -717,7 +808,7 @@ function NewBooking({
                 icon="x-octagon"
                 busy={busy === "fail"}
                 busyLabel="Declining…"
-                disabled={busy !== null && busy !== "fail"}
+                disabled={settledUndelivered || (busy !== null && busy !== "fail")}
                 onClick={() => void pay("fail")}
               >
                 Decline
@@ -726,7 +817,7 @@ function NewBooking({
             <div className="nb-actions nb-actions--quiet">
               <Button
                 variant="ghost"
-                disabled={busy !== null}
+                disabled={settledUndelivered || busy !== null}
                 onClick={() => setConfirmCancel(true)}
               >
                 Cancel booking
@@ -736,7 +827,7 @@ function NewBooking({
                 icon="pencil"
                 busy={busy === "edit"}
                 busyLabel="Releasing…"
-                disabled={busy !== null && busy !== "edit"}
+                disabled={settledUndelivered || payUncertain || (busy !== null && busy !== "edit")}
                 onClick={() => void startOver()}
               >
                 Change details
@@ -781,7 +872,11 @@ function NewBooking({
             </>
           }
         >
-          <p>The held seats go back on sale at once. Nothing has been charged.</p>
+          <p>
+            {payUncertain
+              ? "The held seats go back on sale at once. The test payment may already have gone through; if it did, it is refunded in full and the operator sees an exception."
+              : "The held seats go back on sale at once. Nothing has been charged."}
+          </p>
         </Dialog>
       )}
     </>
@@ -789,17 +884,26 @@ function NewBooking({
 
   /** What trying again means for a problem on this step, if anything. */
   function retryFor(p: Problem): (() => void) | undefined {
+    if (p.command === "open" && p.kind === "refusal" && p.refusal.next === "requote") {
+      return () => void requote();
+    }
     const again =
       p.kind === "delivery" ||
       (p.kind === "refusal" && p.refusal.next === "retry") ||
       (p.kind === "failure" && canRetry(p.reason));
-    if (step === 0 && again) return () => void priceParty(1);
-    if (step === 2 && p.kind === "refusal" && p.refusal.next === "requote") {
-      return () => void requote();
+    if (!again) return undefined;
+    switch (p.command) {
+      case "quote":
+        return () => void priceParty(step === 2 ? 2 : 1);
+      case "open":
+        return () => void holdSeats();
+      case "pay":
+        return () => void pay(lastPay);
+      case "cancel":
+        return () => void cancelBooking();
+      case "edit":
+        return () => void startOver();
     }
-    if (step === 2 && again) return () => void holdSeats();
-    if (step === 3 && again) return () => void pay(lastPay);
-    return undefined;
   }
 
   async function requote() {
@@ -836,25 +940,29 @@ function ProblemNotice({
   busy: boolean;
   onRetry: (() => void) | undefined;
 }) {
-  if (problem.kind === "failure") {
+  if (problem.kind === "failure" && problem.reason === "signed_out") {
+    // Sign in again, here.
     return (
       <ReadFailed
         className="nb-notice"
         reason={problem.reason}
         noun="this booking"
         tenantName={tenantName}
-        retrying={busy}
-        {...(onRetry ? { onRetry } : {})}
       />
     );
   }
   const { title, body } =
-    problem.kind === "delivery"
+    problem.kind === "failure"
       ? {
-          title: "The payment's result didn't reach TideGrid",
-          body: "The provider has the payment, but nothing is decided yet. Try again: the same payment is sent again, never a second one.",
+          title: commandFailureTitles[problem.command],
+          body: failureText(problem.reason, { noun: "this booking", tenantName }).body,
         }
-      : problem.refusal;
+      : problem.kind === "delivery"
+        ? {
+            title: "The payment's result didn't reach TideGrid",
+            body: "The provider has the payment, but nothing is decided yet. Try again: the same payment is sent again, never a second one.",
+          }
+        : problem.refusal;
   const action =
     onRetry && problem.kind === "refusal" && problem.refusal.next === "requote" ? (
       <Button variant="primary" icon="refresh" busy={busy} busyLabel="Pricing…" onClick={onRetry}>

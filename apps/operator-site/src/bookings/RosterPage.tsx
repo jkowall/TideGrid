@@ -221,7 +221,7 @@ function RosterSheet({
           <span>Bookings on {dayText(trip.localDate, "medium", today)}</span>
         </ConsoleLink>
         <div className="roster-tools__actions">
-          {canBook && trip.salesState === "published" && (
+          {canBook && takesBooking(trip, new Date()) && (
             <ConsoleButtonLink
               href={newBookingHref(trip.tripId)}
               icon="plus"
@@ -309,6 +309,18 @@ function RosterSheet({
       </p>
     </div>
   );
+}
+
+/**
+ * Whether the roster's trip still takes a staff booking (G2.12d): the
+ * calendar's Book rule, so the roster never offers a booking the API refuses.
+ * On sale, not blacked out, and before its cutoff; a roster read from before
+ * G2.12d, without the cutoff, falls back to before departure.
+ */
+export function takesBooking(trip: TripRoster["trip"], now: Date): boolean {
+  if (trip.salesState !== "published" || trip.blackedOut === true) return false;
+  const closes = Date.parse(trip.salesCloseAt ?? trip.startsAt);
+  return closes > now.getTime() && Date.parse(trip.startsAt) > now.getTime();
 }
 
 /**

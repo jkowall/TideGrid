@@ -198,10 +198,10 @@ jobs:
           SEED_LOCAL_HOSTNAMES=1 pnpm db:seed
           password="$(openssl rand -hex 24)"
           TIDEGRID_APP_PASSWORD="$password" pnpm --filter @tidegrid/database app-role:password
-          # A booking staff member at the second operator, for its journey.
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "insert into public.staff_users (email, display_name) values ('dan.desk@demo-reef.test', 'Dan Desk') on conflict (email) do nothing" \
-            -c "insert into public.tenant_memberships (tenant_id, user_id, role, display_name) select t.id, u.id, 'booking_staff', 'Dan Desk' from public.tenants t, public.staff_users u where t.slug = 'demo-reef' and u.email = 'dan.desk@demo-reef.test' on conflict do nothing"
+          # A booking staff member at the second operator, for its journey. The
+          # identity comes from app.ensure_staff_user, the one path 0002 gives,
+          # inside that operator's tenant context.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "begin; select set_config('app.tenant_id', (select id::text from public.tenants where slug = 'demo-reef'), true); insert into public.tenant_memberships (tenant_id, user_id, role, display_name) select t.id, app.ensure_staff_user('dan.desk@demo-reef.test', 'ci-console-browser'), 'booking_staff', 'Dan Desk' from public.tenants t where t.slug = 'demo-reef' on conflict do nothing; commit;"
           printf 'DATABASE_URL=postgresql://tidegrid_app:%s@localhost:5432/tidegrid\nFAKE_PAYMENT_WEBHOOK_SECRET=%s\n' "$password" "$(openssl rand -hex 32)" > apps/api-worker/.dev.vars
       - name: Start the API on 8981
         run: |

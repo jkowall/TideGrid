@@ -393,6 +393,13 @@ export const TripRoster = z
       endsAtLocal: OffsetDateTime,
       durationMinutes: z.number().int(),
       seats: z.number().int().min(1).describe("Seats sold per trip, or guests aboard a charter"),
+      salesCloseAt: Instant.optional().describe(
+        "When sales close: departure less the booking cutoff (G2.12d; always sent)",
+      ),
+      blackedOut: z
+        .boolean()
+        .optional()
+        .describe("A blackout covers the trip, so it takes no booking (G2.12d; always sent)"),
     }),
     location: z.object({
       name: z.string(),

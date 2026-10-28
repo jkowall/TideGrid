@@ -22,13 +22,15 @@ import {
   getStaffCheckout,
   MAX_OPEN_CHECKOUTS_PER_CLIENT,
   openStaffCheckout,
+  recordStaffTestPaymentSuperseded,
   requestStaffTestPayment,
   type StaffCheckoutView,
   staffCheckoutPaymentRef,
   staffViewOf,
 } from "@tidegrid/domain-booking";
-import { ProviderUnavailableError } from "@tidegrid/domain-payments";
+import { type FakeEvent, ProviderUnavailableError } from "@tidegrid/domain-payments";
 import { createQuote, getTripOffer, type QuoteProblem } from "@tidegrid/domain-pricing";
+import { sql } from "kysely";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
@@ -52,6 +54,16 @@ const checkoutNotFound = () =>
   new ApiError(404, "checkout_not_found", "No such staff checkout for this tenant");
 const checkoutNotOpen = (state: string) =>
   new ApiError(409, "checkout_not_open", `This checkout is ${state}; no payment can be taken`);
+const alreadySettled = (outcome: "succeed" | "fail") =>
+  new ApiError(
+    409,
+    "test_payment_settled",
+    outcome === "succeed"
+      ? "This test payment already went through; it cannot be declined now"
+      : "This test payment was already declined; take a new booking instead",
+  );
+const outcomeOfEvent = (type: string): "succeed" | "fail" | null =>
+  type === "payment.succeeded" ? "succeed" : type === "payment.failed" ? "fail" : null;
 const providerUnavailable = () =>
   new ApiError(
     503,
@@ -489,7 +501,9 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       404: errorBody(
         "Not the fake provider (not_found), no such tenant, or no such staff checkout for it (checkout_not_found)",
       ),
-      409: errorBody("The checkout is not open or its hold has ended (checkout_not_open)"),
+      409: errorBody(
+        "The checkout is not open or its hold has ended (checkout_not_open), or its payment already settled the other way (test_payment_settled); nothing new is settled",
+      ),
       422: errorBody("Idempotency key reused with a different request"),
       503: errorBody("The provider did not answer (payment_provider_unavailable); retry"),
     },
@@ -521,10 +535,20 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         const asked = await requestStaffTestPayment(trx, ctx, {
           sessionId: checkoutId,
           outcome: input.outcome,
+          // How the fake already settled it, read in this transaction: the
+          // fake's own storage, beside the checkout, under row-level security.
+          settledOutcome: async (paymentRef) => {
+            const { rows } = await sql<{ type: string }>`
+              select type from fake_provider_events
+               where tenant_id = ${ctx.tenantId} and payment_id = ${paymentRef}`.execute(trx);
+            return rows[0] ? outcomeOfEvent(rows[0].type) : null;
+          },
         });
         switch (asked.kind) {
           case "requested":
             return { checkoutId, outcome: input.outcome };
+          case "already_settled":
+            throw alreadySettled(asked.outcome);
           case "not_open":
             throw checkoutNotOpen(asked.state);
           case "not_found":
@@ -558,32 +582,54 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           throw checkoutNotFound();
       }
     }
-    let settled: Awaited<ReturnType<typeof fake.settlePayment>>;
+    // A settled event is delivered again whatever the checkout's state, so a
+    // lost delivery still lands. Nothing new is settled on a checkout that is
+    // no longer open or past its hold: a replay skips phase 1's check.
+    let event: FakeEvent;
+    let wasSettled: boolean;
     try {
-      settled = await fake.settlePayment(
-        tenantId,
-        paymentRef,
-        input.outcome === "succeed" ? "succeeded" : "failed",
-        Date.now(),
-      );
+      const existing = (await fake.getPayment(tenantId, paymentRef))?.events[0];
+      if (existing) {
+        event = existing;
+        wasSettled = true;
+      } else {
+        if (!found.open) throw checkoutNotOpen(found.state);
+        const settled = await fake.settlePayment(
+          tenantId,
+          paymentRef,
+          input.outcome === "succeed" ? "succeeded" : "failed",
+          Date.now(),
+        );
+        if (settled.kind === "not_found") throw checkoutNotFound();
+        event = settled.event;
+        wasSettled = settled.kind === "already_settled";
+      }
     } catch (err) {
       // The request is recorded; the provider's storage did not answer. Same key again.
       if (err instanceof ProviderUnavailableError) throw providerUnavailable();
       throw err;
     }
-    if (settled.kind === "not_found") throw checkoutNotFound();
-    const delivery = await deliverFakeEvent(app, c, fake, settled.event);
+    const settledAs = outcomeOfEvent(event.type);
+    if (settledAs !== null && settledAs !== input.outcome) {
+      // Two requests raced before either settled, and the other one won. The
+      // record says so, and this one delivers nothing.
+      await inTenantTransaction(db, result.ctx, (trx) =>
+        recordStaffTestPaymentSuperseded(trx, result.ctx, {
+          sessionId: checkoutId,
+          requested: input.outcome,
+          settled: settledAs,
+        }),
+      );
+      throw alreadySettled(settledAs);
+    }
+    const delivery = await deliverFakeEvent(app, c, fake, event);
     if (result.replayed) c.header("Idempotent-Replayed", "true");
     return c.json(
       {
         checkoutId,
         outcome: input.outcome,
-        event: {
-          id: settled.event.id,
-          type: settled.event.type,
-          createdAt: settled.event.createdAt,
-        },
-        alreadySettled: settled.kind === "already_settled",
+        event: { id: event.id, type: event.type, createdAt: event.createdAt },
+        alreadySettled: wasSettled,
         delivery,
       },
       200,

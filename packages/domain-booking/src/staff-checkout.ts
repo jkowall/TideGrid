@@ -141,6 +141,8 @@ export type StaffTestPaymentRequestResult =
   | { kind: "requested"; paymentRef: string | null }
   /** Not open, or past its expiry: nothing is settled. */
   | { kind: "not_open"; state: CheckoutSessionState }
+  /** The payment already settled the other way; nothing is recorded, and that outcome stands. */
+  | { kind: "already_settled"; outcome: StaffTestPaymentOutcome }
   | { kind: "not_found" };
 
 /**
@@ -149,11 +151,20 @@ export type StaffTestPaymentRequestResult =
  * for which outcome. The fake provider settles as the system actor, so this
  * row is the only record of who took or declined the payment. No booker
  * details. The settlement and the signed delivery run after commit.
+ *
+ * `settledOutcome` reads, in this transaction, how the provider already
+ * settled the payment, if it has. A request for the other outcome is refused
+ * and records nothing, so the audit history never says a payment was
+ * declined when it went through, or taken when it was declined.
  */
 export async function requestStaffTestPayment(
   trx: TenantTransaction,
   ctx: TenantContext,
-  input: { sessionId: string; outcome: StaffTestPaymentOutcome },
+  input: {
+    sessionId: string;
+    outcome: StaffTestPaymentOutcome;
+    settledOutcome?: (paymentRef: string) => Promise<StaffTestPaymentOutcome | null>;
+  },
 ): Promise<StaffTestPaymentRequestResult> {
   assertStaff(ctx);
   const session = await lockStaffSession(trx, ctx.tenantId, input.sessionId);
@@ -167,6 +178,12 @@ export async function requestStaffTestPayment(
   const payment = rows[0];
   if (!payment) throw new Error("a checkout session has no payment");
   if (payment.provider !== "fake") return { kind: "not_found" };
+  if (payment.provider_payment_id !== null && input.settledOutcome) {
+    const settled = await input.settledOutcome(payment.provider_payment_id);
+    if (settled !== null && settled !== input.outcome) {
+      return { kind: "already_settled", outcome: settled };
+    }
+  }
   await record(trx, ctx, {
     action: "checkout.test_payment_requested",
     subjectType: "checkout_session",
@@ -176,21 +193,60 @@ export async function requestStaffTestPayment(
   return { kind: "requested", paymentRef: payment.provider_payment_id };
 }
 
-/** The provider's payment id for a staff-assisted checkout, for the after-commit settle. */
+/**
+ * The provider's payment id for a staff-assisted checkout, for the
+ * after-commit settle, with whether the checkout is still open and inside
+ * its hold. A replayed request skips phase 1, so the settle checks this
+ * itself before settling anything new.
+ */
 export async function staffCheckoutPaymentRef(
   trx: TenantTransaction,
   tenantId: string,
   sessionId: string,
-): Promise<{ paymentRef: string | null } | null> {
+): Promise<{ paymentRef: string | null; open: boolean; state: CheckoutSessionState } | null> {
   if (!isUuid(sessionId)) return null;
-  const { rows } = await sql<{ provider_payment_id: string | null }>`
-    select p.provider_payment_id
+  const { rows } = await sql<{
+    provider_payment_id: string | null;
+    state: CheckoutSessionState;
+    live: boolean;
+  }>`
+    select p.provider_payment_id, s.state, s.expires_at > now() as live
       from checkout_sessions s
       join payments p on p.tenant_id = s.tenant_id and p.checkout_session_id = s.id
      where s.tenant_id = ${tenantId} and s.id = ${sessionId}
        and s.source = 'staff_assisted' and p.provider = 'fake'`.execute(trx);
   const row = rows[0];
-  return row ? { paymentRef: row.provider_payment_id } : null;
+  if (!row) return null;
+  const open = row.state === "open" && row.live;
+  return {
+    paymentRef: row.provider_payment_id,
+    open,
+    state: row.state === "open" && !row.live ? "expired" : row.state,
+  };
+}
+
+/**
+ * Record that a staff test payment asked for one outcome and the provider had
+ * already settled the other (two requests raced before either settled). The
+ * latest record is what staff see as the last test payment, so it reads true.
+ */
+export async function recordStaffTestPaymentSuperseded(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: {
+    sessionId: string;
+    requested: StaffTestPaymentOutcome;
+    settled: StaffTestPaymentOutcome;
+  },
+): Promise<void> {
+  assertStaff(ctx);
+  await record(trx, ctx, {
+    action: "checkout.test_payment_superseded",
+    subjectType: "checkout_session",
+    subjectId: input.sessionId,
+    reason: "the payment had already settled the other way",
+    after: { requested: input.requested, outcome: input.settled },
+  });
 }
 
 /** What staff see of a staff-assisted checkout: no booker details and no provider secret. */
@@ -251,7 +307,8 @@ export async function getStaffCheckout(
       left join lateral (
         select a.after_state, a.occurred_at from audit_events a
          where a.tenant_id = s.tenant_id and a.subject_type = 'checkout_session'
-           and a.subject_id = s.id::text and a.action = 'checkout.test_payment_requested'
+           and a.subject_id = s.id::text
+           and a.action in ('checkout.test_payment_requested', 'checkout.test_payment_superseded')
          order by a.id desc
          limit 1
       ) t on true

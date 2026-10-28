@@ -10854,6 +10854,15 @@
                               "type": "integer",
                               "minimum": 1,
                               "description": "Seats sold per trip, or guests aboard a charter"
+                            },
+                            "salesCloseAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When sales close: departure less the booking cutoff (G2.12d; always sent)"
+                            },
+                            "blackedOut": {
+                              "type": "boolean",
+                              "description": "A blackout covers the trip, so it takes no booking (G2.12d; always sent)"
                             }
                           },
                           "required": [
@@ -22905,7 +22914,7 @@
             }
           },
           "409": {
-            "description": "The checkout is not open or its hold has ended (checkout_not_open)",
+            "description": "The checkout is not open or its hold has ended (checkout_not_open), or its payment already settled the other way (test_payment_settled); nothing new is settled",
             "content": {
               "application/json": {
                 "schema": {

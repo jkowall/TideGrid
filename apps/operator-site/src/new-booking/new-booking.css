@@ -36,10 +36,7 @@
   color: var(--text-strong);
   font-size: var(--text-lg);
 }
-.nb-step__title:focus-visible {
-  outline: var(--focus-ring, 2px solid var(--focus-color));
-  outline-offset: 4px;
-}
+/* Its focus ring is the base sheet's [tabindex] ring, Tide Lime on the console. */
 
 .nb-extras {
   display: grid;
@@ -107,7 +104,8 @@
   color: var(--text-strong);
   font-size: var(--text-xl);
   font-weight: var(--weight-semibold);
-  overflow-wrap: anywhere;
+  /* Breaks fall after an @ or a dot (the markup offers them), never mid-word. */
+  overflow-wrap: break-word;
 }
 
 .nb-facts {

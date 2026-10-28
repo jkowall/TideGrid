@@ -162,7 +162,26 @@ export interface Refusal {
   next: "requote" | "retry" | "stop" | "edit";
 }
 
-export function refusalOf(code: string | undefined): Refusal {
+/** The command a problem came from, so its copy and its Try again are that command's. */
+export type BookingCommand = "quote" | "open" | "pay" | "cancel" | "edit";
+
+/** What failed, in words, for a command that got no usable answer. */
+export const commandFailureTitles: Record<BookingCommand, string> = {
+  quote: "The party couldn't be priced",
+  open: "The seats couldn't be held",
+  pay: "The test payment didn't go through",
+  cancel: "The hold couldn't be released",
+  edit: "The details couldn't be changed",
+};
+
+export function refusalOf(code: string | undefined, command?: BookingCommand): Refusal {
+  if (code === "payment_provider_unavailable" && command === "pay") {
+    return {
+      title: "The test payment didn't go through",
+      body: "The payment provider didn't answer. Try again: the same request is sent, so the guest is never charged twice.",
+      next: "retry",
+    };
+  }
   switch (code) {
     case "quote_expired":
     case "quote_already_used":
@@ -205,7 +224,19 @@ export function refusalOf(code: string | undefined): Refusal {
     case "too_many_checkouts":
       return {
         title: "You have three bookings waiting for payment",
-        body: "Finish or cancel one of them first. Held seats are released when their time runs out.",
+        body: "Held seats are released within 15 minutes of being held. Try again once one of them has been paid, canceled, or released.",
+        next: "stop",
+      };
+    case "checkout_not_cancelable":
+      return {
+        title: "This booking can no longer be canceled here",
+        body: "Its payment was decided first. See where it stands below.",
+        next: "stop",
+      };
+    case "test_payment_settled":
+      return {
+        title: "This test payment was already decided",
+        body: "The provider settled it the other way first. See where the booking stands below.",
         next: "stop",
       };
     case "payment_provider_unavailable":

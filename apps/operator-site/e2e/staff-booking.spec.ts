@@ -89,17 +89,29 @@ async function weekLoaded(page: Page) {
   await expect(page.locator(".cal-trip--skeleton")).toHaveCount(0);
 }
 
+/** Move the calendar one week on, and wait for that week. */
+async function nextWeek(page: Page) {
+  const range = (await page.locator(".cal-bar__range").textContent()) ?? "";
+  await page.getByRole("button", { name: /Next/ }).click();
+  await expect(page.locator(".cal-bar__range")).not.toHaveText(range);
+  await weekLoaded(page);
+}
+
+/**
+ * A trip that offers Book and is far from its cutoff: from next week on, so a
+ * departure today cannot close between the calendar and the checkout, and
+ * the week's last such trip. The seeded season ends on 2027-05-31
+ * (tools/seed/src/catalog.ts), so this finds nothing after mid-May 2027.
+ */
 async function firstBookable(page: Page) {
   await go(page, "/calendar");
+  await weekLoaded(page);
   for (let week = 0; week < 6; week++) {
-    await weekLoaded(page);
+    await nextWeek(page);
     const book = page.getByRole("link", { name: /^Book / });
-    if ((await book.count()) > 0) return book.first();
-    const range = (await page.locator(".cal-bar__range").textContent()) ?? "";
-    await page.getByRole("button", { name: /Next/ }).click();
-    await expect(page.locator(".cal-bar__range")).not.toHaveText(range);
+    if ((await book.count()) > 0) return book.last();
   }
-  throw new Error("no bookable trip in six weeks");
+  throw new Error("no bookable trip in the next six weeks");
 }
 
 for (const operator of operators) {
