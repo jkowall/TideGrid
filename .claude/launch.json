@@ -15,9 +15,15 @@
     },
     {
       "name": "guest",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@tidegrid/guest-site", "dev"],
-      "env": { "GUEST_DEV_PORT": "5361", "VITE_API_BASE": "http://localhost:8961" },
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "GUEST_DEV_PORT=5361",
+        "VITE_API_BASE=http://localhost:8961",
+        "pnpm",
+        "--filter",
+        "@tidegrid/guest-site",
+        "dev"
+      ],
       "port": 5361
     },
     {

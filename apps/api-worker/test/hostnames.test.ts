@@ -1,8 +1,9 @@
 import { createExecutionContext, env, SELF } from "cloudflare:test";
 import { createFakeHostnameProvider } from "@tidegrid/domain-hostnames";
 import { describe, expect, it } from "vitest";
+import { createApp } from "../src/app.ts";
 import type { Bindings } from "../src/env.ts";
-import { PreflightProjection } from "../src/hostnames/cors.ts";
+import { PreflightProjection, preflightProjection } from "../src/hostnames/cors.ts";
 import { hostnameProvider, hostnameSettings } from "../src/hostnames.ts";
 import { GuestGateway } from "../src/index.ts";
 
@@ -94,6 +95,51 @@ describe("the preflight projection (G2.14b)", () => {
     const cache = new PreflightProjection();
     for (let i = 0; i < 5_000; i++) cache.set(`https://h${i}.example.com`, false, 0);
     expect(cache.size).toBe(1_000);
+  });
+});
+
+describe("preflight flood (G2.14b)", () => {
+  it("limits lookups per address before any database call, and never for an unparsable origin", async () => {
+    const app = createApp();
+    const keys: string[] = [];
+    const limited = {
+      ...base,
+      PUBLIC_RATE_LIMITER: {
+        limit: async ({ key }: { key: string }) => {
+          keys.push(key);
+          return { success: false };
+        },
+      },
+    };
+    preflightProjection.clear();
+    const preflight = (origin: string) =>
+      app.request(
+        "https://api.test/v1/public/quotes",
+        {
+          method: "OPTIONS",
+          headers: {
+            origin,
+            "access-control-request-method": "POST",
+            "cf-connecting-ip": "203.0.113.9",
+          },
+        },
+        limited,
+        createExecutionContext(),
+      );
+    // No database is configured: a lookup would fail. The limiter refuses first.
+    for (let i = 0; i < 50; i++) {
+      const res = await preflight(`https://flood-${i}.example.com`);
+      expect(res.status).toBe(204);
+      expect(res.headers.get("access-control-allow-origin")).toBeNull();
+    }
+    expect(keys).toHaveLength(50);
+    expect(new Set(keys)).toEqual(new Set(["preflight:203.0.113.9"]));
+    // Unparsable origins never reach the limiter or the database.
+    for (const origin of ["http://10.0.0.1", "https://x.example.com:443", "null"]) {
+      await preflight(origin);
+    }
+    expect(keys).toHaveLength(50);
+    expect(preflightProjection.size).toBe(0);
   });
 });
 

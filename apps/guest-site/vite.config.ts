@@ -60,7 +60,7 @@ function serviceWorker(): Plugin {
         const chunk = outputs
           .flatMap((o) => ("output" in o ? o.output : []))
           .find((o) => o.type === "chunk");
-        if (!chunk || chunk.type !== "chunk") throw new Error("the service worker did not build");
+        if (chunk?.type !== "chunk") throw new Error("the service worker did not build");
         source = chunk.code;
       }
       this.emitFile({ type: "asset", fileName: "sw.js", source });
