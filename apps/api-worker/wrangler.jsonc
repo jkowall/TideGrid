@@ -37,6 +37,8 @@
     // Custom hostnames (G2.14b-live, C3, deferred): when on,
     // HOSTNAME_PROVIDER and CF_SAAS_ZONE_ID are the lines right after this
     // comment. CF_SAAS_API_TOKEN is a Wrangler secret.
+    "HOSTNAME_PROVIDER": "cloudflare_saas",
+    "CF_SAAS_ZONE_ID": "<zone id, set by the owner before the pull request>",
     //
     // Verified tenant origins on public routes (G2.14b-live, C1); "static"
     // is the rollback. This key stays last, so each config change above adds
