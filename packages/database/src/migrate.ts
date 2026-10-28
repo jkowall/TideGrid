@@ -13,6 +13,13 @@ import { assertRuntimeRoleIsPlain } from "./role.ts";
  *   with a SHA-256 checksum. A changed checksum on an applied file is an error;
  *   write a new migration instead.
  * - Uses the admin connection (`DATABASE_URL`). Runtime code uses the app role.
+ * - Each file runs under `SET LOCAL lock_timeout` and `statement_timeout`
+ *   (the hosting plan's migration rule), so a file that waits on a lock held
+ *   by a serving Worker fails and rolls back instead of blocking it. Defaults
+ *   are 5 s and 120 s; TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS and
+ *   TIDEGRID_MIGRATE_STATEMENT_TIMEOUT_MS override them.
+ * - Every connection close is bounded, so a compute that restarts mid-run
+ *   cannot hang the command (postgres.js `end()` waits forever otherwise).
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,6 +59,49 @@ export async function loadMigrations(dir = migrationsDir): Promise<MigrationFile
   );
 }
 
+export interface MigrationTimeouts {
+  lockTimeoutMs: number;
+  statementTimeoutMs: number;
+}
+
+export const defaultMigrationTimeouts: MigrationTimeouts = {
+  lockTimeoutMs: 5_000,
+  statementTimeoutMs: 120_000,
+};
+
+/** Seconds postgres.js waits for queries to finish before it closes the socket. */
+export const endTimeoutSeconds = 5;
+
+function timeoutFrom(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
+  const raw = env[name];
+  if (raw === undefined || raw === "") return fallback;
+  if (!/^\d{1,7}$/.test(raw) || Number(raw) < 100) {
+    throw new Error(`${name} must be a whole number of milliseconds from 100 to 9999999`);
+  }
+  return Number(raw);
+}
+
+/** The per-file timeouts, from the environment or the defaults. */
+export function migrationTimeouts(env: NodeJS.ProcessEnv = process.env): MigrationTimeouts {
+  return {
+    lockTimeoutMs: timeoutFrom(
+      env,
+      "TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS",
+      defaultMigrationTimeouts.lockTimeoutMs,
+    ),
+    statementTimeoutMs: timeoutFrom(
+      env,
+      "TIDEGRID_MIGRATE_STATEMENT_TIMEOUT_MS",
+      defaultMigrationTimeouts.statementTimeoutMs,
+    ),
+  };
+}
+
+/** The statements that open each migration's transaction. Integers only, so no quoting. */
+export function timeoutStatements(t: MigrationTimeouts): string {
+  return `SET LOCAL lock_timeout = ${Math.trunc(t.lockTimeoutMs)}; SET LOCAL statement_timeout = ${Math.trunc(t.statementTimeoutMs)}`;
+}
+
 export interface MigrateResult {
   applied: string[];
   skipped: string[];
@@ -60,8 +110,10 @@ export interface MigrateResult {
 export async function migrate(
   connectionString: string,
   files?: MigrationFile[],
+  timeouts: MigrationTimeouts = migrationTimeouts(),
 ): Promise<MigrateResult> {
   const migrations = files ?? (await loadMigrations());
+  const opening = timeoutStatements(timeouts);
   const sql = postgres(connectionString, { max: 1, prepare: false, onnotice: () => {} });
   const applied: string[] = [];
   const skipped: string[] = [];
@@ -97,6 +149,7 @@ export async function migrate(
         }
         try {
           await sql.begin(async (tx) => {
+            await tx.unsafe(opening);
             await tx.unsafe(m.sql);
             await tx`INSERT INTO schema_migrations (name, checksum) VALUES (${m.name}, ${m.checksum})`;
           });
@@ -110,7 +163,7 @@ export async function migrate(
       await sql`SELECT pg_advisory_unlock(${lockKey})`;
     }
   } finally {
-    await sql.end();
+    await sql.end({ timeout: endTimeoutSeconds });
   }
   return { applied, skipped };
 }
@@ -129,7 +182,7 @@ export async function status(connectionString: string) {
     const done = new Set(rows.map((r) => r.name));
     return migrations.map((m) => ({ name: m.name, applied: done.has(m.name) }));
   } finally {
-    await sql.end();
+    await sql.end({ timeout: endTimeoutSeconds });
   }
 }
 
@@ -144,10 +197,12 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       console.log(`${row.applied ? "applied" : "pending"}  ${row.name}`);
     }
   } else {
-    const result = await migrate(url);
+    const timeouts = migrationTimeouts();
+    const result = await migrate(url, undefined, timeouts);
     const names = result.applied.length ? `: ${result.applied.join(", ")}` : "";
     console.log(
-      `applied ${result.applied.length} migration(s)${names}; ${result.skipped.length} already applied`,
+      `applied ${result.applied.length} migration(s)${names}; ${result.skipped.length} already applied` +
+        ` (per file: lock_timeout ${timeouts.lockTimeoutMs} ms, statement_timeout ${timeouts.statementTimeoutMs} ms)`,
     );
   }
 }

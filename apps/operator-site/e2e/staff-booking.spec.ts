@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
+import { cspViolations, deployed, deployedEnv, openSignedIn, signIn } from "./helpers.ts";
 
 /**
  * The staff-assisted booking journey (G2.12d), at 375 and 1280, on both
@@ -16,23 +18,21 @@ import { expect, type Page, test } from "@playwright/test";
  *
  * Synthetic people only. The Reef's booking staff member is added by the CI
  * step that seeds the database.
+ *
+ * Deployed mode (Nov 1 runbook, P6 step 5): one operator only, E2E_OPERATOR,
+ * whose staff display name is E2E_STAFF_NAME; both are required. The storage
+ * state is signed in already, so there is no sign-in step, and the finance
+ * test, which needs its own identity, is skipped. The walk-up guest has a
+ * synthetic address at a reserved .test domain.
  */
 
-const operators = [
-  { name: "Demo Harbor Charters", staff: "ben.desk@demo-harbor.test", staffName: "Ben Desk" },
-  { name: "Demo Reef Divers", staff: "dan.desk@demo-reef.test", staffName: "Dan Desk" },
-] as const;
+const operators: readonly { name: string; staff: string; staffName: string }[] = deployed
+  ? [{ name: deployedEnv("E2E_OPERATOR"), staff: "", staffName: deployedEnv("E2E_STAFF_NAME") }]
+  : [
+      { name: "Demo Harbor Charters", staff: "ben.desk@demo-harbor.test", staffName: "Ben Desk" },
+      { name: "Demo Reef Divers", staff: "dan.desk@demo-reef.test", staffName: "Dan Desk" },
+    ];
 const finance = "fay.books@demo-harbor.test";
-
-/** CSP violations the page reports, collected from the console. */
-function cspViolations(page: Page): string[] {
-  const found: string[] = [];
-  page.on("console", (message) => {
-    const text = message.text();
-    if (/Content Security Policy|Refused to/i.test(text)) found.push(text);
-  });
-  return found;
-}
 
 /** A minimal RFC 4180 reader for the day's export. */
 function parseCsv(withMark: string): string[][] {
@@ -62,18 +62,6 @@ function parseCsv(withMark: string): string[][] {
     } else field += c;
   }
   return rows;
-}
-
-async function signIn(page: Page, email: string) {
-  await page.goto("/");
-  await page.getByLabel("Work email").fill(email);
-  await page.getByRole("button", { name: "Email me a sign-in link" }).click();
-  await page.getByRole("link", { name: "Open the local sign-in link" }).click();
-  // The link opens a confirmation, so a mail scanner's visit signs no one in.
-  await page.getByRole("button", { name: "Continue signing in" }).click();
-  await expect(page.getByRole("navigation", { name: "Console" })).toBeAttached({
-    timeout: 30_000,
-  });
 }
 
 /** The console's rail sits behind a menu on a phone; links are reached by address there too. */
@@ -127,9 +115,12 @@ for (const operator of operators) {
     const violations = cspViolations(page);
     const who = {
       name: `Synthetic Walkup ${info.project.name}`,
-      email: `walkup.${info.project.name}.${Date.now()}@guest.example`,
+      email: deployed
+        ? `nov1.walkup.${info.project.name}.${randomBytes(4).toString("hex")}@nov1-acceptance.test`
+        : `walkup.${info.project.name}.${Date.now()}@guest.example`,
     };
-    await signIn(page, operator.staff);
+    if (deployed) await openSignedIn(page);
+    else await signIn(page, operator.staff);
     await expect(page.getByText(operator.name).first()).toBeVisible();
 
     // 2. A trip from the calendar.
@@ -205,6 +196,7 @@ for (const operator of operators) {
 }
 
 test("gives finance no way to book", async ({ page }) => {
+  test.skip(deployed, "deployed mode exercises one signed-in identity only");
   const violations = cspViolations(page);
   await signIn(page, finance);
   await go(page, "/calendar");
