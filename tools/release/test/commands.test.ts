@@ -9,7 +9,7 @@ import { checkTestKey } from "../src/commands/stripe-smoke.ts";
 import { parseHosts, profileFor } from "../src/http.ts";
 import { loadJournal, saveJournal } from "../src/journal.ts";
 import { fakeApi } from "./fake-api.ts";
-import { fakeDeps, headSha, providerExecs, recordingSql } from "./helpers.ts";
+import { configsWith, fakeDeps, headSha, providerExecs, recordingSql } from "./helpers.ts";
 
 const preview = () =>
   profileFor(
@@ -151,7 +151,12 @@ describe("db: unsafe inputs refuse", () => {
     const k = loadJournal(ready.deps);
     k.approved.push({ sha: headSha, tree: "t", gate: "A10", at: "2026-11-01T17:00:00Z" });
     saveJournal(ready.deps, k);
-    const go = fakeDeps({ env: liveDb, answers, sql: () => sql.client });
+    const go = fakeDeps({
+      env: liveDb,
+      answers,
+      sql: () => sql.client,
+      configs: configsWith("c1", "c4"),
+    });
     go.deps.stateDir = ready.deps.stateDir;
     expect(await main(["db", "platform", "demo-harbor", "--live", "--go", "A10"], go.deps)).toBe(0);
     expect(sql.statements.map((s) => s.text).join("\n")).toMatch(

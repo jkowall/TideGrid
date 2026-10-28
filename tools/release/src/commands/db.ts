@@ -11,8 +11,9 @@ import { type Args, flag, has, onlyFlags } from "../args.ts";
 import { type Deps, Failure, out, type Plan, printPlan, Refusal } from "../core.ts";
 import { assertNoDbHazard, childEnv, present } from "../env.ts";
 import { classifyUrl, displayHost, liveGate } from "../gate.ts";
-import { git } from "../git.ts";
+import { git, releaseState } from "../git.ts";
 import { lastDone, loadJournal, record } from "../journal.ts";
+import { isCutoverConfig } from "../phase.ts";
 import { assertArgvSafe } from "../redact.ts";
 import { treeMigrations } from "./preflight.ts";
 
@@ -357,10 +358,20 @@ async function platform(
       throw new Refusal(
         "the journal does not show step 6 (last-seat) passed; P8 runs after acceptance",
       );
-    if (!journal.approved.some((a) => a.gate === "A10"))
+    // Bound to the C4 merge itself: the tree must carry the cutover config,
+    // and HEAD (that tree) must be approved under A10. A C7 approval alone
+    // never unlocks the permanent platform row.
+    if (!isCutoverConfig(deps.configs())) {
       throw new Refusal(
-        "the C4 merge is not approved in the journal (nov1 approve-sha <sha> --go A10)",
+        "this tree does not carry the C4 cutover config (demo.tidegrid.us route, workers_dev off); merge C4 first",
       );
+    }
+    const state = await releaseState(deps, journal);
+    if (!journal.approved.some((a) => a.gate === "A10" && a.sha === state.head)) {
+      throw new Refusal(
+        "HEAD, the tree that carries C4, is not approved under A10 (nov1 approve-sha <C4 merge> --go A10)",
+      );
+    }
   }
   const sql = deps.sql(url);
   try {

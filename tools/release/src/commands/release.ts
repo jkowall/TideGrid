@@ -215,9 +215,20 @@ function gatesFor(phase: Phase, rollback: boolean): string[] {
  * never skipped (review F3).
  */
 export function rollbackAnchor(journal: Journal, worker: Worker): Entry | undefined {
-  return [...journal.entries]
-    .reverse()
-    .find((e) => e.step === "release" && e.worker === worker && (e.versionBefore?.length ?? 0) > 0);
+  return [...journal.entries].reverse().find(
+    (e) =>
+      e.step === "release" &&
+      e.worker === worker &&
+      (e.versionBefore?.length ?? 0) > 0 &&
+      // A release that failed before upload moved nothing; it is not the one to undo.
+      !(e.versionAfter && sameIds(e.versionAfter, e.versionBefore ?? [])) &&
+      // A started entry without its outcome is superseded by that outcome.
+      e.result !== "started",
+  );
+}
+
+function sameIds(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
 }
 
 export async function release(deps: Deps, args: Args): Promise<number> {
@@ -401,6 +412,11 @@ async function doRollback(
     throw new Refusal("feature-off first; nothing ran");
   }
   const before = await deployedVersions(deps, worker);
+  if (before.includes(anchor)) {
+    throw new Refusal(
+      `${anchor} is already live on ${w.name}; nothing to roll back to. Pass --to <an earlier version id>`,
+    );
+  }
   const code = await wranglerOnTerminal(deps, worker, ["rollback", anchor]);
   const after = await deployedVersions(deps, worker).catch(() => [] as string[]);
   record(deps, {

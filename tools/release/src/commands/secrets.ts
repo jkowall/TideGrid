@@ -5,7 +5,8 @@
  * value from the owner's terminal, or from `openssl rand -hex 32` piped inside
  * a shell nov1 starts with no secret in its argv. `wrangler secret list`
  * (names only) is the verification. Each put or delete deploys the running
- * code (cli.js:299145), so it is journaled like a deploy, with a new anchor.
+ * code (cli.js:299145), so it is journaled with the version ids before and
+ * after. It is not a rollback anchor: --rollback undoes releases only.
  */
 import { type Args, flag, onlyFlags } from "../args.ts";
 import { type Deps, Failure, out, type Plan, printPlan, Refusal } from "../core.ts";
@@ -185,10 +186,13 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
     result: code === 0 ? "done" : "failed",
     versionBefore: before,
     versionAfter: after,
-    note: `${name}; new rollback anchor`,
+    note: `${name}; journaled, not a rollback anchor`,
   });
   if (code !== 0)
     throw new Failure(`wrangler secret ${del ? "delete" : "put"} ${name} exited ${code}`);
-  out(deps, `${name} ${del ? "deleted" : "set"}; rollback anchor now ${after.join(", ")}`);
+  out(
+    deps,
+    `${name} ${del ? "deleted" : "set"}; live version now ${after.join(", ")} (journaled; not a rollback anchor, --rollback undoes releases only)`,
+  );
   return 0;
 }
