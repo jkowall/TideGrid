@@ -25,7 +25,11 @@
  *
  * With T due tenants, and each run that does not overlap another starting at
  * least m turns (m no more than the tenant limit), every due tenant gets a turn
- * within ceil(T / m) runs. The unit tests hold that bound; integration tests
+ * within ceil(T / m) runs. That assumes stamps land: a tenant whose stamp fails
+ * every run keeps its place and takes one of the m turns every run, so with k
+ * such tenants the bound becomes about ceil((T - k) / (m - k)).
+ * A failed stamp is reported once a run (`stampFailures`), and the tenant is
+ * not stamped again in that run. The unit tests hold that bound; integration tests
  * assert relative order only, because the shared test database holds other
  * suites' tenants.
  */
@@ -50,7 +54,7 @@ export interface FairSweepReport {
   deferredTenants: number;
   /** Tenants whose turn threw; they get no further turn this run. */
   failedTenants: number;
-  /** Stamps that failed; each tenant still took its turn. */
+  /** Tenants whose stamp failed this run; each still took its turn. */
   stampFailures: number;
   /**
    * False when a listed tenant got no turn, a tenant still had more at the end
@@ -112,6 +116,14 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
   };
 
   let stalled = false;
+  /** The caller's error observer; one that throws is dropped, never escapes the run. */
+  const notify = (tenantId: string, error: unknown, during: "stamp" | "turn") => {
+    try {
+      options.onTenantError(tenantId, error, during);
+    } catch {
+      // Nothing to report it to; the counts still say what happened.
+    }
+  };
   /** One turn; true when the tenant wants another. */
   const take = async (tenantId: string, pass: number): Promise<boolean> => {
     report.turns += 1;
@@ -130,18 +142,21 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
       return true;
     } catch (error) {
       report.failedTenants += 1;
-      options.onTenantError(tenantId, error, "turn");
+      notify(tenantId, error, "turn");
       return false;
     }
   };
 
+  /** Tenants whose stamp failed this run; they are not stamped again in it. */
+  const unstamped = new Set<string>();
   const stamp = async (tenantId: string) => {
-    if (!(options.stampWhen?.(tenantId) ?? true)) return;
+    if (unstamped.has(tenantId) || !(options.stampWhen?.(tenantId) ?? true)) return;
     try {
       await options.stamp(tenantId);
     } catch (error) {
+      unstamped.add(tenantId);
       report.stampFailures += 1;
-      options.onTenantError(tenantId, error, "stamp");
+      notify(tenantId, error, "stamp");
     }
   };
 
@@ -151,6 +166,8 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
     if (overBudget()) break;
     const tenantId = listed[index] as string;
     await stamp(tenantId);
+    // A slow stamp can use up the budget; then the turn does not start either.
+    if (overBudget()) break;
     report.tenants += 1;
     if (await take(tenantId, 1)) waiting.push(tenantId);
   }
@@ -171,7 +188,14 @@ export async function runFairSweep(options: FairSweepOptions): Promise<FairSweep
       // A tenant's first extra turn stamps it again, behind every tenant that
       // got only one turn. Without it the extra turns of every run would go to
       // the same tenants, the ones a fixed rotation puts at the head of the list.
-      if (pass === 2) await stamp(tenantId);
+      if (pass === 2) {
+        await stamp(tenantId);
+        if (overBudget()) {
+          stopped = true;
+          next.push(...waiting.slice(i));
+          break;
+        }
+      }
       if (await take(tenantId, pass)) next.push(tenantId);
     }
     waiting = next;

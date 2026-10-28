@@ -316,6 +316,23 @@ describe("the checkout sweep's turns", () => {
     expect(report).toMatchObject({ expired: 1, failedTenants: 0, complete: true });
   });
 
+  it("finishes the run, counting a failure once, when the onError observer throws", async () => {
+    const store = new FakeStore().tenant(A).tenant(B);
+    store.checkouts.set(B, [{ id: "b0", kind: "due" }]);
+    store.expire = async (ctx, limit) => {
+      if (ctx.tenantId === A) throw new Error("expiry fails");
+      return FakeStore.prototype.expire.call(store, ctx, limit);
+    };
+    const report = await runCheckoutSweep(store, {
+      runId: "run-1",
+      graceSeconds: 0,
+      onError: () => {
+        throw new Error("observer");
+      },
+    });
+    expect(report).toMatchObject({ tenants: 2, failedTenants: 1, expired: 1, complete: false });
+  });
+
   it("refuses a turn size outside 1 to 1000", async () => {
     await expect(sweep(new FakeStore(), { turnItems: 0 })).rejects.toThrow(RangeError);
   });

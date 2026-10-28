@@ -22,7 +22,10 @@ export interface SweepOptions {
   /**
    * Called when a turn's stamp fails; the turn still runs. Without it,
    * onTenantError hears the failure, so it is never silent. Either way it is
-   * counted in stampFailures, not in failedTenants.
+   * counted in stampFailures, not in failedTenants. The API Worker's cron
+   * passes only onTenantError until Part E of the hardening goal wires this,
+   * so until then a stamp failure logs as hold_sweep_tenant_failed while
+   * failed_tenant_count stays 0.
    */
   onStampError?: (tenantId: string, error: unknown) => void;
   /** Milliseconds clock for the budget; tests pin it. Expiry itself uses the database clock. */
@@ -44,7 +47,7 @@ export interface SweepReport {
   passes: number;
   /** Tenants listed that the budget left for the next run. */
   deferredTenants: number;
-  /** Stamps that failed; each tenant still took its turn. */
+  /** Tenants whose stamp failed; each still took its turn. */
   stampFailures: number;
 }
 

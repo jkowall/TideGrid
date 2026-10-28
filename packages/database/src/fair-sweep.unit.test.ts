@@ -248,6 +248,72 @@ describe("runFairSweep", () => {
     expect(world.stamps.has(HOG)).toBe(false);
   });
 
+  it("reports a stamp that keeps failing once a run, even with extra turns", async () => {
+    const world = new World();
+    world.add(HOG, 3);
+    world.failStamp.add(HOG);
+    const { report, errors } = await world.sweep({ budgetMs: 100 });
+    expect(report).toMatchObject({ turns: 3, stampFailures: 1 });
+    expect(errors).toEqual([`${HOG}:stamp failed`]);
+  });
+
+  it("gives a tenant whose stamp always fails one of the turns every run (the bound's exception)", async () => {
+    const world = new World();
+    const [stuck, a, b] = [tenant(0), tenant(1), tenant(2)];
+    for (const t of [stuck, a, b]) world.add(t, Number.POSITIVE_INFINITY);
+    world.failStamp.add(stuck);
+    for (let i = 0; i < 4; i++) await world.sweep({ budgetMs: 2 });
+    // ceil(3 / 2) = 2 runs without stamp failures; here a and b share one slot.
+    expect([1, 2, 3, 4].map((r) => world.turnsIn(r))).toEqual([
+      [`${stuck}@1`, `${a}@1`],
+      [`${stuck}@1`, `${b}@1`],
+      [`${stuck}@1`, `${a}@1`],
+      [`${stuck}@1`, `${b}@1`],
+    ]);
+  });
+
+  it("starts no turn when the stamp itself used up the budget", async () => {
+    let now = 0;
+    const turns: string[] = [];
+    const report = await runFairSweep({
+      listTenants: async () => [HOG, VICTIM],
+      tenantLimit: 100,
+      stamp: async () => {
+        now += 10;
+      },
+      turn: async (t) => {
+        turns.push(t);
+        return { units: 1, more: false };
+      },
+      budgetMs: 5,
+      clock: () => now,
+      onTenantError: () => {},
+    });
+    expect(turns).toEqual([]);
+    expect(report).toMatchObject({ tenants: 0, turns: 0, deferredTenants: 2, complete: false });
+  });
+
+  it("keeps going when the error observer itself throws", async () => {
+    const turns: string[] = [];
+    const report = await runFairSweep({
+      listTenants: async () => [HOG, VICTIM],
+      tenantLimit: 100,
+      stamp: async () => {},
+      turn: async (t) => {
+        turns.push(t);
+        if (t === HOG) throw new Error("turn");
+        return { units: 1, more: false };
+      },
+      budgetMs: 1000,
+      clock: () => 0,
+      onTenantError: () => {
+        throw new Error("observer");
+      },
+    });
+    expect(turns).toEqual([HOG, VICTIM]);
+    expect(report).toMatchObject({ tenants: 2, failedTenants: 1, complete: false });
+  });
+
   it("drains one busy tenant in one run when the budget allows", async () => {
     const world = new World();
     world.add(HOG, 10);

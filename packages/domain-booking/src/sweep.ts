@@ -104,7 +104,7 @@ export interface CheckoutSweepReport {
   passes: number;
   /** Tenants listed that the budget left for the next run. */
   deferredTenants: number;
-  /** Stamps that failed (each reported as item "stamp"); each tenant still took its turn. */
+  /** Tenants whose stamp failed (each reported once as item "stamp"); each still took its turn. */
   stampFailures: number;
 }
 
@@ -352,7 +352,11 @@ export async function runCheckoutSweep(
   let failures = false;
   const onError: NonNullable<CheckoutSweepOptions["onError"]> = (tenantId, item, error, id) => {
     if (item !== "stamp") failures = true;
-    options.onError?.(tenantId, item, error, id);
+    try {
+      options.onError?.(tenantId, item, error, id);
+    } catch {
+      // An observer that throws must not stop the step or count it twice.
+    }
   };
   const runs = new Map<string, TenantRun>();
   const runOf = (tenantId: string): TenantRun => {
@@ -392,12 +396,16 @@ export async function runCheckoutSweep(
         if (run.inconsistent.has(checkout.id)) continue;
         run.inconsistent.add(checkout.id);
         // Reported for an operator; the batch itself did not fail.
-        options.onError?.(
-          tenantId,
-          "checkouts",
-          new InconsistentCheckoutError(checkout),
-          checkout.id,
-        );
+        try {
+          options.onError?.(
+            tenantId,
+            "checkouts",
+            new InconsistentCheckoutError(checkout),
+            checkout.id,
+          );
+        } catch {
+          // As above: an observer that throws changes nothing.
+        }
       }
       run.expiry =
         batch.expired.length > 0 && batch.expired.length + batch.skipped.length >= batchSize
