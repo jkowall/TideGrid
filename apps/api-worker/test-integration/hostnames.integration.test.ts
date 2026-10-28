@@ -71,6 +71,11 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
   ) {
     const headers = new Headers(init.headers);
     if (origin) headers.set("origin", origin);
+    // A well-formed bearer secret that opens nothing, so routes that check a
+    // credential's shape first (checkout) go on to resolve the Origin.
+    if (!headers.has("authorization") && (init.method ?? "GET") !== "OPTIONS") {
+      headers.set("authorization", `Bearer ${"A".repeat(43)}`);
+    }
     const res = await app.request(
       `http://localhost${path}`,
       { method: init.method ?? "GET", headers },
