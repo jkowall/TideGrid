@@ -17,7 +17,7 @@ import { tripAllocator } from "@tidegrid/domain-inventory/testing";
 import { sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { searchBookings, searchShape } from "./search.ts";
+import { searchBookings } from "./search.ts";
 import {
   confirmBooking,
   createCheckoutFixture,
@@ -214,17 +214,14 @@ describe.skipIf(!env || !on)("console search cost at pilot volume (benchmark)", 
     const [{ n } = { n: 0 }] = await admin<{ n: number }[]>`
       select count(*)::int as n from public.bookings where tenant_id = ${tenantId}`;
     expect(n).toBeGreaterThanOrEqual(N);
-    // "@g" takes the single statement (no trigram) and matches the same gmail
-    // addresses as "gmail" in the arms, so the two shapes compare like for like.
+    // "@g" and "gmail" match the same 20,000 addresses, from different patterns.
     for (const q of ["@g", "gmail", "smith", "zyxwv"]) {
-      console.log(
-        `B_BENCH_EXPLAIN ${JSON.stringify({ q, shape: searchShape(q, true), statements: await explainRequest(q) })}`,
-      );
+      console.log(`B_BENCH_EXPLAIN ${JSON.stringify({ q, statements: await explainRequest(q) })}`);
     }
     for (const q of ["@g", "gmail", "smith", "zyxwv", "luis fernandez"]) {
       const times: number[] = [];
       let total = 0;
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 7; i++) {
         const t0 = performance.now();
         const found = await inTenantTransaction(
           runtime.db,
@@ -238,9 +235,7 @@ describe.skipIf(!env || !on)("console search cost at pilot volume (benchmark)", 
         times.push(Math.round(performance.now() - t0));
         if (found.kind === "ok") total = found.total;
       }
-      console.log(
-        `B_BENCH_REQUEST ${JSON.stringify({ q, shape: searchShape(q, true), total, ms: times })}`,
-      );
+      console.log(`B_BENCH_REQUEST ${JSON.stringify({ q, total, ms: times })}`);
     }
   }, 1_200_000);
 });

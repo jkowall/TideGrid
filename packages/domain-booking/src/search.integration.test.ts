@@ -1,14 +1,18 @@
 /**
  * Console booking search (pre-pilot hardening, item 5, Part B).
  *
- * B0 is a spike: can the runtime role, under forced row-level security, use a
- * trigram index on the booker's name at all? It runs on one admin connection
- * in one transaction that always rolls back, so nothing it creates outlives
- * it, and it logs what the planner chose (a line starting B0_SPIKE).
+ * B0: can the runtime role, under forced row-level security, use a trigram
+ * index on the booker's name at all? It runs on one admin connection in one
+ * transaction that always rolls back, so nothing it creates outlives it, and
+ * it logs what the planner chose (a line starting B0_SPIKE). On PostgreSQL 17
+ * it cannot: LIKE and ILIKE are not leakproof, so the planner keeps them
+ * above the tenant policy and never uses the index for them (D4 B, pg_trgm
+ * deferred). The test asserts that, so a change in the planner shows up here.
  *
- * B1 is the search rewrite: the same bookings, count, order, and pages as the
- * single condition it replaces, which this file keeps as a literal reference
- * query. Two tenants throughout.
+ * The search gate: search returns the same bookings, count, order, and pages
+ * as its condition kept here as a literal reference query, across the cases
+ * an index or a rewrite would have to keep (B1). Any later search change must
+ * pass it. Two tenants throughout.
  */
 
 import {
@@ -24,14 +28,7 @@ import { type RawBuilder, sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { cancelBooking, previewCancellation } from "./cancel.ts";
-import {
-  emailFragment,
-  escapeLike,
-  nameWords,
-  referencePrefix,
-  searchBookings,
-  searchShape,
-} from "./search.ts";
+import { emailFragment, escapeLike, nameWords, referencePrefix, searchBookings } from "./search.ts";
 import {
   type CheckoutFixture,
   confirmBooking,
@@ -73,7 +70,7 @@ const bookers = [
   { name: "Ada Lovelace", email: "ada@a.b.test" },
 ];
 
-describe.skipIf(!env)("console booking search, B0 and B1", () => {
+describe.skipIf(!env)("console booking search: the trigram spike and the result gate", () => {
   let admin: Sql;
   let runtime: ReturnType<typeof createDb>;
   let provider: FakePaymentProvider;
@@ -103,7 +100,7 @@ describe.skipIf(!env)("console booking search, B0 and B1", () => {
     );
 
   /**
-   * The search before B1, kept literally: one condition over the booking and
+   * The search's condition, kept literally: one condition over the booking and
    * its checkout, every match ordered as the page orders them.
    */
   async function reference(tenantId: string, q: string, withBooker: boolean): Promise<string[]> {
@@ -232,6 +229,17 @@ describe.skipIf(!env)("console booking search, B0 and B1", () => {
     console.log(`B0_SPIKE ${JSON.stringify(spike)}`);
     expect(spike.adminCustom).toContain("b0_spike_booker_name_trgm");
     expect(spike.indexVisibleToRuntime).toBe(true);
+    // The runtime, under forced row-level security, never uses it: the reason
+    // pg_trgm is deferred (D4 B). If this starts failing, revisit D4.
+    expect(spike.leakproof).toMatchObject({ textlike: false, texticlike: false });
+    for (const plan of ["runtimeCustom", "runtimeGeneric", "runtimeNoTenantFilter"]) {
+      const indexes = spike[plan] as string[];
+      expect(Array.isArray(indexes)).toBe(true);
+      expect({ plan, trigram: indexes.includes("b0_spike_booker_name_trgm") }).toEqual({
+        plan,
+        trigram: false,
+      });
+    }
     // Nothing persists.
     const [left] = await admin<{ n: number }[]>`
       select count(*)::int as n from pg_class where relname = 'b0_spike_booker_name_trgm'`;
@@ -277,7 +285,7 @@ describe.skipIf(!env)("console booking search, B0 and B1", () => {
     "nobody",
   ];
 
-  it("B1: returns the same bookings, in the same order, as the single condition", async () => {
+  it("returns the same bookings, in the same order, as the reference condition", async () => {
     const reads = [
       ...texts,
       // References: a prefix of two and of eight, typed with spaces, hyphens, and lookalikes.
@@ -289,10 +297,8 @@ describe.skipIf(!env)("console booking search, B0 and B1", () => {
         r.slice(0, 6).replace(/0/g, "O").replace(/1/g, "l"),
       ]),
     ];
-    let arms = 0;
     for (const q of reads) {
       for (const withBooker of [true, false]) {
-        if (searchShape(q, withBooker) === "arms") arms += 1;
         const expected = await reference(A.id, q, withBooker);
         const found = await search(A.id, q, withBooker);
         if (found.kind !== "ok") throw new Error(`search: ${found.kind}`);
@@ -307,15 +313,13 @@ describe.skipIf(!env)("console booking search, B0 and B1", () => {
         );
       }
     }
-    // Most texts take the rewritten shape for staff, so the comparison is not vacuous.
-    expect(arms).toBeGreaterThan(reads.length / 2);
     // Something matched, and the canceled booking is among the matches.
     expect((await reference(A.id, "gmail", true)).length).toBeGreaterThanOrEqual(4);
     const cancel = await search(A.id, "Cancel", true);
     expect(cancel.kind === "ok" && cancel.results.map((r) => r.state)).toEqual(["canceled"]);
   });
 
-  it("B1: pages across a cursor exactly as the single condition orders them", async () => {
+  it("pages across a cursor exactly as the reference condition orders them", async () => {
     for (const q of ["gmail", "test", "smith"]) {
       const expected = await reference(A.id, q, true);
       const seen: string[] = [];
@@ -336,7 +340,7 @@ describe.skipIf(!env)("console booking search, B0 and B1", () => {
     expect(refused.kind).toBe("cursor_invalid");
   });
 
-  it("B1: never returns another tenant's booking by name, email, or reference", async () => {
+  it("never returns another tenant's booking by name, email, or reference", async () => {
     const own = await search(B.id, "Quixote", true);
     expect(own.kind === "ok" && own.total).toBe(1);
     for (const q of ["Quixote", "zq@other", "other.test"]) {

@@ -130,65 +130,6 @@ interface SearchRow {
 }
 
 /**
- * Whether pg_trgm can draw a trigram from a LIKE fragment: it needs a run of
- * three letters or digits, because punctuation splits its words. Counting
- * ASCII only is conservative: it can miss an index, never change a result.
- */
-export function hasTrigram(fragment: string): boolean {
-  return /[A-Za-z0-9]{3,}/.test(fragment);
-}
-
-/**
- * Which statement a search emits (pre-pilot hardening, item 5, B1; D7 A, a
- * coordinator default pending owner confirmation). `arms` matches through a
- * set of booking ids built from one arm per relation, a shape an index on the
- * booker's name or email could serve. It is used only for roles that may see
- * guests, and only when every booker arm in the request has a trigram;
- * otherwise `single`, the one condition this search has always used. Both
- * return the same bookings. The choice changes the SQL text, so a cached
- * plan can never carry one shape's pattern into the other.
- */
-export function searchShape(q: string, withBooker: boolean): "arms" | "single" {
-  if (!withBooker) return "single";
-  const words = nameWords(q);
-  if (words.length > 0 && !words.some(hasTrigram)) return "single";
-  const email = emailFragment(q);
-  if (email !== null && !hasTrigram(email)) return "single";
-  return "arms";
-}
-
-/**
- * The text's condition as a set of matching booking ids, one arm per relation:
- * the reference on the booking, then every name word, then the email, on its
- * checkout. Each arm names its tenant. All the name words stay in one arm, so
- * a short word never widens the set on its own.
- */
-function armsCondition(q: string, tenantId: string): RawBuilder<unknown> {
-  const arms: RawBuilder<unknown>[] = [];
-  const prefix = referencePrefix(q);
-  if (prefix) {
-    arms.push(sql`select rb.id from bookings rb
-       where rb.tenant_id = ${tenantId} and rb.reference like ${`${prefix}%`}`);
-  }
-  const words = nameWords(q).map(
-    (word) => sql`ns.booker_name ilike ${`%${escapeLike(word)}%`} escape '\\'`,
-  );
-  if (words.length > 0) {
-    arms.push(sql`select nb.id from checkout_sessions ns
-       join bookings nb on nb.tenant_id = ns.tenant_id and nb.checkout_session_id = ns.id
-      where ns.tenant_id = ${tenantId} and (${sql.join(words, sql` and `)})`);
-  }
-  const email = emailFragment(q);
-  if (email) {
-    arms.push(sql`select eb.id from checkout_sessions es
-       join bookings eb on eb.tenant_id = es.tenant_id and eb.checkout_session_id = es.id
-      where es.tenant_id = ${tenantId}
-        and es.booker_email like ${`%${escapeLike(email)}%`} escape '\\'`);
-  }
-  return arms.length === 0 ? sql`false` : sql`b.id in (${sql.join(arms, sql` union `)})`;
-}
-
-/**
  * The text's condition. A reference matches from its start; for roles that
  * may see guests, a name matches when it holds every word, and an email when
  * it holds the text, ignoring case. Nothing the role may match is `false`.
@@ -223,13 +164,7 @@ export async function searchBookings(
   const conditions: RawBuilder<unknown>[] = [sql`b.tenant_id = ${tenantId}`];
   if (query.from !== undefined) conditions.push(sql`t.local_date >= ${query.from}::date`);
   if (query.to !== undefined) conditions.push(sql`t.local_date <= ${query.to}::date`);
-  if (query.q !== undefined) {
-    conditions.push(
-      searchShape(query.q, withBooker) === "arms"
-        ? armsCondition(query.q, tenantId)
-        : textCondition(query.q, withBooker),
-    );
-  }
+  if (query.q !== undefined) conditions.push(textCondition(query.q, withBooker));
   const where = sql.join(conditions, sql` and `);
   // Finance's search never joins the checkout, where the booker's details live.
   const bookerJoin: RawBuilder<unknown> = withBooker
