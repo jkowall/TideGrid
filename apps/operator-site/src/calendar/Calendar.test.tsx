@@ -978,7 +978,7 @@ describe("roles", () => {
       expect(open).toHaveLength(books ? 1 : 0);
       if (books) {
         expect(open[0]?.getAttribute("href")).toMatch(/^\/trips\/[0-9a-f-]{36}\/book$/);
-        expect(text(open[0])).toMatch(/^Book Sunset/);
+        expect(text(open[0] ?? null)).toMatch(/^Book Sunset/);
       }
       // Closed, draft, departed, or past the cutoff: none.
       expect(book(rowOn("Friday, November 6", /Sunset/))).toHaveLength(0);
