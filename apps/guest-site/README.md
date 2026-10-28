@@ -1,6 +1,6 @@
 # @tidegrid/guest-site
 
-The branded guest site for the demo build: one React and Vite build serves every operator, which the API names from the page's Origin, with that operator's validated brand. Pages: `/` (the operator's upcoming trips, G2.11a), `/book/<tripId>` (the checkout, G2.11b), `/manage` (the booking's management page, G2.11c), and the placeholder legal pages. The site moves between its own pages in place, through the History API, so the brand stays on screen; Back and Forward work.
+The branded guest site for the demo build: one React and Vite build serves every operator, which the API names from the page's Origin, with that operator's validated brand. Pages: `/` (the operator's upcoming trips, G2.11a), `/book/<tripId>` (the checkout, G2.11b), `/manage` (the booking's management page, G2.11c), the placeholder legal pages (also at `/terms` and `/privacy`), and `/support` and `/offline` (G2.14b). The site moves between its own pages in place, through the History API, so the brand stays on screen; Back and Forward work.
 
 ## The checkout (G2.11b)
 
@@ -57,6 +57,17 @@ With `VITE_DEMO_MAILBOX=1` the confirmation and the management page link to the 
 
 `public/_headers` keeps the guest policy strict: no inline script or style (React and the design system set styles only through the CSSOM), and zod in jitless mode (`src/zod-jitless.ts`), so parsing a contract never compiles code. `connect-src` names the API origin, `https://cloudflareinsights.com` for Cloudflare Web Analytics' manually added beacon, and `'self'`, because the automatically injected beacon reports to the site's own `/cdn-cgi/rum` ([Cloudflare's Web Analytics FAQ](https://developers.cloudflare.com/web-analytics/faq/)). The page's own code fetches only from the API. `src/static.test.ts` and `src/zod-jitless.test.ts` hold these.
 
+## The installable site (G2.14b)
+
+The site is still one assets-only SPA for every operator. An edge Worker (`worker/index.ts`) runs first only for `/manifest.webmanifest`, `/icons/*`, and `/sw.js` (`run_worker_first` in `wrangler.jsonc`). It reads the tenant from the request URL's hostname only, never from a header, and asks the API's `GuestGateway` entrypoint over a service binding; the gateway checks the host with the strict origin rules itself.
+
+- **Manifest.** The operator's own: its name, a `short_name` cut to 12 characters, `theme_color` from its primary, the neutral page background, `start_url`, `scope`, and `id` at `/`, standalone display, and two SVG icons. `Cache-Control: no-cache` and an ETag from the slug and brand version. There is no default tenant and no generic manifest.
+- **Icons.** A square of the brand's primary with its validated SVG mark centered, checked again by the logo validator, or a neutral mark for no logo, a lockup, or a raster mark (D3(a)). Served under `default-src 'none'; style-src 'unsafe-inline'` with nosniff. No apple-touch-icon.
+- **Service worker.** Vite builds `src/sw/sw.ts` into an unhashed classic `/sw.js` with this build's hashed `/assets/*.js` and `*.css` injected as the precache. It precaches those and one neutral offline page (`neutral-offline.html`, under a fixed key), caches fonts as they arrive, and never caches a navigation, a cross-origin request (the API), a non-GET, or anything with `Authorization`: a navigation's URL keeps its `#t=` token. Navigations go network first and fall back to the offline page. The page registers it at `/` with `updateViaCache: "none"` once its operator is ready (`src/sw/register.ts`, from the bootstrap); a new version takes over on the next navigation.
+- **Kill switch, two layers, only on a definite miss.** When the bootstrap reads `tenant_not_found`, the page unregisters every worker and deletes every cache. For a host the gateway reports as a miss, the Worker serves `src/sw/kill-switch.ts` as `/sw.js`, with `Clear-Site-Data: "cache"`; it deletes caches and unregisters, and never touches storage, where an open checkout and a manage or waiver session live. A gateway error, a timeout, or a withheld brand is 503 with no-store and clears nothing. `GUEST_SW_KILL_SWITCH=1` builds the kill switch for every host: the rollback for a bad service worker.
+- **Headers.** The page's policy adds `worker-src 'self'` and `manifest-src 'self'`. Responses the Worker writes set their own security headers, because `public/_headers` covers assets only.
+- **Preview hostnames.** `wrangler.jsonc` lists one Workers Custom Domain per synthetic tenant, `<slug>.book.tidegrid.us` (D8(a)); a test keeps it equal to `config/tenants`. It is not deployed until G2.14b-live; named environments have no routes.
+
 ## API follow-ups
 
 Found while building the checkout, ranked by the code review. None blocks the demo; the page works around each one. The API is unchanged here; each is a proposal for the goal that owns the API.
@@ -73,8 +84,20 @@ cp .env.example .env.local      # VITE_API_BASE, the local API origin
 GUEST_DEV_PORT=5233 pnpm dev    # http://<slug>.book.localhost:5233
 ```
 
-The API's `ALLOWED_ORIGINS` must list the guest origin, and the seed must run with `SEED_LOCAL_HOSTNAMES=1`. Payments need `PAYMENT_PROVIDER=fake` and a `FAKE_PAYMENT_WEBHOOK_SECRET` in the API's `.dev.vars`. Email links point at `GUEST_LINK_ORIGIN` in the API's `.dev.vars` (`http://{slug}.book.localhost:<port>`); `VITE_DEMO_MAILBOX=1` adds the links to the local mailbox.
+The seed must run with `SEED_LOCAL_HOSTNAMES=1`. The API's `dev` environment accepts any seeded `*.book.localhost` origin (`PUBLIC_CORS=dynamic`); the fake payment provider's routes follow the same rule. Payments need `PAYMENT_PROVIDER=fake` and a `FAKE_PAYMENT_WEBHOOK_SECRET` in the API's `.dev.vars`. Email links point at `GUEST_LINK_ORIGIN` in the API's `.dev.vars` (`http://{slug}.book.localhost:<port>`); `VITE_DEMO_MAILBOX=1` adds the links to the local mailbox.
+
+The guest Worker, on the built site (no Vite), on port 5361:
+
+```sh
+VITE_API_BASE=http://localhost:8961 GUEST_LOCAL_API=http://localhost:8961 pnpm build
+pnpm dev:stub     # a stub GuestGateway with the two synthetic brands, no database
+pnpm dev:worker   # bound to the API's GuestGateway: run the API with `wrangler dev --env dev --port 8961`
+```
+
+`GUEST_LOCAL_API` adds the local API to `connect-src` in the built `dist/_headers` only (`scripts/local-headers.mjs`); the committed `public/_headers` and its test stay unchanged.
 
 ## Tests
 
 `pnpm --filter @tidegrid/guest-site test`. The checkout's tests run the page in jsdom against a fake API (`src/booking/fixtures.ts`) with the guest in Tokyo and the marina in New York. They cover each step and state, the keys and their reuse, polling to every outcome, a reload at each step, Back and Forward, leaving an open checkout, a device clock that is off, and that no secret or personal data reaches an address. The management page's tests (`src/manage/*.test.ts(x)`, with `src/manage/fixtures.ts`) cover opening from a link and from the checkout, each link problem, a reload, naming the party with its keys and retries, every remedy and changed terms when canceling, ending the session, and that no token or guest detail reaches an address. `src/design-system-dom.test.tsx` covers the design system's behavior that needs a DOM.
+
+The guest Worker's tests run in workerd with stub bindings and no `dist/` (`vitest.workers.config.ts`, `worker/*.test.ts`), and the service worker's in Node against a fake scope (`src/sw/sw.test.ts`). The browser checks are Playwright (`playwright.config.ts`, `e2e/`), at 375 and 1280: `pnpm e2e` runs part A against the stub gateway, and `E2E_MODE=full` runs part B against the API and a seeded PostgreSQL 17, as the CI browser job does. Locally, `E2E_CHANNEL=chrome` uses an installed Google Chrome; never run `playwright install` on the owner's machine.

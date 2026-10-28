@@ -8,6 +8,16 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### Pending owner confirmation: G2.14b demo narrowings (coordinator defaults, 2026-10-27)
+
+**Status:** Coordinator defaults for the G2.14b local-first pass, pending owner confirmation. They bind the demo build only, and only until the owner confirms or replaces them. The full list, with the reasons, is the [hostnames and PWA narrowing](12-demo-build-plan.md#goal-sequence) in the demo build plan.
+
+- **Tenant selection by verified Origin.** In the demo, the API selects the public experience from the browser Origin through one strict origin parser and an active, verified hostname, and the guest page loads its own bootstrap. The [target architecture](04-architecture.md)'s short-lived scoped token issued by a guest Worker is not built for the demo.
+- **Hostname ownership.** Hostnames live in `tenant_hostnames` and its provisioning table, not in the brand configuration version.
+- **Generated icons.** The guest Worker composes PWA icons from the published brand, with no approved asset hash in the tenant manifest.
+- **Unsigned in-isolate projection.** The hosting plan's "signed, short-lived projection" is read as applying to a cache that crosses a process, network, or storage boundary. The demo's CORS preflight projection stays in one isolate's memory for at most 30 seconds and is not signed. A shared cache needs the signature.
+- **Live cutover unchanged.** The `demo.tidegrid.us` cutover stays a G2.14b-live acceptance item, run as a separately authorized operational step under the external-action rule below.
+
 ### 2026-09-20
 
 - **Demo-grade Core build authorized before the Validation gate.** The sole owner authorizes a real, demo-oriented implementation of the Core booking happy path in this repository before the Validation gate passes. Boundaries: synthetic tenants and data only; Stripe in test mode with test connected accounts; no Twilio and no SMS; no live payments, no customer data, no pilot agreement, no production account, and no claim that any [gate](05-roadmap-validation.md#gates) has passed. The build follows the [demo build plan](12-demo-build-plan.md), which is the canonical scope and sequence for this work, and the [build execution and agent plan](10-build-execution-and-agent-plan.md) for method. The delivery rule in the roadmap is unchanged for the full production system, provider onboarding with live credentials, and customer cutover. Reason: nothing in the paperwork gates code on staging; the code is a better artifact for the post-season operator conversations than the throwaway prototype; and the transaction, waiver, and migration paths teach more than further interviews about product risk. This decision does not weaken the interview thresholds and does not authorize skipping the readiness gate before a live booking.

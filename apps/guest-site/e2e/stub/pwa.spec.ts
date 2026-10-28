@@ -57,6 +57,10 @@ for (const tenant of tenants) {
     expect(manifest.errors).toEqual([]);
     expect(JSON.parse(manifest.data ?? "{}").name).toBe(tenant.name);
     // The first run decides D3: an SVG-only icon set must report no errors.
+    // Recorded in the CI log as installability evidence.
+    console.log(
+      `installability ${tenant.slug}: ${JSON.stringify({ manifestErrors: manifest.errors, installabilityErrors })}`,
+    );
     test.info().annotations.push({
       type: "installability",
       description: JSON.stringify(installabilityErrors),

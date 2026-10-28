@@ -79,6 +79,10 @@ for (const tenant of tenants) {
       name: tenant.name,
       theme_color: tenant.primary,
     });
+    // Recorded in the CI log as installability evidence.
+    console.log(
+      `installability ${tenant.slug}: ${JSON.stringify({ manifestErrors: manifest.errors, installabilityErrors })}`,
+    );
     test.info().annotations.push({
       type: "installability",
       description: JSON.stringify(installabilityErrors),
@@ -151,6 +155,7 @@ test("a disabled host fails closed after a hard reload and its service worker un
 
   // A hard reload: no HTTP cache, so the bootstrap's 60 second max-age does not apply.
   const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Network.enable");
   await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
   await page.reload();
   await expect(
