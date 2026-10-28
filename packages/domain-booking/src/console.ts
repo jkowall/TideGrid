@@ -12,6 +12,8 @@
  */
 import {
   type ActorType,
+  type BookingChannel,
+  type BookingSource,
   type BookingState,
   type CancellationRemedy,
   type ChargeBasis,
@@ -76,7 +78,10 @@ export interface DayBookingView {
   tripId: string;
   /** Canceled bookings stay in the list (lane 1, G2.11c) and out of the trip's counts. */
   state: BookingState;
-  source: "direct";
+  /** Where the booking came from (G2.12d). */
+  source: BookingSource;
+  /** How the guest reached staff; null when direct (G2.12d). */
+  channel: BookingChannel | null;
   confirmedAt: string;
   booker?: { name: string };
   party: PartyView;
@@ -139,7 +144,13 @@ export interface BookingDetailView {
   id: string;
   reference: string;
   state: BookingState;
-  source: "direct";
+  source: BookingSource;
+  channel: BookingChannel | null;
+  /**
+   * The staff member who opened the checkout, by the name this operator gives
+   * them; null when direct. Not customer data, so every role sees it (G2.12d).
+   */
+  openedBy: { userId: string; displayName: string } | null;
   reacquired: boolean;
   confirmedAt: string;
   canceledAt: string | null;
@@ -185,7 +196,12 @@ export interface BookingDetailView {
 
 export interface RosterView {
   generatedAt: string;
-  trip: TripTimingView & { seats: number };
+  /**
+   * `salesCloseAt` and `blackedOut` say whether the trip still takes a
+   * booking, as the calendar reads them (G2.12d): the console offers a staff
+   * booking from the roster only then.
+   */
+  trip: TripTimingView & { seats: number; salesCloseAt: string; blackedOut: boolean };
   location: LocationView;
   totals: {
     bookings: number;
@@ -196,6 +212,8 @@ export interface RosterView {
   bookings: {
     id: string;
     reference: string;
+    source: BookingSource;
+    channel: BookingChannel | null;
     booker: { name: string };
     party: PartyView;
     extras: ExtraView[];
@@ -464,14 +482,13 @@ export async function listDayBookings(
                 join scheduled_trips t2 on t2.tenant_id = b2.tenant_id and t2.id = b2.trip_id
                where b2.tenant_id = ${tenantId} and b2.id = ${query.after}::uuid)`;
   const bookerColumn: RawBuilder<unknown> = query.withBooker ? sql`, s.booker_name` : sql``;
-  const bookerJoin: RawBuilder<unknown> = query.withBooker
-    ? sql`join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id`
-    : sql``;
   const { rows } = await sql<{
     id: string;
     reference: string;
     trip_id: string;
     state: BookingState;
+    source: BookingSource;
+    channel: BookingChannel | null;
     party_size: number;
     confirmed_at: Date | string;
     product_kind: ProductKind;
@@ -482,8 +499,8 @@ export async function listDayBookings(
     refund_amount: number | null;
     booker_name?: string;
   }>`
-    select b.id, b.reference, b.trip_id, b.state, b.party_size, b.confirmed_at,
-           p.kind as product_kind,
+    select b.id, b.reference, b.trip_id, b.state, b.source, s.channel, b.party_size,
+           b.confirmed_at, p.kind as product_kind,
            o.id as order_id, o.total_amount,
            pay.state as payment_state, r.state as refund_state, r.amount as refund_amount
            ${bookerColumn}
@@ -493,7 +510,7 @@ export async function listDayBookings(
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       left join payment_refunds r on r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
-      ${bookerJoin}
+      join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
      where b.tenant_id = ${tenantId} and t.local_date = ${query.date}::date
        ${tripFilter}
        ${cursor}
@@ -513,7 +530,8 @@ export async function listDayBookings(
       reference: r.reference,
       tripId: r.trip_id,
       state: r.state,
-      source: "direct",
+      source: r.source,
+      channel: r.channel,
       confirmedAt: iso(r.confirmed_at),
       ...(query.withBooker && r.booker_name !== undefined
         ? { booker: { name: r.booker_name } }
@@ -555,6 +573,10 @@ export async function getBookingDetail(
       id: string;
       reference: string;
       state: BookingState;
+      source: BookingSource;
+      channel: BookingChannel | null;
+      opened_by: string | null;
+      opened_by_name: string | null;
       reacquired: boolean;
       confirmed_at: Date | string;
       canceled_at: Date | string | null;
@@ -595,7 +617,9 @@ export async function getBookingDetail(
       refund_settled_at: Date | string | null;
     }
   >`
-    select b.id, b.reference, b.state, b.reacquired, b.confirmed_at, b.canceled_at, b.party_size,
+    select b.id, b.reference, b.state, b.source, s.channel, s.opened_by,
+           m.display_name as opened_by_name,
+           b.reacquired, b.confirmed_at, b.canceled_at, b.party_size,
            c.remedy as c_remedy, c.refund_bp as c_refund_bp, c.refund_amount as c_refund_amount,
            c.paid_amount as c_paid_amount, c.cutoff_at as c_cutoff_at,
            c.before_cutoff as c_before_cutoff, c.policy_version as c_policy_version,
@@ -620,6 +644,7 @@ export async function getBookingDetail(
       join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       left join payment_refunds r on r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
       left join booking_cancellations c on c.tenant_id = b.tenant_id and c.booking_id = b.id
+      left join tenant_memberships m on m.tenant_id = s.tenant_id and m.user_id = s.opened_by
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}::uuid`.execute(trx);
   const row = rows[0];
   if (!row) return null;
@@ -697,7 +722,12 @@ export async function getBookingDetail(
     id: row.id,
     reference: row.reference,
     state: row.state,
-    source: "direct",
+    source: row.source,
+    channel: row.channel,
+    openedBy:
+      row.opened_by !== null && row.opened_by_name !== null
+        ? { userId: row.opened_by, displayName: row.opened_by_name }
+        : null,
     reacquired: row.reacquired,
     confirmedAt: iso(row.confirmed_at),
     canceledAt: isoOrNull(row.canceled_at),
@@ -799,10 +829,22 @@ export async function getTripRoster(
       meeting_point: string;
       meeting_instructions: string;
       generated_at: Date | string;
+      sales_close_at: Date | string;
+      blacked_out: boolean;
     }
   >`
     select ${tripColumns},
            t.ends_at, t.end_utc_offset_minutes, t.duration_minutes, t.seat_capacity,
+           t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as sales_close_at,
+           exists (
+             select 1 from blackouts x
+              where x.tenant_id = t.tenant_id
+                and x.starts_at < t.ends_at and t.starts_at < x.ends_at
+                and (   (x.location_id is null and x.product_id is null and x.boat_id is null)
+                     or x.location_id = p.location_id
+                     or x.product_id = t.product_id
+                     or x.boat_id = t.boat_id)
+           ) as blacked_out,
            l.name as location_name, l.meeting_point, l.meeting_instructions,
            now() as generated_at
       from scheduled_trips t
@@ -814,6 +856,8 @@ export async function getTripRoster(
   const { rows } = await sql<{
     id: string;
     reference: string;
+    source: BookingSource;
+    channel: BookingChannel | null;
     party_size: number;
     order_id: string;
     booker_name: string;
@@ -821,7 +865,7 @@ export async function getTripRoster(
     refund_state: RefundState | null;
     refund_amount: number | null;
   }>`
-    select b.id, b.reference, b.party_size, b.order_id, s.booker_name,
+    select b.id, b.reference, b.source, s.channel, b.party_size, b.order_id, s.booker_name,
            pay.state as payment_state, r.state as refund_state, r.amount as refund_amount
       from bookings b
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
@@ -856,6 +900,8 @@ export async function getTripRoster(
     return {
       id: r.id,
       reference: r.reference,
+      source: r.source,
+      channel: r.channel,
       booker: { name: r.booker_name },
       party: partyOf(trip.product_kind, r.party_size, own.service),
       extras: extrasOf(own.addOns),
@@ -865,7 +911,12 @@ export async function getTripRoster(
   });
   return {
     generatedAt: iso(trip.generated_at),
-    trip: { ...tripTiming(trip), seats: trip.seat_capacity },
+    trip: {
+      ...tripTiming(trip),
+      seats: trip.seat_capacity,
+      salesCloseAt: iso(trip.sales_close_at),
+      blackedOut: trip.blacked_out,
+    },
     location: {
       name: trip.location_name,
       meetingPoint: trip.meeting_point,

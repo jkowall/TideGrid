@@ -24,6 +24,7 @@ import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.ts";
 import { registerPricingPublicRoutes } from "./routes/pricing-public.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
+import { registerStaffBookingRoutes } from "./routes/staff-booking.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
 import { registerWaiverPublicRoutes } from "./routes/waivers-public.ts";
 import { registerWaiverStaffRoutes } from "./routes/waivers-staff.ts";
@@ -168,6 +169,8 @@ export function createApp(deps: AppDeps = {}) {
   // Waiver evidence (G2.15).
   registerWaiverPublicRoutes(app, deps);
   registerWaiverStaffRoutes(app, deps);
+  // Staff-assisted booking (G2.12d).
+  registerStaffBookingRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",

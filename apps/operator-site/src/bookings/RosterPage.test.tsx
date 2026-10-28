@@ -339,6 +339,59 @@ describe("a roster", () => {
     expect(terms(container.querySelector(".roster-facts"))["Extras to prepare"]).toBe("None");
   });
 
+  it("marks a staff booking under its booker, and offers New booking on a trip on sale (G2.12d)", async () => {
+    const base = tripRoster();
+    const [first, ...rest] = base.bookings;
+    if (!first) throw new Error("fixture roster has no booking");
+    const roster = tripRoster({
+      bookings: [{ ...first, source: "staff_assisted", channel: "walk_up" }, ...rest],
+    });
+    api({ [route.roster(tripId)]: () => json(rosterBody(roster)) });
+    renderPage("booking_staff");
+    await loaded();
+    const [booker] = cellsOf(rows()[0] as HTMLElement).slice(2);
+    expect(booker).toBe(`${first.booker.name}Staff booking, walk-up`);
+    // A guest's own booking says nothing extra.
+    expect(cellsOf(rows()[1] as HTMLElement)[2]).toBe(rest[0]?.booker.name);
+    const book = screen.getByRole("link", { name: "New booking" });
+    expect(book.getAttribute("href")).toBe(`/trips/${tripId}/book`);
+  });
+
+  it.each([
+    ["departed", { startsAt: "2026-11-04T16:00:00.000Z" }],
+    ["past its cutoff", { salesCloseAt: "2026-11-04T16:59:00.000Z" }],
+    ["blacked out", { blackedOut: true }],
+  ] as const)(
+    "offers no New booking on a trip that is %s, as the calendar's Book rule says",
+    async (_label, over) => {
+      const trip = { ...tripRoster().trip, salesCloseAt: "2026-11-04T22:00:00.000Z", ...over };
+      api({ [route.roster(tripId)]: () => json(rosterBody(tripRoster({ trip }))) });
+      renderPage("booking_staff");
+      await loaded();
+      expect(screen.queryByRole("link", { name: "New booking" })).toBeNull();
+    },
+  );
+
+  it("offers New booking before the cutoff on a trip on sale", async () => {
+    const trip = {
+      ...tripRoster().trip,
+      salesCloseAt: "2026-11-04T22:00:00.000Z",
+      blackedOut: false,
+    };
+    api({ [route.roster(tripId)]: () => json(rosterBody(tripRoster({ trip }))) });
+    renderPage("booking_staff");
+    await loaded();
+    expect(screen.getByRole("link", { name: "New booking" })).toBeTruthy();
+  });
+
+  it("offers no New booking on a trip that is not on sale", async () => {
+    const closed = tripRoster({ trip: { ...tripRoster().trip, salesState: "closed" } });
+    api({ [route.roster(tripId)]: () => json(rosterBody(closed)) });
+    renderPage("owner");
+    await loaded();
+    expect(screen.queryByRole("link", { name: "New booking" })).toBeNull();
+  });
+
   it("reads the trip's own zone, not the viewer's, in its header and footer", async () => {
     const dive = tripRoster({
       generatedAt: "2026-11-04T15:00:00.000Z",
@@ -583,7 +636,12 @@ describe("the sheet", () => {
     const tools = sheet().querySelector(".roster-tools") as HTMLElement;
     expect(tools.querySelector(".roster-head")).toBeNull();
     expect(sheet().querySelector(".roster-head")).not.toBeNull();
-    expect(within(tools).getAllByRole("link")).toHaveLength(1);
+    // The back link and, for a trip on sale, a staff booking (G2.12d).
+    expect(
+      within(tools)
+        .getAllByRole("link")
+        .map((l) => text(l)),
+    ).toEqual([expect.stringContaining("Bookings on"), "New booking"]);
     expect(within(tools).getAllByRole("button")).toHaveLength(1);
   });
 

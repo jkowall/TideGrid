@@ -10,6 +10,7 @@ import type { FakeEvent, FakeOutcome, FakePaymentProvider } from "@tidegrid/doma
 import type { Context } from "hono";
 import type { AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
+import { deliverFakeEvent } from "../fake-delivery.ts";
 import { fakeProviderFor } from "../payments.ts";
 import { limitPublicCommand, resolvePublicTenant } from "../public-tenant.ts";
 import { errorBody } from "./responses.ts";
@@ -59,27 +60,8 @@ export function registerFakeProviderRoutes(app: OpenAPIHono<AppEnv>) {
   }
 
   /** Post a signed event to the real webhook route, through the whole app, as the provider would. */
-  async function deliver(c: Context<AppEnv>, fake: FakePaymentProvider, event: FakeEvent) {
-    const signature = await fake.signDelivery(event.body, Date.now());
-    const response = await app.fetch(
-      new Request(new URL("/v1/webhooks/payments/fake", c.req.url), {
-        method: "POST",
-        headers: { "content-type": "application/json", [signature.name]: signature.value },
-        body: event.body,
-      }),
-      c.env,
-      c.executionCtx,
-    );
-    const json = (await response.json().catch(() => null)) as {
-      outcome?: unknown;
-      duplicate?: unknown;
-    } | null;
-    return {
-      status: response.status,
-      outcome: typeof json?.outcome === "string" ? json.outcome : null,
-      duplicate: typeof json?.duplicate === "boolean" ? json.duplicate : null,
-    };
-  }
+  const deliver = (c: Context<AppEnv>, fake: FakePaymentProvider, event: FakeEvent) =>
+    deliverFakeEvent(app, c, fake, event);
 
   const eventView = (event: FakeEvent) => ({
     id: event.id,

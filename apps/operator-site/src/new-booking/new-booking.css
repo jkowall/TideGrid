@@ -1,0 +1,154 @@
+/* Staff-assisted booking (G2.12d). One column that reads at a phone's width
+   and stays a comfortable measure on a desktop. */
+
+.nb-page {
+  display: grid;
+  gap: var(--space-5);
+  max-width: 40rem;
+}
+
+.nb-trip {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.nb-trip__name {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+.nb-trip__when {
+  margin: 0;
+  color: var(--text-body);
+}
+
+.nb-step {
+  display: grid;
+  gap: var(--space-4);
+}
+.nb-step__title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-lg);
+}
+/* Its focus ring is the base sheet's [tabindex] ring, Tide Lime on the console. */
+
+.nb-extras {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.nb-extras > legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+}
+
+.nb-status,
+.nb-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.nb-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.nb-actions--quiet {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.nb-policy {
+  padding: var(--space-4);
+  border-left: 4px solid var(--border-control);
+  background: var(--surface-sunken);
+}
+.nb-policy > h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-strong);
+  font-size: var(--text-md);
+}
+.nb-policy > p {
+  margin: 0;
+  color: var(--text-body);
+  white-space: pre-line;
+}
+
+/* The address staff read back: large, and never cut short on a phone. */
+.nb-readback {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 2px solid var(--border-control);
+  border-radius: var(--radius-md);
+}
+.nb-readback__label,
+.nb-readback__hint {
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.nb-readback__email {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  /* Breaks fall after an @ or a dot (the markup offers them), never mid-word. */
+  overflow-wrap: break-word;
+}
+
+.nb-facts {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+}
+.nb-facts > div {
+  display: grid;
+  gap: var(--space-1);
+}
+.nb-facts dt {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.nb-facts dd {
+  margin: 0;
+  color: var(--text-strong);
+}
+.nb-facts__amount {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* The console is dark; the count's buttons sit on the same sunken ground as
+   the console's inputs, and the steps' rule reads on Harbor. */
+.tg-dark .nb-page .tg-quantity__step {
+  background: var(--surface-sunken);
+}
+.tg-dark .nb-page .tg-quantity__step:hover:not([aria-disabled="true"]) {
+  background: var(--surface-hover);
+}
+
+@media (min-width: 48rem) {
+  .nb-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* The roster's tools: a staff booking beside printing (G2.12d). */
+.roster-tools__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}

@@ -13,7 +13,9 @@ import type { StaffRole } from "@tidegrid/contracts";
  * leaves out of every response for anyone else, and read trip rosters (G2.7,
  * G2.12b). Owners and booking staff read and write a booking's internal
  * notes (G2.12c); finance does neither, since a note is free text that can
- * mention a guest (the owner's decision of 2026-10-19).
+ * mention a guest (the owner's decision of 2026-10-19). Owners and booking
+ * staff create staff-assisted bookings for a guest who phoned, emailed, or
+ * walked up (`bookings.create`, G2.12d); finance changes no booking.
  */
 export type Permission =
   | "members.read"
@@ -28,7 +30,9 @@ export type Permission =
   | "notes.read"
   | "notes.write"
   // Waivers (G2.15): send a participant's waiver request again.
-  | "waivers.manage";
+  | "waivers.manage"
+  // Staff-assisted bookings (G2.12d): quote, open, pay through the shim, cancel.
+  | "bookings.create";
 
 const matrix: Record<StaffRole, readonly Permission[]> = {
   owner: [
@@ -43,6 +47,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "notes.read",
     "notes.write",
     "waivers.manage",
+    "bookings.create",
   ],
   booking_staff: [
     "catalog.read",
@@ -52,6 +57,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "notes.read",
     "notes.write",
     "waivers.manage",
+    "bookings.create",
   ],
   finance: ["audit.read", "catalog.read", "payments.read"],
 };

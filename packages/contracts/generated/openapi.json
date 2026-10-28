@@ -8476,8 +8476,10 @@
                           "source": {
                             "type": "string",
                             "enum": [
-                              "direct"
-                            ]
+                              "direct",
+                              "staff_assisted"
+                            ],
+                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment"
                           },
                           "reacquired": {
                             "type": "boolean",
@@ -9366,9 +9368,23 @@
                           "source": {
                             "type": "string",
                             "enum": [
-                              "direct"
+                              "direct",
+                              "staff_assisted"
                             ],
-                            "description": "direct: booked by the guest online"
+                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment"
+                          },
+                          "channel": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "enum": [
+                              "phone",
+                              "email",
+                              "walk_up",
+                              null
+                            ],
+                            "description": "How the guest reached staff: phone, email, or walk_up. Null when direct (G2.12d)"
                           },
                           "confirmedAt": {
                             "type": "string",
@@ -9785,8 +9801,43 @@
                         "source": {
                           "type": "string",
                           "enum": [
-                            "direct"
-                          ]
+                            "direct",
+                            "staff_assisted"
+                          ],
+                          "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment"
+                        },
+                        "channel": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "phone",
+                            "email",
+                            "walk_up",
+                            null
+                          ],
+                          "description": "How the guest reached staff: phone, email, or walk_up. Null when direct (G2.12d)"
+                        },
+                        "openedBy": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "userId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "displayName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "userId",
+                            "displayName"
+                          ],
+                          "description": "Who opened a staff-assisted booking's checkout. Null when direct; every role that reads the booking sees it (G2.12d)"
                         },
                         "reacquired": {
                           "type": "boolean",
@@ -10803,6 +10854,15 @@
                               "type": "integer",
                               "minimum": 1,
                               "description": "Seats sold per trip, or guests aboard a charter"
+                            },
+                            "salesCloseAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When sales close: departure less the booking cutoff (G2.12d; always sent)"
+                            },
+                            "blackedOut": {
+                              "type": "boolean",
+                              "description": "A blackout covers the trip, so it takes no booking (G2.12d; always sent)"
                             }
                           },
                           "required": [
@@ -10923,6 +10983,27 @@
                                 "type": "string",
                                 "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
                                 "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "direct",
+                                  "staff_assisted"
+                                ],
+                                "description": "Where the booking came from (G2.12d); always sent"
+                              },
+                              "channel": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "phone",
+                                  "email",
+                                  "walk_up",
+                                  null
+                                ],
+                                "description": "How the guest reached staff: phone, email, or walk_up. Null when direct (G2.12d)"
                               },
                               "booker": {
                                 "type": "object",
@@ -15173,6 +15254,14 @@
                               "canceled"
                             ],
                             "description": "confirmed: booked and holding its seats. canceled: given back, with any refund"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "direct",
+                              "staff_assisted"
+                            ],
+                            "description": "Where the booking came from (G2.12d); always sent"
                           },
                           "confirmedAt": {
                             "type": "string",
@@ -19641,6 +19730,3259 @@
           },
           "404": {
             "description": "No such tenant or evidence (waiver_evidence_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/trips/{tripId}/offer": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "What one trip sells, for a staff booking",
+        "description": "Owners and booking staff (bookings.create). The guest's offer for one trip on sale now: ticket types or the charter price, the add-ons offered on its date, mandatory fees, active tax rates, and the cancellation policy. Staff follow the guest's sales rules: there is no override. An unknown, malformed, or other tenant's trip answers the same 404.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tripId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trip's offer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "offer": {
+                      "type": "object",
+                      "properties": {
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "product": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "shared_seat",
+                                "private_charter"
+                              ]
+                            },
+                            "minPartySize": {
+                              "type": "integer"
+                            },
+                            "maxPartySize": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "kind",
+                            "minPartySize",
+                            "maxPartySize"
+                          ]
+                        },
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "timeZone": {
+                              "type": "string"
+                            },
+                            "localDate": {
+                              "type": "string",
+                              "format": "date",
+                              "description": "Local calendar date, YYYY-MM-DD"
+                            },
+                            "localStartTime": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            },
+                            "startsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "startsAtLocal": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The same instant with the zone's offset, for display"
+                            }
+                          },
+                          "required": [
+                            "timeZone",
+                            "localDate",
+                            "localStartTime",
+                            "startsAt",
+                            "startsAtLocal"
+                          ]
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "priceListVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "tickets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                                "description": "Ticket type, add-on, or fee code from the trip's offer"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "name",
+                              "unitAmount",
+                              "taxable"
+                            ]
+                          },
+                          "description": "Ticket types; empty for a private charter"
+                        },
+                        "charter": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "The whole boat, whatever the party size"
+                            },
+                            "taxable": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "amount",
+                            "taxable"
+                          ],
+                          "description": "The charter price; null for shared seats"
+                        },
+                        "addOns": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                                "description": "Ticket type, add-on, or fee code from the trip's offer"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "quantityRule": {
+                                "type": "string",
+                                "enum": [
+                                  "per_booking",
+                                  "per_participant"
+                                ],
+                                "description": "per_booking: charged or limited once per booking. per_participant: once per participant, or up to the limit for each participant"
+                              },
+                              "maxQuantity": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Per booking, or per participant when quantityRule is per_participant"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "name",
+                              "unitAmount",
+                              "quantityRule",
+                              "maxQuantity",
+                              "taxable"
+                            ]
+                          },
+                          "description": "Paid add-ons offered on this trip's date"
+                        },
+                        "fees": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                                "description": "Ticket type, add-on, or fee code from the trip's offer"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "basis": {
+                                "type": "string",
+                                "enum": [
+                                  "per_booking",
+                                  "per_participant"
+                                ],
+                                "description": "per_booking: charged or limited once per booking. per_participant: once per participant, or up to the limit for each participant"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "name",
+                              "unitAmount",
+                              "basis",
+                              "taxable"
+                            ]
+                          },
+                          "description": "Mandatory fees added to every booking"
+                        },
+                        "taxes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "ratePpm": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Parts per million: 70000 is 7%"
+                              },
+                              "inclusive": {
+                                "type": "boolean",
+                                "description": "Included in prices rather than added to them"
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "ratePpm",
+                              "inclusive"
+                            ]
+                          }
+                        },
+                        "policy": {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "changeCutoffMinutes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "changeCutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "Trip start minus the cutoff. A guest cancellation or reschedule before this instant gets beforeCutoff; at or after it, afterCutoff"
+                            },
+                            "beforeCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "afterCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "noShow": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "text": {
+                              "type": "object",
+                              "properties": {
+                                "cancellation": {
+                                  "type": "string"
+                                },
+                                "reschedule": {
+                                  "type": "string"
+                                },
+                                "noShow": {
+                                  "type": "string"
+                                },
+                                "operatorCancellation": {
+                                  "type": "string"
+                                },
+                                "weather": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "cancellation",
+                                "reschedule",
+                                "noShow",
+                                "operatorCancellation",
+                                "weather"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "changeCutoffMinutes",
+                            "changeCutoffAt",
+                            "beforeCutoff",
+                            "afterCutoff",
+                            "noShow",
+                            "text"
+                          ],
+                          "description": "The product's policy version in force, which the guest accepts before paying"
+                        }
+                      },
+                      "required": [
+                        "tripId",
+                        "product",
+                        "trip",
+                        "currency",
+                        "priceListVersion",
+                        "tickets",
+                        "charter",
+                        "addOns",
+                        "fees",
+                        "taxes",
+                        "policy"
+                      ],
+                      "description": "What the operator sells for one bookable trip, under its current versions"
+                    }
+                  },
+                  "required": [
+                    "offer"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or the Idempotency-Key is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such trip for it (trip_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The trip is not on sale now (trip_not_bookable) or has no price list or policy (pricing_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/quotes": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Price a party for a staff booking and keep the quote",
+        "description": "Owners and booking staff (bookings.create). Prices the party, add-ons, and optional promotion code on the server under the current versions, as the guest's quote does, and stores an immutable quote recorded as the staff member's. No price override. The tenant comes from the path and the membership, never from the Origin. Idempotent by key: a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tripId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "party": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "tickets"
+                            ]
+                          },
+                          "tickets": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                                  "description": "Ticket type, add-on, or fee code from the trip's offer"
+                                },
+                                "quantity": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 500
+                                }
+                              },
+                              "required": [
+                                "code",
+                                "quantity"
+                              ]
+                            },
+                            "minItems": 1,
+                            "maxItems": 20,
+                            "description": "Shared seats: one entry per ticket type; each ticket is one participant"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "tickets"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "charter"
+                            ]
+                          },
+                          "guests": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 500,
+                            "description": "Private charter: participants aboard; the charter price does not change"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "guests"
+                        ]
+                      }
+                    ]
+                  },
+                  "addOns": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+                          "description": "Ticket type, add-on, or fee code from the trip's offer"
+                        },
+                        "quantity": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 50000
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "quantity"
+                      ]
+                    },
+                    "maxItems": 50,
+                    "default": []
+                  },
+                  "promotionCode": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$",
+                    "description": "Promotion code; case does not matter"
+                  }
+                },
+                "required": [
+                  "tripId",
+                  "party"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored quote (or the stored response replayed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "quote": {
+                      "type": "object",
+                      "properties": {
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "product": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "shared_seat",
+                                "private_charter"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "kind"
+                          ]
+                        },
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "timeZone": {
+                              "type": "string"
+                            },
+                            "localDate": {
+                              "type": "string",
+                              "format": "date",
+                              "description": "Local calendar date, YYYY-MM-DD"
+                            },
+                            "localStartTime": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            },
+                            "startsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "startsAtLocal": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The same instant with the zone's offset, for display"
+                            }
+                          },
+                          "required": [
+                            "timeZone",
+                            "localDate",
+                            "localStartTime",
+                            "startsAt",
+                            "startsAtLocal"
+                          ]
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "priceListVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "lines": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "lineNo": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "ticket",
+                                  "charter",
+                                  "add_on",
+                                  "fee",
+                                  "discount"
+                                ]
+                              },
+                              "code": {
+                                "type": "string",
+                                "description": "Ticket, add-on, or fee code; charter; or the promotion code"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "basis": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "per_booking",
+                                  "per_participant",
+                                  null
+                                ],
+                                "description": "Fees and add-ons only"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "unitAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "quantity times unitAmount; negative on the discount line"
+                              },
+                              "discountAmount": {
+                                "type": "integer",
+                                "description": "This trip-price line's share of the discount"
+                              },
+                              "taxable": {
+                                "type": "boolean"
+                              },
+                              "taxes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "taxRateId": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "ratePpm": {
+                                      "type": "integer"
+                                    },
+                                    "inclusive": {
+                                      "type": "boolean"
+                                    },
+                                    "taxableAmount": {
+                                      "type": "integer",
+                                      "description": "Pre-tax amount of this line the rate applies to"
+                                    },
+                                    "amount": {
+                                      "type": "integer",
+                                      "description": "Integer US cents"
+                                    }
+                                  },
+                                  "required": [
+                                    "taxRateId",
+                                    "name",
+                                    "ratePpm",
+                                    "inclusive",
+                                    "taxableAmount",
+                                    "amount"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "lineNo",
+                              "kind",
+                              "code",
+                              "name",
+                              "basis",
+                              "quantity",
+                              "unitAmount",
+                              "amount",
+                              "discountAmount",
+                              "taxable",
+                              "taxes"
+                            ]
+                          }
+                        },
+                        "taxes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "taxRateId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "version": {
+                                "type": "integer",
+                                "minimum": 1
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "ratePpm": {
+                                "type": "integer"
+                              },
+                              "inclusive": {
+                                "type": "boolean"
+                              },
+                              "taxableAmount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              }
+                            },
+                            "required": [
+                              "taxRateId",
+                              "version",
+                              "name",
+                              "ratePpm",
+                              "inclusive",
+                              "taxableAmount",
+                              "amount"
+                            ]
+                          },
+                          "description": "Per rate, summed over the lines"
+                        },
+                        "promotion": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "discountKind": {
+                              "type": "string",
+                              "enum": [
+                                "fixed_amount",
+                                "percent"
+                              ]
+                            },
+                            "amountOff": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ],
+                              "description": "Integer US cents"
+                            },
+                            "percentOffBp": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "version",
+                            "discountKind",
+                            "amountOff",
+                            "percentOffBp"
+                          ]
+                        },
+                        "totals": {
+                          "type": "object",
+                          "properties": {
+                            "subtotal": {
+                              "type": "integer",
+                              "description": "Trip price and add-ons, before the discount"
+                            },
+                            "discount": {
+                              "type": "integer",
+                              "description": "Promotion discount, off the trip price only"
+                            },
+                            "fees": {
+                              "type": "integer",
+                              "description": "Mandatory fees"
+                            },
+                            "tax": {
+                              "type": "integer",
+                              "description": "Taxes added on top of prices"
+                            },
+                            "includedTax": {
+                              "type": "integer",
+                              "description": "Taxes already inside prices; informational"
+                            },
+                            "total": {
+                              "type": "integer",
+                              "description": "subtotal - discount + fees + tax"
+                            },
+                            "amountDueNow": {
+                              "type": "integer",
+                              "description": "What checkout charges for this quote"
+                            }
+                          },
+                          "required": [
+                            "subtotal",
+                            "discount",
+                            "fees",
+                            "tax",
+                            "includedTax",
+                            "total",
+                            "amountDueNow"
+                          ],
+                          "description": "Every total is the sum of the lines above it"
+                        },
+                        "policy": {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "changeCutoffMinutes": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "changeCutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "Trip start minus the cutoff. A guest cancellation or reschedule before this instant gets beforeCutoff; at or after it, afterCutoff"
+                            },
+                            "beforeCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "afterCutoff": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "noShow": {
+                              "type": "object",
+                              "properties": {
+                                "remedy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "full_refund",
+                                    "percent_refund",
+                                    "credit",
+                                    "none"
+                                  ],
+                                  "description": "credit is a named-customer booking credit for the amount paid"
+                                },
+                                "refundBp": {
+                                  "type": [
+                                    "integer",
+                                    "null"
+                                  ],
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points refunded; present only for percent_refund"
+                                }
+                              },
+                              "required": [
+                                "remedy",
+                                "refundBp"
+                              ]
+                            },
+                            "text": {
+                              "type": "object",
+                              "properties": {
+                                "cancellation": {
+                                  "type": "string"
+                                },
+                                "reschedule": {
+                                  "type": "string"
+                                },
+                                "noShow": {
+                                  "type": "string"
+                                },
+                                "operatorCancellation": {
+                                  "type": "string"
+                                },
+                                "weather": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "cancellation",
+                                "reschedule",
+                                "noShow",
+                                "operatorCancellation",
+                                "weather"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "changeCutoffMinutes",
+                            "changeCutoffAt",
+                            "beforeCutoff",
+                            "afterCutoff",
+                            "noShow",
+                            "text"
+                          ],
+                          "description": "The product's policy version in force, which the guest accepts before paying"
+                        },
+                        "quotedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Checkout must start before this instant or ask for a new quote"
+                        }
+                      },
+                      "required": [
+                        "quoteId",
+                        "tripId",
+                        "product",
+                        "trip",
+                        "partySize",
+                        "currency",
+                        "priceListVersion",
+                        "lines",
+                        "taxes",
+                        "promotion",
+                        "totals",
+                        "policy",
+                        "quotedAt",
+                        "expiresAt"
+                      ],
+                      "description": "An immutable priced quote. Later price, tax, promotion, or policy changes never alter it."
+                    }
+                  },
+                  "required": [
+                    "quote"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or the Idempotency-Key is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such trip for it (trip_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The trip is not on sale now (trip_not_bookable), has no price list or policy (pricing_unavailable), or has too few seats left (insufficient_capacity)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The party, add-ons, or promotion code cannot be priced: party_kind_mismatch, invalid_quantity, unknown_ticket_type, duplicate_ticket_type, party_size_out_of_range, unknown_add_on, duplicate_add_on, add_on_unavailable, add_on_quantity_exceeded, promotion_not_applicable, quote_amount_too_large. Or idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/checkouts": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Open a staff-assisted checkout for a guest",
+        "description": "Owners and booking staff (bookings.create). Takes a quote this tenant's staff created and charges its stored total, never an amount the client sends. Holds the quote's party on the trip under the same rules and lock as a guest's checkout, so the two never oversell, and writes the immutable order and a pending payment. The database records the checkout as staff_assisted and the signed-in staff member as its opener; neither can be sent.\n\nStaff attest that they told the guest the policy of the quote's version and read the email address back to them, which cannot be changed later. The confirmation email, with the management link and waiver requests, goes to that address once the payment is verified.\n\nIdempotent by key: a retry with the same key and body returns the same checkout with `Idempotent-Replayed: true` and creates the provider payment if an earlier attempt could not. A 503 payment_provider_unavailable means the checkout exists: retry the same request. At most 3 open checkouts per staff member at a time. The response carries no payment secret.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quoteId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "A quote from POST /v1/staff/tenants/{tenantId}/quotes, still within its validity"
+                  },
+                  "acceptedPolicyVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The policy version staff told the guest; must be the quote's"
+                  },
+                  "booker": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+                      },
+                      "email": {
+                        "type": "string",
+                        "maxLength": 254,
+                        "pattern": "^[\\x21-\\x7e]+$"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "email"
+                    ],
+                    "description": "The person booking. Personal data: stored once for the booking and its messages, never in URLs, events, or logs"
+                  },
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "phone",
+                      "email",
+                      "walk_up"
+                    ],
+                    "description": "How the guest reached staff, on a staff-assisted booking"
+                  },
+                  "attestations": {
+                    "type": "object",
+                    "properties": {
+                      "policyToldToGuest": {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ],
+                        "description": "The staff member told the guest the cancellation policy of the quote's version"
+                      },
+                      "emailReadBack": {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ],
+                        "description": "The staff member read the email address back to the guest; it cannot be changed after booking"
+                      }
+                    },
+                    "required": [
+                      "policyToldToGuest",
+                      "emailReadBack"
+                    ],
+                    "description": "What staff confirm before opening the checkout. Both are required"
+                  }
+                },
+                "required": [
+                  "quoteId",
+                  "acceptedPolicyVersion",
+                  "booker",
+                  "channel",
+                  "attestations"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The open checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkout": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "confirmed",
+                            "unfulfilled",
+                            "failed",
+                            "expired",
+                            "canceled"
+                          ],
+                          "description": "open: awaiting payment. confirmed: paid and booked. unfulfilled: the payment arrived but the trip could not be confirmed; it is refunded in full (see refund). failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "What the payment charges: the quote's total"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The seats are held until this instant"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "channel": {
+                          "type": "string",
+                          "enum": [
+                            "phone",
+                            "email",
+                            "walk_up"
+                          ],
+                          "description": "How the guest reached staff, on a staff-assisted booking"
+                        },
+                        "paymentState": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "succeeded",
+                            "failed"
+                          ],
+                          "description": "succeeded only once a verified provider event says so"
+                        },
+                        "lastTestPayment": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "succeed",
+                                "fail"
+                              ],
+                              "description": "succeed takes the test payment; fail declines it"
+                            },
+                            "requestedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "outcome",
+                            "requestedAt"
+                          ],
+                          "description": "The latest test payment staff asked for, if any"
+                        },
+                        "booking": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "reference": {
+                              "type": "string",
+                              "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "reference"
+                          ],
+                          "description": "Present once confirmed"
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "succeeded",
+                                "failed"
+                              ],
+                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "amount"
+                          ],
+                          "description": "Present when a payment could not be honored, such as one that arrived after the hold ended"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "state",
+                        "tripId",
+                        "quoteId",
+                        "partySize",
+                        "amount",
+                        "currency",
+                        "expiresAt",
+                        "createdAt",
+                        "channel",
+                        "paymentState",
+                        "lastTestPayment",
+                        "booking",
+                        "refund"
+                      ],
+                      "description": "The checkout as it was opened. A replay returns this same snapshot; read the current state with GET"
+                    },
+                    "paymentReady": {
+                      "type": "boolean",
+                      "description": "The provider has the payment, so a test payment can be taken"
+                    }
+                  },
+                  "required": [
+                    "checkout",
+                    "paymentReady"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or the Idempotency-Key is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such staff quote for it (quote_not_found); a guest's quote reads the same",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "quote_expired, quote_already_used, trip_not_bookable, insufficient_capacity, party_size_out_of_range, or payments_unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "policy_not_accepted, payment_amount_too_small, or idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many open checkouts for this staff member (too_many_checkouts)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Payments are not configured (payments_unavailable), or the provider did not answer (payment_provider_unavailable); for the latter, retry with the same Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "A staff-assisted checkout's state",
+        "description": "Owners and booking staff (bookings.create). The state, the amount, the hold's end, the payment's state, the latest test payment asked for, the booking once confirmed, and the refund when a payment could not be honored. An open checkout past its expiry reads as expired. A guest's checkout, another tenant's, an unknown id, and a malformed one answer the same 404.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Checkout UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Checkout UUID; anything else answers 404",
+            "name": "checkoutId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkout": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "confirmed",
+                            "unfulfilled",
+                            "failed",
+                            "expired",
+                            "canceled"
+                          ],
+                          "description": "open: awaiting payment. confirmed: paid and booked. unfulfilled: the payment arrived but the trip could not be confirmed; it is refunded in full (see refund). failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "What the payment charges: the quote's total"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The seats are held until this instant"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "channel": {
+                          "type": "string",
+                          "enum": [
+                            "phone",
+                            "email",
+                            "walk_up"
+                          ],
+                          "description": "How the guest reached staff, on a staff-assisted booking"
+                        },
+                        "paymentState": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "succeeded",
+                            "failed"
+                          ],
+                          "description": "succeeded only once a verified provider event says so"
+                        },
+                        "lastTestPayment": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "succeed",
+                                "fail"
+                              ],
+                              "description": "succeed takes the test payment; fail declines it"
+                            },
+                            "requestedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "outcome",
+                            "requestedAt"
+                          ],
+                          "description": "The latest test payment staff asked for, if any"
+                        },
+                        "booking": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "reference": {
+                              "type": "string",
+                              "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "reference"
+                          ],
+                          "description": "Present once confirmed"
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "succeeded",
+                                "failed"
+                              ],
+                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "amount"
+                          ],
+                          "description": "Present when a payment could not be honored, such as one that arrived after the hold ended"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "state",
+                        "tripId",
+                        "quoteId",
+                        "partySize",
+                        "amount",
+                        "currency",
+                        "expiresAt",
+                        "createdAt",
+                        "channel",
+                        "paymentState",
+                        "lastTestPayment",
+                        "booking",
+                        "refund"
+                      ],
+                      "description": "A staff-assisted checkout as staff see it: no booker details and no provider secret"
+                    }
+                  },
+                  "required": [
+                    "checkout"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or the Idempotency-Key is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such staff checkout for it (checkout_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/cancel": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Cancel an open staff-assisted checkout",
+        "description": "Owners and booking staff (bookings.create). Releases the held seats at once and voids the order, recorded with the staff member and the reason. Repeating it changes nothing. A confirmed booking is not canceled here. A payment that succeeds afterwards anyway is refunded in full. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Checkout UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Checkout UUID; anything else answers 404",
+            "name": "checkoutId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The canceled checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkout": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "open",
+                            "confirmed",
+                            "unfulfilled",
+                            "failed",
+                            "expired",
+                            "canceled"
+                          ],
+                          "description": "open: awaiting payment. confirmed: paid and booked. unfulfilled: the payment arrived but the trip could not be confirmed; it is refunded in full (see refund). failed: the payment failed. expired: time ran out before payment. canceled: the guest abandoned it"
+                        },
+                        "tripId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "quoteId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "partySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "What the payment charges: the quote's total"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The seats are held until this instant"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "channel": {
+                          "type": "string",
+                          "enum": [
+                            "phone",
+                            "email",
+                            "walk_up"
+                          ],
+                          "description": "How the guest reached staff, on a staff-assisted booking"
+                        },
+                        "paymentState": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "succeeded",
+                            "failed"
+                          ],
+                          "description": "succeeded only once a verified provider event says so"
+                        },
+                        "lastTestPayment": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "succeed",
+                                "fail"
+                              ],
+                              "description": "succeed takes the test payment; fail declines it"
+                            },
+                            "requestedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "outcome",
+                            "requestedAt"
+                          ],
+                          "description": "The latest test payment staff asked for, if any"
+                        },
+                        "booking": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "reference": {
+                              "type": "string",
+                              "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "reference"
+                          ],
+                          "description": "Present once confirmed"
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "succeeded",
+                                "failed"
+                              ],
+                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "amount"
+                          ],
+                          "description": "Present when a payment could not be honored, such as one that arrived after the hold ended"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "state",
+                        "tripId",
+                        "quoteId",
+                        "partySize",
+                        "amount",
+                        "currency",
+                        "expiresAt",
+                        "createdAt",
+                        "channel",
+                        "paymentState",
+                        "lastTestPayment",
+                        "booking",
+                        "refund"
+                      ],
+                      "description": "A staff-assisted checkout as staff see it: no booker details and no provider secret"
+                    }
+                  },
+                  "required": [
+                    "checkout"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or the Idempotency-Key is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such staff checkout for it (checkout_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The checkout is no longer open (checkout_not_cancelable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key reused with a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/test-payment": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings",
+          "fake-provider"
+        ],
+        "summary": "Take or decline a test payment for a staff checkout (fake provider only)",
+        "description": "Owners and booking staff (bookings.create). Exists only when PAYMENT_PROVIDER=fake, which a production configuration refuses; anywhere else it answers 404 not_found. No card is charged.\n\nFirst, in the request's transaction, the checkout must be open and inside its hold, and the request is recorded with the staff member. Then, after commit: the fake payment settles, once (a payment that already settled keeps its first outcome), and its signed event is posted to the real webhook route, which alone decides the booking. A delivery whose status is not 200 decided nothing yet: send the same request again with the same Idempotency-Key, which posts the same event again; the webhook records each event once.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Checkout UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Checkout UUID; anything else answers 404",
+            "name": "checkoutId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "succeed",
+                      "fail"
+                    ],
+                    "description": "succeed takes the test payment; fail declines it"
+                  }
+                },
+                "required": [
+                  "outcome"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The payment's outcome event and what the webhook answered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkoutId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "succeed",
+                        "fail"
+                      ],
+                      "description": "succeed takes the test payment; fail declines it"
+                    },
+                    "event": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "payment.succeeded",
+                            "payment.failed"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "createdAt"
+                      ],
+                      "description": "The payment's outcome event, as the provider signed it"
+                    },
+                    "alreadySettled": {
+                      "type": "boolean",
+                      "description": "The payment had settled before this call, so the event is its first outcome, delivered again"
+                    },
+                    "delivery": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "integer",
+                          "description": "The webhook route's HTTP status"
+                        },
+                        "outcome": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "What processing did, or null when it failed"
+                        },
+                        "duplicate": {
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "outcome",
+                        "duplicate"
+                      ],
+                      "description": "What the real webhook route answered. A status other than 200 means the booking is not decided yet: send the same request again with the same Idempotency-Key"
+                    }
+                  },
+                  "required": [
+                    "checkoutId",
+                    "outcome",
+                    "event",
+                    "alreadySettled",
+                    "delivery"
+                  ],
+                  "description": "A test payment taken or declined through the fake provider (demo only)"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or the Idempotency-Key is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not the fake provider (not_found), no such tenant, or no such staff checkout for it (checkout_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The checkout is not open or its hold has ended (checkout_not_open), or its payment already settled the other way (test_payment_settled); nothing new is settled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key reused with a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The provider did not answer (payment_provider_unavailable); retry",
             "content": {
               "application/json": {
                 "schema": {
