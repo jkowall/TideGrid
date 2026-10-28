@@ -236,7 +236,7 @@ describe.skipIf(!env)("staff-assisted checkouts and booking source (G2.12d)", ()
     runtime = createDb(env.runtimeUrl, { max: 8 });
     provider = fakeProvider(runtime.db);
     [A, B] = await Promise.all([
-      createCheckoutFixture(admin, runtime.db, "g212d-a", { days: 14 }),
+      createCheckoutFixture(admin, runtime.db, "g212d-a", { days: 30 }),
       createCheckoutFixture(admin, runtime.db, "g212d-b", { days: 4 }),
     ]);
     tripsA = tripAllocator(A);

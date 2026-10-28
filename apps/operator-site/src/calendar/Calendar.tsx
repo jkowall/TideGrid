@@ -25,9 +25,10 @@ import {
 } from "@tidegrid/design-system/format";
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { bookingsHref } from "../bookings/model.ts";
-import { ConsoleLink, hereAddress } from "../navigation.tsx";
+import { ConsoleButtonLink, ConsoleLink, hereAddress } from "../navigation.tsx";
+import { newBookingHref } from "../new-booking/model.ts";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
-import { canChangeTrips, roleNames } from "../roles.ts";
+import { canChangeTrips, canCreateBookings, roleNames } from "../roles.ts";
 import { ActionDialog } from "./ActionDialog.tsx";
 import { loadWeek, loadZone, type WeekFailure } from "./api.ts";
 import {
@@ -87,6 +88,7 @@ export function CalendarPage({
 }: { membership: Membership } & FocusOnArrival) {
   const { tenantId, tenantName, role } = membership;
   const canChange = canChangeTrips(role);
+  const canBook = canCreateBookings(role);
   /**
    * The marina's zone, read from the operator's catalog before the first week
    * loads, so "this week" and "today" are the marina's, not the viewer's. If
@@ -359,6 +361,7 @@ export function CalendarPage({
               trips={trips}
               today={today}
               canChange={canChange}
+              canBook={canBook}
               done={done}
               onAction={(trip, kind) => setDialog({ trip, kind })}
             />
@@ -549,6 +552,7 @@ function Week({
   trips,
   today,
   canChange,
+  canBook,
   done,
   onAction,
 }: {
@@ -556,6 +560,8 @@ function Week({
   trips: readonly StaffTrip[];
   today: LocalDate;
   canChange: boolean;
+  /** Owners and booking staff book for a guest (G2.12d); the API decides. */
+  canBook: boolean;
   done: Done | null;
   onAction: (trip: StaffTrip, kind: ActionKind) => void;
 }) {
@@ -638,6 +644,7 @@ function Week({
                     now={now}
                     showZone={showZone}
                     canChange={canChange}
+                    canBook={canBook}
                     done={done?.tripId === trip.tripId ? done.what : undefined}
                     onAction={onAction}
                   />
@@ -656,6 +663,7 @@ function TripRow({
   now,
   showZone,
   canChange,
+  canBook,
   done,
   onAction,
 }: {
@@ -663,6 +671,7 @@ function TripRow({
   now: Date;
   showZone: boolean;
   canChange: boolean;
+  canBook: boolean;
   done: string | undefined;
   onAction: (trip: StaffTrip, kind: ActionKind) => void;
 }) {
@@ -676,10 +685,15 @@ function TripRow({
   const departed = hasDeparted(trip, now);
   const final = trip.salesState === "canceled" || trip.salesState === "completed";
   const actions = canChange ? actionsFor(trip, now) : [];
+  // A staff booking follows the guest's sales rules: on sale and before the cutoff (G2.12d).
+  const bookable =
+    canBook && trip.salesState === "published" && !trip.blackedOut && !cutoffPassed(trip, now);
   const place = showZone ? ` ${zoneCity(trip.timeZone)} time` : "";
   return (
     <li
-      className={actions.length > 0 ? "cal-trip" : "cal-trip cal-trip--no-actions"}
+      className={
+        actions.length > 0 || bookable ? "cal-trip" : "cal-trip cal-trip--no-actions"
+      }
       data-state={trip.salesState}
     >
       {/* Read once, inside the heading. */}
@@ -735,8 +749,13 @@ function TripRow({
           </StatusBadge>
         )}
       </div>
-      {actions.length > 0 && (
+      {(actions.length > 0 || bookable) && (
         <div className="cal-trip__actions">
+          {bookable && (
+            <ConsoleButtonLink href={newBookingHref(trip.tripId)} icon="plus">
+              Book <VisuallyHidden>{tripLine(trip)}</VisuallyHidden>
+            </ConsoleButtonLink>
+          )}
           {actions.map((kind) => {
             const copy = actionCopy[kind];
             return (
