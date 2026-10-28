@@ -121,16 +121,18 @@ export async function requestCustomHostname(
   if (reading.hostname !== input.hostname) {
     throw new HostnameProviderRejectedError("hostname_mismatch");
   }
+  // JSON travels as text and is cast in SQL: postgres.js would encode a
+  // string sent for a jsonb parameter as a JSON string, not as the array.
   await inTenantTransaction(adminDb, adminContext(input.tenantId, input.actor), async (trx) => {
     await sql`select app.hostname_attach_provider(
         ${input.tenantId}::uuid, ${input.hostname}, ${reading.providerId},
-        ${JSON.stringify(reading.instructions)}::jsonb)`.execute(trx);
+        ${JSON.stringify(reading.instructions)}::text::jsonb)`.execute(trx);
     if (adopted) {
       await sql`insert into public.audit_events
           (tenant_id, action, subject_type, subject_id, reason, after_state)
         values (${input.tenantId}, 'hostname.provider_adopted', 'tenant_hostname', ${input.hostname},
                 'Adopted the provider record after a lost create answer',
-                ${JSON.stringify({ provider_hostname_id: reading.providerId })}::jsonb)`.execute(
+                ${JSON.stringify({ provider_hostname_id: reading.providerId })}::text::jsonb)`.execute(
         trx,
       );
     }

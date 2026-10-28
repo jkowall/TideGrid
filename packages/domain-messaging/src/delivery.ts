@@ -40,6 +40,7 @@ import {
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
+import { type DeploymentEnvironment, parseBrowserOrigin } from "@tidegrid/domain-hostnames";
 import { type Kysely, sql } from "kysely";
 import { issueAccessLink } from "./access.ts";
 import {
@@ -68,6 +69,13 @@ export interface DeliveryOptions {
    * Its hostname must be an active, verified hostname of the tenant.
    */
   guestLinkOrigin?: string;
+  /**
+   * The deployment environment, which decides whether a link origin may use
+   * http, a port, or a `*.localhost` name (G2.14b): only in "local". The API
+   * Worker always passes its ENVIRONMENT. Omitted, the local rules apply, as
+   * they did before G2.14b, so in-process tests on `*.localhost` keep working.
+   */
+  environment?: DeploymentEnvironment;
   /** Correlates the run's writes, like a request id. */
   runId: string;
   /** Messages per tenant per run. */
@@ -186,26 +194,23 @@ function backoffFor(attempt: number): number {
 
 /**
  * The guest site's origin for a tenant, if its hostname is an active,
- * verified hostname of that tenant; null otherwise.
+ * verified hostname of that tenant; null otherwise. The origin goes through
+ * the same strict parser as a browser's Origin on every public route
+ * (G2.14b): https only, no port, no path, no trailing dot, and no
+ * `*.localhost` name, except in local development.
  */
 export async function guestOriginFor(
   db: Kysely<Database>,
   tenantId: string,
   slug: string,
   template: string,
+  environment: DeploymentEnvironment = "local",
 ): Promise<string | null> {
-  let url: URL;
-  try {
-    url = new URL(template.replaceAll("{slug}", slug));
-  } catch {
-    return null;
-  }
-  const local = url.hostname === "localhost" || url.hostname.endsWith(".localhost");
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return null;
-  if (url.pathname !== "/" || url.search || url.hash || url.username || url.password) return null;
+  const parsed = parseBrowserOrigin(template.replaceAll("{slug}", slug), { environment });
+  if (!parsed) return null;
   const { rows } = await sql<{ tenant_id: string }>`
-    select tenant_id from app.resolve_hostname(${url.hostname})`.execute(db);
-  return rows[0]?.tenant_id === tenantId ? url.origin : null;
+    select tenant_id from app.resolve_hostname(${parsed.host})`.execute(db);
+  return rows[0]?.tenant_id === tenantId ? parsed.origin : null;
 }
 
 /**
@@ -368,7 +373,9 @@ export async function deliverTenantMessages(
       select slug from tenants where id = ${tenantId}`.execute(trx);
     return rows[0]?.slug ?? null;
   });
-  const origin = slug ? await guestOriginFor(db, tenantId, slug, template) : null;
+  const origin = slug
+    ? await guestOriginFor(db, tenantId, slug, template, options.environment ?? "local")
+    : null;
 
   const report: TenantDeliveryReport = {
     claimed: 0,
