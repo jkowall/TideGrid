@@ -22,7 +22,16 @@ import {
   wranglerOnTerminal,
 } from "../wrangler.ts";
 
-export const releaseGates = ["A4", "A8", "A10", "A13", "A19"] as const;
+/** The gate each phase's releases need. A rollback also accepts A4. */
+export const releaseGateFor: Partial<Record<Phase, string>> = {
+  p3: "A4",
+  p4: "A4",
+  p7: "A8",
+  p8: "A10",
+  p9: "A13",
+  p10: "A17",
+  p11: "A19",
+};
 export const apiBase = "https://api.tidegrid.us";
 export const consoleOrigin = "https://console.tidegrid.us";
 export const accessTeamDomain = "winter-feather-7169.cloudflareaccess.com";
@@ -181,6 +190,16 @@ async function postcondition(deps: Deps, worker: Worker, buildId: string): Promi
   return true;
 }
 
+function gatesFor(phase: Phase, rollback: boolean): string[] {
+  const gate = releaseGateFor[phase];
+  if (!gate) {
+    throw new Refusal(
+      `no release runs in ${phase}; releases run in ${Object.keys(releaseGateFor).join(", ")}`,
+    );
+  }
+  return rollback && gate !== "A4" ? [gate, "A4"] : [gate];
+}
+
 export async function release(deps: Deps, args: Args): Promise<number> {
   onlyFlags(args, ["live", "go", "phase", "rollback", "to", "kill-switch", "again"]);
   const worker = parseWorker(args.positional[0]);
@@ -200,7 +219,7 @@ export async function release(deps: Deps, args: Args): Promise<number> {
     deps,
     { live: true, go: flag(args, "go") },
     {
-      gates: releaseGates,
+      gates: gatesFor(phase, rollback),
       confirm: [w.name],
       action: rollback ? `roll back ${w.name}` : `deploy ${w.name} from this tree`,
     },
