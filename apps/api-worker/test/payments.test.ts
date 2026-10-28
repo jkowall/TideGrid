@@ -3,6 +3,7 @@ import { signatureHeaderValue } from "@tidegrid/domain-payments";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { Bindings } from "../src/env.ts";
+import { markConsoleGateway } from "../src/gateway.ts";
 import { paymentSettings } from "../src/payments.ts";
 
 // Payments in the Workers runtime, with no database configured: everything
@@ -97,6 +98,31 @@ describe("payment configuration", () => {
         production,
       ),
     ).toEqual({ status: 404, code: "not_found" });
+  });
+
+  it("offers staff no test payment in a production configuration or where payments are off (G2.12d)", async () => {
+    const path =
+      "/v1/staff/tenants/0b7f3a52-9c1e-4d2a-8f6b-1e2d3c4b5a69/checkouts/1c8f3a52-9c1e-4d2a-8f6b-1e2d3c4b5a69/test-payment";
+    const init = {
+      method: "POST",
+      headers: {
+        origin: "https://console.test",
+        "content-type": "application/json",
+        "idempotency-key": "staff-test-payment-0001",
+      },
+      body: JSON.stringify({ outcome: "succeed" }),
+    };
+    const { PAYMENT_PROVIDER: _unset, ...off } = env as Bindings;
+    for (const bindings of [
+      fakeEnv({ ENVIRONMENT: "production", STAFF_ORIGINS: "https://console.test" }),
+      { ...off, STAFF_ORIGINS: "https://console.test" } as Bindings,
+    ]) {
+      // Through the console gateway, so only the provider decides; nothing is authenticated yet.
+      expect(await call(path, init, markConsoleGateway(bindings))).toEqual({
+        status: 404,
+        code: "not_found",
+      });
+    }
   });
 
   it("hides the fake controls where payments are off", async () => {
