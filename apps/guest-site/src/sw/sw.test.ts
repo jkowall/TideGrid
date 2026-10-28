@@ -165,7 +165,7 @@ describe("service worker caching (G2.14b)", () => {
     await sw.dispatch("install");
     const store = sw.stores.get(cacheNameFor("b1"));
     expect([...(store?.keys() ?? [])].sort()).toEqual([...PRECACHE, OFFLINE_KEY].sort());
-    expect(net.asked).toContain("/offline.html");
+    expect(net.asked).toContain("/neutral-offline");
   });
 
   it("never caches a navigation, and serves the offline page when the network fails", async () => {
@@ -179,7 +179,7 @@ describe("service worker caching (G2.14b)", () => {
     expect(sw.puts.length).toBe(before);
     net.offline();
     const offline = await sw.fetchEvent(navigation(`${ORIGIN}/manage#t=secret-token`));
-    expect(offline === "passed" ? "" : await offline.text()).toBe("body of /offline.html");
+    expect(offline === "passed" ? "" : await offline.text()).toBe("body of /neutral-offline");
     expect(sw.puts.length).toBe(before);
     // Nothing keyed by a navigation URL, a fragment, or the API.
     for (const store of sw.stores.values()) {

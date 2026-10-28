@@ -77,7 +77,7 @@ export default defineConfig({
       // The neutral offline page the service worker precaches (G2.14b).
       input: {
         index: fileURLToPath(new URL("./index.html", import.meta.url)),
-        offline: fileURLToPath(new URL("./offline.html", import.meta.url)),
+        offline: fileURLToPath(new URL("./neutral-offline.html", import.meta.url)),
       },
     },
   },

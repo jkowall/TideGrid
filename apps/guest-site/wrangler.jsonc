@@ -60,7 +60,7 @@
       "services": [
         {
           "binding": "GuestGateway",
-          "service": "tidegrid-guest-stub-gateway",
+          "service": "tidegrid-guest-stub-gateway-test",
           "entrypoint": "GuestGateway"
         }
       ]

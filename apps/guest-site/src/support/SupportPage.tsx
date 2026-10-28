@@ -103,7 +103,7 @@ export function SupportPage({ brand }: { brand: PublicBrand }) {
 /**
  * /offline: what the booking site says about working without a connection.
  * It names no operator and shows no booking: the service worker's own
- * offline page (offline.html) is the one a guest sees with no network.
+ * offline page (neutral-offline.html) is the one a guest sees with no network.
  */
 export function OfflinePage() {
   useTitle("Using this site offline");

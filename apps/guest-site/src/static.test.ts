@@ -83,7 +83,7 @@ describe("static files", () => {
   });
 
   it("keeps the offline page neutral: no tenant, no script, no API (G2.14b)", () => {
-    const offline = readFileSync(new URL("../offline.html", import.meta.url), "utf8");
+    const offline = readFileSync(new URL("../neutral-offline.html", import.meta.url), "utf8");
     expect(offline).not.toMatch(/<script|api\.tidegrid\.us|demo-harbor|demo-reef|{{/);
     expect(offline).toContain("Booking needs a connection");
   });

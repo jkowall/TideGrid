@@ -33,8 +33,13 @@ export interface ServiceWorkerConfig {
 
 /** Where the neutral offline page lives in the cache: a fixed key, never a request URL. */
 export const OFFLINE_KEY = "/__offline";
-/** The built offline page the install step fetches. */
-export const OFFLINE_SOURCE = "/offline.html";
+/**
+ * The built offline page the install step fetches: neutral-offline.html,
+ * which static assets serve at its path without the extension. Asking for
+ * the .html path would answer with a redirect, and a redirected response
+ * cannot answer a navigation.
+ */
+export const OFFLINE_SOURCE = "/neutral-offline";
 const CACHE_PREFIX = "tidegrid-guest-";
 
 export function cacheNameFor(buildId: string): string {
@@ -126,7 +131,15 @@ export function installServiceWorker(scope: ServiceWorkerScopeLike, config: Serv
         const cache = await scope.caches.open(name);
         await cache.addAll(entries);
         const offline = await scope.fetch(OFFLINE_SOURCE, { cache: "no-store" });
-        if (offline.ok) await cache.put(OFFLINE_KEY, offline);
+        if (offline.ok) {
+          // A fresh response, so nothing about how it was fetched (such as
+          // a redirect) can stop it answering a navigation later.
+          const body = await offline.blob();
+          await cache.put(
+            OFFLINE_KEY,
+            new Response(body, { status: 200, headers: offline.headers }),
+          );
+        }
       })(),
     );
   });

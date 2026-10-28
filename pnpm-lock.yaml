@@ -127,6 +127,9 @@ importers:
       '@tidegrid/tenant-config':
         specifier: workspace:*
         version: link:../../packages/tenant-config
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.6
       '@types/react':
         specifier: ^19.1.0
         version: 19.3.0

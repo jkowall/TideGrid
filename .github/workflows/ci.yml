@@ -70,3 +70,82 @@ jobs:
           pnpm db:migrate
           pnpm db:seed
           pnpm test:integration
+
+  # Browser journeys and the installability check (G2.14b; D5(a), a
+  # coordinator default pending owner confirmation). The built guest site runs
+  # under its Worker in `wrangler dev`, first with a stub GuestGateway and no
+  # database (part A), then bound to the API's GuestGateway, with the API in
+  # `wrangler dev` on a disposable PostgreSQL 17 seeded with *.book.localhost
+  # hosts (part B). Chromium is downloaded on the runner only.
+  browser:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' }}
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tidegrid
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tidegrid"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CI: "true"
+      TIDEGRID_EPHEMERAL_DB: "1"
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tidegrid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium for Playwright
+        run: pnpm --filter @tidegrid/guest-site exec playwright install --with-deps chromium
+      - name: Build the guest site for the local API
+        env:
+          VITE_API_BASE: http://localhost:8961
+          GUEST_LOCAL_API: http://localhost:8961
+        run: pnpm --filter @tidegrid/guest-site build
+      - name: Part A, stub gateway, no database
+        run: pnpm --filter @tidegrid/guest-site e2e
+      - name: Migrate, seed local hostnames, and prepare the runtime role
+        run: |
+          pnpm db:migrate
+          SEED_LOCAL_HOSTNAMES=1 pnpm db:seed
+          password="$(openssl rand -hex 24)"
+          TIDEGRID_APP_PASSWORD="$password" pnpm --filter @tidegrid/database app-role:password
+          # A third host for the second tenant, which the journey disables.
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at) select 'reef-e2e.book.localhost', id, 'preview', 'active', now() from public.tenants where slug = 'demo-reef'"
+          printf 'DATABASE_URL=postgresql://tidegrid_app:%s@localhost:5432/tidegrid\nFAKE_PAYMENT_WEBHOOK_SECRET=%s\n' "$password" "$(openssl rand -hex 32)" > apps/api-worker/.dev.vars
+      - name: Start the API on 8961
+        run: |
+          pnpm --filter @tidegrid/api-worker exec wrangler dev --env dev --port 8961 --inspector-port 9961 \
+            --var "GUEST_LINK_ORIGIN:http://{slug}.book.localhost:5361" > api.log 2>&1 &
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:8961/v1/health | grep -q '"database":"ok"'; then exit 0; fi
+            sleep 1
+          done
+          cat api.log
+          exit 1
+      - name: Part B, two brands against the API and the database
+        env:
+          E2E_MODE: full
+          E2E_DISABLE_HOST: reef-e2e.book.localhost
+          E2E_ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tidegrid
+        run: pnpm --filter @tidegrid/guest-site e2e
+      - name: API log
+        if: failure()
+        run: cat api.log || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/guest-site/test-results
+          retention-days: 7
