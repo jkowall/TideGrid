@@ -638,6 +638,9 @@ importers:
         specifier: ^3.4.0
         version: 3.4.9
     devDependencies:
+      '@tidegrid/domain-payments':
+        specifier: workspace:*
+        version: link:../../packages/domain-payments
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.6
