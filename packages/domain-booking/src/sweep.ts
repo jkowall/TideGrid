@@ -13,7 +13,12 @@
  *    keys.
  *
  * The tenant list comes from app.checkout_sweep_tenants, which returns tenant
- * ids only; every read and write then runs in that tenant's own transaction.
+ * ids only, least recently served first (0013); every read and write then runs
+ * in that tenant's own transaction. Tenants take fair turns (`runFairSweep`):
+ * the first pass gives each listed tenant one quantum of each step, and later
+ * passes continue only the steps that said there is more, round the tenants,
+ * until the budget runs out. One tenant's backlog can no longer spend the
+ * whole run.
  *
  * The expiry never waits on a lock. It takes checkouts and their holds with
  * SKIP LOCKED and leaves a busy one for the next run: acquisition and late
@@ -23,12 +28,15 @@
  * order, as the webhook that would have done it. One event or refund that
  * keeps failing is reported and skipped, so it never blocks the rest of its
  * tenant's work; so is an open checkout whose hold is in a state an open
- * checkout cannot have.
+ * checkout cannot have. Within a run each checkout, event, and refund is
+ * reported once, and each event and refund is attempted at most once.
  */
 import {
   type Database,
   type HoldState,
   inTenantTransaction,
+  recordSweepTurn,
+  runFairSweep,
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
@@ -36,11 +44,12 @@ import { expireHold } from "@tidegrid/domain-inventory";
 import type { PaymentProvider } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
-import { processProviderEvent, settleRefund } from "./finalize.ts";
+import { processProviderEvent, type SettleRefundResult, settleRefund } from "./finalize.ts";
 import type { BookingHooks } from "./hooks.ts";
 import { record } from "./views.ts";
 
-export type CheckoutSweepItem = "checkouts" | "inbox_event" | "refund";
+/** What failed: a step, one item in it, or the stamp that keeps the tenant's place. */
+export type CheckoutSweepItem = "checkouts" | "inbox_event" | "refund" | "stamp";
 
 export interface CheckoutSweepOptions {
   /** Correlates this run's audit rows and events, like a request id. */
@@ -50,16 +59,22 @@ export interface CheckoutSweepOptions {
   /** Run inside a booking's confirmation when a reprocessed event confirms one (lane 1 contract). */
   hooks?: BookingHooks | undefined;
   tenantLimit?: number;
+  /** Checkouts expired per batch, and the window of events and refunds read at a time. */
   batchSize?: number;
+  /** Inbox events and refunds attempted per step in one turn. Default 10. */
+  turnItems?: number;
   /** Inbox events and refunds younger than this (0 to 3,600 seconds) are left to the request that made them. */
   graceSeconds?: number;
   budgetMs?: number;
   /**
-   * One tenant's step failed, or one item in it could not be done; the sweep
-   * moves on. `id` names the checkout, event, or refund.
+   * One tenant's step failed, or one item in it could not be done, or its
+   * turn's stamp failed; the sweep moves on. `id` names the checkout, event,
+   * or refund.
    */
   onError?: (tenantId: string, item: CheckoutSweepItem, error: unknown, id?: string) => void;
   clock?: () => number;
+  /** Called as each tenant's turn starts, for tests and logs. */
+  onTurnStart?: (tenantId: string, pass: number) => void;
 }
 
 export interface CheckoutSweepReport {
@@ -68,22 +83,32 @@ export interface CheckoutSweepReport {
   /**
    * Checkouts left open because another transaction held them or their holds,
    * or because their hold is in a state an open checkout cannot have (each of
-   * those is also reported through onError).
+   * those is also reported through onError). Each is counted once a run.
    */
   skipped: number;
   reprocessed: number;
   refundsSettled: number;
-  /** Refunds still requested after this run: no provider, no answer, or out of budget. */
+  /**
+   * Refunds this run read or was handed that are still requested after it: no
+   * provider, no answer, a failed attempt, or out of budget. Each once.
+   */
   refundsPending: number;
   /** Tenants whose expiry step failed. */
   failedTenants: number;
   failedEvents: number;
   failedRefunds: number;
   complete: boolean;
+  /** Tenant turns started. */
+  turns: number;
+  /** Passes over the tenants: the first gives each a quantum, later ones go round those with more. */
+  passes: number;
+  /** Tenants listed that the budget left for the next run. */
+  deferredTenants: number;
 }
 
 export const DEFAULT_CHECKOUT_SWEEP_BATCH = 100;
 export const DEFAULT_CHECKOUT_SWEEP_GRACE_SECONDS = 60;
+export const DEFAULT_CHECKOUT_SWEEP_TURN_ITEMS = 10;
 
 /**
  * An open checkout the sweep cannot expire because of its hold: missing or
@@ -186,8 +211,114 @@ function graceOf(seconds: number | undefined): number {
   return grace;
 }
 
+/** One window of a tenant's waiting events or refunds, oldest first, leaving out this run's attempts. */
+export interface WindowQuery {
+  limit: number;
+  graceSeconds: number;
+  excluding: readonly string[];
+}
+
+/**
+ * What the checkout sweep reads and writes, so its turns can be tested without
+ * a database. `sweepCheckouts` supplies the real one; each call runs in a
+ * tenant transaction of its own, except `settleRefund`, which calls the
+ * provider between two.
+ */
+export interface CheckoutSweepStore {
+  listTenants(limit: number, graceSeconds: number): Promise<readonly string[]>;
+  stamp(ctx: TenantContext): Promise<void>;
+  expire(ctx: TenantContext, limit: number): Promise<ExpireCheckoutsResult>;
+  receivedEvents(ctx: TenantContext, query: WindowQuery): Promise<string[]>;
+  processEvent(ctx: TenantContext, inboxId: string): Promise<{ refundId: string | null } | null>;
+  requestedRefunds(ctx: TenantContext, query: WindowQuery): Promise<string[]>;
+  /** Null without a provider: refunds are then read once and left requested. */
+  settleRefund: ((ctx: TenantContext, refundId: string) => Promise<SettleRefundResult>) | null;
+}
+
+/** The store `sweepCheckouts` uses, over the database as the runtime role. */
+export function checkoutSweepStore(
+  db: Kysely<Database>,
+  provider: PaymentProvider | null,
+  hooks: BookingHooks | undefined,
+): CheckoutSweepStore {
+  return {
+    listTenants: async (limit, graceSeconds) => {
+      const { rows } = await sql<{ tenant_id: string }>`
+        select tenant_id from app.checkout_sweep_tenants(${limit}, ${graceSeconds})`.execute(db);
+      return rows.map((r) => r.tenant_id);
+    },
+    stamp: (ctx) => recordSweepTurn(db, ctx, "checkout"),
+    expire: (ctx, limit) =>
+      inTenantTransaction(db, ctx, (trx) => expireCheckoutSessions(trx, ctx, { limit })),
+    receivedEvents: (ctx, query) =>
+      inTenantTransaction(db, ctx, async (trx) => {
+        const { rows } = await sql<{ id: string }>`
+          select id from provider_events
+           where tenant_id = ${ctx.tenantId} and processing_state = 'received'
+             and verified_at <= now() - make_interval(secs => ${query.graceSeconds})
+             and id <> all(${[...query.excluding]}::uuid[])
+           order by verified_at, id
+           limit ${query.limit}`.execute(trx);
+        return rows.map((e) => e.id);
+      }),
+    processEvent: (ctx, inboxId) =>
+      inTenantTransaction(db, ctx, (trx) =>
+        processProviderEvent(trx, ctx, inboxId, { skipLocked: true, hooks }),
+      ),
+    requestedRefunds: (ctx, query) =>
+      inTenantTransaction(db, ctx, async (trx) => {
+        const { rows } = await sql<{ id: string }>`
+          select id from payment_refunds
+           where tenant_id = ${ctx.tenantId} and state = 'requested'
+             and created_at <= now() - make_interval(secs => ${query.graceSeconds})
+             and id <> all(${[...query.excluding]}::uuid[])
+           order by created_at, id
+           limit ${query.limit}`.execute(trx);
+        return rows.map((r) => r.id);
+      }),
+    settleRefund: provider ? (ctx, refundId) => settleRefund(db, provider, ctx, refundId) : null,
+  };
+}
+
 export async function sweepCheckouts(
   db: Kysely<Database>,
+  options: CheckoutSweepOptions,
+): Promise<CheckoutSweepReport> {
+  return runCheckoutSweep(checkoutSweepStore(db, options.provider ?? null, options.hooks), options);
+}
+
+/** Where a step stands for one tenant in this run. */
+type Step = "todo" | "more" | "done";
+
+/** One tenant's state across its turns in one run. */
+interface TenantRun {
+  ctx: TenantContext;
+  expiry: Step;
+  inbox: Step;
+  refunds: Step;
+  expired: Set<string>;
+  skipped: Set<string>;
+  inconsistent: Set<string>;
+  eventsAttempted: Set<string>;
+  eventsReadFailed: boolean;
+  /** Refunds the run's reprocessed events requested, in order, not yet attempted. */
+  handedRefunds: string[];
+  /** Every refund this run read or was handed. */
+  refundsSeen: Set<string>;
+  refundsAttempted: Set<string>;
+  /** Succeeded or failed at the provider, or no longer requested. */
+  refundsClosed: Set<string>;
+  refundsReadFailed: boolean;
+}
+
+/**
+ * The checkout sweep over any store. Each tenant's turn runs the steps not yet
+ * done, in order: one expiry batch; up to `turnItems` inbox events; up to
+ * `turnItems` refunds. A step says there is more when its batch was full and
+ * expired something, or when its window held items it did not reach.
+ */
+export async function runCheckoutSweep(
+  store: CheckoutSweepStore,
   options: CheckoutSweepOptions,
 ): Promise<CheckoutSweepReport> {
   const clock = options.clock ?? Date.now;
@@ -195,11 +326,12 @@ export async function sweepCheckouts(
   const budgetMs = options.budgetMs ?? 20_000;
   const tenantLimit = options.tenantLimit ?? 100;
   const batchSize = options.batchSize ?? DEFAULT_CHECKOUT_SWEEP_BATCH;
+  const turnItems = options.turnItems ?? DEFAULT_CHECKOUT_SWEEP_TURN_ITEMS;
+  if (!Number.isInteger(turnItems) || turnItems < 1 || turnItems > 1000) {
+    throw new RangeError("turnItems must be a whole number from 1 to 1000");
+  }
   const grace = graceOf(options.graceSeconds);
   const overBudget = () => clock() - started >= budgetMs;
-
-  const { rows } = await sql<{ tenant_id: string }>`
-    select tenant_id from app.checkout_sweep_tenants(${tenantLimit}, ${grace})`.execute(db);
   const report: CheckoutSweepReport = {
     tenants: 0,
     expired: 0,
@@ -210,121 +342,199 @@ export async function sweepCheckouts(
     failedTenants: 0,
     failedEvents: 0,
     failedRefunds: 0,
-    complete: rows.length < tenantLimit,
+    complete: false,
+    turns: 0,
+    passes: 0,
+    deferredTenants: 0,
+  };
+  let failures = false;
+  const onError: NonNullable<CheckoutSweepOptions["onError"]> = (tenantId, item, error, id) => {
+    if (item !== "stamp") failures = true;
+    options.onError?.(tenantId, item, error, id);
+  };
+  const runs = new Map<string, TenantRun>();
+  const runOf = (tenantId: string): TenantRun => {
+    let run = runs.get(tenantId);
+    if (!run) {
+      run = {
+        ctx: { tenantId, actorType: "system", actorId: "checkout-sweep", requestId: options.runId },
+        expiry: "todo",
+        inbox: "todo",
+        refunds: "todo",
+        expired: new Set(),
+        skipped: new Set(),
+        inconsistent: new Set(),
+        eventsAttempted: new Set(),
+        eventsReadFailed: false,
+        handedRefunds: [],
+        refundsSeen: new Set(),
+        refundsAttempted: new Set(),
+        refundsClosed: new Set(),
+        refundsReadFailed: false,
+      };
+      runs.set(tenantId, run);
+    }
+    return run;
   };
 
-  for (const { tenant_id: tenantId } of rows) {
-    if (overBudget()) {
-      report.complete = false;
-      break;
-    }
-    report.tenants += 1;
-    const ctx: TenantContext = {
-      tenantId,
-      actorType: "system",
-      actorId: "checkout-sweep",
-      requestId: options.runId,
-    };
-
-    // 1. Expiry, in batches. Each batch either expires something or ends the
-    // loop, so skipped checkouts cannot keep it turning. An inconsistent
-    // checkout is reported once per batch that meets it, and left alone.
+  /** 1. One expiry batch. Each batch either expires something or ends the step. */
+  const expiry = async (run: TenantRun): Promise<number> => {
+    const { tenantId } = run.ctx;
     try {
-      for (;;) {
-        const { expired, skipped, inconsistent } = await inTenantTransaction(db, ctx, (trx) =>
-          expireCheckoutSessions(trx, ctx, { limit: batchSize }),
-        );
-        report.expired += expired.length;
-        report.skipped += skipped.length;
-        for (const checkout of inconsistent) {
-          options.onError?.(
-            tenantId,
-            "checkouts",
-            new InconsistentCheckoutError(checkout),
-            checkout.id,
-          );
-        }
-        if (expired.length === 0 || expired.length + skipped.length < batchSize) break;
-        if (overBudget()) {
-          report.complete = false;
-          break;
-        }
+      const batch = await store.expire(run.ctx, batchSize);
+      for (const id of batch.expired) {
+        if (!run.expired.has(id)) report.expired += 1;
+        run.expired.add(id);
       }
+      for (const id of batch.skipped) run.skipped.add(id);
+      for (const checkout of batch.inconsistent) {
+        if (run.inconsistent.has(checkout.id)) continue;
+        run.inconsistent.add(checkout.id);
+        // Reported for an operator; the batch itself did not fail.
+        options.onError?.(
+          tenantId,
+          "checkouts",
+          new InconsistentCheckoutError(checkout),
+          checkout.id,
+        );
+      }
+      run.expiry =
+        batch.expired.length > 0 && batch.expired.length + batch.skipped.length >= batchSize
+          ? "more"
+          : "done";
+      return batch.expired.length + batch.skipped.length;
     } catch (error) {
       report.failedTenants += 1;
-      report.complete = false;
-      options.onError?.(tenantId, "checkouts", error);
+      run.expiry = "done";
+      onError(tenantId, "checkouts", error);
+      return 0;
     }
+  };
 
-    // 2. Inbox events a failed request left unprocessed, one transaction each.
-    const refundIds: string[] = [];
-    let pending: string[] = [];
+  /** 2. Up to turnItems inbox events a failed request left unprocessed, one transaction each. */
+  const inbox = async (run: TenantRun): Promise<number> => {
+    const { tenantId } = run.ctx;
+    let window: string[];
     try {
-      pending = await inTenantTransaction(db, ctx, async (trx) => {
-        const { rows: events } = await sql<{ id: string }>`
-          select id from provider_events
-           where tenant_id = ${tenantId} and processing_state = 'received'
-             and verified_at <= now() - make_interval(secs => ${grace})
-           order by verified_at, id
-           limit ${batchSize}`.execute(trx);
-        return events.map((e) => e.id);
+      window = await store.receivedEvents(run.ctx, {
+        limit: batchSize,
+        graceSeconds: grace,
+        excluding: [...run.eventsAttempted],
       });
     } catch (error) {
       report.failedEvents += 1;
-      report.complete = false;
-      options.onError?.(tenantId, "inbox_event", error);
+      run.eventsReadFailed = true;
+      run.inbox = "done";
+      onError(tenantId, "inbox_event", error);
+      return 0;
     }
-    for (const inboxId of pending) {
-      if (overBudget()) {
-        report.complete = false;
-        break;
-      }
+    let attempted = 0;
+    for (const inboxId of window) {
+      if (attempted >= turnItems || overBudget()) break;
+      if (run.eventsAttempted.has(inboxId)) continue;
+      run.eventsAttempted.add(inboxId);
+      attempted += 1;
       try {
-        const processed = await inTenantTransaction(db, ctx, (trx) =>
-          processProviderEvent(trx, ctx, inboxId, { skipLocked: true, hooks: options.hooks }),
-        );
+        const processed = await store.processEvent(run.ctx, inboxId);
         if (!processed) continue;
         report.reprocessed += 1;
-        if (processed.refundId) refundIds.push(processed.refundId);
+        if (processed.refundId && !run.refundsAttempted.has(processed.refundId)) {
+          run.handedRefunds.push(processed.refundId);
+          run.refundsSeen.add(processed.refundId);
+          // A refund an event requested in a later pass reopens the refund step.
+          if (run.refunds === "done") run.refunds = "more";
+        }
       } catch (error) {
         report.failedEvents += 1;
-        report.complete = false;
-        options.onError?.(tenantId, "inbox_event", error, inboxId);
+        onError(tenantId, "inbox_event", error, inboxId);
       }
     }
+    run.inbox = attempted < window.length || window.length >= batchSize ? "more" : "done";
+    return attempted;
+  };
 
-    // 3. Refunds whose outcome is unknown, sent again with their own keys.
-    let requested: string[] = [];
-    try {
-      requested = await inTenantTransaction(db, ctx, async (trx) => {
-        const { rows: refunds } = await sql<{ id: string }>`
-          select id from payment_refunds
-           where tenant_id = ${tenantId} and state = 'requested'
-             and created_at <= now() - make_interval(secs => ${grace})
-           order by created_at, id
-           limit ${batchSize}`.execute(trx);
-        return refunds.map((r) => r.id);
-      });
-    } catch (error) {
-      report.failedRefunds += 1;
-      report.complete = false;
-      options.onError?.(tenantId, "refund", error);
-    }
-    for (const refundId of [...new Set([...refundIds, ...requested])]) {
-      if (!options.provider || overBudget()) {
-        report.refundsPending += 1;
-        continue;
-      }
+  /** 3. Up to turnItems refunds whose outcome is unknown, sent again with their own keys. */
+  const refunds = async (run: TenantRun): Promise<number> => {
+    const { tenantId } = run.ctx;
+    const settle = store.settleRefund;
+    let window: string[] = [];
+    // Without a provider the window is read once, so its refunds are counted.
+    if (!run.refundsReadFailed && (settle || run.refunds === "todo")) {
       try {
-        const settled = await settleRefund(db, options.provider, ctx, refundId);
-        if (settled.kind === "succeeded" || settled.kind === "failed") report.refundsSettled += 1;
-        else if (settled.kind === "unknown") report.refundsPending += 1;
+        window = await store.requestedRefunds(run.ctx, {
+          limit: batchSize,
+          graceSeconds: grace,
+          excluding: [...run.refundsAttempted],
+        });
       } catch (error) {
         report.failedRefunds += 1;
-        report.refundsPending += 1;
-        options.onError?.(tenantId, "refund", error, refundId);
+        run.refundsReadFailed = true;
+        onError(tenantId, "refund", error);
       }
     }
+    for (const id of window) run.refundsSeen.add(id);
+    if (!settle) {
+      run.handedRefunds = [];
+      run.refunds = "done";
+      return 0;
+    }
+    const candidates = [...new Set([...run.handedRefunds, ...window])].filter(
+      (id) => !run.refundsAttempted.has(id),
+    );
+    let attempted = 0;
+    for (const refundId of candidates) {
+      if (attempted >= turnItems || overBudget()) break;
+      run.refundsAttempted.add(refundId);
+      attempted += 1;
+      try {
+        const settled = await settle(run.ctx, refundId);
+        if (settled.kind === "succeeded" || settled.kind === "failed") {
+          report.refundsSettled += 1;
+          run.refundsClosed.add(refundId);
+        } else if (settled.kind === "not_pending") {
+          run.refundsClosed.add(refundId);
+        }
+      } catch (error) {
+        report.failedRefunds += 1;
+        onError(tenantId, "refund", error, refundId);
+      }
+    }
+    run.handedRefunds = run.handedRefunds.filter((id) => !run.refundsAttempted.has(id));
+    run.refunds = attempted < candidates.length || window.length >= batchSize ? "more" : "done";
+    return attempted;
+  };
+
+  const fair = await runFairSweep({
+    listTenants: () => store.listTenants(tenantLimit, grace),
+    tenantLimit,
+    stamp: (tenantId) => store.stamp(runOf(tenantId).ctx),
+    turn: async (tenantId) => {
+      const run = runOf(tenantId);
+      let units = 0;
+      if (run.expiry !== "done") units += await expiry(run);
+      if (run.inbox !== "done") units += await inbox(run);
+      if (run.refunds !== "done") units += await refunds(run);
+      const more = run.expiry === "more" || run.inbox === "more" || run.refunds === "more";
+      return { units, more };
+    },
+    budgetMs,
+    clock,
+    startedAt: started,
+    ...(options.onTurnStart ? { onTurnStart: options.onTurnStart } : {}),
+    onTenantError: (tenantId, error, during) => {
+      if (during === "turn") report.failedTenants += 1;
+      onError(tenantId, during === "stamp" ? "stamp" : "checkouts", error);
+    },
+  });
+
+  for (const run of runs.values()) {
+    for (const id of run.skipped) if (!run.expired.has(id)) report.skipped += 1;
+    for (const id of run.refundsSeen) if (!run.refundsClosed.has(id)) report.refundsPending += 1;
   }
+  report.tenants = fair.tenants;
+  report.turns = fair.turns;
+  report.passes = fair.passes;
+  report.deferredTenants = fair.deferredTenants;
+  report.complete = fair.complete && !failures;
   return report;
 }
