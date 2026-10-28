@@ -120,7 +120,35 @@ for (const tenant of tenants) {
   });
 }
 
-test("a new service worker waits through the visit and takes over on the next navigation (D11(a))", async ({
+const swFile = new URL("../../dist/sw.js", import.meta.url);
+
+/** Build N+1: the built worker with a new build id, so its cache name changes. */
+function shipNewWorker(original: string, buildId: string): void {
+  const next = original.replace(/buildId:`[^`]+`/, `buildId:\`${buildId}\``);
+  if (next === original) throw new Error("dist/sw.js has no build id to change");
+  writeFileSync(swFile, next);
+}
+
+async function workerState(page: Page) {
+  return page.evaluate(async () => {
+    const r = await navigator.serviceWorker.getRegistration("/");
+    return {
+      active: r?.active?.state ?? null,
+      waiting: r?.waiting?.state ?? null,
+      installing: r?.installing?.state ?? null,
+      caches: (await caches.keys()).sort(),
+    };
+  });
+}
+
+/** The browser's own update check, made now rather than at some later navigation. */
+async function checkForUpdate(page: Page) {
+  await page.evaluate(async () => {
+    await (await navigator.serviceWorker.getRegistration("/"))?.update();
+  });
+}
+
+test("a new service worker installs, waits, and takes over on the next navigation (D11(a))", async ({
   page,
 }) => {
   // Edits the served dist/sw.js, so it runs once, at one width.
@@ -128,45 +156,89 @@ test("a new service worker waits through the visit and takes over on the next na
   const tenant = tenants[0];
   if (!tenant) return;
   const host = localHost(tenant.slug);
-  const file = new URL("../../dist/sw.js", import.meta.url);
-  const original = readFileSync(file, "utf8");
-  const registration = () =>
-    page.evaluate(async () => {
-      const r = await navigator.serviceWorker.getRegistration("/");
-      return {
-        active: r?.active?.state ?? null,
-        waiting: r?.waiting?.state ?? null,
-        installing: r?.installing?.state ?? null,
-      };
-    });
+  const original = readFileSync(swFile, "utf8");
   try {
     await page.goto(hostUrl(host));
     await waitForReady(page, tenant.name);
     expect(await controlled(page)).toBe(true);
-    // Build N+1 ships a changed worker.
-    writeFileSync(file, `${original}\n// e2e update ${Date.now()}\n`);
-    // The browser's update check on this navigation installs it. It waits
-    // unless this load already found it waiting; the worker never skips
-    // waiting by itself (unit tests hold that).
-    await page.reload();
-    await waitForReady(page, tenant.name);
+    const before = await workerState(page);
+    expect(before.caches).toHaveLength(1);
+    const oldCache = before.caches[0] ?? "";
+
+    shipNewWorker(original, "e2e-single");
+    await checkForUpdate(page);
+    // A new worker really installed: it waits, and build N's cache is still there.
     await expect
-      .poll(
-        async () => {
-          const r = await registration();
-          return r.waiting === "installed" || (r.active === "activated" && !r.installing);
-        },
-        { timeout: 20_000 },
-      )
-      .toBe(true);
-    // The next navigation's page load asks a waiting worker to take over.
+      .poll(async () => (await workerState(page)).waiting, { timeout: 20_000 })
+      .toBe("installed");
+    expect((await workerState(page)).caches).toContain(oldCache);
+
+    // The next navigation's page load asks it to take over; this is the one window.
     await page.goto(hostUrl(host));
     await waitForReady(page, tenant.name);
     await expect
-      .poll(registration, { timeout: 20_000 })
-      .toEqual({ active: "activated", waiting: null, installing: null });
+      .poll(async () => workerState(page), { timeout: 20_000 })
+      .toEqual({
+        active: "activated",
+        waiting: null,
+        installing: null,
+        caches: ["tidegrid-guest-e2e-single"],
+      });
   } finally {
-    writeFileSync(file, original);
+    writeFileSync(swFile, original);
+  }
+});
+
+test("a waiting service worker does not take over while another window is open (D11(a))", async ({
+  page,
+  context,
+}) => {
+  test.skip(test.info().project.name !== "desktop", "runs once");
+  const tenant = tenants[0];
+  if (!tenant) return;
+  const host = localHost(tenant.slug);
+  const original = readFileSync(swFile, "utf8");
+  try {
+    await page.goto(hostUrl(host));
+    await waitForReady(page, tenant.name);
+    expect(await controlled(page)).toBe(true);
+    const other = await context.newPage();
+    await other.goto(hostUrl(host, "/support"));
+    await expect(other.getByRole("heading", { level: 1, name: "Help and support" })).toBeVisible({
+      timeout: 20_000,
+    });
+    const oldCache = (await workerState(page)).caches[0] ?? "";
+
+    shipNewWorker(original, "e2e-multi");
+    await checkForUpdate(page);
+    await expect
+      .poll(async () => (await workerState(page)).waiting, { timeout: 20_000 })
+      .toBe("installed");
+
+    // A page load asks, but the other window is open: the new worker keeps waiting,
+    // and the other window keeps build N's worker and cache.
+    await page.goto(hostUrl(host));
+    await waitForReady(page, tenant.name);
+    await page.waitForTimeout(2_000);
+    const held = await workerState(page);
+    expect(held).toMatchObject({ active: "activated", waiting: "installed" });
+    expect(held.caches).toContain(oldCache);
+    expect((await workerState(other)).caches).toContain(oldCache);
+
+    // Once it is the only window, the next page load gets the new worker.
+    await other.close();
+    await page.goto(hostUrl(host));
+    await waitForReady(page, tenant.name);
+    await expect
+      .poll(async () => workerState(page), { timeout: 20_000 })
+      .toEqual({
+        active: "activated",
+        waiting: null,
+        installing: null,
+        caches: ["tidegrid-guest-e2e-multi"],
+      });
+  } finally {
+    writeFileSync(swFile, original);
   }
 });
 

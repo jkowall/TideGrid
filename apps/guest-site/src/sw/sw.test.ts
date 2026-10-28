@@ -21,6 +21,8 @@ function fakeScope(network: (url: string) => Promise<Response>) {
   const stores = new Map<string, Map<string, Response>>();
   const puts: { cache: string; key: string }[] = [];
   const skipped = { count: 0 };
+  /** The site's open windows, as clients.matchAll would report them. */
+  const windows = { count: 1 };
   const keyOf = (r: RequestInfo | string) => (typeof r === "string" ? r : r.url);
   const scope: ServiceWorkerScopeLike = {
     location: { origin: ORIGIN },
@@ -58,6 +60,9 @@ function fakeScope(network: (url: string) => Promise<Response>) {
       },
     },
     fetch: (r) => network(typeof r === "string" ? r : r.url),
+    clients: {
+      matchAll: async () => Array.from({ length: windows.count }, (_, i) => ({ id: `w${i}` })),
+    },
     skipWaiting: async () => {
       skipped.count += 1;
     },
@@ -81,10 +86,12 @@ function fakeScope(network: (url: string) => Promise<Response>) {
     });
     return answer === undefined ? "passed" : await answer;
   }
-  function message(data: unknown) {
-    listeners.get("message")?.({ data });
+  async function message(data: unknown) {
+    const waits: Promise<unknown>[] = [];
+    listeners.get("message")?.({ data, waitUntil: (p: Promise<unknown>) => waits.push(p) });
+    await Promise.all(waits);
   }
-  return { scope, stores, puts, skipped, dispatch, fetchEvent, message };
+  return { scope, stores, puts, skipped, windows, dispatch, fetchEvent, message };
 }
 
 const ok = (body: string, type = "text/plain") =>
@@ -244,11 +251,23 @@ describe("service worker update policy (G2.14b, D11(a))", () => {
     installServiceWorker(sw.scope, { precache: PRECACHE, buildId: "b3" });
     await sw.dispatch("install");
     expect(sw.skipped.count).toBe(0);
-    sw.message({ type: "something-else" });
-    sw.message(null);
-    sw.message("SKIP_WAITING");
+    await sw.message({ type: "something-else" });
+    await sw.message(null);
+    await sw.message("SKIP_WAITING");
     expect(sw.skipped.count).toBe(0);
-    sw.message({ type: SKIP_WAITING });
+    await sw.message({ type: SKIP_WAITING });
+    expect(sw.skipped.count).toBe(1);
+  });
+
+  it("keeps waiting while another window or the installed app is open", async () => {
+    const sw = fakeScope(async (url) => ok(`body of ${url}`));
+    installServiceWorker(sw.scope, { precache: PRECACHE, buildId: "b4" });
+    await sw.dispatch("install");
+    sw.windows.count = 2;
+    await sw.message({ type: SKIP_WAITING });
+    expect(sw.skipped.count).toBe(0);
+    sw.windows.count = 1;
+    await sw.message({ type: SKIP_WAITING });
     expect(sw.skipped.count).toBe(1);
   });
 });

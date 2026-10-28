@@ -11,9 +11,10 @@ const SKIP_WAITING = "SKIP_WAITING";
  *   "none", so the browser always asks the network for the script, and the
  *   guest Worker can swap in the kill switch for a host that stopped
  *   resolving. Production builds only: the dev server serves no sw.js.
- * - On that same page load, a worker already waiting (a new build found by
- *   an earlier visit's update check) is asked to take over: a new version
- *   activates on the next navigation, never mid-session (G2.14b, D11(a)).
+ * - On that same page load, once, a worker already waiting (a new build found
+ *   by an earlier visit's update check) is asked to take over. The worker
+ *   does so only when this is the site's one open window (G2.14b, D11(a)).
+ *   "Try again" after a failed bootstrap never asks again.
  * - When the API says no operator is published here (a readable
  *   tenant_not_found), unregister every worker and delete every cache: the
  *   page's half of the kill switch. A failed or timed-out bootstrap is not a
@@ -41,10 +42,16 @@ export async function registerServiceWorker(): Promise<void> {
   }
 }
 
-/** Ask a worker that is waiting to take over; called once per page load. */
-export function activateWaitingWorker(registration: {
-  waiting: { postMessage(message: unknown): void } | null;
-}): void {
+/** Whether this page load has already asked; module state lives as long as the page. */
+const thisPageLoad = { asked: false };
+
+/** Ask a worker that is waiting to take over, at most once per page load. */
+export function activateWaitingWorker(
+  registration: { waiting: { postMessage(message: unknown): void } | null },
+  pageLoad: { asked: boolean } = thisPageLoad,
+): void {
+  if (pageLoad.asked) return;
+  pageLoad.asked = true;
   registration.waiting?.postMessage({ type: SKIP_WAITING });
 }
 

@@ -21,10 +21,13 @@
  * - Cache names carry the build id; activation deletes every other cache.
  * - Update policy (G2.14b, D11(a)): a new version installs and waits. The
  *   next page load finds it waiting and asks it to take over, with a
- *   SKIP_WAITING message; the worker never skips waiting on its own, so a page
- *   that is already open never has its worker swapped mid-session. That page
- *   load came from the network (navigations go network first), so it is
- *   already the new build the new worker precached.
+ *   SKIP_WAITING message. It takes over only when that page is the only open
+ *   window of the site: skipping waiting would switch every open window to
+ *   the new worker at once, and its activation deletes the old build's cache.
+ *   With another tab or the installed app open, it keeps waiting until they
+ *   close (or until the next page load finds itself alone). That page load
+ *   came from the network (navigations go network first), so it is already
+ *   the new build the new worker precached.
  */
 
 export interface ServiceWorkerConfig {
@@ -107,6 +110,7 @@ interface ExtendableEventLike {
 
 interface MessageEventLike {
   data: unknown;
+  waitUntil?(promise: Promise<unknown>): void;
 }
 
 /** What a page posts to its waiting worker on load (src/sw/register.ts). */
@@ -121,6 +125,12 @@ interface FetchEventLike extends ExtendableEventLike {
 export interface ServiceWorkerScopeLike {
   location: { origin: string };
   caches: CacheStorageLike;
+  clients: {
+    matchAll(options: {
+      type: "window";
+      includeUncontrolled: boolean;
+    }): Promise<readonly unknown[]>;
+  };
   fetch(request: RequestInfo | string, init?: RequestInit): Promise<Response>;
   skipWaiting(): Promise<void>;
   addEventListener(
@@ -156,9 +166,15 @@ export function installServiceWorker(scope: ServiceWorkerScopeLike, config: Serv
     );
   });
 
-  // D11(a): only a page's load asks a waiting worker to take over.
+  // D11(a): only a page's load asks a waiting worker to take over, and only
+  // a page that is the site's one open window gets it.
   scope.addEventListener("message", (event) => {
-    if ((event.data as { type?: unknown } | null)?.type === SKIP_WAITING) void scope.skipWaiting();
+    if ((event.data as { type?: unknown } | null)?.type !== SKIP_WAITING) return;
+    const takeOver = (async () => {
+      const windows = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
+      if (windows.length <= 1) await scope.skipWaiting();
+    })();
+    event.waitUntil?.(takeOver);
   });
 
   scope.addEventListener("activate", (event) => {

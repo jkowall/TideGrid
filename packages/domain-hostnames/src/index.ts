@@ -23,6 +23,7 @@ export {
   DEFAULT_HOSTNAME_SWEEP_TENANT_LIMIT,
   disableHostname,
   HostnameNameRefusedError,
+  HostnameSweepFault,
   type HostnameSweepOptions,
   type HostnameSweepReport,
   type RequestOutcome,

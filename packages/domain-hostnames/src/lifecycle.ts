@@ -217,6 +217,11 @@ export interface HostnameSweepOptions {
   onTenantError?: (tenantId: string, error: unknown) => void;
   /** Check only these tenants, as the admin CLI's fake run does. */
   onlyTenants?: readonly string[];
+  /**
+   * The provider gave no reading for one record (a refusal about the record):
+   * its opaque provider id and the code, for the log. The run goes on.
+   */
+  onUnread?: (tenantId: string, providerHostnameId: string, code: string) => void;
   /** A servable hostname whose certificate is close to expiry (G2.14b, D10). */
   onExpiring?: (tenantId: string, hostname: string) => void;
   clock?: () => number;
@@ -231,11 +236,15 @@ export interface HostnameSweepReport {
   /** The provider asked to wait (429 or 5xx); the run stopped early. */
   throttled: boolean;
   /**
-   * The provider refused to answer (401 or 403, another 4xx, a malformed
-   * answer, a missing zone): the code, and the run stopped early. Nothing was
-   * recorded for the hostname it was reading, so nothing was demoted.
+   * The provider refused for the whole account (401 or 403, an
+   * authentication code, a missing zone): the code, and the run stopped
+   * early. Nothing was recorded, so nothing was demoted.
    */
   providerFault: string | null;
+  /** The provider record being read when the account-level refusal came. */
+  providerFaultHostnameId: string | null;
+  /** Hostnames the provider gave no reading for, recorded with their code and no change. */
+  unread: number;
   retryAfterSeconds: number | null;
   /** False when the budget, the call limit, the tenant limit, or throttling cut the run short. */
   complete: boolean;
@@ -257,52 +266,89 @@ class Throttled extends Error {
   }
 }
 
-/** The provider could not give a reading at all; the run stops and records nothing. */
-class ProviderFault extends Error {
-  constructor(readonly refusal: HostnameProviderRejectedError) {
-    super(`the custom-hostname provider gave no reading: ${refusal.code}`);
-    this.name = "ProviderFault";
+/**
+ * Refusals about the account, the token, or the zone rather than one record:
+ * an expired, rotated, or mis-scoped token (401, 403, Cloudflare's
+ * authentication codes), and an exact-name lookup that cannot find the zone
+ * (404). Every other hostname would get the same answer, so the run stops and
+ * records nothing. The Cloudflare codes are its authentication and routing
+ * errors as remembered from its API (invalid or missing token, bad
+ * Authorization header, an object identifier that routes nowhere); they are
+ * unverified against live Cloudflare and listed for G2.14b-live. Any code not
+ * listed is treated as about the one record.
+ */
+const accountLevelRefusals = new Set([
+  "http_401",
+  "http_403",
+  "cloudflare_9106",
+  "cloudflare_9109",
+  "cloudflare_10000",
+  "cloudflare_6003",
+  "cloudflare_6103",
+  "cloudflare_6111",
+  "cloudflare_7003",
+]);
+
+/** The provider refused for the whole account: stop the run and record nothing. */
+export class HostnameSweepFault extends Error {
+  constructor(
+    readonly code: string,
+    /** The provider record being read when the refusal came, an opaque provider id. */
+    readonly providerHostnameId: string,
+  ) {
+    super(`the custom-hostname provider refused the account: ${code}`);
+    this.name = "HostnameSweepFault";
   }
 }
 
-interface Reading {
-  hostnameState: string;
-  certificateState: string;
-  errorCode: string | null;
-}
+type Reading =
+  | { kind: "reading"; hostnameState: string; certificateState: string; errorCode: string | null }
+  /** The provider gave no reading for this one record: record the code, change nothing. */
+  | { kind: "no_reading"; errorCode: string };
 
 const recordGone = (errorCode: string): Reading => ({
+  kind: "reading",
   hostnameState: "deleted",
   certificateState: "failed",
   errorCode,
 });
 
 /**
- * One hostname's reading, or a throw that records nothing. Only a reading the
- * provider actually gave about this record may change the hostname:
+ * One hostname's reading. Only a reading the provider actually gave about
+ * this record may change the hostname:
  *
  * - the record, mapped;
  * - the record now names another hostname: gone for this hostname;
  * - no record by id, confirmed by an exact-name lookup that answers normally:
  *   gone (or replaced by a record with another id).
  *
- * Anything else is not a reading: 429 and 5xx throttle the run, and a refusal
- * (401 or 403 from a rotated token, another 4xx, a malformed answer, or a
- * lookup that cannot find the zone) stops the run as a provider fault. A
- * wrong zone id answers 404 by id and 404 for the lookup too, so it can never
- * read as every hostname deleted.
+ * Anything else is not a reading. 429 and 5xx throttle the run. An
+ * account-level refusal (see accountLevelRefusals, and a lookup's 404, which
+ * means the zone itself is missing or out of the token's reach) throws
+ * HostnameSweepFault, which stops the run and records nothing. Any other
+ * refusal is about this record (a malformed answer for it, an ambiguous name,
+ * another 4xx for its id): it is recorded as no reading, which keeps the
+ * states, backs the next check off, and lets the run go on to the next
+ * hostname, so one odd record never blocks every later check.
+ *
+ * Limit: if the token can reach another real zone and the zone id names it,
+ * the lookup answers normally with no match and every hostname reads as
+ * missing. The token is therefore scoped to the one SaaS zone (G2.14b-live).
  */
 async function readHostname(
   provider: CustomHostnameProvider,
   item: DueHostname,
   countCall: () => void,
 ): Promise<Reading> {
-  const refuse = (error: unknown): never => {
+  const refuse = (error: unknown, accountLevel: (code: string) => boolean): Reading => {
     if (error instanceof HostnameProviderUnavailableError) {
       throw new Throttled(error.retryAfterSeconds);
     }
-    if (error instanceof HostnameProviderRejectedError) throw new ProviderFault(error);
-    throw error;
+    if (!(error instanceof HostnameProviderRejectedError)) throw error;
+    if (accountLevel(error.code)) {
+      throw new HostnameSweepFault(error.code, item.provider_hostname_id);
+    }
+    return { kind: "no_reading", errorCode: error.code };
   };
   let reading: ProviderHostname | null;
   try {
@@ -311,7 +357,7 @@ async function readHostname(
     if (error instanceof HostnameProviderRejectedError && error.code === "hostname_mismatch") {
       return recordGone("hostname_mismatch");
     }
-    return refuse(error);
+    return refuse(error, (code) => accountLevelRefusals.has(code));
   }
   if (!reading) {
     countCall();
@@ -319,7 +365,7 @@ async function readHostname(
     try {
       found = await provider.findByHostname(item.hostname);
     } catch (error) {
-      return refuse(error);
+      return refuse(error, (code) => code === "http_404" || accountLevelRefusals.has(code));
     }
     if (!found) return recordGone("provider_record_missing");
     if (found.providerId !== item.provider_hostname_id) {
@@ -328,6 +374,7 @@ async function readHostname(
     reading = found;
   }
   return {
+    kind: "reading",
     hostnameState: reading.hostnameState,
     certificateState: reading.certificateState,
     errorCode: reading.errors[0] ?? null,
@@ -342,9 +389,11 @@ async function readHostname(
  * Only a definitive negative demotes an active hostname (the database's
  * rule): ownership moved, blocked, or deleted, or the certificate failed. A
  * record the provider no longer has, confirmed by an exact-name lookup, and a
- * record that names another hostname read as deleted. A refusal records
- * nothing and stops the run (`providerFault`), and a 429 or 5xx stops it
- * too, which honors `retry-after` because the next run is 15 minutes away.
+ * record that names another hostname read as deleted. An account-level
+ * refusal records nothing and stops the run (`providerFault`); a refusal
+ * about one record is recorded with no change (`unread`) and the run goes
+ * on; a 429 or 5xx stops the run, which honors `retry-after` because the next
+ * run is 15 minutes away.
  */
 export async function sweepHostnames(
   db: Kysely<Database>,
@@ -367,6 +416,8 @@ export async function sweepHostnames(
     throttled: false,
     retryAfterSeconds: null,
     providerFault: null,
+    providerFaultHostnameId: null,
+    unread: 0,
     complete: rows.length < tenantLimit,
   };
   let calls = 0;
@@ -409,19 +460,21 @@ export async function sweepHostnames(
           break;
         }
         calls += 1;
-        const { hostnameState, certificateState, errorCode } = await readHostname(
-          options.provider,
-          item,
-          () => {
-            calls += 1;
-          },
-        );
+        const reading = await readHostname(options.provider, item, () => {
+          calls += 1;
+        });
+        const hostnameState = reading.kind === "reading" ? reading.hostnameState : null;
+        const certificateState = reading.kind === "reading" ? reading.certificateState : null;
         if (certificateState === "expiring") options.onExpiring?.(tenantId, item.hostname);
+        if (reading.kind === "no_reading") {
+          report.unread += 1;
+          options.onUnread?.(tenantId, item.provider_hostname_id, reading.errorCode);
+        }
         const outcome = await inTenantTransaction(db, ctx, async (trx) => {
           const { rows: result } = await sql<{ outcome: string }>`
             select app.hostname_record_check(${tenantId}::uuid, ${item.hostname},
               ${item.provider_hostname_id}, ${hostnameState}, ${certificateState},
-              ${errorCode}) as outcome`.execute(trx);
+              ${reading.errorCode}) as outcome`.execute(trx);
           return result[0]?.outcome;
         });
         report.checked += 1;
@@ -435,10 +488,11 @@ export async function sweepHostnames(
         report.complete = false;
         break;
       }
-      if (error instanceof ProviderFault) {
-        // A refusal is about the account, the token, or the zone, not one
+      if (error instanceof HostnameSweepFault) {
+        // A refusal about the account, the token, or the zone, not one
         // hostname: stop, record nothing, and let the next run try again.
-        report.providerFault = error.refusal.code;
+        report.providerFault = error.code;
+        report.providerFaultHostnameId = error.providerHostnameId;
         report.failedTenants += 1;
         report.complete = false;
         options.onTenantError?.(tenantId, error);

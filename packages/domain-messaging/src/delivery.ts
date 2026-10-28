@@ -193,13 +193,6 @@ function backoffFor(attempt: number): number {
 }
 
 /**
- * The guest site's origin for a tenant, if its hostname is an active,
- * verified hostname of that tenant; null otherwise. The origin goes through
- * the same strict parser as a browser's Origin on every public route
- * (G2.14b): https only, no port, no path, no trailing dot, and no
- * `*.localhost` name, except in local development.
- */
-/**
  * The host rules a delivery run mints links under: the caller's environment,
  * or the strict deployed rules when it names none (G2.14b). Never the local
  * rules by default.
@@ -210,6 +203,13 @@ export function deliveryEnvironment(
   return options.environment ?? "production";
 }
 
+/**
+ * The guest site's origin for a tenant, if its hostname is an active,
+ * verified hostname of that tenant; null otherwise. The origin goes through
+ * the same strict parser as a browser's Origin on every public route
+ * (G2.14b): https only, no port, no path, no trailing dot, and no
+ * `*.localhost` name, except in local development.
+ */
 export async function guestOriginFor(
   db: Kysely<Database>,
   tenantId: string,

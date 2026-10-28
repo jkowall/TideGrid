@@ -97,9 +97,13 @@ describe("support pages (G2.14b)", () => {
 describe("service worker registration (G2.14b)", () => {
   it("asks a waiting worker to take over on page load, and does nothing without one (D11(a))", () => {
     const postMessage = vi.fn();
-    activateWaitingWorker({ waiting: { postMessage } });
+    const pageLoad = { asked: false };
+    activateWaitingWorker({ waiting: { postMessage } }, pageLoad);
     expect(postMessage).toHaveBeenCalledWith({ type: "SKIP_WAITING" });
-    expect(() => activateWaitingWorker({ waiting: null })).not.toThrow();
+    // "Try again" registers again in the same page load: it never asks twice.
+    activateWaitingWorker({ waiting: { postMessage } }, pageLoad);
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    expect(() => activateWaitingWorker({ waiting: null }, { asked: false })).not.toThrow();
   });
 
   it("clears workers and caches only on a readable not-published answer", async () => {

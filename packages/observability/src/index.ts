@@ -54,6 +54,19 @@ export interface RequestAttributes {
   "tidegrid.email_sweep.canceled_count"?: number;
   "tidegrid.email_sweep.failed_tenant_count"?: number;
   "tidegrid.email_sweep.complete"?: boolean;
+  /** Custom hostname sweep (G2.14b). Provider ids are opaque; no hostname or personal data. */
+  "tidegrid.hostname.reason"?: string;
+  "tidegrid.hostname.refusal_code"?: string;
+  "tidegrid.hostname.provider_hostname_id"?: string;
+  "tidegrid.hostname_sweep.tenant_count"?: number;
+  "tidegrid.hostname_sweep.checked_count"?: number;
+  "tidegrid.hostname_sweep.demoted_count"?: number;
+  "tidegrid.hostname_sweep.expired_count"?: number;
+  "tidegrid.hostname_sweep.unread_count"?: number;
+  "tidegrid.hostname_sweep.failed_tenant_count"?: number;
+  "tidegrid.hostname_sweep.throttled"?: boolean;
+  "tidegrid.hostname_sweep.provider_fault"?: string;
+  "tidegrid.hostname_sweep.complete"?: boolean;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -99,6 +112,19 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.email_sweep.canceled_count",
   "tidegrid.email_sweep.failed_tenant_count",
   "tidegrid.email_sweep.complete",
+  // Custom hostname sweep (G2.14b).
+  "tidegrid.hostname.reason",
+  "tidegrid.hostname.refusal_code",
+  "tidegrid.hostname.provider_hostname_id",
+  "tidegrid.hostname_sweep.tenant_count",
+  "tidegrid.hostname_sweep.checked_count",
+  "tidegrid.hostname_sweep.demoted_count",
+  "tidegrid.hostname_sweep.expired_count",
+  "tidegrid.hostname_sweep.unread_count",
+  "tidegrid.hostname_sweep.failed_tenant_count",
+  "tidegrid.hostname_sweep.throttled",
+  "tidegrid.hostname_sweep.provider_fault",
+  "tidegrid.hostname_sweep.complete",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

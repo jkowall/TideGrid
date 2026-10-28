@@ -1,6 +1,10 @@
 import { createDb } from "@tidegrid/database";
 import { sweepCheckouts } from "@tidegrid/domain-booking";
-import { type CustomHostnameProvider, sweepHostnames } from "@tidegrid/domain-hostnames";
+import {
+  type CustomHostnameProvider,
+  HostnameSweepFault,
+  sweepHostnames,
+} from "@tidegrid/domain-hostnames";
 import { sweepExpiredHolds } from "@tidegrid/domain-inventory";
 import { sweepEmail } from "@tidegrid/domain-messaging";
 import { createLogger, newRequestId } from "@tidegrid/observability";
@@ -33,8 +37,11 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  *    when email is off.
  * 4. The hostname sweep (G2.14b) reads the custom-hostname provider for every
  *    hostname whose check is due and records the reading in that tenant's
- *    own transaction, which demotes a hostname that is no longer servable
- *    and never promotes one. Skipped when custom hostnames are off.
+ *    own transaction. It demotes only on a definitive negative (moved,
+ *    blocked, deleted, or a failed certificate) and never promotes. An
+ *    account-level refusal stops the run and records nothing; a refusal
+ *    about one record is recorded with no change. Skipped when custom
+ *    hostnames are off.
  *
  * Correctness never waits for any of them; they write the facts down, emit the
  * events, and finish interrupted work. A failed job is logged and rethrown, so
@@ -160,7 +167,7 @@ export async function runScheduled(
     }
 
     // 4. Custom hostnames (G2.14b): read the provider for every hostname whose
-    //    check is due and record it, demoting what is no longer servable.
+    //    check is due and record it; only a definitive negative demotes.
     //    Skipped when custom hostnames are off.
     const hostnameLog = createLogger({ ...base, "event.name": "hostname_sweep" }, options.log);
     const hostnames = hostnameProvider(env, options.hostnameProvider);
@@ -178,7 +185,21 @@ export async function runScheduled(
           onTenantError: (tenantId, error) =>
             hostnameLog.error("hostname_sweep_tenant_failed", {
               "tidegrid.tenant_id": tenantId,
-              ...errorAttributes(error),
+              ...(error instanceof HostnameSweepFault
+                ? {
+                    // The refusal's code and the opaque provider record id, so
+                    // a rotated token reads differently from one bad record.
+                    "error.type": error.name,
+                    "tidegrid.hostname.refusal_code": error.code,
+                    "tidegrid.hostname.provider_hostname_id": error.providerHostnameId,
+                  }
+                : errorAttributes(error)),
+            }),
+          onUnread: (tenantId, providerHostnameId, code) =>
+            hostnameLog.warn("hostname_sweep_unread", {
+              "tidegrid.tenant_id": tenantId,
+              "tidegrid.hostname.refusal_code": code,
+              "tidegrid.hostname.provider_hostname_id": providerHostnameId,
             }),
           onExpiring: (tenantId) =>
             hostnameLog.warn("hostname_certificate_expiring", { "tidegrid.tenant_id": tenantId }),
@@ -190,6 +211,13 @@ export async function runScheduled(
           "tidegrid.hostname_sweep.expired_count": report.expired,
           "tidegrid.hostname_sweep.failed_tenant_count": report.failedTenants,
           "tidegrid.hostname_sweep.throttled": report.throttled,
+          "tidegrid.hostname_sweep.unread_count": report.unread,
+          ...(report.providerFault
+            ? {
+                "tidegrid.hostname_sweep.provider_fault": report.providerFault,
+                "tidegrid.hostname.provider_hostname_id": report.providerFaultHostnameId,
+              }
+            : {}),
           "tidegrid.hostname_sweep.complete": report.complete,
           duration_ms: Date.now() - started,
         });

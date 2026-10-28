@@ -525,59 +525,164 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     };
   }
 
-  it("records nothing and demotes nothing when the provider refuses to give a reading (R1)", async () => {
-    const host = name("refused-b");
-    await activeHost(shared, B.id, host);
-    for (const code of [
-      "http_401",
-      "http_403",
-      "cloudflare_10000",
-      "http_400",
-      "malformed_response",
-    ]) {
-      await due(B.id);
-      const [before] = await admin<{ checked: Date | null }[]>`
-        select last_checked_at as checked from public.tenant_hostname_provisioning where hostname = ${host}`;
+  /** A tenant of its own, so a sweep limited to it reads exactly the hostnames under test. */
+  async function isolatedTenant(label: string): Promise<string> {
+    const id = randomUUID();
+    await admin`insert into public.tenants (id, slug, display_name)
+      values (${id}, ${`hn-${label}-${run}`}, ${`Hostname ${label}`})`;
+    return id;
+  }
+
+  async function checkRow(host: string) {
+    const [row] = await admin<
+      {
+        status: string;
+        hostname_state: string;
+        certificate_state: string;
+        last_error_code: string | null;
+        checked: Date | null;
+        next: Date;
+        attempts: number;
+      }[]
+    >`
+      select h.status, p.hostname_state, p.certificate_state, p.last_error_code,
+             p.last_checked_at as checked, p.next_check_at as next, p.check_attempts as attempts
+        from public.tenant_hostname_provisioning p
+        join public.tenant_hostnames h on h.hostname = p.hostname and h.tenant_id = p.tenant_id
+       where p.hostname = ${host}`;
+    if (!row) throw new Error(`no row for ${host}`);
+    return row;
+  }
+
+  it("records nothing and stops the run on an account-level refusal, for the hostname it read (R1)", async () => {
+    for (const code of ["http_401", "http_403", "cloudflare_10000", "cloudflare_9109"]) {
+      const tenant = await isolatedTenant(`acct-${code.replace("_", "")}`);
+      const host = name(`acct-${code.replace("_", "")}`);
+      const later = name(`acct-later-${code.replace("_", "")}`);
+      await activeHost(shared, tenant, host);
+      await activeHost(shared, tenant, later);
+      await due(tenant);
+      const before = await checkRow(host);
+      const read: string[] = [];
       const failures: unknown[] = [];
       const report = await sweepHostnames(runtimeDb.db, {
-        provider: readsWith(async () => {
+        provider: readsWith(async (_id, expected) => {
+          read.push(expected);
           throw new HostnameProviderRejectedError(code);
         }),
         runId: `sweep-${run}`,
-        onlyTenants: [B.id],
+        onlyTenants: [tenant],
         onTenantError: (_t, e) => failures.push(e),
       });
-      expect({ code, fault: report.providerFault, demoted: report.demoted }).toEqual({
-        code,
-        fault: code,
+      // The sweep read the hostname under test first, and stopped there.
+      expect(read).toEqual([host]);
+      expect(report).toMatchObject({
+        providerFault: code,
+        providerFaultHostnameId: (await state(host))?.provider_hostname_id,
         demoted: 0,
+        checked: 0,
       });
       expect(failures).toHaveLength(1);
-      expect(await state(host)).toMatchObject({ status: "active", hostname_state: "active" });
-      const [after] = await admin<{ checked: Date | null }[]>`
-        select last_checked_at as checked from public.tenant_hostname_provisioning where hostname = ${host}`;
-      expect(after?.checked?.getTime()).toBe(before?.checked?.getTime());
-      expect(await resolves(host)).toBe(B.id);
+      const after = await checkRow(host);
+      // Before the R1 fix this row was demoted (unknown, unknown).
+      expect(after).toEqual(before);
+      expect(await resolves(host)).toBe(tenant);
+      expect(await checkRow(later)).toMatchObject({ status: "active" });
     }
   });
 
-  it("never reads a wrong zone (every lookup 404) as every hostname deleted (R1)", async () => {
-    const host = name("zone-a");
-    await activeHost(shared, A.id, host);
-    await due(A.id);
+  it("records a refusal about one record with no change, and goes on to the next (R1)", async () => {
+    for (const code of [
+      "malformed_response",
+      "ambiguous_hostname",
+      "cloudflare_1414",
+      "http_400",
+    ]) {
+      const tenant = await isolatedTenant(`rec-${code.replace("_", "")}`);
+      const odd = name(`odd-${code.replace("_", "")}`);
+      const next = name(`zz-${code.replace("_", "")}`);
+      await activeHost(shared, tenant, odd);
+      await activeHost(shared, tenant, next);
+      shared.advance(next, { hostnameState: "moved" });
+      await due(tenant);
+      const before = await checkRow(odd);
+      const unread: string[] = [];
+      const report = await sweepHostnames(runtimeDb.db, {
+        provider: readsWith(async (id, expected) => {
+          if (expected === odd) throw new HostnameProviderRejectedError(code);
+          return shared.get(id, expected);
+        }),
+        runId: `sweep-${run}`,
+        onlyTenants: [tenant],
+        onUnread: (_t, _id, c) => unread.push(c),
+      });
+      expect(report).toMatchObject({ providerFault: null, unread: 1, checked: 2, demoted: 1 });
+      expect(unread).toEqual([code]);
+      const after = await checkRow(odd);
+      // Before the R1 fix this row was demoted; before the head-of-line fix
+      // the run stopped here and never reached the next hostname.
+      expect(after).toMatchObject({
+        status: "active",
+        hostname_state: before.hostname_state,
+        certificate_state: before.certificate_state,
+        last_error_code: code,
+        attempts: before.attempts + 1,
+      });
+      expect(after.next.getTime()).toBeGreaterThan(Date.now());
+      expect(await resolves(odd)).toBe(tenant);
+      // The run went on: the next hostname was read and its move demoted it.
+      expect(await checkRow(next)).toMatchObject({ status: "disabled", hostname_state: "moved" });
+    }
+  });
+
+  it("never reads a zone the token cannot reach (every lookup 404) as every hostname deleted (R1)", async () => {
+    const tenant = await isolatedTenant("zone");
+    const host = name("zone-only");
+    await activeHost(shared, tenant, host);
+    await due(tenant);
+    const before = await checkRow(host);
+    const read: string[] = [];
     const report = await sweepHostnames(runtimeDb.db, {
       provider: readsWith(
-        async () => null,
+        async (_id, expected) => {
+          read.push(expected);
+          return null;
+        },
         async () => {
           throw new HostnameProviderRejectedError("http_404");
         },
       ),
       runId: `sweep-${run}`,
-      onlyTenants: [A.id],
+      onlyTenants: [tenant],
     });
-    expect(report).toMatchObject({ providerFault: "http_404", demoted: 0 });
-    expect(await state(host)).toMatchObject({ status: "active" });
-    expect(await resolves(host)).toBe(A.id);
+    expect(read).toEqual([host]);
+    expect(report).toMatchObject({ providerFault: "http_404", demoted: 0, checked: 0 });
+    // Before the R1 fix a missing record read as deleted and demoted this row.
+    expect(await checkRow(host)).toEqual(before);
+    expect(await resolves(host)).toBe(tenant);
+  });
+
+  it("refuses a check with one state, or with no reading and no error code", async () => {
+    const tenant = await isolatedTenant("half");
+    const host = name("half");
+    await activeHost(shared, tenant, host);
+    const providerId = (await state(host))?.provider_hostname_id ?? null;
+    for (const [h, c, e] of [
+      ["active", null, null],
+      [null, "active", null],
+      [null, null, null],
+    ] as const) {
+      expect(
+        await pgError(
+          asTenant(
+            tenant,
+            (tx) => tx`select app.hostname_record_check(${tenant}::uuid, ${host}, ${providerId},
+              ${h}, ${c}, ${e})`,
+          ),
+        ),
+      ).toBe("22023");
+    }
+    expect(await checkRow(host)).toMatchObject({ status: "active" });
   });
 
   it("keeps an active hostname whose certificate is renewing or whose state is unknown (R1)", async () => {

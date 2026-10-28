@@ -239,7 +239,13 @@ CREATE FUNCTION app.hostname_sweep_tenants(p_limit integer)
 -- certificate failed. A pending or unknown reading (a certificate renewing,
 -- a state the mapping does not know) is recorded and changes nothing; it
 -- would only block an activation. A pending hostname past its claim becomes
--- disabled as expired. The
+-- disabled as expired.
+--
+-- With both states NULL and an error code, it records that the provider gave
+-- no reading for this one record (a refusal about the record, not the
+-- account): the stored states stay, the error code is kept, the next check
+-- backs off, and nothing is demoted. A claim past its end still expires,
+-- because that is the database's own fact. The
 -- next check backs off from 60 seconds to 4 hours while pending, the provider's
 -- own schedule, and comes hourly while active. Returns 'recorded', 'demoted',
 -- or 'expired'.
@@ -280,11 +286,16 @@ BEGIN
       USING ERRCODE = '42501';
   END IF;
 
-  v_definitive_negative := p_hostname_state IN ('moved', 'blocked', 'deleted')
-                           OR p_certificate_state = 'failed';
+  IF (p_hostname_state IS NULL) <> (p_certificate_state IS NULL)
+     OR (p_hostname_state IS NULL AND p_error_code IS NULL) THEN
+    RAISE EXCEPTION 'a check records both states, or neither with an error code'
+      USING ERRCODE = '22023';
+  END IF;
+  v_definitive_negative := coalesce(p_hostname_state IN ('moved', 'blocked', 'deleted'), false)
+                           OR coalesce(p_certificate_state = 'failed', false);
   UPDATE public.tenant_hostname_provisioning
-     SET hostname_state = p_hostname_state,
-         certificate_state = p_certificate_state,
+     SET hostname_state = coalesce(p_hostname_state, hostname_state),
+         certificate_state = coalesce(p_certificate_state, certificate_state),
          last_error_code = p_error_code,
          last_checked_at = pg_catalog.now(),
          check_attempts = v_attempts + 1,
