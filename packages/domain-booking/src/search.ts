@@ -13,6 +13,7 @@
 
 import { bookingReferencePrefix } from "@tidegrid/contracts/references";
 import {
+  type BookingSource,
   type BookingState,
   isUuid,
   type PaymentState,
@@ -40,6 +41,8 @@ export interface BookingSearchView {
   id: string;
   reference: string;
   state: BookingState;
+  /** Where the booking came from (G2.12d); on the booking itself, so finance reads it too. */
+  source: BookingSource;
   confirmedAt: string;
   trip: {
     tripId: string;
@@ -106,6 +109,7 @@ interface SearchRow {
   id: string;
   reference: string;
   state: BookingState;
+  source: BookingSource;
   confirmed_at: Date | string;
   party_size: number;
   trip_id: string;
@@ -194,7 +198,7 @@ export async function searchBookings(
     ? sql`, s.booker_name, s.booker_email`
     : sql``;
   const { rows } = await sql<SearchRow>`
-    select b.id, b.reference, b.state, b.confirmed_at, b.party_size,
+    select b.id, b.reference, b.state, b.source, b.confirmed_at, b.party_size,
            t.id as trip_id, p.name as product_name, p.kind as product_kind,
            bt.name as boat_name, t.time_zone,
            to_char(t.local_date, 'YYYY-MM-DD') as local_date,
@@ -227,6 +231,7 @@ export async function searchBookings(
       id: r.id,
       reference: r.reference,
       state: r.state,
+      source: r.source,
       confirmedAt: iso(r.confirmed_at),
       trip: {
         tripId: r.trip_id,

@@ -10,6 +10,7 @@
  * transaction-scoped advisory locks taken before any of those.
  */
 import {
+  type BookingChannel,
   type CheckoutSessionState,
   type Database,
   inTenantTransaction,
@@ -69,6 +70,18 @@ export interface CreateCheckoutInput {
   /** The provider's smallest charge. */
   minimumAmount: number;
   ttlSeconds?: number;
+  /**
+   * A staff-assisted checkout (G2.12d): how the guest reached staff, and what
+   * staff attested. Only openStaffCheckout sets it. The database stamps the
+   * source and the opener from the transaction's actor; this is the staff
+   * member's own input, kept on the session and in the audit row.
+   */
+  staff?: StaffCheckoutDetails;
+}
+
+export interface StaffCheckoutDetails {
+  channel: BookingChannel;
+  attestations: { policyToldToGuest: true; emailReadBack: true };
 }
 
 export type CreateCheckoutResult =
@@ -200,10 +213,10 @@ export async function createCheckoutSession(
   // The session copies the hold's expiry in SQL, at full precision.
   await sql`
     insert into checkout_sessions (id, tenant_id, quote_id, trip_id, party_size, hold_id,
-      policy_version, expires_at, secret_hash, client_key, booker_name, booker_email)
+      policy_version, expires_at, secret_hash, client_key, booker_name, booker_email, channel)
     select ${sessionId}, ${ctx.tenantId}, ${quote.id}, h.trip_id, h.party_size, h.id,
            ${quote.policy_version}, h.expires_at, ${secretHash}, ${clientKey}, ${booker.name},
-           ${booker.email}
+           ${booker.email}, ${input.staff?.channel ?? null}
       from capacity_holds h
      where h.tenant_id = ${ctx.tenantId} and h.id = ${hold.id}`.execute(trx);
 
@@ -275,6 +288,19 @@ export async function createCheckoutSession(
       paymentId,
       amount: order.total_amount,
       expiresAt: view.expiresAt,
+      // A staff-assisted checkout records how the guest reached staff and
+      // what staff attested in place of the guest's own acceptance (G2.12d).
+      ...(input.staff
+        ? {
+            source: "staff_assisted",
+            channel: input.staff.channel,
+            policyAcceptance: "staff_attested",
+            attestations: {
+              policyToldToGuest: input.staff.attestations.policyToldToGuest,
+              emailReadBack: input.staff.attestations.emailReadBack,
+            },
+          }
+        : {}),
     },
     topic: "checkout.session.opened",
     payload: {
@@ -438,6 +464,21 @@ export async function cancelCheckoutSession(
        for update`.execute(trx);
   const session = rows[0];
   if (!session) return { kind: "not_found" };
+  return cancelLockedSession(trx, ctx, session, { holdReason: "checkout canceled by the guest" });
+}
+
+/**
+ * Cancel a checkout whose row the caller has locked FOR UPDATE: release its
+ * hold, void its order, close it as canceled, and record it. Shared by the
+ * guest's cancel and staff's (G2.12d), which differ only in how they find
+ * and lock the row and in the reason they give.
+ */
+export async function cancelLockedSession(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  session: { id: string; state: CheckoutSessionState; hold_id: string },
+  options: { holdReason: string; auditReason?: string },
+): Promise<CancelCheckoutResult> {
   const current = async () => {
     const view = await loadSessionView(trx, ctx.tenantId, session.id);
     if (!view) throw new Error("checkout session vanished inside its own transaction");
@@ -449,7 +490,7 @@ export async function cancelCheckoutSession(
   const released = await releaseHold(trx, ctx, {
     holdId: session.hold_id,
     ownerRef: ownerRefFor(session.id),
-    reason: "checkout canceled by the guest",
+    reason: options.holdReason,
   });
   if (released.kind === "not_found") throw new Error("a checkout session's hold was not found");
   await trx
@@ -470,6 +511,7 @@ export async function cancelCheckoutSession(
     action: "checkout.session_canceled",
     subjectType: "checkout_session",
     subjectId: session.id,
+    reason: options.auditReason ?? null,
     before: { state: "open" },
     after: { state: "canceled", orderStatus: "void" },
     topic: "checkout.session.canceled",

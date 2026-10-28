@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { TripSummary } from "./catalog.ts";
-import { PaymentProviderName, RefundState } from "./checkout.ts";
+import { BookingChannel, BookingSource, PaymentProviderName, RefundState } from "./checkout.ts";
 import { bookingReferencePattern } from "./references.ts";
 
 /**
@@ -108,6 +108,25 @@ export const BookingPaymentStatus = z
   .describe("Paid is a succeeded charge with no refund");
 export type BookingPaymentStatus = z.infer<typeof BookingPaymentStatus>;
 
+/**
+ * How the guest reached staff (G2.12d). Null on a direct booking. Optional in
+ * the response type so clients built before G2.12d still read; the API always
+ * sends it.
+ */
+const ChannelField = BookingChannel.nullable()
+  .optional()
+  .describe("How the guest reached staff: phone, email, or walk_up. Null when direct (G2.12d)");
+
+/**
+ * The staff member who opened a staff-assisted booking's checkout, by the
+ * name this operator gives them (G2.12d). Not customer data, so every role
+ * that reads the booking sees it. Null when direct.
+ */
+export const BookingOpenedBy = z
+  .object({ userId: Uuid, displayName: z.string() })
+  .describe("The staff member who opened the checkout, as this operator names them");
+export type BookingOpenedBy = z.infer<typeof BookingOpenedBy>;
+
 const BookerName = z
   .object({ name: z.string() })
   .optional()
@@ -154,7 +173,8 @@ export const BookingListItem = z.object({
   reference: BookingReference,
   tripId: Uuid.describe("One of the response's trips"),
   state: BookingState,
-  source: z.literal("direct").describe("direct: booked by the guest online"),
+  source: BookingSource,
+  channel: ChannelField,
   confirmedAt: Instant,
   booker: BookerName,
   party: BookingParty,
@@ -276,7 +296,13 @@ export const BookingDetail = z.object({
   id: Uuid,
   reference: BookingReference,
   state: BookingState,
-  source: z.literal("direct"),
+  source: BookingSource,
+  channel: ChannelField,
+  openedBy: BookingOpenedBy.nullable()
+    .optional()
+    .describe(
+      "Who opened a staff-assisted booking's checkout. Null when direct; every role that reads the booking sees it (G2.12d)",
+    ),
   reacquired: z
     .boolean()
     .describe("Confirmed after its hold had expired, by taking the seats again"),
@@ -345,6 +371,8 @@ export type RosterParticipant = z.infer<typeof RosterParticipant>;
 export const RosterBooking = z.object({
   id: Uuid,
   reference: BookingReference,
+  source: BookingSource.optional().describe("Where the booking came from (G2.12d); always sent"),
+  channel: ChannelField,
   booker: z.object({ name: z.string() }).describe("Personal data; the roster needs bookings.read"),
   party: BookingParty,
   extras: z.array(BookingExtra),
