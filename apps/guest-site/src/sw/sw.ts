@@ -198,13 +198,19 @@ export function installServiceWorker(
     const asker = event.source?.id;
     if (!asker) return;
     const takeOver = (async () => {
+      let seen = false;
       for (const delay of checks) {
         if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
         const windows = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
         const ids = windows.map((w) => w.id);
-        // The asker left (it closed, or navigated away): nobody is asking any more.
-        if (!ids.includes(asker)) return;
-        if (ids.length === 1) {
+        if (ids.includes(asker)) {
+          seen = true;
+        } else if (seen) {
+          // The asker left (it closed, or navigated away): nobody is asking any more.
+          return;
+        }
+        // An asker not listed yet (a document still loading) is looked for again.
+        if (ids.length === 1 && ids[0] === asker) {
           await scope.skipWaiting();
           return;
         }

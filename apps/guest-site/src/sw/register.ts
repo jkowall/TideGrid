@@ -11,9 +11,12 @@ const SKIP_WAITING = "SKIP_WAITING";
  *   "none", so the browser always asks the network for the script, and the
  *   guest Worker can swap in the kill switch for a host that stopped
  *   resolving. Production builds only: the dev server serves no sw.js.
- * - On that same page load, once, a worker already waiting (a new build found
- *   by an earlier visit's update check) is asked to take over. The worker
- *   does so only when this is the site's one open window (G2.14b, D11(a)).
+ * - On that same page load, once, a worker waiting when the registration is
+ *   read after `ready` is asked to take over. That is usually a new build an
+ *   earlier visit's update check found; rarely it is one this load's own
+ *   update check finished installing first, so a page of the old build may
+ *   ask a newer worker. The worker takes over only when this is the site's
+ *   one open window (G2.14b, D11(a)).
  *   "Try again" after a failed bootstrap never asks again.
  * - When the API says no operator is published here (a readable
  *   tenant_not_found), unregister every worker and delete every cache: the
