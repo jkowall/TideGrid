@@ -60,9 +60,10 @@ describe("payment configuration", () => {
       kind: "off",
       reason: "secret_missing",
     });
+    // The Stripe adapter is built; with no key it is off (stripe-settings.test.ts has the rest).
     expect(paymentSettings(fakeEnv({ PAYMENT_PROVIDER: "stripe" }))).toEqual({
       kind: "off",
-      reason: "not_built",
+      reason: "stripe_key_missing",
     });
     expect(paymentSettings(fakeEnv({ PAYMENT_PROVIDER: "paypal" }))).toEqual({
       kind: "refused",

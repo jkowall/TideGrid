@@ -19,10 +19,19 @@ export interface Bindings {
   /**
    * The payment provider checkout uses (G2.7). "fake" is the demo shim and is
    * refused in a production configuration; unset means payments are off.
+   * "stripe" selects the Stripe adapter, which no deployed configuration sets
+   * yet (standing goal item 3, off until the owner approves the live step).
    */
   PAYMENT_PROVIDER?: string;
   /** Secret. Signs and verifies the fake provider's webhooks; at least 32 characters. */
   FAKE_PAYMENT_WEBHOOK_SECRET?: string;
+  /**
+   * Secret, never a var. A Stripe test key, sk_test_ or rk_test_; live keys are
+   * refused everywhere, and test keys in production.
+   */
+  STRIPE_SECRET_KEY?: string;
+  /** Secret, never a var. The Stripe webhook endpoint's signing secret, whsec_. */
+  STRIPE_WEBHOOK_SECRET?: string;
   /**
    * The email provider transactional email uses (lane 1, the G2.16 shim).
    * "fake" is the demo shim, refused in a production configuration; unset

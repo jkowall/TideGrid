@@ -31,7 +31,7 @@ export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: App
     tags: ["webhooks"],
     summary: "Receive a signed payment provider event",
     description:
-      "For the payment provider only. The body is the provider's event, signed over its raw bytes with a timestamp (the fake provider's `Fake-Signature: t=<unix>,v1=<hex HMAC-SHA256>`). A signature outside the tolerance window, or for another body, answers 400 and nothing is recorded. A verified event is recorded once per event id; a duplicate changes nothing. A booking is confirmed only here, from a verified success. A 500 leaves the event recorded and unprocessed for the provider's retry and the sweep.",
+      "For the payment provider only. The body is the provider's event, signed over its raw bytes with a timestamp (the fake provider's `Fake-Signature: t=<unix>,v1=<hex HMAC-SHA256>`; Stripe's `Stripe-Signature` in the same scheme, when the Stripe adapter is configured, which no deployment does yet). A signature outside the tolerance window, or for another body, answers 400 and nothing is recorded. A Stripe event must be a snapshot Connect event in test mode; a live, platform-scope, or thin event answers 400 payload_invalid. A verified event is recorded once per event id; a duplicate changes nothing, and a Stripe redelivery whose per-delivery fields changed counts as the same event. A booking is confirmed only here, from a verified success. A 500 leaves the event recorded and unprocessed for the provider's retry and the sweep.",
     request: { params: PaymentWebhookParams },
     responses: {
       200: {

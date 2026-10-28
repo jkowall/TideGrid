@@ -1,6 +1,8 @@
 import type { Database } from "@tidegrid/database";
 import {
+  checkStripeConfig,
   createFakePaymentProvider,
+  createStripePaymentProvider,
   FAKE_SECRET_MIN_LENGTH,
   type FakePaymentProvider,
   type PaymentProvider,
@@ -13,14 +15,35 @@ import type { Bindings } from "./env.ts";
 
 /**
  * Which payment provider this deployment uses (G2.7). The demo runs the fake
- * provider, the owner's decision of 2026-10-05; a Stripe adapter replaces it
- * behind the same interface before any live booking. The fake is refused
- * outright in a production configuration, whatever else is set.
+ * provider, the owner's decision of 2026-10-05. The fake is refused outright
+ * in a production configuration, whatever else is set.
+ *
+ * The Stripe adapter (standing goal item 3, a coordinator default of
+ * 2026-10-28 pending the owner) is built but off: no deployed configuration
+ * sets PAYMENT_PROVIDER=stripe. When it is set, both secrets must be present
+ * and well formed; a live key is refused everywhere until the Core live gate,
+ * and a test key is refused in production, so test cards can never confirm a
+ * real booking. The adapter's constructor applies the same refusals again.
+ * Staff bookings stay on the shim (D9): their test-payment control is the
+ * fake's, so it answers 404 under Stripe.
  */
 export type PaymentSettings =
   | { kind: "fake"; secret: string }
-  | { kind: "off"; reason: "unset" | "secret_missing" | "not_built" }
-  | { kind: "refused"; reason: "fake_in_production" | "unknown_provider" };
+  | { kind: "stripe"; secretKey: string; webhookSecret: string }
+  | {
+      kind: "off";
+      reason: "unset" | "secret_missing" | "stripe_key_missing" | "stripe_webhook_secret_missing";
+    }
+  | {
+      kind: "refused";
+      reason:
+        | "fake_in_production"
+        | "unknown_provider"
+        | "live_key"
+        | "stripe_test_in_production"
+        | "key_malformed"
+        | "webhook_secret_malformed";
+    };
 
 export function paymentSettings(env: Bindings): PaymentSettings {
   const name = env.PAYMENT_PROVIDER;
@@ -33,7 +56,14 @@ export function paymentSettings(env: Bindings): PaymentSettings {
     }
     return { kind: "fake", secret };
   }
-  if (name === "stripe") return { kind: "off", reason: "not_built" };
+  if (name === "stripe") {
+    const secretKey = env.STRIPE_SECRET_KEY;
+    const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
+    const problem = checkStripeConfig({ secretKey, webhookSecret, environment: env.ENVIRONMENT });
+    if (problem) return problem;
+    if (!secretKey || !webhookSecret) return { kind: "off", reason: "stripe_key_missing" };
+    return { kind: "stripe", secretKey, webhookSecret };
+  }
   return { kind: "refused", reason: "unknown_provider" };
 }
 
@@ -41,6 +71,16 @@ type DbSource = Kysely<Database> | (() => Kysely<Database>);
 
 /** The configured provider, or null when payments are off. */
 export function paymentProvider(env: Bindings, db: DbSource): PaymentProvider | null {
+  const settings = paymentSettings(env);
+  if (settings.kind === "stripe") {
+    // No fetch and no API base are passed: a deployment speaks only to
+    // https://api.stripe.com. The constructor refuses production again.
+    return createStripePaymentProvider({
+      secretKey: settings.secretKey,
+      webhookSecret: settings.webhookSecret,
+      environment: env.ENVIRONMENT,
+    });
+  }
   return fakeProvider(env, db);
 }
 
