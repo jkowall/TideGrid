@@ -689,6 +689,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         waiver_deliveries: ["INSERT", "SELECT"],
         waiver_signing_sessions: ["INSERT", "SELECT"],
         waiver_evidence: ["INSERT", "SELECT"],
+        // Sweep fairness (0013): one stamp per tenant and sweep.
+        sweep_turns: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -739,6 +741,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // signing session is revoked once. Triggers stamp every time.
         waiver_requests: ["revoked_reason", "state", "superseded_by"],
         waiver_signing_sessions: ["revoked_at", "revoked_reason"],
+        // Sweep fairness (0013): a turn moves the stamp's time and run id only.
+        sweep_turns: ["last_turn_at", "run_id"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

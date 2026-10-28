@@ -36,6 +36,64 @@ describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
     }
   }, 60_000);
 
+  // Sweep fairness (0013) replaces the four sweep list functions in place.
+  it("keeps the sweep list functions' signatures, grants, and definer settings after 0013", async () => {
+    const sql = postgres(url as string, { max: 1, prepare: false });
+    try {
+      const [applied] = await sql<{ ok: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE name = '0013_sweep_fairness.sql') AS ok`;
+      expect(applied?.ok).toBe(true);
+      const rows = await sql<
+        {
+          name: string;
+          args: string;
+          result: string;
+          volatility: string;
+          definer: boolean;
+          config: string[];
+          runtime: boolean;
+          public_execute: boolean;
+          reads_stamps: boolean;
+        }[]
+      >`
+        SELECT p.proname AS name,
+               pg_get_function_identity_arguments(p.oid) AS args,
+               pg_get_function_result(p.oid) AS result,
+               p.provolatile::text AS volatility,
+               p.prosecdef AS definer,
+               p.proconfig AS config,
+               has_function_privilege('tidegrid_app', p.oid, 'EXECUTE') AS runtime,
+               EXISTS (SELECT 1 FROM aclexplode(p.proacl) x WHERE x.grantee = 0) AS public_execute,
+               p.prosrc LIKE '%public.sweep_turns%' AS reads_stamps
+          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'app'
+           AND p.proname IN ('capacity_hold_sweep_tenants', 'checkout_sweep_tenants',
+                             'email_delivery_tenants', 'hostname_sweep_tenants')
+         ORDER BY p.proname`;
+      const common = {
+        result: "TABLE(tenant_id uuid)",
+        volatility: "s",
+        definer: true,
+        config: ["search_path=pg_catalog, pg_temp"],
+        runtime: true,
+        public_execute: false,
+        reads_stamps: true,
+      };
+      expect(rows.map((r) => ({ ...r }))).toEqual([
+        { name: "capacity_hold_sweep_tenants", args: "p_limit integer", ...common },
+        {
+          name: "checkout_sweep_tenants",
+          args: "p_limit integer, p_grace_seconds integer",
+          ...common,
+        },
+        { name: "email_delivery_tenants", args: "p_limit integer", ...common },
+        { name: "hostname_sweep_tenants", args: "p_limit integer", ...common },
+      ]);
+    } finally {
+      await sql.end();
+    }
+  }, 30_000);
+
   it("rejects a changed checksum on an applied migration", async () => {
     const files = await loadMigrations();
     const tampered = files.map((f, i) => (i === 0 ? { ...f, checksum: "0".repeat(64) } : f));
