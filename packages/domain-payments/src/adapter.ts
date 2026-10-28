@@ -86,7 +86,10 @@ export interface VerifiedProviderEvent {
     readonly currency: string;
     readonly clientReference: string | null;
   } | null;
-  /** SHA-256 of the raw body, hex. */
+  /**
+   * SHA-256, hex, of the raw body for the fake; for Stripe, a canonical
+   * projection that leaves out per-delivery fields.
+   */
   readonly payloadSha256: string;
   readonly [verified]: true;
 }
