@@ -389,7 +389,7 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         update public.bookings
            set confirmed_at = (select confirmed_at from public.bookings
                                 where id = ${idsA["Luis Fernández"] ?? ""})
-         where tenant_id = ${A.id} and id = ${idsA["JO SMITHERS"] ?? ""}
+         where tenant_id = ${A.id} and id = ${idsA["jo smith"] ?? ""}
         returning id`;
       if (tied.length !== 1) throw new Error("no booking to tie");
     });
