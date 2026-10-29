@@ -180,9 +180,10 @@ function detailRows(root: Node): number {
   );
 }
 
-/** Which of the search's statements this is. */
-function labelOf(text: string): "cursor" | "count" | "page" | "context" {
+/** Which of the search's statements this is: today's one statement, or one of b6d0247's three. */
+function labelOf(text: string): "search" | "cursor" | "count" | "page" | "context" {
   if (!/from bookings b\b/.test(text)) return "context";
+  if (text.includes("as materialized")) return "search";
   if (text.includes("count(*)")) return "count";
   if (text.includes("order by")) return "page";
   return "cursor";

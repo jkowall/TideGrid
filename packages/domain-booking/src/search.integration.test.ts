@@ -18,10 +18,11 @@
  * level of the order, canceled and staff-assisted bookings, and both roles.
  * Any later search change must pass it. Two tenants throughout.
  *
- * The plan test: as the runtime, under custom and generic plans, the page's
- * one Limit over the matching bookings reads only the matching tables, and no
- * detail join sits under it. Finance's statements never name the checkout,
- * and every join names its tenant.
+ * The plan test: search is one statement. As the runtime, under custom and
+ * generic plans, the matches are collected once (CTE m) from the matching
+ * tables only, with no detail join among them, and the Limit that picks the
+ * page reads those matches with no detail join under it. Finance's statement
+ * never names the checkout, and every join names its tenant.
  */
 
 import { randomUUID } from "node:crypto";
@@ -70,6 +71,8 @@ interface PlanNode {
   "Index Name"?: string;
   "Relation Name"?: string;
   Alias?: string;
+  "Subplan Name"?: string;
+  "CTE Name"?: string;
   Plans?: PlanNode[];
 }
 
@@ -78,28 +81,47 @@ function subtree(node: PlanNode): PlanNode[] {
   return [node, ...(node.Plans ?? []).flatMap(subtree)];
 }
 
-/** The page's detail aliases: none may sit under the Limit that picks its bookings. */
+/** The page's detail aliases: none may be read among the matches or under the page's Limit. */
 const detailAliases = ["b1", "t1", "s1", "p", "bt", "o", "pay", "r1"];
 
 /**
- * The Limit over the matching bookings (alias b): how many there are, which
- * tables it reads, and which detail aliases sit under it.
+ * Where a plan reads the matches: the CTE m that collects them, the tables
+ * and aliases inside it, any matching scan (alias b) outside it, and the
+ * Limits over a scan of m with any detail alias under them.
  */
-function matchingLimit(plan: PlanNode) {
-  const limits = subtree(plan).filter(
-    (n) => n["Node Type"] === "Limit" && subtree(n).some((c) => c.Alias === "b"),
+function matchingShape(plan: PlanNode) {
+  const all = subtree(plan);
+  const ctes = all.filter((n) => n["Subplan Name"] === "CTE m");
+  const inside = ctes.length === 1 && ctes[0] ? subtree(ctes[0]) : [];
+  const limits = all.filter(
+    (n) =>
+      n["Node Type"] === "Limit" &&
+      subtree(n).some((c) => c["Node Type"] === "CTE Scan" && c["CTE Name"] === "m"),
   );
-  const under = limits.length === 1 && limits[0] ? subtree(limits[0]) : [];
+  const details = (nodes: PlanNode[]) =>
+    nodes.flatMap((n) => (n.Alias && detailAliases.includes(n.Alias) ? n.Alias : []));
   return {
-    limits: limits.length,
-    relations: [...new Set(under.flatMap((n) => n["Relation Name"] ?? []))].sort(),
-    detailAliases: under.flatMap((n) =>
-      n.Alias && detailAliases.includes(n.Alias) ? n.Alias : [],
-    ),
+    ctes: ctes.length,
+    relations: [...new Set(inside.flatMap((n) => n["Relation Name"] ?? []))].sort(),
+    detailsAmongMatches: details(inside),
+    matchingScansOutside: all.filter((n) => n.Alias === "b" && !inside.includes(n)).length,
+    limitsOverMatches: limits.length > 0,
+    detailsUnderLimit: details(limits.flatMap(subtree)),
   };
 }
 
-/** Joins and scans in a statement's text that do not name their alias's tenant. */
+const tenantTables = [
+  "bookings",
+  "scheduled_trips",
+  "checkout_sessions",
+  "products",
+  "boats",
+  "orders",
+  "payments",
+  "payment_refunds",
+];
+
+/** Joins and scans of tenant tables in a statement's text that do not name their alias's tenant. */
 function untenanted(text: string): { joins: number; problems: string[] } {
   const problems: string[] = [];
   let joins = 0;
@@ -108,7 +130,9 @@ function untenanted(text: string): { joins: number; problems: string[] } {
     if (m[3] !== `${m[2]}.tenant_id`) problems.push(m[0]);
   }
   for (const m of text.matchAll(/\bfrom\s+(\w+)\s+(\w+)\b/g)) {
-    if (!text.includes(`${m[2]}.tenant_id = `)) problems.push(m[0]);
+    if (tenantTables.includes(m[1] ?? "") && !text.includes(`${m[2]}.tenant_id = `)) {
+      problems.push(m[0]);
+    }
   }
   return { joins, problems };
 }
@@ -820,7 +844,7 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     });
   }
 
-  it("limits the matching bookings before any detail join, in custom and generic plans", async () => {
+  it("collects the matches once and limits them before any detail join, in custom and generic plans", async () => {
     const gmail = await reference(A.id, "gmail", true);
     const everyDay = await reference(A.id, undefined, false, { from: days.first });
     const prefix = references[0]?.slice(0, 4) ?? "";
@@ -836,8 +860,9 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       const { found, captured } = await capture(A.id, query);
       // A fragment that matches, so the planner cannot fold the page away.
       expect(found.kind === "ok" && found.total).toBeGreaterThan(0);
+      // One statement: the count, the cursor check, and the page.
       const search = captured.filter((s) => /from bookings b\b/.test(s.sql));
-      expect(search).toHaveLength(query.after === undefined ? 2 : 3);
+      expect(search).toHaveLength(1);
       // Finance never names the checkout, in any statement, with or without a cursor.
       if (!query.withBooker) {
         expect(captured.filter((s) => s.sql.includes("checkout_sessions"))).toEqual([]);
@@ -847,18 +872,19 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         expect({ query, problems: named.problems }).toEqual({ query, problems: [] });
         expect(named.joins).toBeGreaterThan(0);
       }
-      const page = search.filter((s) => s.sql.includes("order by"));
-      expect(page).toHaveLength(1);
       for (const mode of ["custom", "generic"] as const) {
-        const plan = await planOf(A.id, page[0] ?? { sql: "", parameters: [] }, mode);
-        expect({ query, mode, ...matchingLimit(plan) }).toEqual({
+        const plan = await planOf(A.id, search[0] ?? { sql: "", parameters: [] }, mode);
+        expect({ query, mode, ...matchingShape(plan) }).toEqual({
           query,
           mode,
-          limits: 1,
+          ctes: 1,
           relations: query.withBooker
             ? ["bookings", "checkout_sessions", "scheduled_trips"]
             : ["bookings", "scheduled_trips"],
-          detailAliases: [],
+          detailsAmongMatches: [],
+          matchingScansOutside: 0,
+          limitsOverMatches: true,
+          detailsUnderLimit: [],
         });
         // The details are read, above that Limit.
         const aliases = subtree(plan).map((n) => n.Alias);

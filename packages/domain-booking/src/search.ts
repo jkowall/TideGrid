@@ -149,19 +149,27 @@ function textCondition(q: string, withBooker: boolean): RawBuilder<unknown> {
   return parts.length === 0 ? sql`false` : sql`(${sql.join(parts, sql` or `)})`;
 }
 
+/** The one statement's row: the count and the cursor check, and a page row's details or nulls. */
+interface StatementRow extends Partial<SearchRow> {
+  matched: number;
+  cursor_found?: boolean;
+}
+
 /**
  * Bookings that match, by departure, trip, and confirmation, a page at a
  * time, with how many match in all. The cursor is the previous page's last
  * booking id and must name a booking this search finds. Run it in one
- * snapshot (`snapshotRead`) so the count and the page agree.
+ * snapshot (`snapshotRead`).
  *
- * The page orders and limits the matching booking ids first, in a subquery
- * over the same tables and condition as the count, and only then reads the
- * product, boat, order, payment, refund, and booker of those few rows. A
- * subquery with a LIMIT is never merged into its parent, so no detail join
- * runs for a match the page drops. Every detail join finds exactly one row
- * (each key is NOT NULL with a foreign key, and no role deletes these rows),
- * so the page keeps every booking the subquery chose.
+ * One statement makes one pass over the tenant's bookings: it collects the
+ * matches once (`m`, materialized), counts them, checks the cursor among
+ * them, and orders and limits them to the page before it reads any detail.
+ * Then, for each of those at most limit + 1 rows, it reads the product,
+ * boat, order, payment, latest refund, and booker by key. Every detail join
+ * finds exactly one row (each key is NOT NULL with a foreign key, row-level
+ * security shows a tenant all of its own rows, and no role deletes them), so
+ * the page keeps every booking the limit chose, and the count and the page
+ * come from the same matches.
  */
 export async function searchBookings(
   trx: TenantTransaction,
@@ -183,69 +191,81 @@ export async function searchBookings(
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
       ${bookerJoin}`;
 
-  if (query.after !== undefined) {
-    if (!isUuid(query.after)) return { kind: "cursor_invalid" };
-    const { rows: found } = await sql<{ id: string }>`
-      select b.id ${from}
-       where ${where} and b.id = ${query.after}::uuid`.execute(trx);
-    if (!found[0]) return { kind: "cursor_invalid" };
-  }
-
-  const { rows: counted } = await sql<{ n: number }>`
-    select count(*)::int as n ${from} where ${where}`.execute(trx);
-
-  const cursor =
-    query.after === undefined
+  const { after } = query;
+  if (after !== undefined && !isUuid(after)) return { kind: "cursor_invalid" };
+  // With a cursor: whether it is among the matches, and the page after its keys.
+  const cursorCheck: RawBuilder<unknown> =
+    after === undefined
       ? sql``
-      : sql`and (t.starts_at, t.id, b.confirmed_at, b.id) > (
+      : sql`, c as (select exists (select 1 from m where m.id = ${after}::uuid) as cursor_found)`;
+  const cursorJoin: RawBuilder<unknown> = after === undefined ? sql`` : sql`cross join c`;
+  const cursorColumn: RawBuilder<unknown> = after === undefined ? sql`` : sql`, c.cursor_found`;
+  const cursor: RawBuilder<unknown> =
+    after === undefined
+      ? sql``
+      : sql`where (m.starts_at, m.trip_id, m.confirmed_at, m.id) > (
               select t2.starts_at, t2.id, b2.confirmed_at, b2.id
                 from bookings b2
                 join scheduled_trips t2 on t2.tenant_id = b2.tenant_id and t2.id = b2.trip_id
-               where b2.tenant_id = ${tenantId} and b2.id = ${query.after}::uuid)`;
-  // The page's own scope reads the booker through its own alias, s1; the
-  // matching subquery's s is not visible there. Finance joins neither.
+               where b2.tenant_id = ${tenantId} and b2.id = ${after}::uuid)`;
+  // The details' own scope reads the booker through its own alias, s1.
   const bookerColumns: RawBuilder<unknown> = withBooker
     ? sql`, s1.booker_name, s1.booker_email`
     : sql``;
-  const pageBookerJoin: RawBuilder<unknown> = withBooker
+  const detailBookerJoin: RawBuilder<unknown> = withBooker
     ? sql`join checkout_sessions s1 on s1.tenant_id = b1.tenant_id and s1.id = b1.checkout_session_id`
     : sql``;
-  const { rows } = await sql<SearchRow>`
-    select b1.id, b1.reference, b1.state, b1.source, b1.confirmed_at, b1.party_size,
-           t1.id as trip_id, p.name as product_name, p.kind as product_kind,
-           bt.name as boat_name, t1.time_zone,
-           to_char(t1.local_date, 'YYYY-MM-DD') as local_date,
-           to_char(t1.local_start_time, 'HH24:MI') as local_start_time,
-           t1.starts_at, t1.sales_state,
-           o.total_amount, pay.state as payment_state,
-           r.state as refund_state, r.amount as refund_amount
-           ${bookerColumns}
-      from (
-        -- The page's bookings, ordered and limited before any detail is read.
-        select b.id, t.starts_at, t.id as trip_id, b.confirmed_at
-          ${from}
-         where ${where}
-           ${cursor}
-         order by t.starts_at, t.id, b.confirmed_at, b.id
-         limit ${query.limit + 1}
-      ) m
-      join bookings b1 on b1.tenant_id = ${tenantId} and b1.id = m.id
-      join scheduled_trips t1 on t1.tenant_id = b1.tenant_id and t1.id = b1.trip_id
-      ${pageBookerJoin}
-      join products p on p.tenant_id = t1.tenant_id and p.id = t1.product_id
-      join boats bt on bt.tenant_id = t1.tenant_id and bt.id = t1.boat_id
-      join orders o on o.tenant_id = b1.tenant_id and o.id = b1.order_id
-      join payments pay on pay.tenant_id = b1.tenant_id and pay.id = b1.payment_id
-      -- The latest refund only, so a payment refunded in parts never repeats its booking.
-      left join lateral (
-        select r1.state, r1.amount from payment_refunds r1
-         where r1.tenant_id = b1.tenant_id and r1.payment_id = b1.payment_id
-         order by r1.created_at desc, r1.id desc
-         limit 1
-      ) r on true
-     -- A join keeps no order, so the page sorts its few rows again by the same keys.
-     order by m.starts_at, m.trip_id, m.confirmed_at, m.id`.execute(trx);
+  const { rows: statementRows } = await sql<StatementRow>`
+    with m as materialized (
+      select b.id, t.starts_at, t.id as trip_id, b.confirmed_at
+        ${from}
+       where ${where}
+    ),
+    n as (select count(*)::int as matched from m)
+    ${cursorCheck},
+    pg as (
+      select m.id, m.starts_at, m.trip_id, m.confirmed_at from m
+       ${cursor}
+       order by m.starts_at, m.trip_id, m.confirmed_at, m.id
+       limit ${query.limit + 1}
+    )
+    select n.matched ${cursorColumn}, d.*
+      from n ${cursorJoin}
+      -- With an empty page this is one row of nulls beside the count.
+      left join (
+        pg cross join lateral (
+          -- One page row's details, each found by key.
+          select b1.id, b1.reference, b1.state, b1.source, b1.confirmed_at, b1.party_size,
+                 t1.id as trip_id, p.name as product_name, p.kind as product_kind,
+                 bt.name as boat_name, t1.time_zone,
+                 to_char(t1.local_date, 'YYYY-MM-DD') as local_date,
+                 to_char(t1.local_start_time, 'HH24:MI') as local_start_time,
+                 t1.starts_at, t1.sales_state,
+                 o.total_amount, pay.state as payment_state,
+                 r.state as refund_state, r.amount as refund_amount
+                 ${bookerColumns}
+            from bookings b1
+            join scheduled_trips t1 on t1.tenant_id = b1.tenant_id and t1.id = b1.trip_id
+            ${detailBookerJoin}
+            join products p on p.tenant_id = t1.tenant_id and p.id = t1.product_id
+            join boats bt on bt.tenant_id = t1.tenant_id and bt.id = t1.boat_id
+            join orders o on o.tenant_id = b1.tenant_id and o.id = b1.order_id
+            join payments pay on pay.tenant_id = b1.tenant_id and pay.id = b1.payment_id
+            -- The latest refund only, so a payment refunded in parts never repeats its booking.
+            left join lateral (
+              select r1.state, r1.amount from payment_refunds r1
+               where r1.tenant_id = b1.tenant_id and r1.payment_id = b1.payment_id
+               order by r1.created_at desc, r1.id desc
+               limit 1
+            ) r on true
+           where b1.tenant_id = ${tenantId} and b1.id = pg.id
+        ) d
+      ) on true
+     order by pg.starts_at, pg.trip_id, pg.confirmed_at, pg.id`.execute(trx);
 
+  const head = statementRows[0];
+  if (after !== undefined && head?.cursor_found !== true) return { kind: "cursor_invalid" };
+  const rows = statementRows.filter((r): r is StatementRow & SearchRow => typeof r.id === "string");
   const page = rows.slice(0, query.limit);
   return {
     kind: "ok",
@@ -280,7 +300,7 @@ export async function searchBookings(
             : null,
       },
     })),
-    total: counted[0]?.n ?? 0,
+    total: head?.matched ?? 0,
     nextAfter: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
     matchedOn: query.q === undefined ? [] : searchFields(withBooker),
   };
