@@ -191,5 +191,7 @@ export * from "./participants.ts";
 export * from "./pricing.ts";
 export * from "./references.ts";
 export * from "./self-service.ts";
+// Staff-assisted booking (G2.12d).
+export * from "./staff-booking.ts";
 // Waiver evidence (G2.15).
 export * from "./waivers.ts";

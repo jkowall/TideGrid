@@ -2,7 +2,12 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadMigrations } from "./migrate.ts";
+import {
+  defaultMigrationTimeouts,
+  loadMigrations,
+  migrationTimeouts,
+  timeoutStatements,
+} from "./migrate.ts";
 
 describe("migration files", () => {
   it("are named NNNN_description.sql, ordered, and unique", async () => {
@@ -41,5 +46,35 @@ describe("migration loader strictness", () => {
     const dir = await dirWith(["0001_ok.sql", "0002_also_ok.sql"]);
     const files = await loadMigrations(dir);
     expect(files.map((f) => f.name)).toEqual(["0001_ok.sql", "0002_also_ok.sql"]);
+  });
+});
+
+describe("per-file timeouts (08: lock and statement timeouts for migrations)", () => {
+  it("default to 5 s for locks and 120 s per statement", () => {
+    expect(migrationTimeouts({})).toEqual({ lockTimeoutMs: 5_000, statementTimeoutMs: 120_000 });
+    expect(defaultMigrationTimeouts).toEqual(migrationTimeouts({}));
+  });
+
+  it("take overrides from the environment", () => {
+    expect(
+      migrationTimeouts({
+        TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS: "2500",
+        TIDEGRID_MIGRATE_STATEMENT_TIMEOUT_MS: "600000",
+      }),
+    ).toEqual({ lockTimeoutMs: 2_500, statementTimeoutMs: 600_000 });
+  });
+
+  it("refuse anything but a whole number of milliseconds", () => {
+    for (const bad of ["5s", "-1", "0", "99", "1.5", "1e4", " 5000", "99999999"]) {
+      expect(() => migrationTimeouts({ TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS: bad })).toThrow(
+        /TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS/,
+      );
+    }
+  });
+
+  it("open each file's transaction with SET LOCAL, so they end with it", () => {
+    expect(timeoutStatements({ lockTimeoutMs: 5_000, statementTimeoutMs: 120_000 })).toBe(
+      "SET LOCAL lock_timeout = 5000; SET LOCAL statement_timeout = 120000",
+    );
   });
 });

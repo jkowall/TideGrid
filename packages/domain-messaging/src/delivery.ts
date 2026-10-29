@@ -25,9 +25,25 @@
  *    failure, with a backoff; or failed.
  *
  * A crash after the provider accepted and before step 3 leaves the message
- * sending; once its lease lapses a later run claims it again and sends with
- * the same key, and the provider answers with the first email. That attempt
- * issues a new token that the provider never sends, which simply expires.
+ * sending. What happens once its lease lapses depends on the provider
+ * (`EmailProvider.deduplicates`, G2.16a):
+ *
+ * - A provider that deduplicates (the fake): a later run claims it again and
+ *   sends with the same key, and the provider answers with the first email.
+ *   That attempt issues a new token that the provider never sends, which
+ *   simply expires. An unknown outcome is retried the same way.
+ * - A provider that does not (Cloudflare): at most once. The lapsed message
+ *   fails as `outcome_unknown` without another send, and so does an attempt
+ *   whose outcome is unknown (a timeout, an internal error, a throw that is
+ *   not the provider's answer). A copy that did go out keeps its link, the
+ *   message's only one. Only a temporary failure the provider says was not
+ *   sent is retried. Staff resend (G2.16b) and a guest's request for a new
+ *   link are the recovery.
+ *
+ * An account-level fault (`scope: "account"`) stops the run after that
+ * message, and stops the sweep: every other email would meet it too. A run
+ * with a `deadline` claims a message only while the provider's send bound
+ * and a margin still fit before it.
  *
  * A message canceled while an attempt is under way (`cancelMessage`) loses
  * its links at once; the attempt's email may still arrive, with a link that
@@ -37,6 +53,8 @@ import {
   type AccessRevocationReason,
   type Database,
   inTenantTransaction,
+  recordSweepTurn,
+  runFairSweep,
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
@@ -56,6 +74,19 @@ export const MAX_DELIVERY_ATTEMPTS = 6;
 /** Seconds before attempt n + 1, after attempt n failed temporarily. */
 export const RETRY_BACKOFF_SECONDS = [60, 300, 900, 3600, 14_400] as const;
 export const DEFAULT_LEASE_SECONDS = 120;
+/** Room a deadline keeps beyond one send's bound, for the claim and the record. */
+export const DEADLINE_MARGIN_MS = 2_000;
+/** Why a message whose outcome nobody knows fails on a provider that does not deduplicate. */
+export const OUTCOME_UNKNOWN = "outcome_unknown";
+
+/**
+ * Whether a repeat with the same key is safe on this provider: only when it
+ * says so. Unset means it does not, so a provider that forgets the flag gets
+ * at-most-once delivery, never a second copy (review note S2).
+ */
+export function providerDeduplicates(provider: Pick<EmailProvider, "deduplicates">): boolean {
+  return provider.deduplicates === true;
+}
 /** The default guest-site origin for a tenant: its preview hostname. */
 export const DEFAULT_GUEST_LINK_ORIGIN = "https://{slug}.book.tidegrid.us";
 
@@ -83,10 +114,21 @@ export interface DeliveryOptions {
   leaseSeconds?: number;
   /**
    * A send failed with something other than a provider's answer: a bug, or an
-   * outcome nobody knows. The message is retried with its key like an outage;
-   * this is for the log.
+   * outcome nobody knows. On a provider that deduplicates, the message is
+   * retried with its key like an outage; on one that does not, it fails as
+   * `outcome_unknown`. This is for the log.
    */
   onSendError?: (messageId: string, error: unknown) => void;
+  /**
+   * A wall-clock instant (epoch ms) by which every attempt of this run must
+   * be over, such as the end of a request's `waitUntil` budget (G2.16a). A
+   * new message is claimed only while there is room for the provider's
+   * `sendTimeoutMs` and a margin before it. Unset, the run is bounded by
+   * `limit` alone.
+   */
+  deadline?: number;
+  /** The wall clock the deadline is read with; tests pin it. */
+  clock?: () => number;
 }
 
 export type DeliveryOutcome =
@@ -110,6 +152,9 @@ export interface DeliveryItem {
   code: string | null;
 }
 
+/** Why a run stopped before it ran out of due messages or its limit, or null. */
+export type DeliveryStop = "deadline" | "account_fault";
+
 export interface TenantDeliveryReport {
   claimed: number;
   sent: number;
@@ -118,6 +163,7 @@ export interface TenantDeliveryReport {
   canceled: number;
   superseded: number;
   items: DeliveryItem[];
+  stopped: DeliveryStop | null;
 }
 
 interface ClaimedRow {
@@ -266,6 +312,19 @@ async function claimOne(
         } as const;
       }
     }
+    if (found.state === "sending" && !providerDeduplicates(options.provider)) {
+      // A lapsed lease: the attempt crashed or was canceled, maybe after the
+      // provider accepted. Without deduplication another send could deliver
+      // a second copy with a second working link, so it ends here, unsent
+      // again (at most once). Its link, if the copy went out, keeps working.
+      await fail(trx, ctx, found.id, found.attempts, OUTCOME_UNKNOWN);
+      return {
+        kind: "failed",
+        messageId: found.id,
+        attempt: found.attempts,
+        code: OUTCOME_UNKNOWN,
+      } as const;
+    }
     const { rows: claimed } = await sql<{ attempts: number }>`
       update email_messages
          set state = 'sending', attempts = attempts + 1,
@@ -366,27 +425,52 @@ export async function deliverTenantMessages(
   tenantId: string,
   options: DeliveryOptions,
 ): Promise<TenantDeliveryReport> {
+  deliveryLimit(options);
+  return deliverWithOrigin(db, tenantId, options, await tenantOrigin(db, tenantId, options));
+}
+
+function deliveryLimit(options: Pick<DeliveryOptions, "limit">): number {
   const limit = options.limit ?? 25;
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
     throw new RangeError("limit is a whole number from 1 to 500");
   }
-  const ctx: TenantContext = {
-    tenantId,
-    actorType: "system",
-    actorId: "email-delivery",
-    requestId: options.runId,
-  };
-  // Where links point, resolved once and before any claim: a claim's
-  // transaction holds the connection, and a Worker's pool has only one.
+  return limit;
+}
+
+function deliveryContext(tenantId: string, options: Pick<DeliveryOptions, "runId">): TenantContext {
+  return { tenantId, actorType: "system", actorId: "email-delivery", requestId: options.runId };
+}
+
+/**
+ * Where a tenant's links point, resolved before any claim: a claim's
+ * transaction holds the connection, and a Worker's pool has only one. The
+ * sweep resolves it once a tenant a run and reuses it across that tenant's
+ * turns.
+ */
+async function tenantOrigin(
+  db: Kysely<Database>,
+  tenantId: string,
+  options: DeliveryOptions,
+): Promise<string | null> {
   const template = options.guestLinkOrigin ?? DEFAULT_GUEST_LINK_ORIGIN;
-  const slug = await inTenantTransaction(db, ctx, async (trx) => {
+  const slug = await inTenantTransaction(db, deliveryContext(tenantId, options), async (trx) => {
     const { rows } = await sql<{ slug: string }>`
       select slug from tenants where id = ${tenantId}`.execute(trx);
     return rows[0]?.slug ?? null;
   });
-  const origin = slug
+  return slug
     ? await guestOriginFor(db, tenantId, slug, template, deliveryEnvironment(options))
     : null;
+}
+
+async function deliverWithOrigin(
+  db: Kysely<Database>,
+  tenantId: string,
+  options: DeliveryOptions,
+  origin: string | null,
+): Promise<TenantDeliveryReport> {
+  const limit = deliveryLimit(options);
+  const ctx = deliveryContext(tenantId, options);
 
   const report: TenantDeliveryReport = {
     claimed: 0,
@@ -396,8 +480,15 @@ export async function deliverTenantMessages(
     canceled: 0,
     superseded: 0,
     items: [],
+    stopped: null,
   };
+  const clock = options.clock ?? Date.now;
+  const reserve = (options.provider.sendTimeoutMs ?? 0) + DEADLINE_MARGIN_MS;
   for (let i = 0; i < limit; i++) {
+    if (options.deadline !== undefined && clock() + reserve >= options.deadline) {
+      report.stopped = "deadline";
+      break;
+    }
     const claimed = await claimOne(db, ctx, options, origin);
     if (claimed.kind === "none") break;
     report.claimed += 1;
@@ -415,12 +506,16 @@ export async function deliverTenantMessages(
         | { kind: "sent"; providerMessageId: string }
         | { kind: "retry"; code: string }
         | { kind: "failed"; code: string };
+      let accountFault = false;
+      // Whether the provider was called at all: a throw before it is a known
+      // "not sent" on every provider (review note F2).
+      let attempted = false;
       try {
         const html =
           row.link_slot && url ? fillLinkSlot(row.html_body, row.link_slot, url) : row.html_body;
         const text =
           row.link_slot && url ? fillLinkSlot(row.text_body, row.link_slot, url) : row.text_body;
-        const sent = await options.provider.send({
+        const email = {
           idempotencyKey: row.id,
           tenantId,
           from: { email: options.fromAddress, name: row.from_name },
@@ -429,20 +524,35 @@ export async function deliverTenantMessages(
           subject: row.subject,
           html,
           text,
-        });
+        };
+        attempted = true;
+        const sent = await options.provider.send(email);
         result = { kind: "sent", providerMessageId: sent.providerMessageId };
       } catch (error) {
+        const dedupes = providerDeduplicates(options.provider);
         if (error instanceof EmailProviderRejectedError) {
           result = { kind: "failed", code: error.code };
         } else if (error instanceof EmailProviderUnavailableError) {
-          result = { kind: "retry", code: error.code };
+          accountFault = error.scope === "account";
+          // Retried with the same key when the provider deduplicates, or when
+          // it said the email was not sent; otherwise never repeated (D1 B).
+          result =
+            dedupes || error.outcome === "not_sent"
+              ? { kind: "retry", code: error.code }
+              : { kind: "failed", code: OUTCOME_UNKNOWN };
         } else {
-          // An unknown outcome: retry with the same key, as for an outage.
+          // Not the provider's answer. Before the call, nothing was sent, so
+          // it retries anywhere; after it, nobody knows, so it retries with
+          // the same key only where a repeat is safe.
           options.onSendError?.(row.id, error);
-          result = { kind: "retry", code: "send_error" };
+          result =
+            !attempted || dedupes
+              ? { kind: "retry", code: "send_error" }
+              : { kind: "failed", code: OUTCOME_UNKNOWN };
         }
       }
       item = await record(db, ctx, row, result);
+      if (accountFault) report.stopped = "account_fault";
     }
     report.items.push(item);
     if (item.outcome === "sent") report.sent += 1;
@@ -450,17 +560,32 @@ export async function deliverTenantMessages(
     else if (item.outcome === "failed") report.failed += 1;
     else if (item.outcome === "canceled") report.canceled += 1;
     else report.superseded += 1;
+    // Every other email would meet the same account-level fault now (D2 B).
+    if (report.stopped === "account_fault") break;
   }
   return report;
 }
 
 export interface EmailSweepOptions extends DeliveryOptions {
   tenantLimit?: number;
-  /** Stop starting tenants after this long. */
+  /**
+   * No tenant's turn starts after this long, and no message is claimed
+   * unless its send fits before it: the sweep passes deliverTenantMessages a
+   * deadline of the run's start plus the budget, or the caller's deadline if
+   * that is earlier (D9 B).
+   */
   budgetMs?: number;
+  /** Messages a tenant's turn may send; `limit` (25 by default) stays the cap for its run. */
+  turnMessages?: number;
   /** One tenant's run failed; the sweep moves on. */
   onTenantError?: (tenantId: string, error: unknown) => void;
-  clock?: () => number;
+  /**
+   * A turn's stamp failed; the turn still runs. Without it, onTenantError
+   * hears the failure. Either way it counts in stampFailures, not failedTenants.
+   */
+  onStampError?: (tenantId: string, error: unknown) => void;
+  /** Called as each tenant's turn starts, for tests and logs. */
+  onTurnStart?: (tenantId: string, pass: number) => void;
 }
 
 export interface EmailSweepReport {
@@ -473,13 +598,54 @@ export interface EmailSweepReport {
   superseded: number;
   failedTenants: number;
   complete: boolean;
+  /** An account-level provider fault stopped the sweep (G2.16a, D2). */
+  accountFault: boolean;
+  /** Tenant turns started. */
+  turns: number;
+  /** Passes over the tenants: the first gives each a quantum, later ones go round those with more. */
+  passes: number;
+  /** Tenants listed that the run left for the next one. */
+  deferredTenants: number;
+  /** Tenants whose stamp failed; each still took its turn. */
+  stampFailures: number;
+}
+
+export const DEFAULT_EMAIL_SWEEP_TURN_MESSAGES = 5;
+
+/**
+ * A sweep's two clocks (D9 B). `deadline` bounds every send: the caller's, or
+ * the run's start plus its budget if that is earlier. `budgetMs` is how long
+ * tenants' turns may start: until a claim, which reserves the provider's send
+ * bound and the margin, can no longer fit before the deadline. So the sweep
+ * never stamps or counts a tenant its turn could not send anything for.
+ */
+export function sweepWindow(input: {
+  started: number;
+  budgetMs: number;
+  deadline?: number | undefined;
+  sendTimeoutMs?: number | undefined;
+}): { deadline: number; budgetMs: number } {
+  const deadline = Math.min(
+    input.deadline ?? Number.POSITIVE_INFINITY,
+    input.started + input.budgetMs,
+  );
+  const reserve = (input.sendTimeoutMs ?? 0) + DEADLINE_MARGIN_MS;
+  return { deadline, budgetMs: Math.max(0, deadline - input.started - reserve) };
 }
 
 /**
  * The cron's delivery run: every tenant with due mail, as
- * `app.email_delivery_tenants` names them (tenant ids only), each in its own
- * transactions under row-level security. A tenant whose run fails is
- * reported and skipped; the next run retries it.
+ * `app.email_delivery_tenants` names them (tenant ids only, least recently
+ * served first since 0013), each in its own transactions under row-level
+ * security. Tenants take fair turns (`runFairSweep`, pre-pilot hardening item
+ * 5, Part C): a turn sends up to five messages, the first pass gives each
+ * listed tenant one turn, and later passes go round the tenants whose turn was
+ * full, up to `limit` messages a tenant a run. A tenant whose run fails is
+ * reported and skipped; the next run retries it. An account-level provider
+ * fault, or a run's deadline, ends the sweep (G2.16a). The deadline is the
+ * caller's, or the run's start plus its budget if that is earlier, so a run's
+ * sends end within its budget (D9 B), and no turn starts once a claim cannot
+ * fit before it (`sweepWindow`). A tenant's link origin is read once a run.
  */
 export async function sweepEmail(
   db: Kysely<Database>,
@@ -489,8 +655,21 @@ export async function sweepEmail(
   const started = clock();
   const budget = options.budgetMs ?? 20_000;
   const tenantLimit = options.tenantLimit ?? 100;
-  const { rows } = await sql<{ tenant_id: string }>`
-    select tenant_id from app.email_delivery_tenants(${tenantLimit})`.execute(db);
+  const perTenant = options.limit ?? 25;
+  if (!Number.isInteger(perTenant) || perTenant < 1 || perTenant > 500) {
+    throw new RangeError("limit is a whole number from 1 to 500");
+  }
+  const quantum = options.turnMessages ?? DEFAULT_EMAIL_SWEEP_TURN_MESSAGES;
+  if (!Number.isInteger(quantum) || quantum < 1 || quantum > 500) {
+    throw new RangeError("turnMessages is a whole number from 1 to 500");
+  }
+  const window = sweepWindow({
+    started,
+    budgetMs: budget,
+    deadline: options.deadline,
+    sendTimeoutMs: options.provider.sendTimeoutMs,
+  });
+  const deadline = window.deadline;
   const report: EmailSweepReport = {
     tenants: 0,
     claimed: 0,
@@ -500,27 +679,73 @@ export async function sweepEmail(
     canceled: 0,
     superseded: 0,
     failedTenants: 0,
-    complete: rows.length < tenantLimit,
+    complete: false,
+    accountFault: false,
+    turns: 0,
+    passes: 0,
+    deferredTenants: 0,
+    stampFailures: 0,
   };
-  for (const { tenant_id: tenantId } of rows) {
-    if (clock() - started >= budget) {
-      report.complete = false;
-      break;
-    }
-    report.tenants += 1;
-    try {
-      const done = await deliverTenantMessages(db, tenantId, options);
+  const claimedBy = new Map<string, number>();
+  /** Each tenant's link origin, resolved at its first turn and reused for the run. */
+  const origins = new Map<string, string | null>();
+  const contextOf = (tenantId: string): TenantContext => ({
+    tenantId,
+    actorType: "system",
+    actorId: "email-delivery",
+    requestId: options.runId,
+  });
+
+  const fair = await runFairSweep({
+    listTenants: async () => {
+      const { rows } = await sql<{ tenant_id: string }>`
+        select tenant_id from app.email_delivery_tenants(${tenantLimit})`.execute(db);
+      return rows.map((r) => r.tenant_id);
+    },
+    tenantLimit,
+    stamp: (tenantId) => recordSweepTurn(db, contextOf(tenantId), "email"),
+    turn: async (tenantId) => {
+      const before = claimedBy.get(tenantId) ?? 0;
+      const limit = Math.min(quantum, perTenant - before);
+      let origin = origins.get(tenantId);
+      if (origin === undefined) {
+        origin = await tenantOrigin(db, tenantId, options);
+        origins.set(tenantId, origin);
+      }
+      const done = await deliverWithOrigin(db, tenantId, { ...options, limit, deadline }, origin);
+      claimedBy.set(tenantId, before + done.claimed);
       report.claimed += done.claimed;
       report.sent += done.sent;
       report.retried += done.retried;
       report.failed += done.failed;
       report.canceled += done.canceled;
       report.superseded += done.superseded;
-    } catch (error) {
-      report.failedTenants += 1;
-      report.complete = false;
-      options.onTenantError?.(tenantId, error);
-    }
-  }
+      // An account-level fault meets every tenant alike (D2 B); a passed
+      // deadline leaves the rest to the next run.
+      if (done.stopped !== null) {
+        report.accountFault = done.stopped === "account_fault";
+        return { units: done.claimed, more: true, stop: true };
+      }
+      return {
+        units: done.claimed,
+        more: done.claimed === limit && before + done.claimed < perTenant,
+      };
+    },
+    budgetMs: window.budgetMs,
+    clock,
+    startedAt: started,
+    ...(options.onTurnStart ? { onTurnStart: options.onTurnStart } : {}),
+    onTenantError: (tenantId, error, during) => {
+      if (during === "stamp" && options.onStampError) options.onStampError(tenantId, error);
+      else options.onTenantError?.(tenantId, error);
+    },
+  });
+  report.tenants = fair.tenants;
+  report.failedTenants = fair.failedTenants;
+  report.complete = fair.complete;
+  report.turns = fair.turns;
+  report.passes = fair.passes;
+  report.deferredTenants = fair.deferredTenants;
+  report.stampFailures = fair.stampFailures;
   return report;
 }

@@ -5,6 +5,14 @@ import type { Database } from "./types.ts";
 
 export { type AuditEntry, recordAudit } from "./audit.ts";
 export {
+  DEFAULT_FAIR_SWEEP_MAX_PASSES,
+  type FairSweepOptions,
+  type FairSweepReport,
+  type FairTurnResult,
+  recordSweepTurn,
+  runFairSweep,
+} from "./fair-sweep.ts";
+export {
   type ClaimResult,
   canonicalJson,
   claimIdempotencyKey,

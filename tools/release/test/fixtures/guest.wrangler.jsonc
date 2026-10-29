@@ -1,0 +1,69 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tidegrid-guest",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-22",
+  // The current deployed URL stays until the G2.14b live step turns it off
+  // with the demo.tidegrid.us cutover (D9, a coordinator default pending owner
+  // confirmation).
+  "workers_dev": true,
+  // Preview subdomains, one Workers Custom Domain per synthetic tenant (D8(a),
+  // a coordinator default pending owner confirmation): Universal SSL covers
+  // only first-level subdomains, and a custom domain brings its own
+  // certificate. A test keeps this list equal to previewHostnameFor(slug) for
+  // every manifest in config/tenants. Not deployed until the live step.
+  "routes": [
+    { "pattern": "demo-harbor.book.tidegrid.us", "custom_domain": true },
+    { "pattern": "demo-reef.book.tidegrid.us", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // The Worker answers only the per-tenant PWA paths; everything else is the SPA.
+    "run_worker_first": ["/manifest.webmanifest", "/icons/*", "/sw.js"]
+  },
+  // The API's GuestGateway entrypoint: one typed method, resolveHost. It has
+  // no HTTP surface and never reaches a staff or sign-in route.
+  "services": [
+    { "binding": "GuestGateway", "service": "tidegrid-api", "entrypoint": "GuestGateway" }
+  ],
+  // Named environments inherit routes; an empty list keeps them off the
+  // preview hostnames. Bindings are not inherited, so each names its own.
+  "env": {
+    // Local development: `wrangler dev --env dev` beside the API's dev
+    // environment, which the dev registry names tidegrid-api-dev.
+    "dev": {
+      "routes": [],
+      "workers_dev": false,
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/manifest.webmanifest", "/icons/*", "/sw.js"]
+      },
+      "services": [
+        { "binding": "GuestGateway", "service": "tidegrid-api-dev", "entrypoint": "GuestGateway" }
+      ]
+    },
+    // The no-database browser checks: a stub gateway with two synthetic
+    // brands, a definite miss, and a host that throws (worker/stub-gateway.ts).
+    "test": {
+      "routes": [],
+      "workers_dev": false,
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/manifest.webmanifest", "/icons/*", "/sw.js"]
+      },
+      "services": [
+        {
+          "binding": "GuestGateway",
+          "service": "tidegrid-guest-stub-gateway-test",
+          "entrypoint": "GuestGateway"
+        }
+      ]
+    }
+  }
+}

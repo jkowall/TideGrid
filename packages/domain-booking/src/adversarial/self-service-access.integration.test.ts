@@ -106,6 +106,7 @@ describe.skipIf(!env)("adversarial: access links, guest sessions, and booking em
   /** A provider that accepts through the fake and then loses the answer, as a dropped connection would. */
   const losingAnswers = (): EmailProvider => ({
     name: "fake",
+    deduplicates: true,
     send: async (email) => {
       await world.mail.send(email);
       throw new Error("connection reset after the provider accepted");
@@ -863,6 +864,7 @@ describe.skipIf(!env)("adversarial: access links, guest sessions, and booking em
     );
     const unavailable: EmailProvider = {
       name: "fake",
+      deduplicates: true,
       send: async () => {
         throw new EmailProviderUnavailableError();
       },

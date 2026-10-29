@@ -156,3 +156,13 @@ describe("static files", () => {
     expect(icon).toContain('stroke="#a7d129"');
   });
 });
+
+describe("the new booking page's styles (G2.12d review UI-6)", () => {
+  const booking = readFileSync(new URL("./new-booking/new-booking.css", import.meta.url), "utf8");
+
+  it("draws no focus ring of its own, so its headings take the console's Tide Lime ring", () => {
+    // --focus-ring is the light surface's blue, under 3:1 on Harbor.
+    expect(booking).not.toContain("--focus-ring");
+    expect(booking).not.toMatch(/outline\s*:/);
+  });
+});

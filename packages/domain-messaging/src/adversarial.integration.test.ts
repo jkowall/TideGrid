@@ -189,6 +189,7 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
     const calls: string[] = [];
     const provider: EmailProvider = {
       name: "fake",
+      deduplicates: true,
       send: async (email) => {
         calls.push(email.idempotencyKey);
         return answer(email);
@@ -300,6 +301,7 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
       // The first run stalls before the provider answers; its lease lapses meanwhile.
       const stalling: EmailProvider = {
         name: "fake",
+        deduplicates: true,
         send: async (email) => {
           if (email.idempotencyKey !== messageId) return fake.send(email);
           entered.open();
@@ -336,6 +338,7 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
     // A run sends, then dies before recording: the message stays sending.
     const dying: EmailProvider = {
       name: "fake",
+      deduplicates: true,
       send: async (email) => {
         const accepted = await fake.send(email);
         if (email.idempotencyKey === messageId) {
