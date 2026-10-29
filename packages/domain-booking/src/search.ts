@@ -154,6 +154,14 @@ function textCondition(q: string, withBooker: boolean): RawBuilder<unknown> {
  * time, with how many match in all. The cursor is the previous page's last
  * booking id and must name a booking this search finds. Run it in one
  * snapshot (`snapshotRead`) so the count and the page agree.
+ *
+ * The page orders and limits the matching booking ids first, in a subquery
+ * over the same tables and condition as the count, and only then reads the
+ * product, boat, order, payment, refund, and booker of those few rows. A
+ * subquery with a LIMIT is never merged into its parent, so no detail join
+ * runs for a match the page drops. Every detail join finds exactly one row
+ * (each key is NOT NULL with a foreign key, and no role deletes these rows),
+ * so the page keeps every booking the subquery chose.
  */
 export async function searchBookings(
   trx: TenantTransaction,
@@ -194,35 +202,49 @@ export async function searchBookings(
                 from bookings b2
                 join scheduled_trips t2 on t2.tenant_id = b2.tenant_id and t2.id = b2.trip_id
                where b2.tenant_id = ${tenantId} and b2.id = ${query.after}::uuid)`;
+  // The page's own scope reads the booker through its own alias, s1; the
+  // matching subquery's s is not visible there. Finance joins neither.
   const bookerColumns: RawBuilder<unknown> = withBooker
-    ? sql`, s.booker_name, s.booker_email`
+    ? sql`, s1.booker_name, s1.booker_email`
+    : sql``;
+  const pageBookerJoin: RawBuilder<unknown> = withBooker
+    ? sql`join checkout_sessions s1 on s1.tenant_id = b1.tenant_id and s1.id = b1.checkout_session_id`
     : sql``;
   const { rows } = await sql<SearchRow>`
-    select b.id, b.reference, b.state, b.source, b.confirmed_at, b.party_size,
-           t.id as trip_id, p.name as product_name, p.kind as product_kind,
-           bt.name as boat_name, t.time_zone,
-           to_char(t.local_date, 'YYYY-MM-DD') as local_date,
-           to_char(t.local_start_time, 'HH24:MI') as local_start_time,
-           t.starts_at, t.sales_state,
+    select b1.id, b1.reference, b1.state, b1.source, b1.confirmed_at, b1.party_size,
+           t1.id as trip_id, p.name as product_name, p.kind as product_kind,
+           bt.name as boat_name, t1.time_zone,
+           to_char(t1.local_date, 'YYYY-MM-DD') as local_date,
+           to_char(t1.local_start_time, 'HH24:MI') as local_start_time,
+           t1.starts_at, t1.sales_state,
            o.total_amount, pay.state as payment_state,
            r.state as refund_state, r.amount as refund_amount
            ${bookerColumns}
-      ${from}
-      join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
-      join boats bt on bt.tenant_id = t.tenant_id and bt.id = t.boat_id
-      join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
-      join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
+      from (
+        -- The page's bookings, ordered and limited before any detail is read.
+        select b.id, t.starts_at, t.id as trip_id, b.confirmed_at
+          ${from}
+         where ${where}
+           ${cursor}
+         order by t.starts_at, t.id, b.confirmed_at, b.id
+         limit ${query.limit + 1}
+      ) m
+      join bookings b1 on b1.tenant_id = ${tenantId} and b1.id = m.id
+      join scheduled_trips t1 on t1.tenant_id = b1.tenant_id and t1.id = b1.trip_id
+      ${pageBookerJoin}
+      join products p on p.tenant_id = t1.tenant_id and p.id = t1.product_id
+      join boats bt on bt.tenant_id = t1.tenant_id and bt.id = t1.boat_id
+      join orders o on o.tenant_id = b1.tenant_id and o.id = b1.order_id
+      join payments pay on pay.tenant_id = b1.tenant_id and pay.id = b1.payment_id
       -- The latest refund only, so a payment refunded in parts never repeats its booking.
       left join lateral (
         select r1.state, r1.amount from payment_refunds r1
-         where r1.tenant_id = b.tenant_id and r1.payment_id = b.payment_id
+         where r1.tenant_id = b1.tenant_id and r1.payment_id = b1.payment_id
          order by r1.created_at desc, r1.id desc
          limit 1
       ) r on true
-     where ${where}
-       ${cursor}
-     order by t.starts_at, t.id, b.confirmed_at, b.id
-     limit ${query.limit + 1}`.execute(trx);
+     -- A join keeps no order, so the page sorts its few rows again by the same keys.
+     order by m.starts_at, m.trip_id, m.confirmed_at, m.id`.execute(trx);
 
   const page = rows.slice(0, query.limit);
   return {

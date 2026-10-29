@@ -17,6 +17,11 @@
  * across every text arm, date ranges, limits, paging to the end, ties at every
  * level of the order, canceled and staff-assisted bookings, and both roles.
  * Any later search change must pass it. Two tenants throughout.
+ *
+ * The plan test: as the runtime, under custom and generic plans, the page's
+ * one Limit over the matching bookings reads only the matching tables, and no
+ * detail join sits under it. Finance's statements never name the checkout,
+ * and every join names its tenant.
  */
 
 import { randomUUID } from "node:crypto";
@@ -30,7 +35,7 @@ import type {} from "@tidegrid/database/global-setup";
 import { tripAllocator } from "@tidegrid/domain-inventory/testing";
 import { FAKE_MINIMUM_AMOUNT, type FakePaymentProvider } from "@tidegrid/domain-payments";
 import { createQuote } from "@tidegrid/domain-pricing";
-import { type RawBuilder, sql } from "kysely";
+import { CompiledQuery, type RawBuilder, sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { cancelBooking, previewCancellation } from "./cancel.ts";
@@ -63,7 +68,56 @@ const env = inject("integrationDb");
 interface PlanNode {
   "Node Type"?: string;
   "Index Name"?: string;
+  "Relation Name"?: string;
+  Alias?: string;
   Plans?: PlanNode[];
+}
+
+/** A node and every node under it. */
+function subtree(node: PlanNode): PlanNode[] {
+  return [node, ...(node.Plans ?? []).flatMap(subtree)];
+}
+
+/** The page's detail aliases: none may sit under the Limit that picks its bookings. */
+const detailAliases = ["b1", "t1", "s1", "p", "bt", "o", "pay", "r1"];
+
+/**
+ * The Limit over the matching bookings (alias b): how many there are, which
+ * tables it reads, and which detail aliases sit under it.
+ */
+function matchingLimit(plan: PlanNode) {
+  const limits = subtree(plan).filter(
+    (n) => n["Node Type"] === "Limit" && subtree(n).some((c) => c.Alias === "b"),
+  );
+  const under = limits.length === 1 && limits[0] ? subtree(limits[0]) : [];
+  return {
+    limits: limits.length,
+    relations: [...new Set(under.flatMap((n) => n["Relation Name"] ?? []))].sort(),
+    detailAliases: under.flatMap((n) =>
+      n.Alias && detailAliases.includes(n.Alias) ? n.Alias : [],
+    ),
+  };
+}
+
+/** Joins and scans in a statement's text that do not name their alias's tenant. */
+function untenanted(text: string): { joins: number; problems: string[] } {
+  const problems: string[] = [];
+  let joins = 0;
+  for (const m of text.matchAll(/\bjoin\s+(?!lateral\b)(\w+)\s+(\w+)\s+on\s+(\S+)/g)) {
+    joins++;
+    if (m[3] !== `${m[2]}.tenant_id`) problems.push(m[0]);
+  }
+  for (const m of text.matchAll(/\bfrom\s+(\w+)\s+(\w+)\b/g)) {
+    if (!text.includes(`${m[2]}.tenant_id = `)) problems.push(m[0]);
+  }
+  return { joins, problems };
+}
+
+/** A captured parameter as a SQL literal, for EXECUTE under a generic plan. */
+function literal(value: unknown): string {
+  if (typeof value === "number" && Number.isInteger(value)) return String(value);
+  if (typeof value === "string") return `'${value.replace(/'/g, "''")}'`;
+  throw new TypeError(`no literal for ${typeof value}`);
 }
 
 /** Every index a plan's nodes name. */
@@ -707,6 +761,111 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     // Page across both ties one booking at a time.
     const paged = await pageThrough(A.id, { q: "gmail", limit: 1, withBooker: true });
     expect(paged.ids).toEqual(found.results.map((r) => r.id));
+  });
+
+  /** Every statement one search emits, as compiled, with its parameters. */
+  async function capture(tenantId: string, query: BookingSearchQuery) {
+    const captured: { sql: string; parameters: readonly unknown[] }[] = [];
+    const db = runtime.db.withPlugin({
+      transformQuery: (args) => {
+        const compiled = runtime.db.getExecutor().compileQuery(args.node, args.queryId);
+        captured.push({ sql: compiled.sql, parameters: compiled.parameters });
+        return args.node;
+      },
+      transformResult: async (args) => args.result,
+    });
+    const found = await inTenantTransaction(
+      db,
+      guestContext(tenantId),
+      (trx) => searchBookings(trx, tenantId, query),
+      snapshotRead,
+    );
+    return { found, captured };
+  }
+
+  let planSeq = 0;
+
+  /**
+   * One captured statement's plan as the runtime under the tenant's context:
+   * custom, with the values bound, or generic, through PREPARE and EXECUTE
+   * with plan_cache_mode forced.
+   */
+  function planOf(
+    tenantId: string,
+    statement: { sql: string; parameters: readonly unknown[] },
+    mode: "custom" | "generic",
+  ): Promise<PlanNode> {
+    type Row = { "QUERY PLAN": { Plan: PlanNode }[] };
+    return inTenantTransaction(runtime.db, guestContext(tenantId), async (trx) => {
+      let rows: Row[];
+      if (mode === "custom") {
+        ({ rows } = await trx.executeQuery<Row>(
+          CompiledQuery.raw(`explain (format json) ${statement.sql}`, [...statement.parameters]),
+        ));
+      } else {
+        const name = `search_plan_${++planSeq}`;
+        await trx.executeQuery(CompiledQuery.raw(`prepare ${name} as ${statement.sql}`, []));
+        await sql`set local plan_cache_mode = force_generic_plan`.execute(trx);
+        ({ rows } = await trx.executeQuery<Row>(
+          CompiledQuery.raw(
+            `explain (format json) execute ${name}(${statement.parameters.map(literal).join(", ")})`,
+            [],
+          ),
+        ));
+        await trx.executeQuery(CompiledQuery.raw(`deallocate ${name}`, []));
+      }
+      const plan = rows[0]?.["QUERY PLAN"][0]?.Plan;
+      if (!plan) throw new Error("no plan");
+      return plan;
+    });
+  }
+
+  it("limits the matching bookings before any detail join, in custom and generic plans", async () => {
+    const gmail = await reference(A.id, "gmail", true);
+    const everyDay = await reference(A.id, undefined, false, { from: days.first });
+    const prefix = references[0]?.slice(0, 4) ?? "";
+    const queries: BookingSearchQuery[] = [
+      { q: "gmail", limit: 2, withBooker: true },
+      { q: "gmail", limit: 1, after: gmail[0] ?? "", withBooker: true },
+      { from: days.first, limit: 25, withBooker: true },
+      { q: prefix, limit: 25, withBooker: false },
+      { from: days.first, limit: 2, withBooker: false },
+      { from: days.first, limit: 1, after: everyDay[0] ?? "", withBooker: false },
+    ];
+    for (const query of queries) {
+      const { found, captured } = await capture(A.id, query);
+      // A fragment that matches, so the planner cannot fold the page away.
+      expect(found.kind === "ok" && found.total).toBeGreaterThan(0);
+      const search = captured.filter((s) => /from bookings b\b/.test(s.sql));
+      expect(search).toHaveLength(query.after === undefined ? 2 : 3);
+      // Finance never names the checkout, in any statement, with or without a cursor.
+      if (!query.withBooker) {
+        expect(captured.filter((s) => s.sql.includes("checkout_sessions"))).toEqual([]);
+      }
+      for (const statement of search) {
+        const named = untenanted(statement.sql);
+        expect({ query, problems: named.problems }).toEqual({ query, problems: [] });
+        expect(named.joins).toBeGreaterThan(0);
+      }
+      const page = search.filter((s) => s.sql.includes("order by"));
+      expect(page).toHaveLength(1);
+      for (const mode of ["custom", "generic"] as const) {
+        const plan = await planOf(A.id, page[0] ?? { sql: "", parameters: [] }, mode);
+        expect({ query, mode, ...matchingLimit(plan) }).toEqual({
+          query,
+          mode,
+          limits: 1,
+          relations: query.withBooker
+            ? ["bookings", "checkout_sessions", "scheduled_trips"]
+            : ["bookings", "scheduled_trips"],
+          detailAliases: [],
+        });
+        // The details are read, above that Limit.
+        const aliases = subtree(plan).map((n) => n.Alias);
+        expect(aliases).toEqual(expect.arrayContaining(["b1", "o", "pay", "r1"]));
+        expect(aliases.includes("s1")).toBe(query.withBooker);
+      }
+    }
   });
 
   it("never returns another tenant's booking by name, email, or reference", async () => {

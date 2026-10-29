@@ -454,6 +454,11 @@ describe.skipIf(!env || !on)("console search cost at pilot volume (benchmark)", 
           // With timing off a plan names its JIT functions but not their time.
           const jit = timed.JIT ?? null;
           if (shape === "after" && (counted.JIT?.Functions ?? 0) > 0) jitModes.add(plan);
+          // After the change the details are read for the page's rows only, under either plan.
+          const details = detailRows(counted.Plan);
+          if (shape === "after" && details > c.query.limit + 1) {
+            problems.push({ kind: "detail rows", tenant: c.tenant, case: c.name, plan, details });
+          }
           console.log(
             `B_BENCH_EXPLAIN ${JSON.stringify({
               tenant: c.tenant,
@@ -462,7 +467,7 @@ describe.skipIf(!env || !on)("console search cost at pilot volume (benchmark)", 
               plan,
               statement: label,
               executionMs: counted["Execution Time"],
-              detailRows: detailRows(counted.Plan),
+              detailRows: details,
               estimates: estimates(counted.Plan),
               jit,
               hot: hotspots(timed.Plan),
