@@ -11,10 +11,23 @@
  *
  * The search gate: search returns the same bookings, count, order, and pages
  * as its condition kept here as a literal reference query, across the cases
- * an index or a rewrite would have to keep (B1). Any later search change must
- * pass it. Two tenants throughout.
+ * an index or a rewrite would have to keep (B1). It also returns the same
+ * whole outcome, every field of every row, the count, the cursor, and the
+ * refusals, as the b6d0247 search kept literally in search-baseline.testing.ts,
+ * across every text arm, date ranges, limits, paging to the end, ties at every
+ * level of the order, canceled and staff-assisted bookings, and both roles.
+ * Any later search change must pass it. Two tenants throughout.
+ *
+ * The plan test: search is one statement. As the runtime, under custom and
+ * generic plans, the matches are collected once (CTE m) from the matching
+ * tables only, with no detail join among them, and the Limit that picks the
+ * page reads those matches with no detail join under it. Executed, the page
+ * row's booking and its details are each read at most once per page row, in
+ * subtrees of their own. Finance's statement never names the checkout, and
+ * every join names its tenant.
  */
 
+import { randomUUID } from "node:crypto";
 import {
   createDb,
   inTenantTransaction,
@@ -23,18 +36,32 @@ import {
 } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import { tripAllocator } from "@tidegrid/domain-inventory/testing";
-import type { FakePaymentProvider } from "@tidegrid/domain-payments";
-import { type RawBuilder, sql } from "kysely";
+import { FAKE_MINIMUM_AMOUNT, type FakePaymentProvider } from "@tidegrid/domain-payments";
+import { createQuote } from "@tidegrid/domain-pricing";
+import { CompiledQuery, type RawBuilder, sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { cancelBooking, previewCancellation } from "./cancel.ts";
-import { emailFragment, escapeLike, nameWords, referencePrefix, searchBookings } from "./search.ts";
+import { ensureProviderPayment } from "./checkout.ts";
+import { handleVerifiedEvent } from "./finalize.ts";
+import {
+  type BookingSearchOutcome,
+  type BookingSearchQuery,
+  emailFragment,
+  escapeLike,
+  nameWords,
+  referencePrefix,
+  searchBookings,
+} from "./search.ts";
+import { baselineSearch } from "./search-baseline.testing.ts";
+import { openStaffCheckout } from "./staff-checkout.ts";
 import {
   type CheckoutFixture,
   confirmBooking,
   createCheckoutFixture,
   fakeProvider,
   guestContext,
+  verifiedFakeEvent,
 } from "./test-fixtures.ts";
 
 type Sql = ReturnType<typeof postgres>;
@@ -44,7 +71,109 @@ const env = inject("integrationDb");
 interface PlanNode {
   "Node Type"?: string;
   "Index Name"?: string;
+  "Relation Name"?: string;
+  Alias?: string;
+  "Subplan Name"?: string;
+  "CTE Name"?: string;
+  "Actual Rows"?: number;
+  "Actual Loops"?: number;
   Plans?: PlanNode[];
+}
+
+/** A node and every node under it. */
+function subtree(node: PlanNode): PlanNode[] {
+  return [node, ...(node.Plans ?? []).flatMap(subtree)];
+}
+
+/** The page's detail aliases: none may be read among the matches or under the page's Limit. */
+const detailAliases = ["pb", "b1", "t1", "s1", "p", "bt", "o", "pay", "r1"];
+
+/**
+ * Where a plan reads the matches: the CTE m that collects them, the tables
+ * and aliases inside it, any matching scan (alias b) outside it, and the
+ * Limits over a scan of m with any detail alias under them.
+ */
+function matchingShape(plan: PlanNode) {
+  const all = subtree(plan);
+  const ctes = all.filter((n) => n["Subplan Name"] === "CTE m");
+  const inside = ctes.length === 1 && ctes[0] ? subtree(ctes[0]) : [];
+  const limits = all.filter(
+    (n) =>
+      n["Node Type"] === "Limit" &&
+      subtree(n).some((c) => c["Node Type"] === "CTE Scan" && c["CTE Name"] === "m"),
+  );
+  const details = (nodes: PlanNode[]) =>
+    nodes.flatMap((n) => (n.Alias && detailAliases.includes(n.Alias) ? n.Alias : []));
+  return {
+    ctes: ctes.length,
+    relations: [...new Set(inside.flatMap((n) => n["Relation Name"] ?? []))].sort(),
+    detailsAmongMatches: details(inside),
+    matchingScansOutside: all.filter((n) => n.Alias === "b" && !inside.includes(n)).length,
+    limitsOverMatches: limits.length > 0,
+    detailsUnderLimit: details(limits.flatMap(subtree)),
+  };
+}
+
+const tenantTables = [
+  "bookings",
+  "scheduled_trips",
+  "checkout_sessions",
+  "products",
+  "boats",
+  "orders",
+  "payments",
+  "payment_refunds",
+];
+
+/** The page's booking and its booking-keyed details, whose executed scans the plan test logs. */
+const pageScans = ["b1", "s1", "o", "pay", "r1"] as const;
+
+/**
+ * An executed plan's scans of one alias, as [rows per loop, loops] each.
+ * PostgreSQL 17 rounds rows per loop; the loops are exact.
+ */
+function scansOf(plan: PlanNode, alias: string): [number, number][] {
+  return subtree(plan)
+    .filter((n) => n.Alias === alias)
+    .map((n) => [n["Actual Rows"] ?? 0, n["Actual Loops"] ?? 0]);
+}
+
+/** The deepest node whose subtree scans every given alias, if one does. */
+function holderOf(plan: PlanNode, aliases: readonly string[]): PlanNode | undefined {
+  const holds = (n: PlanNode) => {
+    const seen = new Set(subtree(n).map((c) => c.Alias));
+    return aliases.every((a) => seen.has(a));
+  };
+  if (!holds(plan)) return undefined;
+  let node = plan;
+  for (;;) {
+    const child = (node.Plans ?? []).find(holds);
+    if (!child) return node;
+    node = child;
+  }
+}
+
+/** Joins and scans of tenant tables in a statement's text that do not name their alias's tenant. */
+function untenanted(text: string): { joins: number; problems: string[] } {
+  const problems: string[] = [];
+  let joins = 0;
+  for (const m of text.matchAll(/\bjoin\s+(?!lateral\b)(\w+)\s+(\w+)\s+on\s+(\S+)/g)) {
+    joins++;
+    if (m[3] !== `${m[2]}.tenant_id`) problems.push(m[0]);
+  }
+  for (const m of text.matchAll(/\bfrom\s+(\w+)\s+(\w+)\b/g)) {
+    if (tenantTables.includes(m[1] ?? "") && !text.includes(`${m[2]}.tenant_id = `)) {
+      problems.push(m[0]);
+    }
+  }
+  return { joins, problems };
+}
+
+/** A captured parameter as a SQL literal, for EXECUTE under a generic plan. */
+function literal(value: unknown): string {
+  if (typeof value === "number" && Number.isInteger(value)) return String(value);
+  if (typeof value === "string") return `'${value.replace(/'/g, "''")}'`;
+  throw new TypeError(`no literal for ${typeof value}`);
 }
 
 /** Every index a plan's nodes name. */
@@ -77,6 +206,12 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
   let A: CheckoutFixture;
   let B: CheckoutFixture;
   const references: string[] = [];
+  /** A's bookings by booker, in the order they were made; B's booking ids. */
+  const idsA: Record<string, string> = {};
+  const idsB: string[] = [];
+  /** Local departure dates of A's shared trips 0 and 3, and of A's last trip. */
+  const days = { first: "", fourth: "", last: "" };
+  const refs = { canceled: "", staff: "" };
 
   /** The search as the console runs it: one read-only snapshot as the runtime role. */
   const search = (
@@ -101,21 +236,32 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
 
   /**
    * The search's condition, kept literally: one condition over the booking and
-   * its checkout, every match ordered as the page orders them.
+   * its checkout, every match ordered as the page orders them. Dates, when
+   * given, bound the trip's local date.
    */
-  async function reference(tenantId: string, q: string, withBooker: boolean): Promise<string[]> {
-    const parts: RawBuilder<unknown>[] = [];
-    const prefix = referencePrefix(q);
-    if (prefix) parts.push(sql`b.reference like ${`${prefix}%`}`);
-    if (withBooker) {
-      const words = nameWords(q).map(
-        (word) => sql`s.booker_name ilike ${`%${escapeLike(word)}%`} escape '\\'`,
-      );
-      if (words.length > 0) parts.push(sql`(${sql.join(words, sql` and `)})`);
-      const email = emailFragment(q);
-      if (email) parts.push(sql`s.booker_email like ${`%${escapeLike(email)}%`} escape '\\'`);
+  async function reference(
+    tenantId: string,
+    q: string | undefined,
+    withBooker: boolean,
+    dates: { from?: string; to?: string } = {},
+  ): Promise<string[]> {
+    const conditions: RawBuilder<unknown>[] = [sql`b.tenant_id = ${tenantId}`];
+    if (dates.from !== undefined) conditions.push(sql`t.local_date >= ${dates.from}::date`);
+    if (dates.to !== undefined) conditions.push(sql`t.local_date <= ${dates.to}::date`);
+    if (q !== undefined) {
+      const parts: RawBuilder<unknown>[] = [];
+      const prefix = referencePrefix(q);
+      if (prefix) parts.push(sql`b.reference like ${`${prefix}%`}`);
+      if (withBooker) {
+        const words = nameWords(q).map(
+          (word) => sql`s.booker_name ilike ${`%${escapeLike(word)}%`} escape '\\'`,
+        );
+        if (words.length > 0) parts.push(sql`(${sql.join(words, sql` and `)})`);
+        const email = emailFragment(q);
+        if (email) parts.push(sql`s.booker_email like ${`%${escapeLike(email)}%`} escape '\\'`);
+      }
+      conditions.push(parts.length === 0 ? sql`false` : sql`(${sql.join(parts, sql` or `)})`);
     }
-    const condition = parts.length === 0 ? sql`false` : sql`(${sql.join(parts, sql` or `)})`;
     const join = withBooker
       ? sql`join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id`
       : sql``;
@@ -124,10 +270,114 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         select b.id from bookings b
           join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
           ${join}
-         where b.tenant_id = ${tenantId} and ${condition}
+         where ${sql.join(conditions, sql` and `)}
          order by t.starts_at, t.id, b.confirmed_at, b.id`.execute(trx);
       return rows.map((r) => r.id);
     });
+  }
+
+  /**
+   * One query through the b6d0247 search and through today's, in one
+   * snapshot as the runtime role. Every field of the two outcomes must agree.
+   */
+  async function same(tenantId: string, query: BookingSearchQuery): Promise<BookingSearchOutcome> {
+    const [before, after] = await inTenantTransaction(
+      runtime.db,
+      guestContext(tenantId),
+      async (trx) => [
+        await baselineSearch(trx, tenantId, query),
+        await searchBookings(trx, tenantId, query),
+      ],
+      snapshotRead,
+    );
+    expect({ query, outcome: after }).toStrictEqual({ query, outcome: before });
+    if (!after) throw new Error("no outcome");
+    return after;
+  }
+
+  /** Every page of a search, each one checked by `same`, until nextAfter is null. */
+  async function pageThrough(
+    tenantId: string,
+    query: Omit<BookingSearchQuery, "after">,
+  ): Promise<{ ids: string[]; total: number; pages: number }> {
+    const ids: string[] = [];
+    let total: number | undefined;
+    let after: string | undefined;
+    for (let pages = 1; pages <= 200; pages++) {
+      const found = await same(tenantId, { ...query, ...(after === undefined ? {} : { after }) });
+      if (found.kind !== "ok") throw new Error(`page ${pages}: ${found.kind}`);
+      total ??= found.total;
+      expect(found.total).toBe(total);
+      ids.push(...found.results.map((r) => r.id));
+      if (!found.nextAfter) return { ids, total, pages };
+      expect(found.results).toHaveLength(query.limit);
+      expect(found.nextAfter).toBe(found.results.at(-1)?.id);
+      after = found.nextAfter;
+    }
+    throw new Error("more than 200 pages");
+  }
+
+  /** A booking made at the desk by booking staff (G2.12d), paid through the fake provider. */
+  async function staffAssisted(
+    tenant: CheckoutFixture,
+    tripId: string,
+    booker: { name: string; email: string },
+  ): Promise<string> {
+    const userId = randomUUID();
+    await admin`insert into public.staff_users (id, email, display_name)
+      values (${userId}, ${`search-${userId.slice(0, 8)}@example.test`}, 'Desk')`;
+    await admin`insert into public.tenant_memberships (tenant_id, user_id, role, display_name)
+      values (${tenant.id}, ${userId}, 'booking_staff', 'Dee Desk')`;
+    const ctx: TenantContext = {
+      tenantId: tenant.id,
+      actorType: "staff",
+      actorId: userId,
+      requestId: `req-${randomUUID()}`,
+      sourceIp: null,
+    };
+    const quote = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      createQuote(trx, ctx, {
+        tripId,
+        party: { kind: "tickets", tickets: [{ code: "adult", quantity: 1 }] },
+        addOns: [],
+        promotionCode: null,
+        now: new Date(),
+      }),
+    );
+    if (quote.kind !== "created") throw new Error(`staff quote: ${JSON.stringify(quote)}`);
+    const created = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      openStaffCheckout(trx, ctx, {
+        quoteId: quote.quote.quoteId,
+        acceptedPolicyVersion: quote.quote.policy.version,
+        booker,
+        channel: "walk_up",
+        attestations: { policyToldToGuest: true, emailReadBack: true },
+        provider: "fake",
+        minimumAmount: FAKE_MINIMUM_AMOUNT,
+      }),
+    );
+    if (created.kind !== "created") throw new Error(`staff checkout: ${JSON.stringify(created)}`);
+    const ready = await ensureProviderPayment(runtime.db, provider, ctx, created.session.id);
+    if (ready.kind !== "ready") throw new Error(`payment: ${JSON.stringify(ready)}`);
+    const settled = await provider.settlePayment(
+      tenant.id,
+      ready.paymentRef,
+      "succeeded",
+      Date.now(),
+    );
+    if (settled.kind === "not_found") throw new Error("no fake payment");
+    const event = await verifiedFakeEvent(provider, settled.event.body);
+    const handled = await handleVerifiedEvent(runtime.db, provider, event, {
+      requestId: `wh-${randomUUID()}`,
+    });
+    if (handled.kind !== "processed" || !handled.outcome.startsWith("confirmed")) {
+      throw new Error(`confirmation: ${JSON.stringify(handled)}`);
+    }
+    const [row] = await admin<{ id: string; reference: string; source: string }[]>`
+      select id, reference, source from public.bookings
+       where tenant_id = ${tenant.id} and checkout_session_id = ${created.session.id}`;
+    if (row?.source !== "staff_assisted") throw new Error(`staff booking: ${JSON.stringify(row)}`);
+    return row.reference;
   }
 
   beforeAll(async () => {
@@ -144,12 +394,27 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       const trip = i % 3 === 2 ? (A.trips.shared[0] ?? "") : tripsA.shared();
       const booked = await confirmBooking(runtime.db, provider, A, trip, 1, { booker });
       references.push(booked.reference);
+      idsA[booker.name] = booked.bookingId;
     }
+    // A charter on the first day departs at the same instant as the shared
+    // trip that day, on another boat, so the order falls to the trip's id.
+    const tie = await confirmBooking(runtime.db, provider, A, A.trips.charter[0] ?? "", 2, {
+      charter: true,
+      booker: { name: "Tie Charter", email: "tie.charter@gmail.test" },
+    });
+    references.push(tie.reference);
+    // A booking made at the desk (staff_assisted).
+    refs.staff = await staffAssisted(A, tripsA.shared(), {
+      name: "Walkup Desk",
+      email: "walkup@gmail.test",
+    });
+    references.push(refs.staff);
     // One of them canceled: search still finds it.
     const canceled = await confirmBooking(runtime.db, provider, A, tripsA.shared(), 1, {
       booker: { name: "Cancel Lation", email: "gone@gmail.test" },
     });
     references.push(canceled.reference);
+    refs.canceled = canceled.reference;
     const ctx: TenantContext = guestContext(A.id);
     const terms = await inTenantTransaction(runtime.db, ctx, (trx) =>
       previewCancellation(trx, A.id, canceled.bookingId),
@@ -166,8 +431,48 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       { name: "Luis Fernández", email: "luis.fernandez@gmail.test" },
       { name: "Zebulon Quixote", email: "zq@other.test" },
     ]) {
-      await confirmBooking(runtime.db, provider, B, tripsB.shared(), 1, { booker });
+      idsB.push(
+        (await confirmBooking(runtime.db, provider, B, tripsB.shared(), 1, { booker })).bookingId,
+      );
     }
+    // Synthetic, throwaway database only: two bookings on the first shared
+    // trip get the same confirmation instant, so the order falls to the
+    // booking's id. Each fixture booking confirms in its own transaction, so
+    // no real tie reaches that column. Triggers are off for this one update.
+    await admin.begin(async (tx) => {
+      await tx`set local session_replication_role = replica`;
+      const tied = await tx`
+        update public.bookings
+           set confirmed_at = (select confirmed_at from public.bookings
+                                where id = ${idsA["Luis Fernández"] ?? ""})
+         where tenant_id = ${A.id} and id = ${idsA["jo smith"] ?? ""}
+        returning id`;
+      if (tied.length !== 1) throw new Error("no booking to tie");
+    });
+    const tripDays = await admin<{ id: string; day: string }[]>`
+      select id, local_date::text as day from public.scheduled_trips where tenant_id = ${A.id}`;
+    const dayOf = (tripId: string | undefined) => tripDays.find((t) => t.id === tripId)?.day ?? "";
+    // Fresh statistics, so the plan test does not depend on whether autovacuum
+    // has analyzed these tables yet.
+    for (const table of [
+      "bookings",
+      "scheduled_trips",
+      "checkout_sessions",
+      "products",
+      "boats",
+      "orders",
+      "payments",
+      "payment_refunds",
+    ]) {
+      await admin.unsafe(`analyze public.${table}`);
+    }
+    days.first = dayOf(A.trips.shared[0]);
+    days.fourth = dayOf(A.trips.shared[3]);
+    days.last =
+      tripDays
+        .map((t) => t.day)
+        .sort()
+        .at(-1) ?? "";
   });
 
   afterAll(async () => {
@@ -203,7 +508,11 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
           spike[label] = indexesIn(row?.["QUERY PLAN"]);
         };
         // Control: the owner bypasses row-level security, so it may use the index.
-        await explain("adminCustom");
+        // The name-only query, so no tenant index competes with it, however few
+        // rows the table holds when this file runs.
+        const bareQuery = `select s.id from public.checkout_sessions s where s.booker_name ilike '%ern%'`;
+        const [control] = await tx.unsafe(`explain (format json) ${bareQuery}`);
+        spike.adminCustom = indexesIn(control?.["QUERY PLAN"]);
         // The runtime role, under forced row-level security, in the same transaction.
         await tx`set local role tidegrid_app`;
         await tx`select set_config('app.tenant_id', ${A.id}, true)`;
@@ -219,9 +528,7 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         );
         spike.runtimeGeneric = indexesIn(generic?.["QUERY PLAN"]);
         // A name-only query without the tenant filter, so only the trigram index could serve it.
-        const [bare] = await tx.unsafe(
-          `explain (format json) select s.id from public.checkout_sessions s where s.booker_name ilike '%ern%'`,
-        );
+        const [bare] = await tx.unsafe(`explain (format json) ${bareQuery}`);
         spike.runtimeNoTenantFilter = indexesIn(bare?.["QUERY PLAN"]);
         throw rollback;
       }),
@@ -340,6 +647,354 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     expect(refused.kind).toBe("cursor_invalid");
   });
 
+  /** Every text the id-level gate reads, with the reference variants. */
+  const reads = () => [
+    ...texts,
+    ...references.flatMap((r) => [
+      r.slice(0, 2),
+      r.slice(0, 8),
+      `${r.slice(0, 4)} ${r.slice(4, 6)}`,
+      `${r.slice(0, 4).toLowerCase()}-${r.slice(4, 6).toLowerCase()}`,
+      r.slice(0, 6).replace(/0/g, "O").replace(/1/g, "l"),
+    ]),
+    // A reference with name words: prefix 7K3M9P, words 7K3M and 9P.
+    "7K3M 9P",
+    // Reference (ADA), name, and email arms at once.
+    "ada",
+  ];
+
+  it("returns the b6d0247 search's whole outcome for every arm, role, and limit", async () => {
+    for (const q of reads()) {
+      for (const withBooker of [true, false]) {
+        for (const limit of [1, 2, 25, 100]) {
+          await same(A.id, { q, limit, withBooker });
+        }
+      }
+    }
+  });
+
+  it("returns the b6d0247 search's whole outcome for dates, alone and with text", async () => {
+    const ranges: { from?: string; to?: string }[] = [
+      { from: days.fourth },
+      { to: days.fourth },
+      { from: days.first, to: days.first },
+      { from: days.first, to: days.last },
+      // No trips in the range, and a range that ends before it starts.
+      { from: "2099-01-01", to: "2099-01-31" },
+      { from: days.fourth, to: days.first },
+    ];
+    for (const range of ranges) {
+      for (const q of [undefined, "gmail", "smith", "test", references[0]?.slice(0, 4)]) {
+        for (const withBooker of [true, false]) {
+          const expected = await reference(A.id, q, withBooker, range);
+          for (const limit of [1, 2, 25, 100]) {
+            const found = await same(A.id, {
+              ...(q === undefined ? {} : { q }),
+              ...range,
+              limit,
+              withBooker,
+            });
+            if (found.kind !== "ok") throw new Error(`search: ${found.kind}`);
+            expect({ range, q, withBooker, ids: found.results.map((r) => r.id) }).toEqual({
+              range,
+              q,
+              withBooker,
+              ids: expected.slice(0, limit),
+            });
+            expect(found.total).toBe(expected.length);
+          }
+        }
+      }
+    }
+    // The first day holds the shared trip's three bookings and the charter's one.
+    expect(
+      await reference(A.id, undefined, true, { from: days.first, to: days.first }),
+    ).toHaveLength(4);
+    expect(await reference(A.id, undefined, true, { from: "2099-01-01" })).toEqual([]);
+  });
+
+  it("pages to the end exactly as the b6d0247 search and the reference condition do", async () => {
+    const searches: { q?: string; from?: string; to?: string; withBooker: boolean }[] = [
+      { q: "gmail", withBooker: true },
+      { q: "test", withBooker: true },
+      { q: "smith", withBooker: true },
+      { from: days.first, withBooker: true },
+      { from: days.first, withBooker: false },
+      { to: days.last, withBooker: false },
+      { q: "test", withBooker: false },
+      { q: "gmail", from: days.first, to: days.fourth, withBooker: true },
+    ];
+    for (const { withBooker, ...rest } of searches) {
+      const expected = await reference(A.id, rest.q, withBooker, rest);
+      for (const limit of [1, 2]) {
+        const paged = await pageThrough(A.id, { ...rest, limit, withBooker });
+        expect({ ...rest, withBooker, limit, ids: paged.ids, total: paged.total }).toEqual({
+          ...rest,
+          withBooker,
+          limit,
+          ids: expected,
+          total: expected.length,
+        });
+      }
+    }
+    // Finance pages every booking by date alone.
+    expect((await reference(A.id, undefined, false, { from: days.first })).length).toBeGreaterThan(
+      10,
+    );
+    // A cursor at the very last match: an empty page, no next cursor, the same total.
+    const all = await reference(A.id, "gmail", true);
+    const last = await same(A.id, {
+      q: "gmail",
+      limit: 2,
+      after: all.at(-1) ?? "",
+      withBooker: true,
+    });
+    expect(last).toStrictEqual({
+      kind: "ok",
+      results: [],
+      total: all.length,
+      nextAfter: null,
+      matchedOn: ["reference", "booker_name", "booker_email"],
+    });
+  });
+
+  it("refuses the same cursors as the b6d0247 search", async () => {
+    const lovelace = idsA["Ada Lovelace"] ?? "";
+    const firstDay = idsA["Luis Fernández"] ?? "";
+    const refused: { query: BookingSearchQuery; why: string }[] = [
+      { why: "not a uuid", query: { q: "gmail", limit: 2, after: "not-a-uuid", withBooker: true } },
+      {
+        why: "not a uuid",
+        query: { q: "gmail", limit: 2, after: "not-a-uuid", withBooker: false },
+      },
+      {
+        why: "another search's booking",
+        query: { q: "gmail", limit: 2, after: lovelace, withBooker: true },
+      },
+      {
+        why: "another tenant's booking",
+        query: { q: "Fernández", limit: 2, after: idsB[0] ?? "", withBooker: true },
+      },
+      {
+        why: "outside the dates",
+        query: { from: days.fourth, limit: 2, after: firstDay, withBooker: true },
+      },
+      {
+        why: "outside the dates",
+        query: { from: days.fourth, limit: 2, after: firstDay, withBooker: false },
+      },
+      // Staff find Ada by name; finance reads "Lovelace" as a reference prefix, which matches nothing.
+      {
+        why: "a name finance cannot match",
+        query: { q: "Lovelace", limit: 2, after: lovelace, withBooker: false },
+      },
+    ];
+    for (const { query, why } of refused) {
+      expect({ why, outcome: await same(A.id, query) }).toEqual({
+        why,
+        outcome: { kind: "cursor_invalid" },
+      });
+    }
+    const staff = await same(A.id, { q: "Lovelace", limit: 2, after: lovelace, withBooker: true });
+    expect(staff.kind === "ok" && staff.total).toBe(1);
+  });
+
+  it("returns canceled and staff-assisted bookings, and ties at every level of the order, alike", async () => {
+    // The canceled booking carries its refund, for both roles.
+    for (const [q, withBooker] of [
+      ["Cancel", true],
+      [refs.canceled, false],
+    ] as const) {
+      const found = await same(A.id, { q, limit: 25, withBooker });
+      if (found.kind !== "ok") throw new Error(`search: ${found.kind}`);
+      expect(found.results.map((r) => r.state)).toEqual(["canceled"]);
+      expect(found.results[0]?.payment.refund?.amount).toBeGreaterThan(0);
+    }
+    // The desk's booking says where it came from, for both roles.
+    for (const [q, withBooker] of [
+      ["walkup", true],
+      [refs.staff, false],
+    ] as const) {
+      const found = await same(A.id, { q, limit: 25, withBooker });
+      expect(found.kind === "ok" && found.results.map((r) => r.source)).toEqual(["staff_assisted"]);
+    }
+    // "gmail" crosses both ties: two trips at one instant, and two bookings confirmed at one instant.
+    const found = await same(A.id, { q: "gmail", limit: 100, withBooker: true });
+    if (found.kind !== "ok") throw new Error(`search: ${found.kind}`);
+    const pairs = found.results.slice(1).map((r, i) => [found.results[i], r] as const);
+    expect(
+      pairs.some(
+        ([a, b]) => a?.trip.startsAt === b.trip.startsAt && a.trip.tripId !== b.trip.tripId,
+      ),
+    ).toBe(true);
+    expect(
+      pairs.some(([a, b]) => a?.trip.tripId === b.trip.tripId && a.confirmedAt === b.confirmedAt),
+    ).toBe(true);
+    // Page across both ties one booking at a time.
+    const paged = await pageThrough(A.id, { q: "gmail", limit: 1, withBooker: true });
+    expect(paged.ids).toEqual(found.results.map((r) => r.id));
+  });
+
+  /** Every statement one search emits, as compiled, with its parameters. */
+  async function capture(tenantId: string, query: BookingSearchQuery) {
+    const captured: { sql: string; parameters: readonly unknown[] }[] = [];
+    const db = runtime.db.withPlugin({
+      transformQuery: (args) => {
+        const compiled = runtime.db.getExecutor().compileQuery(args.node, args.queryId);
+        captured.push({ sql: compiled.sql, parameters: compiled.parameters });
+        return args.node;
+      },
+      transformResult: async (args) => args.result,
+    });
+    const found = await inTenantTransaction(
+      db,
+      guestContext(tenantId),
+      (trx) => searchBookings(trx, tenantId, query),
+      snapshotRead,
+    );
+    return { found, captured };
+  }
+
+  let planSeq = 0;
+
+  /**
+   * One captured statement's plan as the runtime under the tenant's context:
+   * custom, with the values bound, or generic, through PREPARE and EXECUTE
+   * with plan_cache_mode forced.
+   */
+  function planOf(
+    tenantId: string,
+    statement: { sql: string; parameters: readonly unknown[] },
+    mode: "custom" | "generic",
+    options = "format json",
+  ): Promise<PlanNode> {
+    type Row = { "QUERY PLAN": { Plan: PlanNode }[] };
+    return inTenantTransaction(runtime.db, guestContext(tenantId), async (trx) => {
+      let rows: Row[];
+      if (mode === "custom") {
+        ({ rows } = await trx.executeQuery<Row>(
+          CompiledQuery.raw(`explain (${options}) ${statement.sql}`, [...statement.parameters]),
+        ));
+      } else {
+        const name = `search_plan_${++planSeq}`;
+        await trx.executeQuery(CompiledQuery.raw(`prepare ${name} as ${statement.sql}`, []));
+        await sql`set local plan_cache_mode = force_generic_plan`.execute(trx);
+        ({ rows } = await trx.executeQuery<Row>(
+          CompiledQuery.raw(
+            `explain (${options}) execute ${name}(${statement.parameters.map(literal).join(", ")})`,
+            [],
+          ),
+        ));
+        await trx.executeQuery(CompiledQuery.raw(`deallocate ${name}`, []));
+      }
+      const plan = rows[0]?.["QUERY PLAN"][0]?.Plan;
+      if (!plan) throw new Error("no plan");
+      return plan;
+    });
+  }
+
+  it("collects the matches once and limits them before any detail join, in custom and generic plans", async () => {
+    const gmail = await reference(A.id, "gmail", true);
+    const everyDay = await reference(A.id, undefined, false, { from: days.first });
+    const prefix = references[0]?.slice(0, 4) ?? "";
+    const queries: BookingSearchQuery[] = [
+      { q: "gmail", limit: 2, withBooker: true },
+      { q: "gmail", limit: 1, after: gmail[0] ?? "", withBooker: true },
+      { from: days.first, limit: 25, withBooker: true },
+      // Every booking matches and the page holds one: details read for more than two show at once.
+      { from: days.first, limit: 1, withBooker: true },
+      { q: prefix, limit: 25, withBooker: false },
+      { from: days.first, limit: 2, withBooker: false },
+      { from: days.first, limit: 1, after: everyDay[0] ?? "", withBooker: false },
+    ];
+    for (const query of queries) {
+      const { found, captured } = await capture(A.id, query);
+      // A fragment that matches, so the planner cannot fold the page away.
+      expect(found.kind === "ok" && found.total).toBeGreaterThan(0);
+      // One statement: the count, the cursor check, and the page.
+      const search = captured.filter((s) => /from bookings b\b/.test(s.sql));
+      expect(search).toHaveLength(1);
+      // The fences that keep the booking's read and its details' read apart from
+      // the outer joins and from each other.
+      expect(search[0]?.sql).toMatch(/b1\.id = pg\.id\s+offset 0\s+\) pb/);
+      expect(search[0]?.sql).toMatch(/t1\.id = pb\.trip_id\s+offset 0\s+\) d/);
+      // Finance never names the checkout, in any statement, with or without a cursor.
+      if (!query.withBooker) {
+        expect(captured.filter((s) => s.sql.includes("checkout_sessions"))).toEqual([]);
+      }
+      for (const statement of search) {
+        const named = untenanted(statement.sql);
+        expect({ query, problems: named.problems }).toEqual({ query, problems: [] });
+        expect(named.joins).toBeGreaterThan(0);
+      }
+      for (const mode of ["custom", "generic"] as const) {
+        const plan = await planOf(A.id, search[0] ?? { sql: "", parameters: [] }, mode);
+        expect({ query, mode, ...matchingShape(plan) }).toEqual({
+          query,
+          mode,
+          ctes: 1,
+          relations: query.withBooker
+            ? ["bookings", "checkout_sessions", "scheduled_trips"]
+            : ["bookings", "scheduled_trips"],
+          detailsAmongMatches: [],
+          matchingScansOutside: 0,
+          limitsOverMatches: true,
+          detailsUnderLimit: [],
+        });
+        // The details are read, above that Limit.
+        const aliases = subtree(plan).map((n) => n.Alias);
+        expect(aliases).toEqual(expect.arrayContaining(["b1", "o", "pay", "r1"]));
+        expect(aliases.includes("s1")).toBe(query.withBooker);
+        // Executed: the booking's read (b1) and its details' read each run at
+        // least once and at most once per page row, and the details' subtree
+        // holds neither the booking's scan nor the matches. This bounds how
+        // often each runs; it does not detect a removed fence, which the text
+        // assertions above lock. (The details' subquery cannot be merged in its
+        // current form, fence or not.) How each table is read inside is the
+        // planner's choice and is logged, not asserted.
+        const ran = await planOf(
+          A.id,
+          search[0] ?? { sql: "", parameters: [] },
+          mode,
+          "analyze, timing off, format json",
+        );
+        const scans = Object.fromEntries(pageScans.map((alias) => [alias, scansOf(ran, alias)]));
+        const detailScans = [
+          "t1",
+          "p",
+          "bt",
+          "o",
+          "pay",
+          "r1",
+          ...(query.withBooker ? ["s1"] : []),
+        ];
+        const details = holderOf(ran, detailScans);
+        const runs = (loops: number) => loops >= 1 && loops <= query.limit + 1;
+        console.log(
+          `SEARCH_PAGE_SCANS ${JSON.stringify({ query, mode, scans, detailRuns: details?.["Actual Loops"] })}`,
+        );
+        const booking = scansOf(ran, "b1");
+        expect({
+          query,
+          mode,
+          bookingScans: booking.length,
+          bookingRuns: booking.every(([, loops]) => runs(loops)),
+          detailsApart:
+            details !== undefined &&
+            !subtree(details).some((n) => n.Alias === "b1" || n["Node Type"] === "CTE Scan"),
+          detailRuns: runs(details?.["Actual Loops"] ?? 0),
+        }).toEqual({
+          query,
+          mode,
+          bookingScans: 1,
+          bookingRuns: true,
+          detailsApart: true,
+          detailRuns: true,
+        });
+      }
+    }
+  });
+
   it("never returns another tenant's booking by name, email, or reference", async () => {
     const own = await search(B.id, "Quixote", true);
     expect(own.kind === "ok" && own.total).toBe(1);
@@ -359,6 +1014,17 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     for (const r of references) {
       const found = await search(B.id, r, true);
       expect(found.kind === "ok" && found.results.map((x) => x.reference)).not.toContain(r);
+    }
+    // B's matching bookings change neither A's count nor A's pages.
+    for (const q of ["Fernández", "luis", "gmail", "test"]) {
+      const expected = await reference(A.id, q, true);
+      const paged = await pageThrough(A.id, { q, limit: 2, withBooker: true });
+      expect({ q, ids: paged.ids, total: paged.total }).toEqual({
+        q,
+        ids: expected,
+        total: expected.length,
+      });
+      expect(paged.ids.filter((id) => idsB.includes(id))).toEqual([]);
     }
   });
 });
