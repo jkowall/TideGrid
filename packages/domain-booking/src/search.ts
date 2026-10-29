@@ -166,11 +166,12 @@ interface StatementRow extends Partial<SearchRow> {
  * them, and orders and limits them to the page before it reads any detail.
  * Then, for each of those at most limit + 1 rows, it reads the product,
  * boat, order, payment, latest refund, and booker by key, in a LATERAL
- * subquery the planner may not merge into the outer joins (OFFSET 0). Every detail join
- * finds exactly one row (each key is NOT NULL with a foreign key, row-level
- * security shows a tenant all of its own rows, and no role deletes them), so
- * the page keeps every booking the limit chose, and the count and the page
- * come from the same matches.
+ * subquery the planner may not merge into the outer joins (OFFSET 0). Every
+ * inner detail join finds exactly one row (each key is NOT NULL with a foreign
+ * key, row-level security shows a tenant all of its own rows, and no role
+ * deletes them), and the refund join zero or one, so the page keeps every
+ * booking the limit chose, and the count and the page come from the same
+ * matches.
  */
 export async function searchBookings(
   trx: TenantTransaction,

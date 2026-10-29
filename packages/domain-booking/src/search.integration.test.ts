@@ -73,6 +73,8 @@ interface PlanNode {
   Alias?: string;
   "Subplan Name"?: string;
   "CTE Name"?: string;
+  "Actual Rows"?: number;
+  "Actual Loops"?: number;
   Plans?: PlanNode[];
 }
 
@@ -120,6 +122,20 @@ const tenantTables = [
   "payments",
   "payment_refunds",
 ];
+
+/** The page's booking and its booking-keyed details, whose executed scans the plan test logs. */
+const pageScans = ["b1", "s1", "o", "pay", "r1"] as const;
+
+/**
+ * An executed plan's scans of one alias, as [rows per loop, loops] each.
+ * PostgreSQL 17 rounds rows per loop, so a scan run many times for a few
+ * rows can show 0; the loops are exact.
+ */
+function scansOf(plan: PlanNode, alias: string): [number, number][] {
+  return subtree(plan)
+    .filter((n) => n.Alias === alias)
+    .map((n) => [n["Actual Rows"] ?? 0, n["Actual Loops"] ?? 0]);
+}
 
 /** Joins and scans of tenant tables in a statement's text that do not name their alias's tenant. */
 function untenanted(text: string): { joins: number; problems: string[] } {
@@ -818,13 +834,14 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     tenantId: string,
     statement: { sql: string; parameters: readonly unknown[] },
     mode: "custom" | "generic",
+    options = "format json",
   ): Promise<PlanNode> {
     type Row = { "QUERY PLAN": { Plan: PlanNode }[] };
     return inTenantTransaction(runtime.db, guestContext(tenantId), async (trx) => {
       let rows: Row[];
       if (mode === "custom") {
         ({ rows } = await trx.executeQuery<Row>(
-          CompiledQuery.raw(`explain (format json) ${statement.sql}`, [...statement.parameters]),
+          CompiledQuery.raw(`explain (${options}) ${statement.sql}`, [...statement.parameters]),
         ));
       } else {
         const name = `search_plan_${++planSeq}`;
@@ -832,7 +849,7 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         await sql`set local plan_cache_mode = force_generic_plan`.execute(trx);
         ({ rows } = await trx.executeQuery<Row>(
           CompiledQuery.raw(
-            `explain (format json) execute ${name}(${statement.parameters.map(literal).join(", ")})`,
+            `explain (${options}) execute ${name}(${statement.parameters.map(literal).join(", ")})`,
             [],
           ),
         ));
@@ -852,6 +869,8 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       { q: "gmail", limit: 2, withBooker: true },
       { q: "gmail", limit: 1, after: gmail[0] ?? "", withBooker: true },
       { from: days.first, limit: 25, withBooker: true },
+      // Every booking matches and the page holds one: details read for more than two show at once.
+      { from: days.first, limit: 1, withBooker: true },
       { q: prefix, limit: 25, withBooker: false },
       { from: days.first, limit: 2, withBooker: false },
       { from: days.first, limit: 1, after: everyDay[0] ?? "", withBooker: false },
@@ -863,6 +882,8 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       // One statement: the count, the cursor check, and the page.
       const search = captured.filter((s) => /from bookings b\b/.test(s.sql));
       expect(search).toHaveLength(1);
+      // The fence that keeps the details from merging into the outer joins.
+      expect(search[0]?.sql).toMatch(/b1\.id = pg\.id\s+offset 0\s+\) d/);
       // Finance never names the checkout, in any statement, with or without a cursor.
       if (!query.withBooker) {
         expect(captured.filter((s) => s.sql.includes("checkout_sessions"))).toEqual([]);
@@ -890,6 +911,26 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         const aliases = subtree(plan).map((n) => n.Alias);
         expect(aliases).toEqual(expect.arrayContaining(["b1", "o", "pay", "r1"]));
         expect(aliases.includes("s1")).toBe(query.withBooker);
+        // Executed, the page finds each of its bookings once: one scan of b1,
+        // run at most limit + 1 times, at most one row a run, under either plan.
+        // Merged into the outer joins, the details would probe b1 once per trip
+        // per page row instead. The other details are logged, not bounded: on a
+        // table this small the planner may hash one once and reuse it.
+        const ran = await planOf(
+          A.id,
+          search[0] ?? { sql: "", parameters: [] },
+          mode,
+          "analyze, timing off, format json",
+        );
+        const scans = Object.fromEntries(pageScans.map((alias) => [alias, scansOf(ran, alias)]));
+        console.log(`SEARCH_PAGE_SCANS ${JSON.stringify({ query, mode, scans })}`);
+        const pageBooking = scansOf(ran, "b1");
+        expect({
+          query,
+          mode,
+          scans: pageBooking.length,
+          byKey: pageBooking.every(([rows, loops]) => loops <= query.limit + 1 && rows <= 1),
+        }).toEqual({ query, mode, scans: 1, byKey: true });
       }
     }
   });

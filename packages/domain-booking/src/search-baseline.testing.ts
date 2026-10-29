@@ -1,10 +1,18 @@
 /**
- * The console search exactly as it ran at b6d0247, before the page statement
- * ordered and limited the matching ids ahead of its detail joins. Kept
- * literally, for tests only: the result gate compares every outcome of
+ * The console search as it ran at b6d0247, before search became one
+ * statement. For tests only: the result gate compares every outcome of
  * `searchBookings` with this one, and the off-by-default benchmark times both
- * in the same run. Never exported from the package. Do not change it to match
- * a later search: its value is that it does not move.
+ * in the same run. Never exported from the package.
+ *
+ * Frozen here, as b6d0247 had them: the text condition, the three statements
+ * (cursor check, count, page), and the row mapping. Shared with today's
+ * search, imported live: the input helpers (`referencePrefix`, `escapeLike`,
+ * `nameWords`, `emailFragment`, `searchFields`), `iso`, and the types. Those
+ * helpers decide what matches, which no search change may move, so a change
+ * to one moves both sides alike and the gate cannot see it; their own tests
+ * cover them (`console-completion.test.ts`, and the contracts'
+ * `console.test.ts` for the reference prefix). Do not change the frozen part
+ * to match a later search.
  */
 
 import {
