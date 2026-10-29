@@ -38,10 +38,10 @@
 # (`podman machine start`). The container listens on 127.0.0.1 only.
 #
 # Clock check: `up`, after the server is ready, and `test`, before its first
-# part, refuse a container clock more than 5 s away from this machine's.
-# Quotes take their expiry from the writer's clock (Node, here) and checkout
-# compares it with the database's now(), so a lagging clock makes a stale
-# quote look fresh and the quote tests fail. A podman machine on a Mac can lag
+# part, refuse a container clock more than 5 s away from this machine's (plus
+# the reading's own round trip). Domain code mixes this machine's clock (quote
+# and hold expiry, waiver send times) with the database's now(), so results
+# near a time boundary are off by the skew. A podman machine on a Mac can lag
 # by many minutes after the Mac sleeps. Fix it with
 # `podman machine ssh sudo chronyc makestep`, or restart the machine. Docker on
 # Linux, as in CI, shares the host's clock, so the check passes there.
@@ -170,9 +170,11 @@ clock_fix() {
 }
 
 # check_clock <what> <command...>: the command prints the container's epoch
-# seconds. The host clock is read before and after it, so a slow round trip
-# widens the window instead of failing; a reading slower than 2 s is retried,
-# and after three slow ones the check warns and lets the run go on.
+# seconds. The host clock is read before and after it, and the reading must
+# fall within the limit of that window. A reading outside it is skew however
+# slow the round trip was. A reading inside a window wider than 2 s cannot
+# confirm the limit, so it is retried; after three such readings the check
+# warns and lets the run go on.
 check_clock() {
   local what="$1" _ before reading after skew direction
   shift
@@ -184,9 +186,9 @@ check_clock() {
     case "$reading" in
     '' | *[!0-9]*) die "unexpected clock reading from $what: $reading" ;;
     esac
-    [ $((after - before)) -le 2 ] || continue
     if [ "$reading" -ge $((before - CLOCK_SKEW_LIMIT)) ] && [ "$reading" -le $((after + CLOCK_SKEW_LIMIT)) ]; then
-      return 0
+      [ $((after - before)) -le 2 ] && return 0
+      continue
     fi
     skew=$((reading - (before + after) / 2))
     direction="ahead of"
@@ -194,9 +196,9 @@ check_clock() {
       skew=$((-skew))
       direction=behind
     fi
-    die "the clock in $what is $skew s $direction this machine's (limit $CLOCK_SKEW_LIMIT s). Quote expiry comes from this machine's clock and checkout compares it with the database's, so the quote tests would fail. $(clock_fix)"
+    die "the clock in $what is $skew s $direction this machine's (limit $CLOCK_SKEW_LIMIT s). Domain code mixes this machine's clock with the database's now(), so integration results near a time boundary would be off by that much. $(clock_fix)"
   done
-  log "warning: $what answered too slowly to compare its clock with this machine's; skipped the clock check"
+  log "warning: $what answered too slowly to confirm its clock is within $CLOCK_SKEW_LIMIT s of this machine's; going on without that check"
 }
 
 # The running server's own clock, as checkout reads it.
