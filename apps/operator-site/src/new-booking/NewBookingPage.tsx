@@ -23,6 +23,7 @@ import {
 } from "@tidegrid/design-system/components";
 import { formatDate, formatMoney, formatTripTime } from "@tidegrid/design-system/format";
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import type { Read } from "../bookings/api.ts";
 import { bookingHref, guestsText, instantText } from "../bookings/model.ts";
 import { canRetry, failureText, ReadFailed } from "../bookings/States.tsx";
 import { focusIsLost } from "../focus.ts";
@@ -94,7 +95,12 @@ type OfferLoad =
 type Problem =
   | { kind: "refusal"; command: BookingCommand; refusal: Refusal }
   | { kind: "failure"; command: BookingCommand; reason: ReadFailure }
-  | { kind: "delivery"; command: "pay" };
+  /**
+   * The provider settled the payment and its result did not reach TideGrid.
+   * On the outcome (`check`), `declined` says it was a decline: nothing was
+   * charged, and only its record is missing.
+   */
+  | { kind: "delivery"; command: "pay" | "check"; declined?: boolean };
 
 export function NewBookingPage({
   membership,
@@ -519,7 +525,7 @@ function NewBooking({
       // request, so nothing was charged, as cancelBooking concludes from the
       // same answer.
       setPayUncertain(false);
-      if (await showCheckout(checkout.id)) return;
+      if ((await showCheckout(checkout.id)).kind === "ok") return;
     }
     setBusy(null);
     if (result.reason === "key_reused") payKey.forget();
@@ -531,18 +537,18 @@ function NewBooking({
   };
 
   /**
-   * Read the checkout and show where it stands on the outcome step; null when
-   * it can't be read. `after` is a problem from the request just before the
-   * read, shown only while it still matters: the checkout is canceled and its
-   * payment is undecided. A payment the provider declined charged nothing.
+   * Read the checkout and show where it stands on the outcome step; the read
+   * says whether it could. `after` is a problem from the request just before
+   * the read, shown only while it still matters: the checkout is canceled and
+   * its payment is undecided. A payment the provider declined charged nothing.
    */
   async function showCheckout(
     id: string,
     after: Problem | null = null,
-  ): Promise<StaffCheckout | null> {
+  ): Promise<Read<StaffCheckout>> {
     const now = await readCheckout(tenantId, id);
     setBusy(null);
-    if (now.kind !== "ok") return null;
+    if (now.kind !== "ok") return now;
     if (now.value.paymentState === "failed") setPayUncertain(false);
     setProblem(
       after && now.value.state === "canceled" && now.value.paymentState === "pending"
@@ -552,7 +558,7 @@ function NewBooking({
     setCheckout(now.value);
     setPolls(0);
     setStep(4);
-    return now.value;
+    return now;
   }
 
   /**
@@ -568,10 +574,12 @@ function NewBooking({
   async function resendUncertainPayment(id: string): Promise<Problem | null> {
     const sent = await takeTestPayment(tenantId, id, lastPay, payKey.keyFor(lastPay));
     if (sent.kind === "ok") {
+      // A decline charged nothing, delivered or not.
+      const declined = sent.value.event.type === "payment.failed";
+      if (declined) setPayUncertain(false);
       // The provider has the payment, but its result did not land: the same request again.
-      if (sent.value.delivery.status !== 200) return { kind: "delivery", command: "pay" };
-      // A decline, delivered: nothing was charged.
-      if (sent.value.event.type === "payment.failed") setPayUncertain(false);
+      if (sent.value.delivery.status !== 200)
+        return { kind: "delivery", command: "check", declined };
       return null;
     }
     if (sent.reason === "refused" && sent.code === "checkout_not_open") {
@@ -579,26 +587,29 @@ function NewBooking({
       setPayUncertain(false);
       return null;
     }
-    return problemOf(sent, "pay");
+    return problemOf(sent, "check");
   }
 
   /**
-   * Check again, while a test payment that got no answer is still unknown.
-   * On a canceled checkout, its own request goes again before the read. On a
-   * hold that ended instead, which the page reaches only when staff asked to
-   * cancel and the cancel was refused because the hold had already ended,
-   * only the read: a success delivered there books the guest when the seats
-   * are still free, against the cancel staff asked for.
+   * Check again, after a test payment that got no answer. With `resend`, on a
+   * canceled checkout, that payment's own request goes again before the read.
+   * On a hold that ended instead, which the page reaches only when staff asked
+   * to cancel and the cancel was refused because the hold had already ended,
+   * only the read (owner decision, 2026-10-29): a success delivered there
+   * books the guest when the seats are still free, against the cancel staff
+   * asked for. A read that fails says so.
    */
-  const checkAgain = async () => {
+  const checkAgain = async (resend: boolean) => {
     if (!checkout) return;
     setBusy("recheck");
     setProblem(null);
     const after =
-      payUncertain && outcomeOf(checkout) === "canceled"
+      resend && outcomeOf(checkout) === "canceled"
         ? await resendUncertainPayment(checkout.id)
         : null;
-    if (!(await showCheckout(checkout.id, after))) setProblem(after);
+    const read = await showCheckout(checkout.id, after);
+    if (read.kind !== "ok")
+      setProblem(after ?? { kind: "failure", command: "check", reason: read.reason });
   };
 
   const cancelBooking = async () => {
@@ -612,7 +623,7 @@ function NewBooking({
       if (payUncertain) {
         // The payment may have gone through: deliver whatever settled (recheck 3).
         after = await resendUncertainPayment(checkout.id);
-        if (await showCheckout(checkout.id, after)) return;
+        if ((await showCheckout(checkout.id, after)).kind === "ok") return;
       }
       setBusy(null);
       setProblem(after);
@@ -622,7 +633,7 @@ function NewBooking({
     }
     if (result.reason === "refused" && result.code === "checkout_not_cancelable") {
       // Its payment was decided first: show where it stands.
-      if (await showCheckout(checkout.id)) return;
+      if ((await showCheckout(checkout.id)).kind === "ok") return;
     }
     setBusy(null);
     setProblem(problemOf(result, "cancel"));
@@ -711,6 +722,12 @@ function NewBooking({
   )}`;
   const draft = party ?? emptyParty(trip);
   const locked = frozen || busy !== null;
+  /** The outcome offers Check again: an uncertain payment on a closed checkout. */
+  const recheckShown =
+    step === 4 &&
+    checkout !== null &&
+    payUncertain &&
+    (outcomeOf(checkout) === "canceled" || outcomeOf(checkout) === "expired");
 
   return (
     <>
@@ -999,10 +1016,10 @@ function NewBooking({
               checkout={checkout}
               outcome={outcomeOf(checkout)}
               stalled={polls >= POLL_LIMIT}
-              uncertain={payUncertain}
+              uncertain={payUncertain ? lastPay : null}
               checking={busy === "recheck"}
               onCheck={() => setPolls(0)}
-              onRecheck={() => void checkAgain()}
+              onRecheck={() => void checkAgain(payUncertain)}
             />
           </section>
         )}
@@ -1030,9 +1047,11 @@ function NewBooking({
           }
         >
           <p>
-            {payUncertain
-              ? "The held seats go back on sale at once. The test payment may already have gone through; if it did, it is refunded in full and the operator sees an exception."
-              : "The held seats go back on sale at once. Nothing has been charged."}
+            {!payUncertain
+              ? "The held seats go back on sale at once. Nothing has been charged."
+              : lastPay === "fail"
+                ? "The held seats go back on sale at once. Nothing has been charged: only a decline was asked for."
+                : "The held seats go back on sale at once. The test payment may already have gone through; if it did, it is refunded in full and the operator sees an exception."}
           </p>
         </Dialog>
       )}
@@ -1055,8 +1074,11 @@ function NewBooking({
       case "open":
         return () => void holdSeats();
       case "pay":
-        // On the outcome, the payment's checkout is closed: Check again's resend, then a read.
-        return () => void (step === 4 ? checkAgain() : pay(lastPay));
+        return () => void pay(lastPay);
+      case "check":
+        // One control at a time: where the outcome offers Check again, that is the retry.
+        if (recheckShown) return undefined;
+        return () => void checkAgain(payUncertain || p.kind === "delivery");
       case "cancel":
         return () => void cancelBooking();
       case "edit":
@@ -1117,10 +1139,7 @@ function ProblemNotice({
           body: failureText(problem.reason, { noun: "this booking", tenantName }).body,
         }
       : problem.kind === "delivery"
-        ? {
-            title: "The payment's result didn't reach TideGrid",
-            body: "The provider has the payment, but nothing is decided yet. Try again: the same payment is sent again, never a second one.",
-          }
+        ? deliveryText(problem)
         : problem.refusal;
   const action =
     onRetry && problem.kind === "refusal" && problem.refusal.next === "requote" ? (
@@ -1143,6 +1162,25 @@ function ProblemNotice({
       <p>{body}</p>
     </Notice>
   );
+}
+
+/** A settled payment whose result did not reach TideGrid, on the payment step or the outcome. */
+function deliveryText(problem: { command: "pay" | "check"; declined?: boolean }) {
+  if (problem.command === "pay") {
+    return {
+      title: "The payment's result didn't reach TideGrid",
+      body: "The provider has the payment, but nothing is decided yet. Try again: the same payment is sent again, never a second one.",
+    };
+  }
+  return problem.declined
+    ? {
+        title: "The decline didn't reach TideGrid",
+        body: "Nothing was charged. Sending the same decline again records it.",
+      }
+    : {
+        title: "The payment's result didn't reach TideGrid",
+        body: "The provider has the payment. It is refunded in full once its result lands, and sending it again never charges twice.",
+      };
 }
 
 function outcomeTitle(outcome: Outcome, stalled: boolean): string {
@@ -1176,8 +1214,11 @@ function OutcomeBody({
   checkout: StaffCheckout;
   outcome: Outcome;
   stalled: boolean;
-  /** A test payment got no answer before this outcome: it may have gone through. */
-  uncertain: boolean;
+  /**
+   * A test payment got no answer before this outcome, and what it asked for.
+   * A success may have gone through; a decline charged nothing either way.
+   */
+  uncertain: StaffTestPaymentOutcome | null;
   /** Check again is working. */
   checking: boolean;
   onCheck: () => void;
@@ -1270,14 +1311,27 @@ function OutcomeBody({
         <Notice
           tone="warning"
           title="The seats were released"
-          actions={uncertain ? recheck : again}
+          actions={
+            uncertain === "succeed" ? (
+              recheck
+            ) : uncertain === "fail" ? (
+              <>
+                {recheck}
+                {again}
+              </>
+            ) : (
+              again
+            )
+          }
         >
           <p>
-            {uncertain
+            {uncertain === "succeed"
               ? "The hold ended before the test payment's result arrived. It may have gone through. If its result reaches TideGrid, the guest is booked if the seats are still free, or refunded in full. Check again shows where it stands."
-              : "The payment wasn't taken before the hold ended. Start again to book the guest."}
+              : uncertain === "fail"
+                ? "The hold ended before the decline's result arrived. Nothing was charged: only a decline was asked for. Check again shows where it stands."
+                : "The payment wasn't taken before the hold ended. Start again to book the guest."}
           </p>
-          {uncertain && toCalendar}
+          {uncertain === "succeed" && toCalendar}
         </Notice>
       );
     case "canceled":
@@ -1285,12 +1339,25 @@ function OutcomeBody({
         <Notice
           tone="info"
           title="The held seats went back on sale"
-          actions={uncertain ? recheck : again}
+          actions={
+            uncertain === "succeed" ? (
+              recheck
+            ) : uncertain === "fail" ? (
+              <>
+                {recheck}
+                {again}
+              </>
+            ) : (
+              again
+            )
+          }
         >
           <p>
-            {uncertain
+            {uncertain === "succeed"
               ? "The test payment may have gone through before the cancel. If it did, it is refunded in full, and Check again shows the refund here; the operator also sees an exception."
-              : "Nothing was charged."}
+              : uncertain === "fail"
+                ? "Nothing was charged: only a decline was asked for. The decline may not have reached TideGrid yet, and Check again sends it again."
+                : "Nothing was charged."}
           </p>
           {toCalendar}
         </Notice>
