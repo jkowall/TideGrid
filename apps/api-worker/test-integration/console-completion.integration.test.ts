@@ -1287,8 +1287,10 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
     });
 
     it("records each note in the audit history by id, never by its text", async () => {
+      // The marker uses letters outside hex, so no id in the audit history can
+      // contain it by chance (a digit run like 7731 can sit inside a uuid).
       const res = await addNote(A.id, fx.formula.bookingId, A.owner, {
-        body: "Secret phrase 7731.",
+        body: "Secret phrase zqxjv.",
       });
       const note = BookingNoteCreatedResponse.parse(res.json).note;
       const rows = await admin<{ action: string; subject_id: string; after_state: unknown }[]>`
@@ -1304,7 +1306,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       ]);
       const [leak] = await admin<{ n: number }[]>`
         select count(*)::int as n from public.audit_events
-         where tenant_id = ${A.id} and (after_state::text like '%7731%' or reason like '%7731%')`;
+         where tenant_id = ${A.id} and (after_state::text ilike '%zqxjv%' or reason ilike '%zqxjv%')`;
       expect(leak?.n).toBe(0);
     });
   });
