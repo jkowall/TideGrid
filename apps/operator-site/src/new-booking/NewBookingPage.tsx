@@ -207,7 +207,7 @@ function NewBooking({
   /** An open request whose answer did not arrive: a checkout may exist that the page has no id for. */
   const [openUnknown, setOpenUnknown] = useState(false);
   const [busy, setBusy] = useState<
-    null | "quote" | "open" | "edit" | "cancel" | StaffTestPaymentOutcome
+    null | "quote" | "open" | "edit" | "cancel" | "recheck" | StaffTestPaymentOutcome
   >(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -514,6 +514,11 @@ function NewBooking({
       return;
     }
     if (result.reason === "refused" && result.code === "checkout_not_open") {
+      // Refused on this payment's own key: a replay that found no settled
+      // event, or a first try that recorded nothing. Nothing settled for this
+      // request, so nothing was charged, as cancelBooking concludes from the
+      // same answer.
+      setPayUncertain(false);
       if (await showCheckout(checkout.id)) return;
     }
     setBusy(null);
@@ -525,17 +530,76 @@ function NewBooking({
     setProblem(problemOf(result, "pay"));
   };
 
-  /** Read the checkout and show where it stands on the outcome step. False when it can't be read. */
-  async function showCheckout(id: string): Promise<boolean> {
+  /**
+   * Read the checkout and show where it stands on the outcome step; null when
+   * it can't be read. `after` is a problem from the request just before the
+   * read, shown only while it still matters: the checkout is canceled and its
+   * payment is undecided. A payment the provider declined charged nothing.
+   */
+  async function showCheckout(
+    id: string,
+    after: Problem | null = null,
+  ): Promise<StaffCheckout | null> {
     const now = await readCheckout(tenantId, id);
     setBusy(null);
-    if (now.kind !== "ok") return false;
-    setProblem(null);
+    if (now.kind !== "ok") return null;
+    if (now.value.paymentState === "failed") setPayUncertain(false);
+    setProblem(
+      after && now.value.state === "canceled" && now.value.paymentState === "pending"
+        ? after
+        : null,
+    );
     setCheckout(now.value);
     setPolls(0);
     setStep(4);
-    return true;
+    return now.value;
   }
+
+  /**
+   * A test payment got no answer and its checkout is canceled now: send that
+   * payment's own request again, on its key, so a result the provider settled
+   * reaches TideGrid. On the API, a replay posts the settled event again
+   * whatever the checkout's state and settles nothing new on a checkout that
+   * is not open, and the fake settles a payment once. A first try that
+   * recorded nothing makes this a new request, which is refused as not open.
+   * A success delivered on a canceled checkout is refunded in full with an
+   * exception, never booked. Answers the problem to show beside the outcome.
+   */
+  async function resendUncertainPayment(id: string): Promise<Problem | null> {
+    const sent = await takeTestPayment(tenantId, id, lastPay, payKey.keyFor(lastPay));
+    if (sent.kind === "ok") {
+      // The provider has the payment, but its result did not land: the same request again.
+      if (sent.value.delivery.status !== 200) return { kind: "delivery", command: "pay" };
+      // A decline, delivered: nothing was charged.
+      if (sent.value.event.type === "payment.failed") setPayUncertain(false);
+      return null;
+    }
+    if (sent.reason === "refused" && sent.code === "checkout_not_open") {
+      // Refused as no longer open: nothing had settled, so nothing was charged.
+      setPayUncertain(false);
+      return null;
+    }
+    return problemOf(sent, "pay");
+  }
+
+  /**
+   * Check again, while a test payment that got no answer is still unknown.
+   * On a canceled checkout, its own request goes again before the read. On a
+   * hold that ended instead, which the page reaches only when staff asked to
+   * cancel and the cancel was refused because the hold had already ended,
+   * only the read: a success delivered there books the guest when the seats
+   * are still free, against the cancel staff asked for.
+   */
+  const checkAgain = async () => {
+    if (!checkout) return;
+    setBusy("recheck");
+    setProblem(null);
+    const after =
+      payUncertain && outcomeOf(checkout) === "canceled"
+        ? await resendUncertainPayment(checkout.id)
+        : null;
+    if (!(await showCheckout(checkout.id, after))) setProblem(after);
+  };
 
   const cancelBooking = async () => {
     if (!checkout) return;
@@ -544,24 +608,14 @@ function NewBooking({
     const result = await cancelCheckout(tenantId, checkout.id, newKey());
     setConfirmCancel(false);
     if (result.kind === "ok") {
+      let after: Problem | null = null;
       if (payUncertain) {
-        // The payment may have gone through. Its own request again, on its
-        // key, delivers a settled result so the refund follows, and settles
-        // nothing on the canceled checkout otherwise (recheck 3).
-        const settled = await takeTestPayment(
-          tenantId,
-          checkout.id,
-          lastPay,
-          payKey.keyFor(lastPay),
-        );
-        // Refused as no longer open: nothing had settled, so nothing was charged.
-        if (settled.kind === "failed" && settled.code === "checkout_not_open") {
-          setPayUncertain(false);
-        }
-        if (await showCheckout(checkout.id)) return;
+        // The payment may have gone through: deliver whatever settled (recheck 3).
+        after = await resendUncertainPayment(checkout.id);
+        if (await showCheckout(checkout.id, after)) return;
       }
       setBusy(null);
-      setProblem(null);
+      setProblem(after);
       setCheckout(result.value);
       setStep(4);
       return;
@@ -946,8 +1000,9 @@ function NewBooking({
               outcome={outcomeOf(checkout)}
               stalled={polls >= POLL_LIMIT}
               uncertain={payUncertain}
+              checking={busy === "recheck"}
               onCheck={() => setPolls(0)}
-              onRecheck={() => void showCheckout(checkout.id)}
+              onRecheck={() => void checkAgain()}
             />
           </section>
         )}
@@ -1000,7 +1055,8 @@ function NewBooking({
       case "open":
         return () => void holdSeats();
       case "pay":
-        return () => void pay(lastPay);
+        // On the outcome, the payment's checkout is closed: Check again's resend, then a read.
+        return () => void (step === 4 ? checkAgain() : pay(lastPay));
       case "cancel":
         return () => void cancelBooking();
       case "edit":
@@ -1113,6 +1169,7 @@ function OutcomeBody({
   outcome,
   stalled,
   uncertain,
+  checking,
   onCheck,
   onRecheck,
 }: {
@@ -1121,11 +1178,19 @@ function OutcomeBody({
   stalled: boolean;
   /** A test payment got no answer before this outcome: it may have gone through. */
   uncertain: boolean;
+  /** Check again is working. */
+  checking: boolean;
   onCheck: () => void;
   onRecheck: () => void;
 }) {
   const recheck = (
-    <Button variant="primary" icon="refresh" onClick={onRecheck}>
+    <Button
+      variant="primary"
+      icon="refresh"
+      busy={checking}
+      busyLabel="Checking…"
+      onClick={onRecheck}
+    >
       Check again
     </Button>
   );
@@ -1133,6 +1198,13 @@ function OutcomeBody({
     <ButtonLink href={hereAddress()} icon="refresh">
       Start a new booking
     </ButtonLink>
+  );
+  const toCalendar = (
+    <p>
+      <ConsoleLink href="/calendar" className="tap-target">
+        Back to calendar
+      </ConsoleLink>
+    </p>
   );
   switch (outcome) {
     case "waiting":
@@ -1202,9 +1274,10 @@ function OutcomeBody({
         >
           <p>
             {uncertain
-              ? "The hold ended before the test payment's result arrived. It may have gone through; if it did, it is refunded in full, and Check again shows the refund."
+              ? "The hold ended before the test payment's result arrived. It may have gone through. If its result reaches TideGrid, the guest is booked if the seats are still free, or refunded in full. Check again shows where it stands."
               : "The payment wasn't taken before the hold ended. Start again to book the guest."}
           </p>
+          {uncertain && toCalendar}
         </Notice>
       );
     case "canceled":
@@ -1219,11 +1292,7 @@ function OutcomeBody({
               ? "The test payment may have gone through before the cancel. If it did, it is refunded in full, and Check again shows the refund here; the operator also sees an exception."
               : "Nothing was charged."}
           </p>
-          <p>
-            <ConsoleLink href="/calendar" className="tap-target">
-              Back to calendar
-            </ConsoleLink>
-          </p>
+          {toCalendar}
         </Notice>
       );
   }
