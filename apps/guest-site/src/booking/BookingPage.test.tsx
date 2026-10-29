@@ -634,7 +634,9 @@ describe("opening the checkout", () => {
       expiresAt: expect.any(String),
       clockOffsetMs: 0,
     });
-    expect(stored).not.toMatch(/Ava|example\.test/);
+    // The whole name and address: the stored secret is random base64url, which
+    // can spell a short fragment such as "Ava" by chance, never one with a space or @.
+    expect(stored).not.toMatch(/Ava Guest|ava@example\.test/);
     // The facts beside the steps say the seats are held.
     expect(text(screen.getByRole("complementary", { name: "Trip details" }))).toContain(
       "Your 3 seats are held",

@@ -26,6 +26,11 @@ export interface RequestAttributes {
   "tidegrid.hold_sweep.expired_count"?: number;
   "tidegrid.hold_sweep.failed_tenant_count"?: number;
   "tidegrid.hold_sweep.complete"?: boolean;
+  /** Fair turns, for each of the four sweeps (pre-pilot hardening, Part E). Counts only. */
+  "tidegrid.hold_sweep.turn_count"?: number;
+  "tidegrid.hold_sweep.pass_count"?: number;
+  "tidegrid.hold_sweep.deferred_tenant_count"?: number;
+  "tidegrid.hold_sweep.stamp_failure_count"?: number;
   /** Payment webhooks (G2.7): what processing did. Never an event body, id, or secret. */
   "tidegrid.payment_event.outcome"?: string;
   "tidegrid.payment_event.duplicate"?: boolean;
@@ -40,6 +45,10 @@ export interface RequestAttributes {
   "tidegrid.checkout_sweep.failed_event_count"?: number;
   "tidegrid.checkout_sweep.failed_refund_count"?: number;
   "tidegrid.checkout_sweep.complete"?: boolean;
+  "tidegrid.checkout_sweep.turn_count"?: number;
+  "tidegrid.checkout_sweep.pass_count"?: number;
+  "tidegrid.checkout_sweep.deferred_tenant_count"?: number;
+  "tidegrid.checkout_sweep.stamp_failure_count"?: number;
   /** Email delivery (lane 1, the G2.16 shim): counts and codes, never a recipient or body. */
   "tidegrid.email.sent_count"?: number;
   "tidegrid.email.retried_count"?: number;
@@ -59,6 +68,12 @@ export interface RequestAttributes {
   "tidegrid.email_sweep.canceled_count"?: number;
   "tidegrid.email_sweep.failed_tenant_count"?: number;
   "tidegrid.email_sweep.complete"?: boolean;
+  "tidegrid.email_sweep.turn_count"?: number;
+  "tidegrid.email_sweep.pass_count"?: number;
+  "tidegrid.email_sweep.deferred_tenant_count"?: number;
+  "tidegrid.email_sweep.stamp_failure_count"?: number;
+  /** The provider refused for the whole account and the run stopped. */
+  "tidegrid.email_sweep.account_fault"?: boolean;
   /** Custom hostname sweep (G2.14b). Provider ids are opaque; no hostname or personal data. */
   "tidegrid.hostname.reason"?: string;
   "tidegrid.hostname.refusal_code"?: string;
@@ -72,6 +87,14 @@ export interface RequestAttributes {
   "tidegrid.hostname_sweep.throttled"?: boolean;
   "tidegrid.hostname_sweep.provider_fault"?: string;
   "tidegrid.hostname_sweep.complete"?: boolean;
+  "tidegrid.hostname_sweep.turn_count"?: number;
+  "tidegrid.hostname_sweep.pass_count"?: number;
+  "tidegrid.hostname_sweep.deferred_tenant_count"?: number;
+  "tidegrid.hostname_sweep.stamp_failure_count"?: number;
+  "tidegrid.hostname_sweep.expiry_only_turn_count"?: number;
+  "tidegrid.hostname_sweep.provider_call_count"?: number;
+  /** The provider's requested wait after a 429 or 5xx, in seconds. */
+  "tidegrid.hostname_sweep.retry_after_seconds"?: number;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -91,6 +114,11 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.hold_sweep.expired_count",
   "tidegrid.hold_sweep.failed_tenant_count",
   "tidegrid.hold_sweep.complete",
+  // Fair turns (pre-pilot hardening, Part E).
+  "tidegrid.hold_sweep.turn_count",
+  "tidegrid.hold_sweep.pass_count",
+  "tidegrid.hold_sweep.deferred_tenant_count",
+  "tidegrid.hold_sweep.stamp_failure_count",
   "tidegrid.payment_event.outcome",
   "tidegrid.payment_event.duplicate",
   "tidegrid.checkout_sweep.tenant_count",
@@ -103,6 +131,10 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.checkout_sweep.failed_event_count",
   "tidegrid.checkout_sweep.failed_refund_count",
   "tidegrid.checkout_sweep.complete",
+  "tidegrid.checkout_sweep.turn_count",
+  "tidegrid.checkout_sweep.pass_count",
+  "tidegrid.checkout_sweep.deferred_tenant_count",
+  "tidegrid.checkout_sweep.stamp_failure_count",
   // Email delivery (lane 1, the G2.16 shim).
   "tidegrid.email.sent_count",
   "tidegrid.email.retried_count",
@@ -122,6 +154,11 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.email_sweep.canceled_count",
   "tidegrid.email_sweep.failed_tenant_count",
   "tidegrid.email_sweep.complete",
+  "tidegrid.email_sweep.turn_count",
+  "tidegrid.email_sweep.pass_count",
+  "tidegrid.email_sweep.deferred_tenant_count",
+  "tidegrid.email_sweep.stamp_failure_count",
+  "tidegrid.email_sweep.account_fault",
   // Custom hostname sweep (G2.14b).
   "tidegrid.hostname.reason",
   "tidegrid.hostname.refusal_code",
@@ -135,6 +172,13 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.hostname_sweep.throttled",
   "tidegrid.hostname_sweep.provider_fault",
   "tidegrid.hostname_sweep.complete",
+  "tidegrid.hostname_sweep.turn_count",
+  "tidegrid.hostname_sweep.pass_count",
+  "tidegrid.hostname_sweep.deferred_tenant_count",
+  "tidegrid.hostname_sweep.stamp_failure_count",
+  "tidegrid.hostname_sweep.expiry_only_turn_count",
+  "tidegrid.hostname_sweep.provider_call_count",
+  "tidegrid.hostname_sweep.retry_after_seconds",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

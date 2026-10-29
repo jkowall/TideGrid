@@ -19,7 +19,7 @@ import {
   todayIn,
   zoneCity,
 } from "@tidegrid/design-system/format";
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { loadZone } from "../calendar/api.ts";
 import { salesStates } from "../calendar/model.ts";
 import { focusIsLost } from "../focus.ts";
@@ -162,7 +162,10 @@ export function BookingsPage({
   // The address keeps the day and the trip, so a reload shows the same list.
   // Today's list alone goes without a day, so its address always opens today;
   // a trip departs on one day, so it always travels with its day.
-  useEffect(() => {
+  // A layout effect, so the address is written inside its own commit. A
+  // passive one can still be pending when a link is followed, and would then
+  // write this list's day and trip over the new page's address.
+  useLayoutEffect(() => {
     if (!day || !zoneSettled) return;
     const params = new URLSearchParams(window.location.search);
     if (day === today && !tripId) params.delete("day");
@@ -180,7 +183,10 @@ export function BookingsPage({
   // booking of a last page, or to the day's heading. Only a settled answer
   // moves focus, never while Try again is still working, and only when focus
   // went with the control: the person may have moved on while it loaded.
-  useEffect(() => {
+  // A layout effect, so focus moves inside the commit that settles the
+  // answer. A passive one can still be pending when the next click or check
+  // comes, which then finds focus still on the page's body.
+  useLayoutEffect(() => {
     if (load.kind === "loading" || (load.kind === "failed" && load.retrying)) return;
     let first: string | null = null;
     if (load.kind === "ready") {
