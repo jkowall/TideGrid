@@ -1,4 +1,10 @@
-import { type Database, inTenantTransaction, type TenantContext } from "@tidegrid/database";
+import {
+  type Database,
+  inTenantTransaction,
+  recordSweepTurn,
+  runFairSweep,
+  type TenantContext,
+} from "@tidegrid/database";
 import { customHostnameProblem } from "@tidegrid/tenant-config";
 import { type Kysely, sql } from "kysely";
 import {
@@ -205,13 +211,21 @@ export interface HostnameSweepOptions {
   /** Correlates this run's audit rows, like a request id. */
   runId: string;
   tenantLimit?: number;
-  /** Hostnames read per tenant per run. */
+  /** Rows handled per tenant per run, ended claims included. */
   perTenantLimit?: number;
+  /**
+   * Due rows one tenant's turn reads and handles, ended claims included
+   * (pre-pilot hardening, D-E1 A); `perTenantLimit` stays the cap for the
+   * run. A whole number from 1 to 1,000.
+   */
+  turnHostnames?: number;
   /**
    * Provider calls per run. Cloudflare allows 1,200 requests per 5 minutes
    * for the whole account; a run every 15 minutes stays far below that.
    * Past the limit the run reads the provider no more, but ended claims
-   * still expire until the budget runs out.
+   * still expire until the budget runs out. The limit is checked before each
+   * read; a read that finds no record adds its exact-name lookup unchecked,
+   * so a run makes at most one call more than the limit.
    */
   maxProviderCalls?: number;
   /**
@@ -219,7 +233,15 @@ export interface HostnameSweepOptions {
    * expiry starts after it.
    */
   budgetMs?: number;
+  /** One tenant's turn failed, an account-level refusal included; the sweep moves on. */
   onTenantError?: (tenantId: string, error: unknown) => void;
+  /**
+   * A turn's stamp failed; the turn still runs. Without it, onTenantError
+   * hears the failure. Either way it counts in stampFailures, not failedTenants.
+   */
+  onStampError?: (tenantId: string, error: unknown) => void;
+  /** Called as each tenant's turn starts, for tests and logs. */
+  onTurnStart?: (tenantId: string, pass: number) => void;
   /** Check only these tenants, as the admin CLI's fake run does. */
   onlyTenants?: readonly string[];
   /**
@@ -258,10 +280,23 @@ export interface HostnameSweepReport {
   retryAfterSeconds: number | null;
   /** False when the budget, the call limit, the tenant limit, or throttling cut the run short. */
   complete: boolean;
+  /** Tenant turns started, expiry-only turns included. */
+  turns: number;
+  /** Passes over the tenants: the first gives each a turn, later ones go round those with more. */
+  passes: number;
+  /** Tenants listed that the budget left for the next run. */
+  deferredTenants: number;
+  /** Tenants whose stamp failed; each still took its turn. */
+  stampFailures: number;
+  /** Turns that started after the provider reads stopped; none of them stamps its tenant. */
+  expiryOnlyTurns: number;
+  /** Provider calls this run, exact-name lookups included. */
+  providerCalls: number;
 }
 
 export const DEFAULT_HOSTNAME_SWEEP_TENANT_LIMIT = 100;
 export const DEFAULT_HOSTNAME_SWEEP_PER_TENANT = 20;
+export const DEFAULT_HOSTNAME_SWEEP_TURN = 5;
 export const DEFAULT_HOSTNAME_SWEEP_PROVIDER_CALLS = 200;
 export const DEFAULT_HOSTNAME_SWEEP_BUDGET_MS = 20_000;
 
@@ -414,6 +449,15 @@ async function readHostname(
  * After any of these, and after the call limit, readings already recorded
  * stand and the run still expires pending claims that ran out, which needs no
  * provider answer. The budget ends the run, expiries included.
+ *
+ * Tenants take fair turns (`runFairSweep`, pre-pilot hardening item 5, Part
+ * D), listed least recently served first (0013): a turn reads up to five due
+ * rows of one tenant and handles them, the first pass gives each listed
+ * tenant one turn, and later passes go round the tenants whose turn was full,
+ * up to `perTenantLimit` rows a tenant a run. Each hostname is handled at
+ * most once a run. A tenant is stamped only while its turn may still read the
+ * provider, so a tenant reached after a stop keeps its place for the next
+ * run's reads (D-E3 A).
  */
 export async function sweepHostnames(
   db: Kysely<Database>,
@@ -425,8 +469,10 @@ export async function sweepHostnames(
   const maxCalls = options.maxProviderCalls ?? DEFAULT_HOSTNAME_SWEEP_PROVIDER_CALLS;
   const perTenant = options.perTenantLimit ?? DEFAULT_HOSTNAME_SWEEP_PER_TENANT;
   const tenantLimit = options.tenantLimit ?? DEFAULT_HOSTNAME_SWEEP_TENANT_LIMIT;
-  const { rows } = await sql<{ tenant_id: string }>`
-    select tenant_id from app.hostname_sweep_tenants(${tenantLimit})`.execute(db);
+  const quantum = options.turnHostnames ?? DEFAULT_HOSTNAME_SWEEP_TURN;
+  if (!Number.isInteger(quantum) || quantum < 1 || quantum > 1000) {
+    throw new RangeError("turnHostnames is a whole number from 1 to 1000");
+  }
   const report: HostnameSweepReport = {
     tenants: 0,
     checked: 0,
@@ -438,34 +484,71 @@ export async function sweepHostnames(
     providerFault: null,
     providerFaultHostnameId: null,
     unread: 0,
-    complete: rows.length < tenantLimit,
+    complete: false,
+    turns: 0,
+    passes: 0,
+    deferredTenants: 0,
+    stampFailures: 0,
+    expiryOnlyTurns: 0,
+    providerCalls: 0,
   };
-  let calls = 0;
+  const contextOf = (tenantId: string): TenantContext => ({
+    tenantId,
+    actorType: "system",
+    actorId: "hostname-sweep",
+    requestId: options.runId,
+  });
+  // One time origin with the scheduler, so a turn the budget cut and the
+  // scheduler's next check agree.
   const outOfTime = () => clock() - started >= budgetMs;
 
   // After a throttle, an account-level refusal, or the call limit the run
   // reads the provider no more, but it still expires claims that ran out:
   // that is the database's own fact and needs no provider answer. The budget
   // ends the run, expiries included.
-  let expiryOnly = false;
-  for (const { tenant_id: tenantId } of rows) {
-    if (options.onlyTenants && !options.onlyTenants.includes(tenantId)) continue;
-    if (outOfTime()) {
-      report.complete = false;
-      break;
-    }
-    if (calls >= maxCalls) {
-      report.complete = false;
-      expiryOnly = true;
-    }
-    report.tenants += 1;
-    const ctx: TenantContext = {
-      tenantId,
-      actorType: "system",
-      actorId: "hostname-sweep",
-      requestId: options.runId,
-    };
-    try {
+  let calls = 0;
+  let readsStopped = false;
+  /** Rows the list returned before `onlyTenants`: a full list means more tenants may wait. */
+  let listedRows = 0;
+  /** The call limit was reached, so rows that needed a read may remain. */
+  let capHit = false;
+  /** The budget ran out inside a turn. */
+  let cut = false;
+  /** A tenant's read was full when it reached `perTenantLimit`. */
+  let fullAtCap = false;
+  /** The hostnames each tenant's turns handled this run; none is handled twice. */
+  const handled = new Map<string, Set<string>>();
+
+  const fair = await runFairSweep({
+    listTenants: async () => {
+      const { rows } = await sql<{ tenant_id: string }>`
+        select tenant_id from app.hostname_sweep_tenants(${tenantLimit})`.execute(db);
+      listedRows = rows.length;
+      const ids = rows.map((r) => r.tenant_id);
+      // Applied after the limit, as before (a test's or the CLI's filter).
+      const only = options.onlyTenants;
+      return only ? ids.filter((id) => only.includes(id)) : ids;
+    },
+    tenantLimit,
+    stamp: (tenantId) => recordSweepTurn(db, contextOf(tenantId), "hostname"),
+    // A turn that can only expire claims leaves its tenant's place alone, so
+    // a tenant reached after a stop goes first for reads on the next run.
+    stampWhen: () => !readsStopped && calls < maxCalls,
+    turn: async (tenantId) => {
+      const ctx = contextOf(tenantId);
+      let seen = handled.get(tenantId);
+      if (!seen) {
+        seen = new Set();
+        handled.set(tenantId, seen);
+      }
+      const before = seen.size;
+      const limit = Math.min(quantum, perTenant - before);
+      if (calls >= maxCalls) {
+        readsStopped = true;
+        capHit = true;
+      }
+      const expiryOnly = readsStopped;
+      if (expiryOnly) report.expiryOnlyTurns += 1;
       const due = await inTenantTransaction(db, ctx, async (trx) => {
         const { rows: found } = await sql<DueHostname>`
           select p.hostname, p.provider_hostname_id,
@@ -481,79 +564,111 @@ export async function sweepHostnames(
                   or (h.status = 'active' and p.next_check_at <= now()))
              and (not ${expiryOnly}::boolean
                   or (h.status = 'pending' and p.claim_expires_at <= now()))
+             and p.hostname <> all(${[...seen]}::text[])
            order by claim_ended desc, p.next_check_at, p.hostname
-           limit ${perTenant}`.execute(trx);
+           limit ${limit}`.execute(trx);
         return found;
       });
-      if (due.length === perTenant) report.complete = false;
-      for (const item of due) {
-        if (outOfTime()) {
-          report.complete = false;
-          break;
-        }
-        if (item.claim_ended) {
-          // No provider call: record_check with no reading expires it.
+      let capped = false;
+      try {
+        for (const item of due) {
+          if (outOfTime()) {
+            cut = true;
+            break;
+          }
+          seen.add(item.hostname);
+          if (item.claim_ended) {
+            // No provider call: record_check with no reading expires it.
+            const outcome = await inTenantTransaction(db, ctx, async (trx) => {
+              const { rows: result } = await sql<{ outcome: string }>`
+                select app.hostname_record_check(${tenantId}::uuid, ${item.hostname},
+                  ${item.provider_hostname_id}, null, null, 'claim_ended') as outcome`.execute(trx);
+              return result[0]?.outcome;
+            });
+            if (outcome === "expired") report.expired += 1;
+            continue;
+          }
+          if (readsStopped) continue;
+          if (calls >= maxCalls) {
+            readsStopped = true;
+            capHit = true;
+            capped = true;
+            continue;
+          }
+          calls += 1;
+          const reading = await readHostname(options.provider, item, () => {
+            calls += 1;
+          });
+          const hostnameState = reading.kind === "reading" ? reading.hostnameState : null;
+          const certificateState = reading.kind === "reading" ? reading.certificateState : null;
+          if (certificateState === "expiring") options.onExpiring?.(tenantId, item.hostname);
+          if (reading.kind === "no_reading") {
+            report.unread += 1;
+            options.onUnread?.(tenantId, item.provider_hostname_id, reading.errorCode);
+          }
           const outcome = await inTenantTransaction(db, ctx, async (trx) => {
             const { rows: result } = await sql<{ outcome: string }>`
               select app.hostname_record_check(${tenantId}::uuid, ${item.hostname},
-                ${item.provider_hostname_id}, null, null, 'claim_ended') as outcome`.execute(trx);
+                ${item.provider_hostname_id}, ${hostnameState}, ${certificateState},
+                ${reading.errorCode}) as outcome`.execute(trx);
             return result[0]?.outcome;
           });
+          report.checked += 1;
+          if (outcome === "demoted") report.demoted += 1;
           if (outcome === "expired") report.expired += 1;
-          continue;
         }
-        if (expiryOnly) continue;
-        if (calls >= maxCalls) {
-          report.complete = false;
-          expiryOnly = true;
-          continue;
+      } catch (error) {
+        if (error instanceof Throttled) {
+          report.throttled = true;
+          report.retryAfterSeconds = error.retryAfterSeconds;
+          readsStopped = true;
+          return { units: seen.size - before, more: false };
         }
-        calls += 1;
-        const reading = await readHostname(options.provider, item, () => {
-          calls += 1;
-        });
-        const hostnameState = reading.kind === "reading" ? reading.hostnameState : null;
-        const certificateState = reading.kind === "reading" ? reading.certificateState : null;
-        if (certificateState === "expiring") options.onExpiring?.(tenantId, item.hostname);
-        if (reading.kind === "no_reading") {
-          report.unread += 1;
-          options.onUnread?.(tenantId, item.provider_hostname_id, reading.errorCode);
+        if (error instanceof HostnameSweepFault) {
+          // A refusal about the account, the token, or the zone, not one
+          // hostname: read the provider no more, record nothing for this
+          // hostname, and let the next run try again. The scheduler counts
+          // the tenant as failed and reports it once.
+          report.providerFault = error.code;
+          report.providerFaultHostnameId = error.providerHostnameId;
+          readsStopped = true;
         }
-        const outcome = await inTenantTransaction(db, ctx, async (trx) => {
-          const { rows: result } = await sql<{ outcome: string }>`
-            select app.hostname_record_check(${tenantId}::uuid, ${item.hostname},
-              ${item.provider_hostname_id}, ${hostnameState}, ${certificateState},
-              ${reading.errorCode}) as outcome`.execute(trx);
-          return result[0]?.outcome;
-        });
-        report.checked += 1;
-        if (outcome === "demoted") report.demoted += 1;
-        if (outcome === "expired") report.expired += 1;
+        throw error;
       }
-    } catch (error) {
-      if (error instanceof Throttled) {
-        report.throttled = true;
-        report.retryAfterSeconds = error.retryAfterSeconds;
-        report.complete = false;
-        expiryOnly = true;
-        continue;
-      }
-      if (error instanceof HostnameSweepFault) {
-        // A refusal about the account, the token, or the zone, not one
-        // hostname: read the provider no more, record nothing for this
-        // hostname, and let the next run try again.
-        report.providerFault = error.code;
-        report.providerFaultHostnameId = error.providerHostnameId;
-        report.failedTenants += 1;
-        report.complete = false;
-        options.onTenantError?.(tenantId, error);
-        expiryOnly = true;
-        continue;
-      }
-      report.failedTenants += 1;
-      report.complete = false;
-      options.onTenantError?.(tenantId, error);
-    }
-  }
+      const units = seen.size - before;
+      // Ended claims sort first, so a turn stopped at a read left none behind.
+      if (capped || cut) return { units, more: false };
+      const full = due.length === limit;
+      if (full && seen.size >= perTenant) fullAtCap = true;
+      return { units, more: full && seen.size < perTenant };
+    },
+    budgetMs,
+    clock,
+    startedAt: started,
+    ...(options.onTurnStart ? { onTurnStart: options.onTurnStart } : {}),
+    // Routed, never counted here: the scheduler counts each failure once.
+    onTenantError: (tenantId, error, during) => {
+      if (during === "stamp" && options.onStampError) options.onStampError(tenantId, error);
+      else options.onTenantError?.(tenantId, error);
+    },
+  });
+
+  report.tenants = fair.tenants;
+  report.failedTenants = fair.failedTenants;
+  report.turns = fair.turns;
+  report.passes = fair.passes;
+  report.deferredTenants = fair.deferredTenants;
+  report.stampFailures = fair.stampFailures;
+  report.providerCalls = calls;
+  // The bound the list function applies: greatest(1, least(limit, 1000)).
+  const listLimit = Math.min(1000, Math.max(1, Math.trunc(tenantLimit) || 1));
+  report.complete =
+    fair.complete &&
+    listedRows < listLimit &&
+    !capHit &&
+    !cut &&
+    !fullAtCap &&
+    !report.throttled &&
+    report.providerFault === null;
   return report;
 }
