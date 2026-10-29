@@ -507,7 +507,7 @@ describe.skipIf(!env)("the hostname sweep takes fair turns across tenants", () =
   it.each([0, 1.5, 1001])(
     "refuses a turn of %s hostnames before it reads",
     async (turnHostnames) => {
-      const { provider, read } = reads();
+      const { provider } = reads();
       await expect(
         sweepHostnames(runtimeDb.db, {
           provider,
