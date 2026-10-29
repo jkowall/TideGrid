@@ -1,8 +1,10 @@
 /**
  * Integration-test harness (Node only). Integration suites run against a
- * throwaway database, a disposable PostgreSQL or a Neon branch: they migrate
- * it, rotate the runtime role's password on it, and connect twice, once as the admin role for fixtures and
- * once as tidegrid_app so row-level security is exercised for real.
+ * throwaway database: the local PostgreSQL 17 container that
+ * tools/local-db/local-db.sh starts (CI uses the same script), or optionally a
+ * throwaway Neon branch. They migrate it, rotate the runtime role's password
+ * on it, and connect twice, once as the admin role for fixtures and once as
+ * tidegrid_app so row-level security is exercised for real.
  */
 import postgres from "postgres";
 import { migrate } from "./migrate.ts";
@@ -23,29 +25,38 @@ export function integrationAdminUrl(): string | null {
   const url = process.env.DATABASE_URL;
   if (!url) {
     if (process.env.CI) {
-      throw new Error("DATABASE_URL is required in CI; integration suites must not skip silently.");
+      throw new Error(
+        "DATABASE_URL is required in CI; integration suites must not skip silently. Start a throwaway database with tools/local-db/local-db.sh up.",
+      );
     }
     return null;
   }
   if (process.env.TIDEGRID_EPHEMERAL_DB !== "1") {
     throw new Error(
-      "Integration suites rotate the runtime role password. Point DATABASE_URL at a throwaway database (a disposable PostgreSQL or a Neon branch) and set TIDEGRID_EPHEMERAL_DB=1.",
+      "Integration suites rotate the runtime role password. Point DATABASE_URL at a throwaway database (tools/local-db/local-db.sh up, or a throwaway Neon branch) and set TIDEGRID_EPHEMERAL_DB=1.",
     );
   }
   return url;
 }
 
 export async function prepareIntegrationDatabase(adminUrl: string): Promise<IntegrationDatabase> {
-  await step("migrate the branch", 120_000, () => migrate(adminUrl));
+  await step("migrate the database", 120_000, () => migrate(adminUrl));
   const password = newRuntimePassword();
   await step("rotate the runtime password", 60_000, () =>
     setRuntimeRolePassword(adminUrl, password),
   );
   const runtimeUrl = runtimeUrlFrom(adminUrl, password);
   // Neon applies a role change through its control plane; give it a moment.
-  await new Promise((resolve) => setTimeout(resolve, 3_000));
+  // A plain PostgreSQL applies it at commit, so only a Neon host waits.
+  if (isNeonHost(adminUrl)) await new Promise((resolve) => setTimeout(resolve, 3_000));
   await waitUntilReachable([adminUrl, runtimeUrl]);
   return { adminUrl, runtimeUrl };
+}
+
+/** True when the URL's host is a Neon endpoint, such as ep-x.us-east-2.aws.neon.tech. */
+export function isNeonHost(url: string): boolean {
+  const host = new URL(url).hostname.toLowerCase();
+  return host === "neon.tech" || host.endsWith(".neon.tech");
 }
 
 /**

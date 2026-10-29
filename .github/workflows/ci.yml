@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -33,30 +33,18 @@ jobs:
       - run: pnpm check:prototype && pnpm test:prototype
 
   integration:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ github.event_name == 'pull_request' }}
     # A disposable PostgreSQL 17 container per run, so CI spends no Neon
-    # quota. The image's admin role creates tidegrid_app through migration
-    # 0001, as on Neon, and the image ships btree_gist with contrib.
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: tidegrid
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d tidegrid"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
+    # quota. tools/local-db/local-db.sh starts it from the pinned image, the
+    # same script and image a local run uses, and exports DATABASE_URL and
+    # TIDEGRID_EPHEMERAL_DB=1 (integration suites rotate tidegrid_app's
+    # password; this database is disposable). The image's admin role creates
+    # tidegrid_app through migration 0001, as on Neon, and the image ships
+    # btree_gist with contrib.
     env:
       CI: "true"
-      # Integration suites rotate tidegrid_app's password; this database is disposable.
-      TIDEGRID_EPHEMERAL_DB: "1"
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tidegrid
+      TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -65,10 +53,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Start PostgreSQL 17
+        run: tools/local-db/local-db.sh up >> "$GITHUB_ENV"
       - name: Migrate, seed, and run integration tests
         run: |
-          pnpm db:migrate
-          pnpm db:seed
+          tools/local-db/local-db.sh prepare integration
           pnpm test:integration
 
   # Browser journeys and the installability check (G2.14b; D5(a), a
@@ -76,28 +65,14 @@ jobs:
   # under its Worker in `wrangler dev`, first with a stub GuestGateway and no
   # database (part A), then bound to the API's GuestGateway, with the API in
   # `wrangler dev` on a disposable PostgreSQL 17 seeded with *.book.localhost
-  # hosts (part B). Chromium is downloaded on the runner only.
+  # hosts (part B), through tools/local-db/local-db.sh. Chromium is
+  # downloaded on the runner only.
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ github.event_name == 'pull_request' }}
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: tidegrid
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d tidegrid"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     env:
       CI: "true"
-      TIDEGRID_EPHEMERAL_DB: "1"
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tidegrid
+      TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -123,30 +98,21 @@ jobs:
         run: pnpm --filter @tidegrid/guest-site build
       - name: Part A, stub gateway, no database
         run: pnpm --filter @tidegrid/guest-site e2e
+      - name: Start PostgreSQL 17
+        run: tools/local-db/local-db.sh up >> "$GITHUB_ENV"
       - name: Migrate, seed local hostnames, and prepare the runtime role
-        run: |
-          pnpm db:migrate
-          SEED_LOCAL_HOSTNAMES=1 pnpm db:seed
-          password="$(openssl rand -hex 24)"
-          TIDEGRID_APP_PASSWORD="$password" pnpm --filter @tidegrid/database app-role:password
-          # A third host for the second tenant, which the journey disables.
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at) select 'reef-e2e.book.localhost', id, 'preview', 'active', now() from public.tenants where slug = 'demo-reef'"
-          printf 'DATABASE_URL=postgresql://tidegrid_app:%s@localhost:5432/tidegrid\nFAKE_PAYMENT_WEBHOOK_SECRET=%s\n' "$password" "$(openssl rand -hex 32)" > apps/api-worker/.dev.vars
+        # Also a third host for the second tenant, which the journey disables,
+        # and the API's .dev.vars with a fresh runtime password.
+        run: tools/local-db/local-db.sh prepare guest-e2e
       - name: Start the API on 8961
         run: |
-          pnpm --filter @tidegrid/api-worker exec wrangler dev --env dev --port 8961 --inspector-port 9961 \
-            --var "GUEST_LINK_ORIGIN:http://{slug}.book.localhost:5361" > api.log 2>&1 &
-          for i in $(seq 1 90); do
-            if curl -fsS http://localhost:8961/v1/health | grep -q '"database":"ok"'; then exit 0; fi
-            sleep 1
-          done
-          cat api.log
-          exit 1
+          tools/local-db/local-db.sh api 8961 api.log \
+            --var "GUEST_LINK_ORIGIN:http://{slug}.book.localhost:5361"
       - name: Part B, two brands against the API and the database
         env:
           E2E_MODE: full
           E2E_DISABLE_HOST: reef-e2e.book.localhost
-          E2E_ADMIN_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tidegrid
+          E2E_ADMIN_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: pnpm --filter @tidegrid/guest-site e2e
       - name: API log
         if: failure()
@@ -167,26 +133,11 @@ jobs:
   # gets no way to book. Chromium is downloaded on the runner only. A job of
   # its own, apart from the guest site's, on ports 8981 and 5382.
   console-browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: ${{ github.event_name == 'pull_request' }}
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: tidegrid
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d tidegrid"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     env:
       CI: "true"
-      TIDEGRID_EPHEMERAL_DB: "1"
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tidegrid
+      TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -207,29 +158,19 @@ jobs:
           exit 1
       - name: Build the console
         run: pnpm --filter @tidegrid/operator-site build
+      - name: Start PostgreSQL 17
+        run: tools/local-db/local-db.sh up >> "$GITHUB_ENV"
       - name: Migrate, seed, and prepare the runtime role
-        run: |
-          pnpm db:migrate
-          # Local guest hosts, so the confirmation email's link has a verified host.
-          SEED_LOCAL_HOSTNAMES=1 pnpm db:seed
-          password="$(openssl rand -hex 24)"
-          TIDEGRID_APP_PASSWORD="$password" pnpm --filter @tidegrid/database app-role:password
-          # A booking staff member at the second operator, for its journey. The
-          # identity comes from app.ensure_staff_user, the one path 0002 gives,
-          # inside that operator's tenant context.
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "begin; select set_config('app.tenant_id', (select id::text from public.tenants where slug = 'demo-reef'), true); insert into public.tenant_memberships (tenant_id, user_id, role, display_name) select t.id, app.ensure_staff_user('dan.desk@demo-reef.test', 'ci-console-browser'), 'booking_staff', 'Dan Desk' from public.tenants t where t.slug = 'demo-reef' on conflict do nothing; commit;"
-          printf 'DATABASE_URL=postgresql://tidegrid_app:%s@localhost:5432/tidegrid\nFAKE_PAYMENT_WEBHOOK_SECRET=%s\n' "$password" "$(openssl rand -hex 32)" > apps/api-worker/.dev.vars
+        # Local guest hosts, so the confirmation email's link has a verified
+        # host; a booking staff member at the second operator, for its journey,
+        # through app.ensure_staff_user in that operator's tenant context; and
+        # the API's .dev.vars with a fresh runtime password.
+        run: tools/local-db/local-db.sh prepare console-e2e
       - name: Start the API on 8981
         run: |
-          pnpm --filter @tidegrid/api-worker exec wrangler dev --env dev --port 8981 --inspector-port 9981 \
+          tools/local-db/local-db.sh api 8981 api.log \
             --var "STAFF_ORIGINS:http://localhost:5382" --var "ALLOWED_ORIGINS:http://localhost:5382" \
-            --var "GUEST_LINK_ORIGIN:http://{slug}.book.localhost:5361" > api.log 2>&1 &
-          for i in $(seq 1 90); do
-            if curl -fsS http://localhost:8981/v1/health | grep -q '"database":"ok"'; then exit 0; fi
-            sleep 1
-          done
-          cat api.log
-          exit 1
+            --var "GUEST_LINK_ORIGIN:http://{slug}.book.localhost:5361"
       - name: Console journeys at 375 and 1280, both operators
         run: pnpm --filter @tidegrid/operator-site e2e
       - name: API log

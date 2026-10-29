@@ -245,7 +245,7 @@ These exist outside the repository and only the owner can create them. Values go
 
 | Input | Needed by | Detail |
 |---|---|---|
-| Neon nonproduction project | G2.1 | Project in the Neon account, PostgreSQL 17; a Neon API key for branch creation in CI, and the direct connection string for staging |
+| Neon nonproduction project | G2.1 | Project in the Neon account, PostgreSQL 17; the direct connection string for staging, and an optional Neon API key for manual throwaway branches (CI uses a local PostgreSQL 17 container, not Neon) |
 | Cloudflare Workers Paid and Hyperdrive | G2.1 | Confirm the plan on the existing account; an API token scoped to Workers, Hyperdrive, DNS for `tidegrid.us`, Access, and Email Service |
 | Cloudflare Access application | G2.2 | Application for `console.tidegrid.us` with the owner's identity provider; the application audience tag |
 | Cloudflare Email Service | The Cloudflare Email Service adapter (G2.16) | Enabled on the account with `tidegrid.us` as an authenticated sender domain. Moved out of the demo's inputs by the 2026-10-05 [email narrowing](#goal-sequence): the demo sends through the email shim. G2.16-live (proposed) needs, once authorized: Workers Paid confirmed; the sender domain (the apex or a subdomain) onboarded with its records and a DMARC policy; the `EMAIL_ALLOWED_RECIPIENTS` secret; the switch-on pull request and a deploy; and one real send to an owner inbox, recording the message id format and the authentication results |
@@ -254,7 +254,7 @@ These exist outside the repository and only the owner can create them. Values go
 | Token budget per goal | Each goal | Set at goal start; the lead reports at the four checkpoints |
 | Commit and pull request authorization | Each goal | One reviewed pull request per goal; merge is the owner's action |
 
-Local tooling on the build machine: Node 24, pnpm, and the Stripe CLI (`/opt/homebrew/bin/stripe`, observed 2026-10-28) are present. Docker and `psql` are not installed; `psql` is convenient for migrations. Using the Stripe CLI against an account is its own owner approval (gate A14 in the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md)).
+Local tooling on the build machine: Node 24, pnpm, and the Stripe CLI (`/opt/homebrew/bin/stripe`, observed 2026-10-28) are present. Docker and a host `psql` are not installed. Podman is, and `tools/local-db/local-db.sh` runs the pinned PostgreSQL 17 image in its machine, with `psql` inside the container, for every database-backed test (observed 2026-10-29). Using the Stripe CLI against an account is its own owner approval (gate A14 in the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md)).
 
 ## What this build does not prove
 

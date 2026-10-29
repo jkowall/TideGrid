@@ -1,8 +1,8 @@
 import { defineConfig } from "vitest/config";
 
 // Runs templates, assignment, tokens, signing, and evidence against a
-// throwaway Neon branch as tidegrid_app. The shared global setup migrates the
-// branch and rotates the runtime password. Race tests open several
+// throwaway PostgreSQL 17 as tidegrid_app. The shared global setup migrates the
+// database and rotates the runtime password. Race tests open several
 // connections at once; files still run one at a time.
 export default defineConfig({
   test: {

@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
-// Runs the payment adapter and inbox against a throwaway Neon branch as tidegrid_app.
-// The shared global setup migrates the branch and rotates the runtime password.
+// Runs the payment adapter and inbox against a throwaway PostgreSQL 17 as tidegrid_app.
+// The shared global setup migrates the database and rotates the runtime password.
 export default defineConfig({
   test: {
     include: ["src/**/*.integration.test.ts"],

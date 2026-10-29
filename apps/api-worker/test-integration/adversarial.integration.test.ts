@@ -1,6 +1,6 @@
 /**
  * Independent adversarial checks for G2.2 at the API layer. The Hono app runs
- * in Node against a throwaway Neon branch as tidegrid_app, with an injected
+ * in Node against a throwaway PostgreSQL 17 as tidegrid_app, with an injected
  * Access verifier over a local key set and a capturing login-link sender.
  * Fixtures use the admin connection. Tests whose names start with "documents"
  * pin behavior that is by design today. Change them only with a recorded
