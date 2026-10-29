@@ -190,6 +190,12 @@ function NewBooking({
   const [party, setParty] = useState<PartyDraft | null>(null);
   const [partyError, setPartyError] = useState<string | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
+  /**
+   * The id of a quote the checkout refused, asking for a new one: Hold waits
+   * for a quote with another id, so a press never sends the refused one again.
+   */
+  const [refusedQuote, setRefusedQuote] = useState<string | null>(null);
+  const quoteStale = refusedQuote !== null;
   const [booker, setBooker] = useState<BookerDraft>({ name: "", email: "" });
   const [bookerErrors, setBookerErrors] = useState<{ name?: string; email?: string }>({});
   const [channel, setChannel] = useState<BookingChannel>("phone");
@@ -313,6 +319,13 @@ function NewBooking({
     const result = await createQuote(tenantId, body, quoteKey.keyFor(body));
     setBusy(null);
     if (result.kind === "ok") {
+      if (result.value.quoteId === refusedQuote) {
+        // The refused quote came back, as a replayed answer would: it is still
+        // refused. Say so, keep Hold waiting, and ask with a new key next time.
+        quoteKey.forget();
+        setProblem({ kind: "refusal", command: "quote", refusal: refusalOf("quote_expired") });
+        return;
+      }
       if (
         result.value.quoteId !== quote?.quoteId ||
         result.value.policy.version !== quote?.policy.version
@@ -321,6 +334,7 @@ function NewBooking({
         setAttestErrors({ email: false, policy: false });
       }
       setQuote(result.value);
+      setRefusedQuote(null);
       setStep(andThen);
       return;
     }
@@ -367,7 +381,9 @@ function NewBooking({
 
   const holdSeats = async () => {
     // One command at a time: not while Price again, an edit, or a cancel is working.
-    if (!quote || busy !== null) return;
+    // Not with a quote the checkout refused. Defense in depth, untested: Hold is
+    // unavailable in every render where quoteStale is true, so no press gets here.
+    if (!quote || quoteStale || busy !== null) return;
     const missing = { email: !attest.email, policy: !attest.policy };
     setAttestErrors(missing);
     if (missing.email) emailCheck.current?.focus();
@@ -384,6 +400,14 @@ function NewBooking({
     }
     const failed = problemOf(result, "open");
     setProblem(failed);
+    if (failed.kind === "refusal" && failed.refusal.next === "requote") {
+      // Only a new quote helps. New keys for both requests, so pricing the same
+      // party again from any step never replays the refused quote, and the next
+      // hold is a new request.
+      quoteKey.forget();
+      openKey.forget();
+      setRefusedQuote(quote.quoteId);
+    }
     // Refused with a reason: nothing is held, and the details can change again.
     if (failed.kind === "refusal" && failed.refusal.next !== "retry") setFrozen(false);
   };
@@ -439,6 +463,7 @@ function NewBooking({
     setPayUncertain(false);
     setSettledUndelivered(false);
     setQuote(null);
+    setRefusedQuote(null);
     setAttest({ email: false, policy: false });
     // A new checkout needs a new quote, even for the same party: the old one is used.
     quoteKey.forget();
@@ -823,7 +848,7 @@ function NewBooking({
                 icon="lock"
                 busy={busy === "open"}
                 busyLabel="Holding seats…"
-                disabled={busy !== null && busy !== "open"}
+                disabled={quoteStale || (busy !== null && busy !== "open")}
                 onClick={() => void holdSeats()}
               >
                 Hold seats and take payment
@@ -961,7 +986,7 @@ function NewBooking({
 
   /** What trying again means for a problem on this step, if anything. */
   function retryFor(p: Problem): (() => void) | undefined {
-    if (p.command === "open" && p.kind === "refusal" && p.refusal.next === "requote") {
+    if (p.kind === "refusal" && p.refusal.next === "requote") {
       return () => void requote();
     }
     const again =
@@ -984,11 +1009,12 @@ function NewBooking({
   }
 
   async function requote() {
-    // The quote lapsed before the checkout: price the same party again and stay on review.
+    // The quote lapsed before the checkout: price the same party again and stay
+    // on this step's way forward (review, or the guest after the party).
     quoteKey.forget();
     openKey.forget();
     setFrozen(false);
-    await priceParty(2);
+    await priceParty(step === 2 ? 2 : 1);
   }
 }
 

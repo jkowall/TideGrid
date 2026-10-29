@@ -61,6 +61,20 @@ const offerAnswer =
 const quoteAnswer = () => json({ quote: quoteFor() }, 201);
 const openAnswer = () => json({ checkout: staffCheckout(), paymentReady: true }, 201);
 
+/**
+ * The staff quotes route as the API keeps it: a request with a key it has
+ * seen replays that key's first answer; each new key gets the next quote id.
+ */
+function quotesByKey(ids: string[]) {
+  const answered = new Map<string, string>();
+  return () => {
+    const key = sentTo(newRoute.quote).at(-1)?.headers.get("idempotency-key") ?? "";
+    const id = answered.get(key) ?? ids[answered.size] ?? quoteId;
+    answered.set(key, id);
+    return json({ quote: quoteFor({ quoteId: id }) }, 201);
+  };
+}
+
 async function toGuest() {
   await stepHeading("Who is coming");
   await click("Add one Adult");
@@ -681,6 +695,152 @@ describe("review fixes (G2.12d review)", () => {
     );
     await waitFor(() => expect(hold.getAttribute("aria-disabled")).toBeNull());
     expect(sentTo(newRoute.open)).toHaveLength(1);
+  });
+
+  it("Hold stays unavailable when Price again fails, and never resends the refused quote", async () => {
+    api({
+      ...base(),
+      [newRoute.quote]: [quoteAnswer, () => apiError(500, "internal_error")],
+      [newRoute.open]: () => apiError(409, "quote_expired"),
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByText("The price needs refreshing");
+    await click("Price again");
+    await screen.findByText("The party couldn't be priced");
+    await stepHeading("Review with the guest");
+    await settle();
+    const hold = screen.getByRole("button", { name: "Hold seats and take payment" });
+    expect(hold.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(hold);
+    await settle();
+    expect(sentTo(newRoute.open)).toHaveLength(1);
+    // The way forward stays on screen: price the same party again.
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("Hold is unavailable from the refusal that needs a new quote until a new quote arrives", async () => {
+    const requoted = deferred();
+    api({
+      ...base(),
+      [newRoute.quote]: [quoteAnswer, requoted.answer],
+      [newRoute.open]: () => apiError(409, "quote_expired"),
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByText("The price needs refreshing");
+    await settle();
+    const hold = screen.getByRole("button", { name: "Hold seats and take payment" });
+    expect(hold.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(hold);
+    await settle();
+    expect(sentTo(newRoute.open)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Price again" })).toBeTruthy();
+
+    await click("Price again");
+    await waitFor(() => expect(sentTo(newRoute.quote)).toHaveLength(2));
+    expect(hold.getAttribute("aria-disabled")).toBe("true");
+    requoted.release(
+      json({ quote: quoteFor({ quoteId: "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a62" }) }, 201),
+    );
+    await waitFor(() => expect(hold.getAttribute("aria-disabled")).toBeNull());
+    expect(sentTo(newRoute.open)).toHaveLength(1);
+  });
+
+  it("a successful Price again makes Hold available, and Hold sends the new quote", async () => {
+    const fresh = "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a62";
+    api({
+      ...base(),
+      [newRoute.quote]: [quoteAnswer, () => json({ quote: quoteFor({ quoteId: fresh }) }, 201)],
+      [newRoute.open]: [() => apiError(409, "quote_expired"), openAnswer],
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByText("The price needs refreshing");
+    await click("Price again");
+    const policy = screen.getByLabelText(
+      "I told the guest the cancellation policy (version 3)",
+    ) as HTMLInputElement;
+    await waitFor(() => expect(policy.checked).toBe(false));
+    const hold = screen.getByRole("button", { name: "Hold seats and take payment" });
+    expect(hold.getAttribute("aria-disabled")).toBeNull();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await stepHeading("Payment");
+    const [first, second] = sentTo(newRoute.open);
+    expect(first?.body).toMatchObject({ quoteId });
+    expect(second?.body).toMatchObject({ quoteId: fresh });
+  });
+
+  it("Change details and the same party get a new quote, never the refused one", async () => {
+    const fresh = "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a62";
+    api({
+      ...base(),
+      [newRoute.quote]: quotesByKey([quoteId, fresh]),
+      [newRoute.open]: [() => apiError(409, "quote_expired"), openAnswer],
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByText("The price needs refreshing");
+    await click("Change details");
+    await stepHeading("Who is coming");
+    await click("Price and continue");
+    await stepHeading("The guest");
+    await click("Review");
+    await stepHeading("Review with the guest");
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await stepHeading("Payment");
+    const keyOf = (c: { headers: Headers } | undefined) => c?.headers.get("idempotency-key");
+    const [firstQuote, secondQuote] = sentTo(newRoute.quote);
+    expect(keyOf(secondQuote)).not.toBe(keyOf(firstQuote));
+    const opens = sentTo(newRoute.open);
+    expect(opens.map((o) => (o.body as { quoteId: string }).quoteId)).toEqual([quoteId, fresh]);
+    expect(keyOf(opens[1])).not.toBe(keyOf(opens[0]));
+  });
+
+  it("a quote that comes back with the refused id keeps Hold waiting, and says so", async () => {
+    const fresh = "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a62";
+    api({
+      ...base(),
+      [newRoute.quote]: [
+        quoteAnswer,
+        quoteAnswer,
+        () => json({ quote: quoteFor({ quoteId: fresh }) }, 201),
+      ],
+      [newRoute.open]: [() => apiError(409, "quote_expired"), openAnswer],
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByText("The price needs refreshing");
+    await click("Price again");
+    await waitFor(() => expect(sentTo(newRoute.quote)).toHaveLength(2));
+    // The notice goes while pricing and comes back for the refused quote.
+    await screen.findByRole("button", { name: "Price again" });
+    expect(screen.getByText(/The quote is no longer valid/)).toBeTruthy();
+    const hold = screen.getByRole("button", { name: "Hold seats and take payment" });
+    expect(hold.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(hold);
+    await settle();
+    expect(sentTo(newRoute.open)).toHaveLength(1);
+
+    await click("Price again");
+    await waitFor(() => expect(hold.getAttribute("aria-disabled")).toBeNull());
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await stepHeading("Payment");
+    const opens = sentTo(newRoute.open);
+    expect(opens.map((o) => (o.body as { quoteId: string }).quoteId)).toEqual([quoteId, fresh]);
   });
 
   it("UI-2: a new quote's policy is never sent with the old quote's attestations", async () => {
