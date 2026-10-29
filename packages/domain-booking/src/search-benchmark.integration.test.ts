@@ -39,7 +39,7 @@ import {
 type Sql = ReturnType<typeof postgres>;
 
 const env = inject("integrationDb");
-const on = process.env.TIDEGRID_SEARCH_BENCH === "1";
+const on = true;
 const N = Number(process.env.BENCH_BOOKINGS ?? 50_000);
 /** Timed requests per case and plan mode, after the warm-ups. */
 const AFTER_RUNS = 60;
