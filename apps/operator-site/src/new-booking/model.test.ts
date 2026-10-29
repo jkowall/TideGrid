@@ -147,6 +147,13 @@ describe("words for the desk", () => {
     expect(refusalOf("test_payment_settled").next).toBe("stop");
   });
 
+  it("says what a provider timeout means when the outcome checks a payment on a canceled checkout", () => {
+    const check = refusalOf("payment_provider_unavailable", "check");
+    expect(check).toMatchObject({ title: "The payment provider didn't answer", next: "retry" });
+    expect(check.body).not.toContain("held");
+    expect(check.body).toContain("nothing is charged twice");
+  });
+
   it("reads every checkout state as an outcome", () => {
     expect(
       (["open", "confirmed", "failed", "unfulfilled", "expired", "canceled"] as const).map(
