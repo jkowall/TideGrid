@@ -269,18 +269,14 @@ function NewBooking({
 
   // An attestation is for one address, one channel, and one quote's policy, on
   // the review in front of the guest: leaving the review, or a new quote,
-  // clears both boxes, so they are checked again for what is shown.
+  // clears both boxes, so they are checked again for what is shown. A new
+  // quote clears them in the same update that shows it (see priceParty), so
+  // no press can send it with the boxes checked for the one before.
   useEffect(() => {
     if (step === 2) return;
     setAttest({ email: false, policy: false });
     setAttestErrors({ email: false, policy: false });
   }, [step]);
-  useEffect(() => {
-    void quote?.quoteId;
-    void quote?.policy.version;
-    setAttest({ email: false, policy: false });
-    setAttestErrors({ email: false, policy: false });
-  }, [quote?.quoteId, quote?.policy.version]);
 
   // After a test payment, read the checkout until it is decided.
   useEffect(() => {
@@ -317,6 +313,13 @@ function NewBooking({
     const result = await createQuote(tenantId, body, quoteKey.keyFor(body));
     setBusy(null);
     if (result.kind === "ok") {
+      if (
+        result.value.quoteId !== quote?.quoteId ||
+        result.value.policy.version !== quote?.policy.version
+      ) {
+        setAttest({ email: false, policy: false });
+        setAttestErrors({ email: false, policy: false });
+      }
       setQuote(result.value);
       setStep(andThen);
       return;
@@ -363,7 +366,8 @@ function NewBooking({
   };
 
   const holdSeats = async () => {
-    if (!quote) return;
+    // One command at a time: not while Price again, an edit, or a cancel is working.
+    if (!quote || busy !== null) return;
     const missing = { email: !attest.email, policy: !attest.policy };
     setAttestErrors(missing);
     if (missing.email) emailCheck.current?.focus();
@@ -819,6 +823,7 @@ function NewBooking({
                 icon="lock"
                 busy={busy === "open"}
                 busyLabel="Holding seats…"
+                disabled={busy !== null && busy !== "open"}
                 onClick={() => void holdSeats()}
               >
                 Hold seats and take payment
