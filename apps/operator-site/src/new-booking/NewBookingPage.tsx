@@ -623,7 +623,9 @@ function NewBooking({
       if (payUncertain) {
         // The payment may have gone through: deliver whatever settled (recheck 3).
         after = await resendUncertainPayment(checkout.id);
-        if ((await showCheckout(checkout.id, after)).kind === "ok") return;
+        const read = await showCheckout(checkout.id, after);
+        if (read.kind === "ok") return;
+        after ??= { kind: "failure", command: "check", reason: read.reason };
       }
       setBusy(null);
       setProblem(after);
@@ -722,11 +724,14 @@ function NewBooking({
   )}`;
   const draft = party ?? emptyParty(trip);
   const locked = frozen || busy !== null;
+  /** Signed out: Sign in again is the only way on, so Check again waits for it. */
+  const signedOut = problem?.kind === "failure" && problem.reason === "signed_out";
   /** The outcome offers Check again: an uncertain payment on a closed checkout. */
   const recheckShown =
     step === 4 &&
     checkout !== null &&
     payUncertain &&
+    !signedOut &&
     (outcomeOf(checkout) === "canceled" || outcomeOf(checkout) === "expired");
 
   return (
@@ -1019,7 +1024,7 @@ function NewBooking({
               uncertain={payUncertain ? lastPay : null}
               checking={busy === "recheck"}
               onCheck={() => setPolls(0)}
-              onRecheck={() => void checkAgain(payUncertain)}
+              onRecheck={signedOut ? undefined : () => void checkAgain(payUncertain)}
             />
           </section>
         )}
@@ -1077,8 +1082,10 @@ function NewBooking({
         return () => void pay(lastPay);
       case "check":
         // One control at a time: where the outcome offers Check again, that is the retry.
+        // Otherwise it sends the payment's request again, a decline still unrecorded
+        // included; checkAgain resends only on a canceled checkout, where nothing settles.
         if (recheckShown) return undefined;
-        return () => void checkAgain(payUncertain || p.kind === "delivery");
+        return () => void checkAgain(true);
       case "cancel":
         return () => void cancelBooking();
       case "edit":
@@ -1222,9 +1229,10 @@ function OutcomeBody({
   /** Check again is working. */
   checking: boolean;
   onCheck: () => void;
-  onRecheck: () => void;
+  /** Check again, while a payment is unknown; none while the page waits for a sign-in. */
+  onRecheck: (() => void) | undefined;
 }) {
-  const recheck = (
+  const recheck = onRecheck && (
     <Button
       variant="primary"
       icon="refresh"
