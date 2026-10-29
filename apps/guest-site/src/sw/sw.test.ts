@@ -306,6 +306,24 @@ describe("service worker update policy (G2.14b, D11(a))", () => {
     expect(sw.skipped.count).toBe(0);
   });
 
+  it("looks again when the asker is not on the client list yet", async () => {
+    const sw = fakeScope(async (url) => ok(`body of ${url}`));
+    installServiceWorker(
+      sw.scope,
+      { precache: PRECACHE, buildId: "b7" },
+      { takeOverChecksMs: [0, 5, 5] },
+    );
+    await sw.dispatch("install");
+    // At the first look the list has only the document the reload replaced.
+    sw.windows.ids = ["replaced"];
+    const asked = sw.message({ type: SKIP_WAITING });
+    setTimeout(() => {
+      sw.windows.ids = ["asker"];
+    }, 2);
+    await asked;
+    expect(sw.skipped.count).toBe(1);
+  });
+
   it("looks again for a moment, so a window that just closed does not hold it back", async () => {
     const sw = fakeScope(async (url) => ok(`body of ${url}`));
     installServiceWorker(

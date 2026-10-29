@@ -20,8 +20,8 @@
  * - Navigations go to the network first and fall back to the offline page.
  * - Cache names carry the build id; activation deletes every other cache.
  * - Update policy (G2.14b, D11(a)): a new version installs and waits. The
- *   next page load finds it waiting and asks it to take over, with a
- *   SKIP_WAITING message. It takes over only when the window that asked is
+ *   next page load, once it has settled (register.ts), finds it waiting and
+ *   asks it to take over, with a SKIP_WAITING message. It takes over only when the window that asked is
  *   the site's only open window, looking for up to 60 seconds after the ask:
  *   skipping waiting would switch every open window to the new worker at
  *   once, and its activation deletes the old build's cache. With another tab
@@ -151,10 +151,11 @@ export interface ServiceWorkerScopeLike {
 
 /**
  * When a page load's take-over request looks for the site to be down to the
- * asking window alone: at once, then 1, 3, 7, 15, 30, and 60 seconds after the ask. A
- * window that just closed, or a document a reload replaced, can stay on the
- * browser's client list for a while (tens of seconds in headless Chromium). A window that is really open stays on
- * it, and the worker keeps waiting; so does it when the asker leaves.
+ * asking window alone: at once, then 1, 3, 7, 15, 30, and 60 seconds after
+ * the ask. A window that just closed, or a document a reload replaced, may
+ * stay on the browser's client list for a while; the length of that while is
+ * a hypothesis, not a measurement. A window that is really open stays on it,
+ * and the worker keeps waiting; so does it when the asker leaves.
  */
 export const TAKE_OVER_CHECKS_MS: readonly number[] = [
   0, 1_000, 2_000, 4_000, 8_000, 15_000, 30_000,
@@ -197,13 +198,19 @@ export function installServiceWorker(
     const asker = event.source?.id;
     if (!asker) return;
     const takeOver = (async () => {
+      let seen = false;
       for (const delay of checks) {
         if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
         const windows = await scope.clients.matchAll({ type: "window", includeUncontrolled: true });
         const ids = windows.map((w) => w.id);
-        // The asker left (it closed, or navigated away): nobody is asking any more.
-        if (!ids.includes(asker)) return;
-        if (ids.length === 1) {
+        if (ids.includes(asker)) {
+          seen = true;
+        } else if (seen) {
+          // The asker left (it closed, or navigated away): nobody is asking any more.
+          return;
+        }
+        // An asker not listed yet (a document still loading) is looked for again.
+        if (ids.length === 1 && ids[0] === asker) {
           await scope.skipWaiting();
           return;
         }

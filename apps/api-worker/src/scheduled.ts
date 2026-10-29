@@ -39,9 +39,11 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  *    hostname whose check is due and records the reading in that tenant's
  *    own transaction. It demotes only on a definitive negative (moved,
  *    blocked, deleted, or a failed certificate) and never promotes. An
- *    account-level refusal stops the run and records nothing; a refusal
- *    about one record is recorded with no change. Skipped when custom
- *    hostnames are off.
+ *    account-level refusal, a 429, or a 5xx records nothing for the hostname
+ *    being read and ends the provider reads; a refusal about one record is
+ *    recorded with no change. Earlier readings stand, and ended claims still
+ *    expire until the budget runs out. Skipped when custom hostnames are
+ *    off.
  *
  * Correctness never waits for any of them; they write the facts down, emit the
  * events, and finish interrupted work. A failed job is logged and rethrown, so

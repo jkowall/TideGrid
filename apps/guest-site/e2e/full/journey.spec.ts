@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { type BrowserContext, expect, type Page, test, type Worker } from "@playwright/test";
 import {
   collectCspViolations,
   hostUrl,
@@ -122,11 +122,54 @@ for (const tenant of tenants) {
 
 const swFile = new URL("../../dist/sw.js", import.meta.url);
 
+/**
+ * Each worker's own view of a take-over request, for the update checks'
+ * diagnostics: prepended to build N ("old") and build N+1 ("new"), it logs
+ * each evaluation of the script (a restart logs again), each fetch event
+ * the worker gets, each SKIP_WAITING with the id of the client that posted
+ * it, each clients.matchAll answer the take-over loop gets (the only
+ * caller), and each skipWaiting call. "at" is the browser's clock, so the
+ * old worker's fetches line up with the new one's skipWaiting. It wraps and
+ * never changes what the worker does. Lines go to the worker's console,
+ * which the test collects as they happen, and to self.__d11 as a fallback.
+ */
+const workerDiagnostics = (role: "old" | "new") => `(() => {
+  const started = Date.now();
+  const log = (self.__d11 = []);
+  const note = (entry) => {
+    const line = { role: "${role}", at: Date.now(), ms: Date.now() - started, ...entry };
+    log.push(line);
+    console.log("D11 worker " + JSON.stringify(line));
+  };
+  self.addEventListener("fetch", (event) => {
+    const url = new URL(event.request.url);
+    note({ fetch: url.origin === self.location.origin ? url.pathname : url.origin });
+  });
+  self.addEventListener("message", (event) =>
+    note({ message: event.data && event.data.type, source: (event.source && event.source.id) || null }),
+  );
+  const matchAll = Clients.prototype.matchAll;
+  Clients.prototype.matchAll = async function (...args) {
+    const found = await matchAll.apply(this, args);
+    note({
+      look: found.map((c) => ({ id: c.id, url: c.url, frame: c.frameType, visible: c.visibilityState })),
+    });
+    return found;
+  };
+  const skipWaiting = self.skipWaiting.bind(self);
+  self.skipWaiting = () => {
+    note({ skipWaiting: true });
+    return skipWaiting();
+  };
+  note({ evaluated: true });
+})();
+`;
+
 /** Build N+1: the built worker with a new build id, so its cache name changes. */
 function shipNewWorker(original: string, buildId: string): void {
   const next = original.replace(/buildId:`[^`]+`/, `buildId:\`${buildId}\``);
   if (next === original) throw new Error("dist/sw.js has no build id to change");
-  writeFileSync(swFile, next);
+  writeFileSync(swFile, workerDiagnostics("new") + next);
 }
 
 async function workerState(page: Page) {
@@ -158,11 +201,20 @@ async function loadControlled(page: Page, url: string, name: string) {
 }
 
 /**
- * Diagnostics for the update checks, printed only on failure: what each page
- * posted to a worker, and Chromium's worker version events with their
- * clients, over DevTools.
+ * Diagnostics for the update checks. The worker's own view (see
+ * workerDiagnostics) prints after every run, pass or fail, so repeated runs
+ * show how long the client list took to come down to the asker. On failure
+ * also: what each page posted to a worker, Chromium's worker version events
+ * with their clients, over DevTools, and the open targets.
  */
 async function attachDiagnostics(page: Page, context: BrowserContext) {
+  const workerLines: string[] = [];
+  const watch = (worker: Worker) =>
+    worker.on("console", (message) => {
+      if (message.text().startsWith("D11 worker ")) workerLines.push(message.text().slice(11));
+    });
+  for (const worker of context.serviceWorkers()) watch(worker);
+  context.on("serviceworker", watch);
   await context.addInitScript(() => {
     const posts: unknown[] = [];
     (window as unknown as { __swPosts: unknown[] }).__swPosts = posts;
@@ -176,7 +228,23 @@ async function attachDiagnostics(page: Page, context: BrowserContext) {
   const events: unknown[] = [];
   cdp.on("ServiceWorker.workerVersionUpdated", (e) => events.push({ at: Date.now(), ...e }));
   await cdp.send("ServiceWorker.enable");
-  return async () => {
+  const workerView = async () => {
+    const fallback = await Promise.all(
+      context
+        .serviceWorkers()
+        .map((w) =>
+          w
+            .evaluate(() => (self as unknown as { __d11?: unknown }).__d11 ?? null)
+            .catch(() => null),
+        ),
+    );
+    console.log(
+      `D11 worker view (${test.info().title}, repeat ${test.info().repeatEachIndex}): ${JSON.stringify(
+        { console: workerLines, evaluated: fallback.filter(Boolean) },
+      )}`,
+    );
+  };
+  const onFailure = async () => {
     const targets = await cdp.send("Target.getTargets").catch(() => null);
     console.log(
       `D11 diagnostics: ${JSON.stringify({
@@ -190,6 +258,7 @@ async function attachDiagnostics(page: Page, context: BrowserContext) {
       })}`,
     );
   };
+  return { workerView, onFailure };
 }
 
 /** The browser's own update check, made now rather than at some later navigation. */
@@ -212,6 +281,7 @@ test("a new service worker installs, waits, and takes over on the next navigatio
   const original = readFileSync(swFile, "utf8");
   const diagnose = await attachDiagnostics(page, context);
   try {
+    writeFileSync(swFile, workerDiagnostics("old") + original);
     await loadControlled(page, hostUrl(host), tenant.name);
     // Exactly one window, the one that will ask.
     expect(context.pages()).toHaveLength(1);
@@ -243,10 +313,11 @@ test("a new service worker installs, waits, and takes over on the next navigatio
           caches: ["tidegrid-guest-e2e-single"],
         });
     } catch (error) {
-      await diagnose();
+      await diagnose.onFailure();
       throw error;
     }
   } finally {
+    await diagnose.workerView();
     writeFileSync(swFile, original);
   }
 });
@@ -263,6 +334,7 @@ test("a waiting service worker does not take over while another window is open (
   const original = readFileSync(swFile, "utf8");
   const diagnose = await attachDiagnostics(page, context);
   try {
+    writeFileSync(swFile, workerDiagnostics("old") + original);
     await loadControlled(page, hostUrl(host), tenant.name);
     const other = await context.newPage();
     await other.goto(hostUrl(host, "/support"));
@@ -304,10 +376,11 @@ test("a waiting service worker does not take over while another window is open (
           caches: ["tidegrid-guest-e2e-multi"],
         });
     } catch (error) {
-      await diagnose();
+      await diagnose.onFailure();
       throw error;
     }
   } finally {
+    await diagnose.workerView();
     writeFileSync(swFile, original);
   }
 });
