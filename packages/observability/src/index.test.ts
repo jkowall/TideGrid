@@ -25,6 +25,22 @@ describe("observability", () => {
     });
   });
 
+  it("keeps the fair-sweep counters, the email account fault, and the hostname retry wait", () => {
+    const counts = ["turn_count", "pass_count", "deferred_tenant_count", "stamp_failure_count"];
+    const keys = [
+      ...["hold", "checkout", "email", "hostname"].flatMap((job) =>
+        counts.map((c) => `tidegrid.${job}_sweep.${c}`),
+      ),
+      "tidegrid.hostname_sweep.expiry_only_turn_count",
+      "tidegrid.hostname_sweep.provider_call_count",
+      "tidegrid.hostname_sweep.retry_after_seconds",
+    ];
+    const kept: Record<string, unknown> = Object.fromEntries(keys.map((k, i) => [k, i + 1]));
+    kept["tidegrid.email_sweep.account_fault"] = true;
+    expect(Object.keys(kept)).toHaveLength(20);
+    expect(redact({ ...kept, "tidegrid.hostname": "guest.example.com" })).toEqual(kept);
+  });
+
   it("emits one JSON line with level, message, and merged attributes", () => {
     const lines: string[] = [];
     const log = createLogger({ "tidegrid.environment": "local" }, (l) => lines.push(l));
