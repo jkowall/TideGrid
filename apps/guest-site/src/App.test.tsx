@@ -120,9 +120,12 @@ describe("guest app", () => {
     const title = await screen.findByRole("heading", { level: 1, name: "Sunset Harbor Cruise" });
     expect(window.location.pathname).toBe(`/book/${tripId}`);
     await waitFor(() => expect(document.activeElement).toBe(title));
+    // The count field renders one passive effect after the heading, when the
+    // page moves from restoring to the party step.
+    const adult = (await screen.findByRole("spinbutton", { name: "Adult" })) as HTMLInputElement;
+    expect(adult.value).toBe("2");
     // The brand is not loaded again for the new page.
     expect(fetched.filter((p) => p === "/v1/public/tenant")).toHaveLength(1);
-    expect((screen.getByRole("spinbutton", { name: "Adult" }) as HTMLInputElement).value).toBe("2");
 
     window.history.back();
     const home = await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
