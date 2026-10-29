@@ -2,8 +2,9 @@
  * Console search cost evidence (pre-pilot hardening, item 5, 6.5, and the
  * search latency goal). Off by default: it runs only with
  * TIDEGRID_SEARCH_BENCH=1, on a throwaway commit of a draft PR, and logs
- * B_BENCH lines. It gates on equality only: before and after must give the
- * same whole outcome in every case.
+ * B_BENCH lines. Before and after must give the same whole outcome in every
+ * case, the after shape must read details for the page's rows only, and its
+ * p95 must be at most 300 ms (the owner's target, D-E8) under either plan.
  *
  * It grows one tenant to about BENCH_BOOKINGS bookings by cloning one real
  * booking's rows as the owner with triggers and foreign keys off
@@ -39,12 +40,14 @@ import {
 type Sql = ReturnType<typeof postgres>;
 
 const env = inject("integrationDb");
-const on = true;
+const on = process.env.TIDEGRID_SEARCH_BENCH === "1";
 const N = Number(process.env.BENCH_BOOKINGS ?? 50_000);
 /** Timed requests per case and plan mode, after the warm-ups. */
 const AFTER_RUNS = 60;
 const BEFORE_RUNS = 20;
 const WARMUPS = 3;
+/** The owner's target for a whole request, p95 (D-E8, 2026-10-29). */
+const TARGET_P95_MS = 300;
 /** Rare synthetic bookings on the last trip, carrying a token nothing else holds. */
 const LATE = 5;
 
@@ -527,6 +530,7 @@ describe.skipIf(!env || !on)("console search cost at pilot volume (benchmark)", 
       const label = jit ? plan : `${plan}+jit_off`;
       for (const shape of ["before", "after"] as const) {
         if (ms[shape].length === 0) continue;
+        const stats = summary(ms[shape]);
         console.log(
           `B_BENCH_REQUEST ${JSON.stringify({
             tenant: c.tenant,
@@ -537,10 +541,20 @@ describe.skipIf(!env || !on)("console search cost at pilot volume (benchmark)", 
             shape,
             plan: label,
             total,
-            ...summary(ms[shape]),
+            ...stats,
             prepared: reset ? "reset" : delta,
           })}`,
         );
+        // The owner's target (D-E8): asserted once two runs showed every case at 225 ms or under.
+        if (shape === "after" && jit && (stats.p95 ?? Number.POSITIVE_INFINITY) > TARGET_P95_MS) {
+          problems.push({
+            kind: "over target",
+            tenant: c.tenant,
+            case: c.name,
+            plan,
+            p95: stats.p95,
+          });
+        }
       }
     };
     for (const plan of ["custom", "generic"] as const)
