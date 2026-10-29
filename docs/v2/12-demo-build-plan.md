@@ -35,7 +35,7 @@ Boundaries:
 | Async work | Idempotency keys and a PostgreSQL outbox table from the first migration; a cron-triggered sweep on the API Worker for hold expiry and outbox delivery | Cloudflare Queues and a dedicated async Worker are deferred with G2.3 |
 | Object storage | Private R2 bucket | Needed from G2.15 for waiver evidence. The demo keeps each signed PDF in PostgreSQL with its evidence row instead (see the G2.15 status); the bucket, with object lock, is a pre-pilot follow-up |
 | Infrastructure as code | Wrangler configuration checked in; no Terraform for the demo | Terraform enters with the pilot readiness gate |
-| CI | GitHub Actions: typecheck, lint, unit, integration against a PostgreSQL 17 service container, browser journeys | No preview deploys per pull request: CI dry-runs the three Workers (`pnpm release:dry`), and deploys run only through the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md) (proposed), each with the owner's go |
+| CI | GitHub Actions: typecheck, lint, unit, integration against a disposable PostgreSQL 17 container started by `tools/local-db/local-db.sh`, browser journeys | No preview deploys per pull request: CI dry-runs the three Workers (`pnpm release:dry`), and deploys run only through the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md) (proposed), each with the owner's go |
 | Telemetry | Workers Logs plus structured request logs with tenant and request identifiers; OpenTelemetry export destination open | Attribute naming follows OpenTelemetry semantic conventions |
 
 Hostnames on `tidegrid.us`:
@@ -136,7 +136,7 @@ The adapter and the shim are in [packages/domain-payments](../../packages/domain
 
 The adapter, the shim, and the delivery job are in [packages/domain-messaging](../../packages/domain-messaging/README.md).
 
-**CI database (narrowing decided by the owner on 2026-10-27).** The Neon project ran out of its free plan's monthly allowance on 2026-10-20. CI's integration job therefore runs on a PostgreSQL 17 service container, not a Neon branch, since pull request 17. The owner kept that, recorded it here, and stays on the free plan.
+**CI database (narrowing decided by the owner on 2026-10-27).** The Neon project ran out of its free plan's monthly allowance on 2026-10-20. CI's integration job therefore runs on a disposable PostgreSQL 17 container, not a Neon branch, since pull request 17 (a service container at first). The owner kept that, recorded it here, and stays on the free plan. As of 2026-10-29, local database-backed tests and the three CI database jobs use one script for it, `tools/local-db/local-db.sh` (podman on the Mac, Docker in CI).
 
 - Each run migrates a fresh, empty database, seeds it, and runs every integration suite with `TIDEGRID_EPHEMERAL_DB=1`. The suites' rules are unchanged.
 - Demo acceptance step 9 is met by that container. A container does not prove Neon-specific behavior: Hyperdrive, branch compute limits, autosuspend, or the direct endpoint.
@@ -247,7 +247,7 @@ The build is demo-complete when, on a preview deployment with two synthetic tena
 6. A concurrent last-seat test run against the deployment shows no oversell.
 7. A signed-in operator of tenant A cannot reach any tenant B booking, link, search result, or export.
 8. Waiver requests go out automatically after confirmation and a participant signs on a phone-width screen.
-9. All checks run green in CI on a fresh PostgreSQL 17 database (a service container, per the [CI narrowing](#goal-sequence)).
+9. All checks run green in CI on a fresh PostgreSQL 17 database (a disposable PostgreSQL 17 container started by `tools/local-db/local-db.sh`, per the [CI narrowing](#goal-sequence)).
 
 None of this is a gate. It is the point at which the code can be shown to an operator and taken toward the Core live gate when the [Validation gate](05-roadmap-validation.md#validation-gate) or the proposed Core pilot gate passes.
 
@@ -257,7 +257,7 @@ These exist outside the repository and only the owner can create them. Values go
 
 | Input | Needed by | Detail |
 |---|---|---|
-| Neon nonproduction project | G2.1 | Project in the Neon account, PostgreSQL 17; a Neon API key for branch creation in CI, and the direct connection string for staging |
+| Neon nonproduction project | G2.1 | Project in the Neon account, PostgreSQL 17; the direct connection string for staging, and an optional Neon API key for manual throwaway branches (CI uses a local PostgreSQL 17 container, not Neon) |
 | Cloudflare Workers Paid and Hyperdrive | G2.1 | Confirm the plan on the existing account; an API token scoped to Workers, Hyperdrive, DNS for `tidegrid.us`, Access, and Email Service |
 | Cloudflare Access application | G2.2 | Application for `console.tidegrid.us` with the owner's identity provider; the application audience tag |
 | Cloudflare Email Service | The Cloudflare Email Service adapter (G2.16) | Enabled on the account with `tidegrid.us` as an authenticated sender domain. Moved out of the demo's inputs by the 2026-10-05 [email narrowing](#goal-sequence): the demo sends through the email shim. G2.16-live (proposed) needs, once authorized: Workers Paid confirmed; the sender domain (the apex or a subdomain) onboarded with its records and a DMARC policy; the `EMAIL_ALLOWED_RECIPIENTS` secret; the switch-on pull request and a deploy; and one real send to an owner inbox, recording the message id format and the authentication results |
@@ -266,7 +266,7 @@ These exist outside the repository and only the owner can create them. Values go
 | Token budget per goal | Each goal | Set at goal start; the lead reports at the four checkpoints |
 | Commit and pull request authorization | Each goal | One reviewed pull request per goal; merge is the owner's action |
 
-Local tooling on the build machine: Node 24, pnpm, and the Stripe CLI (`/opt/homebrew/bin/stripe`, observed 2026-10-28) are present. Docker and `psql` are not installed; `psql` is convenient for migrations. Using the Stripe CLI against an account is its own owner approval (gate A14 in the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md)).
+Local tooling on the build machine: Node 24, pnpm, and the Stripe CLI (`/opt/homebrew/bin/stripe`, observed 2026-10-28) are present. Docker and a host `psql` are not installed. Podman is, and `tools/local-db/local-db.sh` runs the pinned PostgreSQL 17 image in its machine, with `psql` inside the container, for every database-backed test (observed 2026-10-29). Using the Stripe CLI against an account is its own owner approval (gate A14 in the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md)).
 
 ## What this build does not prove
 

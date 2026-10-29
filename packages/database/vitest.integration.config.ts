@@ -5,7 +5,7 @@ export default defineConfig({
     include: ["src/**/*.integration.test.ts"],
     environment: "node",
     globalSetup: ["./src/global-setup.ts"],
-    // Suites share one branch and assert on catalog-wide state; run them in order.
+    // Suites share one database and assert on catalog-wide state; run them in order.
     fileParallelism: false,
     testTimeout: 60_000,
     hookTimeout: 120_000,
