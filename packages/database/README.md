@@ -86,6 +86,7 @@ The capacity and holds migration adds `capacity_holds` under rules 1 to 10. The 
 - What it reveals is that some tenant has at least one stale hold. That is a weaker activity signal than the shared audit and outbox id sequences already give (see the known gaps above).
 - It is read-only and STABLE, a SECURITY DEFINER function with `search_path` pinned, every relation qualified, explicit predicates, and at most 1,000 rows. EXECUTE is granted to `tidegrid_app` only.
 - The alternatives are worse. A row-level-security bypass for the cron's connection would expose every tenant's rows to one session. A tenant list in configuration drifts from the database and would silently skip new tenants. One definer function that expired holds across tenants would write audit and outbox rows outside any tenant's transaction.
+- **Order.** Since 0013 each orders by its sweep's stamps (see [Sweep turns](#sweep-turns-0013)).
 
 ## Checkout, payments, and bookings
 
@@ -163,7 +164,7 @@ Every transition writes an `audit_events` row in the same transaction. Activatio
 
 **Disabled is terminal, by design.** No function moves a disabled hostname back, and the name stays reserved, so a false demotion cannot be undone from the runtime or the CLI. That is why only a definitive negative demotes, and why the sweep records no reading for a hostname when the provider refuses to answer about it (a rotated token, another 4xx, a malformed answer, a missing zone). Expiring a pending claim that ran out is not a reading: the sweep still does it after such a refusal, and it disables only a name that never went live. If a disabled hostname ever has to come back, the recovery path is a reviewed migration `0012` with an admin-only re-enable function and its audit, not a manual update, which the trigger refuses for every role.
 
-`app.hostname_sweep_tenants` has the same argument as the hold sweep's: it returns tenant ids only, capped at 1,000, read-only and STABLE, and every read and write that follows runs in `inTenantTransaction` under forced row-level security. It reveals that some tenant has a custom hostname with a check due, a weaker signal than the shared id sequences already give.
+`app.hostname_sweep_tenants` has the same argument as the hold sweep's: it returns tenant ids only, capped at 1,000, read-only and STABLE, and every read and write that follows runs in `inTenantTransaction` under forced row-level security. It reveals that some tenant has a custom hostname with a check due, a weaker signal than the shared id sequences already give. Since 0013 it orders by the `hostname` stamps, which the sweep writes only for tenants it may read the provider for.
 
 ## Staff-assisted bookings (G2.12d)
 
@@ -173,6 +174,15 @@ Migration `0012_staff_bookings.sql` records where a checkout and its booking cam
 - **`bookings.source` widens to `staff_assisted`.** A trigger (`app.stamp_booking_source`, named `bookings_a_source` to fire before `bookings_evidence` and `bookings_lifecycle`) sets each new booking's source from its checkout, so the confirmation code inserts the default and cannot forge it. `app.check_booking` is not replaced and does not read the source; an integration test holds that. The source stays immutable under `bookings_lifecycle` (0009).
 - **Rules unchanged.** The runtime's table-level INSERT on `checkout_sessions` covers the new columns. Forced row-level security, the no-DELETE rule, and the chain of custody stand as they were. Both trigger functions have EXECUTE revoked from PUBLIC.
 - **Tests.** `packages/domain-booking/src/staff-source.integration.test.ts` proves the stamping as the runtime and the admin, the immutability, and the booking's source after a verified event.
+
+## Sweep turns (0013)
+
+Migration `0013_sweep_fairness.sql` adds `sweep_turns`, a tenant-owned table under rules 1 to 10. It has forced row-level security with the `tenant_isolation` policy, the default SELECT and INSERT, and UPDATE on `last_turn_at` and `run_id` only. Triggers refuse DELETE and TRUNCATE for every role, the owner included.
+
+- **Stamps.** A sweep stamps a tenant in that tenant's own `inTenantTransaction` (`recordSweepTurn` in `src/fair-sweep.ts`), before its first turn and again at its first extra turn. A sweep may decline a stamp (`stampWhen`); the hostname sweep does so once it reads the provider no more. A stamp never moves back: of two overlapping runs, the later time stays. A stamp writes no audit or outbox row.
+- **The list functions.** The four sweep list functions read the stamps only to order due tenants least recently served first, then by tenant id. They still return tenant ids only. Each joins on its own tenant and its own sweep name explicitly (`t.tenant_id = d.tenant_id AND t.sweep = ...`), because the definer bypasses row-level security (rule 7). The order reveals the relative recency of the platform's own turns to platform code; no tenant reads another's stamp.
+- **Tests.** `src/sweep-turns.integration.test.ts` proves the grants, the guards, and the order.
+- Coordinator defaults D1 A and D3 A of the pre-pilot hardening goal, pending owner confirmation.
 
 ## Tests
 

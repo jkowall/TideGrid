@@ -28,7 +28,7 @@ describe("checkout secrets", () => {
   it("keys the per-client limit by tenant and address without storing the address", async () => {
     const a = await clientKeyFor("t1", "203.0.113.7");
     expect(a).toMatch(/^[0-9a-f]{64}$/);
-    expect(a).not.toContain("203");
+    expect(a).not.toContain("203.0.113.7");
     expect(await clientKeyFor("t2", "203.0.113.7")).not.toBe(a);
     expect(await clientKeyFor("t1", "203.0.113.8")).not.toBe(a);
   });

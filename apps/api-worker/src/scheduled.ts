@@ -77,11 +77,22 @@ export async function runScheduled(
             "tidegrid.tenant_id": tenantId,
             ...errorAttributes(error),
           }),
+        // A failed stamp is not a failed tenant: its turn still ran, unless
+        // the budget ran out during the stamp.
+        onStampError: (tenantId, error) =>
+          log.error("hold_sweep_stamp_failed", {
+            "tidegrid.tenant_id": tenantId,
+            ...errorAttributes(error),
+          }),
       });
       log.info("hold_sweep", {
         "tidegrid.hold_sweep.tenant_count": report.tenants,
         "tidegrid.hold_sweep.expired_count": report.expired,
         "tidegrid.hold_sweep.failed_tenant_count": report.failedTenants,
+        "tidegrid.hold_sweep.turn_count": report.turns,
+        "tidegrid.hold_sweep.pass_count": report.passes,
+        "tidegrid.hold_sweep.deferred_tenant_count": report.deferredTenants,
+        "tidegrid.hold_sweep.stamp_failure_count": report.stampFailures,
         "tidegrid.hold_sweep.complete": report.complete,
         duration_ms: Date.now() - started,
       });
@@ -116,6 +127,10 @@ export async function runScheduled(
         "tidegrid.checkout_sweep.failed_tenant_count": report.failedTenants,
         "tidegrid.checkout_sweep.failed_event_count": report.failedEvents,
         "tidegrid.checkout_sweep.failed_refund_count": report.failedRefunds,
+        "tidegrid.checkout_sweep.turn_count": report.turns,
+        "tidegrid.checkout_sweep.pass_count": report.passes,
+        "tidegrid.checkout_sweep.deferred_tenant_count": report.deferredTenants,
+        "tidegrid.checkout_sweep.stamp_failure_count": report.stampFailures,
         "tidegrid.checkout_sweep.complete": report.complete,
         duration_ms: Date.now() - started,
       });
@@ -145,6 +160,11 @@ export async function runScheduled(
               "tidegrid.tenant_id": tenantId,
               ...errorAttributes(error),
             }),
+          onStampError: (tenantId, error) =>
+            emailLog.error("email_sweep_stamp_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
           onSendError: (_messageId, error) =>
             emailLog.error("email_send_error", sendErrorAttributes(error)),
         });
@@ -156,6 +176,12 @@ export async function runScheduled(
           "tidegrid.email_sweep.superseded_count": report.superseded,
           "tidegrid.email_sweep.canceled_count": report.canceled,
           "tidegrid.email_sweep.failed_tenant_count": report.failedTenants,
+          "tidegrid.email_sweep.turn_count": report.turns,
+          "tidegrid.email_sweep.pass_count": report.passes,
+          "tidegrid.email_sweep.deferred_tenant_count": report.deferredTenants,
+          "tidegrid.email_sweep.stamp_failure_count": report.stampFailures,
+          // Always logged: the one stop cause the counts cannot show (D-E5 B).
+          "tidegrid.email_sweep.account_fault": report.accountFault,
           "tidegrid.email_sweep.complete": report.complete,
           duration_ms: Date.now() - started,
         });
@@ -197,6 +223,11 @@ export async function runScheduled(
                   }
                 : errorAttributes(error)),
             }),
+          onStampError: (tenantId, error) =>
+            hostnameLog.error("hostname_sweep_stamp_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
           onUnread: (tenantId, providerHostnameId, code) =>
             hostnameLog.warn("hostname_sweep_unread", {
               "tidegrid.tenant_id": tenantId,
@@ -214,6 +245,16 @@ export async function runScheduled(
           "tidegrid.hostname_sweep.failed_tenant_count": report.failedTenants,
           "tidegrid.hostname_sweep.throttled": report.throttled,
           "tidegrid.hostname_sweep.unread_count": report.unread,
+          "tidegrid.hostname_sweep.turn_count": report.turns,
+          "tidegrid.hostname_sweep.pass_count": report.passes,
+          "tidegrid.hostname_sweep.deferred_tenant_count": report.deferredTenants,
+          "tidegrid.hostname_sweep.stamp_failure_count": report.stampFailures,
+          "tidegrid.hostname_sweep.expiry_only_turn_count": report.expiryOnlyTurns,
+          "tidegrid.hostname_sweep.provider_call_count": report.providerCalls,
+          // The provider's requested wait, so a long 429 storm reads apart from a short one.
+          ...(report.retryAfterSeconds !== null
+            ? { "tidegrid.hostname_sweep.retry_after_seconds": report.retryAfterSeconds }
+            : {}),
           ...(report.providerFault
             ? {
                 "tidegrid.hostname_sweep.provider_fault": report.providerFault,
