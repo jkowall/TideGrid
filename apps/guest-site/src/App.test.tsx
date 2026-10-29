@@ -122,7 +122,9 @@ describe("guest app", () => {
     await waitFor(() => expect(document.activeElement).toBe(title));
     // The brand is not loaded again for the new page.
     expect(fetched.filter((p) => p === "/v1/public/tenant")).toHaveLength(1);
-    expect((screen.getByRole("spinbutton", { name: "Adult" }) as HTMLInputElement).value).toBe("2");
+    // The count field renders once the checkout has loaded, after the heading.
+    const adult = (await screen.findByRole("spinbutton", { name: "Adult" })) as HTMLInputElement;
+    expect(adult.value).toBe("2");
 
     window.history.back();
     const home = await screen.findByRole("heading", { level: 1, name: "Demo Harbor Charters" });
