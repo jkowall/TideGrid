@@ -26,7 +26,7 @@ export function integrationAdminUrl(): string | null {
   if (!url) {
     if (process.env.CI) {
       throw new Error(
-        "DATABASE_URL is required in CI; integration suites must not skip silently. Start a throwaway database with tools/local-db/local-db.sh up.",
+        'DATABASE_URL is required in CI; integration suites must not skip silently. Use pnpm test:local-db, or tools/local-db/local-db.sh up and then eval "$(tools/local-db/local-db.sh env)".',
       );
     }
     return null;

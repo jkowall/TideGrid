@@ -35,9 +35,9 @@ pnpm test                         # unit tests (Workers tests run in workerd)
 pnpm contracts:generate           # regenerate packages/contracts/generated/openapi.json
 DATABASE_URL=... pnpm db:migrate  # apply SQL migrations (admin connection)
 DATABASE_URL=... pnpm db:seed     # deterministic synthetic seed
-pnpm test:local-db                # every integration suite, guest browser parts A and B, and the console browser tests, on throwaway local PostgreSQL 17 containers (podman machine running)
+pnpm test:local-db                # every integration suite, guest browser parts A and B, and the console browser tests, on throwaway local PostgreSQL 17 containers (podman machine running; the browser parts use the installed Google Chrome)
 pnpm test:local-db integration    # or one part: integration, guest, console
-pnpm --silent db:local up         # start the container and print DATABASE_URL and TIDEGRID_EPHEMERAL_DB=1; pnpm db:local down removes it
+pnpm db:local up                  # start the container; then eval "$(tools/local-db/local-db.sh env)" exports DATABASE_URL and TIDEGRID_EPHEMERAL_DB=1; pnpm db:local down removes it
 DATABASE_URL=... TIDEGRID_EPHEMERAL_DB=1 pnpm test:integration   # integration suites against a throwaway database you started
 pnpm --filter @tidegrid/database neon:branch create <name>   # optional expiring Neon branch, when the plan has quota (needs NEON_API_KEY, NEON_PROJECT_ID)
 pnpm --filter @tidegrid/api-worker dev                       # local API on :8787 (reads apps/api-worker/.dev.vars)

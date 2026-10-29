@@ -172,4 +172,4 @@ The independent review on 2026-10-05 accepted this goal with fixes, which are ap
 ## Tests
 
 - `pnpm --filter @tidegrid/domain-inventory test` runs unit tests.
-- `pnpm --filter @tidegrid/domain-inventory test:integration` runs against a throwaway Neon branch with `TIDEGRID_EPHEMERAL_DB=1`, like every integration suite. `src/test-fixtures.ts` builds a tenant through the real catalog services and hands out unused trips.
+- `pnpm --filter @tidegrid/domain-inventory test:integration` runs against the throwaway PostgreSQL 17 from `tools/local-db/local-db.sh` (`pnpm test:local-db integration` runs every suite; see the [database README](../database/README.md#tests)) with `TIDEGRID_EPHEMERAL_DB=1`, like every integration suite. `src/test-fixtures.ts` builds a tenant through the real catalog services and hands out unused trips.

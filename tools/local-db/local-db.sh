@@ -5,7 +5,8 @@
 #
 #   local-db.sh up             start a fresh container, wait for it, print the
 #                              DATABASE_URL and TIDEGRID_EPHEMERAL_DB lines
-#   local-db.sh env            print those lines again (KEY=VALUE)
+#   local-db.sh env            print them as export lines for this checkout's
+#                              running container: eval "$(local-db.sh env)"
 #   local-db.sh prepare <kind> migrate and seed for one job:
 #                                integration  migrate and seed
 #                                guest-e2e    plus local hostnames, the runtime
@@ -19,6 +20,8 @@
 #                              background and wait until its database answers
 #   local-db.sh api-stop <port> stop the API that `api` started on that port
 #   local-db.sh psql [args]    psql inside the container, as the admin
+#   local-db.sh logs           the PostgreSQL server log of this checkout's
+#                              container (CI prints it after every job)
 #   local-db.sh down           remove the container and restore .dev.vars
 #   local-db.sh test [part...] the local one command (`pnpm test:local-db`):
 #                              integration, guest, console, or all (default).
@@ -98,11 +101,10 @@ container_exists() {
   "$ENGINE" container inspect "$NAME" >/dev/null 2>&1
 }
 
-# Removes this checkout's container. Refuses one this script did not create,
-# and one another checkout created, so a second lane cannot drop the first
-# lane's database mid-run. Returns 1 when there was nothing to remove.
-remove_container() {
-  container_exists || return 1
+# Refuses a container this script did not create, and one another checkout
+# created, so a second lane can neither drop nor reuse the first lane's
+# database.
+check_owner() {
   local label root
   label="$("$ENGINE" container inspect --format '{{ index .Config.Labels "io.tidegrid.local-db" }}' "$NAME" 2>/dev/null || true)"
   if [ "$label" != "1" ]; then
@@ -112,7 +114,29 @@ remove_container() {
   if [ "$root" != "$ROOT" ]; then
     die "$NAME belongs to the checkout at $root. For a parallel lane set TIDEGRID_LOCAL_DB_NAME and TIDEGRID_LOCAL_DB_PORT; if that checkout is gone, run: $ENGINE rm -f -v $NAME"
   fi
+}
+
+# Removes this checkout's container. Returns 1 when there was nothing to remove.
+remove_container() {
+  container_exists || return 1
+  check_owner
   "$ENGINE" rm -f -v "$NAME" >/dev/null
+}
+
+# env and prepare mark the database on $PORT as throwaway, so they first
+# confirm it is this checkout's own running container on that port.
+require_own_container() {
+  check_engine
+  container_exists || die "$NAME is not running; start it with: tools/local-db/local-db.sh up"
+  check_owner
+  local running ports
+  running="$("$ENGINE" container inspect --format '{{.State.Running}}' "$NAME" 2>/dev/null || true)"
+  [ "$running" = true ] || die "$NAME exists but is not running; start a fresh one with: tools/local-db/local-db.sh up"
+  ports="$("$ENGINE" port "$NAME" 5432 2>/dev/null || true)"
+  case "$ports" in
+  *"127.0.0.1:$PORT"*) ;;
+  *) die "$NAME does not publish 127.0.0.1:$PORT (it has: ${ports:-nothing}); check TIDEGRID_LOCAL_DB_PORT" ;;
+  esac
 }
 
 print_env() {
@@ -157,6 +181,20 @@ cmd_down() {
   if [ -n "$ENGINE" ] && "$ENGINE" info >/dev/null 2>&1 && remove_container; then
     log "removed $NAME"
   fi
+}
+
+cmd_env() {
+  require_own_container
+  print_env | sed 's/^/export /'
+}
+
+cmd_logs() {
+  [ -n "$ENGINE" ] || return 0
+  container_exists || {
+    log "no $NAME container"
+    return 0
+  }
+  "$ENGINE" logs --timestamps "$NAME" 2>&1 || true
 }
 
 cmd_psql() {
@@ -207,6 +245,7 @@ runtime_role_and_dev_vars() {
 
 cmd_prepare() {
   local kind="${1:-}"
+  require_own_container
   export DATABASE_URL="$ADMIN_URL" TIDEGRID_EPHEMERAL_DB=1
   cd "$ROOT"
   case "$kind" in
@@ -318,6 +357,9 @@ part_console() {
 
 cleanup_test() {
   local status=$?
+  # A second Ctrl-C must not abort the cleanup half way, leaving the API,
+  # the container, and the owner's .dev.vars set aside.
+  trap '' INT TERM
   cmd_api_stop 8961 || true
   cmd_api_stop 8981 || true
   cmd_down || true
@@ -360,7 +402,8 @@ main() {
   case "$cmd" in
   up) cmd_up ;;
   down) cmd_down ;;
-  env) print_env ;;
+  env) cmd_env ;;
+  logs) cmd_logs ;;
   prepare) cmd_prepare "$@" ;;
   api) cmd_api "$@" ;;
   api-stop) cmd_api_stop "$@" ;;
