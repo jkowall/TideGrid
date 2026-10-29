@@ -300,7 +300,8 @@ describe("when the totals do not load", () => {
     expect(text(alert)).toContain("The console can't reach TideGrid");
     expect(text(alert)).toContain("Check your connection, then try again.");
     expect(text(alert)).not.toMatch(/TypeError|Failed to fetch/);
-    expect(grid()).toBeNull();
+    // Neither figures nor loading placeholders beside the notice.
+    expect(document.querySelector(".bk-totals__grid")).toBeNull();
     // The export is still offered.
     expect(exportButton()).toBeTruthy();
 
