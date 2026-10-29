@@ -77,7 +77,8 @@ export async function runScheduled(
             "tidegrid.tenant_id": tenantId,
             ...errorAttributes(error),
           }),
-        // A failed stamp is not a failed tenant: its turn still ran.
+        // A failed stamp is not a failed tenant: its turn still ran, unless
+        // the budget ran out during the stamp.
         onStampError: (tenantId, error) =>
           log.error("hold_sweep_stamp_failed", {
             "tidegrid.tenant_id": tenantId,

@@ -15,7 +15,7 @@ This log records each dated verification pass over the throwaway guest workflow 
 - **Failing-first record.** A red run records only the first failing package, because `pnpm -r` stops there (root `package.json`). Behavioral means the assertion failed on the old behavior itself; nominal means it failed on a missing option or field.
   - Part A, behavioral: run [40755745908](https://github.com/jkowall/TideGrid/actions/runs/40755745908), the hold list order (received `[low, high]`, as the old loop wrote no stamps); run [40756715324](https://github.com/jkowall/TideGrid/actions/runs/40756715324), the booking expiry, inbox, and refund write order (the hog's items first). Nominal: the hold adversarial pair (no `onTurnStart`), the hold zero-budget test (no `turns`), and the booking poison and at-most-once tests (no `checkoutSweepStore`), with the reasoning in pull request 32.
   - Part C, behavioral: run [40767816390](https://github.com/jkowall/TideGrid/actions/runs/40767816390): the victim's mail went out 13th, not 6th; the list order did not change; `complete` was true under a 5 s budget with a 10 s send bound.
-  - Part D: run [40868382975](https://github.com/jkowall/TideGrid/actions/runs/40868382975) on `eaa0577`, the tests alone on the old loop. Integration was red in domain-hostnames only, where `lifecycle.integration.test.ts` stayed green. The `checks` job was red too, on typecheck: the tests pass options and read fields the old sweep lacks. Each case, with its first failing assertion:
+  - Part D: run [40868382975](https://github.com/jkowall/TideGrid/actions/runs/40868382975) on `eaa0577`, the tests alone on the old loop. Integration went red at domain-hostnames, where `pnpm -r` stopped, so the later packages' suites did not run; `lifecycle.integration.test.ts` stayed green. The `checks` job was red too, on typecheck: the tests pass options and read fields the old sweep lacks. Each case, with its first failing assertion:
     - behavioral, the adversarial pair's read order: the victim's hostname was read 13th (index 12), not 6th;
     - behavioral, the pair's list order on the next run: `[hog, victim]`, not `[victim, hog]`;
     - behavioral, a declined stamp after a throttle, an account fault, and the call limit (three cases): the list stayed `[hog, victim]`;
@@ -28,7 +28,7 @@ This log records each dated verification pass over the throwaway guest workflow 
     - nominal, `turnHostnames` of 0, 1.5, and 1,001: the old sweep resolved instead of throwing `RangeError`;
     - a pin that passed whole: `complete` under `onlyTenants` with a full unfiltered list.
   - Part E: run [40874558317](https://github.com/jkowall/TideGrid/actions/runs/40874558317) on `6e69129`, the cron log test alone, red in the API Worker's unit tests (98 others passed). Behavioral: a failed stamp logged `hold_sweep_tenant_failed`, `email_sweep_tenant_failed`, and `hostname_sweep_tenant_failed`. Nominal: the summaries lacked the new counts, and the email summary lacked `account_fault`. Then run [40878787537](https://github.com/jkowall/TideGrid/actions/runs/40878787537) on `8cceb28`, the `redact` case alone, red in observability: all 20 new keys were dropped (nominal).
-- **Tests.** Integration on CI's PostgreSQL 17: `packages/domain-hostnames/src/sweep-fairness.integration.test.ts`, 18 cases with tenants of its own, one fake provider with its own id prefix, and a cleanup that leaves nothing of its own due. The 26 cases of `lifecycle.integration.test.ts`, its 16 sweep cases among them, and the hostname CLI's suite pass unedited. Unit, in workerd: `apps/api-worker/test/scheduled-sweep-logs.test.ts`, 3 cases; `packages/observability/src/index.test.ts`, one new case. The existing scheduled tests pass unedited.
+- **Tests.** Integration on CI's PostgreSQL 17: `packages/domain-hostnames/src/sweep-fairness.integration.test.ts`, 18 cases with tenants of its own, one fake provider with its own id prefix, and a cleanup that leaves nothing of its own due. The 26 cases of `lifecycle.integration.test.ts`, its 16 sweep cases among them, and the hostname CLI's suite pass unedited. Unit, in workerd: `apps/api-worker/test/scheduled-sweep-logs.test.ts`, 3 cases. Unit, in Node: `packages/observability/src/index.test.ts`, one new case. The existing scheduled tests pass unedited.
 - **CI on the final code:**
   - Part A: run [40762414420](https://github.com/jkowall/TideGrid/actions/runs/40762414420) on `4f65deb`;
   - Part B: run [40766188746](https://github.com/jkowall/TideGrid/actions/runs/40766188746) on `32a6148`;
@@ -47,7 +47,7 @@ This log records each dated verification pass over the throwaway guest workflow 
   - 0013 and the four sweeps on Neon: their first Neon run is on Nov 1;
   - the ceil(T / m) bound, proven in unit tests only; the two hostname residuals are inferred;
   - order beyond relative facts: integration asserts relative order, and the 0013 list-order test uses synthetic rows with triggers bypassed, so it proves ordering only (Part A N3);
-  - the hostname sweep's routing of a failed stamp to `onStampError`, and its handling of each hostname at most once a run, have no dedicated domain test; the second shows only as each hostname read once in the adversarial pair;
+  - the hostname sweep's routing of a failed stamp to `onStampError`, and its handling of each hostname at most once a run, have no dedicated domain test; no integration case shows the second either: the adversarial pair reads each hostname once, but it would pass without the attempted-set exclusion, because every recorded check pushes the row's next check out of the run;
   - the pg_trgm checks on Neon, moot under D4 B;
   - no gate is claimed.
 - **Follow-ups, flagged, not fixed:**
@@ -63,6 +63,8 @@ This log records each dated verification pass over the throwaway guest workflow 
   - the six-run workaround in `apps/api-worker/test-integration/checkout.integration.test.ts`, removable now that Part A is green;
   - an alert on `tidegrid.email_sweep.account_fault`, on the G2.16-live checklist;
   - the search page statement, now required work under D-E8;
+  - the doc comments in `fair-sweep.ts`, `delivery.ts`, and the hold and checkout sweeps say a turn always runs after a failed stamp; at the budget edge it does not (the scheduler re-checks the budget after the stamp). The hostname sweep's comments say so; the others are out of this pull request's paths;
+  - an integration case where a handled hostname stays due within the run, which is what the attempted-set exclusion guards;
   - the Neon checks after Nov 1, on a throwaway branch with `TIDEGRID_EPHEMERAL_DB=1`.
 
 ## 2026-10-28

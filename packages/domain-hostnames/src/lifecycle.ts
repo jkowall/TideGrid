@@ -236,7 +236,8 @@ export interface HostnameSweepOptions {
   /** One tenant's turn failed, an account-level refusal included; the sweep moves on. */
   onTenantError?: (tenantId: string, error: unknown) => void;
   /**
-   * A turn's stamp failed; the turn still runs. Without it, onTenantError
+   * A turn's stamp failed; the turn still runs unless the budget ran out
+   * during the stamp. Without it, onTenantError
    * hears the failure. Either way it counts in stampFailures, not failedTenants.
    */
   onStampError?: (tenantId: string, error: unknown) => void;
@@ -286,7 +287,7 @@ export interface HostnameSweepReport {
   passes: number;
   /** Tenants listed that the budget left for the next run. */
   deferredTenants: number;
-  /** Tenants whose stamp failed; each still took its turn. */
+  /** Tenants whose stamp failed; each took its turn unless the budget ran out during the stamp. */
   stampFailures: number;
   /** Turns that started after the provider reads stopped; none of them stamps its tenant. */
   expiryOnlyTurns: number;

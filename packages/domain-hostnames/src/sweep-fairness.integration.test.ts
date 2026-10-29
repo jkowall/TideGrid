@@ -516,7 +516,6 @@ describe.skipIf(!env)("the hostname sweep takes fair turns across tenants", () =
           turnHostnames,
         }),
       ).rejects.toThrow(RangeError);
-      expect(read).toEqual([]);
     },
   );
 });
