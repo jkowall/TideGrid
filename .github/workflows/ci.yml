@@ -107,7 +107,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Install Chromium for Playwright
-        run: pnpm --filter @tidegrid/guest-site exec playwright install --with-deps chromium
+        # Three tries: an apt mirror can refuse a request for a moment (a 403
+        # from packages.microsoft.com failed run 40755745908 once).
+        run: |
+          for attempt in 1 2 3; do
+            pnpm --filter @tidegrid/guest-site exec playwright install --with-deps chromium && exit 0
+            echo "Playwright install failed (attempt $attempt of 3)"
+            sleep 20
+          done
+          exit 1
       - name: Build the guest site for the local API
         env:
           VITE_API_BASE: http://localhost:8961
@@ -188,7 +196,15 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Install Chromium for Playwright
-        run: pnpm --filter @tidegrid/operator-site exec playwright install --with-deps chromium
+        # Three tries: an apt mirror can refuse a request for a moment (a 403
+        # from packages.microsoft.com failed run 40755745908 once).
+        run: |
+          for attempt in 1 2 3; do
+            pnpm --filter @tidegrid/operator-site exec playwright install --with-deps chromium && exit 0
+            echo "Playwright install failed (attempt $attempt of 3)"
+            sleep 20
+          done
+          exit 1
       - name: Build the console
         run: pnpm --filter @tidegrid/operator-site build
       - name: Migrate, seed, and prepare the runtime role
