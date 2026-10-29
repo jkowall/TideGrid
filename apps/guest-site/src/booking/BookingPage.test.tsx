@@ -1767,6 +1767,11 @@ describe("a kept confirmation and a later checkout", () => {
     // Back to book the same trip again, and this time the card is declined.
     window.history.back();
     await heading("Who's coming");
+    // Back from an outcome goes on to the party's own entry, the first one, with
+    // a history traversal of its own that lands a few tasks later. If the new
+    // quote's answer came before it, that traversal would take the page from
+    // the details back to the party.
+    await waitFor(() => expect(window.history.state?.pos).toBe(0));
     state = "open";
     await toDetails();
     await toPayment();

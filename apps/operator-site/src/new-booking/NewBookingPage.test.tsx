@@ -644,14 +644,79 @@ describe("review fixes (G2.12d review)", () => {
     await attestBoth();
     await click("Hold seats and take payment");
     await screen.findByRole("alert");
-    await click("Price again");
-    await waitFor(() => expect(sentTo(newRoute.quote)).toHaveLength(2));
-    await stepHeading("Review with the guest");
-    await settle();
     const policy = screen.getByLabelText(
       "I told the guest the cancellation policy (version 3)",
     ) as HTMLInputElement;
+    // Still checked for the old quote.
+    expect(policy.checked).toBe(true);
+    await click("Price again");
+    await waitFor(() => expect(sentTo(newRoute.quote)).toHaveLength(2));
+    await stepHeading("Review with the guest");
+    // Only the new quote's answer clears it, and that answer can land a few
+    // tasks after the request went out.
+    await waitFor(() => expect(policy.checked).toBe(false));
+  });
+
+  it("UI-2: Hold waits while Price again is pricing, and sends no second checkout", async () => {
+    const requoted = deferred();
+    api({
+      ...base(),
+      [newRoute.quote]: [quoteAnswer, requoted.answer],
+      [newRoute.open]: () => apiError(409, "quote_expired"),
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByRole("alert");
+    await click("Price again");
+    await waitFor(() => expect(sentTo(newRoute.quote)).toHaveLength(2));
+    const hold = screen.getByRole("button", { name: "Hold seats and take payment" });
+    expect(hold.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(hold);
+    expect(sentTo(newRoute.open)).toHaveLength(1);
+
+    requoted.release(
+      json({ quote: quoteFor({ quoteId: "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a62" }) }, 201),
+    );
+    await waitFor(() => expect(hold.getAttribute("aria-disabled")).toBeNull());
+    expect(sentTo(newRoute.open)).toHaveLength(1);
+  });
+
+  it("UI-2: a new quote's policy is never sent with the old quote's attestations", async () => {
+    // The new quote has a new policy version. Hold is pressed in the same task
+    // as the commit that shows it, before any passive effect of that commit runs.
+    const newer = quoteFor({
+      quoteId: "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a62",
+      policy: { ...quoteFor().policy, version: 4 },
+    });
+    api({
+      ...base(),
+      [newRoute.quote]: [quoteAnswer, () => json({ quote: newer }, 201)],
+      [newRoute.open]: [() => apiError(409, "quote_expired"), openAnswer],
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByRole("alert");
+    let pressed = false;
+    const observer = new MutationObserver(() => {
+      if (pressed || !document.body.textContent?.includes("(version 4)")) return;
+      pressed = true;
+      screen.getByRole("button", { name: "Hold seats and take payment" }).click();
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    await click("Price again");
+    await waitFor(() => expect(pressed).toBe(true));
+    observer.disconnect();
+    await settle();
+    expect(sentTo(newRoute.open)).toHaveLength(1);
+    const policy = screen.getByLabelText(
+      "I told the guest the cancellation policy (version 4)",
+    ) as HTMLInputElement;
     expect(policy.checked).toBe(false);
+    expect(screen.getByText("Read the address back first.")).toBeTruthy();
   });
 
   it("UI-10: an attestation's error goes once its box is checked", async () => {
