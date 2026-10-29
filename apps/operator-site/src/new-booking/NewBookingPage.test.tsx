@@ -48,8 +48,18 @@ function renderPage(role: StaffRole = "booking_staff", tripId: string = tripIds.
 
 /** Let React commit and run its passive effects before the next click (CI-only focus races). */
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+/** Every request sent so far has its answer, and React has applied them. */
+async function answered() {
+  await act(async () => {
+    await Promise.allSettled(vi.mocked(fetch).mock.results.map((r) => r.value));
+  });
+  await settle();
+}
 
 const stepHeading = (name: string | RegExp) => screen.findByRole("heading", { level: 2, name });
+/** The page's primary actions, by name: one at a time. */
+const primaries = () =>
+  [...document.querySelectorAll(".nb-page .tg-button--primary")].map((b) => text(b));
 const click = async (name: string | RegExp) => {
   await settle();
   fireEvent.click(screen.getByRole("button", { name }));
@@ -929,6 +939,12 @@ describe("review fixes (G2.12d review)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
     expect(await stepHeading("Booking canceled")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+    // Refused as not open on the payment's own key: nothing settled.
+    const page = text(document.querySelector(".nb-page"));
+    expect(page).toContain("Nothing was charged.");
+    expect(page).not.toContain("may have gone through");
+    expect(screen.getByRole("link", { name: "Start a new booking" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
   });
 
   it("recheck 1: an unanswered Take test payment leaves Decline unavailable and Try again on its own key", async () => {
@@ -1062,7 +1078,8 @@ describe("review fixes (G2.12d review)", () => {
   it("recheck 3: a canceled outcome after an unanswered payment never says nothing was charged, and offers Check again", async () => {
     api({
       ...base(),
-      [newRoute.pay()]: [dropped, dropped],
+      // The payment, the cancel's resend, and Check again's resend: no answer each time.
+      [newRoute.pay()]: [dropped, dropped, dropped],
       [newRoute.cancel()]: () => json({ checkout: staffCheckout({ state: "canceled" }) }),
       [newRoute.read()]: [
         () => json({ checkout: staffCheckout({ state: "canceled" }) }),
@@ -1088,6 +1105,11 @@ describe("review fixes (G2.12d review)", () => {
     const page = text(document.querySelector(".nb-page"));
     expect(page).not.toContain("Nothing was charged");
     expect(page).toContain("may have gone through");
+    // The resend got no answer: said once, under its own name, with one control.
+    const alert = text(screen.getByRole("alert"));
+    expect(alert).toContain("The payment couldn't be checked");
+    expect(alert).not.toContain("may not have gone through");
+    expect(primaries()).toEqual(["Check again"]);
     await click("Check again");
     expect(await stepHeading("The payment came too late")).toBeTruthy();
   });
@@ -1207,5 +1229,541 @@ describe("review fixes (G2.12d review)", () => {
     const email = document.querySelector(".nb-readback__email") as HTMLElement;
     expect(text(email)).toBe(caller.email);
     expect(email.querySelectorAll("wbr")).toHaveLength(3);
+  });
+});
+
+describe("uncertain payment recovery (G2.12d follow-up)", () => {
+  const base = () => ({
+    [newRoute.offer()]: offerAnswer(),
+    [newRoute.quote]: quoteAnswer,
+    [newRoute.open]: openAnswer,
+  });
+  const canceledCheckout = () => staffCheckout({ state: "canceled" });
+  const refunded = () =>
+    staffCheckout({
+      state: "unfulfilled",
+      paymentState: "succeeded",
+      refund: { state: "succeeded", amount: 9630 },
+    });
+  const declined = paid({
+    outcome: "fail",
+    event: {
+      id: "fevt_ABCDEFGHIJKLMNOPQRSTUVWX",
+      type: "payment.failed",
+      createdAt: "2026-11-04T17:01:00.000Z",
+    },
+    alreadySettled: true,
+    delivery: { status: 200, outcome: "failure_recorded", duplicate: false },
+  });
+  const keysOf = (calls: { headers: Headers }[]) =>
+    new Set(calls.map((c) => c.headers.get("idempotency-key")));
+
+  /** The payment gets no answer, then staff cancel through the danger dialog. */
+  async function cancelAfterUnanswered(press: "Take test payment" | "Decline") {
+    await toPayment();
+    await click(press);
+    await screen.findByRole("alert");
+    await click("Cancel booking");
+    const dialog = await screen.findByRole("dialog", { name: "Cancel this booking?" });
+    await settle();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
+  }
+
+  it.each([
+    ["expired", "The hold ended", "The payment wasn't taken before the hold ended."],
+    ["canceled", "Booking canceled", "Nothing was charged."],
+  ] as const)(
+    "follow-up 2: Try again refused as not open after an unanswered payment reads %s, with nothing charged and a new booking offered",
+    async (state, heading, said) => {
+      api({
+        ...base(),
+        // Refused as no longer open on the payment's own key: nothing had settled.
+        [newRoute.pay()]: [dropped, () => apiError(409, "checkout_not_open")],
+        [newRoute.read()]: () => json({ checkout: staffCheckout({ state }) }),
+      });
+      renderPage();
+      await toPayment();
+      await click("Take test payment");
+      await screen.findByRole("alert");
+      await click("Try again");
+      expect(await stepHeading(heading)).toBeTruthy();
+      const page = text(document.querySelector(".nb-page"));
+      expect(page).toContain(said);
+      expect(page).not.toContain("may have gone through");
+      expect(screen.getByRole("link", { name: "Start a new booking" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+      const pays = sentTo(newRoute.pay());
+      expect(pays).toHaveLength(2);
+      expect(keysOf(pays).size).toBe(1);
+    },
+  );
+
+  it("follow-up 1: Check again on a canceled outcome sends the payment's own request again, so a settled success is refunded", async () => {
+    let delivered = false;
+    api({
+      ...base(),
+      [newRoute.pay()]: [
+        dropped,
+        // The cancel's resend gets no answer either: nothing has delivered the settled success.
+        dropped,
+        () => {
+          delivered = true;
+          return json(
+            paid({
+              alreadySettled: true,
+              delivery: { status: 200, outcome: "refund_required", duplicate: false },
+            }),
+          );
+        },
+      ],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      // The checkout stays canceled until the success is delivered, then it is refunded.
+      [newRoute.read()]: () => json({ checkout: delivered ? refunded() : canceledCheckout() }),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Take test payment");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    expect(text(document.querySelector(".nb-page"))).toContain("may have gone through");
+    await click("Check again");
+    expect(await stepHeading("The payment came too late")).toBeTruthy();
+    expect(screen.getByText("Refunded in full")).toBeTruthy();
+    const pays = sentTo(newRoute.pay());
+    expect(pays.map((p) => p.body)).toEqual([
+      { outcome: "succeed" },
+      { outcome: "succeed" },
+      { outcome: "succeed" },
+    ]);
+    expect(keysOf(pays).size).toBe(1);
+  });
+
+  it("follow-up 1: a resend whose result did not reach TideGrid says so, and Check again, the one control, sends it again on its key", async () => {
+    let delivered = false;
+    api({
+      ...base(),
+      [newRoute.pay()]: [
+        dropped,
+        // The cancel's resend: the provider has the success, and the webhook answered 500.
+        () =>
+          json(
+            paid({
+              alreadySettled: true,
+              delivery: { status: 500, outcome: null, duplicate: null },
+            }),
+          ),
+        () => {
+          delivered = true;
+          return json(
+            paid({
+              alreadySettled: true,
+              delivery: { status: 200, outcome: "refund_required", duplicate: true },
+            }),
+          );
+        },
+      ],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      [newRoute.read()]: () => json({ checkout: delivered ? refunded() : canceledCheckout() }),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Take test payment");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    const alert = text(await screen.findByRole("alert"));
+    expect(alert).toContain("The payment's result didn't reach TideGrid");
+    expect(alert).not.toContain("nothing is decided yet");
+    expect(primaries()).toEqual(["Check again"]);
+    await click("Check again");
+    expect(await stepHeading("The payment came too late")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    const pays = sentTo(newRoute.pay());
+    expect(pays).toHaveLength(3);
+    expect(keysOf(pays).size).toBe(1);
+  });
+
+  it("follow-up 1: a resend whose result did not reach TideGrid says so when the read after it fails too", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [
+        dropped,
+        () =>
+          json(
+            paid({
+              alreadySettled: true,
+              delivery: { status: 503, outcome: null, duplicate: null },
+            }),
+          ),
+      ],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      [newRoute.read()]: () => apiError(503, "unavailable"),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Take test payment");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    expect(text(await screen.findByRole("alert"))).toContain(
+      "The payment's result didn't reach TideGrid",
+    );
+    expect(text(document.querySelector(".nb-page"))).toContain("may have gone through");
+    expect(primaries()).toEqual(["Check again"]);
+  });
+
+  it("follow-up 1: a resend that delivers a decline clears the doubt, even when the read after it fails", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped, () => json(declined)],
+      // The cancel's own answer is all the page has: pending, as it was canceled.
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      [newRoute.read()]: () => apiError(503, "unavailable"),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Decline");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    const page = text(document.querySelector(".nb-page"));
+    expect(page).toContain("Nothing was charged.");
+    expect(page).not.toContain("may have gone through");
+    expect(screen.getByRole("link", { name: "Start a new booking" })).toBeTruthy();
+    // The cancel's own read failed: said, with Try again, the one primary.
+    expect(text(screen.getByRole("alert"))).toContain("The payment couldn't be checked");
+    expect(primaries()).toEqual(["Try again"]);
+    expect(sentTo(newRoute.pay()).map((p) => p.body)).toEqual([
+      { outcome: "fail" },
+      { outcome: "fail" },
+    ]);
+  });
+
+  it("follow-up 1: a read that shows the payment failed clears the doubt, with no stale problem", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped, dropped],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      // The decline reached TideGrid; only its answer to the console was lost.
+      [newRoute.read()]: () =>
+        json({ checkout: staffCheckout({ state: "canceled", paymentState: "failed" }) }),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Decline");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    const page = text(document.querySelector(".nb-page"));
+    expect(page).toContain("Nothing was charged.");
+    expect(page).not.toContain("may have gone through");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+  });
+
+  it("follow-up 1: after a cancel refused because the hold had ended, Check again only reads, and says a late success books or refunds", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped],
+      [newRoute.cancel()]: () => apiError(409, "checkout_not_cancelable"),
+      [newRoute.read()]: () => json({ checkout: staffCheckout({ state: "expired" }) }),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Take test payment");
+    expect(await stepHeading("The hold ended")).toBeTruthy();
+    const page = text(document.querySelector(".nb-page"));
+    expect(page).toContain("may have gone through");
+    expect(page).toContain("the guest is booked if the seats are still free, or refunded in full");
+    expect(page).not.toContain("Check again shows the refund");
+    expect(screen.getByRole("link", { name: "Back to calendar" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Start a new booking" })).toBeNull();
+    await click("Check again");
+    await waitFor(() => expect(sentTo(newRoute.read())).toHaveLength(2));
+    await settle();
+    // A delivered success on an ended hold books the guest: Check again never sends it.
+    expect(sentTo(newRoute.pay())).toHaveLength(1);
+  });
+
+  it("copy-1: after an unanswered Decline, the cancel dialog and the canceled outcome say nothing was charged, and Check again still sends the decline", async () => {
+    let recorded = false;
+    api({
+      ...base(),
+      [newRoute.pay()]: [
+        dropped,
+        dropped,
+        () => {
+          recorded = true;
+          return json(declined);
+        },
+      ],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      [newRoute.read()]: () =>
+        json({
+          checkout: staffCheckout({
+            state: "canceled",
+            paymentState: recorded ? "failed" : "pending",
+          }),
+        }),
+    });
+    renderPage();
+    await toPayment();
+    await click("Decline");
+    await screen.findByRole("alert");
+    await click("Cancel booking");
+    const dialog = await screen.findByRole("dialog", { name: "Cancel this booking?" });
+    expect(text(dialog)).toContain("Nothing has been charged");
+    expect(text(dialog)).not.toContain("refunded");
+    await settle();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel booking" }));
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    const page = text(document.querySelector(".nb-page"));
+    expect(page).toContain(
+      "Nothing was charged: only a decline was asked for. The decline may not have reached TideGrid yet, and Check again sends it again.",
+    );
+    for (const said of ["may have gone through", "refunded", "exception"]) {
+      expect(page).not.toContain(said);
+    }
+    expect(primaries()).toEqual(["Check again"]);
+    await click("Check again");
+    // The decline is recorded: the plain "Nothing was charged." and no Check again.
+    await waitFor(() =>
+      expect(text(document.querySelector(".nb-page"))).toContain("Nothing was charged."),
+    );
+    expect(screen.queryByRole("button", { name: /Check again|Checking/ })).toBeNull();
+    const pays = sentTo(newRoute.pay());
+    expect(pays.map((p) => p.body)).toEqual([
+      { outcome: "fail" },
+      { outcome: "fail" },
+      { outcome: "fail" },
+    ]);
+    expect(keysOf(pays).size).toBe(1);
+  });
+
+  it("copy-1: after an unanswered Decline, the hold-ended outcome says nothing was charged, and Check again only reads", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped],
+      [newRoute.cancel()]: () => apiError(409, "checkout_not_cancelable"),
+      [newRoute.read()]: () => json({ checkout: staffCheckout({ state: "expired" }) }),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Decline");
+    expect(await stepHeading("The hold ended")).toBeTruthy();
+    const page = text(document.querySelector(".nb-page"));
+    expect(page).toContain("Nothing was charged");
+    for (const said of ["may have gone through", "booked", "refunded"]) {
+      expect(page).not.toContain(said);
+    }
+    expect(screen.getByRole("link", { name: "Start a new booking" })).toBeTruthy();
+    await click("Check again");
+    await waitFor(() => expect(sentTo(newRoute.read())).toHaveLength(2));
+    await settle();
+    expect(sentTo(newRoute.pay())).toHaveLength(1);
+  });
+
+  it("copy-2: a resend that finds a decline whose delivery failed says nothing was charged, and Try again records it", async () => {
+    let recorded = false;
+    api({
+      ...base(),
+      [newRoute.pay()]: [
+        dropped,
+        () => json({ ...declined, delivery: { status: 500, outcome: null, duplicate: null } }),
+        () => {
+          recorded = true;
+          return json(declined);
+        },
+      ],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      [newRoute.read()]: () =>
+        json({
+          checkout: staffCheckout({
+            state: "canceled",
+            paymentState: recorded ? "failed" : "pending",
+          }),
+        }),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Decline");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    const alert = text(await screen.findByRole("alert"));
+    expect(alert).toContain("The decline didn't reach TideGrid");
+    expect(alert).toContain("Nothing was charged");
+    const page = text(document.querySelector(".nb-page"));
+    expect(page).toContain("Nothing was charged.");
+    expect(page).not.toContain("may have gone through");
+    expect(primaries()).toEqual(["Try again"]);
+    await click("Try again");
+    // The cancel's read, then Try again's: the decline is recorded, and the notice goes.
+    await waitFor(() => expect(sentTo(newRoute.read())).toHaveLength(2));
+    await answered();
+    expect(screen.queryByRole("alert")).toBeNull();
+    const pays = sentTo(newRoute.pay());
+    expect(pays).toHaveLength(3);
+    expect(keysOf(pays).size).toBe(1);
+  });
+
+  it("S2: Check again on the hold-ended outcome asks to sign in again when its read is refused as signed out", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped],
+      [newRoute.cancel()]: () => apiError(409, "checkout_not_cancelable"),
+      [newRoute.read()]: [
+        () => json({ checkout: staffCheckout({ state: "expired" }) }),
+        () => apiError(401, "unauthenticated"),
+      ],
+    });
+    renderPage();
+    await cancelAfterUnanswered("Take test payment");
+    expect(await stepHeading("The hold ended")).toBeTruthy();
+    await click("Check again");
+    expect(await screen.findByRole("link", { name: "Sign in again" })).toBeTruthy();
+    expect(primaries()).toEqual(["Sign in again"]);
+    expect(sentTo(newRoute.pay())).toHaveLength(1);
+  });
+
+  it("S2: a read that fails after a clean resend on the canceled outcome says so, with Check again the one control", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [
+        dropped,
+        dropped,
+        () =>
+          json(
+            paid({
+              alreadySettled: true,
+              delivery: { status: 200, outcome: "refund_required", duplicate: false },
+            }),
+          ),
+        () =>
+          json(
+            paid({
+              alreadySettled: true,
+              delivery: { status: 200, outcome: "refund_required", duplicate: true },
+            }),
+          ),
+      ],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      [newRoute.read()]: [
+        () => json({ checkout: canceledCheckout() }),
+        () => apiError(503, "unavailable"),
+        () => json({ checkout: refunded() }),
+      ],
+    });
+    renderPage();
+    await cancelAfterUnanswered("Take test payment");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    await click("Check again");
+    await waitFor(() => expect(sentTo(newRoute.read())).toHaveLength(2));
+    await waitFor(() => expect(text(screen.queryByRole("alert"))).toContain("isn't responding"));
+    expect(primaries()).toEqual(["Check again"]);
+    await click("Check again");
+    expect(await stepHeading("The payment came too late")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    ["the provider does not answer", () => apiError(503, "payment_provider_unavailable")],
+    ["the console cannot reach TideGrid", dropped],
+  ] as const)(
+    "F1: after a decline whose delivery failed, Try again keeps sending it when %s",
+    async (_, again) => {
+      let recorded = false;
+      const pending = () =>
+        json({
+          checkout: staffCheckout({
+            state: "canceled",
+            paymentState: recorded ? "failed" : "pending",
+          }),
+        });
+      api({
+        ...base(),
+        [newRoute.pay()]: [
+          dropped,
+          () => json({ ...declined, delivery: { status: 500, outcome: null, duplicate: null } }),
+          again,
+          () => {
+            recorded = true;
+            return json(declined);
+          },
+        ],
+        [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+        [newRoute.read()]: pending,
+      });
+      renderPage();
+      await cancelAfterUnanswered("Decline");
+      expect(text(await screen.findByRole("alert"))).toContain("The decline didn't reach TideGrid");
+      await click("Try again");
+      await waitFor(() => expect(sentTo(newRoute.read())).toHaveLength(2));
+      await answered();
+      // The decline is still not recorded: a way to record it stays, and it sends the decline.
+      expect(primaries()).toEqual(["Try again"]);
+      await click("Try again");
+      await waitFor(() => expect(sentTo(newRoute.read())).toHaveLength(3));
+      await answered();
+      expect(screen.queryByRole("alert")).toBeNull();
+      const pays = sentTo(newRoute.pay());
+      expect(pays.map((p) => p.body)).toEqual([
+        { outcome: "fail" },
+        { outcome: "fail" },
+        { outcome: "fail" },
+        { outcome: "fail" },
+      ]);
+      expect(keysOf(pays).size).toBe(1);
+    },
+  );
+
+  it("F2: a signed-out Check again on the canceled outcome leaves Sign in again the one primary", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped, dropped, () => apiError(401, "unauthenticated")],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      [newRoute.read()]: [
+        () => json({ checkout: canceledCheckout() }),
+        () => apiError(401, "unauthenticated"),
+      ],
+    });
+    renderPage();
+    await cancelAfterUnanswered("Take test payment");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    await click("Check again");
+    expect(await screen.findByRole("link", { name: "Sign in again" })).toBeTruthy();
+    expect(primaries()).toEqual(["Sign in again"]);
+    expect(text(document.querySelector(".nb-page"))).toContain("may have gone through");
+  });
+
+  it("T-1: a resend the provider does not answer, on the canceled outcome, says so with Check again the one control", async () => {
+    api({
+      ...base(),
+      [newRoute.pay()]: [dropped, () => apiError(503, "payment_provider_unavailable")],
+      [newRoute.cancel()]: () => json({ checkout: canceledCheckout() }),
+      [newRoute.read()]: () => json({ checkout: canceledCheckout() }),
+    });
+    renderPage();
+    await cancelAfterUnanswered("Take test payment");
+    expect(await stepHeading("Booking canceled")).toBeTruthy();
+    const alert = text(await screen.findByRole("alert"));
+    expect(alert).toContain("The payment provider didn't answer");
+    expect(alert).toContain("The payment's result couldn't be checked yet");
+    expect(alert).not.toContain("held");
+    expect(primaries()).toEqual(["Check again"]);
+  });
+
+  it("follow-up 3: after quote_expired, Change details then Price again on the party step goes to the guest, keeps the name, and Hold sends the new quote", async () => {
+    const fresh = "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a62";
+    api({
+      ...base(),
+      [newRoute.quote]: [quoteAnswer, () => json({ quote: quoteFor({ quoteId: fresh }) }, 201)],
+      [newRoute.open]: [() => apiError(409, "quote_expired"), openAnswer],
+    });
+    renderPage();
+    await toReview();
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await screen.findByText("The price needs refreshing");
+    await click("Change details");
+    await stepHeading("Who is coming");
+    await click("Price again");
+    expect(await stepHeading("The guest")).toBeTruthy();
+    expect((screen.getByLabelText("Booker's name") as HTMLInputElement).value).toBe(caller.name);
+    await click("Review");
+    await stepHeading("Review with the guest");
+    await settle();
+    for (const label of [
+      "I read the email address back to the guest",
+      "I told the guest the cancellation policy (version 3)",
+    ]) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).checked).toBe(false);
+    }
+    await attestBoth();
+    await click("Hold seats and take payment");
+    await stepHeading("Payment");
+    const opens = sentTo(newRoute.open);
+    expect(opens.map((o) => (o.body as { quoteId: string }).quoteId)).toEqual([quoteId, fresh]);
   });
 });

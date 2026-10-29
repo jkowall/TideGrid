@@ -162,8 +162,12 @@ export interface Refusal {
   next: "requote" | "retry" | "stop" | "edit";
 }
 
-/** The command a problem came from, so its copy and its Try again are that command's. */
-export type BookingCommand = "quote" | "open" | "pay" | "cancel" | "edit";
+/**
+ * The command a problem came from, so its copy and its Try again are that
+ * command's. `check` is Check again on the outcome: an uncertain payment's
+ * own request again, on a canceled checkout, then a read.
+ */
+export type BookingCommand = "quote" | "open" | "pay" | "cancel" | "edit" | "check";
 
 /** What failed, in words, for a command that got no usable answer. */
 export const commandFailureTitles: Record<BookingCommand, string> = {
@@ -172,9 +176,17 @@ export const commandFailureTitles: Record<BookingCommand, string> = {
   pay: "The test payment may not have gone through",
   cancel: "The hold couldn't be released",
   edit: "The details couldn't be changed",
+  check: "The payment couldn't be checked",
 };
 
 export function refusalOf(code: string | undefined, command?: BookingCommand): Refusal {
+  if (code === "payment_provider_unavailable" && command === "check") {
+    return {
+      title: "The payment provider didn't answer",
+      body: "The payment's result couldn't be checked yet. The same request goes again, so nothing is charged twice.",
+      next: "retry",
+    };
+  }
   if (code === "payment_provider_unavailable" && command === "pay") {
     return {
       title: "The test payment may not have gone through",
