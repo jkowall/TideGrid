@@ -76,6 +76,18 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
     return inTenantTransaction(runtime.db, ctx, (trx) => fn(trx, ctx));
   };
 
+  /**
+   * The database clock in milliseconds. Checkout reads a quote's validity on
+   * that clock, so back-dated quote times come from it, not from this process,
+   * whose clock can drift from a local container's.
+   */
+  const dbNow = async (): Promise<number> => {
+    const [row] = await admin<{ ms: number }[]>`
+      select (extract(epoch from now()) * 1000)::float8 as ms`;
+    if (!row) throw new Error("no database time");
+    return row.ms;
+  };
+
   /** A quote and an open checkout on it, with its provider payment created. */
   async function checkout(
     tenant: CheckoutFixture,
@@ -221,7 +233,7 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
 
   it("refuses a stale quote, a used quote, an unaccepted policy, and another tenant's quote", async () => {
     const stale = await quoteFor(runtime.db, A.id, tripsA.shared(), 1, {
-      now: new Date(Date.now() - 31 * 60_000),
+      now: new Date((await dbNow()) - 31 * 60_000),
     });
     const attempt = (tenantId: string, quoteId: string, policy: number) =>
       asGuest(tenantId, (trx, ctx) =>
@@ -602,7 +614,8 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
       };
     };
     // Quoted 25 minutes ago: its price holds 5 more minutes, so does the checkout.
-    const late = await open(new Date(Date.now() - 25 * 60_000));
+    const lateAt = await dbNow();
+    const late = await open(new Date(lateAt - 25 * 60_000));
     if (late.created.kind !== "created") throw new Error(late.created.kind);
     const [bounds] = await admin<{ session: string; hold: string; valid_until: string }[]>`
       select s.expires_at::text as session, h.expires_at::text as hold,
@@ -615,18 +628,16 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
     expect(Date.parse(bounds?.session ?? "")).toBeLessThanOrEqual(
       Date.parse(bounds?.valid_until ?? ""),
     );
-    expect(Date.parse(late.created.session.expiresAt) - Date.now()).toBeLessThan(
-      5 * 60_000 + 5_000,
-    );
+    expect(Date.parse(late.created.session.expiresAt) - lateAt).toBeLessThan(5 * 60_000 + 5_000);
     // Quoted 29 and a half minutes ago: too little time left to pay.
-    const tooLate = await open(new Date(Date.now() - 29.5 * 60_000));
+    const tooLate = await open(new Date((await dbNow()) - 29.5 * 60_000));
     expect(tooLate.created).toEqual({ kind: "quote_expired" });
     // The database refuses a checkout that outlives its quote, for every
     // writer: the owner forges a 10-minute hold and session on a quote with
     // five minutes left. Both roll back together.
     const tripId = tripsA.shared();
     const quote = await quoteFor(runtime.db, A.id, tripId, 1, {
-      now: new Date(Date.now() - 25 * 60_000),
+      now: new Date((await dbNow()) - 25 * 60_000),
     });
     const sessionId = randomUUID();
     expect(

@@ -122,6 +122,14 @@ function pausedSession<T>(
 
 describe.skipIf(!env)("G2.6 adversarial clock, replay, and sweep checks", () => {
   let admin: Sql;
+
+  /** The database clock in milliseconds, which hold expiry runs on. */
+  async function dbNow(): Promise<number> {
+    const [row] = await admin<{ ms: number }[]>`
+      select (extract(epoch from now()) * 1000)::float8 as ms`;
+    if (!row) throw new Error("no database time");
+    return row.ms;
+  }
   let runtime: Runtime;
   let sweeper: Runtime;
   let trips: ReturnType<typeof tripSource>;
@@ -543,7 +551,7 @@ describe.skipIf(!env)("G2.6 adversarial clock, replay, and sweep checks", () => 
       if (replay.kind !== "existing") return;
       expect(replay.hold.state).toBe("expired");
       expect(replay.hold.expiredAt).not.toBeNull();
-      expect(Date.parse(replay.hold.expiresAt)).toBeLessThan(Date.now());
+      expect(Date.parse(replay.hold.expiresAt)).toBeLessThan(await dbNow());
       // Nothing counts it any more, and the only write was its expiry.
       expect(await usageOf(admin, tripId)).toMatchObject({ counted: 0, live: 0 });
       expect((await auditsOf(hold.id)).map((a) => a.action)).toEqual([

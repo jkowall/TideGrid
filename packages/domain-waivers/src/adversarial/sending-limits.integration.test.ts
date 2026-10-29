@@ -64,6 +64,14 @@ describe.skipIf(!env)("G2.15 adversarial: sending limits across requests", () =>
     await closeWorld(world);
   });
 
+  /** The database clock in milliseconds, which the sending limits run on. */
+  async function dbNow(): Promise<number> {
+    const [row] = await world.admin<{ ms: number }[]>`
+      select (extract(epoch from now()) * 1000)::float8 as ms`;
+    if (!row) throw new Error("no database time");
+    return row.ms;
+  }
+
   /** Every waiver email of one booking, oldest first. */
   async function emails(bookingId: string) {
     return world.admin<
@@ -109,7 +117,7 @@ describe.skipIf(!env)("G2.15 adversarial: sending limits across requests", () =>
     }
     expect(
       (await statusOf(booked.bookingId)).request?.delivery?.sendAfter.getTime(),
-    ).toBeGreaterThan(Date.now() + 8 * 60_000);
+    ).toBeGreaterThan((await dbNow()) + 8 * 60_000);
   }, 240_000);
 
   it("holds flips between adult and minor to one email in 10 minutes, across new requests", async () => {
@@ -145,7 +153,9 @@ describe.skipIf(!env)("G2.15 adversarial: sending limits across requests", () =>
     expect(all.filter((e) => e.state === "sent")).toHaveLength(8);
     const held = await statusOf(booked.bookingId);
     expect(held.status).toBe("email_held");
-    expect(held.request?.resendAvailableAt?.getTime()).toBeGreaterThan(Date.now() + 23 * 3_600_000);
+    expect(held.request?.resendAvailableAt?.getTime()).toBeGreaterThan(
+      (await dbNow()) + 23 * 3_600_000,
+    );
   }, 300_000);
 
   it("caps one address at ten an hour across the operator's bookings", async () => {
@@ -231,11 +241,12 @@ describe.skipIf(!env)("G2.15 adversarial: sending limits across requests", () =>
     const waiting = await statusOf(booked.bookingId);
     expect(waiting.status).toBe("waiting");
     expect(waiting.request?.delivery?.generation).toBe(2);
-    expect(waiting.request?.delivery?.sendAfter.getTime()).toBeGreaterThan(Date.now() + 8 * 60_000);
+    const waitingAt = await dbNow();
+    expect(waiting.request?.delivery?.sendAfter.getTime()).toBeGreaterThan(waitingAt + 8 * 60_000);
     const guest = await inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
       listGuestBookingWaivers(trx, A.id, booked.bookingId),
     );
-    expect(guest?.participants[0]?.sendsAt?.getTime()).toBeGreaterThan(Date.now() + 8 * 60_000);
+    expect(guest?.participants[0]?.sendsAt?.getTime()).toBeGreaterThan(waitingAt + 8 * 60_000);
     // The old link stays closed; once the time comes, the new email's opens.
     expect((await redeem(world, A.id, first.token)).kind).toBe("replaced");
     await world.admin`update public.email_messages m set next_attempt_at = now()

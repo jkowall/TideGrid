@@ -37,6 +37,15 @@
 # TIDEGRID_LOCAL_DB_ENGINE to choose. On a Mac, podman needs a running machine
 # (`podman machine start`). The container listens on 127.0.0.1 only.
 #
+# Clock check: `up`, after the server is ready, and `test`, before its first
+# part, refuse a container clock more than 5 s away from this machine's.
+# Quotes take their expiry from the writer's clock (Node, here) and checkout
+# compares it with the database's now(), so a lagging clock makes a stale
+# quote look fresh and the quote tests fail. A podman machine on a Mac can lag
+# by many minutes after the Mac sleeps. Fix it with
+# `podman machine ssh sudo chronyc makestep`, or restart the machine. Docker on
+# Linux, as in CI, shares the host's clock, so the check passes there.
+#
 # The admin password below is a fixed throwaway test value for a container
 # that lives for one run on the loopback interface. It is not a credential for
 # anything else. The runtime role's password is random for every prepare.
@@ -147,6 +156,62 @@ print_env() {
   printf 'TIDEGRID_EPHEMERAL_DB=1\n'
 }
 
+# --- the clock check (see the header) ---------------------------------------
+
+CLOCK_SKEW_LIMIT=5
+
+clock_fix() {
+  if [ "$ENGINE" = podman ]; then
+    printf 'Step the podman machine clock with: podman machine ssh sudo chronyc makestep\n'
+    printf '(or restart it: podman machine stop && podman machine start), then run this again.'
+  else
+    printf "%s's VM clock is off. Restart the engine (Docker Desktop, colima, or its VM) so it syncs, then run this again." "$ENGINE"
+  fi
+}
+
+# check_clock <what> <command...>: the command prints the container's epoch
+# seconds. The host clock is read before and after it, so a slow round trip
+# widens the window instead of failing; a reading slower than 2 s is retried,
+# and after three slow ones the check warns and lets the run go on.
+check_clock() {
+  local what="$1" _ before reading after skew direction
+  shift
+  for _ in 1 2 3; do
+    before="$(date +%s)"
+    reading="$("$@")" || die "could not read the clock of $what"
+    after="$(date +%s)"
+    reading="${reading%%.*}"
+    case "$reading" in
+    '' | *[!0-9]*) die "unexpected clock reading from $what: $reading" ;;
+    esac
+    [ $((after - before)) -le 2 ] || continue
+    if [ "$reading" -ge $((before - CLOCK_SKEW_LIMIT)) ] && [ "$reading" -le $((after + CLOCK_SKEW_LIMIT)) ]; then
+      return 0
+    fi
+    skew=$((reading - (before + after) / 2))
+    direction="ahead of"
+    if [ "$skew" -lt 0 ]; then
+      skew=$((-skew))
+      direction=behind
+    fi
+    die "the clock in $what is $skew s $direction this machine's (limit $CLOCK_SKEW_LIMIT s). Quote expiry comes from this machine's clock and checkout compares it with the database's, so the quote tests would fail. $(clock_fix)"
+  done
+  log "warning: $what answered too slowly to compare its clock with this machine's; skipped the clock check"
+}
+
+# The running server's own clock, as checkout reads it.
+check_server_clock() {
+  check_clock "$NAME" "$ENGINE" exec "$NAME" psql -U "$ADMIN_USER" -d "$DB_NAME" -Atc \
+    'select extract(epoch from clock_timestamp())'
+}
+
+# Before any container exists: a one-shot container from the same image reads
+# the same engine clock, so `test` fails in seconds instead of after a build.
+check_engine_clock() {
+  "$ENGINE" image inspect "$IMAGE" >/dev/null 2>&1 || "$ENGINE" pull -q "$IMAGE" >/dev/null
+  check_clock "a $ENGINE container" "$ENGINE" run --rm --network none --entrypoint date "$IMAGE" +%s
+}
+
 cmd_up() {
   check_engine
   remove_container || true
@@ -176,6 +241,7 @@ cmd_up() {
     sleep 1
   done
   log "ready: $("$ENGINE" exec "$NAME" psql -U "$ADMIN_USER" -d "$DB_NAME" -Atc 'show server_version')"
+  check_server_clock
   print_env
 }
 
@@ -385,6 +451,7 @@ cmd_test() {
   fi
   export DATABASE_URL="$ADMIN_URL" TIDEGRID_EPHEMERAL_DB=1
   check_engine
+  check_engine_clock
   cd "$ROOT"
   mkdir -p "$STATE_DIR"
   LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tidegrid-local-db.XXXXXX")"
