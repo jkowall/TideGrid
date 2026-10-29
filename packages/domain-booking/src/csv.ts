@@ -108,6 +108,7 @@ export function renderDayExport(
     "USD",
     csvInstant(r.confirmedAt),
     generated,
+    r.source,
     ...(options.withBooker ? [csvText(r.booker?.name ?? ""), csvText(r.booker?.email ?? "")] : []),
   ]);
   const t = report.totals;
@@ -130,6 +131,7 @@ export function renderDayExport(
     "USD",
     "",
     generated,
+    "",
     ...(options.withBooker ? ["", ""] : []),
   ];
   return renderCsv(header, [...bookingRows, totalRow]);

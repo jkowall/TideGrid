@@ -534,6 +534,14 @@ export type PaymentState = "pending" | "succeeded" | "failed";
 export type RefundState = "requested" | "succeeded" | "failed";
 export type RefundReason = "unfulfilled_payment" | "booking_canceled";
 export type BookingState = "confirmed" | "canceled";
+/**
+ * Where a booking came from (G2.12d). The database stamps it from the
+ * transaction's actor on the checkout, and copies it to the booking; no
+ * writer chooses it.
+ */
+export type BookingSource = "direct" | "staff_assisted";
+/** How a guest reached the staff member who opened a staff-assisted checkout (G2.12d). */
+export type BookingChannel = "phone" | "email" | "walk_up";
 export type ProviderEventType = "payment.succeeded" | "payment.failed" | "other";
 export type InboxProcessingState = "received" | "processed";
 export type FinalizationReason =
@@ -593,6 +601,12 @@ export interface CheckoutSessionsTable {
   client_key: FixedDefault<string | null>;
   booker_name: Fixed<string>;
   booker_email: Fixed<string>;
+  /** Stamped from the transaction's actor (0012); never chosen by a writer. */
+  source: ColumnType<BookingSource, never, never>;
+  /** Required on a staff-assisted checkout and null otherwise (0012). */
+  channel: FixedDefault<BookingChannel | null>;
+  /** The staff member who opened it, stamped from the actor (0012); null when direct. */
+  opened_by: ColumnType<string | null, never, never>;
   created_at: Stamped;
   confirmed_at: Stamp;
   unfulfilled_at: Stamp;
@@ -694,7 +708,8 @@ export interface BookingsTable {
   hold_id: Fixed<string>;
   trip_id: Fixed<string>;
   party_size: Fixed<number>;
-  source: FixedDefault<"direct">;
+  /** Copied from its checkout by a trigger (0012), whatever the insert names. */
+  source: FixedDefault<BookingSource>;
   /** Created confirmed; canceled once, with its cancellation (G2.11c). */
   state: ColumnType<BookingState, "confirmed" | undefined, "canceled">;
   reacquired: Fixed<boolean>;
@@ -1089,6 +1104,21 @@ interface WaiverTables {
   waiver_evidence: WaiverEvidenceTable;
 }
 
+/** The cron's cross-tenant sweeps that take fair turns (0013). */
+export type SweepName = "hold" | "checkout" | "email" | "hostname";
+
+/**
+ * When a sweep last started a turn for a tenant (0013, pre-pilot hardening).
+ * The runtime inserts the row and may move only the time and the run id.
+ * Housekeeping: no audit or outbox row. Nobody deletes one.
+ */
+export interface SweepTurnsTable {
+  tenant_id: TenantColumn;
+  sweep: Fixed<SweepName>;
+  last_turn_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  run_id: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
 export interface Database
   extends PricingTables,
     CheckoutTables,
@@ -1115,6 +1145,8 @@ export interface Database
   brand_activations: BrandActivationsTable;
   // Capacity and holds (G2.6).
   capacity_holds: CapacityHoldsTable;
+  // Sweep fairness (0013).
+  sweep_turns: SweepTurnsTable;
 }
 
 export type { Generated, GeneratedAlways };

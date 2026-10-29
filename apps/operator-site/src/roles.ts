@@ -40,3 +40,13 @@ export function canSeeGuests(role: StaffRole): boolean {
 export function canUseNotes(role: StaffRole): boolean {
   return role === "owner" || role === "booking_staff";
 }
+
+/**
+ * Who books for a guest who phoned, emailed, or walked up (G2.12d): owners
+ * and booking staff. Finance changes no booking. This mirrors the API's
+ * `bookings.create` permission for display only; the API refuses finance on
+ * every staff booking route either way.
+ */
+export function canCreateBookings(role: StaffRole): boolean {
+  return role === "owner" || role === "booking_staff";
+}

@@ -23,6 +23,11 @@ export {
   type WebhookVerification,
 } from "./adapter.ts";
 export {
+  isTestPaymentEnvironment,
+  TEST_PAYMENT_ENVIRONMENTS,
+  type TestPaymentEnvironment,
+} from "./environments.ts";
+export {
   createFakePaymentProvider,
   FAKE_MINIMUM_AMOUNT,
   FAKE_SECRET_MIN_LENGTH,
@@ -55,3 +60,19 @@ export {
   signPayload,
   verifySignature,
 } from "./signature.ts";
+export {
+  checkStripeConfig,
+  createStripePaymentProvider,
+  STRIPE_API_BASE,
+  STRIPE_API_VERSION,
+  STRIPE_MINIMUM_AMOUNT,
+  STRIPE_PAYMENT_METADATA_KEY,
+  STRIPE_REFUND_LOOKUP_PAGES,
+  STRIPE_REFUND_METADATA_KEY,
+  STRIPE_SIGNATURE_HEADER,
+  type StripeConfigProblem,
+  StripePaymentProvider,
+  type StripeProviderOptions,
+  stripeSecretKeyPattern,
+  stripeWebhookSecretPattern,
+} from "./stripe.ts";

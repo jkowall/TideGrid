@@ -46,6 +46,11 @@ export interface RequestAttributes {
   "tidegrid.email.failed_count"?: number;
   "tidegrid.email.canceled_count"?: number;
   "tidegrid.email.reason"?: string;
+  /** Cloudflare email adapter (G2.16a): TideGrid's message id, the opaque provider id, flags. Never an address. */
+  "tidegrid.email.message_id"?: string;
+  "tidegrid.email.provider_message_id"?: string;
+  "tidegrid.email.provider_id_normalized"?: boolean;
+  "tidegrid.email.stopped"?: string;
   "tidegrid.email_sweep.tenant_count"?: number;
   "tidegrid.email_sweep.sent_count"?: number;
   "tidegrid.email_sweep.retried_count"?: number;
@@ -104,6 +109,11 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.email.failed_count",
   "tidegrid.email.canceled_count",
   "tidegrid.email.reason",
+  // Cloudflare email adapter (G2.16a).
+  "tidegrid.email.message_id",
+  "tidegrid.email.provider_message_id",
+  "tidegrid.email.provider_id_normalized",
+  "tidegrid.email.stopped",
   "tidegrid.email_sweep.tenant_count",
   "tidegrid.email_sweep.sent_count",
   "tidegrid.email_sweep.retried_count",

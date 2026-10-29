@@ -210,6 +210,20 @@ export const FakePaymentControlResponse = z.object({
 });
 export type FakePaymentControlResponse = z.infer<typeof FakePaymentControlResponse>;
 
+// Booking source (G2.12d) -------------------------------------------------------------
+
+export const BookingSource = z
+  .enum(["direct", "staff_assisted"])
+  .describe(
+    "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment",
+  );
+export type BookingSource = z.infer<typeof BookingSource>;
+
+export const BookingChannel = z
+  .enum(["phone", "email", "walk_up"])
+  .describe("How the guest reached staff, on a staff-assisted booking");
+export type BookingChannel = z.infer<typeof BookingChannel>;
+
 // Staff reads ------------------------------------------------------------------------
 
 export const StaffBooking = z.object({
@@ -220,7 +234,7 @@ export const StaffBooking = z.object({
   state: z
     .enum(["confirmed", "canceled"])
     .describe("canceled: the guest canceled within policy (lane 1, G2.11c)"),
-  source: z.literal("direct"),
+  source: BookingSource,
   reacquired: z
     .boolean()
     .describe("Confirmed after its hold had expired, by taking the seats again"),

@@ -36,6 +36,7 @@ import {
   verifiedEvent,
   type WebhookVerification,
 } from "./adapter.ts";
+import { isTestPaymentEnvironment } from "./environments.ts";
 import {
   DEFAULT_TOLERANCE_SECONDS,
   sha256Hex,
@@ -220,6 +221,10 @@ export class FakePaymentProvider implements PaymentProvider {
   constructor(options: FakeProviderOptions) {
     if (options.environment === "production") {
       throw new Error("the fake payment provider is refused in a production configuration");
+    }
+    // Fail closed: an unset or unknown environment is never taken for a test one.
+    if (!isTestPaymentEnvironment(options.environment)) {
+      throw new Error("the fake payment provider is refused in an unknown environment");
     }
     if (options.secret.length < FAKE_SECRET_MIN_LENGTH) {
       throw new RangeError(

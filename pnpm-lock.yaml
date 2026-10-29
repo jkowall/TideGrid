@@ -124,6 +124,9 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.0
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tidegrid/release':
+        specifier: workspace:*
+        version: link:../../tools/release
       '@tidegrid/tenant-config':
         specifier: workspace:*
         version: link:../../packages/tenant-config
@@ -170,12 +173,21 @@ importers:
         specifier: ^19.1.0
         version: 19.3.0(react@19.3.0)
     devDependencies:
+      '@playwright/test':
+        specifier: 1.64.0
+        version: 1.64.0
       '@testing-library/dom':
         specifier: ^10.4.0
         version: 10.4.2
       '@testing-library/react':
         specifier: ^16.3.0
         version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@tidegrid/release':
+        specifier: workspace:*
+        version: link:../../tools/release
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.6
       '@types/react':
         specifier: ^19.1.0
         version: 19.3.0
@@ -620,6 +632,28 @@ importers:
         specifier: ^4.1.0
         version: 4.1.11(@types/node@24.13.6)(jsdom@30.1.1)(vite@8.3.3(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
+  tools/release:
+    dependencies:
+      postgres:
+        specifier: ^3.4.0
+        version: 3.4.9
+    devDependencies:
+      '@tidegrid/domain-payments':
+        specifier: workspace:*
+        version: link:../../packages/domain-payments
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.6
+      tsx:
+        specifier: ^4.20.0
+        version: 4.23.13
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.11(@types/node@24.13.6)(jsdom@30.1.1)(vite@8.3.3(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
+
   tools/seed:
     dependencies:
       '@tidegrid/database':
@@ -656,6 +690,9 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      vitest:
+        specifier: ^4.1.0
+        version: 4.1.11(@types/node@24.13.6)(jsdom@30.1.1)(vite@8.3.3(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.1))
 
 packages:
 

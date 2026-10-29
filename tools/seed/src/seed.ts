@@ -8,6 +8,8 @@
  *
  * SEED_OWNER_EMAILS grants owner access to both demo operators to addresses
  * supplied at seed time, so personal addresses never enter the repository.
+ * SEED_SINGLE_TENANT_OWNER=<address>:<slug> grants one operator only, and
+ * SEED_OWNER_DISPLAY_NAME names new rows for these addresses (owners.ts).
  *
  *   DATABASE_URL=... SEED_DEMO_BOOKINGS=1 pnpm db:seed
  *
@@ -19,6 +21,7 @@ import postgres from "postgres";
 import { seedDemoBookings } from "./bookings.ts";
 import { seedBrands } from "./brands.ts";
 import { seedCatalog } from "./catalog.ts";
+import { parseSeedOwners, type SeedOwner, SeedOwnerError } from "./owners.ts";
 import { seedPaymentAccounts } from "./payments.ts";
 import { seedPricing } from "./pricing.ts";
 import { seedWaivers } from "./waivers.ts";
@@ -51,16 +54,19 @@ const demoStaff = [
   { email: "cara.owner@demo-reef.test", name: "Cara Owner", tenant: 1, role: "owner" },
 ] as const;
 
-const ownerEmails = (process.env.SEED_OWNER_EMAILS ?? "")
-  .split(",")
-  .map((e) => e.trim().toLowerCase())
-  .filter((e) => e.length > 0);
-for (const email of ownerEmails) {
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    console.error("SEED_OWNER_EMAILS contains an invalid address.");
-    process.exit(2);
-  }
+let owners: SeedOwner[];
+try {
+  owners = parseSeedOwners(
+    process.env,
+    demoTenants.map((t) => t.slug),
+  );
+} catch (err) {
+  if (!(err instanceof SeedOwnerError)) throw err;
+  console.error(err.message);
+  process.exit(2);
 }
+const ownerEmails = owners.map((o) => o.email);
+const singleTenantOwners = owners.filter((o) => o.tenants.length === 1);
 
 const sql = postgres(url, { max: 1, onnotice: () => {} });
 try {
@@ -78,14 +84,26 @@ try {
       await tx`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
         values (${t.hostname}, ${t.id}, 'preview', 'active', now()) on conflict (hostname) do nothing`;
     }
+    // A single-tenant owner must stay single-tenant: refuse, before any
+    // write, an address that already belongs to another demo operator.
+    for (const o of singleTenantOwners) {
+      const keep = demoTenants[o.tenants[0] ?? -1]?.id;
+      const [other] = await tx<{ n: number }[]>`
+        select count(*)::int as n
+          from public.tenant_memberships m
+          join public.staff_users u on u.id = m.user_id
+         where u.email = ${o.email}
+           and m.tenant_id in ${tx(demoTenants.map((t) => t.id))}
+           and m.tenant_id <> ${keep ?? ""}`;
+      if (other?.n) {
+        throw new SeedOwnerError(
+          "SEED_SINGLE_TENANT_OWNER already belongs to another demo operator; nothing was written.",
+        );
+      }
+    }
     const people = [
       ...demoStaff.map((s) => ({ ...s, tenants: [s.tenant] })),
-      ...ownerEmails.map((email) => ({
-        email,
-        name: email.split("@")[0] ?? "Owner",
-        role: "owner" as const,
-        tenants: [0, 1],
-      })),
+      ...owners.map((o) => ({ ...o, role: "owner" as const })),
     ];
     for (const p of people) {
       await tx`insert into public.staff_users (email, display_name)
@@ -121,7 +139,8 @@ try {
   console.log(
     `seeded ${summary?.tenants} demo operators, ${summary?.staff} staff, ${summary?.memberships} memberships` +
       (ownerEmails.length
-        ? ` (${ownerEmails.length} owner address(es) from SEED_OWNER_EMAILS)`
+        ? ` (${ownerEmails.length - singleTenantOwners.length} owner address(es) from SEED_OWNER_EMAILS` +
+          `, ${singleTenantOwners.length} single-tenant)`
         : ""),
   );
   await seedBrands(sql, { localHostnames: process.env.SEED_LOCAL_HOSTNAMES === "1" });
@@ -129,6 +148,11 @@ try {
   // fake-provider events, so the console's booking views have something to
   // show (G2.12b).
   if (process.env.SEED_DEMO_BOOKINGS === "1") await seedDemoBookings(url, sql, demoTenants);
+} catch (err) {
+  if (!(err instanceof SeedOwnerError)) throw err;
+  console.error(err.message);
+  process.exitCode = 2;
 } finally {
-  await sql.end();
+  // Bounded, so a compute that restarts mid-run cannot hang the command.
+  await sql.end({ timeout: 5 });
 }

@@ -5,7 +5,14 @@ DATABASE_URL=postgresql://tidegrid_app:password@host/neondb?sslmode=require
 # string of at least 32 characters, for example from `openssl rand -hex 32`.
 # Anything shorter, like this placeholder, leaves payments off.
 FAKE_PAYMENT_WEBHOOK_SECRET=change-me
+# The Stripe adapter (standing goal item 3) is off. Do not opt in locally with
+# real test keys until the owner approves the live step. These placeholders
+# fail the key checks, so PAYMENT_PROVIDER=stripe with them stays refused.
+# STRIPE_SECRET_KEY=sk_test_change-me
+# STRIPE_WEBHOOK_SECRET=whsec_change-me
 # Transactional email (lane 1, the G2.16 shim). The dev environment sends to
 # the fake provider; read it at http://localhost:<port>/v1/fake-email/mailbox.
 # Point links in email at your guest site's port if it is not 5173.
 # GUEST_LINK_ORIGIN=http://{slug}.book.localhost:5173
+# The Cloudflare Email Service adapter (G2.16a) stays off locally: the dev
+# environment has no send_email binding. Never set "remote": true on one.
