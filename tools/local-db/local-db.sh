@@ -25,6 +25,11 @@
 #                              Each part gets a fresh container, as each CI job
 #                              gets a fresh database.
 #
+# Parallel lanes: integration runs in two checkouts at once need distinct
+# TIDEGRID_LOCAL_DB_NAME (starting tidegrid-local-db) and
+# TIDEGRID_LOCAL_DB_PORT values. The browser parts use fixed ports (8961,
+# 8981, 5361, 5382), so only one checkout at a time can run them.
+#
 # The container engine is podman, or docker when podman is absent; set
 # TIDEGRID_LOCAL_DB_ENGINE to choose. On a Mac, podman needs a running machine
 # (`podman machine start`). The container listens on 127.0.0.1 only.
@@ -74,14 +79,13 @@ engine() {
     printf 'podman'
   elif command -v docker >/dev/null 2>&1; then
     printf 'docker'
-  else
-    die "Neither podman nor docker is on PATH. Install one (owner decision) or set TIDEGRID_LOCAL_DB_ENGINE."
   fi
 }
 
 ENGINE="$(engine)"
 
 check_engine() {
+  [ -n "$ENGINE" ] || die "Neither podman nor docker is on PATH. Install one (owner decision) or set TIDEGRID_LOCAL_DB_ENGINE."
   if ! "$ENGINE" info >/dev/null 2>&1; then
     if [ "$ENGINE" = podman ] && [ "$(uname -s)" = Darwin ]; then
       die "podman cannot reach its machine. Start it with: podman machine start"
@@ -94,15 +98,21 @@ container_exists() {
   "$ENGINE" container inspect "$NAME" >/dev/null 2>&1
 }
 
+# Removes this checkout's container. Refuses one this script did not create,
+# and one another checkout created, so a second lane cannot drop the first
+# lane's database mid-run. Returns 1 when there was nothing to remove.
 remove_container() {
-  if container_exists; then
-    local label
-    label="$("$ENGINE" container inspect --format '{{ index .Config.Labels "io.tidegrid.local-db" }}' "$NAME" 2>/dev/null || true)"
-    if [ "$label" != "1" ]; then
-      die "A container named $NAME exists but this script did not create it; remove or rename it first."
-    fi
-    "$ENGINE" rm -f -v "$NAME" >/dev/null
+  container_exists || return 1
+  local label root
+  label="$("$ENGINE" container inspect --format '{{ index .Config.Labels "io.tidegrid.local-db" }}' "$NAME" 2>/dev/null || true)"
+  if [ "$label" != "1" ]; then
+    die "A container named $NAME exists but this script did not create it; remove or rename it first."
   fi
+  root="$("$ENGINE" container inspect --format '{{ index .Config.Labels "io.tidegrid.local-db.root" }}' "$NAME" 2>/dev/null || true)"
+  if [ "$root" != "$ROOT" ]; then
+    die "$NAME belongs to the checkout at $root. For a parallel lane set TIDEGRID_LOCAL_DB_NAME and TIDEGRID_LOCAL_DB_PORT; if that checkout is gone, run: $ENGINE rm -f -v $NAME"
+  fi
+  "$ENGINE" rm -f -v "$NAME" >/dev/null
 }
 
 print_env() {
@@ -112,9 +122,9 @@ print_env() {
 
 cmd_up() {
   check_engine
-  remove_container
+  remove_container || true
   log "starting $NAME from $IMAGE on 127.0.0.1:$PORT"
-  "$ENGINE" run -d --name "$NAME" --label "$LABEL" \
+  "$ENGINE" run -d --name "$NAME" --label "$LABEL" --label "io.tidegrid.local-db.root=$ROOT" \
     -e POSTGRES_USER="$ADMIN_USER" -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" -e POSTGRES_DB="$DB_NAME" \
     -p "127.0.0.1:$PORT:5432" "$IMAGE" >/dev/null
   local i
@@ -144,8 +154,7 @@ cmd_up() {
 
 cmd_down() {
   restore_dev_vars
-  if command -v "$ENGINE" >/dev/null 2>&1 && "$ENGINE" info >/dev/null 2>&1; then
-    remove_container
+  if [ -n "$ENGINE" ] && "$ENGINE" info >/dev/null 2>&1 && remove_container; then
     log "removed $NAME"
   fi
 }
@@ -172,8 +181,13 @@ restore_dev_vars() {
   for file in "$DEV_VARS" "$DEV_VARS_ENV"; do
     if [ -f "$file" ] && grep -qxF "$MARKER" "$file"; then rm -f "$file"; fi
     if [ -f "$file.local-db-backup" ]; then
-      mv "$file.local-db-backup" "$file"
-      log "restored $(basename "$file")"
+      if [ -e "$file" ]; then
+        # A newer file of the owner's own: never overwrite it with the backup.
+        log "kept both $(basename "$file") and $(basename "$file").local-db-backup; merge them by hand"
+      else
+        mv "$file.local-db-backup" "$file"
+        log "restored $(basename "$file")"
+      fi
     fi
   done
 }
@@ -226,13 +240,20 @@ cmd_api() {
   shift 2
   cd "$ROOT"
   mkdir -p "$STATE_DIR"
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    die "port $port is already in use; stop that server first (another checkout's API?)"
+  fi
   # Inspector on 9000 + the last three digits, as CI had it (8961 -> 9961).
   nohup pnpm --filter @tidegrid/api-worker exec wrangler dev --env dev --port "$port" \
     --inspector-port "$((9000 + port % 1000))" "$@" >"$logfile" 2>&1 &
-  echo $! >"$STATE_DIR/api-$port.pid"
-  local i
+  local pid=$! i
+  echo "$pid" >"$STATE_DIR/api-$port.pid"
   for i in $(seq 1 90); do
-    if curl -fsS "http://localhost:$port/v1/health" 2>/dev/null | grep -q '"database":"ok"'; then
+    if ! kill -0 "$pid" 2>/dev/null; then
+      cat "$logfile" >&2
+      die "the API on $port exited before it reported its database"
+    fi
+    if curl -fsS --max-time 5 "http://localhost:$port/v1/health" 2>/dev/null | grep -q '"database":"ok"'; then
       log "API on $port is up with its database"
       return 0
     fi
@@ -251,7 +272,12 @@ kill_tree() {
 cmd_api_stop() {
   local port="${1:?api-stop needs a port}" pidfile="$STATE_DIR/api-${1}.pid"
   if [ -f "$pidfile" ]; then
-    kill_tree "$(cat "$pidfile")"
+    local pid
+    pid="$(cat "$pidfile")"
+    # Only the API this script started: a stale file can name a reused PID.
+    if ps -o command= -p "$pid" 2>/dev/null | grep -q -- "wrangler dev --env dev --port $port"; then
+      kill_tree "$pid"
+    fi
     rm -f "$pidfile"
   fi
 }
@@ -300,12 +326,12 @@ cleanup_test() {
 }
 
 cmd_test() {
-  local parts="$*" part started
-  [ -n "$parts" ] || parts="integration guest console"
-  [ "$parts" = all ] && parts="integration guest console"
-  for part in $parts; do
+  local parts="" part started
+  [ $# -gt 0 ] || set -- all
+  for part in "$@"; do
     case "$part" in
-    integration | guest | console) ;;
+    all) parts="integration guest console" ;;
+    integration | guest | console) parts="$parts $part" ;;
     *) die "test parts are integration, guest, console, or all (got $part)" ;;
     esac
   done
@@ -318,13 +344,14 @@ cmd_test() {
   mkdir -p "$STATE_DIR"
   LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tidegrid-local-db.XXXXXX")"
   trap cleanup_test EXIT
-  trap 'exit 130' INT TERM
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   started=$(date +%s)
   for part in $parts; do
     log "=== $part ==="
     "part_$part"
   done
-  log "all parts passed ($parts) in $(($(date +%s) - started)) s"
+  log "all parts passed ($(echo $parts)) in $(($(date +%s) - started)) s"
 }
 
 main() {
@@ -340,7 +367,7 @@ main() {
   psql) cmd_psql "$@" ;;
   test) cmd_test "$@" ;;
   *)
-    sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2
+    awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}" >&2
     exit 2
     ;;
   esac
