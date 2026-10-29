@@ -2,6 +2,69 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-10-29
+
+### Pre-pilot hardening verification, October 28 to 29, 2026
+
+- **Built** as standing goal item 5, under the owner's standing goal of 2026-10-28 and the owner's request of 2026-10-29, "keep going, hardening parts D and E, merge when green". No Neon, deploy, install, or live provider call was made.
+  - Part A, pull request 32, merged as `e93f0aa`: `runFairSweep`, migration `0013_sweep_fairness.sql`, and the hold and checkout sweeps on the scheduler.
+  - Part B, pull request 33, merged as `894839e`: pg_trgm deferred under D4 B; search unchanged.
+  - Part C, pull request 35, merged as `90dd41e`: the email sweep on the scheduler, under D9 B.
+  - Parts D and E, pull request 37, on branch `build/hardening-d-e` from `main` at `b6d0247`: the hostname sweep on the scheduler; the cron's sweep log attributes and stamp-error wiring; the database README's 0013 section, docs/v2/06 and 12, and this entry. Its merge SHA goes in the next entry, or in the Nov 1 runbook's evidence pull request.
+- **Decisions.** Coordinator defaults, each pending owner confirmation: D1 A, D2 A, D3 A, D4 B, D5 A, D6 A, D7 A, D8 C, and D9 B (2026-10-28), and D-E1 to D-E6 and D-E9 to D-E12 (2026-10-29). Owner decisions of 2026-10-29: D-E7 keeps the 20 s email budget, and D-E8 sets a console search target of 300 ms p95 for a tenant with about 50,000 bookings, common fragments included. All are in the [decision register](v2/06-decision-register.md#decision-log) and the [demo build plan](v2/12-demo-build-plan.md#goal-sequence).
+- **Failing-first record.** A red run records only the first failing package, because `pnpm -r` stops there (root `package.json`). Behavioral means the assertion failed on the old behavior itself; nominal means it failed on a missing option or field.
+  - Part A, behavioral: run [40755745908](https://github.com/jkowall/TideGrid/actions/runs/40755745908), the hold list order (received `[low, high]`, as the old loop wrote no stamps); run [40756715324](https://github.com/jkowall/TideGrid/actions/runs/40756715324), the booking expiry, inbox, and refund write order (the hog's items first). Nominal: the hold adversarial pair (no `onTurnStart`), the hold zero-budget test (no `turns`), and the booking poison and at-most-once tests (no `checkoutSweepStore`), with the reasoning in pull request 32.
+  - Part C, behavioral: run [40767816390](https://github.com/jkowall/TideGrid/actions/runs/40767816390): the victim's mail went out 13th, not 6th; the list order did not change; `complete` was true under a 5 s budget with a 10 s send bound.
+  - Part D: run [40868382975](https://github.com/jkowall/TideGrid/actions/runs/40868382975) on `eaa0577`, the tests alone on the old loop. Integration was red in domain-hostnames only, where `lifecycle.integration.test.ts` stayed green. The `checks` job was red too, on typecheck: the tests pass options and read fields the old sweep lacks. Each case, with its first failing assertion:
+    - behavioral, the adversarial pair's read order: the victim's hostname was read 13th (index 12), not 6th;
+    - behavioral, the pair's list order on the next run: `[hog, victim]`, not `[victim, hog]`;
+    - behavioral, a declined stamp after a throttle, an account fault, and the call limit (three cases): the list stayed `[hog, victim]`;
+    - behavioral, the poison read turn: the list stayed `[poison, other]`;
+    - behavioral, the account fault in pass 2: the victim read none of its hostnames, not 5;
+    - behavioral on stamp rows, the throttle in pass 2: no stamps, not `[victim, hog]`, after its expiry and read assertions passed;
+    - behavioral on stamp rows, the call limit at the end of a turn: no stamp for the hog, after `checked` 5 and `complete` false passed;
+    - nominal, the pair's turns: no `onTurnStart` call;
+    - nominal after pins that passed: the per-tenant cap (`checked` 6, `complete` false, one row still due), the zero budget, `complete` true, and the budget cut inside a turn (with its second run), each then failing on `onTurnStart` or a new report field;
+    - nominal, `turnHostnames` of 0, 1.5, and 1,001: the old sweep resolved instead of throwing `RangeError`;
+    - a pin that passed whole: `complete` under `onlyTenants` with a full unfiltered list.
+  - Part E: run [40874558317](https://github.com/jkowall/TideGrid/actions/runs/40874558317) on `6e69129`, the cron log test alone, red in the API Worker's unit tests (98 others passed). Behavioral: a failed stamp logged `hold_sweep_tenant_failed`, `email_sweep_tenant_failed`, and `hostname_sweep_tenant_failed`. Nominal: the summaries lacked the new counts, and the email summary lacked `account_fault`. Then run [40878787537](https://github.com/jkowall/TideGrid/actions/runs/40878787537) on `8cceb28`, the `redact` case alone, red in observability: all 20 new keys were dropped (nominal).
+- **Tests.** Integration on CI's PostgreSQL 17: `packages/domain-hostnames/src/sweep-fairness.integration.test.ts`, 18 cases with tenants of its own, one fake provider with its own id prefix, and a cleanup that leaves nothing of its own due. The 26 cases of `lifecycle.integration.test.ts`, its 16 sweep cases among them, and the hostname CLI's suite pass unedited. Unit, in workerd: `apps/api-worker/test/scheduled-sweep-logs.test.ts`, 3 cases; `packages/observability/src/index.test.ts`, one new case. The existing scheduled tests pass unedited.
+- **CI on the final code:**
+  - Part A: run [40762414420](https://github.com/jkowall/TideGrid/actions/runs/40762414420) on `4f65deb`;
+  - Part B: run [40766188746](https://github.com/jkowall/TideGrid/actions/runs/40766188746) on `32a6148`;
+  - Part C: run [40771266807](https://github.com/jkowall/TideGrid/actions/runs/40771266807) on `2af2f53`;
+  - Parts D and E: run [40879615894](https://github.com/jkowall/TideGrid/actions/runs/40879615894) on `0618f7b`, all green: checks, integration, browser, and console browser. Part D alone was green in run [40869044306](https://github.com/jkowall/TideGrid/actions/runs/40869044306) on `6998826`. Later commits touch documents only.
+- **B0 and the benchmark (Part B), on CI PostgreSQL 17, not Neon.** B0, runs [40759514375](https://github.com/jkowall/TideGrid/actions/runs/40759514375) and [40765472082](https://github.com/jkowall/TideGrid/actions/runs/40765472082): the admin role's plan used a GIN trigram index, and `tidegrid_app` under forced row-level security never did, in the custom, generic, or unfiltered plan, because `textlike` and `texticlike` are not leakproof. The benchmark, run [40765472082](https://github.com/jkowall/TideGrid/actions/runs/40765472082), on one tenant with 50,000 bookings: about 320 ms (max 355 ms) at about 20,000 matches, about 175 ms at 2,000, and 120 to 160 ms with none. The count took 55 to 75 ms; the page statement dominates. That is above the owner's 300 ms p95 target (D-E8), so the search follow-up, ordering and limiting the matching ids before the joins, is now required work, in a goal of its own. **B1 was dropped:** in run [40764463348](https://github.com/jkowall/TideGrid/actions/runs/40764463348) the arms rewrite's page statement passed a 90 s statement timeout at 20,000 matches.
+- **Reviews, by area, and what happened to each:**
+  - Part A, proofs: F1 should-fix (the failing-first evidence), answered by the record above; F2 (the bound without its stamp-failure exception), fixed in `4f65deb`.
+  - Part A, tenancy: N1 (a throwing `onError` counted twice), closed by the checkout sweep's observer shim; N2, closed by Part E's `onStampError` wiring; N3 (the list-order test uses synthetic rows with triggers bypassed), no action, under Not proven; N4 and N5, no action.
+  - Part A, semantics: F1 (a throwing `onError` aborts the run), closed by the same shim; F2 (no budget check after the stamp), fixed; F3 (the pass-1 refund quantum), a follow-up; F4, closed by Part E; F5 (a failing restamp counted twice), fixed by the scheduler's `unstamped` set.
+  - Part C: delivery C1 and scheduler F1, one defect, fixed in `2af2f53` (`sweepWindow`); C2, recorded with D9 B; C3 in part: the origin is read once a run, and the extra empty turn at an exact multiple of 5 stays open; C4, closed by Part E's logs; scheduler F2 and F3, fixed.
+  - Parts D and E: this pull request's review.
+- **Closes review F8** of the [G2.11c entry of 2026-10-20](#g211c-guest-self-service-and-the-email-shim-verification-october-20-2026): the email sweep visited tenants by id with a fixed limit and budget. That entry is not edited.
+- **Not proven:**
+  - planner behavior under row-level security on Neon: D4 B was observed on CI PostgreSQL 17 only;
+  - 0013 and the four sweeps on Neon: their first Neon run is on Nov 1;
+  - the ceil(T / m) bound, proven in unit tests only; the two hostname residuals are inferred;
+  - order beyond relative facts: integration asserts relative order, and the 0013 list-order test uses synthetic rows with triggers bypassed, so it proves ordering only (Part A N3);
+  - the hostname sweep's routing of a failed stamp to `onStampError`, and its handling of each hostname at most once a run, have no dedicated domain test; the second shows only as each hostname read once in the adversarial pair;
+  - the pg_trgm checks on Neon, moot under D4 B;
+  - no gate is claimed.
+- **Follow-ups, flagged, not fixed:**
+  - the Nov 1 runbook's D2 text says the `accountFault` log came with pull request 26; it came with Part E. Fix it in the runbook's own pull request before the Oct 31 freeze;
+  - `onlyTenants` applies after the tenant limit, so the CLI's fake run can miss a tenant past the first 100 listed (D-E11);
+  - one exact-name lookup can pass the call cap (D-E12);
+  - under a long provider stop, tenants past position 100 move up slowly; consider stamping expiry-only visits that expired something, or a larger hostname tenant limit;
+  - 14 of the hostname lifecycle cases need their tenants within the first 100 listed, and after Part D the stamped tenants A and B sort last;
+  - raw `tidegrid.tenant_id` in sweep logs, against the hosting plan's hash;
+  - cross-run head-of-line poison above 100 items per checkout step;
+  - the pass-1 refund quantum (Part A semantics F3), and a stuck refund retried first each run at one provider call, with its exception after some hours a G2.9 follow-up;
+  - the email sweep's extra empty turn at an exact multiple of 5 (C3), and the first-turn origin lookup with no budget check after it, the same budget-edge residual as the hostname sweep's;
+  - the six-run workaround in `apps/api-worker/test-integration/checkout.integration.test.ts`, removable now that Part A is green;
+  - an alert on `tidegrid.email_sweep.account_fault`, on the G2.16-live checklist;
+  - the search page statement, now required work under D-E8;
+  - the Neon checks after Nov 1, on a throwaway branch with `TIDEGRID_EPHEMERAL_DB=1`.
+
 ## 2026-10-28
 
 ### G2.16a Cloudflare Email Service adapter verification, October 28, 2026

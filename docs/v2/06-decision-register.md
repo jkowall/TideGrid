@@ -8,6 +8,37 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-10-29: pre-pilot hardening, owner decisions
+
+The owner decided the two questions the hardening goal left open (standing goal item 5). Both are owner decisions, not coordinator defaults. Details are in the [pre-pilot hardening narrowing](12-demo-build-plan.md#goal-sequence) of the demo build plan.
+
+- **D-E7: the cron's email sweep keeps its 20 s budget.** Bound, inferred and not tested: with Cloudflare's 10 s send bound and the 2 s margin, claims happen only in the first 8 s of a run (D9 B below). No sends-per-run figure was measured.
+- **D-E8: a console search latency target of 300 ms p95** for the large tenant (about 50,000 bookings), common fragments included. The observed number is above it: about 320 ms, max 355 ms, at 20,000 matches, on CI PostgreSQL 17, not Neon (run 40765472082). So the deferred search follow-up is now required work: a page statement that orders and limits the matching booking ids before the joins, not an index. It runs as a goal and pull request of its own. The measurements and the proposed fix are in the [booking README](../../packages/domain-booking/README.md#deferred-and-known-gaps).
+
+### Pending owner confirmation: pre-pilot hardening (coordinator defaults, 2026-10-28 and 2026-10-29)
+
+**Status:** Standing goal item 5. D1 to D9 were taken under the owner's standing goal of 2026-10-28, "go, include the Stripe and email adapters", whose Authority section takes each packet's recommended decisions as coordinator defaults. D-E1 to D-E12 were taken on 2026-10-29 under the owner's request "keep going, hardening parts D and E, merge when green"; the owner then decided D-E7 and D-E8 (above). The defaults bind the demo build only, until the owner confirms or replaces them. Details are in the [pre-pilot hardening narrowing](12-demo-build-plan.md#goal-sequence) of the demo build plan.
+
+- **D1 A:** least-recently-served stamps per tenant and sweep (`sweep_turns`, 0013).
+- **D2 A:** quanta of 1 hold batch, checkout steps of 1 batch and 10 items, 5 emails within the cap of 25, and 5 hostname rows within the cap of 20.
+- **D3 A:** no audit or outbox row for a stamp.
+- **D4 B:** pg_trgm deferred with evidence. Observed on CI PostgreSQL 17 (runs 40759514375 and 40765472082); Neon is unchecked. `textlike` and `texticlike` are not leakproof, and the runtime's custom, generic, and unfiltered plans never used the trigram index under forced row-level security. `search.integration.test.ts` asserts the block, so a planner change reopens D4. This defers the standing goal's item 5 bullet "a trigram index for console search". D4 A, a definer matcher over booker personal data, was a hard stop and was not taken. Details are in the [booking README](../../packages/domain-booking/README.md#deferred-and-known-gaps).
+- **D5 A, D6 A, D7 A:** not exercised, because D4 B deferred the index. D5 A keeps its precondition: an integration test of the booking-to-confirmed invariant before a partial index relies on `state = 'confirmed'`.
+- **Standing rule from D6 A.** A non-transactional runner mode for `CREATE INDEX CONCURRENTLY` must land before any pilot-volume table gets a new index. Today each migration file runs in one transaction (`packages/database/src/migrate.ts`).
+- **D8 C:** the first pull request to merge took 0013.
+- **D9 B:** the email sweep's deadline comes from its budget. Bound, inferred and not tested: with a 20 s budget, Cloudflare's 10 s send bound, and a 2 s margin, claims happen only in the first 8 s of the run. No sends-per-run figure was measured.
+- **Parts D and E, 2026-10-29:**
+  - D-E1 A: a hostname turn reads up to 5 due rows, ended claims included; `perTenantLimit` (20) stays the per-tenant run cap.
+  - D-E2 A: the hostname sweep keeps its budget check before each hostname.
+  - D-E3 A: a throttle, an account-level refusal, or the call limit ends the run's provider reads; later turns only expire ended claims and stamp nobody. Two residuals are recorded, inferred and not tested.
+  - D-E4 A: the hostname report adds `turns`, `passes`, `deferredTenants`, `stampFailures`, `expiryOnlyTurns`, and `providerCalls`.
+  - D-E5 B: no email stop field. The cron logs `tidegrid.email_sweep.account_fault` on every summary, with the deferred-tenant count. A deadline stop and a spent budget are one condition.
+  - D-E6 A: the new log keys join the logger's allowlist.
+  - D-E9 A: a new dated verification-log entry; older entries are not edited.
+  - D-E10 A: tests-first commits in the pull request.
+  - D-E11 A: `onlyTenants` still applies after the tenant limit, and `complete` stays honest through the unfiltered count. Follow-up.
+  - D-E12 A: one exact-name lookup can pass the call cap, so a run makes at most `maxProviderCalls + 1` calls. Follow-up.
+
 ### Pending owner confirmation: Nov 1 runbook (coordinator defaults, 2026-10-28)
 
 **Status:** Coordinator defaults for the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md), standing goal item 6, pending owner confirmation. The runbook is prepared and dry-run only. Every live step on Nov 1 is the owner's own, after a go given at the time, under the external-action rule below.
@@ -50,7 +81,7 @@ Run-time decisions, each asked as a go/no-go prompt at its step with the default
 
 - **D1 (a): local first.** The adapter, its recorded-shape fixture, and the API wiring are built and tested with no Stripe account, call, CLI, or install. The wiring is off.
 - **D2 (a): Stripe redelivery dedupe by a canonical projection hash** that leaves out `pending_webhooks` and `request`, in the adapter. No inbox or finalize change.
-- **D3 (a): refunds are looked up by key before they are created,** and a pending refund is an unknown outcome. This defers the [product scope](02-product-scope.md)'s pending, succeeded, and failed refund states and its actionable failed side effects to G2.9. Known risk: refunds stuck pending, and refunds whose lookup is refused for good (an account or payment id that no longer matches), stay requested and can fill the front of each sweep batch, with no word to the guest or the operator; fair ordering and an exception after some hours that covers both are proposed G2.9 follow-ups.
+- **D3 (a): refunds are looked up by key before they are created,** and a pending refund is an unknown outcome. This defers the [product scope](02-product-scope.md)'s pending, succeeded, and failed refund states and its actionable failed side effects to G2.9. Known risk: refunds stuck pending, and refunds whose lookup is refused for good (an account or payment id that no longer matches), stay requested and can fill the front of each sweep batch, with no word to the guest or the operator; fair ordering and an exception after some hours that covers both are proposed G2.9 follow-ups. Cross-tenant fair ordering and a per-run attempted set landed in pull request 32 (0013). A stuck refund is still retried first each run at one provider call. The exception after some hours stays a G2.9 follow-up.
 - **D4 (a): no `cancelPayment` on the port** until G2.9 or G2.10. A late success on an intent that could have been canceled is refunded, and the operator loses its processing fee.
 - **D5 (a) card only; D6 (a) PaymentIntents; D7 (a) `fetch` and hand parsers, no SDK.**
 - **D8 (a): live keys and live events refused everywhere** until the Core live gate, and test keys refused in production. This adds a production refusal for the Stripe adapter like the fake's. Both fail closed: a test key and the fake run only when `ENVIRONMENT` is `local`, `preview`, or `staging`, and anything else, unset included, is refused as `environment_unknown`.
