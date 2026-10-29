@@ -17,7 +17,7 @@
 - `prototypes/guest-flow` is a throwaway demo, not production code. Do not treat its behavior as an implementation contract.
 - The demo build lives in `apps/`, `packages/`, `tools/`, and `config/`. Migrations in `packages/database/migrations` are forward-only once merged; write a new file instead of editing an applied one. Runtime code connects as `tidegrid_app`, which is created by migration 0001 in SQL and must never be created through the Neon console or API.
 - Tenant isolation follows the contract in [packages/database/README.md](packages/database/README.md): every tenant-owned read or write runs inside `inTenantTransaction`, every tenant table has forced row-level security, the runtime never receives DELETE, and credential tables are reachable only through the functions in schema `app`. Integration tests check these rules from the catalog.
-- Integration suites run only against a throwaway database with `TIDEGRID_EPHEMERAL_DB=1`: in CI, a PostgreSQL 17 service container; locally, a disposable PostgreSQL 17 or a throwaway Neon branch. They rotate the runtime role's password, so never point them at the Neon main branch.
+- Integration suites run only against a throwaway database with `TIDEGRID_EPHEMERAL_DB=1`: the pinned PostgreSQL 17 container that `tools/local-db/local-db.sh` starts, locally with podman and in CI with Docker, or optionally a throwaway Neon branch. They rotate the runtime role's password, so never point them at the Neon main branch. With `DATABASE_URL` unset they skip locally and fail in CI.
 - Model and tool names belong only in [docs/v2/10-build-execution-and-agent-plan.md](docs/v2/10-build-execution-and-agent-plan.md). Elsewhere, say "the build execution and agent plan" and link to it.
 - Agent definition files in `.claude/agents` carry standing role instructions only. Goal scope, owned paths, and invariants come from the goal packet, not from those files.
 - No customer data, credentials, or personal filing details in this repository. The owner keeps those in a private location outside the repo.
@@ -35,8 +35,11 @@ pnpm test                         # unit tests (Workers tests run in workerd)
 pnpm contracts:generate           # regenerate packages/contracts/generated/openapi.json
 DATABASE_URL=... pnpm db:migrate  # apply SQL migrations (admin connection)
 DATABASE_URL=... pnpm db:seed     # deterministic synthetic seed
-DATABASE_URL=... pnpm test:integration   # migration tests against a live branch
-pnpm --filter @tidegrid/database neon:branch create <name>   # expiring Neon branch (needs NEON_API_KEY, NEON_PROJECT_ID)
+pnpm test:local-db                # every integration suite, guest browser parts A and B, and the console browser tests, on throwaway local PostgreSQL 17 containers (podman machine running; the browser parts use the installed Google Chrome)
+pnpm test:local-db integration    # or one part: integration, guest, console
+pnpm db:local up                  # start the container; then eval "$(tools/local-db/local-db.sh env)" exports DATABASE_URL and TIDEGRID_EPHEMERAL_DB=1; pnpm db:local down removes it
+DATABASE_URL=... TIDEGRID_EPHEMERAL_DB=1 pnpm test:integration   # integration suites against a throwaway database you started
+pnpm --filter @tidegrid/database neon:branch create <name>   # optional expiring Neon branch, when the plan has quota (needs NEON_API_KEY, NEON_PROJECT_ID)
 pnpm --filter @tidegrid/api-worker dev                       # local API on :8787 (reads apps/api-worker/.dev.vars)
 ```
 

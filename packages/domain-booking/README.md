@@ -361,4 +361,4 @@ The checkout secret and the client secret travel in headers and bodies only, nev
 ## Tests
 
 - `pnpm --filter @tidegrid/domain-booking test` runs unit tests.
-- `pnpm --filter @tidegrid/domain-booking test:integration` runs against a throwaway Neon branch with `TIDEGRID_EPHEMERAL_DB=1`. `src/test-fixtures.ts` (exported as `@tidegrid/domain-booking/testing`) builds a tenant through the real services, adds a fake connected account, a tax rate, and a promotion, and produces events only by signing and verifying them.
+- `pnpm --filter @tidegrid/domain-booking test:integration` runs against the throwaway PostgreSQL 17 from `tools/local-db/local-db.sh` (`pnpm test:local-db integration` runs every suite; see the [database README](../database/README.md#tests)) with `TIDEGRID_EPHEMERAL_DB=1`. `src/test-fixtures.ts` (exported as `@tidegrid/domain-booking/testing`) builds a tenant through the real services, adds a fake connected account, a tax rate, and a promotion, and produces events only by signing and verifying them.

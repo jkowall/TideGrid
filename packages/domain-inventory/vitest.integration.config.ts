@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
-// Runs the inventory services against a throwaway Neon branch as tidegrid_app.
-// The shared global setup migrates the branch and rotates the runtime password.
+// Runs the inventory services against a throwaway PostgreSQL 17 as tidegrid_app.
+// The shared global setup migrates the database and rotates the runtime password.
 // Race suites open many connections at once; files still run one at a time.
 export default defineConfig({
   test: {
