@@ -190,6 +190,11 @@ function NewBooking({
   const [party, setParty] = useState<PartyDraft | null>(null);
   const [partyError, setPartyError] = useState<string | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
+  /**
+   * The checkout refused this quote and asked for a new one: Hold waits for
+   * the next quote, so a press never sends the refused one again.
+   */
+  const [quoteStale, setQuoteStale] = useState(false);
   const [booker, setBooker] = useState<BookerDraft>({ name: "", email: "" });
   const [bookerErrors, setBookerErrors] = useState<{ name?: string; email?: string }>({});
   const [channel, setChannel] = useState<BookingChannel>("phone");
@@ -321,6 +326,7 @@ function NewBooking({
         setAttestErrors({ email: false, policy: false });
       }
       setQuote(result.value);
+      setQuoteStale(false);
       setStep(andThen);
       return;
     }
@@ -367,7 +373,8 @@ function NewBooking({
 
   const holdSeats = async () => {
     // One command at a time: not while Price again, an edit, or a cancel is working.
-    if (!quote || busy !== null) return;
+    // Not with a quote the checkout refused: only a new quote can be held.
+    if (!quote || quoteStale || busy !== null) return;
     const missing = { email: !attest.email, policy: !attest.policy };
     setAttestErrors(missing);
     if (missing.email) emailCheck.current?.focus();
@@ -384,6 +391,7 @@ function NewBooking({
     }
     const failed = problemOf(result, "open");
     setProblem(failed);
+    if (failed.kind === "refusal" && failed.refusal.next === "requote") setQuoteStale(true);
     // Refused with a reason: nothing is held, and the details can change again.
     if (failed.kind === "refusal" && failed.refusal.next !== "retry") setFrozen(false);
   };
@@ -439,6 +447,7 @@ function NewBooking({
     setPayUncertain(false);
     setSettledUndelivered(false);
     setQuote(null);
+    setQuoteStale(false);
     setAttest({ email: false, policy: false });
     // A new checkout needs a new quote, even for the same party: the old one is used.
     quoteKey.forget();
@@ -823,7 +832,7 @@ function NewBooking({
                 icon="lock"
                 busy={busy === "open"}
                 busyLabel="Holding seats…"
-                disabled={busy !== null && busy !== "open"}
+                disabled={quoteStale || (busy !== null && busy !== "open")}
                 onClick={() => void holdSeats()}
               >
                 Hold seats and take payment
