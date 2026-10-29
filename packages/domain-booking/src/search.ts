@@ -165,7 +165,8 @@ interface StatementRow extends Partial<SearchRow> {
  * matches once (`m`, materialized), counts them, checks the cursor among
  * them, and orders and limits them to the page before it reads any detail.
  * Then, for each of those at most limit + 1 rows, it reads the product,
- * boat, order, payment, latest refund, and booker by key. Every detail join
+ * boat, order, payment, latest refund, and booker by key, in a LATERAL
+ * subquery the planner may not merge into the outer joins (OFFSET 0). Every detail join
  * finds exactly one row (each key is NOT NULL with a foreign key, row-level
  * security shows a tenant all of its own rows, and no role deletes them), so
  * the page keeps every booking the limit chose, and the count and the page
@@ -234,7 +235,9 @@ export async function searchBookings(
       -- With an empty page this is one row of nulls beside the count.
       left join (
         pg cross join lateral (
-          -- One page row's details, each found by key.
+          -- One page row's details, each found by key. OFFSET 0 keeps the
+          -- planner from merging this subquery into the outer joins, so it
+          -- runs once per page row instead of joining every booking's details.
           select b1.id, b1.reference, b1.state, b1.source, b1.confirmed_at, b1.party_size,
                  t1.id as trip_id, p.name as product_name, p.kind as product_kind,
                  bt.name as boat_name, t1.time_zone,
@@ -259,6 +262,7 @@ export async function searchBookings(
                limit 1
             ) r on true
            where b1.tenant_id = ${tenantId} and b1.id = pg.id
+          offset 0
         ) d
       ) on true
      order by pg.starts_at, pg.trip_id, pg.confirmed_at, pg.id`.execute(trx);
