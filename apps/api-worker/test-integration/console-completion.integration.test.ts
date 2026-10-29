@@ -85,7 +85,11 @@ const people = {
 const bMaya = people.maya;
 const bOnly = { name: "Bea Elsewhere", email: "bea.elsewhere@guest.example" } as const;
 
-/** Every fragment of personal data in the fixture, lowercased. */
+/**
+ * Every fragment of personal data in the fixture, in its stored case. Checks
+ * compare case-sensitively: booking references are random uppercase letters and
+ * digits, and lowercased they can spell a short name such as "maya".
+ */
 const personal = [...Object.values(people), bOnly].flatMap((p) => [
   p.email,
   ...p.name.split(/[\s,()"=]+/).filter((w) => w.length > 3 && !/^(http|example)/i.test(w)),
@@ -662,8 +666,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       const dated = await search(A.id, A.finance, { from: fx.day.d0, to: fx.day.d2 });
       expect(dated.status).toBe(200);
       expect(keysOf(dated.json).has("booker")).toBe(false);
-      const raw = dated.text.toLowerCase();
-      for (const fragment of personal) expect(raw, fragment).not.toContain(fragment.toLowerCase());
+      for (const fragment of personal) expect(dated.text, fragment).not.toContain(fragment);
       expect(BookingSearchResponse.parse(dated.json).total).toBe(8);
     });
 
@@ -924,9 +927,9 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
           r.slice(0, bookingDayExportColumns.length).filter((_, i) => i !== generated),
         );
       expect(financial(finance)).toEqual(financial(owner));
-      const financeText = (await exported(A.finance)).text.toLowerCase();
+      const financeText = (await exported(A.finance)).text;
       for (const fragment of personal) {
-        expect(financeText, fragment).not.toContain(fragment.toLowerCase());
+        expect(financeText, fragment).not.toContain(fragment);
       }
     });
 
@@ -1287,8 +1290,9 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
     });
 
     it("records each note in the audit history by id, never by its text", async () => {
-      // The marker uses letters outside hex, so no id in the audit history can
-      // contain it by chance (a digit run like 7731 can sit inside a uuid).
+      // The marker holds a space and letters outside hex, so no id, number, or
+      // timestamp in the audit history can contain it by chance (a digit run
+      // like 7731 can sit inside a uuid or a timestamp).
       const res = await addNote(A.id, fx.formula.bookingId, A.owner, {
         body: "Secret phrase zqxjv.",
       });
@@ -1305,8 +1309,8 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
         },
       ]);
       const [leak] = await admin<{ n: number }[]>`
-        select count(*)::int as n from public.audit_events
-         where tenant_id = ${A.id} and (after_state::text ilike '%zqxjv%' or reason ilike '%zqxjv%')`;
+        select count(*)::int as n from public.audit_events a
+         where a.tenant_id = ${A.id} and a::text ilike '%phrase zqxjv%'`;
       expect(leak?.n).toBe(0);
     });
   });
