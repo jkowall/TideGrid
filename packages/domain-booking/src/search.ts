@@ -164,14 +164,17 @@ interface StatementRow extends Partial<SearchRow> {
  * One statement makes one pass over the tenant's bookings: it collects the
  * matches once (`m`, materialized), counts them, checks the cursor among
  * them, and orders and limits them to the page before it reads any detail.
- * Then, for each of those at most limit + 1 rows, it reads the product,
- * boat, order, payment, latest refund, and booker by key, in a LATERAL
- * subquery the planner may not merge into the outer joins (OFFSET 0). Every
- * inner detail join finds exactly one row (each key is NOT NULL with a foreign
- * key, row-level security shows a tenant all of its own rows, and no role
- * deletes them), and the refund join zero or one, so the page keeps every
- * booking the limit chose, and the count and the page come from the same
- * matches.
+ * Then, for each of those at most limit + 1 rows, it reads the booking by its
+ * id, and that booking's trip, product, boat, order, payment, latest refund,
+ * and booker from the booking's own keys. Each of those two reads is a LATERAL
+ * subquery the planner may not merge into the outer joins or into each other
+ * (OFFSET 0), so each runs once per page row. How it reads each table inside
+ * is the planner's choice: by index at pilot volume, as measured; on a tiny
+ * table perhaps a scan. Every inner detail join finds exactly one row (each
+ * key is NOT NULL with a foreign key, row-level security shows a tenant all
+ * of its own rows, and no role deletes them), and the refund join zero or
+ * one, so the page keeps every booking the limit chose, and the count and
+ * the page come from the same matches.
  */
 export async function searchBookings(
   trx: TenantTransaction,
@@ -215,7 +218,7 @@ export async function searchBookings(
     ? sql`, s1.booker_name, s1.booker_email`
     : sql``;
   const detailBookerJoin: RawBuilder<unknown> = withBooker
-    ? sql`join checkout_sessions s1 on s1.tenant_id = b1.tenant_id and s1.id = b1.checkout_session_id`
+    ? sql`join checkout_sessions s1 on s1.tenant_id = pb.tenant_id and s1.id = pb.checkout_session_id`
     : sql``;
   const { rows: statementRows } = await sql<StatementRow>`
     with m as materialized (
@@ -231,16 +234,26 @@ export async function searchBookings(
        order by m.starts_at, m.trip_id, m.confirmed_at, m.id
        limit ${query.limit + 1}
     )
-    select n.matched ${cursorColumn}, d.*
+    select n.matched ${cursorColumn},
+           pb.id, pb.reference, pb.state, pb.source, pb.confirmed_at, pb.party_size, d.*
       from n ${cursorJoin}
       -- With an empty page this is one row of nulls beside the count.
       left join (
-        pg cross join lateral (
-          -- One page row's details, each found by key. OFFSET 0 keeps the
-          -- planner from merging this subquery into the outer joins, so it
-          -- runs once per page row instead of joining every booking's details.
+        pg
+        -- The page row's booking, by its id. OFFSET 0 keeps this subquery and
+        -- the next apart from the outer joins and from each other, so each
+        -- runs once per page row.
+        cross join lateral (
           select b1.id, b1.reference, b1.state, b1.source, b1.confirmed_at, b1.party_size,
-                 t1.id as trip_id, p.name as product_name, p.kind as product_kind,
+                 b1.tenant_id, b1.trip_id, b1.order_id, b1.payment_id, b1.checkout_session_id
+            from bookings b1
+           where b1.tenant_id = ${tenantId} and b1.id = pg.id
+          offset 0
+        ) pb
+        -- That booking's trip, product, boat, order, payment, latest refund,
+        -- and booker, each from the booking's own keys.
+        cross join lateral (
+          select t1.id as trip_id, p.name as product_name, p.kind as product_kind,
                  bt.name as boat_name, t1.time_zone,
                  to_char(t1.local_date, 'YYYY-MM-DD') as local_date,
                  to_char(t1.local_start_time, 'HH24:MI') as local_start_time,
@@ -248,21 +261,20 @@ export async function searchBookings(
                  o.total_amount, pay.state as payment_state,
                  r.state as refund_state, r.amount as refund_amount
                  ${bookerColumns}
-            from bookings b1
-            join scheduled_trips t1 on t1.tenant_id = b1.tenant_id and t1.id = b1.trip_id
+            from scheduled_trips t1
             ${detailBookerJoin}
             join products p on p.tenant_id = t1.tenant_id and p.id = t1.product_id
             join boats bt on bt.tenant_id = t1.tenant_id and bt.id = t1.boat_id
-            join orders o on o.tenant_id = b1.tenant_id and o.id = b1.order_id
-            join payments pay on pay.tenant_id = b1.tenant_id and pay.id = b1.payment_id
+            join orders o on o.tenant_id = pb.tenant_id and o.id = pb.order_id
+            join payments pay on pay.tenant_id = pb.tenant_id and pay.id = pb.payment_id
             -- The latest refund only, so a payment refunded in parts never repeats its booking.
             left join lateral (
               select r1.state, r1.amount from payment_refunds r1
-               where r1.tenant_id = b1.tenant_id and r1.payment_id = b1.payment_id
+               where r1.tenant_id = pb.tenant_id and r1.payment_id = pb.payment_id
                order by r1.created_at desc, r1.id desc
                limit 1
             ) r on true
-           where b1.tenant_id = ${tenantId} and b1.id = pg.id
+           where t1.tenant_id = pb.tenant_id and t1.id = pb.trip_id
           offset 0
         ) d
       ) on true

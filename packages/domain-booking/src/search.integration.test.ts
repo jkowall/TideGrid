@@ -21,8 +21,10 @@
  * The plan test: search is one statement. As the runtime, under custom and
  * generic plans, the matches are collected once (CTE m) from the matching
  * tables only, with no detail join among them, and the Limit that picks the
- * page reads those matches with no detail join under it. Finance's statement
- * never names the checkout, and every join names its tenant.
+ * page reads those matches with no detail join under it. Executed, the page
+ * row's booking and its details are each read at most once per page row, in
+ * subtrees of their own. Finance's statement never names the checkout, and
+ * every join names its tenant.
  */
 
 import { randomUUID } from "node:crypto";
@@ -84,7 +86,7 @@ function subtree(node: PlanNode): PlanNode[] {
 }
 
 /** The page's detail aliases: none may be read among the matches or under the page's Limit. */
-const detailAliases = ["b1", "t1", "s1", "p", "bt", "o", "pay", "r1"];
+const detailAliases = ["pb", "b1", "t1", "s1", "p", "bt", "o", "pay", "r1"];
 
 /**
  * Where a plan reads the matches: the CTE m that collects them, the tables
@@ -128,13 +130,27 @@ const pageScans = ["b1", "s1", "o", "pay", "r1"] as const;
 
 /**
  * An executed plan's scans of one alias, as [rows per loop, loops] each.
- * PostgreSQL 17 rounds rows per loop, so a scan run many times for a few
- * rows can show 0; the loops are exact.
+ * PostgreSQL 17 rounds rows per loop; the loops are exact.
  */
 function scansOf(plan: PlanNode, alias: string): [number, number][] {
   return subtree(plan)
     .filter((n) => n.Alias === alias)
     .map((n) => [n["Actual Rows"] ?? 0, n["Actual Loops"] ?? 0]);
+}
+
+/** The deepest node whose subtree scans every given alias, if one does. */
+function holderOf(plan: PlanNode, aliases: readonly string[]): PlanNode | undefined {
+  const holds = (n: PlanNode) => {
+    const seen = new Set(subtree(n).map((c) => c.Alias));
+    return aliases.every((a) => seen.has(a));
+  };
+  if (!holds(plan)) return undefined;
+  let node = plan;
+  for (;;) {
+    const child = (node.Plans ?? []).find(holds);
+    if (!child) return node;
+    node = child;
+  }
 }
 
 /** Joins and scans of tenant tables in a statement's text that do not name their alias's tenant. */
@@ -436,6 +452,20 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     const tripDays = await admin<{ id: string; day: string }[]>`
       select id, local_date::text as day from public.scheduled_trips where tenant_id = ${A.id}`;
     const dayOf = (tripId: string | undefined) => tripDays.find((t) => t.id === tripId)?.day ?? "";
+    // Fresh statistics, so the plan test does not depend on whether autovacuum
+    // has analyzed these tables yet.
+    for (const table of [
+      "bookings",
+      "scheduled_trips",
+      "checkout_sessions",
+      "products",
+      "boats",
+      "orders",
+      "payments",
+      "payment_refunds",
+    ]) {
+      await admin.unsafe(`analyze public.${table}`);
+    }
     days.first = dayOf(A.trips.shared[0]);
     days.fourth = dayOf(A.trips.shared[3]);
     days.last =
@@ -478,7 +508,11 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
           spike[label] = indexesIn(row?.["QUERY PLAN"]);
         };
         // Control: the owner bypasses row-level security, so it may use the index.
-        await explain("adminCustom");
+        // The name-only query, so no tenant index competes with it, however few
+        // rows the table holds when this file runs.
+        const bareQuery = `select s.id from public.checkout_sessions s where s.booker_name ilike '%ern%'`;
+        const [control] = await tx.unsafe(`explain (format json) ${bareQuery}`);
+        spike.adminCustom = indexesIn(control?.["QUERY PLAN"]);
         // The runtime role, under forced row-level security, in the same transaction.
         await tx`set local role tidegrid_app`;
         await tx`select set_config('app.tenant_id', ${A.id}, true)`;
@@ -494,9 +528,7 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         );
         spike.runtimeGeneric = indexesIn(generic?.["QUERY PLAN"]);
         // A name-only query without the tenant filter, so only the trigram index could serve it.
-        const [bare] = await tx.unsafe(
-          `explain (format json) select s.id from public.checkout_sessions s where s.booker_name ilike '%ern%'`,
-        );
+        const [bare] = await tx.unsafe(`explain (format json) ${bareQuery}`);
         spike.runtimeNoTenantFilter = indexesIn(bare?.["QUERY PLAN"]);
         throw rollback;
       }),
@@ -882,8 +914,10 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       // One statement: the count, the cursor check, and the page.
       const search = captured.filter((s) => /from bookings b\b/.test(s.sql));
       expect(search).toHaveLength(1);
-      // The fence that keeps the details from merging into the outer joins.
-      expect(search[0]?.sql).toMatch(/b1\.id = pg\.id\s+offset 0\s+\) d/);
+      // The fences that keep the booking's read and its details' read apart from
+      // the outer joins and from each other.
+      expect(search[0]?.sql).toMatch(/b1\.id = pg\.id\s+offset 0\s+\) pb/);
+      expect(search[0]?.sql).toMatch(/t1\.id = pb\.trip_id\s+offset 0\s+\) d/);
       // Finance never names the checkout, in any statement, with or without a cursor.
       if (!query.withBooker) {
         expect(captured.filter((s) => s.sql.includes("checkout_sessions"))).toEqual([]);
@@ -911,11 +945,12 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         const aliases = subtree(plan).map((n) => n.Alias);
         expect(aliases).toEqual(expect.arrayContaining(["b1", "o", "pay", "r1"]));
         expect(aliases.includes("s1")).toBe(query.withBooker);
-        // Executed, the page finds each of its bookings once: one scan of b1,
-        // run at most limit + 1 times, at most one row a run, under either plan.
-        // Merged into the outer joins, the details would probe b1 once per trip
-        // per page row instead. The other details are logged, not bounded: on a
-        // table this small the planner may hash one once and reuse it.
+        // Executed, what the fences guarantee: the booking's read (b1) and its
+        // details' read each run at least once and at most once per page row,
+        // and the details' subtree holds neither the booking's scan nor the
+        // matches. Merged into the outer joins, the details would join b1 and the
+        // page in one tree. How each table is read inside is the planner's
+        // choice and is logged, not asserted.
         const ran = await planOf(
           A.id,
           search[0] ?? { sql: "", parameters: [] },
@@ -923,14 +958,38 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
           "analyze, timing off, format json",
         );
         const scans = Object.fromEntries(pageScans.map((alias) => [alias, scansOf(ran, alias)]));
-        console.log(`SEARCH_PAGE_SCANS ${JSON.stringify({ query, mode, scans })}`);
-        const pageBooking = scansOf(ran, "b1");
+        const detailScans = [
+          "t1",
+          "p",
+          "bt",
+          "o",
+          "pay",
+          "r1",
+          ...(query.withBooker ? ["s1"] : []),
+        ];
+        const details = holderOf(ran, detailScans);
+        const runs = (loops: number) => loops >= 1 && loops <= query.limit + 1;
+        console.log(
+          `SEARCH_PAGE_SCANS ${JSON.stringify({ query, mode, scans, detailRuns: details?.["Actual Loops"] })}`,
+        );
+        const booking = scansOf(ran, "b1");
         expect({
           query,
           mode,
-          scans: pageBooking.length,
-          byKey: pageBooking.every(([rows, loops]) => loops <= query.limit + 1 && rows <= 1),
-        }).toEqual({ query, mode, scans: 1, byKey: true });
+          bookingScans: booking.length,
+          bookingRuns: booking.every(([, loops]) => runs(loops)),
+          detailsApart:
+            details !== undefined &&
+            !subtree(details).some((n) => n.Alias === "b1" || n["Node Type"] === "CTE Scan"),
+          detailRuns: runs(details?.["Actual Loops"] ?? 0),
+        }).toEqual({
+          query,
+          mode,
+          bookingScans: 1,
+          bookingRuns: true,
+          detailsApart: true,
+          detailRuns: true,
+        });
       }
     }
   });
