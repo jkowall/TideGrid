@@ -945,12 +945,13 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         const aliases = subtree(plan).map((n) => n.Alias);
         expect(aliases).toEqual(expect.arrayContaining(["b1", "o", "pay", "r1"]));
         expect(aliases.includes("s1")).toBe(query.withBooker);
-        // Executed, what the fences guarantee: the booking's read (b1) and its
-        // details' read each run at least once and at most once per page row,
-        // and the details' subtree holds neither the booking's scan nor the
-        // matches. Merged into the outer joins, the details would join b1 and the
-        // page in one tree. How each table is read inside is the planner's
-        // choice and is logged, not asserted.
+        // Executed: the booking's read (b1) and its details' read each run at
+        // least once and at most once per page row, and the details' subtree
+        // holds neither the booking's scan nor the matches. This bounds how
+        // often each runs; it does not detect a removed fence, which the text
+        // assertions above lock. (The details' subquery cannot be merged in its
+        // current form, fence or not.) How each table is read inside is the
+        // planner's choice and is logged, not asserted.
         const ran = await planOf(
           A.id,
           search[0] ?? { sql: "", parameters: [] },
