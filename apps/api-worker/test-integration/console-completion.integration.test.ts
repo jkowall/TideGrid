@@ -158,6 +158,14 @@ const cents = (decimal: string | undefined) => {
 
 describe.skipIf(!env)("G2.12c console completion through the API", () => {
   let admin: Sql;
+
+  /** The database clock in milliseconds; this process's clock can drift from it. */
+  async function dbNow(): Promise<number> {
+    const [row] = await admin<{ ms: number }[]>`
+      select (extract(epoch from now()) * 1000)::float8 as ms`;
+    if (!row) throw new Error("no database time");
+    return row.ms;
+  }
   let runtime: ReturnType<typeof createDb>;
   let app: ReturnType<typeof createApp>;
   let verifier: ReturnType<typeof createAccessVerifier>;
@@ -1177,7 +1185,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
     });
 
     it("authors a note from the signed-in member, with the database's time", async () => {
-      const before = Date.now();
+      const before = await dbNow();
       const res = await addNote(A.id, fx.single.bookingId, A.staff, {
         body: "Wheelchair access asked.",
       });

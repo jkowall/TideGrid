@@ -35,7 +35,7 @@ pnpm test                         # unit tests (Workers tests run in workerd)
 pnpm contracts:generate           # regenerate packages/contracts/generated/openapi.json
 DATABASE_URL=... pnpm db:migrate  # apply SQL migrations (admin connection)
 DATABASE_URL=... pnpm db:seed     # deterministic synthetic seed
-pnpm test:local-db                # every integration suite, guest browser parts A and B, and the console browser tests, on throwaway local PostgreSQL 17 containers (podman machine running; the browser parts use the installed Google Chrome)
+pnpm test:local-db                # every integration suite, guest browser parts A and B, and the console browser tests, on throwaway local PostgreSQL 17 containers (podman machine running with its clock within 5 s of the Mac's, which the script checks; the browser parts use the installed Google Chrome)
 pnpm test:local-db integration    # or one part: integration, guest, console
 pnpm db:local up                  # start the container; then eval "$(tools/local-db/local-db.sh env)" exports DATABASE_URL and TIDEGRID_EPHEMERAL_DB=1; pnpm db:local down removes it
 DATABASE_URL=... TIDEGRID_EPHEMERAL_DB=1 pnpm test:integration   # integration suites against a throwaway database you started

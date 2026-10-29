@@ -47,6 +47,14 @@ interface Tenant extends CheckoutFixture {
 
 describe.skipIf(!env)("adversarial: guest booking access through the API", () => {
   let admin: Sql;
+
+  /** The database clock in milliseconds; this process's clock can drift from it. */
+  async function dbNow(): Promise<number> {
+    const [row] = await admin<{ ms: number }[]>`
+      select (extract(epoch from now()) * 1000)::float8 as ms`;
+    if (!row) throw new Error("no database time");
+    return row.ms;
+  }
   let runtime: ReturnType<typeof createDb>;
   let app: ReturnType<typeof createApp>;
   let payments: FakePaymentProvider;
@@ -415,12 +423,12 @@ describe.skipIf(!env)("adversarial: guest booking access through the API", () =>
     expect([expired.status, expired.json.error?.code]).toEqual([410, "link_expired"]);
 
     const fresh = await bookedWithLink(A);
-    const before = Date.now();
+    const before = await dbNow();
     const opened = await redeemAt(A, fresh.token);
     expect(opened.status).toBe(201);
     const expiresAt = Date.parse(opened.json.session.expiresAt);
     expect(expiresAt).toBeGreaterThan(before + 3600_000 - 120_000);
-    expect(expiresAt).toBeLessThanOrEqual(Date.now() + 3600_000 + 120_000);
+    expect(expiresAt).toBeLessThanOrEqual((await dbNow()) + 3600_000 + 120_000);
     const session = opened.json.session.token as string;
     const hash = sha256(`guest-session:${session}`);
     const [span] = await admin<{ seconds: number }[]>`
