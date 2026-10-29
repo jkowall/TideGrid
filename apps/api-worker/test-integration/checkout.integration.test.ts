@@ -43,6 +43,14 @@ const AUD = "cd".repeat(32);
 
 describe.skipIf(!env)("checkout to confirmation through the API", () => {
   let admin: Sql;
+
+  /** The database clock in milliseconds; this process's clock can drift from it. */
+  async function dbNow(): Promise<number> {
+    const [row] = await admin<{ ms: number }[]>`
+      select (extract(epoch from now()) * 1000)::float8 as ms`;
+    if (!row) throw new Error("no database time");
+    return row.ms;
+  }
   let runtime: ReturnType<typeof createDb>;
   let app: ReturnType<typeof createApp>;
   let signingKey: CryptoKey;
@@ -450,7 +458,7 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
 
   it("refuses a checkout for a trip with too few seats, a stale quote, and too many open checkouts", async () => {
     const stale = await quoteFor(runtime.db, A.id, tripsA.shared(), 1, {
-      now: new Date(Date.now() - 31 * 60_000),
+      now: new Date((await dbNow()) - 31 * 60_000),
     });
     const staleRes = await request("POST", "/v1/public/checkout-sessions", {
       origin: guest(A),

@@ -144,6 +144,14 @@ function keysOf(value: unknown, out = new Set<string>()): Set<string> {
 
 describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
   let admin: Sql;
+
+  /** The database clock in milliseconds; this process's clock can drift from it. */
+  async function dbNow(): Promise<number> {
+    const [row] = await admin<{ ms: number }[]>`
+      select (extract(epoch from now()) * 1000)::float8 as ms`;
+    if (!row) throw new Error("no database time");
+    return row.ms;
+  }
   let runtime: ReturnType<typeof createDb>;
   let app: ReturnType<typeof createApp>;
   let signingKey: CryptoKey;
@@ -1519,7 +1527,7 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
       startsAt: iso(trip?.starts_at ?? new Date(0)),
       localDate: fx.day.d0,
     });
-    expect(Math.abs(Date.parse(roster.generatedAt) - Date.now())).toBeLessThan(5 * 60_000);
+    expect(Math.abs(Date.parse(roster.generatedAt) - (await dbNow()))).toBeLessThan(5 * 60_000);
     expect(roster.bookings.map((b) => b.id)).toEqual([
       fx.rich.bookingId,
       fx.single.bookingId,

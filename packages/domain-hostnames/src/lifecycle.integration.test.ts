@@ -536,6 +536,14 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     return id;
   }
 
+  /** The database clock in milliseconds, which the sweep schedules checks on. */
+  async function dbNow(): Promise<number> {
+    const [row] = await admin<{ ms: number }[]>`
+      select (extract(epoch from now()) * 1000)::float8 as ms`;
+    if (!row) throw new Error("no database time");
+    return row.ms;
+  }
+
   async function checkRow(host: string) {
     const [row] = await admin<
       {
@@ -631,7 +639,7 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
         last_error_code: code,
         attempts: before.attempts + 1,
       });
-      expect(after.next.getTime()).toBeGreaterThan(Date.now());
+      expect(after.next.getTime()).toBeGreaterThan(await dbNow());
       expect(await resolves(odd)).toBe(tenant);
       // The run went on: the next hostname was read and its move demoted it.
       expect(await checkRow(next)).toMatchObject({ status: "disabled", hostname_state: "moved" });
@@ -714,7 +722,7 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       await due(tenant);
       const before = await checkRow(host);
-      const started = Date.now();
+      const started = await dbNow();
       await sweepHostnames(runtimeDb.db, {
         provider: refusing,
         runId: `sweep-${run}`,
