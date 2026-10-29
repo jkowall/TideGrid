@@ -76,6 +76,16 @@ const listFor =
 
 const dayHeading = (name: RegExp | string) => screen.findByRole("heading", { level: 2, name });
 const tripSection = (name: RegExp) => screen.findByRole("region", { name });
+/**
+ * The day's totals, read. They ask from an effect of the commit that shows the
+ * trips, which may not have run when a trip's section is found.
+ */
+const totalsRead = () =>
+  waitFor(() =>
+    expect(screen.getByRole("region", { name: "Day totals" }).getAttribute("aria-busy")).toBe(
+      "false",
+    ),
+  );
 const rowsOf = (section: HTMLElement) => within(section).queryAllByRole("listitem");
 const badges = (element: Element) =>
   [...element.querySelectorAll(".tg-status")].map((badge) => text(badge));
@@ -561,12 +571,14 @@ describe("what each role sees", () => {
     const ownerCalls = api({ [route.day()]: () => json(asSeenBy("owner", dayBody())) });
     renderPage("owner");
     await tripSection(/Sunset Harbor Cruise/);
+    await totalsRead();
     const ownerAsked = ownerCalls.map((c) => `${c.method} ${c.path}?${c.query}`);
     cleanup();
 
     const calls = api({ [route.day()]: () => json(asSeenBy("finance", dayBody())) });
     const { container } = renderPage("finance");
     const sunset = await tripSection(/Sunset Harbor Cruise/);
+    await totalsRead();
     expect(calls.map((c) => `${c.method} ${c.path}?${c.query}`)).toEqual(ownerAsked);
 
     // No Booker column, no name, no row fact for who booked.
