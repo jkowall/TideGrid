@@ -4,6 +4,84 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-10-29
 
+### Console search latency verification, October 29, 2026
+
+- **Built** as a follow-up of standing goal item 5, for the owner's target of 2026-10-29 (D-E8: 300 ms p95 for a whole request on a tenant of about 50,000 bookings, common fragments included), in pull request 41 on branch `build/search-latency` from `main` at `b6d0247`, merged forward to `bb9b510`. No index, extension, or migration. No Neon, deploy, or install. The owner decided on 2026-10-29 to merge it when green, not after the Nov 1 deploy.
+- **What changed.** `searchBookings` (`packages/domain-booking/src/search.ts`) is one statement instead of a cursor check, a count, and a page. It collects the matches once (`m`, materialized), counts them, checks the cursor among them, orders and limits them to the page, and then reads each page row's product, boat, order, payment, latest refund, and booker by key in a LATERAL subquery fenced with OFFSET 0, so the detail joins run at most limit + 1 times. The text condition, the cursor position, the order, and the contract are unchanged. Finance's statement never names the checkout. Details: the [booking README](../packages/domain-booking/README.md#deferred-and-known-gaps).
+- **Decisions.** The goal packet's coordinator defaults: S1 A with escalation to S1 B, S2 A (no index), S3 A (equality and plan shape gate normal CI; the 300 ms assertion lives only in the off-by-default benchmark), S4 A, S5 A, S9 A. S8 A (merge after Nov 1) was replaced by the owner's decision above. S1 A met 300 ms but not the packet's 225 ms headroom, so S1 B was taken.
+- **Runs, in order, on CI PostgreSQL 17, not Neon:**
+  - [40893467723](https://github.com/jkowall/TideGrid/actions/runs/40893467723) on `0604a3c`: the extended gate and the benchmark against the b6d0247 shape on both sides, the before baseline. The benchmark passed; one gate case was red on a test bug (the synthetic confirmation tie named a booking on another trip), fixed in `b1cc9f7`.
+  - [40898413073](https://github.com/jkowall/TideGrid/actions/runs/40898413073) on `b1cc9f7`: S1 A, the matching ids ordered and limited in a subquery, then the details joined. Green, every case under 300 ms, but tenant B over 225 ms: "@g" 267.5, every day 259.6, and "qj" 235.2 ms p95. Its LIMIT let the custom plan sort every booking and probe each checkout in order, hoping to stop early (about 100 ms for a fragment that matches nothing), and with 1,265 trips the planner joined the page's rows to every trip before probing bookings (a Materialize of 50,001 rows read 26 times).
+  - [40902374643](https://github.com/jkowall/TideGrid/actions/runs/40902374643) on `f65c1ab`: S1 B without the fence. Red on the benchmark's detail-row bound only: the planner merged the LATERAL detail subquery into the outer joins and read 50,006 rows of each detail table (1.3 million with a cursor under a generic plan). Every outcome equaled the b6d0247 search's.
+  - [40910950938](https://github.com/jkowall/TideGrid/actions/runs/40910950938) on `0b14c59`, attempts 1 and 2: S1 B with OFFSET 0. Green on every job both times. These are the two benchmark runs below.
+- **Benchmark.** `search-benchmark.integration.test.ts`, on only through a THROWAWAY commit (`0604a3c`), reverted before review. Tenant A: 50,006 bookings, 50,000 of them cloned onto 40 of its 85 trips and five synthetic ones on its last trip; tenant B: 50,001 over its 1,265 trips, loaded after tenant A's series. Per case and plan mode (`plan_cache_mode` forced to custom, then generic): three warm-ups of each shape, then 20 requests of the b6d0247 search ("before") and 60 of today's ("after"), interleaved one before to three after, on one connection. Whole requests in a snapshot, as the runtime, timed around the transaction. p95 is nearest rank; ms. `pg_prepared_statements` showed only custom plans in every custom series and only generic plans in every generic series. No after plan used JIT. Every orders, payments, and refunds scan of the after shape read at most limit + 1 (26) rows. The runner: 4 CPUs, PostgreSQL 17.11, `shared_buffers` 128MB, `work_mem` 4MB, `jit` on.
+- **Run 1** ([40910950938, attempt 1](https://github.com/jkowall/TideGrid/actions/runs/40910950938/attempts/1)):
+
+| Tenant | Class | Case | Role | Matches | Before custom p50 / p95 | Before generic p50 / p95 | After custom p50 / p95 / max | After generic p50 / p95 / max |
+|---|---|---|---|---:|---|---|---|---|
+| A | common | @g | staff | 20000 | 408.7 / 423.5 | 454 / 471.8 | 58.9 / 60.6 / 61.5 | 110.8 / 118 / 129.8 |
+| A | common | gmail | staff | 20000 | 425.2 / 438.8 | 419.7 / 432.5 | 99.5 / 101.3 / 101.6 | 99.7 / 101.2 / 103.3 |
+| A | common | 0000 | staff | 50005 | 691.5 / 716.4 | 675.5 / 705.5 | 62.4 / 63.9 / 64.9 | 114.1 / 116.3 / 117 |
+| A | common | every day | staff | 50006 | 676 / 686.4 | 716.6 / 723.8 | 52.2 / 54.2 / 60.9 | 113.7 / 115.4 / 123 |
+| A | common | from only | staff | 50006 | 664.1 / 674.6 | 662.3 / 674.8 | 52 / 53 / 58.3 | 56 / 59.4 / 68.2 |
+| A | mid | smith | staff | 2000 | 227.5 / 228.9 | 226.6 / 236.3 | 68.5 / 69.3 / 70.1 | 69.4 / 70.6 / 71.7 |
+| A | mid | luis | staff | 2500 | 212.3 / 217.7 | 216.6 / 220.7 | 44.5 / 46.2 / 53 | 49.7 / 51 / 59.9 |
+| A | rare | guest4999 | staff | 11 | 179.2 / 182 | 179.4 / 183.8 | 37.4 / 38 / 49.2 | 39.9 / 40.8 / 41 |
+| A | rare | one reference | staff | 1 | 203.5 / 210 | 204 / 206.7 | 63.4 / 65.9 / 79.1 | 64.9 / 68 / 70.2 |
+| A | none | zyxwv | staff | 0 | 201.4 / 206.1 | 197.2 / 204.1 | 63.9 / 66 / 68.5 | 65.6 / 69 / 76.5 |
+| A | none | luis fernandez | staff | 0 | 168.9 / 172.3 | 186.2 / 190.7 | 33.1 / 33.6 / 49 | 34 / 34.5 / 34.7 |
+| A | early | qj | staff | 0 | 201.9 / 204.7 | 196.3 / 200.2 | 63.5 / 64.9 / 65.1 | 62.5 / 64.2 / 64.6 |
+| A | early | qu (last trip) | staff | 5 | 176.9 / 183.6 | 170.3 / 173.9 | 41.1 / 43.3 / 51.4 | 36.7 / 37.4 / 39.1 |
+| A | finance | 0000 | finance | 50005 | 564.5 / 576.4 | 599.3 / 618.1 | 29.3 / 30 / 37.2 | 33.8 / 37 / 42.6 |
+| A | finance | gmail | finance | 0 | 25.9 / 27.4 | 24.5 / 28.4 | 7.7 / 8.1 / 8.2 | 8 / 9.2 / 10.3 |
+| A | finance | one reference | finance | 1 | 27.4 / 30.1 | 27.3 / 30.3 | 8.1 / 8.5 / 10.2 | 8.7 / 9.2 / 9.4 |
+| A | finance | zz | finance | 0 | 28.7 / 30 | 23.9 / 28.2 | 8 / 8.4 / 8.7 | 8.1 / 8.7 / 8.9 |
+| A | paging | @g page two | staff | 20000 | 422.3 / 445 | 469.9 / 474 | 58.3 / 60.4 / 81.4 | 113.2 / 114.4 / 125 |
+| A | paging | @g ten from the end | staff | 20000 | 98.5 / 99.6 | 147 / 147.7 | 55.1 / 55.7 / 55.9 | 111.5 / 112.6 / 113 |
+| B | common | @g | staff | 20000 | 458.5 / 462.6 | 505 / 509.9 | 70.9 / 71.6 / 72.8 | 112.3 / 114.7 / 127.4 |
+| B | early | qj | staff | 0 | 210.3 / 217 | 228 / 229.6 | 71.5 / 73 / 74.1 | 83.3 / 85.3 / 86.3 |
+| B | common | every day | staff | 50001 | 741.6 / 761.7 | 881.7 / 913.2 | 56.5 / 59.1 / 74.3 | 124.3 / 128.9 / 141.3 |
+
+- **Run 2** ([40910950938, attempt 2](https://github.com/jkowall/TideGrid/actions/runs/40910950938/attempts/2)):
+
+| Tenant | Class | Case | Role | Matches | Before custom p50 / p95 | Before generic p50 / p95 | After custom p50 / p95 / max | After generic p50 / p95 / max |
+|---|---|---|---|---:|---|---|---|---|
+| A | common | @g | staff | 20000 | 393.3 / 403 | 444.6 / 448.2 | 57.1 / 63.3 / 67.4 | 108.2 / 109.7 / 130.6 |
+| A | common | gmail | staff | 20000 | 409.2 / 413.7 | 413.1 / 416.7 | 98.1 / 99.9 / 115.1 | 99.6 / 100.7 / 101.6 |
+| A | common | 0000 | staff | 50005 | 650.7 / 661.3 | 649 / 653 | 60.1 / 61.4 / 62.4 | 114.1 / 115.3 / 126.2 |
+| A | common | every day | staff | 50006 | 631.7 / 649.1 | 1103.2 / 1110.9 | 50.7 / 52.3 / 76.3 | 113.9 / 115.8 / 142.7 |
+| A | common | from only | staff | 50006 | 631.2 / 659.6 | 629.3 / 647.8 | 50.2 / 52.5 / 61.1 | 54 / 57.1 / 60.8 |
+| A | mid | smith | staff | 2000 | 222.7 / 225.8 | 221 / 223.7 | 67 / 68.4 / 70 | 68.5 / 69.3 / 79.5 |
+| A | mid | luis | staff | 2500 | 207.6 / 208.7 | 207.9 / 210.3 | 45.7 / 46.3 / 47.6 | 48.8 / 50.2 / 51 |
+| A | rare | guest4999 | staff | 11 | 171.3 / 173.6 | 169.3 / 172.2 | 38.5 / 39.4 / 48.4 | 38.7 / 39.8 / 45.7 |
+| A | rare | one reference | staff | 1 | 198 / 199.7 | 197.7 / 201.1 | 62.5 / 63.7 / 65.2 | 64.3 / 65.4 / 66.5 |
+| A | none | zyxwv | staff | 0 | 191.1 / 194.2 | 191.7 / 193.1 | 61.4 / 62.5 / 62.8 | 63 / 64.1 / 69.1 |
+| A | none | luis fernandez | staff | 0 | 159.8 / 162.4 | 167.7 / 170 | 33.3 / 34.3 / 35.6 | 32.5 / 33.6 / 35.5 |
+| A | early | qj | staff | 0 | 190.1 / 190.9 | 188.3 / 190.5 | 60.2 / 61.9 / 62.3 | 61.4 / 62.5 / 63 |
+| A | early | qu (last trip) | staff | 5 | 171 / 173.5 | 161.7 / 163.6 | 40.6 / 42.2 / 43 | 35.3 / 36.1 / 36.4 |
+| A | finance | 0000 | finance | 50005 | 520.3 / 525.7 | 572.4 / 578.4 | 30 / 30.6 / 31.4 | 31.8 / 32.6 / 34.5 |
+| A | finance | gmail | finance | 0 | 25.8 / 27.3 | 25.1 / 28.2 | 7.9 / 8.3 / 10 | 8.7 / 9.4 / 9.8 |
+| A | finance | one reference | finance | 1 | 27 / 28.5 | 27 / 28.1 | 8.1 / 8.6 / 12.5 | 9 / 9.5 / 10.5 |
+| A | finance | zz | finance | 0 | 25.6 / 27.2 | 25.2 / 28.7 | 7.9 / 8.1 / 8.5 | 8.7 / 9.1 / 9.4 |
+| A | paging | @g page two | staff | 20000 | 396.4 / 399.1 | 449.1 / 467.5 | 57.5 / 58.4 / 58.9 | 110.5 / 112 / 114.1 |
+| A | paging | @g ten from the end | staff | 20000 | 94.9 / 97.7 | 142 / 143.2 | 55.1 / 56 / 56.3 | 107.7 / 109.7 / 110.3 |
+| B | common | @g | staff | 20000 | 425.1 / 430.6 | 489.9 / 494.9 | 67.6 / 69.1 / 69.5 | 110.8 / 112 / 112.3 |
+| B | early | qj | staff | 0 | 199.1 / 201.4 | 218.3 / 225.4 | 69.1 / 71 / 71.7 | 81.3 / 84.6 / 90.4 |
+| B | common | every day | staff | 50001 | 690.9 / 696.8 | 775 / 785.7 | 52.7 / 55.4 / 56.5 | 119.2 / 122 / 146.2 |
+
+- **Result.** Worse plan mode, worse run: every after-p95 is at most 128.9 ms (tenant B, every day, generic) and every after request at most 146.2 ms, under the 225 ms headroom and the 300 ms target. Before, the same cases ran 438.8 to 1,110.9 ms p95 at 20,000 or 50,000 matches. Both runs met the packet's rule, so the benchmark now asserts the 300 ms target for the after shape; it stays off by default and never gates normal CI.
+- **Equality.** The benchmark compared every one of its requests, before and after, with the first outcome of its case: equal in every case, both runs, including data loaded with foreign keys off. The result gate (`search.integration.test.ts`, always on) compares whole outcomes of today's search and the b6d0247 search kept literally in `search-baseline.testing.ts`, in one snapshot: every text arm, a reference with name words, escaping and punctuation, references typed every way, dates alone and with text (a range with no trips and one that ends before it starts among them), limits 1, 2, 25, and 100, paging to the end for both roles at limits 1 and 2, a cursor at the last row, five kinds of refused cursor, the canceled booking with its refund, a staff-assisted booking, a charter tied on departure with a shared trip, and two bookings tied on confirmation (one synthetic update, throwaway database only). Its id-level checks against the literal reference condition are kept. All 10 cases passed on the final code.
+- **Plan shape.** As `tidegrid_app` under forced row-level security, custom (bound values) and generic (PREPARE and EXECUTE), for both roles, with and without a cursor: one statement; the CTE that collects the matches reads only bookings, trips, and for staff the checkout, with no detail alias inside it or under the Limit that picks the page, and no matching scan outside it. Finance's statement never names `checkout_sessions`, and every join names its tenant. Asserted on shape only, never timing.
+- **CI on the final code:** run [40910950938](https://github.com/jkowall/TideGrid/actions/runs/40910950938) on `0b14c59`, green on every job. Later commits revert the throwaway flip, add the off-by-default 300 ms assertion, and touch documents only.
+- **Not proven:**
+  - Neon: no Neon run before Nov 1. A request is now 5 round trips (begin, the leaked-context check, the context, the statement, commit), down from 6 or 7; the headroom assumes about 10 ms or less each through Hyperdrive;
+  - growth past 50,000 bookings: one matching pass a request, linear in the tenant's bookings (inferred);
+  - the 300 ms assertion runs only when the benchmark is on.
+- **Follow-ups, flagged, not fixed:**
+  - the benchmark on a throwaway Neon branch after Nov 1, with `TIDEGRID_EPHEMERAL_DB=1`;
+  - the day list and day report share the order but were not measured at pilot volume;
+  - the lateral refund's ordering is redundant under one refund per payment; a plain left join is simpler.
+
 ### Pre-pilot hardening verification, October 28 to 29, 2026
 
 - **Built** as standing goal item 5, under the owner's standing goal of 2026-10-28 and the owner's request of 2026-10-29, "keep going, hardening parts D and E, merge when green". No Neon, deploy, install, or live provider call was made.
