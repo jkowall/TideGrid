@@ -74,6 +74,9 @@ case "$NAME" in
 tidegrid-local-db*) ;;
 *) die "TIDEGRID_LOCAL_DB_NAME must start with tidegrid-local-db (got $NAME)." ;;
 esac
+case "$PORT" in
+'' | *[!0-9]*) die "TIDEGRID_LOCAL_DB_PORT must be a port number (got $PORT)." ;;
+esac
 
 engine() {
   if [ -n "${TIDEGRID_LOCAL_DB_ENGINE:-}" ]; then
@@ -133,10 +136,10 @@ require_own_container() {
   running="$("$ENGINE" container inspect --format '{{.State.Running}}' "$NAME" 2>/dev/null || true)"
   [ "$running" = true ] || die "$NAME exists but is not running; start a fresh one with: tools/local-db/local-db.sh up"
   ports="$("$ENGINE" port "$NAME" 5432 2>/dev/null || true)"
-  case "$ports" in
-  *"127.0.0.1:$PORT"*) ;;
-  *) die "$NAME does not publish 127.0.0.1:$PORT (it has: ${ports:-nothing}); check TIDEGRID_LOCAL_DB_PORT" ;;
-  esac
+  # A whole line, so a port that only starts the published one (5543 for
+  # 55432) does not pass.
+  printf '%s\n' "$ports" | grep -qxF "127.0.0.1:$PORT" ||
+    die "$NAME does not publish 127.0.0.1:$PORT (it has: ${ports:-nothing}); check TIDEGRID_LOCAL_DB_PORT"
 }
 
 print_env() {
