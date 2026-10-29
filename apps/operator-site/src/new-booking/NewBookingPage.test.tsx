@@ -644,14 +644,17 @@ describe("review fixes (G2.12d review)", () => {
     await attestBoth();
     await click("Hold seats and take payment");
     await screen.findByRole("alert");
-    await click("Price again");
-    await waitFor(() => expect(sentTo(newRoute.quote)).toHaveLength(2));
-    await stepHeading("Review with the guest");
-    await settle();
     const policy = screen.getByLabelText(
       "I told the guest the cancellation policy (version 3)",
     ) as HTMLInputElement;
-    expect(policy.checked).toBe(false);
+    // Still checked for the old quote.
+    expect(policy.checked).toBe(true);
+    await click("Price again");
+    await waitFor(() => expect(sentTo(newRoute.quote)).toHaveLength(2));
+    await stepHeading("Review with the guest");
+    // Only the new quote's answer clears it, and that answer can land a few
+    // tasks after the request went out.
+    await waitFor(() => expect(policy.checked).toBe(false));
   });
 
   it("UI-10: an attestation's error goes once its box is checked", async () => {

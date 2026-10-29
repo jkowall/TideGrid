@@ -52,7 +52,11 @@ function renderTotals(
   };
 }
 
-const grid = () => document.querySelector(".bk-totals__grid");
+/**
+ * The figures, once they are shown. The loading placeholders share the grid's
+ * class but are a div, so waiting on the class alone passes while loading.
+ */
+const grid = () => document.querySelector("dl.bk-totals__grid");
 const figures = () => terms(grid());
 const note = () => text(document.querySelector(".bk-totals__note"));
 const exportButton = () => screen.getByRole("button", { name: "Export CSV" });
