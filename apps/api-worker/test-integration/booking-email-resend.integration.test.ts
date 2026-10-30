@@ -433,6 +433,28 @@ describe.skipIf(!env)("staff resend of a booking's email: the API (G2.16b)", () 
     });
   });
 
+  it("says a resend is not allowed while email is off, even when nothing else blocks it", async () => {
+    const b = await booked(A, tripsA);
+    const own = paths(A.id, b.bookingId);
+    const on = await request("GET", own.messages, { as: A.owner });
+    expect(on.json.resend).toEqual({
+      kind: "confirmation",
+      allowed: true,
+      availableAt: null,
+      remaining: 5,
+      blockedBy: null,
+    });
+    const off = await request("GET", own.messages, { as: A.owner, email: "off" });
+    expect(off.json.emailDelivery).toBe("off");
+    expect(off.json.resend).toEqual({
+      kind: "confirmation",
+      allowed: false,
+      availableAt: null,
+      remaining: 5,
+      blockedBy: "email_off",
+    });
+  });
+
   it("validates the request before anything else: a key, a kind, a reason code, and no address", async () => {
     const b = await booked(A, tripsA);
     const own = paths(A.id, b.bookingId);

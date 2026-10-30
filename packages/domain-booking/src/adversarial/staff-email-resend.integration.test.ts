@@ -32,6 +32,7 @@ import type {} from "@tidegrid/database/global-setup";
 import { tripAllocator } from "@tidegrid/domain-inventory/testing";
 import {
   type CloudflareEmailBuilder,
+  cancelMessage,
   createCloudflareEmailProvider,
   type EmailProvider,
   enqueueMessage,
@@ -97,6 +98,8 @@ vi.mock("@tidegrid/domain-messaging", async (importOriginal) => {
 
 const env = inject("integrationDb");
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 interface Recorder {
   binding: SendEmailBinding;
   sends: CloudflareEmailBuilder[];
@@ -147,10 +150,16 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
   let C: CheckoutFixture;
   /** Cloudflare recorder cases, so no other tenant's mail meets the recorder. */
   let CF: CheckoutFixture;
+  /** The operator cap under concurrent resends of different bookings (fix round). */
+  let D: CheckoutFixture;
+  /** The operator cap counting canceled resends (fix round). */
+  let E: CheckoutFixture;
   let tripsA: ReturnType<typeof tripAllocator>;
   let tripsB: ReturnType<typeof tripAllocator>;
   let tripsC: ReturnType<typeof tripAllocator>;
   let tripsCF: ReturnType<typeof tripAllocator>;
+  let tripsD: ReturnType<typeof tripAllocator>;
+  let tripsE: ReturnType<typeof tripAllocator>;
   const staffOne = randomUUID();
   const staffTwo = randomUUID();
   let count = 0;
@@ -288,17 +297,21 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
       payments: fakeProvider(runtime.db),
       mail: new FakeEmailProvider({ db: runtime.db, environment: "local" }),
     };
-    [A, B, C, CF] = await Promise.all([
-      createCheckoutFixture(admin, runtime.db, "rsd-a", { days: 30 }),
+    [A, B, C, CF, D, E] = await Promise.all([
+      createCheckoutFixture(admin, runtime.db, "rsd-a", { days: 40 }),
       createCheckoutFixture(admin, runtime.db, "rsd-b", { days: 4 }),
       createCheckoutFixture(admin, runtime.db, "rsd-c", { days: 6 }),
       createCheckoutFixture(admin, runtime.db, "rsd-cf", { days: 6 }),
+      createCheckoutFixture(admin, runtime.db, "rsd-d", { days: 10 }),
+      createCheckoutFixture(admin, runtime.db, "rsd-e", { days: 4 }),
     ]);
-    for (const t of [A, B, C, CF]) await addLocalHostname(admin, t);
+    for (const t of [A, B, C, CF, D, E]) await addLocalHostname(admin, t);
     tripsA = tripAllocator(A);
     tripsB = tripAllocator(B);
     tripsC = tripAllocator(C);
     tripsCF = tripAllocator(CF);
+    tripsD = tripAllocator(D);
+    tripsE = tripAllocator(E);
   });
 
   afterAll(async () => {
@@ -777,6 +790,152 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     expect((await resend(B, own.bookingId, "confirmation")).kind).toBe("queued");
     expect(await resend(B, randomUUID(), "confirmation")).toEqual({ kind: "not_found" });
     expect(await resend(B, "not-a-booking", "confirmation")).toEqual({ kind: "not_found" });
+  });
+
+  // Fix round (review wf_cb9f85e0-2f5) -------------------------------------------------------------
+
+  it("F1. holds the operator's 50 an hour exactly under concurrent resends of different bookings", async () => {
+    const seed = await book(world, D, tripsD.shared(), 1);
+    for (let n = 1; n <= 49; n += 1) await seedResend(D, seed.bookingId, n);
+    const targets: Booked[] = [];
+    for (let i = 0; i < 6; i += 1) targets.push(await book(world, D, tripsD.shared(), 1));
+    // Hold every audit insert, the service's last write, so without a lock
+    // across the operator's resends each one reads the count before any commits.
+    const conn = await world.admin.reserve();
+    let results: ResendResult[] = [];
+    try {
+      await conn`begin`;
+      await conn`lock table public.audit_events in share row exclusive mode`;
+      const all = Promise.all(
+        targets.map((b, i) =>
+          resend(D, b.bookingId, "confirmation", { actor: i % 2 === 0 ? staffOne : staffTwo }),
+        ),
+      );
+      await sleep(800);
+      await conn`commit`;
+      results = await all;
+    } finally {
+      conn.release();
+    }
+    expect(results.map((r) => (r.kind === "refused" ? r.code : r.kind)).sort()).toEqual([
+      "queued",
+      "rate_limited",
+      "rate_limited",
+      "rate_limited",
+      "rate_limited",
+      "rate_limited",
+    ]);
+    const [row] = await world.admin<{ n: number }[]>`
+      select count(*)::int as n from public.email_messages
+       where tenant_id = ${D.id} and starts_with(dedupe_key, 'booking.resend:')
+         and created_at > now() - interval '1 hour'`;
+    expect(row?.n).toBe(50);
+  });
+
+  it("F2. waits for a refund being refused at that moment, then refuses the notice as refund_failed", async () => {
+    const b = await book(world, A, tripsA.shared(), 1);
+    const record = await cancel(A, b);
+    if (!record.refundId) throw new Error("setup: the fixture policy gives no refund");
+    // The refusal is recorded in a transaction still open when the resend runs.
+    const conn = await world.admin.reserve();
+    let result: ResendResult | undefined;
+    try {
+      await conn`begin`;
+      await conn`update public.payment_refunds set state = 'failed', failure_code = 'card_declined'
+                  where id = ${record.refundId}`;
+      const pending = resend(A, b.bookingId, "cancellation");
+      await sleep(500);
+      await conn`commit`;
+      result = await pending;
+    } finally {
+      conn.release();
+    }
+    expect(result).toEqual({ kind: "refused", code: "refund_failed", availableAt: null });
+    expect(await resendRows(b.bookingId)).toEqual([]);
+    expect(await auditRows(b.bookingId)).toEqual([]);
+  });
+
+  it("F3. counts a resend that was attempted and then canceled toward the 5", async () => {
+    const b = await book(world, A, tripsA.shared(), 1, {
+      booker: {
+        name: "Synthetic Twice Flaky",
+        email: `twice.${randomUUID()}+fail-once@example.test`,
+      },
+    });
+    await deliverMail(world, A.id);
+    const first = queued(await resend(A, b.bookingId, "confirmation"));
+    // Its first attempt is not sent: it waits to retry, attempted once.
+    await deliverMail(world, A.id);
+    expect(await messageOf(world.admin, first.messageId)).toMatchObject({
+      state: "queued",
+      attempts: 1,
+    });
+    const second = queued(await resend(A, b.bookingId, "confirmation", { at: await dbLater(11) }));
+    expect(second.canceledMessageIds).toEqual([first.messageId]);
+    expect(await messageOf(world.admin, first.messageId)).toMatchObject({
+      state: "canceled",
+      attempts: 1,
+      last_error_code: "resent",
+    });
+    // An attempted resend may have reached a mailbox, canceled or not: both count.
+    expect((await availability(A, b.bookingId, await dbLater(22)))?.remaining).toBe(3);
+  });
+
+  it("F4. a resend canceled with its booking still starts the 10 minutes: a notice straight after is too_soon", async () => {
+    const b = await book(world, A, tripsA.shared(), 1);
+    await deliverMail(world, A.id);
+    const first = queued(await resend(A, b.bookingId, "confirmation"));
+    await cancel(A, b);
+    expect(await messageOf(world.admin, first.messageId)).toMatchObject({
+      state: "canceled",
+      attempts: 0,
+    });
+    expect(await resend(A, b.bookingId, "cancellation")).toMatchObject({
+      kind: "refused",
+      code: "too_soon",
+    });
+  });
+
+  it("F5. counts canceled resends toward the operator's 50 an hour", async () => {
+    const seed = await book(world, E, tripsE.shared(), 1);
+    const seeded: string[] = [];
+    for (let n = 1; n <= 50; n += 1) seeded.push(await seedResend(E, seed.bookingId, n));
+    for (const id of seeded.slice(0, 10)) {
+      const done = await asSystem(world.db, E.id, (trx, ctx) =>
+        cancelMessage(trx, ctx, id, { code: "resent" }),
+      );
+      expect(done).toMatchObject({ kind: "canceled", inFlight: false });
+    }
+    const b = await book(world, E, tripsE.shared(), 1);
+    expect(await resend(E, b.bookingId, "confirmation")).toMatchObject({
+      kind: "refused",
+      code: "rate_limited",
+    });
+  });
+
+  it("F6. waits for a delivery claim in progress, then refuses in_progress and cancels nothing", async () => {
+    const b = await book(world, A, tripsA.shared(), 1);
+    const [original] = await messagesOf(world.admin, b.bookingId);
+    if (!original) throw new Error("setup: no confirmation");
+    // A claim, as the delivery job makes it, still open when the resend runs.
+    const conn = await world.admin.reserve();
+    let result: ResendResult | undefined;
+    try {
+      await conn`begin`;
+      await conn`update public.email_messages
+                    set state = 'sending', attempts = attempts + 1,
+                        lease_expires_at = now() + interval '2 minutes', provider = 'fake'
+                  where id = ${original.id}`;
+      const pending = resend(A, b.bookingId, "confirmation");
+      await sleep(500);
+      await conn`commit`;
+      result = await pending;
+    } finally {
+      conn.release();
+    }
+    expect(result).toEqual({ kind: "refused", code: "in_progress", availableAt: null });
+    expect(await messageOf(world.admin, original.id)).toMatchObject({ state: "sending" });
+    expect(await resendRows(b.bookingId)).toEqual([]);
   });
 });
 
