@@ -229,8 +229,10 @@ export interface HostnameSweepOptions {
    */
   maxProviderCalls?: number;
   /**
-   * The run ends after this many milliseconds: no provider read and no claim
-   * expiry starts after it.
+   * The run ends after this many milliseconds: no hostname read and no claim
+   * expiry starts after it. A read already under way can still make its
+   * second provider call, so a run can end later than this, each call bounded
+   * by the client's request timeout (15 seconds by default).
    */
   budgetMs?: number;
   /** One tenant's turn failed, an account-level refusal included; the sweep moves on. */

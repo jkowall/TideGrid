@@ -11,12 +11,15 @@ const SKIP_WAITING = "SKIP_WAITING";
  *   "none", so the browser always asks the network for the script, and the
  *   guest Worker can swap in the kill switch for a host that stopped
  *   resolving. Production builds only: the dev server serves no sw.js.
- * - On that same page load, once, after the page has settled (see
- *   pageSettled), a worker waiting then is asked to take over. That is
- *   usually a new build an earlier visit's update check found; rarely it is
- *   one this load's own update check finished installing first, so a page of
- *   the old build may ask a newer worker. The worker takes over only when
- *   this is the site's one open window (G2.14b, D11(a)).
+ * - On that same page load, once, the worker waiting when the page first
+ *   reads its registration (once a worker is ready) is asked to take over,
+ *   after the page has settled (see pageSettled), and only if it is still
+ *   the one waiting. That is usually a new build an earlier visit's update
+ *   check found. Rarely this load's own update check finished installing a
+ *   newer one before that first read, so a page of the old build may ask a
+ *   newer worker; one that installs while the page settles is left for the
+ *   next page load. The worker takes over only when this is the site's one
+ *   open window (G2.14b, D11(a)).
  *   "Try again" after a failed bootstrap never asks again.
  * - When the API says no operator is published here (a readable
  *   tenant_not_found), unregister every worker and delete every cache: the
@@ -39,9 +42,10 @@ export async function registerServiceWorker(): Promise<void> {
       scope: "/",
       updateViaCache: "none",
     });
-    await pageSettled();
-    const current = await navigator.serviceWorker.getRegistration("/");
-    if (current) activateWaitingWorker(current);
+    await navigator.serviceWorker.ready;
+    await askWaitingWorker(
+      async () => (await navigator.serviceWorker.getRegistration("/"))?.waiting ?? null,
+    );
   } catch {
     // Private browsing, a blocked script, or no support: no offline page, nothing else.
   }
@@ -82,14 +86,36 @@ export async function pageSettled(page: SettlingPage = window): Promise<void> {
 /** Whether this page load has already asked; module state lives as long as the page. */
 const thisPageLoad = { asked: false };
 
+/** The one thing the page does with a waiting worker. */
+type WaitingWorker = { postMessage(message: unknown): void };
+
 /** Ask a worker that is waiting to take over, at most once per page load. */
 export function activateWaitingWorker(
-  registration: { waiting: { postMessage(message: unknown): void } | null },
+  registration: { waiting: WaitingWorker | null },
   pageLoad: { asked: boolean } = thisPageLoad,
 ): void {
   if (pageLoad.asked) return;
   pageLoad.asked = true;
   registration.waiting?.postMessage({ type: SKIP_WAITING });
+}
+
+/**
+ * Note the worker waiting now, let the page settle, then ask that same worker
+ * to take over. A worker that replaced it meanwhile, from this load's own
+ * update check, is not asked: this load is the old build, and the next page
+ * load asks it. The browser hands back the same ServiceWorker object for the
+ * same worker, so identity tells them apart. Either way this page load has
+ * had its one ask.
+ */
+export async function askWaitingWorker(
+  readWaiting: () => Promise<WaitingWorker | null>,
+  settle: () => Promise<void> = pageSettled,
+  pageLoad: { asked: boolean } = thisPageLoad,
+): Promise<void> {
+  const noted = await readWaiting();
+  if (noted) await settle();
+  const now = await readWaiting();
+  activateWaitingWorker({ waiting: noted && now === noted ? now : null }, pageLoad);
 }
 
 export async function clearServiceWorkers(): Promise<void> {
