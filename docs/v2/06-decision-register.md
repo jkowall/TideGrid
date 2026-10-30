@@ -8,6 +8,22 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-10-29: G2.16b staff email resend, owner decisions
+
+The owner accepted every recommended default of the G2.16b goal packet (failure surfaces on booking detail and staff resend with audit), as relayed by the coordinator on 2026-10-29. These are owner decisions, not coordinator defaults. Details are in the [staff resend narrowing](12-demo-build-plan.md#goal-sequence) of the demo build plan and the [booking README](../../packages/domain-booking/README.md#staff-resend-of-a-bookings-email-g216b).
+
+- **D1 A: two kinds.** The confirmation, with a new management link, for a confirmed booking before its trip ends. The cancellation notice, for a canceled booking, refused as `booking_email_refund_failed` when the cancellation's refund failed, since the notice says the refund is on its way. Not the management-link email (the guest asks for one), not the refund-failed follow-up, and not waiver requests (they keep their own resend).
+- **D2 A: a `messages.resend` permission** for owners and booking staff. Finance is refused.
+- **D3 A: a new message, its token minted at send time.** Earlier unused links of the booking's management purpose are superseded when the new link is issued, so they still renew. A stored token cannot be sent again: only hashes are stored. This narrows the [product scope](02-product-scope.md)'s rule that a fallback must not duplicate a delivered message, for staff resends only. After `outcome_unknown`, a staff resend may deliver a second copy if the first arrived. It is a new, audited message a person chose, not the automatic fallback, and only the newest link works. The rule that a retry never sends the same message twice still holds.
+- **D4 A: limits held by the service, no migration.** At most 5 deliverable resends per booking for ever (attempted, or still waiting), at least 10 minutes after the booking's newest resend of any state, and 50 resends an hour per operator. The service counts committed `email_messages` rows under the booking's row lock, so the limits hold across requests, addresses, and staff members. They do not bind a writer that bypasses the service; the uniqueness of each resend's key is the database's either way. Follow-up, before any pilot tenant (the same gate as G2.16-live): migration `0014` with an append-only resend table and a trigger that decides the limits, as `waiver_deliveries` does.
+- **D5 A: an earlier email still pending.** An earlier email of the same template still queued is canceled with code `resent` once every check has passed, its links superseded. One being sent refuses the resend as `booking_email_in_progress`.
+- **D6 A: the reason is a code**: `guest_did_not_receive`, `delivery_failed`, `delivery_unknown`, `guest_asked_again`, or `other`. Finance reads audit history, and the owner kept guest-naming free text from finance (2026-10-19). The waiver resend's free-text reason in audit is the same exposure; it is recorded here, not fixed.
+- **D7 A: finance gets no card** and makes no messages request.
+- **D8 A: email off.** The read says `emailDelivery: "off"`; a resend answers `booking_email_off` after authentication, membership, permission, and an idempotent replay, and stores nothing.
+- **D9 A: booking detail only.** A tenant-wide email exceptions list is a proposed follow-up.
+- **D10: merge after the Nov 1 deploy** (after P11). This replaces the packet's D10 B.
+- **D11 A: booking-level emails only** on the card; waiver requests stay on the Waivers card.
+
 ### 2026-10-29: pre-pilot hardening, owner decisions
 
 The owner decided the two questions the hardening goal left open (standing goal item 5). Both are owner decisions, not coordinator defaults. Details are in the [pre-pilot hardening narrowing](12-demo-build-plan.md#goal-sequence) of the demo build plan.

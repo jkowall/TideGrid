@@ -37,7 +37,7 @@ The thin slice of G2.12 pulled forward on 2026-10-06, recorded in the [demo buil
 
 ### Who sees what
 
-The API decides; the console mirrors it with `canSeeGuests` and `canUseNotes` in `src/roles.ts`, only to choose what to show.
+The API decides; the console mirrors it with `canSeeGuests`, `canUseNotes`, and `canResendEmail` in `src/roles.ts`, only to choose what to show.
 
 | | Owner | Booking staff | Finance |
 |---|---|---|---|
@@ -52,6 +52,7 @@ The API decides; the console mirrors it with `canSeeGuests` and `canUseNotes` in
 | The export's booker name and email columns | Yes | Yes | No |
 | Read a booking's notes | Yes | Yes | No |
 | Add a note | Yes | Yes | No |
+| A booking's email and its delivery; send the confirmation or cancellation notice again (G2.16b) | Yes | Yes | No |
 
 - **Finance sees the money, not the people.** Finance holds `payments.read` and `audit.read`, not `bookings.read`. It reads every booking's reference, party, extras, order lines, totals, payment, refund, and the exceptions, which is what reconciling sales, fees, taxes, and refunds needs. The booker's name and email are left out of the API's queries for any role without `bookings.read`, so they are absent from finance's responses, not hidden in the page.
 - **No roster for finance.** The product scope calls the roster a booking-management view. It exists to run a departure: who is coming, how many, and what to prepare. Without the guests' names it would be the bookings list printed again, and finance's reconciliation work is covered by the list, the detail, and the exceptions, which carry the same money. Keeping the roster to `bookings.read` also keeps every sheet that leaves the screen on paper to the roles that manage bookings. The API answers 403 to finance; the console shows a designed explanation and makes no call.
@@ -77,6 +78,17 @@ Two self-contained cards in `src/waivers/`, each loading its own data from the [
 - **`TripWaiversCard`** on a trip's roster, after the sheet: signed of named, waiting, needing attention (no address, a failed or held email, or no request), and not named yet, then each booking's people with their status. It prints with the roster.
 
 Who sees what: waiver status names people, so both cards need `bookings.read` (owners and booking staff), as the roster does; finance is refused by the API and the console does not place the cards. Sending again needs `waivers.manage` (owners and booking staff). Tests: `src/waivers/BookingWaivers.test.tsx`, and the API's role rules in `apps/api-worker/test-integration/waivers.integration.test.ts`.
+
+## Booking email (G2.16b)
+
+`BookingEmailCard` in `src/email/`, on a booking's detail after Waivers and before Notes, for roles that see guests. It loads its own data from the [messages read](../../packages/domain-booking/README.md#api), so the page only places it. Owner decisions of 2026-10-29 ([staff resend](../../packages/domain-booking/README.md#staff-resend-of-a-bookings-email-g216b)).
+
+- **The list.** The booking's own email, oldest first: what it was (Confirmation, Booking link, Cancellation notice, Refund problem notice), a "Sent again by staff" tag, its state as an icon and a label (Waiting to send, Trying again, Sending, Sent, Outcome unknown, Failed, Not sent), when and after how many attempts, and the failure in plain words for every code in the contract's `MESSAGE_FAILURE_CODES`, with generic words for any other. Sent means the email service accepted it, not that the guest read it. Outcome unknown says TideGrid did not try again, to avoid a second working link. Waiver requests stay on the Waivers card. No recipient, subject, or body: the API sends none.
+- **Email off.** When the environment sends no email (`EMAIL_PROVIDER` unset or refused, as on the Nov 1 preview), the card says so and offers no Send again.
+- **Send again.** For owners and booking staff (`canResendEmail`, mirroring `messages.resend`): "Send the confirmation again" or "Send the cancellation notice again", with how many sends again are left. When it is not offered, the card says why and when it will be. The dialog shows the booker's address, from the detail already loaded, to read back to the guest (it is never sent), and requires a reason from a list of codes. A retry after no answer keeps the `Idempotency-Key`; a refusal is the key's stored answer, so the next try takes a new key. After a send, "Sent again" takes focus and the card reads again, and once more 3 seconds later.
+- **Focus and timing.** Focus moves are layout effects; the card is `aria-busy` while it reads, and tests that compare requests wait for `aria-busy="false"`. A committed regression test presses Send again from a MutationObserver callback, between a commit and its passive effects.
+
+Tests: `src/email/BookingEmailCard.test.tsx`, `src/email/model.test.ts`, and the placement and finance cases in `src/bookings/BookingDetail.test.tsx`. `src/bookings/fixtures.ts` answers the messages read with no email and email off when a test does not name it.
 
 ### Canceled bookings (lane 1, G2.11c)
 

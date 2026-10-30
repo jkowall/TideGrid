@@ -258,6 +258,31 @@ The database is the judge, for every role, the owner included:
 
 **Lock order:** checkout session, booking, payment, trip, hold: the confirmation path's order with the booking after the session. Booking and participant rows are locked FOR NO KEY UPDATE, never FOR UPDATE, so the email delivery job's foreign key checks (a link names its booking and participant) never wait behind a transaction that may wait for that job; `cancelMessage` and `revokeAccessLinks` wait for a claim in progress. Code that may cancel a message, such as a lifecycle hook, keeps to the same rule. A late or duplicate payment event for a canceled booking's checkout finds its payment already succeeded and changes nothing (`already_succeeded`); a late failure is `ignored_after_success`.
 
+## Staff resend of a booking's email (G2.16b)
+
+```ts
+resendBookingEmail(trx, ctx, { bookingId, kind, reason }, options?: { at?: Date }): Promise<
+  | { kind: "queued"; messageId; generation; queuedAt; canceledMessageIds }
+  | { kind: "refused"; code; availableAt }   // code: one of RESEND_REFUSAL_ORDER, or email_invalid
+  | { kind: "not_found" }>
+resendAvailability(trx, tenantId, bookingId, options?): Promise<{ kind; allowed; availableAt; remaining; blockedBy } | null>
+resendRefusal(trx, tenantId, bookingId, kind, at): Promise<{ code; availableAt } | null>
+refusalsOf(facts, kind, at)   // pure: every refusal that applies, in order
+```
+
+An owner or booking staff member sends the booking's email again from the console, when the guest did not get it (owner decisions, 2026-10-29; [decision register](../../docs/v2/06-decision-register.md#2026-10-29-g216b-staff-email-resend-owner-decisions)).
+
+- **Kinds.** `confirmation`: the confirmation, receipt, and policy with a new management link, for a confirmed booking before its trip ends. `cancellation`: the cancellation notice, for a canceled booking whose cancellation refund has not failed (`payment_refunds.state = 'failed'` refuses it, since the notice says the refund is on its way). Each is re-rendered from the booking as it is now, with the current template version (`booking_confirmation` v1, `booking_canceled` v2), and goes to the booker's address on file, read in the transaction.
+- **A new message.** Its dedupe key is `booking.resend:<bookingId>:<generation>`. The generation is 1 plus the highest generation the booking has, in any state, read under the booking's lock, so a resend canceled with its booking or replaced by a newer one never makes the next key collide. A `duplicate` from `enqueueMessage` throws: no success is answered for a message that was not written. Delivery sends it at most once like any message; nothing re-queues an earlier one.
+- **Links.** The new token is minted when the email is sent; only its hash is stored. Issuing it supersedes the booking's earlier unused management links, which still renew (`renewManageLink`). Nothing revokes them as `staff` or `withdrawn`, so a sibling message is never canceled as stale.
+- **Limits** (`MAX_STAFF_RESENDS`, `STAFF_RESEND_INTERVAL_MINUTES`, `MAX_OPERATOR_RESENDS_PER_HOUR`), counted from committed `email_messages` rows under the booking's lock, for every request and staff member: at most 5 deliverable resends per booking for ever (`state <> 'canceled' or attempts > 0`), at least 10 minutes after the booking's newest resend of any state, and 50 resends of any state per operator in the last hour. The service holds them; a writer that bypasses it is not bound. A trigger in migration `0014` is a follow-up due before any pilot tenant. The operator cap may pass by one under concurrent resends of different bookings, as the waiver caps may.
+- **Order inside the transaction.** The booking's row (`FOR NO KEY UPDATE`), then its earlier messages of the same template still `queued` or `sending` (`FOR UPDATE`), then every refusal, in `RESEND_REFUSAL_ORDER`: `kind_mismatch`, `trip_over` (confirmation only), `refund_failed` (cancellation only), `limit`, `too_soon`, `rate_limited`, `in_progress`. Nothing is written before the last check passes; a refused request changes nothing. Then, under a savepoint, the earlier queued messages are canceled with code `resent` (links superseded; each must cancel with `inFlight: false`) and the new message is written. A composer that throws `TypeError` or `RangeError` rolls back to the savepoint and answers `email_invalid`. The composers cut every stored text and the database bounds the booker's name and address, so stored data does not reach it today; it guards against a change to the composers.
+- **The clock.** `at` replaces the database clock for the time limits and the trip's end, for tests; the route never passes it.
+- **Audit.** One `booking.email_resent` row on the booking, reason the code (`guest_did_not_receive`, `delivery_failed`, `delivery_unknown`, `guest_asked_again`, `other`), after `{ messageId, kind, template, templateVersion, generation, canceledMessageIds, previous: { messageId, state, failureCode } | null }`. Never an address, a name, a subject, or a body: finance reads audit history. No outbox event.
+- **Waiver requests** keep their own resend and card (domain-waivers).
+
+Tests: `src/adversarial/staff-email-resend.integration.test.ts` (cases 1 to 14 of the goal packet, the Cloudflare recorder included), and the route in `apps/api-worker/test-integration/booking-email-resend.integration.test.ts` and `apps/api-worker/test/booking-email-resend.test.ts`.
+
 ## Lock order
 
 Inbox event, checkout session, payment, trip, hold, then the order and the rest. Opening a checkout takes transaction-scoped advisory locks on the quote and the client address before any row lock, then the trip and its holds. The database's own checks lock the payment row before inserting a booking or a refund for it, so the two can never both be written. Expiring a checkout takes its session and then its hold row with SKIP LOCKED, never waiting and never touching the trip. External calls never run inside a transaction. Every command needs READ COMMITTED, as the inventory commands do.
@@ -291,6 +316,7 @@ Events carry identifiers only.
 | staff test payment lost a race to the other outcome (G2.12d) | `checkout.test_payment_superseded`, with the outcome asked for and the one that stood | |
 | staff canceled an open checkout (G2.12d) | `checkout.session_canceled`, with the staff actor and the reason | `checkout.session.canceled` |
 | confirmation email not written (lane 1) | `booking.confirmation_email_failed` | `booking.confirmation_email_failed` |
+| staff sent a booking's email again (G2.16b) | `booking.email_resent`, with the reason code and ids only | |
 
 The confirmation email is written in the confirming transaction under a savepoint (lane 1, review F2). A failure writing it, such as a stored value the email cannot carry, rolls back only the email: the booking confirms, its money and seats stay with it, and the audit row and event above tell staff that no email went out. Subjects, previews, and recipients' names are made single-line from stored data (`singleLine`), so a product name with a tab or a newline no longer fails.
 
@@ -316,7 +342,8 @@ Hold transitions keep their own `hold.*` audit rows and `inventory.hold.*` event
 | `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes` | owners and booking staff (`notes.read`, G2.12c); 403 for finance; 404 `booking_not_found` |
 | `POST /v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes` | owners and booking staff (`notes.write`, G2.12c); `{ body }` with an `Idempotency-Key`; 201 `{ note: { id, author, createdAt } }`, without the text; 403 for finance; 404 `booking_not_found`; 422 `idempotency_key_reused` |
 | `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants` | owners and booking staff (lane 1, G2.11c); the party as named so far; 403 for finance; 404 `booking_not_found` |
-| `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/messages` | owners and booking staff (lane 1, G2.11c); each email's delivery state, with no recipient or content; 403 for finance; 404 `booking_not_found` |
+| `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}/messages` | owners and booking staff (lane 1, G2.11c); each email's delivery state and `staffResend`, with no recipient or content; `emailDelivery` (`on` or `off`) and `resend` (`kind`, `allowed`, `availableAt`, `remaining`, `blockedBy`, G2.16b); 403 for finance; 404 `booking_not_found` |
+| `POST /v1/staff/tenants/{tenantId}/bookings/{bookingId}/emails/resend` | owners and booking staff (`messages.resend`, G2.16b) and an idempotency key; `{ kind, reason }`, nothing else; 201 `{ message: { id, generation, queuedAt } }`; 403 for finance; 404 `booking_not_found`; 409 `booking_email_off` (after 401, 404, 403, and a replay; stores nothing), `booking_email_kind_mismatch`, `booking_trip_over`, `booking_email_refund_failed`, `booking_email_resend_limit`, `booking_email_too_soon`, `booking_email_rate_limited`, `booking_email_in_progress`, `booking_email_invalid` (each the key's stored answer, replayed as the same 409); 422 `idempotency_key_reused` |
 | `POST /v1/public/booking-access` | the management link's explicit redemption, `{ token }` in the body; 201 a booking session; 404 `link_not_found`; 410 `link_expired`, `link_used`, `link_superseded`, `link_revoked`; 429 |
 | `POST /v1/public/booking-access/renewals` | `{ token }` of any earlier link; 202 for every token alike, and mails a new link to the booker on file, at most three an hour; 429 |
 | `POST /v1/public/checkout-sessions/{id}/manage-session` | the checkout secret as a bearer token, within an hour of confirmation; 201 a booking session; 401 `checkout_secret_required`; 404; 409 `checkout_not_confirmed`; 410 `manage_window_closed` |
