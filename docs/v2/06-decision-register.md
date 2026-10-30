@@ -8,6 +8,10 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-10-29: G2.12e merge timing, owner decision
+
+- **D7 C: G2.12e merges after the last Nov 1 release step (P11),** so the day list's source filter, staff booking badge, and trip header Book are not in the Nov 1 deploy. The goal's other choices are coordinator defaults, pending owner confirmation below. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
+
 ### 2026-10-29: pre-pilot hardening, owner decisions
 
 The owner decided the two questions the hardening goal left open (standing goal item 5). Both are owner decisions, not coordinator defaults. Details are in the [pre-pilot hardening narrowing](12-demo-build-plan.md#goal-sequence) of the demo build plan.
@@ -17,12 +21,11 @@ The owner decided the two questions the hardening goal left open (standing goal 
 
 ### Pending owner confirmation: G2.12e bookings list by source (coordinator defaults, 2026-10-29)
 
-**Status:** Coordinator defaults for G2.12e, the G2.12 tail on the day's bookings list, pending owner confirmation, except D7, which the owner decided. They bind the demo build only. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
+**Status:** Coordinator defaults for G2.12e, the G2.12 tail on the day's bookings list, pending owner confirmation. D7, merge timing, is the owner's decision above. They bind the demo build only. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
 
 - **D1 A: counts follow the filter.** Every trip of the day still lists, with that source's confirmed bookings and guests. Under a filter, Roster shows for owners and booking staff whatever the count, because the roster lists every source. Trade-off: a filtered trip with no bookings at all also shows Roster, which opens the roster's empty state.
 - **D2 A: a badge on staff bookings only,** "Staff booking, walk-up", under the reference and outside the row's facts, for every role, finance included (as G2.12d D14).
 - **D3 A: Book in each trip's header,** by the calendar's Book rule, failing closed: the day list sends `salesCloseAt` and `blackedOut`, and Book shows only when both arrived. The API still refuses a full trip and an inactive product, location, or boat.
-- **D7 C, owner decision of 2026-10-29: hold the merge until after the last Nov 1 release step (P11).** G2.12e is not in the Nov 1 deploy.
 - **Also taken by default:** the source survives an operator switch, which drops the trip and the day (D4 A); the day's totals and the CSV cover every source, with a note while a filter is on (D5 A); a new browser spec, `e2e/bookings-list.spec.ts`, skipped in deployed mode (D6 C); new test files beside the shared fixtures (D8 A); the answer echoes `source`, and the console refuses one for another source (D9 A); this entry (D10 A); and one combined review (D11).
 
 ### Pending owner confirmation: pre-pilot hardening (coordinator defaults, 2026-10-28 and 2026-10-29)
