@@ -564,13 +564,14 @@ function Day({
                   : `${bookingsText(0)}, ${guestsText(0)}`}
           </p>
         )}
-        {source && (
-          <p className="bk-filters__note">
-            <Icon name="info" />
-            <span>Day totals and the export cover bookings from every source.</span>
-          </p>
-        )}
       </div>
+      {/* Under the controls, as the zone line: what the day's totals still count. */}
+      {source && (
+        <p className="bk-filters__note">
+          <Icon name="info" />
+          <span>Day totals and the export cover bookings from every source.</span>
+        </p>
+      )}
 
       <p className="bk-zone">
         <Icon name="clock" />
