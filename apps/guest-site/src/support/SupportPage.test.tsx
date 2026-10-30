@@ -106,7 +106,7 @@ describe("service worker registration (G2.14b)", () => {
     expect(() => activateWaitingWorker({ waiting: null }, { asked: false })).not.toThrow();
   });
 
-  it("asks only after the load event, two frames, and the fonts those frames requested (D11(a))", async () => {
+  it("asks only after the load event, two frames, and any fonts those frames requested (D11(a))", async () => {
     let load = () => {};
     const frames: (() => void)[] = [];
     let fontsLoaded = () => {};

@@ -55,14 +55,18 @@ export interface SettlingPage {
 }
 
 /**
- * Resolves once this page load has stopped asking the old worker for files:
- * the load event has fired, two frames have run, so the ready page has
- * rendered and requested the brand's web fonts, and those fonts have loaded.
- * The bootstrap calls followExperience before that render. When the page
- * asked before it, in CI the new worker sometimes skipped waiting, Chromium
- * stopped the old one, and the old one restarted within milliseconds (most
- * likely for those font requests) and was still running 75 seconds later,
- * with the new worker still waiting (verification log, G2.14b follow-up).
+ * Resolves once this page load's own startup requests have gone through the
+ * old worker: the load event has fired, and two frames have run, so the
+ * ready page has rendered and sent its first reads (the trips list). Any web
+ * fonts that render requested have loaded too. Every request from a
+ * controlled page, the cross-origin API included, is a fetch event on the
+ * old worker. The bootstrap calls followExperience before that render. When
+ * the page asked before it, in CI the new worker sometimes skipped waiting,
+ * Chromium stopped the old one, and the old one restarted within
+ * milliseconds and was still running 75 seconds later, with the new worker
+ * still waiting. The request that restarted it was most likely the trips
+ * read. Asked after this, nothing reached the old worker after the new one
+ * skipped waiting, in 22 of 22 runs (verification log, G2.14b follow-up).
  * A hidden tab runs no frames, so it asks once it is shown.
  */
 export async function pageSettled(page: SettlingPage = window): Promise<void> {
