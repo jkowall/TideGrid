@@ -1,0 +1,95 @@
+/*
+ * A booking's email in the console (G2.16b): a card on the booking's detail
+ * page. State is a StatusBadge, an icon and a label, never color alone.
+ */
+
+.em-card {
+  align-content: start;
+}
+/*
+ * No focus ring of its own: the heading and the sent notice, which take focus
+ * from code, show the console's Tide Lime ring (G2.12d review UI-6).
+ */
+.em-muted {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.em-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.em-item {
+  display: grid;
+  gap: var(--space-2);
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.em-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.em-item__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+.em-item__name {
+  color: var(--text-strong);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+.em-item__line {
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.em-item__line.em-muted {
+  color: var(--text-muted);
+}
+.em-tag {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
+  color: var(--text-body);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  vertical-align: middle;
+}
+
+.em-resend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.em-skeleton {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.em-dialog {
+  display: grid;
+  gap: var(--space-4);
+}
+.em-dialog p {
+  margin: 0;
+}
+.em-address {
+  overflow-wrap: anywhere;
+}
+
+@media print {
+  .em-resend {
+    display: none;
+  }
+}
