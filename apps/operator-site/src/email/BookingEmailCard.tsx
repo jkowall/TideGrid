@@ -218,7 +218,8 @@ export function BookingEmailCard({
           {sent && (
             <div ref={sentNotice} tabIndex={-1} className="em-sent">
               <Notice tone="success" title="Sent again">
-                A new {kindNames[sent.kind]} is on its way to {bookerEmail ?? "the guest"}.
+                A new {kindNames[sent.kind]} is on its way to{" "}
+                <span className="em-address">{bookerEmail ?? "the guest"}</span>.
                 {sent.kind === "confirmation" &&
                   " Its link replaces the ones in earlier emails once it is sent."}
               </Notice>
