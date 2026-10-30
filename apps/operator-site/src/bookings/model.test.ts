@@ -195,6 +195,13 @@ describe("addresses", () => {
     expect(bookingsHref("2026-11-04")).toBe("/bookings?day=2026-11-04");
     expect(bookingsHref("2026-11-04", trip)).toBe(`/bookings?day=2026-11-04&trip=${trip}`);
     expect(bookingsHref("2026-11-04", undefined)).toBe("/bookings?day=2026-11-04");
+    // G2.12e fix round: a source, after the trip.
+    expect(bookingsHref("2026-11-04", undefined, "staff_assisted")).toBe(
+      "/bookings?day=2026-11-04&source=staff_assisted",
+    );
+    expect(bookingsHref("2026-11-04", trip, "direct")).toBe(
+      `/bookings?day=2026-11-04&trip=${trip}&source=direct`,
+    );
   });
 
   it("reads back what it builds", () => {
@@ -205,6 +212,8 @@ describe("addresses", () => {
 
   it("builds a booking's and a roster's address from the id alone", () => {
     expect(bookingHref(mayaBooking.id)).toBe(`/bookings/${mayaBooking.id}`);
+    expect(bookingHref(mayaBooking.id, "direct")).toBe(`/bookings/${mayaBooking.id}?source=direct`);
+    expect(bookingHref(mayaBooking.id, undefined)).toBe(`/bookings/${mayaBooking.id}`);
     expect(rosterHref(trip)).toBe(`/trips/${trip}/roster`);
     // An id cannot change the path it sits in.
     expect(bookingHref("a/b?c#d")).toBe("/bookings/a%2Fb%3Fc%23d");

@@ -46,6 +46,7 @@ import {
   importedBooking,
   staffBody,
   staffBooking,
+  staffBookingTwoId,
 } from "./source-fixtures.ts";
 
 /**
@@ -259,6 +260,48 @@ describe("filtering by source (G2.12e)", () => {
     await waitFor(() => expect(window.location.search).toBe(""));
   });
 
+  // Review finding 2: Show more's answer belongs to the listing it was asked
+  // for. A refresh for another source that ends on the same cursor must not
+  // take the old listing's next page.
+  it("drops a Show more answer for the source the person has left, even when the new list ends on the same cursor", async () => {
+    window.history.replaceState(null, "", "/bookings?source=staff_assisted");
+    const more = deferred();
+    const refresh = deferred();
+    const secondStaff = { ...staffBooking, id: staffBookingTwoId, reference: "P4DESK77" };
+    const calls = api({
+      [route.day()]: [
+        () => json(staffBody({ nextAfter: staffBooking.id })),
+        more.answer,
+        refresh.answer,
+      ],
+    });
+    renderPage();
+    const sunset = await tripSection(/Sunset Harbor Cruise/);
+    fireEvent.click(screen.getByRole("button", { name: "Show more bookings" }));
+    await waitFor(() => expect(callsTo(calls, route.day())).toHaveLength(2));
+    // Every source, while the staff list's next page is still on its way.
+    fireEvent.change(sourceSelect(), { target: { value: "" } });
+    await waitFor(() => expect(callsTo(calls, route.day())).toHaveLength(3));
+    refresh.release(
+      json(
+        allSourcesBody({
+          bookings: [priyaBooking, mayaBooking, staffBooking],
+          nextAfter: staffBooking.id,
+        }),
+      ),
+    );
+    await waitFor(() => expect(busy()).toBeNull());
+    expect(rowsOf(sunset)).toHaveLength(2);
+    // The staff list's next page arrives last, with the cursor the new list ends on.
+    more.release(json(staffBody({ bookings: [secondStaff], nextAfter: null })));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(rowsOf(sunset).map((row) => text(row.querySelector(".bk-row__ref")))).toEqual([
+      "Booking QKG6ERBF",
+      "Booking K7DESK42",
+    ]);
+    expect(screen.getByRole("button", { name: "Show more bookings" })).toBeTruthy();
+  });
+
   it("asks for more of the filtered list with the cursor, the trip, and the source", async () => {
     window.history.replaceState(
       null,
@@ -369,6 +412,28 @@ describe("counts under a source filter (G2.12e)", () => {
   });
 });
 
+describe("a booking's link under a filter (G2.12e fix round)", () => {
+  it("carries the list's source to the booking, and nothing else", async () => {
+    window.history.replaceState(null, "", "/bookings?source=staff_assisted");
+    api({ [route.day()]: bySource() });
+    renderPage();
+    await tripSection(/Sunset Harbor Cruise/);
+    expect(screen.getByRole("link", { name: /^Booking\s?K7DESK42$/ }).getAttribute("href")).toBe(
+      `/bookings/${staffBooking.id}?source=staff_assisted`,
+    );
+    expectNoPersonalDataInAddresses();
+  });
+
+  it("links to a booking by its id alone when no filter is on", async () => {
+    api({ [route.day()]: bySource() });
+    renderPage();
+    await tripSection(/Sunset Harbor Cruise/);
+    expect(screen.getByRole("link", { name: /^Booking\s?K7DESK42$/ }).getAttribute("href")).toBe(
+      `/bookings/${staffBooking.id}`,
+    );
+  });
+});
+
 describe("the answer must be for the source asked (G2.12e)", () => {
   it.each([
     ["a filtered answer for another source", "?source=staff_assisted", directBody()],
@@ -429,6 +494,66 @@ describe("Book in a trip's header (G2.12e)", () => {
     await tripSection(/Sunset Harbor Cruise/);
     expect(bookLinks()).toHaveLength(0);
   });
+
+  // Review finding 3: Book follows the trip, whatever the count or the filter.
+  it.each(["owner", "booking_staff"] as const)(
+    "offers %s Book on an open trip with no bookings of the filter's source",
+    async (role) => {
+      window.history.replaceState(null, "", "/bookings?source=staff_assisted");
+      api({
+        [route.day()]: () =>
+          json(
+            asSeenBy(
+              role,
+              staffBody({
+                trips: [counted(bookable(charterTrip), 0, 0), counted(bookable(sunsetTrip), 0, 0)],
+                bookings: [],
+              }),
+            ),
+          ),
+      });
+      renderPage(role);
+      const sunset = await tripSection(/Sunset Harbor Cruise/);
+      expect(parts(sunset.querySelector(".bk-trip__meta"))).toEqual([
+        "Boat: Sea Lark",
+        "No staff bookings yet",
+      ]);
+      expect(
+        within(sunset)
+          .getByRole("link", { name: /^Book\b/ })
+          .getAttribute("href"),
+      ).toBe(`/trips/${tripIds.sunset}/book`);
+    },
+  );
+
+  it.each(["owner", "booking_staff"] as const)(
+    "offers %s Book on an open trip with nothing booked, unfiltered",
+    async (role) => {
+      api({
+        [route.day()]: () =>
+          json(
+            asSeenBy(
+              role,
+              allSourcesBody({
+                trips: [bookable(charterTrip), counted(bookable(sunsetTrip), 0, 0)],
+                bookings: [priyaBooking],
+              }),
+            ),
+          ),
+      });
+      renderPage(role);
+      const sunset = await tripSection(/Sunset Harbor Cruise/);
+      expect(parts(sunset.querySelector(".bk-trip__meta"))).toEqual([
+        "Boat: Sea Lark",
+        "No bookings yet",
+      ]);
+      expect(
+        within(sunset)
+          .getByRole("link", { name: /^Book\b/ })
+          .getAttribute("href"),
+      ).toBe(`/trips/${tripIds.sunset}/book`);
+    },
+  );
 
   it("never offers finance Book or a roster, filtered or not", async () => {
     window.history.replaceState(null, "", "/bookings?source=staff_assisted");

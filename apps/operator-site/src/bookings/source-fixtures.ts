@@ -16,6 +16,7 @@ import {
  */
 
 export const staffBookingId = "3c1f6a52-9d44-4e0b-8a6f-2b7d5c9e0a21";
+export const staffBookingTwoId = "3c1f6a52-9d44-4e0b-8a6f-2b7d5c9e0a23";
 
 /** A walk-up booked by staff on the sunset cruise. */
 export const staffBooking: BookingListItem = {

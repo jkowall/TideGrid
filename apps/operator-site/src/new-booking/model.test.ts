@@ -164,6 +164,12 @@ describe("words for the desk", () => {
     expect(sourceText("direct", null)).toBe("Online, by the guest");
   });
 
+  it("says only Staff booking for a channel it does not know (G2.12e fix round)", () => {
+    for (const channel of ["fax", "toString", "__proto__", ""]) {
+      expect(sourceText("staff_assisted", channel as never), channel).toBe("Staff booking");
+    }
+  });
+
   it.each([
     ["quote_expired", "requote"],
     ["insufficient_capacity", "edit"],
