@@ -32,6 +32,7 @@ import {
 import {
   bookingHref,
   bookingsHref,
+  bookingsText,
   clampDay,
   countText,
   dayBounds,
@@ -42,13 +43,16 @@ import {
   guestsText,
   instantText,
   isUuid,
+  noBookingsText,
   orderRows,
   partyDetail,
   paymentCopy,
   providerName,
   readDay,
+  readSource,
   readTrip,
   rosterHref,
+  sourceFilterOptions,
   spokenReference,
   timelineLabel,
 } from "./model.ts";
@@ -139,6 +143,50 @@ describe("the trip an address names", () => {
     for (const search of unreadable) {
       expect(readTrip(search), search).toBeUndefined();
     }
+  });
+});
+
+describe("the source an address names (G2.12e)", () => {
+  it("accepts the API's two sources, exactly", () => {
+    expect(readSource("?source=direct")).toBe("direct");
+    expect(readSource("?source=staff_assisted")).toBe("staff_assisted");
+    expect(readSource(`?day=2026-11-04&trip=${trip}&source=staff_assisted`)).toBe("staff_assisted");
+  });
+
+  it("accepts nothing else", () => {
+    for (const search of [
+      "",
+      "?source=",
+      "?source=STAFF_ASSISTED",
+      "?source=staff",
+      "?source=complimentary",
+      "?source=direct%20",
+      "?source=toString",
+      "?source=__proto__",
+      "?day=2026-11-04",
+    ]) {
+      expect(readSource(search), search).toBeUndefined();
+    }
+  });
+
+  it("offers every source, then the guest's own, then staff bookings", () => {
+    expect(sourceFilterOptions).toEqual([
+      { value: "", label: "All sources" },
+      { value: "direct", label: "Online, by the guest" },
+      { value: "staff_assisted", label: "Staff bookings" },
+    ]);
+  });
+
+  it("names the source in a count, and in none", () => {
+    expect(bookingsText(1)).toBe("1 booking");
+    expect(bookingsText(3)).toBe("3 bookings");
+    expect(bookingsText(1, "staff_assisted")).toBe("1 staff booking");
+    expect(bookingsText(2, "staff_assisted")).toBe("2 staff bookings");
+    expect(bookingsText(1, "direct")).toBe("1 online booking");
+    expect(bookingsText(4, "direct")).toBe("4 online bookings");
+    expect(noBookingsText()).toBe("No bookings");
+    expect(noBookingsText("staff_assisted")).toBe("No staff bookings");
+    expect(noBookingsText("direct")).toBe("No online bookings");
   });
 });
 

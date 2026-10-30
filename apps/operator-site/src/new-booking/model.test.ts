@@ -4,6 +4,7 @@ import {
   addOnLimit,
   bookerProblems,
   cleanBooker,
+  dayTripTakesBooking,
   emptyParty,
   guestsOf,
   newBookingHref,
@@ -13,7 +14,50 @@ import {
   quoteRequest,
   refusalOf,
   sourceText,
+  takesBooking,
 } from "./model.ts";
+
+describe("the Book rule (G2.12e, moved from the roster)", () => {
+  const now = new Date("2026-11-04T17:00:00Z");
+  const open = {
+    salesState: "published" as const,
+    startsAt: "2026-11-04T23:00:00.000Z",
+    salesCloseAt: "2026-11-04T22:00:00.000Z",
+    blackedOut: false,
+  };
+
+  it("takes a booking on sale, not blacked out, before its cutoff and its departure", () => {
+    expect(takesBooking(open, now)).toBe(true);
+    expect(dayTripTakesBooking(open, now)).toBe(true);
+  });
+
+  it.each([
+    ["closed", { salesState: "closed" as const }],
+    ["canceled", { salesState: "canceled" as const }],
+    ["blacked out", { blackedOut: true }],
+    ["past its cutoff", { salesCloseAt: "2026-11-04T16:59:59.000Z" }],
+    ["at its cutoff", { salesCloseAt: "2026-11-04T17:00:00.000Z" }],
+    [
+      "departed",
+      { startsAt: "2026-11-04T16:00:00.000Z", salesCloseAt: "2026-11-04T18:00:00.000Z" },
+    ],
+  ])("takes none %s", (_label, change) => {
+    expect(takesBooking({ ...open, ...change }, now)).toBe(false);
+    expect(dayTripTakesBooking({ ...open, ...change }, now)).toBe(false);
+  });
+
+  it("falls back to departure on a roster without the cutoff, as before", () => {
+    const { salesCloseAt: _close, blackedOut: _out, ...bare } = open;
+    expect(takesBooking(bare, now)).toBe(true);
+  });
+
+  it("fails closed on a day trip without either input", () => {
+    const { salesCloseAt: _close, ...noClose } = open;
+    const { blackedOut: _out, ...noBlackout } = open;
+    expect(dayTripTakesBooking(noClose, now)).toBe(false);
+    expect(dayTripTakesBooking(noBlackout, now)).toBe(false);
+  });
+});
 
 describe("the party (G2.12d)", () => {
   it("starts empty for shared seats and at the minimum for a charter", () => {
