@@ -11,9 +11,10 @@
  * is sent, and that supersedes the links earlier emails carried (they still
  * renew), so only the newest link opens the booking.
  *
- * Limits, counted from committed email_messages rows under the booking's row
- * lock, across every request and every staff member (owner decision D4 A,
- * 2026-10-29; a database trigger is a pre-pilot follow-up): at most 5
+ * Limits, counted from committed email_messages rows under the tenant's
+ * resend lock and the booking's row lock, across every request and every
+ * staff member, exactly (owner decision D4 A, 2026-10-29; a database trigger
+ * is a pre-pilot follow-up): at most 5
  * deliverable resends per booking for ever (attempted, or still waiting), at
  * least 10 minutes after the booking's newest resend of any state, and 50
  * resends an hour per operator. The generation is separate from the count:
@@ -275,17 +276,49 @@ export async function resendAvailability(
 }
 
 /**
+ * The operator's resends, one at a time: a transaction-scoped advisory lock
+ * per tenant, so the hourly count is read and written by one resend at a time
+ * and the cap is exact. Taken first, before any row lock, as checkout's
+ * advisory locks are; nothing else takes this key, so a resend waiting for it
+ * holds nothing another path needs (README, Lock order).
+ */
+async function lockTenantResends(trx: TenantTransaction, tenantId: string): Promise<void> {
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`tidegrid.booking_resend:${tenantId}`}, 0))`.execute(
+    trx,
+  );
+}
+
+/**
+ * The cancellation's refund row, shared: a refund being refused right now
+ * commits first and the refusal check then sees it, and one refused later
+ * waits for this transaction, so its follow-up email comes after the notice.
+ * Send path only: the messages read runs READ ONLY and takes no lock.
+ */
+async function lockCancellationRefund(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<void> {
+  await sql`
+    select r.id from booking_cancellations c
+      join payment_refunds r on r.tenant_id = c.tenant_id and r.id = c.refund_id
+     where c.tenant_id = ${tenantId} and c.booking_id = ${bookingId}
+       for share of r`.execute(trx);
+}
+
+/**
  * Send the booking's confirmation or cancellation notice again, in the
  * caller's transaction (the route's, which holds the idempotency key). The
- * order is fixed: the booking's row lock (`FOR NO KEY UPDATE`, never
- * `FOR UPDATE`, so the delivery job's key checks never wait behind it), then
- * the earlier emails of the same template that have not gone out, locked;
- * then every refusal, decided from what is committed, before any write; then,
- * under a savepoint, the earlier queued emails canceled as `resent` and the
- * new message written; then one audit row. A composer that refuses the
- * booking's data answers `email_invalid` with everything rolled back to the
- * savepoint. `at` replaces the database clock for the time limits, for tests;
- * the route never passes it.
+ * order is fixed: the tenant's resend lock (advisory); the booking's row lock
+ * (`FOR NO KEY UPDATE`, never `FOR UPDATE`, so the delivery job's key checks
+ * never wait behind it); the earlier emails of the same template that have
+ * not gone out (`FOR UPDATE`); for a cancellation notice, the refund row
+ * (`FOR SHARE`); then every refusal, decided from what is committed, before
+ * any write; then, under a savepoint, the earlier queued emails canceled as
+ * `resent` and the new message written; then one audit row. A composer that
+ * refuses the booking's data answers `email_invalid` with everything rolled
+ * back to the savepoint. `at` replaces the database clock for the time
+ * limits, for tests; the route never passes it.
  */
 export async function resendBookingEmail(
   trx: TenantTransaction,
@@ -304,6 +337,7 @@ export async function resendBookingEmail(
   const tenantId = ctx.tenantId;
   const template = templates[kind];
 
+  await lockTenantResends(trx, tenantId);
   const { rows: locked } = await sql<{ id: string }>`
     select id from bookings where tenant_id = ${tenantId} and id = ${bookingId}
        for no key update`.execute(trx);
@@ -316,6 +350,7 @@ export async function resendBookingEmail(
        and template = ${template.key} and state in ('queued', 'sending')
      order by created_at, id
        for update`.execute(trx);
+  if (kind === "cancellation") await lockCancellationRefund(trx, tenantId, bookingId);
 
   const at = options.at ?? (await databaseNow(trx));
   const refusal = await resendRefusal(trx, tenantId, bookingId, kind, at);
