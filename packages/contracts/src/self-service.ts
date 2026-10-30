@@ -302,10 +302,14 @@ export const BookingMessagesResponse = z.object({
 });
 export type BookingMessagesResponse = z.infer<typeof BookingMessagesResponse>;
 
-export const BookingEmailResendRequest = z.object({
-  kind: BookingEmailResendKind,
-  reason: BookingEmailResendReason,
-});
+export const BookingEmailResendRequest = z
+  .strictObject({
+    kind: BookingEmailResendKind,
+    reason: BookingEmailResendReason,
+  })
+  .describe(
+    "No address: the email goes to the booker's address on file. Any other field is refused (400)",
+  );
 export type BookingEmailResendRequest = z.infer<typeof BookingEmailResendRequest>;
 
 export const BookingEmailResendResponse = z.object({
