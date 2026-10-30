@@ -23,12 +23,16 @@
  * - a lost webhook delivery retried on the same key, a test payment on a
  *   canceled or expired checkout, and cancel racing pay;
  * - the per-staff open-checkout limit; and audit and outbox rows without
- *   booker data.
+ *   booker data;
+ * - G2.12e: the day list filtered by source, at two operators with direct and
+ *   staff-assisted bookings on one day, its counts, paging, cursors, and echo,
+ *   and the Book rule's inputs on each day trip, equal to the roster's.
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
   BookingDayTotalsResponse,
   BookingDetailResponse,
+  BookingListResponse,
   BookingSearchResponse,
   bookingDayExportColumns,
   QuoteResponse,
@@ -47,7 +51,9 @@ import {
 } from "@tidegrid/domain-booking";
 import {
   type CheckoutFixture,
+  confirmBooking,
   createCheckoutFixture,
+  fakeProvider,
   newSecret,
   quoteFor,
   TEST_FAKE_SECRET,
@@ -414,8 +420,10 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
     });
     app = createApp({ accessVerifier: verifier, deliverEmailAfterCommit: false });
     const [a, b] = await Promise.all([
-      createCheckoutFixture(admin, runtime.db, "g212d-api-a", { days: 30 }),
-      createCheckoutFixture(admin, runtime.db, "g212d-api-b", { days: 8 }),
+      // G2.12e keeps the last two days of A and the last day of B to itself:
+      // the allocator hands out days from the first, and no earlier test reaches them.
+      createCheckoutFixture(admin, runtime.db, "g212d-api-a", { days: 32 }),
+      createCheckoutFixture(admin, runtime.db, "g212d-api-b", { days: 9 }),
     ]);
     A = await withAccess(a, "g212d-a");
     B = await withAccess(b, "g212d-b");
@@ -1189,6 +1197,332 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
     for (const tripId of [blacked, late]) {
       expect((await offer(A.id, A.staff, tripId)).json.error?.code).toBe("trip_not_bookable");
     }
+  });
+
+  // G2.12e: the day list by source ------------------------------------------------------------
+
+  const dayPath = (t: string, q: Record<string, string | number | undefined>) => {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(q)) if (v !== undefined) params.set(k, String(v));
+    return `${base(t)}/bookings?${params}`;
+  };
+  type Source = "direct" | "staff_assisted";
+  const sources: (Source | undefined)[] = [undefined, "direct", "staff_assisted"];
+
+  /** A guest's own booking, confirmed through the verified fake event. */
+  const bookDirect = (t: Tenant, tripId: string, party: number, charter = false) =>
+    confirmBooking(runtime.db, fakeProvider(runtime.db), t, tripId, party, {
+      charter,
+      booker: booker("direct"),
+    });
+
+  /** The day's confirmed bookings by trip, of one source or of all, from the ledger. */
+  async function ledger(tenantId: string, date: string, source?: Source) {
+    const rows = await admin<{ trip_id: string; bookings: number; guests: number }[]>`
+      select t.id as trip_id,
+             count(b.id)::int as bookings, coalesce(sum(b.party_size), 0)::int as guests
+        from public.scheduled_trips t
+        left join public.bookings b
+          on b.trip_id = t.id and b.state = 'confirmed'
+         and (${source ?? null}::text is null or b.source::text = ${source ?? null}::text)
+       where t.tenant_id = ${tenantId} and t.local_date = ${date}::date
+       group by t.id`;
+    return Object.fromEntries(
+      rows.map((r) => [r.trip_id, { bookings: r.bookings, guests: r.guests }]),
+    );
+  }
+
+  /** The ids a day's list holds, of one source or of all, from the ledger, in the API's order. */
+  async function listedIds(tenantId: string, date: string, source?: Source) {
+    const rows = await admin<{ id: string }[]>`
+      select b.id from public.bookings b
+        join public.scheduled_trips t on t.id = b.trip_id
+       where b.tenant_id = ${tenantId} and t.local_date = ${date}::date
+         and (${source ?? null}::text is null or b.source::text = ${source ?? null}::text)
+       order by t.starts_at, t.id, b.confirmed_at, b.id`;
+    return rows.map((r) => r.id);
+  }
+
+  const countsOf = (list: BookingListResponse) =>
+    Object.fromEntries(
+      list.trips.map((t) => [t.tripId, { bookings: t.bookings, guests: t.guests }]),
+    );
+
+  interface MixedDay {
+    date: string;
+    shared: string;
+    charter: string;
+    staff: string[];
+    direct: string[];
+  }
+  let mixed: Promise<{ a: MixedDay; b: MixedDay }> | undefined;
+  /** One day at each operator with direct and staff-assisted bookings, built once. */
+  function mixedDays() {
+    mixed ??= (async () => {
+      const day = async (t: Tenant, at: number): Promise<MixedDay> => {
+        const shared = t.trips.shared.at(at) ?? "";
+        const charter = t.trips.charter.at(at) ?? "";
+        const date = await dateOf(shared);
+        expect(await dateOf(charter)).toBe(date);
+        return { date, shared, charter, staff: [], direct: [] };
+      };
+      const a = await day(A, -1);
+      const b = await day(B, -1);
+      const staffA = (as: string, trip: string, body: unknown, channel: Channel) =>
+        bookAsStaff(A, as, trip, body, channel).then((m) => m.bookingId);
+      a.staff.push(await staffA(A.staff, a.shared, tickets(a.shared, 2), "phone"));
+      a.direct.push((await bookDirect(A, a.shared, 3)).bookingId);
+      a.staff.push(await staffA(A.owner, a.charter, aboard(a.charter, 4), "walk_up"));
+      a.direct.push((await bookDirect(A, a.shared, 1)).bookingId);
+      a.staff.push(await staffA(A.staff, a.shared, tickets(a.shared, 1), "email"));
+      b.direct.push((await bookDirect(B, b.shared, 2)).bookingId);
+      b.staff.push(
+        (await bookAsStaff(B, B.staff, b.shared, tickets(b.shared, 1), "phone")).bookingId,
+      );
+      b.direct.push((await bookDirect(B, b.charter, 3, true)).bookingId);
+      return { a, b };
+    })();
+    return mixed;
+  }
+
+  it("G2.12e: lists only the asked source's bookings, with every trip and that source's counts, for every role", async () => {
+    const { a, b } = await mixedDays();
+    for (const as of [A.owner, A.staff, A.finance]) {
+      for (const source of sources) {
+        const res = await request("GET", dayPath(A.id, { date: a.date, source, limit: 200 }), {
+          as,
+        });
+        expect(res.status, res.text).toBe(200);
+        const list = BookingListResponse.parse(res.json);
+        // The echo: the source the page and counts are filtered to, or null.
+        expect(list.source).toBe(source ?? null);
+        const want =
+          source === "direct"
+            ? a.direct
+            : source === "staff_assisted"
+              ? a.staff
+              : [...a.staff, ...a.direct];
+        expect(new Set(list.bookings.map((x) => x.id))).toEqual(new Set(want));
+        expect(list.bookings.map((x) => x.id)).toEqual(await listedIds(A.id, a.date, source));
+        if (source) for (const x of list.bookings) expect(x.source).toBe(source);
+        // Never another operator's booking.
+        for (const id of [...b.staff, ...b.direct]) {
+          expect(list.bookings.some((x) => x.id === id)).toBe(false);
+        }
+        // Every trip of the day still lists, counted for the asked source only.
+        expect(countsOf(list)).toEqual(await ledger(A.id, a.date, source));
+        expect(list.trips.map((t) => t.tripId)).toEqual(
+          expect.arrayContaining([a.shared, a.charter]),
+        );
+        // Finance never gets the booker.
+        expect(keysOf(res.json).has("booker")).toBe(as !== A.finance);
+      }
+    }
+    // The fixture really is mixed: each filter holds bookings the other does not.
+    expect((await ledger(A.id, a.date, "staff_assisted"))[a.shared]).toEqual({
+      bookings: 2,
+      guests: 3,
+    });
+    expect((await ledger(A.id, a.date, "direct"))[a.shared]).toEqual({ bookings: 2, guests: 4 });
+    expect((await ledger(A.id, a.date, "direct"))[a.charter]).toEqual({ bookings: 0, guests: 0 });
+  });
+
+  it("G2.12e: pages a filtered day one booking at a time with no overlap or skip, and refuses a cursor outside the filter", async () => {
+    const { a, b } = await mixedDays();
+    for (const source of ["direct", "staff_assisted"] as const) {
+      const seen: string[] = [];
+      let after: string | undefined;
+      for (let page = 0; page < 10; page++) {
+        const res = await request("GET", dayPath(A.id, { date: a.date, source, limit: 1, after }), {
+          as: A.owner,
+        });
+        expect(res.status, res.text).toBe(200);
+        const list = BookingListResponse.parse(res.json);
+        expect(list.source).toBe(source);
+        expect(list.bookings.length).toBeLessThanOrEqual(1);
+        seen.push(...list.bookings.map((x) => x.id));
+        if (!list.nextAfter) break;
+        after = list.nextAfter;
+      }
+      expect(seen).toEqual(await listedIds(A.id, a.date, source));
+    }
+    const cases: [string, Record<string, string>][] = [
+      ["a direct booking, staff asked", { source: "staff_assisted", after: a.direct[0] ?? "" }],
+      ["a staff booking, direct asked", { source: "direct", after: a.staff[0] ?? "" }],
+      [
+        "a staff booking on another trip",
+        { source: "staff_assisted", tripId: a.shared, after: a.staff[1] ?? "" },
+      ],
+      ["another operator's staff booking", { source: "staff_assisted", after: b.staff[0] ?? "" }],
+    ];
+    for (const [label, q] of cases) {
+      const res = await request("GET", dayPath(A.id, { date: a.date, ...q }), { as: A.owner });
+      expect([label, res.status, res.json.error?.code]).toEqual([label, 400, "cursor_invalid"]);
+    }
+    // The same cursor is good where its booking is in the listing.
+    const fine = await request(
+      "GET",
+      dayPath(A.id, { date: a.date, source: "direct", after: a.direct[0] ?? "" }),
+      { as: A.owner },
+    );
+    expect(fine.status, fine.text).toBe(200);
+  });
+
+  it("G2.12e: keeps each operator's filter to its own bookings, and answers another operator's staff with the one 404", async () => {
+    const { a, b } = await mixedDays();
+    const res = await request("GET", dayPath(B.id, { date: b.date, source: "staff_assisted" }), {
+      as: B.finance,
+    });
+    expect(res.status, res.text).toBe(200);
+    const list = BookingListResponse.parse(res.json);
+    expect(list.bookings.map((x) => x.id)).toEqual(b.staff);
+    expect(countsOf(list)).toEqual(await ledger(B.id, b.date, "staff_assisted"));
+    // B's staff on A's route, filtered or not, get what an unknown operator gets.
+    const unknown = await request(
+      "GET",
+      dayPath(randomUUID(), { date: a.date, source: "staff_assisted" }),
+      { as: B.staff },
+    );
+    expect(unknown.status).toBe(404);
+    for (const source of sources) {
+      const other = await request("GET", dayPath(A.id, { date: a.date, source }), { as: B.staff });
+      expect([other.status, other.json.error?.code]).toEqual([
+        unknown.status,
+        unknown.json.error?.code,
+      ]);
+    }
+  });
+
+  it("G2.12e: refuses a repeated source, whether the values differ or not", async () => {
+    const { a } = await mixedDays();
+    for (const twice of ["source=direct&source=staff_assisted", "source=direct&source=direct"]) {
+      const res = await request("GET", `${dayPath(A.id, { date: a.date })}&${twice}`, {
+        as: A.owner,
+      });
+      expect([twice, res.status, res.json.error?.code]).toEqual([twice, 400, "validation_failed"]);
+    }
+  });
+
+  // Last of the cases on the mixed days: its blackouts close them to booking.
+  it("G2.12e: gives each day trip the roster's Book rule inputs, and another operator's blackout marks nothing", async () => {
+    const { a, b } = await mixedDays();
+    const ctxA = systemContext(A.id, "g212e-blackout");
+    const ctxB = systemContext(B.id, "g212e-blackout");
+    // A tenant-wide blackout at B on A's day first: A's trips stay open.
+    await inTenantTransaction(runtime.db, ctxB, (trx) =>
+      createBlackout(trx, ctxB, {
+        scope: { kind: "tenant", timeZone: "UTC" },
+        startsOn: a.date,
+        endsOn: a.date,
+        reason: "g212e other operator",
+      }),
+    );
+    const before = BookingListResponse.parse(
+      (await request("GET", dayPath(A.id, { date: a.date }), { as: A.staff })).json,
+    );
+    expect(before.trips.length).toBeGreaterThanOrEqual(2);
+    for (const t of before.trips) expect([t.tripId, t.blackedOut]).toEqual([t.tripId, false]);
+    // Then a product blackout at A on its shared trip.
+    await inTenantTransaction(runtime.db, ctxA, (trx) =>
+      createBlackout(trx, ctxA, {
+        scope: { kind: "product", productId: A.products.shared },
+        startsOn: a.date,
+        endsOn: a.date,
+        reason: "g212e product",
+      }),
+    );
+    for (const source of sources) {
+      for (const as of [A.owner, A.finance]) {
+        const res = await request("GET", dayPath(A.id, { date: a.date, source }), { as });
+        expect(res.status, res.text).toBe(200);
+        for (const trip of BookingListResponse.parse(res.json).trips) {
+          const [closes] = await admin<{ at: Date }[]>`
+            select t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as at
+              from public.scheduled_trips t join public.products p on p.id = t.product_id
+             where t.id = ${trip.tripId}`;
+          expect(trip.salesCloseAt).toBe(closes?.at.toISOString());
+          expect([trip.tripId, trip.blackedOut]).toEqual([trip.tripId, trip.tripId === a.shared]);
+          // The same values as the trip's roster.
+          const roster = await request("GET", `${base(A.id)}/trips/${trip.tripId}/roster`, {
+            as: A.staff,
+          });
+          const rosterTrip = TripRosterResponse.parse(roster.json).roster.trip;
+          expect({ salesCloseAt: trip.salesCloseAt, blackedOut: trip.blackedOut }).toEqual({
+            salesCloseAt: rosterTrip.salesCloseAt,
+            blackedOut: rosterTrip.blackedOut,
+          });
+        }
+      }
+    }
+    // A late trip, inside its cutoff, closed before now.
+    const lateTrip = A.trips.late[2] ?? "";
+    const lateDay = BookingListResponse.parse(
+      (await request("GET", dayPath(A.id, { date: await dateOf(lateTrip) }), { as: A.staff })).json,
+    );
+    const late = lateDay.trips.find((t) => t.tripId === lateTrip);
+    expect(Date.parse(late?.salesCloseAt ?? "")).toBeLessThan(Date.now());
+    expect(late?.blackedOut).toBe(false);
+    // B's own day is untouched by A's blackout.
+    const bDay = BookingListResponse.parse(
+      (await request("GET", dayPath(B.id, { date: b.date }), { as: B.staff })).json,
+    );
+    for (const t of bDay.trips) expect([t.tripId, t.blackedOut]).toEqual([t.tripId, false]);
+  });
+
+  // A filter's counts are of the bookings it lists, in one snapshot, even while
+  // both sources confirm on the trip. A count join that left out the source
+  // fails every filtered read here, not only a torn one.
+  it("G2.12e: keeps a filtered day's counts equal to the bookings it lists while staff and guest bookings confirm", async () => {
+    const shared = A.trips.shared.at(-2) ?? "";
+    const date = await dateOf(shared);
+    await bookAsStaff(A, A.staff, shared, tickets(shared, 1), "phone");
+    await bookDirect(A, shared, 1);
+    const reads: { source: Source | undefined; ok: boolean; detail: unknown }[] = [];
+    let confirming = true;
+    const reader = async (source: Source | undefined) => {
+      while (confirming) {
+        const res = await request("GET", dayPath(A.id, { date, source, limit: 200 }), {
+          as: A.owner,
+        });
+        if (res.status !== 200) throw new Error(`read: ${res.status} ${res.text}`);
+        const list = BookingListResponse.parse(res.json);
+        const trip = list.trips.find((t) => t.tripId === shared);
+        const own = list.bookings.filter((x) => x.tripId === shared && x.state === "confirmed");
+        const guests = own.reduce((n, x) => n + x.party.guests, 0);
+        const sourced = list.bookings.every((x) => !source || x.source === source);
+        reads.push({
+          source,
+          ok:
+            trip?.bookings === own.length &&
+            trip?.guests === guests &&
+            sourced &&
+            list.source === (source ?? null),
+          detail: {
+            counted: trip?.bookings,
+            listed: own.length,
+            guests: trip?.guests,
+            guests2: guests,
+          },
+        });
+      }
+    };
+    const readers = sources.flatMap((s) => [reader(s), reader(s)]);
+    try {
+      await Promise.all([
+        bookAsStaff(A, A.staff, shared, tickets(shared, 2), "walk_up"),
+        bookAsStaff(A, A.owner, shared, tickets(shared, 1), "email"),
+        bookDirect(A, shared, 2),
+        bookDirect(A, shared, 1),
+      ]);
+    } finally {
+      confirming = false;
+    }
+    await Promise.all(readers);
+    for (const s of sources) expect(reads.filter((r) => r.source === s).length).toBeGreaterThan(0);
+    expect(reads.filter((r) => !r.ok)).toEqual([]);
+    // At rest: three of each source on the trip.
+    expect((await ledger(A.id, date, "staff_assisted"))[shared]?.bookings).toBe(3);
+    expect((await ledger(A.id, date, "direct"))[shared]?.bookings).toBe(3);
   });
 
   // Acceptance 14 ----------------------------------------------------------------------------

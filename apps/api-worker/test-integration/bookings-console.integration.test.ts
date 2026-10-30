@@ -2109,6 +2109,32 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
       ["limit text", dayPath(A.id, { date: d0, limit: "ten" }), 400, "validation_failed"],
       ["trip id text", dayPath(A.id, { date: d0, tripId: "trip" }), 400, "validation_failed"],
       ["after text", dayPath(A.id, { date: d0, after: "cursor" }), 400, "validation_failed"],
+      // G2.12e: the source is the API's own value, exactly.
+      [
+        "source complimentary",
+        `${dayPath(A.id, { date: d0 })}&source=complimentary`,
+        400,
+        "validation_failed",
+      ],
+      ["source empty", `${dayPath(A.id, { date: d0 })}&source=`, 400, "validation_failed"],
+      [
+        "source in another case",
+        `${dayPath(A.id, { date: d0 })}&source=STAFF_ASSISTED`,
+        400,
+        "validation_failed",
+      ],
+      [
+        "source twice",
+        `${dayPath(A.id, { date: d0 })}&source=direct&source=staff_assisted`,
+        400,
+        "validation_failed",
+      ],
+      [
+        "after names a booking of another source",
+        `${dayPath(A.id, { date: d0, after: fx.rich.bookingId })}&source=staff_assisted`,
+        400,
+        "cursor_invalid",
+      ],
       ["after unknown", dayPath(A.id, { date: d0, after: randomUUID() }), 400, "cursor_invalid"],
       [
         "after names an exception",
@@ -2181,11 +2207,15 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
     const count = opened.length;
     const reads: { counted: number; listed: number; guests: number; listedGuests: number }[] = [];
     let confirming = true;
-    const reader = async () => {
+    // G2.12e: half the readers ask for direct bookings, which every one here is.
+    const echoes: string[] = [];
+    const reader = async (source?: "direct") => {
       while (confirming) {
-        const res = await get(dayPath(A.id, { date: fx.raceDay }), A.owner);
+        const path = dayPath(A.id, { date: fx.raceDay });
+        const res = await get(source ? `${path}&source=${source}` : path, A.owner);
         if (res.status !== 200) throw new Error(`read: ${res.status} ${res.text}`);
         const list = BookingListResponse.parse(res.json);
+        if (list.source !== (source ?? null)) echoes.push(String(list.source));
         const trip = list.trips.find((t) => t.tripId === tripId);
         const own = list.bookings.filter((b) => b.tripId === tripId);
         expect(list.nextAfter).toBeNull();
@@ -2197,7 +2227,7 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
         });
       }
     };
-    const readers = Array.from({ length: 6 }, () => reader());
+    const readers = Array.from({ length: 6 }, (_, i) => reader(i % 2 ? "direct" : undefined));
     try {
       await Promise.all(opened.map((o) => deliver(A, o, ["confirmed", "confirmed_reacquired"])));
     } finally {
@@ -2210,6 +2240,7 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
     );
     expect(reads.length).toBeGreaterThanOrEqual(8);
     expect(torn).toEqual([]);
+    expect(echoes).toEqual([]);
     // At rest the day agrees with itself.
     const settled = BookingListResponse.parse(
       (await get(dayPath(A.id, { date: fx.raceDay }), A.owner)).json,
