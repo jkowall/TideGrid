@@ -88,9 +88,19 @@ export const failureCopy: Record<MessageFailureCode, string> = {
 
 const knownCodes = new Set<string>(MESSAGE_FAILURE_CODES);
 
-/** A failure in words; a code the console does not know still reads as a sentence. */
-export function failureText(code: string | null): string | null {
+/** Templates whose email carries a link that opens something. */
+const linkTemplates = new Set(["booking_confirmation", "booking_manage_link", "waiver_request"]);
+
+/**
+ * A failure in words; a code the console does not know still reads as a
+ * sentence. An unknown outcome names the second working link only for an
+ * email that carries one.
+ */
+export function failureText(code: string | null, template = ""): string | null {
   if (code === null) return null;
+  if (code === "outcome_unknown" && !linkTemplates.has(template)) {
+    return "The email service did not answer, so TideGrid did not try again, to avoid sending it twice. Send it again if the guest did not get it.";
+  }
   if (knownCodes.has(code)) return failureCopy[code as MessageFailureCode];
   return "The email service reported a problem TideGrid doesn't describe yet.";
 }
@@ -199,6 +209,8 @@ export function resendFailureText(reason: string): string {
       return "This booking isn't here any more.";
     case "unreachable":
       return "The console can't reach TideGrid. Check your connection, then try again.";
+    case "key_reused":
+      return "An earlier try may have gone through. Check the list before sending it again.";
     default:
       return "TideGrid didn't send it. Try again in a moment.";
   }

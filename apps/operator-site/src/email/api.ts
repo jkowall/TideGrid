@@ -95,8 +95,9 @@ export type ResendResult =
       kind: "failed";
       /**
        * email_off, kind_mismatch, trip_over, refund_failed, limit, too_soon,
-       * rate_limited, in_progress, email_invalid, forbidden, signed_out,
-       * not_found, unreachable, unavailable
+       * rate_limited, in_progress, email_invalid, key_reused (the key went
+       * with another body: an earlier try may have gone through), forbidden,
+       * signed_out, not_found, unreachable, unavailable
        */
       reason: string;
       /**
@@ -117,6 +118,9 @@ const refusals: Record<string, string> = {
   booking_email_rate_limited: "rate_limited",
   booking_email_in_progress: "in_progress",
   booking_email_invalid: "email_invalid",
+  // The key went with another body before: that earlier try may have gone
+  // through, so this is final for the key, and the card reads again.
+  idempotency_key_reused: "key_reused",
 };
 
 /**

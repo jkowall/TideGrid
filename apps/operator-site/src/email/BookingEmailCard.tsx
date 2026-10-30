@@ -143,22 +143,27 @@ export function BookingEmailCard({
           tone="error"
           title="Email didn't load"
           actions={
-            <Button
-              icon="refresh"
-              busy={busy}
-              busyLabel="Trying again…"
-              onClick={() => {
-                retried.current = true;
-                reload();
-              }}
-            >
-              Try again
-            </Button>
+            // Signed out, trying again meets the same answer: sign in first.
+            load.reason === "signed_out" ? undefined : (
+              <Button
+                icon="refresh"
+                busy={busy}
+                busyLabel="Trying again…"
+                onClick={() => {
+                  retried.current = true;
+                  reload();
+                }}
+              >
+                Try again
+              </Button>
+            )
           }
         >
-          {load.reason === "forbidden"
-            ? "Your role can't see this booking's email."
-            : "TideGrid isn't responding right now. Try again in a moment."}
+          {load.reason === "signed_out"
+            ? "You're signed out. Sign in again to see this booking's email."
+            : load.reason === "forbidden"
+              ? "Your role can't see this booking's email."
+              : "TideGrid isn't responding right now. Try again in a moment."}
         </Notice>
       )}
       {data && (
@@ -175,7 +180,7 @@ export function BookingEmailCard({
             <ul className="em-list">
               {messages.map((m) => {
                 const state = stateView(m);
-                const failure = failureText(m.failureCode);
+                const failure = failureText(m.failureCode, m.template);
                 return (
                   <li key={m.id} className="em-item">
                     <div className="em-item__head">
@@ -217,11 +222,11 @@ export function BookingEmailCard({
           )}
           {sent && (
             <div ref={sentNotice} tabIndex={-1} className="em-sent">
-              <Notice tone="success" title="Sent again">
-                A new {kindNames[sent.kind]} is on its way to{" "}
-                <span className="em-address">{bookerEmail ?? "the guest"}</span>.
-                {sent.kind === "confirmation" &&
-                  " Its link replaces the ones in earlier emails once it is sent."}
+              {/* Queued, not delivered: the list says what the email service did with it. */}
+              <Notice tone="success" title="Queued to send again">
+                A new {kindNames[sent.kind]} is queued for{" "}
+                <span className="em-address">{bookerEmail ?? "the guest"}</span>. The list above
+                shows whether the email service took it.
               </Notice>
             </div>
           )}
@@ -240,6 +245,9 @@ export function BookingEmailCard({
             setSending(null);
             reload();
           }}
+          // The API decided against this send: what the card offers may have
+          // changed (a send that went through, a limit), so read it again.
+          onDecided={reload}
         />
       )}
     </section>
@@ -254,6 +262,7 @@ function ResendDialog({
   bookerEmail,
   onClose,
   onSent,
+  onDecided,
 }: {
   tenantId: string;
   bookingId: string;
@@ -262,15 +271,18 @@ function ResendDialog({
   bookerEmail: string | null;
   onClose: () => void;
   onSent: () => void;
+  /** The API answered with a final refusal: the card reads again. */
+  onDecided: () => void;
 }) {
   const [reason, setReason] = useState<BookingEmailResendReason | "">("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | undefined>();
-  // One key per send; the same key again when this send is retried after no
-  // answer, and a new one after the API decided, since a refusal is the
-  // stored answer for its key.
-  const key = useRef(newResendKey());
+  // One key per send, bound to what it sends: the same key again when the
+  // same send is retried after no answer; a new one when the reason changes
+  // (the API would refuse the old key with another body) and after the API
+  // decided, since a refusal is the stored answer for its key.
+  const key = useRef<{ value: string; reason: BookingEmailResendReason } | null>(null);
   const select = useRef<HTMLSelectElement>(null);
 
   const submit = async (event: FormEvent) => {
@@ -284,14 +296,18 @@ function ResendDialog({
     setFieldError(undefined);
     setError(null);
     setBusy(true);
-    const result = await resendBookingEmail(tenantId, bookingId, kind, reason, key.current);
+    if (key.current?.reason !== reason) key.current = { value: newResendKey(), reason };
+    const result = await resendBookingEmail(tenantId, bookingId, kind, reason, key.current.value);
     setBusy(false);
     if (result.kind === "sent") {
       onSent();
       return;
     }
-    if (result.final) key.current = newResendKey();
     setError(resendFailureText(result.reason));
+    if (result.final) {
+      key.current = null;
+      onDecided();
+    }
   };
 
   return (
@@ -319,7 +335,7 @@ function ResendDialog({
         </p>
         <p>
           {kind === "confirmation"
-            ? "It has the receipt, the trip, the policy, and a new booking link. Links in earlier emails stop working once it is sent; the guest can still ask for a new link from one."
+            ? "It has the receipt, the trip, the policy, and a new booking link. Links in earlier emails stop working once TideGrid starts sending it, even if that send fails; the guest can still ask for a new link from one."
             : "It says the booking is canceled and what its refund is now."}{" "}
           {remaining === 1
             ? "This is the last send again for this booking."
