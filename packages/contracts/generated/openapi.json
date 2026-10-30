@@ -9183,7 +9183,7 @@
           "bookings"
         ],
         "summary": "Bookings on trips departing on one local date",
-        "description": "Every role. The date's trips with their booking and guest counts, and a page of its bookings by departure, trip, and confirmation: reference, party, extras, total, and payment state. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
+        "description": "Every role. The date's trips with their booking and guest counts, when each trip's sales close and whether a blackout covers it, and a page of its bookings by departure, trip, and confirmation: reference, source, party, extras, total, and payment state. With source, the page and the trip counts are of that source only, every trip still lists, and the answer echoes it. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
         "security": [
           {
             "accessJwt": []
@@ -9227,6 +9227,20 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "staff_assisted"
+              ],
+              "description": "Only bookings of this source, and trip counts of this source (G2.12e). Every trip of the date still lists. Exactly direct or staff_assisted; any other value, an empty one, or a repeated source answers 400 validation_failed"
+            },
+            "required": false,
+            "description": "Only bookings of this source, and trip counts of this source (G2.12e). Every trip of the date still lists. Exactly direct or staff_assisted; any other value, an empty one, or a repeated source answers 400 validation_failed",
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 200,
@@ -9240,10 +9254,10 @@
             "schema": {
               "type": "string",
               "format": "uuid",
-              "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid"
+              "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, this trip when one is given, and this source when one is given) answers 400 cursor_invalid"
             },
             "required": false,
-            "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid",
+            "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, this trip when one is given, and this source when one is given) answers 400 cursor_invalid",
             "name": "after",
             "in": "query"
           }
@@ -9314,12 +9328,21 @@
                           "bookings": {
                             "type": "integer",
                             "minimum": 0,
-                            "description": "Confirmed bookings on the trip; canceled ones gave their seats back"
+                            "description": "Confirmed bookings on the trip, of the asked source when one is given; canceled ones gave their seats back"
                           },
                           "guests": {
                             "type": "integer",
                             "minimum": 0,
                             "description": "Guests across those bookings"
+                          },
+                          "salesCloseAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When sales close: departure less the booking cutoff, as the roster sends it (G2.12e; always sent)"
+                          },
+                          "blackedOut": {
+                            "type": "boolean",
+                            "description": "A blackout covers the trip, so it takes no booking, as the roster sends it (G2.12e; always sent)"
                           }
                         },
                         "required": [
@@ -9336,7 +9359,7 @@
                           "guests"
                         ]
                       },
-                      "description": "Every trip departing on the date, in any sales state, with its booking and guest counts across all pages; sorted by departure; at most 200"
+                      "description": "Every trip departing on the date, in any sales state, with its booking and guest counts across all pages (of the asked source when one is given); sorted by departure; at most 200"
                     },
                     "bookings": {
                       "type": "array",
@@ -9582,13 +9605,26 @@
                       ],
                       "format": "uuid",
                       "description": "Pass as after for the next page; null on the last page. The same cursor always returns the same page while nothing is booked in between"
+                    },
+                    "source": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "direct",
+                        "staff_assisted",
+                        null
+                      ],
+                      "description": "The source the page and the trip counts are filtered to; null for every source (G2.12e)"
                     }
                   },
                   "required": [
                     "date",
                     "trips",
                     "bookings",
-                    "nextAfter"
+                    "nextAfter",
+                    "source"
                   ],
                   "description": "Bookings on trips departing on one local date"
                 }
@@ -9596,7 +9632,7 @@
             }
           },
           "400": {
-            "description": "A malformed date, trip id, or limit (validation_failed), or a cursor that names no booking of this tenant (cursor_invalid)",
+            "description": "A malformed date, trip id, source, or limit, or a repeated source (validation_failed), or a cursor that names no booking in this listing (cursor_invalid)",
             "content": {
               "application/json": {
                 "schema": {
