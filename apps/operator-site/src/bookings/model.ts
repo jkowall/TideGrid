@@ -71,6 +71,39 @@ export function readTrip(search: string): string | undefined {
   return isUuid(value) ? value.toLowerCase() : undefined;
 }
 
+/** The sources the day list filters by (G2.12e): the API's own values. */
+export type ListSource = "direct" | "staff_assisted";
+
+/** `?source=` from the address, when it is exactly one of the API's sources. */
+export function readSource(search: string): ListSource | undefined {
+  const value = new URLSearchParams(search).get("source");
+  return value === "direct" || value === "staff_assisted" ? value : undefined;
+}
+
+/** The Source control's choices; the empty value is every source. */
+export const sourceFilterOptions: readonly { value: "" | ListSource; label: string }[] = [
+  { value: "", label: "All sources" },
+  { value: "direct", label: "Online, by the guest" },
+  { value: "staff_assisted", label: "Staff bookings" },
+];
+
+const bookingNouns: Record<ListSource | "all", [string, string]> = {
+  all: ["booking", "bookings"],
+  direct: ["online booking", "online bookings"],
+  staff_assisted: ["staff booking", "staff bookings"],
+};
+
+/** "1 booking", "2 staff bookings", "1 online booking": a count that names the filter's source. */
+export function bookingsText(count: number, source?: ListSource): string {
+  const [one, many] = bookingNouns[source ?? "all"];
+  return count === 1 ? `1 ${one}` : `${count} ${many}`;
+}
+
+/** "No bookings", "No staff bookings", "No online bookings". */
+export function noBookingsText(source?: ListSource): string {
+  return `No ${bookingNouns[source ?? "all"][1]}`;
+}
+
 /** The list's address: a day and, optionally, one trip. Ids and dates only. */
 export function bookingsHref(day: LocalDate, tripId?: string): string {
   const params = new URLSearchParams({ day });

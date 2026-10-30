@@ -180,6 +180,33 @@
   min-width: min(100%, 16rem);
   margin: 0;
 }
+/* The source beside the trip (G2.12e): its longest choice fits at 12rem. */
+.bk-filters__source {
+  flex: 0 1 16rem;
+  min-width: min(100%, 12rem);
+  margin: 0;
+}
+@media (min-width: 40rem) {
+  /* The totals keep the far end while the two controls sit together. */
+  .bk-filters__totals {
+    margin-inline-start: auto;
+  }
+}
+/* While a source filter is on: what the day's totals above still count. */
+.bk-filters__note {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.bk-filters__note .tg-icon {
+  flex: none;
+  margin-top: 0.15em;
+  color: var(--status-info);
+}
 .bk-filters__totals {
   margin: 0;
   padding-bottom: var(--space-3);
@@ -269,7 +296,8 @@
     justify-content: flex-start;
   }
 }
-.bk-trip__roster {
+.bk-trip__roster,
+.bk-trip__book {
   padding-inline: var(--space-3);
   font-size: var(--text-sm);
 }
@@ -311,6 +339,17 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-raised);
+}
+/* The reference, and under it who took a staff booking (G2.12e). */
+.bk-row__lead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.bk-row__source {
+  margin: 0;
 }
 .bk-row__ref {
   justify-self: start;
@@ -397,6 +436,10 @@
   }
   .bk-row__ref {
     margin-block: calc((var(--tap-min) - 1.5rem) / -2);
+  }
+  /* Clear of the reference's tap target, which reaches past its text. */
+  .bk-row__source {
+    margin-top: calc((var(--tap-min) - 1.5rem) / 2);
   }
   /* The facts take the row's remaining columns as its own. */
   .bk-row__facts {

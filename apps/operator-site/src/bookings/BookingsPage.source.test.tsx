@@ -92,6 +92,8 @@ const parts = (element: Element | null) =>
   [...(element?.children ?? [])].map((child) => text(child));
 const dayRequests = (calls: ReturnType<typeof api>) =>
   callsTo(calls, route.day()).map((c) => c.query.toString());
+/** The address's query as an object: the order of its parameters is not the point. */
+const params = () => Object.fromEntries(new URLSearchParams(window.location.search));
 const busy = () => document.querySelector(".bk-day")?.getAttribute("aria-busy");
 /** The day's totals, read: they ask from an effect of the commit that shows the trips. */
 const totalsRead = () =>
@@ -221,13 +223,13 @@ describe("filtering by source (G2.12e)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Next day" }));
     await screen.findByRole("heading", { name: "No trips on Thursday, November 5" });
-    expect(window.location.search).toBe("?day=2026-11-05&source=staff_assisted");
+    expect(params()).toEqual({ day: "2026-11-05", source: "staff_assisted" });
     fireEvent.click(screen.getByRole("button", { name: "Today" }));
     await tripSection(/Sunset Harbor Cruise/);
     expect(window.location.search).toBe("?source=staff_assisted");
     fireEvent.click(screen.getByRole("button", { name: "Previous day" }));
     await screen.findByRole("heading", { name: "No trips on Tuesday, November 3" });
-    expect(window.location.search).toBe("?day=2026-11-03&source=staff_assisted");
+    expect(params()).toEqual({ day: "2026-11-03", source: "staff_assisted" });
 
     expect(dayRequests(calls)).toEqual([
       `date=${wednesday}&tripId=${tripIds.sunset}&source=staff_assisted`,
@@ -481,7 +483,9 @@ describe("what each role asks for under a filter (G2.12e)", () => {
       [route.day()]: (call) =>
         call.query.get("after")
           ? json(staffBody({ bookings: [], nextAfter: null }))
-          : call.query.get("source") === "staff_assisted" && !call.query.get("tripId")
+          : call.query.get("source") === "staff_assisted" &&
+              call.query.get("date") === wednesday &&
+              !call.query.get("tripId")
             ? json(staffBody({ nextAfter: staffBooking.id }))
             : bySource()(call),
     });
@@ -504,7 +508,7 @@ describe("what each role asks for under a filter (G2.12e)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next day" }));
     await screen.findByRole("heading", { name: "No trips on Thursday, November 5" });
     expectNoPersonalDataInAddresses();
-    expect(window.location.search).toBe("?day=2026-11-05&source=staff_assisted");
+    expect(params()).toEqual({ day: "2026-11-05", source: "staff_assisted" });
     expect(callsTo(calls, route.day()).length).toBeGreaterThanOrEqual(5);
   });
 });

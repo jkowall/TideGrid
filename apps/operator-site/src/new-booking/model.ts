@@ -24,6 +24,36 @@ export const channelLabels: Record<BookingChannel, string> = {
   walk_up: "walk-up",
 };
 
+/** What the Book rule reads of a trip: the calendar's, the roster's, and the day list's. */
+export interface BookableTrip {
+  salesState: string;
+  startsAt: string;
+  salesCloseAt?: string | undefined;
+  blackedOut?: boolean | undefined;
+}
+
+/**
+ * Whether a trip still takes a staff booking (G2.12d): the calendar's Book
+ * rule, so the console never offers a booking the API refuses for these
+ * reasons. On sale, not blacked out, and before its cutoff and departure. A
+ * roster read from before G2.12d, without the cutoff, falls back to departure.
+ * The API still decides: it also refuses a full trip and an inactive product,
+ * location, or boat, and the new booking page says so.
+ */
+export function takesBooking(trip: BookableTrip, now: Date): boolean {
+  if (trip.salesState !== "published" || trip.blackedOut === true) return false;
+  const closes = Date.parse(trip.salesCloseAt ?? trip.startsAt);
+  return closes > now.getTime() && Date.parse(trip.startsAt) > now.getTime();
+}
+
+/**
+ * The Book rule for a trip on the day list (G2.12e). It fails closed: with
+ * either input missing, as from an API before G2.12e, it offers no Book.
+ */
+export function dayTripTakesBooking(trip: BookableTrip, now: Date): boolean {
+  return trip.salesCloseAt !== undefined && trip.blackedOut === false && takesBooking(trip, now);
+}
+
 /** "Staff booking, phone": how a booking's source reads beside it. */
 export function sourceText(source: string | undefined, channel: BookingChannel | null | undefined) {
   if (source !== "staff_assisted") return "Online, by the guest";
