@@ -24,9 +24,10 @@
  *   canceled or expired checkout, and cancel racing pay;
  * - the per-staff open-checkout limit; and audit and outbox rows without
  *   booker data;
- * - G2.12e: the day list filtered by source, at two operators with direct and
- *   staff-assisted bookings on one day, its counts, paging, cursors, and echo,
- *   and the Book rule's inputs on each day trip, equal to the roster's.
+ * - G2.12e: the day list filtered by source, at two operators that both have
+ *   direct and staff-assisted bookings on the same date, so only the tenant
+ *   keeps them apart: its counts, paging, cursors, and echo, and the Book
+ *   rule's inputs on each day trip, equal to the roster's.
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -421,9 +422,10 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
     app = createApp({ accessVerifier: verifier, deliverEmailAfterCommit: false });
     const [a, b] = await Promise.all([
       // G2.12e keeps the last two days of A and the last day of B to itself:
-      // the allocator hands out days from the first, and no earlier test reaches them.
+      // the allocator hands out days from the first, and no earlier test reaches
+      // them. Both run 32 days, so A's and B's last days share one date.
       createCheckoutFixture(admin, runtime.db, "g212d-api-a", { days: 32 }),
-      createCheckoutFixture(admin, runtime.db, "g212d-api-b", { days: 9 }),
+      createCheckoutFixture(admin, runtime.db, "g212d-api-b", { days: 32 }),
     ]);
     A = await withAccess(a, "g212d-a");
     B = await withAccess(b, "g212d-b");
@@ -1256,7 +1258,11 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
     direct: string[];
   }
   let mixed: Promise<{ a: MixedDay; b: MixedDay }> | undefined;
-  /** One day at each operator with direct and staff-assisted bookings, built once. */
+  /**
+   * One day at each operator with direct and staff-assisted bookings, built
+   * once. Both on the same date: a date filter alone never keeps B's bookings
+   * out of A's list, so the tenant has to.
+   */
   function mixedDays() {
     mixed ??= (async () => {
       const day = async (t: Tenant, at: number): Promise<MixedDay> => {
@@ -1268,6 +1274,7 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
       };
       const a = await day(A, -1);
       const b = await day(B, -1);
+      expect(b.date).toBe(a.date);
       const staffA = (as: string, trip: string, body: unknown, channel: Channel) =>
         bookAsStaff(A, as, trip, body, channel).then((m) => m.bookingId);
       a.staff.push(await staffA(A.staff, a.shared, tickets(a.shared, 2), "phone"));
@@ -1404,25 +1411,17 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
   });
 
   // Last of the cases on the mixed days: its blackouts close them to booking.
-  it("G2.12e: gives each day trip the roster's Book rule inputs, and another operator's blackout marks nothing", async () => {
+  it("G2.12e: gives each day trip the roster's Book rule inputs, and one operator's blackout never marks another's trips", async () => {
     const { a, b } = await mixedDays();
     const ctxA = systemContext(A.id, "g212e-blackout");
     const ctxB = systemContext(B.id, "g212e-blackout");
-    // A tenant-wide blackout at B on A's day first: A's trips stay open.
-    await inTenantTransaction(runtime.db, ctxB, (trx) =>
-      createBlackout(trx, ctxB, {
-        scope: { kind: "tenant", timeZone: "UTC" },
-        startsOn: a.date,
-        endsOn: a.date,
-        reason: "g212e other operator",
-      }),
-    );
-    const before = BookingListResponse.parse(
-      (await request("GET", dayPath(A.id, { date: a.date }), { as: A.staff })).json,
-    );
-    expect(before.trips.length).toBeGreaterThanOrEqual(2);
-    for (const t of before.trips) expect([t.tripId, t.blackedOut]).toEqual([t.tripId, false]);
-    // Then a product blackout at A on its shared trip.
+    const blackedOf = async (t: Tenant) =>
+      Object.fromEntries(
+        BookingListResponse.parse(
+          (await request("GET", dayPath(t.id, { date: a.date }), { as: t.staff })).json,
+        ).trips.map((trip) => [trip.tripId, trip.blackedOut]),
+      );
+    // A product blackout at A on its shared trip: B's trips on the same date stay open.
     await inTenantTransaction(runtime.db, ctxA, (trx) =>
       createBlackout(trx, ctxA, {
         scope: { kind: "product", productId: A.products.shared },
@@ -1431,6 +1430,18 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
         reason: "g212e product",
       }),
     );
+    expect(await blackedOf(B)).toEqual({ [b.shared]: false, [b.charter]: false });
+    // Then a tenant-wide blackout at B on the same date: it marks B's trips, never A's.
+    await inTenantTransaction(runtime.db, ctxB, (trx) =>
+      createBlackout(trx, ctxB, {
+        scope: { kind: "tenant", timeZone: "UTC" },
+        startsOn: a.date,
+        endsOn: a.date,
+        reason: "g212e other operator",
+      }),
+    );
+    expect(await blackedOf(B)).toEqual({ [b.shared]: true, [b.charter]: true });
+    expect(await blackedOf(A)).toEqual({ [a.shared]: true, [a.charter]: false });
     for (const source of sources) {
       for (const as of [A.owner, A.finance]) {
         const res = await request("GET", dayPath(A.id, { date: a.date, source }), { as });
@@ -1462,11 +1473,6 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
     const late = lateDay.trips.find((t) => t.tripId === lateTrip);
     expect(Date.parse(late?.salesCloseAt ?? "")).toBeLessThan(Date.now());
     expect(late?.blackedOut).toBe(false);
-    // B's own day is untouched by A's blackout.
-    const bDay = BookingListResponse.parse(
-      (await request("GET", dayPath(B.id, { date: b.date }), { as: B.staff })).json,
-    );
-    for (const t of bDay.trips) expect([t.tripId, t.blackedOut]).toEqual([t.tripId, false]);
   });
 
   // A filter's counts are of the bookings it lists, in one snapshot, even while
