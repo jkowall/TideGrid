@@ -194,15 +194,129 @@ export const MessageStatus = z
       .string()
       .nullable()
       .describe(
-        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled) or null",
+        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, or resent: a newer email replaced it) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically",
       ),
     provider: z.enum(["fake", "cloudflare"]).nullable(),
+    staffResend: z
+      .boolean()
+      .describe("True for an email staff sent again from the console (G2.16b)"),
     createdAt: Instant,
   })
   .describe("A message's delivery, without its recipient or content");
 export type MessageStatus = z.infer<typeof MessageStatus>;
 
+/**
+ * Every failure or cancellation code a message can carry today, from delivery,
+ * the adapters, and the modules that cancel messages. A client keeps copy for
+ * each and shows any other code generically.
+ */
+export const MESSAGE_FAILURE_CODES = [
+  "provider_unavailable",
+  "bounced",
+  "retries_exhausted",
+  "link_host_unmapped",
+  "send_error",
+  "outcome_unknown",
+  "invalid_message",
+  "recipient_suppressed",
+  "recipient_not_allowed",
+  "provider_rate_limited",
+  "provider_quota_exceeded",
+  "sender_not_verified",
+  "provider_account_suspended",
+  "recipient_changed",
+  "access_withdrawn",
+  "booking_canceled",
+  "resent",
+] as const;
+export type MessageFailureCode = (typeof MESSAGE_FAILURE_CODES)[number];
+
+// Sending a booking's email again (G2.16b) ------------------------------------------------------
+
+export const BookingEmailResendKind = z
+  .enum(["confirmation", "cancellation"])
+  .describe(
+    "confirmation: the confirmation with its receipt and a new management link, for a confirmed booking before its trip ends. cancellation: the cancellation notice, for a canceled booking whose refund has not failed",
+  );
+export type BookingEmailResendKind = z.infer<typeof BookingEmailResendKind>;
+
+export const BookingEmailResendReason = z
+  .enum([
+    "guest_did_not_receive",
+    "delivery_failed",
+    "delivery_unknown",
+    "guest_asked_again",
+    "other",
+  ])
+  .describe(
+    "Why staff send it again, as a code: the audit history records it, and finance reads that history, so it is never free text",
+  );
+export type BookingEmailResendReason = z.infer<typeof BookingEmailResendReason>;
+
+export const BookingEmailResendBlock = z
+  .enum([
+    "email_off",
+    "kind_mismatch",
+    "trip_over",
+    "refund_failed",
+    "limit",
+    "too_soon",
+    "rate_limited",
+    "in_progress",
+  ])
+  .describe(
+    "email_off: this environment sends no email. kind_mismatch: the booking's state has no email of that kind to send again. trip_over: the trip has ended. refund_failed: the refund failed, so the notice would say money is on its way when it is not. limit: sent again 5 times already. too_soon: sent again under 10 minutes ago. rate_limited: the operator sent 50 again in the last hour. in_progress: an earlier email of the same kind is being sent right now",
+  );
+export type BookingEmailResendBlock = z.infer<typeof BookingEmailResendBlock>;
+
+export const BookingEmailResendAvailability = z
+  .object({
+    kind: BookingEmailResendKind.nullable().describe(
+      "The email staff could send again for the booking's state",
+    ),
+    allowed: z.boolean(),
+    availableAt: Instant.nullable().describe(
+      "When the time limits that block it lift; null when none does",
+    ),
+    remaining: z
+      .number()
+      .int()
+      .min(0)
+      .max(5)
+      .describe("Sends again left: 5 less those that were attempted or are still queued"),
+    blockedBy: BookingEmailResendBlock.nullable().describe(
+      "The first refusal, in the send's order",
+    ),
+  })
+  .describe(
+    "Whether staff can send the booking's email again, at the moment of the read. Advisory: the send checks again under the booking's lock",
+  );
+export type BookingEmailResendAvailability = z.infer<typeof BookingEmailResendAvailability>;
+
 export const BookingMessagesResponse = z.object({
   messages: z.array(MessageStatus).describe("Oldest first"),
+  emailDelivery: z
+    .enum(["on", "off"])
+    .describe("off: this environment sends no email, so messages stay queued"),
+  resend: BookingEmailResendAvailability,
 });
 export type BookingMessagesResponse = z.infer<typeof BookingMessagesResponse>;
+
+export const BookingEmailResendRequest = z.object({
+  kind: BookingEmailResendKind,
+  reason: BookingEmailResendReason,
+});
+export type BookingEmailResendRequest = z.infer<typeof BookingEmailResendRequest>;
+
+export const BookingEmailResendResponse = z.object({
+  message: z.object({
+    id: z.uuid(),
+    generation: z
+      .number()
+      .int()
+      .min(1)
+      .describe("1 for the booking's first email sent again, then 2, and so on"),
+    queuedAt: Instant,
+  }),
+});
+export type BookingEmailResendResponse = z.infer<typeof BookingEmailResendResponse>;

@@ -65,6 +65,25 @@ export {
   type DayReportTotals,
   totalsOf,
 } from "./day-report.ts";
+// Staff resend of a booking's email (G2.16b).
+export {
+  MAX_OPERATOR_RESENDS_PER_HOUR,
+  MAX_STAFF_RESENDS,
+  RESEND_REASONS,
+  RESEND_REFUSAL_ORDER,
+  type ResendAvailability,
+  type ResendFacts,
+  type ResendKind,
+  type ResendReason,
+  type ResendRefusal,
+  type ResendRefusalCode,
+  type ResendResult,
+  refusalsOf,
+  resendAvailability,
+  resendBookingEmail,
+  resendRefusal,
+  STAFF_RESEND_INTERVAL_MINUTES,
+} from "./email-resend.ts";
 export {
   CANCELED_TEMPLATE,
   CONFIRMATION_TEMPLATE,

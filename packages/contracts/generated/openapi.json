@@ -11682,7 +11682,7 @@
                               "string",
                               "null"
                             ],
-                            "description": "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled) or null"
+                            "description": "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, or resent: a newer email replaced it) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically"
                           },
                           "provider": {
                             "type": [
@@ -11694,6 +11694,10 @@
                               "cloudflare",
                               null
                             ]
+                          },
+                          "staffResend": {
+                            "type": "boolean",
+                            "description": "True for an email staff sent again from the console (G2.16b)"
                           },
                           "createdAt": {
                             "type": "string",
@@ -11713,15 +11717,86 @@
                           "canceledAt",
                           "failureCode",
                           "provider",
+                          "staffResend",
                           "createdAt"
                         ],
                         "description": "A message's delivery, without its recipient or content"
                       },
                       "description": "Oldest first"
+                    },
+                    "emailDelivery": {
+                      "type": "string",
+                      "enum": [
+                        "on",
+                        "off"
+                      ],
+                      "description": "off: this environment sends no email, so messages stay queued"
+                    },
+                    "resend": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "confirmation",
+                            "cancellation",
+                            null
+                          ],
+                          "description": "The email staff could send again for the booking's state"
+                        },
+                        "allowed": {
+                          "type": "boolean"
+                        },
+                        "availableAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time",
+                          "description": "When the time limits that block it lift; null when none does"
+                        },
+                        "remaining": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 5,
+                          "description": "Sends again left: 5 less those that were attempted or are still queued"
+                        },
+                        "blockedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "email_off",
+                            "kind_mismatch",
+                            "trip_over",
+                            "refund_failed",
+                            "limit",
+                            "too_soon",
+                            "rate_limited",
+                            "in_progress",
+                            null
+                          ],
+                          "description": "The first refusal, in the send's order"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "allowed",
+                        "availableAt",
+                        "remaining",
+                        "blockedBy"
+                      ],
+                      "description": "Whether staff can send the booking's email again, at the moment of the read. Advisory: the send checks again under the booking's lock"
                     }
                   },
                   "required": [
-                    "messages"
+                    "messages",
+                    "emailDelivery",
+                    "resend"
                   ]
                 }
               }
