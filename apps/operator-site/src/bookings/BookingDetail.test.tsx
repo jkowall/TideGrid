@@ -275,12 +275,29 @@ describe("one booking", () => {
   });
 
   it("gives finance no email card, and asks the API for no messages (G2.16b)", async () => {
-    const calls = api({ [route.booking(bookingId)]: answer("finance") });
+    // The messages route is named, so a request to it is recorded in `calls`
+    // rather than taken by the fixtures' default answer (review fix round).
+    const messages = `GET /api/v1/staff/tenants/${tenantId}/bookings/${bookingId}/messages`;
+    const calls = api({
+      [route.booking(bookingId)]: answer("finance"),
+      [messages]: () =>
+        json({
+          messages: [],
+          emailDelivery: "on",
+          resend: {
+            kind: "confirmation",
+            allowed: true,
+            availableAt: null,
+            remaining: 5,
+            blockedBy: null,
+          },
+        }),
+    });
     renderDetail("finance");
     await loaded();
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(screen.queryByRole("region", { name: "Email" })).toBeNull();
     expect(calls.filter((c) => c.path.endsWith("/messages"))).toEqual([]);
+    expect(screen.queryByRole("region", { name: "Email" })).toBeNull();
   });
 
   it("shows a charter's guests and what was sold, with no ticket list", async () => {

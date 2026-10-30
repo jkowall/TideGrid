@@ -32,8 +32,12 @@ describe("a booking's email in words (G2.16b)", () => {
   });
 
   it("says what the three codes staff act on mean", () => {
-    expect(failureText("outcome_unknown")).toBe(
+    expect(failureText("outcome_unknown", "booking_confirmation")).toBe(
       "The email service did not answer, so TideGrid did not try again, to avoid a second working link. Send it again if the guest did not get it.",
+    );
+    // An email without a link (the review's nit): no promise about a link.
+    expect(failureText("outcome_unknown", "booking_canceled")).toBe(
+      "The email service did not answer, so TideGrid did not try again, to avoid sending it twice. Send it again if the guest did not get it.",
     );
     expect(failureText("resent")).toBe("Replaced by a newer email before it went out.");
     expect(failureText("bounced")).toContain("refused it");
@@ -169,6 +173,8 @@ describe("a booking's email in words (G2.16b)", () => {
       "signed_out",
       "not_found",
       "unreachable",
+      // Fix round: a reused key means an earlier try may have gone through.
+      "key_reused",
     ]) {
       expect(resendFailureText(reason), reason).not.toBe(generic);
     }

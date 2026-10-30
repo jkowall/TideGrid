@@ -265,9 +265,11 @@ describe("sending it again (G2.16b)", () => {
       target: { value: "delivery_unknown" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
-    const notice = await screen.findByText("Sent again");
+    const notice = await screen.findByText("Queued to send again");
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(text(card())).toContain(`A new confirmation is on its way to ${bookerEmail}.`);
+    expect(text(card())).toContain(
+      `A new confirmation is queued for ${bookerEmail}. The list above shows whether the email service took it.`,
+    );
     expect(document.activeElement?.contains(notice)).toBe(true);
 
     const [post] = sends(calls);
@@ -308,7 +310,7 @@ describe("sending it again (G2.16b)", () => {
       target: { value: "guest_asked_again" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
-    await screen.findByText("Sent again");
+    await screen.findByText("Queued to send again");
     expect(sends(calls)[0]?.body).toEqual({ kind: "cancellation", reason: "guest_asked_again" });
   });
 
@@ -340,7 +342,7 @@ describe("sending it again (G2.16b)", () => {
     send();
     await within(dialog).findByText(resendFailureText("too_soon"));
     send();
-    await screen.findByText("Sent again");
+    await screen.findByText("Queued to send again");
     const keys = sends(calls).map((c) => c.headers.get("Idempotency-Key"));
     expect(keys).toHaveLength(3);
     expect(keys[1]).toBe(keys[0]);
@@ -411,10 +413,162 @@ describe("sending it again (G2.16b)", () => {
         target: { value: "guest_did_not_receive" },
       });
       fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
-      await screen.findByText("Sent again");
+      await screen.findByText("Queued to send again");
       expect(sends(calls)).toHaveLength(1);
     } finally {
       observer.disconnect();
     }
+  });
+});
+
+describe("the review's fixes (G2.16b fix round)", () => {
+  const created = (id: string) =>
+    json(201, { message: { id, generation: 1, queuedAt: "2026-11-04T19:00:00.000Z" } });
+
+  async function openDialog(reason: string) {
+    fireEvent.click(within(card()).getByRole("button", { name: "Send the confirmation again" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: reason } });
+    return dialog;
+  }
+
+  it("takes a new key when the reason changes after no answer, so the server's answer is the truth", async () => {
+    let posts = 0;
+    const calls = stubApi((call) => {
+      if (call.method !== "POST") return json(200, messagesBody());
+      posts += 1;
+      // The first send went through; its answer was lost.
+      if (posts === 1) throw new TypeError("Failed to fetch");
+      return apiError(409, "booking_email_too_soon");
+    });
+    renderCard();
+    await settled();
+    const dialog = await openDialog("guest_did_not_receive");
+    const send = () => fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
+    send();
+    await within(dialog).findByText(resendFailureText("unreachable"));
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: "other" } });
+    send();
+    await within(dialog).findByText(resendFailureText("too_soon"));
+    const [first, second] = sends(calls);
+    expect(second?.body).toEqual({ kind: "confirmation", reason: "other" });
+    expect(second?.headers.get("Idempotency-Key")).not.toBe(first?.headers.get("Idempotency-Key"));
+  });
+
+  it("reads a reused key as an earlier try that may have gone through, and reads the card again", async () => {
+    const calls = stubApi((call) =>
+      call.method === "POST" ? apiError(422, "idempotency_key_reused") : json(200, messagesBody()),
+    );
+    renderCard();
+    await settled();
+    const dialog = await openDialog("other");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
+    const alert = await within(dialog).findByRole("alert");
+    expect(text(alert)).toContain(resendFailureText("key_reused"));
+    expect(resendFailureText("key_reused")).toMatch(/may have gone through/);
+    await waitFor(() => expect(reads(calls)).toHaveLength(2));
+  });
+
+  it("reads the card again after a final refusal, so what it offers is current", async () => {
+    const calls = stubApi((call) =>
+      call.method === "POST" ? apiError(409, "booking_email_too_soon") : json(200, messagesBody()),
+    );
+    renderCard();
+    await settled();
+    const dialog = await openDialog("other");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
+    await within(dialog).findByText(resendFailureText("too_soon"));
+    await waitFor(() => expect(reads(calls)).toHaveLength(2));
+  });
+
+  it("says the email is queued, not on its way, and leaves delivery to the list", async () => {
+    let sent = false;
+    const failed = "99999999-0000-4000-8000-000000000010";
+    stubApi((call) => {
+      if (call.method === "POST") {
+        sent = true;
+        return created(failed);
+      }
+      return json(
+        200,
+        sent
+          ? messagesBody({
+              messages: [
+                message(),
+                message({
+                  id: failed,
+                  staffResend: true,
+                  state: "failed",
+                  sentAt: null,
+                  failedAt: "2026-11-04T19:00:05.000Z",
+                  failureCode: "bounced",
+                }),
+              ],
+              resend: availability({ allowed: false, blockedBy: "too_soon" }),
+            })
+          : messagesBody(),
+      );
+    });
+    renderCard();
+    await settled();
+    const dialog = await openDialog("delivery_failed");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
+    await screen.findByText("Queued to send again");
+    await waitFor(() => expect(text(items()[1])).toContain("Failed"));
+    const notice = text(card().querySelector(".em-sent"));
+    expect(notice).toContain("is queued for");
+    expect(notice).toContain("The list above shows whether the email service took it.");
+    expect(notice).not.toMatch(/on its way|Sent again/);
+  });
+
+  it("says earlier links stop working once TideGrid starts sending it, even if that send fails", async () => {
+    stubApi(() => json(200, messagesBody()));
+    renderCard();
+    await settled();
+    const dialog = await openDialog("other");
+    expect(text(dialog)).toContain(
+      "Links in earlier emails stop working once TideGrid starts sending it, even if that send fails; the guest can still ask for a new link from one.",
+    );
+  });
+
+  it("hands focus to the heading when Try again's answer commits, before passive effects run", async () => {
+    // The list item appears in the commit that ends Try again. A MutationObserver
+    // callback runs after that commit and before its passive effects flush, the
+    // order a preempted CI runner produces: focus must have moved already.
+    let first = true;
+    stubApi(() => {
+      if (first) {
+        first = false;
+        return apiError(500, "internal_error");
+      }
+      return json(200, messagesBody());
+    });
+    renderCard();
+    const retry = within(await screen.findByRole("alert")).getByRole("button", {
+      name: "Try again",
+    });
+    let focusedWhenListed: Element | null | undefined;
+    const observer = new MutationObserver(() => {
+      if (focusedWhenListed === undefined && document.querySelector(".em-item")) {
+        focusedWhenListed = document.activeElement;
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      retry.focus();
+      fireEvent.click(retry);
+      await waitFor(() => expect(focusedWhenListed).toBeDefined());
+    } finally {
+      observer.disconnect();
+    }
+    expect(focusedWhenListed).toBe(screen.getByRole("heading", { name: "Email" }));
+  });
+
+  it("asks a signed-out person to sign in again, with no Try again", async () => {
+    stubApi(() => apiError(401, "unauthenticated"));
+    renderCard();
+    const alert = await screen.findByRole("alert");
+    expect(text(alert)).toContain("You're signed out. Sign in again to see this booking's email.");
+    expect(within(alert).queryByRole("button")).toBeNull();
   });
 });
