@@ -38,6 +38,7 @@ import {
   orderRows,
   paymentCopy,
   providerName,
+  readSource,
   rosterHref,
   timelineLabel,
 } from "./model.ts";
@@ -217,7 +218,11 @@ function Detail({
   return (
     <div className="bd">
       <div className="bd-top">
-        <ConsoleLink href={bookingsHref(trip.localDate)} className="bd-back tap-target">
+        {/* Back to the list it came from: a source filter in this address (G2.12e) goes too. */}
+        <ConsoleLink
+          href={bookingsHref(trip.localDate, undefined, readSource(window.location.search))}
+          className="bd-back tap-target"
+        >
           <Icon name="arrow-left" />
           <span>Bookings on {dayText(trip.localDate, "medium", today)}</span>
         </ConsoleLink>
@@ -231,7 +236,10 @@ function Detail({
         </div>
       </div>
       <p className="bd-lede">
-        Booked online by the guest. Confirmed {instantText(booking.confirmedAt, zone)}.
+        {booking.source === "staff_assisted"
+          ? `${sourceText(booking.source, booking.channel)}.`
+          : "Booked online by the guest."}{" "}
+        Confirmed {instantText(booking.confirmedAt, zone)}.
         {booking.reacquired &&
           " The payment arrived after the checkout's hold ran out, and the seats were still free."}
         {booking.cancellation &&

@@ -122,6 +122,8 @@ export function BookingsPage({
   const focusDayOnLoad = useRef(false);
   /** The last page took Show more bookings with it: its first booking takes focus. */
   const focusBookingId = useRef<string | null>(null);
+  /** Show more's request, which belongs to the listing it was asked for. */
+  const moreRequest = useRef<AbortController | null>(null);
   const today = todayIn(zone);
   const bounds = dayBounds(today);
 
@@ -140,6 +142,10 @@ export function BookingsPage({
     void attempt;
     if (!day) return;
     const controller = new AbortController();
+    // A new listing: the last one's next page, still on its way, is not its own,
+    // even when the new listing ends on the same cursor.
+    moreRequest.current?.abort();
+    moreRequest.current = null;
     const retry = retryRequested.current;
     const keep = keepList.current;
     retryRequested.current = false;
@@ -249,27 +255,32 @@ export function BookingsPage({
     if (load.kind !== "ready" || load.refreshing || !load.page.nextAfter || !day) return;
     const after = load.page.nextAfter;
     setLoad({ ...load, more: "loading" });
-    void loadDay(tenantId, { date: day, tripId, source, after }).then((result) => {
-      setLoad((current) => {
-        if (current.kind !== "ready" || current.refreshing || current.page.nextAfter !== after) {
-          return current;
-        }
-        if (result.kind !== "ok") return { ...current, more: "failed" };
-        if (result.value.nextAfter === null) {
-          focusBookingId.current = result.value.bookings[0]?.id ?? "";
-        }
-        return {
-          kind: "ready",
-          more: "idle",
-          refreshing: false,
-          page: {
-            trips: result.value.trips,
-            bookings: [...current.page.bookings, ...result.value.bookings],
-            nextAfter: result.value.nextAfter,
-          },
-        };
-      });
-    });
+    const controller = new AbortController();
+    moreRequest.current = controller;
+    void loadDay(tenantId, { date: day, tripId, source, after }, controller.signal).then(
+      (result) => {
+        if (controller.signal.aborted) return;
+        setLoad((current) => {
+          if (current.kind !== "ready" || current.refreshing || current.page.nextAfter !== after) {
+            return current;
+          }
+          if (result.kind !== "ok") return { ...current, more: "failed" };
+          if (result.value.nextAfter === null) {
+            focusBookingId.current = result.value.bookings[0]?.id ?? "";
+          }
+          return {
+            kind: "ready",
+            more: "idle",
+            refreshing: false,
+            page: {
+              trips: result.value.trips,
+              bookings: [...current.page.bookings, ...result.value.bookings],
+              nextAfter: result.value.nextAfter,
+            },
+          };
+        });
+      },
+    );
   };
 
   const page = load.kind === "ready" ? load.page : null;
@@ -725,7 +736,7 @@ function TripBookings({
           designed empty state when the list shows it alone; one whose bookings
           are on a later page says where they are. */}
       {bookings.length > 0 ? (
-        <BookingRows bookings={bookings} seesGuests={seesGuests} />
+        <BookingRows bookings={bookings} seesGuests={seesGuests} source={source} />
       ) : !complete && trip.bookings > 0 ? (
         <p className="bk-trip__none">Not loaded yet. Choose Show more bookings below.</p>
       ) : alone && trip.bookings === 0 && source ? (
@@ -763,9 +774,12 @@ function TripBookings({
 function BookingRows({
   bookings,
   seesGuests,
+  source,
 }: {
   bookings: BookingListItem[];
   seesGuests: boolean;
+  /** The list's source filter: a booking's link carries it, so its way back keeps it. */
+  source: ListSource | undefined;
 }) {
   return (
     <div className={seesGuests ? "bk-table" : "bk-table bk-table--no-booker"}>
@@ -786,7 +800,7 @@ function BookingRows({
             <li key={b.id} className="bk-row">
               <div className="bk-row__lead">
                 <ConsoleLink
-                  href={bookingHref(b.id)}
+                  href={bookingHref(b.id, source)}
                   className="bk-row__ref tap-target"
                   data-booking={b.id}
                 >

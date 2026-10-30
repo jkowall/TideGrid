@@ -104,14 +104,22 @@ export function noBookingsText(source?: ListSource): string {
   return `No ${bookingNouns[source ?? "all"][1]}`;
 }
 
-/** The list's address: a day and, optionally, one trip. Ids and dates only. */
-export function bookingsHref(day: LocalDate, tripId?: string): string {
+/** The list's address: a day and, optionally, one trip and one source. Ids, dates, and a source only. */
+export function bookingsHref(day: LocalDate, tripId?: string, source?: ListSource): string {
   const params = new URLSearchParams({ day });
   if (tripId) params.set("trip", tripId);
+  if (source) params.set("source", source);
   return `/bookings?${params}`;
 }
 
-export const bookingHref = (bookingId: string) => `/bookings/${encodeURIComponent(bookingId)}`;
+/**
+ * A booking's address. From a list filtered by source (G2.12e), it carries the
+ * source, so the booking's link back returns to the same filtered list.
+ */
+export function bookingHref(bookingId: string, source?: ListSource): string {
+  const path = `/bookings/${encodeURIComponent(bookingId)}`;
+  return source ? `${path}?${new URLSearchParams({ source })}` : path;
+}
 export const rosterHref = (tripId: string) => `/trips/${encodeURIComponent(tripId)}/roster`;
 
 // Parties, extras, and payments -------------------------------------------------------
