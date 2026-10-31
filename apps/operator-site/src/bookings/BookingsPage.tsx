@@ -25,32 +25,40 @@ import { salesStates } from "../calendar/model.ts";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink, useNavigate } from "../navigation.tsx";
+import { dayTripTakesBooking, newBookingHref, sourceText } from "../new-booking/model.ts";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
-import { canSeeGuests, roleNames } from "../roles.ts";
+import { canCreateBookings, canSeeGuests, roleNames } from "../roles.ts";
 import { type DayPage, findReference, loadDay } from "./api.ts";
 import { DayTotals } from "./DayTotals.tsx";
 import {
   bookingHref,
   bookingStates,
+  bookingsText,
   clampDay,
   dayBounds,
   dayText,
   extrasText,
   guestsText,
+  type ListSource,
+  noBookingsText,
   partyDetail,
   paymentCopy,
   readDay,
+  readSource,
   readTrip,
   rosterHref,
+  sourceFilterOptions,
 } from "./model.ts";
 import { ReadFailed } from "./States.tsx";
 
 /**
  * A day's bookings for the selected operator (G2.12b): every trip departing
- * that day on the marina's clock, each with its bookings. The day and an
- * optional trip live in the address (`?day=`, `?trip=`), so a reload, a link
- * from the calendar, and Back all show the same list. Quick find opens a
- * booking from the reference a guest quotes.
+ * that day on the marina's clock, each with its bookings. The day, an
+ * optional trip, and an optional source (G2.12e) live in the address
+ * (`?day=`, `?trip=`, `?source=`), so a reload, a link from the calendar, and
+ * Back all show the same list. Quick find opens a booking from the reference
+ * a guest quotes. Owners and booking staff book a guest from a trip's header
+ * while the trip still takes a booking (G2.12e).
  *
  * Owners and booking staff see each booker's name. Finance sees the same
  * bookings, parties, totals, and payments without it: the API never sends it.
@@ -89,6 +97,11 @@ export function BookingsPage({
       : null,
   );
   const [tripId, setTripId] = useState<string | undefined>(() => readTrip(window.location.search));
+  // A source the address names exactly; anything else is ignored and dropped.
+  const [source, setSource] = useState<ListSource | undefined>(() =>
+    readSource(window.location.search),
+  );
+  const canBook = canCreateBookings(role);
   // A day in the address beyond two years of today opens the nearest day
   // that is not, and says so (G2.12c) until the person moves to another day.
   const [clampedFrom, setClampedFrom] = useState<LocalDate | null>(() => {
@@ -109,6 +122,8 @@ export function BookingsPage({
   const focusDayOnLoad = useRef(false);
   /** The last page took Show more bookings with it: its first booking takes focus. */
   const focusBookingId = useRef<string | null>(null);
+  /** Show more's request, which belongs to the listing it was asked for. */
+  const moreRequest = useRef<AbortController | null>(null);
   const today = todayIn(zone);
   const bounds = dayBounds(today);
 
@@ -127,6 +142,10 @@ export function BookingsPage({
     void attempt;
     if (!day) return;
     const controller = new AbortController();
+    // A new listing: the last one's next page, still on its way, is not its own,
+    // even when the new listing ends on the same cursor.
+    moreRequest.current?.abort();
+    moreRequest.current = null;
     const retry = retryRequested.current;
     const keep = keepList.current;
     retryRequested.current = false;
@@ -136,7 +155,7 @@ export function BookingsPage({
       if (keep && current.kind === "ready") return { ...current, refreshing: true };
       return { kind: "loading" };
     });
-    void loadDay(tenantId, { date: day, tripId }, controller.signal).then((result) => {
+    void loadDay(tenantId, { date: day, tripId, source }, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.kind === "ok") {
         setLoad({ kind: "ready", page: result.value, more: "idle", refreshing: false });
@@ -157,11 +176,12 @@ export function BookingsPage({
       }));
     });
     return () => controller.abort();
-  }, [tenantId, day, tripId, attempt]);
+  }, [tenantId, day, tripId, source, attempt]);
 
-  // The address keeps the day and the trip, so a reload shows the same list.
-  // Today's list alone goes without a day, so its address always opens today;
-  // a trip departs on one day, so it always travels with its day.
+  // The address keeps the day, the trip, and the source, so a reload shows the
+  // same list. Today's list alone goes without a day, so its address always
+  // opens today; a trip departs on one day, so it always travels with its day.
+  // A source names no day, so it goes with neither.
   // A layout effect, so the address is written inside its own commit. A
   // passive one can still be pending when a link is followed, and would then
   // write this list's day and trip over the new page's address.
@@ -172,12 +192,14 @@ export function BookingsPage({
     else params.set("day", day);
     if (tripId) params.set("trip", tripId);
     else params.delete("trip");
+    if (source) params.set("source", source);
+    else params.delete("source");
     const search = params.toString() ? `?${params}` : "";
     if (search !== window.location.search) {
       const { pathname, hash } = window.location;
       window.history.replaceState(window.history.state, "", `${pathname}${search}${hash}`);
     }
-  }, [day, tripId, today, zoneSettled]);
+  }, [day, tripId, source, today, zoneSettled]);
 
   // A control that goes away with the change hands focus on: to the first
   // booking of a last page, or to the day's heading. Only a settled answer
@@ -222,31 +244,43 @@ export function BookingsPage({
     setTripId(next);
   };
 
+  /** As a trip: the list stays, marked busy, so the control keeps focus. */
+  const chooseSource = (next: ListSource | undefined, moveFocus = false) => {
+    if (moveFocus) focusDayOnLoad.current = true;
+    else keepList.current = true;
+    setSource(next);
+  };
+
   const loadMore = () => {
     if (load.kind !== "ready" || load.refreshing || !load.page.nextAfter || !day) return;
     const after = load.page.nextAfter;
     setLoad({ ...load, more: "loading" });
-    void loadDay(tenantId, { date: day, tripId, after }).then((result) => {
-      setLoad((current) => {
-        if (current.kind !== "ready" || current.refreshing || current.page.nextAfter !== after) {
-          return current;
-        }
-        if (result.kind !== "ok") return { ...current, more: "failed" };
-        if (result.value.nextAfter === null) {
-          focusBookingId.current = result.value.bookings[0]?.id ?? "";
-        }
-        return {
-          kind: "ready",
-          more: "idle",
-          refreshing: false,
-          page: {
-            trips: result.value.trips,
-            bookings: [...current.page.bookings, ...result.value.bookings],
-            nextAfter: result.value.nextAfter,
-          },
-        };
-      });
-    });
+    const controller = new AbortController();
+    moreRequest.current = controller;
+    void loadDay(tenantId, { date: day, tripId, source, after }, controller.signal).then(
+      (result) => {
+        if (controller.signal.aborted) return;
+        setLoad((current) => {
+          if (current.kind !== "ready" || current.refreshing || current.page.nextAfter !== after) {
+            return current;
+          }
+          if (result.kind !== "ok") return { ...current, more: "failed" };
+          if (result.value.nextAfter === null) {
+            focusBookingId.current = result.value.bookings[0]?.id ?? "";
+          }
+          return {
+            kind: "ready",
+            more: "idle",
+            refreshing: false,
+            page: {
+              trips: result.value.trips,
+              bookings: [...current.page.bookings, ...result.value.bookings],
+              nextAfter: result.value.nextAfter,
+            },
+          };
+        });
+      },
+    );
   };
 
   const page = load.kind === "ready" ? load.page : null;
@@ -256,7 +290,7 @@ export function BookingsPage({
     : load.kind === "loading" || (load.kind === "ready" && load.refreshing)
       ? `Loading bookings for ${dayText(day, "full", today)}…`
       : page
-        ? summary(page, dayText(day, "full", today), tripId, selected)
+        ? summary(page, dayText(day, "full", today), tripId, selected, source)
         : "";
 
   return (
@@ -385,11 +419,14 @@ export function BookingsPage({
             today={today}
             page={page}
             tripId={tripId}
+            source={source}
             selected={selected}
             seesGuests={seesGuests}
+            canBook={canBook}
             more={load.kind === "ready" ? load.more : "idle"}
             refreshing={load.kind === "ready" && load.refreshing}
             onTrip={chooseTrip}
+            onSource={chooseSource}
             onToday={() => goToDay(today, true)}
             onMore={loadMore}
           />
@@ -404,6 +441,7 @@ function summary(
   dayName: string,
   tripId: string | undefined,
   selected: BookingDayTrip | undefined,
+  source: ListSource | undefined,
 ): string {
   if (tripId && !selected && page.trips.length > 0) {
     return `That trip doesn't depart on ${dayName}.`;
@@ -416,9 +454,15 @@ function summary(
     const rows = selected
       ? page.bookings.filter((b) => b.tripId === selected.tripId)
       : page.bookings;
-    return `${hasCanceled(rows) ? "No active bookings" : "No bookings"} ${on}.`;
+    return `${noneText(source, hasCanceled(rows))} ${on}.`;
   }
-  return `${bookings === 1 ? "1 booking" : `${bookings} bookings`}, ${guestsText(guests)} ${on}.`;
+  return `${bookingsText(bookings, source)}, ${guestsText(guests)} ${on}.`;
+}
+
+/** "No bookings", or "No active staff bookings" when canceled ones still list. */
+function noneText(source: ListSource | undefined, canceledListed: boolean): string {
+  const none = noBookingsText(source);
+  return canceledListed ? none.replace(/^No /, "No active ") : none;
 }
 
 /**
@@ -439,11 +483,14 @@ function Day({
   today,
   page,
   tripId,
+  source,
   selected,
   seesGuests,
+  canBook,
   more,
   refreshing,
   onTrip,
+  onSource,
   onToday,
   onMore,
 }: {
@@ -451,11 +498,14 @@ function Day({
   today: LocalDate;
   page: DayPage;
   tripId: string | undefined;
+  source: ListSource | undefined;
   selected: BookingDayTrip | undefined;
   seesGuests: boolean;
+  canBook: boolean;
   more: "idle" | "loading" | "failed";
   refreshing: boolean;
   onTrip: (tripId: string | undefined, moveFocus?: boolean) => void;
+  onSource: (source: ListSource | undefined, moveFocus?: boolean) => void;
   onToday: () => void;
   onMore: () => void;
 }) {
@@ -503,17 +553,36 @@ function Day({
             })),
           ]}
         />
+        <SelectField
+          label="Source"
+          className="bk-filters__source"
+          value={source ?? ""}
+          onChange={(e) => onSource(e.target.value ? (e.target.value as ListSource) : undefined)}
+          options={sourceFilterOptions.map((o) => ({ value: o.value, label: o.label }))}
+        />
         {!unknownTrip && (
           <p className="bk-filters__totals">
-            {totals.bookings === 0 &&
-            hasCanceled(
-              selected ? page.bookings.filter((b) => b.tripId === selected.tripId) : page.bookings,
-            )
-              ? "No active bookings"
-              : `${totals.bookings === 1 ? "1 booking" : `${totals.bookings} bookings`}, ${guestsText(totals.guests)}`}
+            {totals.bookings > 0
+              ? `${bookingsText(totals.bookings, source)}, ${guestsText(totals.guests)}`
+              : hasCanceled(
+                    selected
+                      ? page.bookings.filter((b) => b.tripId === selected.tripId)
+                      : page.bookings,
+                  )
+                ? noneText(source, true)
+                : source
+                  ? noBookingsText(source)
+                  : `${bookingsText(0)}, ${guestsText(0)}`}
           </p>
         )}
       </div>
+      {/* Under the controls, as the zone line: what the day's totals still count. */}
+      {source && (
+        <p className="bk-filters__note">
+          <Icon name="info" />
+          <span>Day totals and the export cover bookings from every source.</span>
+        </p>
+      )}
 
       <p className="bk-zone">
         <Icon name="clock" />
@@ -549,6 +618,9 @@ function Day({
           bookings={page.bookings.filter((b) => b.tripId === trip.tripId)}
           complete={page.nextAfter === null}
           seesGuests={seesGuests}
+          canBook={canBook}
+          source={source}
+          onAllSources={() => onSource(undefined, true)}
         />
       ))}
 
@@ -576,6 +648,9 @@ function TripBookings({
   complete,
   showZone,
   seesGuests,
+  canBook,
+  source,
+  onAllSources,
 }: {
   trip: BookingDayTrip;
   /** The list is filtered to this trip. */
@@ -586,12 +661,18 @@ function TripBookings({
   complete: boolean;
   showZone: boolean;
   seesGuests: boolean;
+  /** Owners and booking staff, who book a guest from here (G2.12e). */
+  canBook: boolean;
+  /** The list's source filter; counts are of this source only. */
+  source: ListSource | undefined;
+  onAllSources: () => void;
 }) {
   const time = tripTime(trip);
   const state = salesStates[trip.salesState];
   const where = showZone ? `, ${zoneCity(trip.timeZone)} time` : "";
   // A trip that has left will not take more bookings, so "yet" would mislead.
   const departed = Date.parse(trip.startsAt) <= Date.now();
+  const tripLine = `${trip.productName}, ${dayText(trip.localDate, "medium", today)}, ${time}`;
   return (
     <section className="bk-trip" aria-labelledby={tripHeadingId(trip.tripId)}>
       <div className="bk-trip__head">
@@ -609,11 +690,11 @@ function TripBookings({
             <Icon name="users" />
             {trip.bookings === 0
               ? hasCanceled(bookings)
-                ? "No active bookings"
+                ? noneText(source, true)
                 : departed
-                  ? "No bookings"
-                  : "No bookings yet"
-              : `${trip.bookings === 1 ? "1 booking" : `${trip.bookings} bookings`}, ${guestsText(trip.guests)}`}
+                  ? noBookingsText(source)
+                  : `${noBookingsText(source)} yet`
+              : `${bookingsText(trip.bookings, source)}, ${guestsText(trip.guests)}`}
           </span>
           {showZone && (
             <span>
@@ -628,16 +709,25 @@ function TripBookings({
               {state.label}
             </StatusBadge>
           )}
-          {seesGuests && trip.bookings > 0 && (
+          {/* The roster lists every source, so under a filter it shows whatever
+              this source's count (G2.12e D1); its own empty state covers none. */}
+          {seesGuests && (source !== undefined || trip.bookings > 0) && (
             <ConsoleButtonLink
               href={rosterHref(trip.tripId)}
               icon="printer"
               className="bk-trip__roster"
             >
-              Roster{" "}
-              <VisuallyHidden>
-                for {trip.productName}, {dayText(trip.localDate, "medium", today)}, {time}
-              </VisuallyHidden>
+              Roster <VisuallyHidden>for {tripLine}</VisuallyHidden>
+            </ConsoleButtonLink>
+          )}
+          {/* The calendar's Book rule, failing closed without its inputs (G2.12e). */}
+          {canBook && dayTripTakesBooking(trip, new Date()) && (
+            <ConsoleButtonLink
+              href={newBookingHref(trip.tripId)}
+              icon="plus"
+              className="bk-trip__book"
+            >
+              Book <VisuallyHidden>{tripLine}</VisuallyHidden>
             </ConsoleButtonLink>
           )}
         </div>
@@ -646,9 +736,23 @@ function TripBookings({
           designed empty state when the list shows it alone; one whose bookings
           are on a later page says where they are. */}
       {bookings.length > 0 ? (
-        <BookingRows bookings={bookings} seesGuests={seesGuests} />
+        <BookingRows bookings={bookings} seesGuests={seesGuests} source={source} />
       ) : !complete && trip.bookings > 0 ? (
         <p className="bk-trip__none">Not loaded yet. Choose Show more bookings below.</p>
+      ) : alone && trip.bookings === 0 && source ? (
+        <EmptyState
+          icon="users"
+          headingLevel={4}
+          className="bk-trip__empty"
+          title={`${noBookingsText(source)} on this trip`}
+          actions={
+            <Button icon="list" onClick={onAllSources}>
+              Show all sources
+            </Button>
+          }
+        >
+          <p>Choose All sources to see every booking on it.</p>
+        </EmptyState>
       ) : alone && trip.bookings === 0 ? (
         <EmptyState
           icon="users"
@@ -670,9 +774,12 @@ function TripBookings({
 function BookingRows({
   bookings,
   seesGuests,
+  source,
 }: {
   bookings: BookingListItem[];
   seesGuests: boolean;
+  /** The list's source filter: a booking's link carries it, so its way back keeps it. */
+  source: ListSource | undefined;
 }) {
   return (
     <div className={seesGuests ? "bk-table" : "bk-table bk-table--no-booker"}>
@@ -691,14 +798,27 @@ function BookingRows({
           const state = bookingStates[b.state];
           return (
             <li key={b.id} className="bk-row">
-              <ConsoleLink
-                href={bookingHref(b.id)}
-                className="bk-row__ref tap-target"
-                data-booking={b.id}
-              >
-                <VisuallyHidden>Booking </VisuallyHidden>
-                {b.reference}
-              </ConsoleLink>
+              <div className="bk-row__lead">
+                <ConsoleLink
+                  href={bookingHref(b.id, source)}
+                  className="bk-row__ref tap-target"
+                  data-booking={b.id}
+                >
+                  <VisuallyHidden>Booking </VisuallyHidden>
+                  {b.reference}
+                </ConsoleLink>
+                {/* Who took it (G2.12e), outside the facts so the columns stay;
+                    a guest's own booking, or a source this console does not
+                    know yet, shows none. */}
+                {b.source === "staff_assisted" && (
+                  <p className="bk-row__source">
+                    <VisuallyHidden>Source: </VisuallyHidden>
+                    <StatusBadge tone="neutral" icon="user">
+                      {sourceText(b.source, b.channel)}
+                    </StatusBadge>
+                  </p>
+                )}
+              </div>
               <dl className="bk-row__facts">
                 {seesGuests && (
                   <div className="bk-fact bk-fact--booker">

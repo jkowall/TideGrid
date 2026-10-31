@@ -163,7 +163,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "Bookings on trips departing on one local date",
     description:
-      "Every role. The date's trips with their booking and guest counts, and a page of its bookings by departure, trip, and confirmation: reference, party, extras, total, and payment state. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
+      "Every role. The date's trips with their booking and guest counts, when each trip's sales close and whether a blackout covers it, and a page of its bookings by departure, trip, and confirmation: reference, source, party, extras, total, and payment state. With source, the page and the trip counts are of that source only, every trip still lists, and the answer echoes it. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
     security: staffSecurity,
     request: { params: StaffTenantParams, query: BookingListQuery },
     responses: {
@@ -172,7 +172,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         description: "The day's bookings",
       },
       400: errorBody(
-        "A malformed date, trip id, or limit (validation_failed), or a cursor that names no booking of this tenant (cursor_invalid)",
+        "A malformed date, trip id, source, or limit, or a repeated source (validation_failed), or a cursor that names no booking in this listing (cursor_invalid)",
       ),
       401: errorBody("Not signed in"),
       403: errorBody("Role does not allow this"),
@@ -182,7 +182,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(dayBookingsRoute, async (c) => {
     const { tenantId } = c.req.valid("param");
-    const { date, tripId, limit, after } = c.req.valid("query");
+    const { date, tripId, source, limit, after } = c.req.valid("query");
     const { body } = await withStaffTenant(
       c,
       deps,
@@ -192,6 +192,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           date,
           limit,
           ...(tripId === undefined ? {} : { tripId }),
+          ...(source === undefined ? {} : { source }),
           ...(after === undefined ? {} : { after }),
           withBooker: seesBooker(ctx),
         });
@@ -201,6 +202,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           trips: result.trips.map((t) => ({ ...t })),
           bookings: result.bookings.map((b) => ({ ...b })),
           nextAfter: result.nextAfter,
+          source: source ?? null,
         };
       },
     );
