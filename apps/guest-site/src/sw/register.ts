@@ -18,8 +18,9 @@ const SKIP_WAITING = "SKIP_WAITING";
  *   check found. Rarely this load's own update check finished installing a
  *   newer one before that first read, and then that worker is the one asked;
  *   one that installs while the page settles is left for the next page load,
- *   which asks the version already waiting when it began. The worker takes over only when this is the site's one
- *   open window (G2.14b, D11(a)).
+ *   which asks the worker waiting when it first reads its registration. The
+ *   worker takes over only when this is the site's one open window (G2.14b,
+ *   D11(a)).
  *   "Try again" after a failed bootstrap never asks again.
  * - When the API says no operator is published here (a readable
  *   tenant_not_found), unregister every worker and delete every cache: the
@@ -102,11 +103,11 @@ export function activateWaitingWorker(
 /**
  * Note the worker waiting now, let the page settle, then ask that same worker
  * to take over. A worker that replaced it meanwhile, from this load's own
- * update check, is not asked: the next page load asks the version already
- * waiting when it begins (D11(a)). Navigations go network first, so this page
- * is usually that newer build already; the cost is that the newer worker
- * waits one more page load. The browser hands back the same ServiceWorker object for the
- * same worker, so identity tells them apart. Either way this page load has
+ * update check, is not asked: the next page load asks the worker waiting when
+ * it first reads its registration (D11(a)). Navigations go network first, so
+ * this page is usually that newer build already; the cost is that the newer
+ * worker waits one more page load. The browser hands back the same
+ * ServiceWorker object for the same worker, so identity tells them apart. Either way this page load has
  * had its one ask.
  */
 export async function askWaitingWorker(
