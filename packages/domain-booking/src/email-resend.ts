@@ -7,9 +7,11 @@
  * "booking.resend:<bookingId>:<generation>", rendered from the booking as it
  * is now and addressed to the booker's address on file. It is never a retry
  * of an earlier message: delivery still sends each message at most once on a
- * provider that does not deduplicate. Its management link is minted when it
- * is sent, and that supersedes the links earlier emails carried (they still
- * renew), so only the newest link opens the booking.
+ * provider that does not deduplicate. Its management link is minted when the
+ * delivery job claims it to send, and that supersedes the links earlier emails
+ * carried, even if the send then fails (they still renew). A link email the
+ * guest asks for later supersedes it in turn: the link in the email sent last
+ * opens the booking.
  *
  * Limits, counted from committed email_messages rows under the tenant's
  * resend lock and the booking's row lock, across every request and every
