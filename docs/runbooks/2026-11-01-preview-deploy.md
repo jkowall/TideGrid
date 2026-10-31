@@ -248,7 +248,7 @@ Rules for the day apply. Go/no-go: **D11**, then **D6**. Prompt: *"Sender `<addr
 - Expect: health ok; `nov1 db outbox-summary --live --go A1` shows the P6 backlog ending `failed recipient_not_allowed`, with no provider call (12:198-199), before any step 3 booking.
 - **A9:** one booking from one allowlisted address. It settles whether non-verified destinations are accepted, before steps 3 and 8.
 - Verify:
-  - **Step 3:** a booking from an allowlisted address delivers a confirmation, and its management link opens the booking.
+  - **Step 3:** a booking from an allowlisted address delivers a confirmation, and its management link opens the booking. Do not press the console's Send again (G2.16b) on a booking under check: from P7 on it is offered, and a resend supersedes the earlier link even when the allowlist refuses the address.
   - **Step 8:** waiver requests arrive, and a participant signs on the owner's phone at 375 px. The link is single-use: the phone or Playwright, not both.
   - SPF, DKIM, and DMARC results, recorded in P12.
 - Rollback: first `nov1 secrets email --delete EMAIL_ALLOWED_RECIPIENTS --phase <current> --live --go A7`. An empty fence means email is off (`apps/api-worker/src/email.ts:114-126`), and mail stays queued. Then, if needed, revert C2 and release. Leave the DNS records.

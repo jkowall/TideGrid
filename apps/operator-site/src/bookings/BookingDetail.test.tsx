@@ -25,6 +25,7 @@ import {
   priyaBooking,
   route,
   strayRequests,
+  tenantId,
   tenantName,
   terms,
   text,
@@ -244,6 +245,59 @@ describe("one booking", () => {
     expect(screen.queryByRole("heading", { name: "Notes" })).toBeNull();
     expect(document.querySelector(".bd-notes, textarea")).toBeNull();
     expect(calls.filter((c) => c.path.endsWith("/notes"))).toEqual([]);
+  });
+
+  it("places the booking's email after the waivers and before the notes (G2.16b)", async () => {
+    api({
+      [route.booking(bookingId)]: answer("owner"),
+      [`GET /api/v1/staff/tenants/${tenantId}/bookings/${bookingId}/messages`]: () =>
+        json({
+          messages: [],
+          emailDelivery: "on",
+          resend: {
+            kind: "confirmation",
+            allowed: true,
+            availableAt: null,
+            remaining: 5,
+            blockedBy: null,
+          },
+        }),
+    });
+    renderDetail("owner");
+    await loaded();
+    const email = await screen.findByRole("region", { name: "Email" });
+    await waitFor(() => expect(email.getAttribute("aria-busy")).toBe("false"));
+    const order = [...document.querySelectorAll(".bd-grid > section")].map((section) =>
+      text(section.querySelector("h2")),
+    );
+    expect(order.slice(-3)).toEqual(["Waivers", "Email", "Notes"]);
+    expect(within(email).getByRole("button", { name: "Send the confirmation again" })).toBeTruthy();
+  });
+
+  it("gives finance no email card, and asks the API for no messages (G2.16b)", async () => {
+    // The messages route is named, so a request to it is recorded in `calls`
+    // rather than taken by the fixtures' default answer (review fix round).
+    const messages = `GET /api/v1/staff/tenants/${tenantId}/bookings/${bookingId}/messages`;
+    const calls = api({
+      [route.booking(bookingId)]: answer("finance"),
+      [messages]: () =>
+        json({
+          messages: [],
+          emailDelivery: "on",
+          resend: {
+            kind: "confirmation",
+            allowed: true,
+            availableAt: null,
+            remaining: 5,
+            blockedBy: null,
+          },
+        }),
+    });
+    renderDetail("finance");
+    await loaded();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(calls.filter((c) => c.path.endsWith("/messages"))).toEqual([]);
+    expect(screen.queryByRole("region", { name: "Email" })).toBeNull();
   });
 
   it("shows a charter's guests and what was sold, with no ticket list", async () => {

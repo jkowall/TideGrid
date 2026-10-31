@@ -471,11 +471,14 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
         "nextAttemptAt",
         "provider",
         "sentAt",
+        // A staff resend's flag (G2.16b): a boolean, never a recipient or content.
+        "staffResend",
         "state",
         "template",
         "templateVersion",
       ].sort(),
     );
+    expect(status?.staffResend).toBe(false);
     const text = JSON.stringify(status);
     expect(text).not.toContain(recipient);
     expect(text).not.toContain("Synthetic status");

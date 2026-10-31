@@ -15,7 +15,9 @@ import type { StaffRole } from "@tidegrid/contracts";
  * notes (G2.12c); finance does neither, since a note is free text that can
  * mention a guest (the owner's decision of 2026-10-19). Owners and booking
  * staff create staff-assisted bookings for a guest who phoned, emailed, or
- * walked up (`bookings.create`, G2.12d); finance changes no booking.
+ * walked up (`bookings.create`, G2.12d); finance changes no booking. Owners
+ * and booking staff send a booking's email again (`messages.resend`, G2.16b);
+ * finance sends none.
  */
 export type Permission =
   | "members.read"
@@ -32,7 +34,9 @@ export type Permission =
   // Waivers (G2.15): send a participant's waiver request again.
   | "waivers.manage"
   // Staff-assisted bookings (G2.12d): quote, open, pay through the shim, cancel.
-  | "bookings.create";
+  | "bookings.create"
+  // Booking email (G2.16b): send a booking's confirmation or cancellation notice again.
+  | "messages.resend";
 
 const matrix: Record<StaffRole, readonly Permission[]> = {
   owner: [
@@ -48,6 +52,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "notes.write",
     "waivers.manage",
     "bookings.create",
+    "messages.resend",
   ],
   booking_staff: [
     "catalog.read",
@@ -58,6 +63,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "notes.write",
     "waivers.manage",
     "bookings.create",
+    "messages.resend",
   ],
   finance: ["audit.read", "catalog.read", "payments.read"],
 };

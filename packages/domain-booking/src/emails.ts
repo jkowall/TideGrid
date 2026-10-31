@@ -107,6 +107,15 @@ function subject(prefix: string, detail: BookingDetailView): string {
 }
 
 /**
+ * Which message a composer writes. Without a key, the booking's own email,
+ * once per booking. A staff resend (G2.16b) names its own key,
+ * "booking.resend:<bookingId>:<generation>", so it is a new message.
+ */
+export interface ComposeOptions {
+  dedupeKey?: string;
+}
+
+/**
  * The confirmation, in the confirming transaction: receipt, trip, party, and
  * the management link, once per booking.
  */
@@ -114,7 +123,8 @@ export async function enqueueConfirmationEmail(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
-): Promise<{ messageId: string }> {
+  options: ComposeOptions = {},
+): Promise<{ messageId: string; duplicate: boolean }> {
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const policy = await policyText(trx, ctx.tenantId, bookingId);
   const blocks: EmailBlock[] = [
@@ -141,7 +151,7 @@ export async function enqueueConfirmationEmail(
     { kind: "note", text: demoNote },
   ];
   const result = await enqueueMessage(trx, ctx, {
-    dedupeKey: `booking.confirmation:${bookingId}`,
+    dedupeKey: options.dedupeKey ?? `booking.confirmation:${bookingId}`,
     template: CONFIRMATION_TEMPLATE.key,
     templateVersion: CONFIRMATION_TEMPLATE.version,
     to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
@@ -157,7 +167,7 @@ export async function enqueueConfirmationEmail(
       ttlSeconds: MANAGE_LINK_TTL_SECONDS,
     },
   });
-  return { messageId: result.messageId };
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }
 
 /**
@@ -217,7 +227,8 @@ export async function enqueueCancellationEmail(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
-): Promise<{ messageId: string }> {
+  options: ComposeOptions = {},
+): Promise<{ messageId: string; duplicate: boolean }> {
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const c = detail.cancellation;
   if (!c) throw new Error("a cancellation email needs the booking's cancellation");
@@ -255,14 +266,14 @@ export async function enqueueCancellationEmail(
     { kind: "note", text: demoNote },
   ];
   const result = await enqueueMessage(trx, ctx, {
-    dedupeKey: `booking.canceled:${bookingId}`,
+    dedupeKey: options.dedupeKey ?? `booking.canceled:${bookingId}`,
     template: CANCELED_TEMPLATE.key,
     templateVersion: CANCELED_TEMPLATE.version,
     to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
     bookingId,
     content: { subject: subject(`Booking ${detail.reference} canceled`, detail), blocks },
   });
-  return { messageId: result.messageId };
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }
 
 /**

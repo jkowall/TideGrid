@@ -10,6 +10,7 @@ import { ApiError } from "./errors.ts";
 import { requireConsoleGateway } from "./gateway.ts";
 import { allowedOrigin } from "./hostnames/cors.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
+import { registerBookingEmailStaffRoutes } from "./routes/booking-email-staff.ts";
 import { registerBookingStaffRoutes } from "./routes/bookings-staff.ts";
 import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
 import { registerCatalogStaffRoutes } from "./routes/catalog-staff.ts";
@@ -171,6 +172,8 @@ export function createApp(deps: AppDeps = {}) {
   registerWaiverStaffRoutes(app, deps);
   // Staff-assisted booking (G2.12d).
   registerStaffBookingRoutes(app, deps);
+  // Staff resend of a booking's email (G2.16b).
+  registerBookingEmailStaffRoutes(app, deps);
 
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",
