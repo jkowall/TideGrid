@@ -4,7 +4,12 @@ import type { PublicBrand } from "@tidegrid/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrandedShell } from "../BrandedShell.tsx";
 import { NavigationProvider } from "../navigation.tsx";
-import { activateWaitingWorker, followExperience, pageSettled } from "../sw/register.ts";
+import {
+  activateWaitingWorker,
+  askWaitingWorker,
+  followExperience,
+  pageSettled,
+} from "../sw/register.ts";
 
 const tenant = { slug: "demo-reef", name: "Demo Reef Divers" };
 const brand = {
@@ -106,7 +111,7 @@ describe("service worker registration (G2.14b)", () => {
     expect(() => activateWaitingWorker({ waiting: null }, { asked: false })).not.toThrow();
   });
 
-  it("asks only after the load event, two frames, and the fonts those frames requested (D11(a))", async () => {
+  it("asks only after the load event, two frames, and any fonts those frames requested (D11(a))", async () => {
     let load = () => {};
     const frames: (() => void)[] = [];
     let fontsLoaded = () => {};
@@ -136,6 +141,50 @@ describe("service worker registration (G2.14b)", () => {
     fontsLoaded();
     await tick();
     expect(settled).toBe(true);
+  });
+
+  it("settles at once when the page has loaded and has no fonts API", async () => {
+    const page = {
+      document: { readyState: "complete" },
+      addEventListener: vi.fn(),
+      requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0),
+    };
+    await pageSettled(page);
+    expect(page.addEventListener).not.toHaveBeenCalled();
+  });
+
+  it("asks the worker waiting at the start only after the page settles (D11(a))", async () => {
+    const order: string[] = [];
+    const waiting = { postMessage: vi.fn(() => order.push("ask")) };
+    const read = vi.fn(async () => {
+      order.push("read");
+      return waiting;
+    });
+    const settle = async () => {
+      order.push("settled");
+    };
+    await askWaitingWorker(read, settle, { asked: false });
+    expect(order).toEqual(["read", "settled", "read", "ask"]);
+    expect(waiting.postMessage).toHaveBeenCalledWith({ type: "SKIP_WAITING" });
+  });
+
+  it("leaves a worker that replaced the noted one for the next page load (D11(a))", async () => {
+    const noted = { postMessage: vi.fn() };
+    const newer = { postMessage: vi.fn() };
+    const workers = [noted, newer];
+    const pageLoad = { asked: false };
+    await askWaitingWorker(
+      async () => workers.shift() ?? null,
+      async () => {},
+      pageLoad,
+    );
+    expect(noted.postMessage).not.toHaveBeenCalled();
+    expect(newer.postMessage).not.toHaveBeenCalled();
+    // One ask per page load, even when none was sent: "Try again" never asks.
+    expect(pageLoad.asked).toBe(true);
+    const settle = vi.fn(async () => {});
+    await askWaitingWorker(async () => newer, settle, pageLoad);
+    expect(newer.postMessage).not.toHaveBeenCalled();
   });
 
   it("clears workers and caches only on a readable not-published answer", async () => {

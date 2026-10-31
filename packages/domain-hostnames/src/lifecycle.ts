@@ -229,8 +229,11 @@ export interface HostnameSweepOptions {
    */
   maxProviderCalls?: number;
   /**
-   * The run ends after this many milliseconds: no provider read and no claim
-   * expiry starts after it.
+   * The run ends after this many milliseconds: no hostname read and no claim
+   * expiry starts after it. A read already under way finishes: its provider
+   * call, its exact-name lookup when the record is missing, and its recorded
+   * check. So a run can end later than this, by up to two of the client's
+   * request timeouts (15 seconds each by default) and one database write.
    */
   budgetMs?: number;
   /** One tenant's turn failed, an account-level refusal included; the sweep moves on. */
@@ -449,7 +452,7 @@ async function readHostname(
  * reads, which honors `retry-after` because the next run is 15 minutes away.
  * After any of these, and after the call limit, readings already recorded
  * stand and the run still expires pending claims that ran out, which needs no
- * provider answer. The budget ends the run, expiries included.
+ * provider answer. No read and no expiry starts after the budget.
  *
  * Tenants take fair turns (`runFairSweep`, pre-pilot hardening item 5, Part
  * D), listed least recently served first (0013): a turn reads up to five due
