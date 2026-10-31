@@ -570,5 +570,108 @@ describe("the review's fixes (G2.16b fix round)", () => {
     const alert = await screen.findByRole("alert");
     expect(text(alert)).toContain("You're signed out. Sign in again to see this booking's email.");
     expect(within(alert).queryByRole("button")).toBeNull();
+    // The console's own way back: this page again, which asks for a sign-in first.
+    expect(within(alert).getByRole("link", { name: "Sign in again" }).getAttribute("href")).toBe(
+      window.location.pathname,
+    );
+  });
+});
+
+describe("focus after the card changes under it (G2.16b final check)", () => {
+  const heading = () => screen.getByRole("heading", { name: "Email" });
+
+  it("hands focus to the heading when the dialog closes after a refusal took its opener away", async () => {
+    let refused = false;
+    stubApi((call) => {
+      if (call.method === "POST") {
+        refused = true;
+        return apiError(409, "booking_email_too_soon");
+      }
+      return json(
+        200,
+        refused
+          ? messagesBody({
+              resend: availability({
+                allowed: false,
+                blockedBy: "too_soon",
+                availableAt: "2026-11-04T19:10:00.000Z",
+                remaining: 4,
+              }),
+            })
+          : messagesBody(),
+      );
+    });
+    renderCard();
+    await settled();
+    const opener = within(card()).getByRole("button", { name: "Send the confirmation again" });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: "other" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
+    await within(dialog).findByText(resendFailureText("too_soon"));
+    // The re-read after the refusal takes Send again away while the dialog is open.
+    await waitFor(() =>
+      expect(
+        within(card()).queryByRole("button", { name: "Send the confirmation again" }),
+      ).toBeNull(),
+    );
+    await settled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(heading());
+  });
+
+  it("hands focus to the heading when a re-read takes away the Send again that had it", async () => {
+    let answer: (r: Response) => void = () => {};
+    let reads = 0;
+    stubApi((call) => {
+      if (call.method === "POST") return apiError(409, "booking_email_rate_limited");
+      reads += 1;
+      if (reads === 1) return json(200, messagesBody());
+      // The re-read after the refusal lands only after the dialog has closed.
+      return new Promise<Response>((resolve) => (answer = resolve));
+    });
+    renderCard();
+    await settled();
+    const opener = within(card()).getByRole("button", { name: "Send the confirmation again" });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: "other" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Send again" }));
+    await within(dialog).findByText(resendFailureText("rate_limited"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(document.activeElement).toBe(opener);
+    answer(
+      json(
+        200,
+        messagesBody({ resend: availability({ allowed: false, blockedBy: "rate_limited" }) }),
+      ),
+    );
+    await settled();
+    expect(opener.isConnected).toBe(false);
+    expect(document.activeElement).toBe(heading());
+  });
+
+  it("hands focus to the heading when Try again ends signed out and its button goes", async () => {
+    let first = true;
+    stubApi(() => {
+      if (first) {
+        first = false;
+        return apiError(500, "internal_error");
+      }
+      return apiError(401, "unauthenticated");
+    });
+    renderCard();
+    const retry = within(await screen.findByRole("alert")).getByRole("button", {
+      name: "Try again",
+    });
+    retry.focus();
+    fireEvent.click(retry);
+    await screen.findByText("You're signed out. Sign in again to see this booking's email.");
+    await settled();
+    expect(within(card()).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(document.activeElement).toBe(heading());
   });
 });
