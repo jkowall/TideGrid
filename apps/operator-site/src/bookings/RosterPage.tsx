@@ -20,7 +20,7 @@ import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "re
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
-import { newBookingHref, sourceText } from "../new-booking/model.ts";
+import { newBookingHref, sourceText, takesBooking } from "../new-booking/model.ts";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canCreateBookings, canSeeGuests, roleNames } from "../roles.ts";
 import { TripWaiversCard } from "../waivers/TripWaivers.tsx";
@@ -309,18 +309,6 @@ function RosterSheet({
       </p>
     </div>
   );
-}
-
-/**
- * Whether the roster's trip still takes a staff booking (G2.12d): the
- * calendar's Book rule, so the roster never offers a booking the API refuses.
- * On sale, not blacked out, and before its cutoff; a roster read from before
- * G2.12d, without the cutoff, falls back to before departure.
- */
-export function takesBooking(trip: TripRoster["trip"], now: Date): boolean {
-  if (trip.salesState !== "published" || trip.blackedOut === true) return false;
-  const closes = Date.parse(trip.salesCloseAt ?? trip.startsAt);
-  return closes > now.getTime() && Date.parse(trip.startsAt) > now.getTime();
 }
 
 /**

@@ -9183,7 +9183,7 @@
           "bookings"
         ],
         "summary": "Bookings on trips departing on one local date",
-        "description": "Every role. The date's trips with their booking and guest counts, and a page of its bookings by departure, trip, and confirmation: reference, party, extras, total, and payment state. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
+        "description": "Every role. The date's trips with their booking and guest counts, when each trip's sales close and whether a blackout covers it, and a page of its bookings by departure, trip, and confirmation: reference, source, party, extras, total, and payment state. With source, the page and the trip counts are of that source only, every trip still lists, and the answer echoes it. The booker's name goes only to roles that hold bookings.read; for any other role the field is absent.",
         "security": [
           {
             "accessJwt": []
@@ -9227,6 +9227,20 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "staff_assisted"
+              ],
+              "description": "Only bookings of this source, and trip counts of this source (G2.12e). Every trip of the date still lists. Exactly direct or staff_assisted; any other value, an empty one, or a repeated source answers 400 validation_failed"
+            },
+            "required": false,
+            "description": "Only bookings of this source, and trip counts of this source (G2.12e). Every trip of the date still lists. Exactly direct or staff_assisted; any other value, an empty one, or a repeated source answers 400 validation_failed",
+            "name": "source",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 200,
@@ -9240,10 +9254,10 @@
             "schema": {
               "type": "string",
               "format": "uuid",
-              "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid"
+              "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, this trip when one is given, and this source when one is given) answers 400 cursor_invalid"
             },
             "required": false,
-            "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid",
+            "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, this trip when one is given, and this source when one is given) answers 400 cursor_invalid",
             "name": "after",
             "in": "query"
           }
@@ -9314,12 +9328,21 @@
                           "bookings": {
                             "type": "integer",
                             "minimum": 0,
-                            "description": "Confirmed bookings on the trip; canceled ones gave their seats back"
+                            "description": "Confirmed bookings on the trip, of the asked source when one is given; canceled ones gave their seats back"
                           },
                           "guests": {
                             "type": "integer",
                             "minimum": 0,
                             "description": "Guests across those bookings"
+                          },
+                          "salesCloseAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When sales close: departure less the booking cutoff, as the roster sends it (G2.12e; always sent)"
+                          },
+                          "blackedOut": {
+                            "type": "boolean",
+                            "description": "A blackout covers the trip, so it takes no booking, as the roster sends it (G2.12e; always sent)"
                           }
                         },
                         "required": [
@@ -9336,7 +9359,7 @@
                           "guests"
                         ]
                       },
-                      "description": "Every trip departing on the date, in any sales state, with its booking and guest counts across all pages; sorted by departure; at most 200"
+                      "description": "Every trip departing on the date, in any sales state, with its booking and guest counts across all pages (of the asked source when one is given); sorted by departure; at most 200"
                     },
                     "bookings": {
                       "type": "array",
@@ -9582,13 +9605,26 @@
                       ],
                       "format": "uuid",
                       "description": "Pass as after for the next page; null on the last page. The same cursor always returns the same page while nothing is booked in between"
+                    },
+                    "source": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "direct",
+                        "staff_assisted",
+                        null
+                      ],
+                      "description": "The source the page and the trip counts are filtered to; null for every source (G2.12e)"
                     }
                   },
                   "required": [
                     "date",
                     "trips",
                     "bookings",
-                    "nextAfter"
+                    "nextAfter",
+                    "source"
                   ],
                   "description": "Bookings on trips departing on one local date"
                 }
@@ -9596,7 +9632,7 @@
             }
           },
           "400": {
-            "description": "A malformed date, trip id, or limit (validation_failed), or a cursor that names no booking of this tenant (cursor_invalid)",
+            "description": "A malformed date, trip id, source, or limit, or a repeated source (validation_failed), or a cursor that names no booking in this listing (cursor_invalid)",
             "content": {
               "application/json": {
                 "schema": {
@@ -11572,7 +11608,7 @@
           "bookings"
         ],
         "summary": "A booking's email and its delivery",
-        "description": "Owners and booking staff. Each message the booking caused, oldest first: its template, its delivery state, attempts, when it was sent, and the last failure's code. No recipient or content. Provider acceptance is not proof the guest read a message. Finance does not hold bookings.read and is refused.",
+        "description": "Owners and booking staff. Each message the booking caused, oldest first: its template, its delivery state, attempts, when it was sent, the last failure's code, and whether staff sent it again. No recipient or content. Provider acceptance is not proof the guest read a message. Also whether this environment sends email, and whether staff can send the booking's email again now (G2.16b; advisory, the send decides again). Finance does not hold bookings.read and is refused.",
         "security": [
           {
             "accessJwt": []
@@ -11682,7 +11718,7 @@
                               "string",
                               "null"
                             ],
-                            "description": "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled) or null"
+                            "description": "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, or resent: a newer email replaced it) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically"
                           },
                           "provider": {
                             "type": [
@@ -11694,6 +11730,10 @@
                               "cloudflare",
                               null
                             ]
+                          },
+                          "staffResend": {
+                            "type": "boolean",
+                            "description": "True for an email staff sent again from the console (G2.16b)"
                           },
                           "createdAt": {
                             "type": "string",
@@ -11713,15 +11753,86 @@
                           "canceledAt",
                           "failureCode",
                           "provider",
+                          "staffResend",
                           "createdAt"
                         ],
                         "description": "A message's delivery, without its recipient or content"
                       },
                       "description": "Oldest first"
+                    },
+                    "emailDelivery": {
+                      "type": "string",
+                      "enum": [
+                        "on",
+                        "off"
+                      ],
+                      "description": "off: this environment sends no email, so messages stay queued"
+                    },
+                    "resend": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "confirmation",
+                            "cancellation",
+                            null
+                          ],
+                          "description": "The email staff could send again for the booking's state"
+                        },
+                        "allowed": {
+                          "type": "boolean"
+                        },
+                        "availableAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time",
+                          "description": "When the time limits that block it lift; null when none does"
+                        },
+                        "remaining": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 5,
+                          "description": "Sends again left: 5 less those that were attempted or are still queued"
+                        },
+                        "blockedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "email_off",
+                            "kind_mismatch",
+                            "trip_over",
+                            "refund_failed",
+                            "limit",
+                            "too_soon",
+                            "rate_limited",
+                            "in_progress",
+                            null
+                          ],
+                          "description": "The first refusal, in the send's order"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "allowed",
+                        "availableAt",
+                        "remaining",
+                        "blockedBy"
+                      ],
+                      "description": "Whether staff can send the booking's email again, at the moment of the read. Advisory: the send checks again under the booking's lock"
                     }
                   },
                   "required": [
-                    "messages"
+                    "messages",
+                    "emailDelivery",
+                    "resend"
                   ]
                 }
               }
@@ -22983,6 +23094,336 @@
           },
           "503": {
             "description": "The provider did not answer (payment_provider_unavailable); retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/emails/resend": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Send a booking's email again",
+        "description": "Owners and booking staff. Sends the booking's confirmation (with a new management link) or its cancellation notice again, as a new message, to the booker's address on file, rendered from the booking as it is now. The new link is minted when the email is sent; earlier links are superseded then, and still renew. An earlier email of the same kind still waiting to go out is canceled (code resent). The reason code is recorded in the audit history. Never a retry of an earlier message: delivery sends each message at most once.\n\nLimits, for every staff member and request: at most 5 sends again per booking that were attempted or are still waiting, at least 10 minutes after the booking's last one, and 50 an hour per operator. Idempotent by key: a refusal is the key's stored answer and replays as the same 409; send again with a new key.\n\nOrder: authentication (401), membership (404), permission (403), the key's replay, the booking (404), then booking_email_off (409) when this environment sends no email, which stores nothing for the key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "confirmation",
+                      "cancellation"
+                    ],
+                    "description": "confirmation: the confirmation with its receipt and a new management link, for a confirmed booking before its trip ends. cancellation: the cancellation notice, for a canceled booking whose refund has not failed"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "guest_did_not_receive",
+                      "delivery_failed",
+                      "delivery_unknown",
+                      "guest_asked_again",
+                      "other"
+                    ],
+                    "description": "Why staff send it again, as a code: the audit history records it, and finance reads that history, so it is never free text"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "additionalProperties": false,
+                "description": "No address: the email goes to the booker's address on file. Any other field is refused (400)"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Queued; it goes out at once, or with the next delivery run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "generation": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "1 for the booking's first email sent again, then 2, and so on"
+                        },
+                        "queuedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "generation",
+                        "queuedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email is off in this environment (booking_email_off, not stored for the key); the booking's state has no email of this kind (booking_email_kind_mismatch); the trip has ended (booking_trip_over); the refund failed (booking_email_refund_failed); sent again 5 times already (booking_email_resend_limit); sent again under 10 minutes ago (booking_email_too_soon); the operator's hourly limit is reached (booking_email_rate_limited); an earlier email of this kind is being sent right now (booking_email_in_progress); or the email could not be built (booking_email_invalid). Every refusal but booking_email_off is final for its Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
             "content": {
               "application/json": {
                 "schema": {

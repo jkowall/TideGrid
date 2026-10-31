@@ -562,6 +562,51 @@ describe("one operator's page never carries over to another", () => {
     expect(window.location.search).toBe("");
   });
 
+  // G2.12e: a source names no operator's data, so it stays across a switch; the trip and day go.
+  it("keeps the source filter and drops the trip and day when another operator is chosen", async () => {
+    vi.setSystemTime(new Date("2026-11-04T05:00:00Z"));
+    const reefDays: string[] = [];
+    const echo = (call: Call, body: object) => json({ ...body, source: call.query.get("source") });
+    api({
+      [route.catalog()]: () => catalog("America/New_York"),
+      [route.catalog(reef)]: () => catalog("Pacific/Honolulu"),
+      [route.day()]: (call) =>
+        echo(call, dayBody(call.query.get("source") ? { bookings: [] } : {})),
+      [route.day(reef)]: (call) => {
+        reefDays.push(call.query.toString());
+        return echo(call, {
+          date: call.query.get("date"),
+          trips: [{ ...sunsetTrip, timeZone: "Pacific/Honolulu", localDate: "2026-11-03" }],
+          bookings: [],
+          nextAfter: null,
+        });
+      },
+    });
+    renderShell("/bookings", both());
+    await tripSection(/Sunset Harbor Cruise/);
+    fireEvent.change(screen.getByRole("combobox", { name: "Source" }), {
+      target: { value: "staff_assisted" },
+    });
+    await waitFor(() => expect(params()).toEqual({ source: "staff_assisted" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Trip" }), { target: { value: sunset } });
+    await waitFor(() =>
+      expect(params()).toEqual({ day: "2026-11-04", trip: sunset, source: "staff_assisted" }),
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Operator" }), {
+      target: { value: reef },
+    });
+    await waitFor(() => expect(reefDays).toHaveLength(1));
+    // The other operator's own today, every trip, and the same source.
+    expect(reefDays).toEqual(["date=2026-11-03&source=staff_assisted"]);
+    await tripSection(/Sunset Harbor Cruise/);
+    expect((screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement).value).toBe(
+      "staff_assisted",
+    );
+    expect((screen.getByRole("combobox", { name: "Trip" }) as HTMLSelectElement).value).toBe("");
+    expect(params()).toEqual({ source: "staff_assisted" });
+  });
+
   it("remembers the operator chosen, so a reload opens a booking's address with it", async () => {
     twoOperators({
       [route.booking(booking, reef)]: () => json({ booking: asSeenBy("finance", bookingDetail()) }),

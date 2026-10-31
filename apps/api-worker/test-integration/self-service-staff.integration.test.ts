@@ -55,6 +55,8 @@ const STATUS_KEYS = [
   "nextAttemptAt",
   "provider",
   "sentAt",
+  // A staff resend's flag (G2.16b).
+  "staffResend",
   "state",
   "template",
   "templateVersion",

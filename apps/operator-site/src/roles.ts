@@ -50,3 +50,12 @@ export function canUseNotes(role: StaffRole): boolean {
 export function canCreateBookings(role: StaffRole): boolean {
   return role === "owner" || role === "booking_staff";
 }
+
+/**
+ * Who sends a booking's confirmation or cancellation notice again (G2.16b):
+ * owners and booking staff. This mirrors the API's `messages.resend`
+ * permission for display only; the API refuses finance either way.
+ */
+export function canResendEmail(role: StaffRole): boolean {
+  return role === "owner" || role === "booking_staff";
+}

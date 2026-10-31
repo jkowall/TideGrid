@@ -16,6 +16,7 @@ import type {
 import { isKnownZone, isLocalDate, type LocalDate } from "@tidegrid/design-system/format";
 import { isKnownSalesState } from "../calendar/model.ts";
 import { call, failureOf, type ReadFailure, tenantPath } from "../http.ts";
+import type { ListSource } from "./model.ts";
 
 /**
  * The booking views' reads (G2.12b). Each never throws: it answers with what
@@ -147,6 +148,10 @@ function isListItem(b: Partial<BookingListItem> | null | undefined): boolean {
     isString(b.reference) &&
     isString(b.tripId) &&
     isBookingState(b.state) &&
+    // Any source reads (G2.12e): one this console does not know yet lists
+    // with no badge rather than blanking the day.
+    (b.source === undefined || isString(b.source)) &&
+    (b.channel === undefined || b.channel === null || isString(b.channel)) &&
     isBooker(b.booker, false) &&
     isParty(b.party) &&
     isExtras(b.extras) &&
@@ -163,23 +168,50 @@ export interface DayPage {
   nextAfter: string | null;
 }
 
-/** A page of a local date's bookings, optionally for one trip, after a cursor. */
+/**
+ * A trip of a day's list: its summary and counts, and, since G2.12e, when its
+ * sales close and whether a blackout covers it. Either may be missing, from
+ * an API before G2.12e, and then the list offers no Book; if present, each
+ * must read. Only `loadDay` uses it: `isTripSummary` stays the shared check.
+ */
+function isDayTrip(t: Partial<BookingDayTrip> | null | undefined): boolean {
+  return (
+    isTripSummary(t) &&
+    isInt(t?.bookings) &&
+    isInt(t?.guests) &&
+    (t?.salesCloseAt === undefined || isInstant(t.salesCloseAt)) &&
+    (t?.blackedOut === undefined || typeof t.blackedOut === "boolean")
+  );
+}
+
+/**
+ * A page of a local date's bookings, optionally for one trip and one source
+ * (G2.12e), after a cursor. A filtered answer must say it is for that source;
+ * one for every source, or for another, cannot be shown as filtered. An
+ * unfiltered answer names no source, or null.
+ */
 export function loadDay(
   tenantId: string,
-  query: { date: LocalDate; tripId?: string | undefined; after?: string | undefined },
+  query: {
+    date: LocalDate;
+    tripId?: string | undefined;
+    source?: ListSource | undefined;
+    after?: string | undefined;
+  },
   signal?: AbortSignal,
 ): Promise<Read<DayPage>> {
   const params = new URLSearchParams({ date: query.date });
   if (query.tripId) params.set("tripId", query.tripId);
+  if (query.source) params.set("source", query.source);
   if (query.after) params.set("after", query.after);
   return read(
     `${tenantPath(tenantId)}/bookings?${params}`,
     (body) => {
       const b = body as Partial<BookingListResponse> | null;
       if (!Array.isArray(b?.trips) || !Array.isArray(b.bookings)) return null;
-      if (!b.trips.every((t) => isTripSummary(t) && isInt(t.bookings) && isInt(t.guests))) {
-        return null;
-      }
+      const echo = b.source;
+      if (query.source ? echo !== query.source : echo !== undefined && echo !== null) return null;
+      if (!b.trips.every(isDayTrip)) return null;
       if (!b.bookings.every(isListItem)) return null;
       if (b.nextAfter !== null && !isString(b.nextAfter)) return null;
       return { trips: b.trips, bookings: b.bookings, nextAfter: b.nextAfter ?? null };

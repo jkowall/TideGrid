@@ -32,6 +32,7 @@ describe("role permissions", () => {
       "notes.write",
       "waivers.manage",
       "bookings.create",
+      "messages.resend",
     ]);
     expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read", "payments.read"]);
   });
@@ -71,6 +72,14 @@ describe("role permissions", () => {
       "owner",
       "booking_staff",
     ]);
+  });
+
+  it("lets owners and booking staff send a booking's email again, never finance (G2.16b)", () => {
+    expect(StaffRole.options.filter((r) => can(r, "messages.resend"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
+    expect(permissionsFor("owner")).toContain("messages.resend");
   });
 
   it("denies unknown roles", () => {

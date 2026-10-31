@@ -691,6 +691,25 @@ export function api(routes: Record<string, Answer | Answer[]>): Call[] {
           },
         });
       }
+      // Booking email (G2.16b): the booking page's email card reads its own
+      // route. A test that does not name it gets no email, with email off,
+      // kept out of `calls` as the waiver answers are.
+      if (
+        !routes[key] &&
+        /^GET \/api\/v1\/staff\/tenants\/[^/]+\/bookings\/[^/]+\/messages$/.test(key)
+      ) {
+        return json({
+          messages: [],
+          emailDelivery: "off",
+          resend: {
+            kind: "confirmation",
+            allowed: false,
+            availableAt: null,
+            remaining: 5,
+            blockedBy: "email_off",
+          },
+        });
+      }
       calls.push(call);
       const queued = routes[key];
       const answer = (Array.isArray(queued) ? queued.shift() : queued) ?? defaultAnswer(key);

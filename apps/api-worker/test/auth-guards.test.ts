@@ -223,6 +223,8 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}",
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/cancel",
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/test-payment",
+        // Staff resend of a booking's email (G2.16b).
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/emails/resend",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are

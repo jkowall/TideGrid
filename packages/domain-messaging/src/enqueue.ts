@@ -275,8 +275,16 @@ export interface MessageStatus {
    */
   failureCode: string | null;
   provider: EmailProviderName | null;
+  /** Staff sent it again from the console (G2.16b): its key's topic is STAFF_RESEND_TOPIC. */
+  staffResend: boolean;
   createdAt: string;
 }
+
+/**
+ * The dedupe-key topic of a booking email staff send again (G2.16b):
+ * "booking.resend:<bookingId>:<generation>". Status reads flag those messages.
+ */
+export const STAFF_RESEND_TOPIC = "booking.resend";
 
 interface StatusRow {
   id: string;
@@ -291,6 +299,7 @@ interface StatusRow {
   canceled_at: Date | string | null;
   last_error_code: string | null;
   provider: EmailProviderName | null;
+  staff_resend: boolean;
   created_at: Date | string;
 }
 
@@ -311,12 +320,14 @@ function toStatus(row: StatusRow): MessageStatus {
     canceledAt: isoOrNull(row.canceled_at),
     failureCode: row.last_error_code,
     provider: row.provider,
+    staffResend: row.staff_resend,
     createdAt: iso(row.created_at),
   };
 }
 
 const statusColumns = sql`id, template, template_version, state, attempts, last_attempt_at,
-  next_attempt_at, sent_at, failed_at, canceled_at, last_error_code, provider, created_at`;
+  next_attempt_at, sent_at, failed_at, canceled_at, last_error_code, provider, created_at,
+  starts_with(dedupe_key, ${`${STAFF_RESEND_TOPIC}:`}) as staff_resend`;
 
 /** One message's delivery status, without its recipient or content; null when not this tenant's. */
 export async function getMessageStatus(

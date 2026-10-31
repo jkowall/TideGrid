@@ -176,15 +176,41 @@
   gap: var(--space-3) var(--space-6);
 }
 .bk-filters__trip {
-  flex: 0 1 30rem;
+  flex: 0 1 26rem;
   min-width: min(100%, 16rem);
   margin: 0;
+}
+/* The source beside the trip (G2.12e): its longest choice fits at 12rem. */
+.bk-filters__source {
+  flex: 0 1 14rem;
+  min-width: min(100%, 12rem);
+  margin: 0;
+}
+/* While a source filter is on: what the day's totals above still count. */
+.bk-filters__note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: calc(var(--space-2) * -1) 0 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.bk-filters__note .tg-icon {
+  flex: none;
+  margin-top: 0.15em;
+  color: var(--status-info);
 }
 .bk-filters__totals {
   margin: 0;
   padding-bottom: var(--space-3);
   color: var(--text-strong);
   font-weight: var(--weight-semibold);
+}
+@media (min-width: 40rem) {
+  /* The totals keep the far end while the two controls sit together. */
+  .bk-filters__totals {
+    margin-inline-start: auto;
+  }
 }
 .bk-zone {
   display: flex;
@@ -269,7 +295,8 @@
     justify-content: flex-start;
   }
 }
-.bk-trip__roster {
+.bk-trip__roster,
+.bk-trip__book {
   padding-inline: var(--space-3);
   font-size: var(--text-sm);
 }
@@ -288,11 +315,13 @@
  * fact keeps its label for the ear. Every row uses the same columns, so they
  * line up.
  */
+/* The first column holds the reference and, for a staff booking, its badge
+   on two lines (G2.12e). */
 .bk-table {
-  --bk-columns: 7.5rem minmax(0, 1.2fr) minmax(0, 1.5fr) minmax(0, 1.2fr) 6.5rem 9.5rem;
+  --bk-columns: 9rem minmax(0, 1.2fr) minmax(0, 1.5fr) minmax(0, 1.2fr) 6.5rem 9.5rem;
 }
 .bk-table--no-booker {
-  --bk-columns: 7.5rem minmax(0, 1.6fr) minmax(0, 1.3fr) 6.5rem 9.5rem;
+  --bk-columns: 9rem minmax(0, 1.6fr) minmax(0, 1.3fr) 6.5rem 9.5rem;
 }
 .bk-cols {
   display: none;
@@ -311,6 +340,17 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--surface-raised);
+}
+/* The reference, and under it who took a staff booking (G2.12e). */
+.bk-row__lead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.bk-row__source {
+  margin: 0;
 }
 .bk-row__ref {
   justify-self: start;
@@ -397,6 +437,22 @@
   }
   .bk-row__ref {
     margin-block: calc((var(--tap-min) - 1.5rem) / -2);
+  }
+  /* Clear of the reference's tap target, which reaches past its text, and
+     inside the reference's column: the badge wraps there rather than run
+     under the facts. */
+  .bk-row__source {
+    max-width: 100%;
+    margin-top: calc((var(--tap-min) - 1.5rem) / 2);
+  }
+  .bk-row__source .tg-status {
+    align-items: flex-start;
+    border-radius: var(--radius-md);
+    white-space: normal;
+  }
+  .bk-row__source .tg-icon {
+    flex: none;
+    margin-top: 0.125rem;
   }
   /* The facts take the row's remaining columns as its own. */
   .bk-row__facts {

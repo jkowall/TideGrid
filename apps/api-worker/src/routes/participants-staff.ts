@@ -4,11 +4,12 @@ import {
   ParticipantListResponse,
   StaffParticipantParams,
 } from "@tidegrid/contracts";
-import { listParticipants } from "@tidegrid/domain-booking";
+import { listParticipants, resendAvailability } from "@tidegrid/domain-booking";
 import { listBookingMessages } from "@tidegrid/domain-messaging";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
+import { emailDelivery } from "./booking-email-staff.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const participantsPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants";
@@ -72,7 +73,7 @@ export function registerParticipantStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
     tags: ["staff", "bookings"],
     summary: "A booking's email and its delivery",
     description:
-      "Owners and booking staff. Each message the booking caused, oldest first: its template, its delivery state, attempts, when it was sent, and the last failure's code. No recipient or content. Provider acceptance is not proof the guest read a message. Finance does not hold bookings.read and is refused.",
+      "Owners and booking staff. Each message the booking caused, oldest first: its template, its delivery state, attempts, when it was sent, the last failure's code, and whether staff sent it again. No recipient or content. Provider acceptance is not proof the guest read a message. Also whether this environment sends email, and whether staff can send the booking's email again now (G2.16b; advisory, the send decides again). Finance does not hold bookings.read and is refused.",
     security: staffSecurity,
     request: { params: StaffParticipantParams },
     responses: {
@@ -96,7 +97,23 @@ export function registerParticipantStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
         const party = await listParticipants(trx, tenantId, bookingId);
         if (!party) throw new ApiError(404, "booking_not_found", "No such booking for this tenant");
         const messages = await listBookingMessages(trx, tenantId, bookingId);
-        return { messages: messages.map((m) => ({ ...m })) };
+        const availability = await resendAvailability(trx, tenantId, bookingId);
+        if (!availability) {
+          throw new ApiError(404, "booking_not_found", "No such booking for this tenant");
+        }
+        const off = emailDelivery(c.env) === "off";
+        return {
+          messages: messages.map((m) => ({ ...m })),
+          emailDelivery: off ? "off" : "on",
+          resend: {
+            kind: availability.kind,
+            allowed: !off && availability.allowed,
+            // Email off comes first, as the send decides it before any refusal.
+            availableAt: off ? null : (availability.availableAt?.toISOString() ?? null),
+            remaining: availability.remaining,
+            blockedBy: off ? "email_off" : availability.blockedBy,
+          },
+        };
       },
     );
     return c.json(body as BookingMessagesResponse, 200);

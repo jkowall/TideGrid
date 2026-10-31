@@ -35,6 +35,11 @@
       "esbuild",
       "workerd",
       "@biomejs/biome"
-    ]
+    ],
+    "overrides": {
+      "@cloudflare/vitest-pool-workers>zod": "4.6.6",
+      "miniflare>sharp": "0.35.5",
+      "miniflare>undici": "7.30.1"
+    }
   }
 }

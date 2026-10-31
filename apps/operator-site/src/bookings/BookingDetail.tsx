@@ -16,6 +16,7 @@ import {
   zoneCity,
 } from "@tidegrid/design-system/format";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { BookingEmailCard } from "../email/BookingEmailCard.tsx";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleButtonLink, ConsoleLink } from "../navigation.tsx";
@@ -38,6 +39,7 @@ import {
   orderRows,
   paymentCopy,
   providerName,
+  readSource,
   rosterHref,
   timelineLabel,
 } from "./model.ts";
@@ -182,6 +184,19 @@ export function BookingDetailPage({
               />
             ) : null
           }
+          email={
+            // Booking email (G2.16b): a self-contained card, for roles that see
+            // guests; finance gets no card and makes no messages request.
+            canSeeGuests(role) ? (
+              <BookingEmailCard
+                tenantId={tenantId}
+                bookingId={booking.id}
+                role={role}
+                timeZone={booking.trip.timeZone}
+                bookerEmail={booking.booker?.email ?? null}
+              />
+            ) : null
+          }
         />
       )}
     </>
@@ -194,6 +209,7 @@ function Detail({
   roleName,
   notes,
   waivers,
+  email,
 }: {
   booking: BookingDetail;
   seesGuests: boolean;
@@ -202,6 +218,8 @@ function Detail({
   notes: ReactNode;
   /** The party's waivers (G2.15), before the notes; none for finance. */
   waivers: ReactNode;
+  /** The booking's email (G2.16b), after the waivers and before the notes; none for finance. */
+  email: ReactNode;
 }) {
   const { trip, location } = booking;
   const zone = trip.timeZone;
@@ -217,7 +235,11 @@ function Detail({
   return (
     <div className="bd">
       <div className="bd-top">
-        <ConsoleLink href={bookingsHref(trip.localDate)} className="bd-back tap-target">
+        {/* Back to the list it came from: a source filter in this address (G2.12e) goes too. */}
+        <ConsoleLink
+          href={bookingsHref(trip.localDate, undefined, readSource(window.location.search))}
+          className="bd-back tap-target"
+        >
           <Icon name="arrow-left" />
           <span>Bookings on {dayText(trip.localDate, "medium", today)}</span>
         </ConsoleLink>
@@ -231,7 +253,10 @@ function Detail({
         </div>
       </div>
       <p className="bd-lede">
-        Booked online by the guest. Confirmed {instantText(booking.confirmedAt, zone)}.
+        {booking.source === "staff_assisted"
+          ? `${sourceText(booking.source, booking.channel)}.`
+          : "Booked online by the guest."}{" "}
+        Confirmed {instantText(booking.confirmedAt, zone)}.
         {booking.reacquired &&
           " The payment arrived after the checkout's hold ran out, and the seats were still free."}
         {booking.cancellation &&
@@ -431,6 +456,7 @@ function Detail({
         </section>
 
         {waivers}
+        {email}
         {notes}
       </div>
     </div>
