@@ -32,6 +32,7 @@ import {
 import {
   bookingHref,
   bookingsHref,
+  bookingsText,
   clampDay,
   countText,
   dayBounds,
@@ -42,13 +43,16 @@ import {
   guestsText,
   instantText,
   isUuid,
+  noBookingsText,
   orderRows,
   partyDetail,
   paymentCopy,
   providerName,
   readDay,
+  readSource,
   readTrip,
   rosterHref,
+  sourceFilterOptions,
   spokenReference,
   timelineLabel,
 } from "./model.ts";
@@ -142,11 +146,62 @@ describe("the trip an address names", () => {
   });
 });
 
+describe("the source an address names (G2.12e)", () => {
+  it("accepts the API's two sources, exactly", () => {
+    expect(readSource("?source=direct")).toBe("direct");
+    expect(readSource("?source=staff_assisted")).toBe("staff_assisted");
+    expect(readSource(`?day=2026-11-04&trip=${trip}&source=staff_assisted`)).toBe("staff_assisted");
+  });
+
+  it("accepts nothing else", () => {
+    for (const search of [
+      "",
+      "?source=",
+      "?source=STAFF_ASSISTED",
+      "?source=staff",
+      "?source=complimentary",
+      "?source=direct%20",
+      "?source=toString",
+      "?source=__proto__",
+      "?day=2026-11-04",
+    ]) {
+      expect(readSource(search), search).toBeUndefined();
+    }
+  });
+
+  it("offers every source, then the guest's own, then staff bookings", () => {
+    expect(sourceFilterOptions).toEqual([
+      { value: "", label: "All sources" },
+      { value: "direct", label: "Online, by the guest" },
+      { value: "staff_assisted", label: "Staff bookings" },
+    ]);
+  });
+
+  it("names the source in a count, and in none", () => {
+    expect(bookingsText(1)).toBe("1 booking");
+    expect(bookingsText(3)).toBe("3 bookings");
+    expect(bookingsText(1, "staff_assisted")).toBe("1 staff booking");
+    expect(bookingsText(2, "staff_assisted")).toBe("2 staff bookings");
+    expect(bookingsText(1, "direct")).toBe("1 online booking");
+    expect(bookingsText(4, "direct")).toBe("4 online bookings");
+    expect(noBookingsText()).toBe("No bookings");
+    expect(noBookingsText("staff_assisted")).toBe("No staff bookings");
+    expect(noBookingsText("direct")).toBe("No online bookings");
+  });
+});
+
 describe("addresses", () => {
   it("builds the list's address from a day and, optionally, a trip", () => {
     expect(bookingsHref("2026-11-04")).toBe("/bookings?day=2026-11-04");
     expect(bookingsHref("2026-11-04", trip)).toBe(`/bookings?day=2026-11-04&trip=${trip}`);
     expect(bookingsHref("2026-11-04", undefined)).toBe("/bookings?day=2026-11-04");
+    // G2.12e fix round: a source, after the trip.
+    expect(bookingsHref("2026-11-04", undefined, "staff_assisted")).toBe(
+      "/bookings?day=2026-11-04&source=staff_assisted",
+    );
+    expect(bookingsHref("2026-11-04", trip, "direct")).toBe(
+      `/bookings?day=2026-11-04&trip=${trip}&source=direct`,
+    );
   });
 
   it("reads back what it builds", () => {
@@ -157,6 +212,8 @@ describe("addresses", () => {
 
   it("builds a booking's and a roster's address from the id alone", () => {
     expect(bookingHref(mayaBooking.id)).toBe(`/bookings/${mayaBooking.id}`);
+    expect(bookingHref(mayaBooking.id, "direct")).toBe(`/bookings/${mayaBooking.id}?source=direct`);
+    expect(bookingHref(mayaBooking.id, undefined)).toBe(`/bookings/${mayaBooking.id}`);
     expect(rosterHref(trip)).toBe(`/trips/${trip}/roster`);
     // An id cannot change the path it sits in.
     expect(bookingHref("a/b?c#d")).toBe("/bookings/a%2Fb%3Fc%23d");

@@ -28,12 +28,29 @@ The owner accepted the recommended defaults of the G2.16b goal packet (failure s
 - **D10 (replaced on October 30, above): merge after the Nov 1 deploy** (after P11). This replaced the packet's D10 B.
 - **D11 A: booking-level emails only** on the card; waiver requests stay on the Waivers card.
 
+### 2026-10-30: G2.12e merge timing changed, owner decision
+
+- **D7 replaced: G2.12e merges now, before the Oct 31 freeze.** The owner said on October 30: "merge it now". So the day list's source filter, staff booking badge, trip header Book, and the booking detail's source lede are in `main` before the release SHA is frozen, and ride into the Nov 1 deploy unless the owner freezes an earlier SHA at P0.1 of the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md). The runbook's console acceptance runs (P6 steps 5 and 7) select tests by `--grep walk-up` and `--grep 'one-tenant identity'`, which match no test in the new browser spec, `e2e/bookings-list.spec.ts`; the spec also skips itself in deployed mode. The walk-up run does now pass through G2.12e's day list and booking detail lede. This replaces D7 C below.
+
+### 2026-10-29: G2.12e merge timing, owner decision
+
+- **D7 C (replaced on October 30, above): G2.12e merges after the last Nov 1 release step (P11),** so the day list's source filter, staff booking badge, and trip header Book are not in the Nov 1 deploy. The goal's other choices are coordinator defaults, pending owner confirmation below. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
+
 ### 2026-10-29: pre-pilot hardening, owner decisions
 
 The owner decided the two questions the hardening goal left open (standing goal item 5). Both are owner decisions, not coordinator defaults. Details are in the [pre-pilot hardening narrowing](12-demo-build-plan.md#goal-sequence) of the demo build plan.
 
 - **D-E7: the cron's email sweep keeps its 20 s budget.** Bound, inferred and not tested: with Cloudflare's 10 s send bound and the 2 s margin, claims happen only in the first 8 s of a run (D9 B below). No sends-per-run figure was measured.
 - **D-E8: a console search latency target of 300 ms p95** for the large tenant (about 50,000 bookings), common fragments included. When the target was set, the observed number was above it: about 320 ms, max 355 ms, at 20,000 matches, on CI PostgreSQL 17, not Neon (run 40765472082). So the deferred search follow-up became required work, as a goal and pull request of its own: order and limit the matching booking ids before the joins, not an index. Built in pull request 41: search is now one statement that collects the matches once and orders and limits them before any detail join, with no new index. It meets the 300 ms p95 target on CI PostgreSQL 17; Neon is not yet shown. The measurements are in the [booking README](../../packages/domain-booking/README.md#deferred-and-known-gaps). The owner decided on 2026-10-29 to merge it when green, not after the Nov 1 deploy.
+
+### Pending owner confirmation: G2.12e bookings list by source (coordinator defaults, 2026-10-29)
+
+**Status:** Coordinator defaults for G2.12e, the G2.12 tail on the day's bookings list, pending owner confirmation. D7, merge timing, is the owner's decision above (October 30, replacing October 29). They bind the demo build only. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
+
+- **D1 A: counts follow the filter.** Every trip of the day still lists, with that source's confirmed bookings and guests. Under a filter, Roster shows for owners and booking staff whatever the count, because the roster lists every source. Trade-off: a filtered trip with no bookings at all also shows Roster, which opens the roster's empty state.
+- **D2 A: a badge on staff bookings only,** "Staff booking, walk-up", under the reference and outside the row's facts, for every role, finance included (as G2.12d D14).
+- **D3 A: Book in each trip's header,** by the calendar's Book rule, failing closed: the day list sends `salesCloseAt` and `blackedOut`, and Book shows only when both arrived. The API still refuses a full trip and an inactive product, location, or boat.
+- **Also taken by default:** the source survives an operator switch, which drops the trip and the day (D4 A); the day's totals and the CSV cover every source, with a note while a filter is on (D5 A); a new browser spec, `e2e/bookings-list.spec.ts`, skipped in deployed mode (D6 C); new test files beside the shared fixtures (D8 A); the answer echoes `source`, and the console refuses one for another source (D9 A); this entry (D10 A); and one combined review (D11).
 
 ### Pending owner confirmation: pre-pilot hardening (coordinator defaults, 2026-10-28 and 2026-10-29)
 

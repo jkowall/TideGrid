@@ -76,7 +76,7 @@ sweepCheckouts(db, { runId, provider, ... })          // the cron
 listTripBookings(trx, tenantId, tripId)               // staff
 listFinalizationExceptions(trx, tenantId, { limit })  // staff, no personal data
 // Console reads (G2.12b), below
-listDayBookings(trx, tenantId, { date, tripId?, limit, after?, withBooker })
+listDayBookings(trx, tenantId, { date, tripId?, source?, limit, after?, withBooker })
 getBookingDetail(trx, tenantId, bookingId, { withBooker })
 findBookingByReference(trx, tenantId, reference)
 getTripRoster(trx, tenantId, tripId)
@@ -161,7 +161,7 @@ The operator console's booking views read through `src/console.ts`, under the ca
 
 - **Who sees the booker.** Every read takes `withBooker`, which the API sets from the role: true only with `bookings.read` (owners and booking staff). When it is false the query does not select the booker's name or email at all, so a view for finance never holds them. The roster always names the booker and its route needs `bookings.read`.
 - **What never leaves.** No checkout secret or its hash, client key, idempotency key, payload hash, raw provider payload, or account reference. A provider payment id leaves only masked, `maskProviderReference`: its prefix up to the first underscore and, when at least twelve characters follow, the last four (`fpay_••••a1B2`).
-- **A day.** `listDayBookings` reads the date's trips with their booking and guest counts and a page of bookings ordered by departure, trip, confirmation, and booking id. The cursor is the previous page's last booking id; the position is read in SQL, so the database's own timestamp precision orders the page, and the same cursor always returns the same page while nothing new is booked before it. A cursor that names no booking in the listing (this tenant, this date, and the trip when one is given) answers `cursor_invalid`. The API runs it in one snapshot (`snapshotRead` in the [database contract](../database/README.md#commands-audit-idempotency-and-outbox)), so the counts and the page agree even while bookings confirm; the test specialist's suite caught them disagreeing before that.
+- **A day.** `listDayBookings` reads the date's trips with their booking and guest counts and a page of bookings ordered by departure, trip, confirmation, and booking id. The cursor is the previous page's last booking id; the position is read in SQL, so the database's own timestamp precision orders the page, and the same cursor always returns the same page while nothing new is booked before it. With a `source` (G2.12e), the page and the trip counts are that source's only, and every trip of the date still lists. Each trip also carries `salesCloseAt` and `blackedOut`, from the SQL fragment the roster uses, so the console's Book rule reads the same inputs on both. A cursor that names no booking in the listing (this tenant, this date, the trip when one is given, and the source when one is given) answers `cursor_invalid`. The API runs it in one snapshot (`snapshotRead` in the [database contract](../database/README.md#commands-audit-idempotency-and-outbox)), so the counts and the page agree even while bookings confirm; the test specialist's suite caught them disagreeing before that.
 - **Every console read runs in a snapshot** for the same reason, and the routes answer `Cache-Control: no-store` on refusals as well as on success.
 - **Limits.** A day lists its first 200 trips by departure. A booking on a later trip would have no trip to show under; no marina runs that many departures in a day, so the list has no truncation flag yet. A roster holds at most a trip's capacity.
 - **Ids are lowercase.** The contract accepts a UUID in either case, but ids are matched as the API writes them, in lowercase, as everywhere else in the API (`isUuid` in `@tidegrid/database`): an uppercase booking or trip id is not found, and an uppercase cursor is `cursor_invalid`. The console sends ids as it received them.
@@ -343,7 +343,7 @@ Hold transitions keep their own `hold.*` audit rows and `inventory.hold.*` event
 | `POST /v1/webhooks/payments/{provider}` | 200 `{ received, duplicate, outcome }`; 400 `signature_invalid`, `payload_invalid`; 403 `origin_not_allowed`; 404; 413 `payload_too_large` |
 | `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/bookings` | owners and booking staff; the trip's bookings with booker contact |
 | `GET /v1/staff/tenants/{tenantId}/finalization-exceptions?limit=&before=` | every role; newest first, a page at a time; who paid only with `bookings.read`; 400 `cursor_invalid` |
-| `GET /v1/staff/tenants/{tenantId}/bookings?date=&tripId=&limit=&after=` | every role (G2.12b); a local date's trips and a page of its bookings; 400 `cursor_invalid` |
+| `GET /v1/staff/tenants/{tenantId}/bookings?date=&tripId=&source=&limit=&after=` | every role (G2.12b); a local date's trips and a page of its bookings; `source` filters both and is echoed (G2.12e); 400 `cursor_invalid` |
 | `GET /v1/staff/tenants/{tenantId}/bookings/{bookingId}` | every role (G2.12b); 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/booking-references/{reference}` | every role (G2.12b); 404 `booking_not_found` |
 | `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/roster` | owners and booking staff (G2.12b); 403 for finance; 404 `trip_not_found` |

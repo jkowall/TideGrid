@@ -151,9 +151,12 @@ export const BookingListQuery = z.object({
   tripId: Uuid.optional().describe(
     "Only this trip's bookings. A trip of another operator, or on another date, matches nothing",
   ),
+  source: BookingSource.optional().describe(
+    "Only bookings of this source, and trip counts of this source (G2.12e). Every trip of the date still lists. Exactly direct or staff_assisted; any other value, an empty one, or a repeated source answers 400 validation_failed",
+  ),
   limit: z.coerce.number().int().min(1).max(200).default(100),
   after: Uuid.optional().describe(
-    "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, and this trip when one is given) answers 400 cursor_invalid",
+    "Cursor: the last booking id of the previous page (nextAfter). One that names no booking in this listing (this operator, this date, this trip when one is given, and this source when one is given) answers 400 cursor_invalid",
   ),
 });
 export type BookingListQuery = z.infer<typeof BookingListQuery>;
@@ -163,8 +166,19 @@ export const BookingDayTrip = TripSummary.extend({
     .number()
     .int()
     .min(0)
-    .describe("Confirmed bookings on the trip; canceled ones gave their seats back"),
+    .describe(
+      "Confirmed bookings on the trip, of the asked source when one is given; canceled ones gave their seats back",
+    ),
   guests: z.number().int().min(0).describe("Guests across those bookings"),
+  salesCloseAt: Instant.optional().describe(
+    "When sales close: departure less the booking cutoff, as the roster sends it (G2.12e; always sent)",
+  ),
+  blackedOut: z
+    .boolean()
+    .optional()
+    .describe(
+      "A blackout covers the trip, so it takes no booking, as the roster sends it (G2.12e; always sent)",
+    ),
 });
 export type BookingDayTrip = z.infer<typeof BookingDayTrip>;
 
@@ -191,13 +205,16 @@ export const BookingListResponse = z
     trips: z
       .array(BookingDayTrip)
       .describe(
-        "Every trip departing on the date, in any sales state, with its booking and guest counts across all pages; sorted by departure; at most 200",
+        "Every trip departing on the date, in any sales state, with its booking and guest counts across all pages (of the asked source when one is given); sorted by departure; at most 200",
       ),
     bookings: z
       .array(BookingListItem)
       .describe("This page, sorted by departure, then by trip, then by confirmation"),
     nextAfter: Uuid.nullable().describe(
       "Pass as after for the next page; null on the last page. The same cursor always returns the same page while nothing is booked in between",
+    ),
+    source: BookingSource.nullable().describe(
+      "The source the page and the trip counts are filtered to; null for every source (G2.12e)",
     ),
   })
   .describe("Bookings on trips departing on one local date");

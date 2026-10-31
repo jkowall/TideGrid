@@ -68,8 +68,12 @@ export interface TripSummaryView {
 }
 
 export interface DayTripView extends TripSummaryView {
+  /** Confirmed bookings, of the asked source when one is given (G2.12e). */
   bookings: number;
   guests: number;
+  /** The roster's Book rule inputs (G2.12e): the console offers Book from the list only then. */
+  salesCloseAt: string;
+  blackedOut: boolean;
 }
 
 export interface DayBookingView {
@@ -352,6 +356,29 @@ const tripJoins = sql`
   join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
   join boats bt on bt.tenant_id = t.tenant_id and bt.id = t.boat_id`;
 
+/**
+ * Whether a trip still takes a booking, as the calendar reads it (G2.12d):
+ * when its sales close (departure less the product's cutoff) and whether a
+ * blackout of its operator covers it. The roster and the day list (G2.12e)
+ * share it, so the two never disagree. `t` is the trip, `p` its product.
+ */
+const bookRuleColumns = sql`
+  t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as sales_close_at,
+  exists (
+    select 1 from blackouts x
+     where x.tenant_id = t.tenant_id
+       and x.starts_at < t.ends_at and t.starts_at < x.ends_at
+       and (   (x.location_id is null and x.product_id is null and x.boat_id is null)
+            or x.location_id = p.location_id
+            or x.product_id = t.product_id
+            or x.boat_id = t.boat_id)
+  ) as blacked_out`;
+
+interface BookRuleRow {
+  sales_close_at: Date | string;
+  blacked_out: boolean;
+}
+
 interface TripRow {
   trip_id: string;
   product_name: string;
@@ -440,7 +467,15 @@ export type DayBookingsResult =
 export async function listDayBookings(
   trx: TenantTransaction,
   tenantId: string,
-  query: { date: string; tripId?: string; limit: number; after?: string; withBooker: boolean },
+  query: {
+    date: string;
+    tripId?: string;
+    /** Only this source's bookings, and trip counts of this source (G2.12e). */
+    source?: BookingSource;
+    limit: number;
+    after?: string;
+    withBooker: boolean;
+  },
 ): Promise<DayBookingsResult> {
   const tripFilter =
     query.tripId === undefined
@@ -448,6 +483,8 @@ export async function listDayBookings(
       : isUuid(query.tripId)
         ? sql`and b.trip_id = ${query.tripId}::uuid`
         : sql`and false`;
+  // A parameter, never text: the route has checked it is a source.
+  const sourceFilter = query.source === undefined ? sql`` : sql`and b.source = ${query.source}`;
   if (query.after !== undefined) {
     if (!isUuid(query.after)) return { kind: "cursor_invalid" };
     // The cursor must name a booking this listing could have returned.
@@ -457,19 +494,24 @@ export async function listDayBookings(
         join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
        where b.tenant_id = ${tenantId} and b.id = ${query.after}::uuid
          and t.local_date = ${query.date}::date
-         ${tripFilter}`.execute(trx);
+         ${tripFilter}
+         ${sourceFilter}`.execute(trx);
     if (!found[0]) return { kind: "cursor_invalid" };
   }
-  // A trip's counts are its confirmed bookings: a canceled one gave its seats back.
-  const { rows: tripRows } = await sql<TripRow & { bookings: number; guests: number }>`
-    select ${tripColumns},
+  // A trip's counts are its confirmed bookings, of the asked source when one
+  // is given: a canceled one gave its seats back. Every trip of the date lists.
+  const { rows: tripRows } = await sql<
+    TripRow & BookRuleRow & { bookings: number; guests: number }
+  >`
+    select ${tripColumns}, ${bookRuleColumns},
            count(b.id)::int as bookings, coalesce(sum(b.party_size), 0)::int as guests
       from scheduled_trips t
       ${tripJoins}
       left join bookings b
         on b.tenant_id = t.tenant_id and b.trip_id = t.id and b.state = 'confirmed'
+       ${sourceFilter}
      where t.tenant_id = ${tenantId} and t.local_date = ${query.date}::date
-     group by t.id, p.name, p.kind, bt.name
+     group by t.id, p.id, p.name, p.kind, bt.name
      order by t.starts_at, t.id
      limit ${DAY_TRIPS_LIMIT}`.execute(trx);
 
@@ -513,6 +555,7 @@ export async function listDayBookings(
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
      where b.tenant_id = ${tenantId} and t.local_date = ${query.date}::date
        ${tripFilter}
+       ${sourceFilter}
        ${cursor}
      order by t.starts_at, t.id, b.confirmed_at, b.id
      limit ${query.limit + 1}`.execute(trx);
@@ -549,6 +592,8 @@ export async function listDayBookings(
       ...tripSummary(row),
       bookings: row.bookings,
       guests: row.guests,
+      salesCloseAt: iso(row.sales_close_at),
+      blackedOut: row.blacked_out,
     })),
     bookings,
     nextAfter: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
@@ -823,28 +868,18 @@ export async function getTripRoster(
 ): Promise<RosterView | null> {
   if (!isUuid(tripId)) return null;
   const { rows: tripRows } = await sql<
-    TimingRow & {
-      seat_capacity: number;
-      location_name: string;
-      meeting_point: string;
-      meeting_instructions: string;
-      generated_at: Date | string;
-      sales_close_at: Date | string;
-      blacked_out: boolean;
-    }
+    TimingRow &
+      BookRuleRow & {
+        seat_capacity: number;
+        location_name: string;
+        meeting_point: string;
+        meeting_instructions: string;
+        generated_at: Date | string;
+      }
   >`
     select ${tripColumns},
            t.ends_at, t.end_utc_offset_minutes, t.duration_minutes, t.seat_capacity,
-           t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as sales_close_at,
-           exists (
-             select 1 from blackouts x
-              where x.tenant_id = t.tenant_id
-                and x.starts_at < t.ends_at and t.starts_at < x.ends_at
-                and (   (x.location_id is null and x.product_id is null and x.boat_id is null)
-                     or x.location_id = p.location_id
-                     or x.product_id = t.product_id
-                     or x.boat_id = t.boat_id)
-           ) as blacked_out,
+           ${bookRuleColumns},
            l.name as location_name, l.meeting_point, l.meeting_instructions,
            now() as generated_at
       from scheduled_trips t
