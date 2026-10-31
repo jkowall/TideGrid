@@ -10,7 +10,7 @@ Dated decisions that changed scope, wording, or process. Each entry records the 
 
 ### 2026-10-30: G2.12e merge timing changed, owner decision
 
-- **D7 replaced: G2.12e merges now, before the Oct 31 freeze.** The owner said on October 30: "merge it now". So the day list's source filter, staff booking badge, trip header Book, and the booking detail's source lede are in `main` before the release SHA is frozen, and ride into the Nov 1 deploy unless the owner freezes an earlier SHA at P0.1 of the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md). The new browser spec, `e2e/bookings-list.spec.ts`, skips itself in deployed mode, so the runbook's acceptance runs select the same tests as before. This replaces D7 C below.
+- **D7 replaced: G2.12e merges now, before the Oct 31 freeze.** The owner said on October 30: "merge it now". So the day list's source filter, staff booking badge, trip header Book, and the booking detail's source lede are in `main` before the release SHA is frozen, and ride into the Nov 1 deploy unless the owner freezes an earlier SHA at P0.1 of the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md). The runbook's console acceptance runs (P6 steps 5 and 7) select tests by `--grep walk-up` and `--grep 'one-tenant identity'`, which match no test in the new browser spec, `e2e/bookings-list.spec.ts`; the spec also skips itself in deployed mode. The walk-up run does now pass through G2.12e's day list and booking detail lede. This replaces D7 C below.
 
 ### 2026-10-29: G2.12e merge timing, owner decision
 
