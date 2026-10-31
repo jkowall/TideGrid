@@ -8,9 +8,13 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-10-30: G2.16b merge timing changed, owner decision
+
+- **D10 replaced: G2.16b merges now, before the Oct 31 freeze.** The owner said on October 30: "merge it now". So G2.16b merges as soon as its final fix round is green and checked, and the Email card on booking detail and the staff resend route are in `main` before the release SHA is frozen. They ride into the Nov 1 deploy unless the owner freezes an earlier SHA at P0.1 of the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md). Email is off on that preview, so the card says so there and offers no Send again. G2.16b adds no browser spec and changes neither console spec, so the runbook's acceptance runs select the same tests as before. This replaces D10 below.
+
 ### 2026-10-29: G2.16b staff email resend, owner decisions
 
-The owner accepted the recommended defaults of the G2.16b goal packet (failure surfaces on booking detail and staff resend with audit) for D1 to D9 and D11, as relayed by the coordinator on 2026-10-29. For D10 the owner chose the packet's option C instead: hold the merge until after the Nov 1 deploy. These are owner decisions, not coordinator defaults. Details are in the [staff resend narrowing](12-demo-build-plan.md#goal-sequence) of the demo build plan and the [booking README](../../packages/domain-booking/README.md#staff-resend-of-a-bookings-email-g216b).
+The owner accepted the recommended defaults of the G2.16b goal packet (failure surfaces on booking detail and staff resend with audit) for D1 to D9 and D11, as relayed by the coordinator on 2026-10-29. For D10 the owner chose the packet's option C instead: hold the merge until after the Nov 1 deploy, which the owner replaced on October 30 (above). These are owner decisions, not coordinator defaults. Details are in the [staff resend narrowing](12-demo-build-plan.md#goal-sequence) of the demo build plan and the [booking README](../../packages/domain-booking/README.md#staff-resend-of-a-bookings-email-g216b).
 
 - **D1 A: two kinds.** The confirmation, with a new management link, for a confirmed booking before its trip ends. The cancellation notice, for a canceled booking, refused as `booking_email_refund_failed` when the cancellation's refund failed, since the notice says the refund is on its way. Not the management-link email (the guest asks for one), not the refund-failed follow-up, and not waiver requests (they keep their own resend).
 - **D2 A: a `messages.resend` permission** for owners and booking staff. Finance is refused.
@@ -21,7 +25,7 @@ The owner accepted the recommended defaults of the G2.16b goal packet (failure s
 - **D7 A: finance gets no card** and makes no messages request.
 - **D8 A: email off.** The read says `emailDelivery: "off"`; a resend answers `booking_email_off` after authentication, membership, permission, and an idempotent replay, and stores nothing.
 - **D9 A: booking detail only.** A tenant-wide email exceptions list is a proposed follow-up.
-- **D10: merge after the Nov 1 deploy** (after P11). This replaces the packet's D10 B.
+- **D10 (replaced on October 30, above): merge after the Nov 1 deploy** (after P11). This replaced the packet's D10 B.
 - **D11 A: booking-level emails only** on the card; waiver requests stay on the Waivers card.
 
 ### 2026-10-29: pre-pilot hardening, owner decisions
