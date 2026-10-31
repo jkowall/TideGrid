@@ -107,8 +107,8 @@ export function activateWaitingWorker(
  * it first reads its registration (D11(a)). Navigations go network first, so
  * this page is usually that newer build already; the cost is that the newer
  * worker waits one more page load. The browser hands back the same
- * ServiceWorker object for the same worker, so identity tells them apart. Either way this page load has
- * had its one ask.
+ * ServiceWorker object for the same worker, so identity tells them apart.
+ * Either way this page load has had its one ask.
  */
 export async function askWaitingWorker(
   readWaiting: () => Promise<WaitingWorker | null>,
