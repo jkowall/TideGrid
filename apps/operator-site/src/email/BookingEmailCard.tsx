@@ -6,6 +6,7 @@ import type {
 } from "@tidegrid/contracts";
 import {
   Button,
+  ButtonLink,
   Dialog,
   Notice,
   SelectField,
@@ -17,6 +18,7 @@ import { type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { instantText } from "../bookings/model.ts";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
+import { hereAddress } from "../navigation.tsx";
 import { canResendEmail } from "../roles.ts";
 import { loadBookingEmail, newResendKey, resendBookingEmail } from "./api.ts";
 import {
@@ -92,14 +94,52 @@ export function BookingEmailCard({
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
-  // Try again worked and its button is gone: the card's heading takes focus,
-  // unless the person moved it elsewhere meanwhile. A layout effect, so a
-  // click that lands before the commit's passive effects never races it.
+  const data = load.kind === "ready" ? load.data : null;
+  const off = data?.emailDelivery === "off";
+  const resend = data?.resend ?? null;
+  /** Send again is on the card now. */
+  const offered = canResendEmail(role) && !off && !!resend?.allowed && !!resend.kind;
+  /** Send again had focus when it was last on the card. */
+  const openerFocused = useRef(false);
+  /** The last Send again button, kept after it leaves the page. */
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const keepOpener = useCallback((element: HTMLButtonElement | null) => {
+    if (element) opener.current = element;
+  }, []);
+  const dialogWasOpen = useRef(false);
+
+  // Try again ended and its button is gone (the email, or a signed-out notice
+  // with Sign in again): the card's heading takes focus, unless the person
+  // moved it elsewhere meanwhile. A layout effect, so a click that lands
+  // before the commit's passive effects never races it.
   useLayoutEffect(() => {
     if (busy || !retried.current) return;
     retried.current = false;
-    if (load.kind === "ready" && focusIsLost()) heading.current?.focus();
+    if (focusIsLost()) heading.current?.focus();
   }, [busy, load]);
+
+  // The dialog closed. It gives focus back to Send again when it can; when a
+  // read after a refusal took Send again away, the heading takes focus.
+  useLayoutEffect(() => {
+    if (sending) {
+      dialogWasOpen.current = true;
+      return;
+    }
+    if (!dialogWasOpen.current) return;
+    dialogWasOpen.current = false;
+    if (focusIsLost()) heading.current?.focus();
+    // The dialog gave focus back to Send again inside this commit, where its
+    // focus handler may not run: note it, for a read that takes it away later.
+    else if (document.activeElement === opener.current) openerFocused.current = true;
+  }, [sending]);
+
+  // A read took away the Send again that had focus (a refusal's re-read that
+  // landed after the dialog closed): the heading takes focus.
+  useLayoutEffect(() => {
+    if (offered || !openerFocused.current) return;
+    openerFocused.current = false;
+    if (focusIsLost()) heading.current?.focus();
+  }, [offered]);
 
   // A send went out: its notice takes focus, since the dialog and perhaps the
   // button that opened it are gone.
@@ -116,10 +156,7 @@ export function BookingEmailCard({
   }, [sent, reload]);
 
   const when = (iso: string) => instantText(iso, timeZone);
-  const data = load.kind === "ready" ? load.data : null;
-  const off = data?.emailDelivery === "off";
   const messages = data ? data.messages.filter(isBookingEmail) : [];
-  const resend = data?.resend ?? null;
   const blocked = resend ? blockedText(resend, when) : null;
 
   return (
@@ -143,8 +180,13 @@ export function BookingEmailCard({
           tone="error"
           title="Email didn't load"
           actions={
-            // Signed out, trying again meets the same answer: sign in first.
-            load.reason === "signed_out" ? undefined : (
+            // Signed out, trying again meets the same answer: this page
+            // again, from the start, asks for a sign-in and comes back here.
+            load.reason === "signed_out" ? (
+              <ButtonLink icon="arrow-left" href={hereAddress()}>
+                Sign in again
+              </ButtonLink>
+            ) : (
               <Button
                 icon="refresh"
                 busy={busy}
@@ -206,9 +248,19 @@ export function BookingEmailCard({
           )}
           {canResendEmail(role) && resend && !off && (
             <div className="em-resend">
-              {resend.allowed && resend.kind ? (
+              {offered && resend.kind ? (
                 <>
-                  <Button icon="mail" onClick={() => setSending(resend.kind)}>
+                  <Button
+                    ref={keepOpener}
+                    icon="mail"
+                    onClick={() => setSending(resend.kind)}
+                    onFocus={() => {
+                      openerFocused.current = true;
+                    }}
+                    onBlur={() => {
+                      openerFocused.current = false;
+                    }}
+                  >
                     Send the {kindNames[resend.kind]} again
                   </Button>
                   <p className="em-muted">
