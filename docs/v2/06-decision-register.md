@@ -8,9 +8,13 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-10-30: G2.12e merge timing changed, owner decision
+
+- **D7 replaced: G2.12e merges now, before the Oct 31 freeze.** The owner said on October 30: "merge it now". So the day list's source filter, staff booking badge, trip header Book, and the booking detail's source lede are in `main` before the release SHA is frozen, and ride into the Nov 1 deploy unless the owner freezes an earlier SHA at P0.1 of the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md). The new browser spec, `e2e/bookings-list.spec.ts`, skips itself in deployed mode, so the runbook's acceptance runs select the same tests as before. This replaces D7 C below.
+
 ### 2026-10-29: G2.12e merge timing, owner decision
 
-- **D7 C: G2.12e merges after the last Nov 1 release step (P11),** so the day list's source filter, staff booking badge, and trip header Book are not in the Nov 1 deploy. The goal's other choices are coordinator defaults, pending owner confirmation below. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
+- **D7 C (replaced on October 30, above): G2.12e merges after the last Nov 1 release step (P11),** so the day list's source filter, staff booking badge, and trip header Book are not in the Nov 1 deploy. The goal's other choices are coordinator defaults, pending owner confirmation below. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
 
 ### 2026-10-29: pre-pilot hardening, owner decisions
 
@@ -21,7 +25,7 @@ The owner decided the two questions the hardening goal left open (standing goal 
 
 ### Pending owner confirmation: G2.12e bookings list by source (coordinator defaults, 2026-10-29)
 
-**Status:** Coordinator defaults for G2.12e, the G2.12 tail on the day's bookings list, pending owner confirmation. D7, merge timing, is the owner's decision above. They bind the demo build only. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
+**Status:** Coordinator defaults for G2.12e, the G2.12 tail on the day's bookings list, pending owner confirmation. D7, merge timing, is the owner's decision above (October 30, replacing October 29). They bind the demo build only. Verification is in the [log](../verification-log.md#g212e-bookings-list-by-source-verification-october-30-2026).
 
 - **D1 A: counts follow the filter.** Every trip of the day still lists, with that source's confirmed bookings and guests. Under a filter, Roster shows for owners and booking staff whatever the count, because the roster lists every source. Trade-off: a filtered trip with no bookings at all also shows Roster, which opens the roster's empty state.
 - **D2 A: a badge on staff bookings only,** "Staff booking, walk-up", under the reference and outside the row's facts, for every role, finance included (as G2.12d D14).

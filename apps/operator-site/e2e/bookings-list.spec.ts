@@ -38,7 +38,7 @@ async function dayLoaded(page: Page) {
 const params = (page: Page) => Object.fromEntries(new URL(page.url()).searchParams);
 
 test.describe("the day list by source (G2.12e)", () => {
-  test.skip(deployed, "local only: G2.12e is not part of the Nov 1 deploy");
+  test.skip(deployed, "local only: the Nov 1 acceptance runs keep their earlier test list");
 
   test("filters a day by source, keeps it in the address, and books from a trip header", async ({
     page,
