@@ -189,6 +189,8 @@ describe("request body cap", () => {
     });
     const got = await send("POST", "/v1/public/quotes", broken);
     expect([got.status, got.code]).toEqual([400, "bad_request"]);
+    // The cap's own answer, not the validator's.
+    expect(got.headers.get("cache-control")).toBe("no-store");
   });
 });
 
