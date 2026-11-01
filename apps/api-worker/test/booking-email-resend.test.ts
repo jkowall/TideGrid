@@ -19,8 +19,18 @@ const state = vi.hoisted(() => ({
   /** A stored answer for the key, or null for a new key. */
   replay: null as null | { status: number; body: Record<string, unknown> },
   bookingExists: true,
+  /** Where the database refuses a resend that ran past its bound (0014): at the service's insert, or at commit. */
+  late: null as null | "service" | "commit",
   log: [] as string[],
 }));
+
+/** The database's refusal of a resend whose transaction ran past its bound (0014). */
+function lateError(): Error {
+  return Object.assign(new Error("staff resend transaction ran longer than its bound"), {
+    code: "23514",
+    constraint_name: "booking_email_resends_late",
+  });
+}
 
 const principal = {
   userId: "33333333-3333-4333-8333-333333333333",
@@ -79,6 +89,8 @@ vi.mock("@tidegrid/database", async (importOriginal) => {
       state.log.push("begin");
       try {
         const out = await fn(fakeTrx());
+        // The deferred check at commit refuses it: the transaction rolls back.
+        if (state.late === "commit") throw lateError();
         state.log.push("commit");
         return out;
       } catch (error) {
@@ -118,6 +130,7 @@ vi.mock("@tidegrid/domain-booking", async (importOriginal) => {
     ...real,
     resendBookingEmail: async () => {
       state.log.push("resend");
+      if (state.late === "service") throw lateError();
       return {
         kind: "queued",
         messageId: "44444444-4444-4444-8444-444444444444",
@@ -205,6 +218,7 @@ beforeEach(() => {
   state.role = "owner";
   state.replay = null;
   state.bookingExists = true;
+  state.late = null;
   state.log = [];
 });
 afterEach(() => {
@@ -316,4 +330,20 @@ describe("the resend route's order (G2.16b)", () => {
       "commit",
     ]);
   });
+
+  it.each([
+    ["at the service's ledger insert", "service"],
+    ["at commit", "commit"],
+  ] as const)(
+    "answers a resend that ran past its bound %s as 503 booking_email_busy, with nothing stored",
+    async (_name, where) => {
+      state.late = where;
+      const res = await post({ settings: { EMAIL_PROVIDER: "fake" } });
+      expect([res.status, res.code]).toEqual([503, "booking_email_busy"]);
+      // The whole transaction rolls back, the key's claim with it, so the
+      // same key may be sent again.
+      expect(state.log.at(-1)).toBe("rollback");
+      expect(state.log).not.toContain("commit");
+    },
+  );
 });

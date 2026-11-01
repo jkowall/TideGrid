@@ -813,14 +813,15 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
       ]);
     });
 
-    it("runs the staff resend functions as their caller, and lets the runtime execute only the facts (0014)", async () => {
+    it("runs the staff resend functions as their caller, and lets the runtime execute only the facts and the bound (0014)", async () => {
       const rows = await admin`
         select p.proname, p.prosecdef, p.provolatile,
                has_function_privilege('tidegrid_app', p.oid, 'EXECUTE') as runtime_execute
           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'app'
-           and p.proname in ('booking_resend_facts', 'check_booking_email_resend',
-                             'check_booking_resend_recorded', 'lock_booking_resend')
+           and p.proname in ('booking_resend_facts', 'booking_resend_max_transaction',
+                             'check_booking_email_resend', 'check_booking_resend_recorded',
+                             'lock_booking_resend')
          order by p.proname`;
       // The check trigger must stay VOLATILE: its statements then each take a
       // fresh snapshot, so the counts after the resend lock see what committed
@@ -828,6 +829,12 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
       expect(rows.map((r) => ({ ...r }))).toEqual([
         {
           proname: "booking_resend_facts",
+          prosecdef: false,
+          provolatile: "s",
+          runtime_execute: true,
+        },
+        {
+          proname: "booking_resend_max_transaction",
           prosecdef: false,
           provolatile: "s",
           runtime_execute: true,

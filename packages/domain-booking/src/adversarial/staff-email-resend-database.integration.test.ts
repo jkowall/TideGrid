@@ -18,11 +18,13 @@
  *   booking, generation, and kind, and nothing of another tenant.
  * - The service maps a limit the trigger raises to its typed refusal, and the
  *   service and a direct insert agree at every boundary.
- * - Fix round (review of 2026-11-01): a row is stamped when its writer
- *   decided, not when its transaction began, and the limits are decided at
- *   the transaction's time, counting rows committed after it; the service and
- *   a direct writer meet on the tenant's resend lock before either holds a
- *   resend key, so they never deadlock; the service takes that lock first.
+ * - Fix round (review of 2026-11-01): a row is stamped, and the limits are
+ *   decided, at the transaction's time, counting rows committed after it; a
+ *   resend whose transaction ran longer than 30 s (or a shorter
+ *   app.resend_max_transaction) is refused at its insert and at commit, so a
+ *   stamp lags its commit by at most that; the service and a direct writer
+ *   meet on the tenant's resend lock before either holds a resend key, so
+ *   they never deadlock; the service takes that lock first.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -1117,40 +1119,44 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     expect(written).toBe(false);
   });
 
-  it("DB13. a writer that held its transaction open is stamped when it decided, so the next writer's 10 minutes run from then (P6)", async () => {
-    const b = await book(world, A, tripsA.shared(), 1);
-    const started = gate();
-    const resume = gate();
-    let began = "";
+  it("DB13. a resend whose transaction ran longer than the bound is refused _late, at its ledger insert and at commit (P6)", async () => {
     const ctx = staffContext(A.id);
-    const held = outcome(
+    const bound = (trx: TenantTransaction) =>
+      sql`select set_config('app.resend_max_transaction', '1 second', true)`.execute(trx);
+    // At the insert: the transaction began more than the bound before it.
+    const early = await book(world, A, tripsA.shared(), 1);
+    const atInsert = await outcome(
       inTenantTransaction(world.db, ctx, async (trx) => {
-        const { rows } = await sql<{ now: string }>`select now()::text as now`.execute(trx);
-        began = rows[0]?.now ?? "";
-        started.open();
-        await resume.opened;
-        await directWrite(trx, ctx, { bookingId: b.bookingId, generation: 1 });
+        await bound(trx);
+        await sql`select pg_sleep(1.2)`.execute(trx);
+        await directWrite(trx, ctx, { bookingId: early.bookingId, generation: 1 });
       }),
     );
-    await started.opened;
-    // Three seconds pass on the database clock while the transaction stays open.
-    await poll("three seconds after it began", async () => {
-      const [row] = await world.admin<{ ok: boolean }[]>`
-        select clock_timestamp() >= ${began}::text::timestamptz + interval '3 seconds' as ok`;
-      return row?.ok === true;
-    });
-    resume.open();
-    expect(await held).toBe("ok");
-    const [row] = await world.admin<{ late: boolean }[]>`
-      select created_at >= date_trunc('milliseconds', ${began}::text::timestamptz) + interval '3 seconds' as late
-        from public.booking_email_resends where booking_id = ${b.bookingId}`;
-    expect(row?.late).toBe(true);
-    // Moved back 9:58.5, the row still bars the next writer: stamped at its
-    // transaction's start instead, it would have let it through.
-    await backdate({ tenantId: A.id, bookingId: b.bookingId }, "9 minutes 58.5 seconds");
-    expect(await outcome(direct(A, { bookingId: b.bookingId, generation: 2 }))).toBe(
-      "23514:booking_email_resends_interval",
+    expect(atInsert).toBe("23514:booking_email_resends_late");
+    // At commit: written in time, then held open past the bound.
+    const held = await book(world, A, tripsA.shared(), 1);
+    const atCommit = await outcome(
+      inTenantTransaction(world.db, ctx, async (trx) => {
+        await bound(trx);
+        await directWrite(trx, ctx, { bookingId: held.bookingId, generation: 1 });
+        await sql`select pg_sleep(1.2)`.execute(trx);
+      }),
     );
+    expect(atCommit).toBe("23514:booking_email_resends_late");
+    for (const b of [early, held]) {
+      expect(await ledgerOf(b.bookingId)).toEqual([]);
+      expect(await resendMessagesOf(b.bookingId)).toEqual([]);
+    }
+    // Within the bound: stamped at the transaction's time, to the
+    // millisecond, the time its message carries.
+    const fresh = await book(world, A, tripsA.shared(), 1);
+    const { messageId } = await direct(A, { bookingId: fresh.bookingId, generation: 1 });
+    const [row] = await world.admin<{ same: boolean }[]>`
+      select r.created_at = date_trunc('milliseconds', m.created_at) as same
+        from public.booking_email_resends r
+        join public.email_messages m on m.id = r.message_id
+       where m.id = ${messageId}`;
+    expect(row?.same).toBe(true);
   });
 
   it("DB14. the limits count rows committed after the writer's transaction began: a later resend bars it, and so does a full hour", async () => {
@@ -1207,5 +1213,86 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     expect(fresh?.n).toBe(50);
     s2Go.open();
     expect(await s2).toBe("23514:booking_email_resends_rate");
+  });
+
+  it("DB15. app.resend_max_transaction can only shorten the 30 s bound: a larger or malformed value cannot loosen it", async () => {
+    const ctx = staffContext(A.id);
+    const boundFor = (value: string | null) =>
+      inTenantTransaction(world.db, ctx, async (trx) => {
+        if (value !== null) {
+          await sql`select set_config('app.resend_max_transaction', ${value}, true)`.execute(trx);
+        }
+        const { rows } = await sql<{ bound: string }>`
+          select app.booking_resend_max_transaction()::text as bound`.execute(trx);
+        return rows[0]?.bound;
+      });
+    expect(await boundFor(null)).toBe("00:00:30");
+    expect(await boundFor("")).toBe("00:00:30");
+    expect(await boundFor("1 hour")).toBe("00:00:30");
+    expect(await boundFor("31 seconds")).toBe("00:00:30");
+    expect(await boundFor("10 seconds")).toBe("00:00:10");
+    // Malformed or negative: the bound closes, and every resend is late.
+    expect(await boundFor("garbage")).toBe("00:00:00");
+    expect(await boundFor("-5 seconds")).toBe("00:00:00");
+    for (const value of ["garbage", "-5 seconds"]) {
+      const b = await book(world, A, tripsA.shared(), 1);
+      expect(
+        await outcome(
+          inTenantTransaction(world.db, ctx, async (trx) => {
+            await sql`select set_config('app.resend_max_transaction', ${value}, true)`.execute(trx);
+            await directWrite(trx, ctx, { bookingId: b.bookingId, generation: 1 });
+          }),
+        ),
+      ).toBe("23514:booking_email_resends_late");
+      expect(await ledgerOf(b.bookingId)).toEqual([]);
+    }
+  });
+
+  it("DB16. a service resend past the bound is refused _late, with nothing written, at its ledger insert and at commit", async () => {
+    const ctx = staffContext(A.id);
+    const lateError = (e: { code?: string; constraint_name?: string }) => ({
+      code: e.code,
+      constraint: e.constraint_name,
+    });
+    // At the ledger insert: the service's transaction had already run past the bound.
+    const slow = await book(world, A, tripsA.shared(), 1);
+    const slowBefore = await messagesOf(world.admin, slow.bookingId);
+    const atInsert = await inTenantTransaction(world.db, ctx, async (trx) => {
+      await sql`select set_config('app.resend_max_transaction', '1 second', true)`.execute(trx);
+      await sql`select pg_sleep(1.2)`.execute(trx);
+      return resendBookingEmail(trx, ctx, {
+        bookingId: slow.bookingId,
+        kind: "confirmation",
+        reason: "other",
+      });
+    }).then(() => "committed", lateError);
+    expect(atInsert).toEqual({ code: "23514", constraint: "booking_email_resends_late" });
+    // At commit: the service queued it in time, then the caller's
+    // transaction ran past the bound before it committed.
+    const held = await book(world, A, tripsA.shared(), 1);
+    const heldBefore = await messagesOf(world.admin, held.bookingId);
+    let answered: ResendResult | undefined;
+    const atCommit = await inTenantTransaction(world.db, ctx, async (trx) => {
+      await sql`select set_config('app.resend_max_transaction', '1 second', true)`.execute(trx);
+      answered = await resendBookingEmail(trx, ctx, {
+        bookingId: held.bookingId,
+        kind: "confirmation",
+        reason: "other",
+      });
+      await sql`select pg_sleep(1.2)`.execute(trx);
+    }).then(() => "committed", lateError);
+    expect(answered?.kind).toBe("queued");
+    expect(atCommit).toEqual({ code: "23514", constraint: "booking_email_resends_late" });
+    // Nothing was written: no message queued (at most once holds), no ledger
+    // row, no audit row, and the earlier confirmation is as it was.
+    for (const [b, before] of [
+      [slow, slowBefore],
+      [held, heldBefore],
+    ] as const) {
+      expect(await resendMessagesOf(b.bookingId)).toEqual([]);
+      expect(await ledgerOf(b.bookingId)).toEqual([]);
+      expect(await auditRows(b.bookingId)).toBe(0);
+      expect(await messagesOf(world.admin, b.bookingId)).toEqual(before);
+    }
   });
 });
