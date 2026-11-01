@@ -18,6 +18,11 @@
  *   booking, generation, and kind, and nothing of another tenant.
  * - The service maps a limit the trigger raises to its typed refusal, and the
  *   service and a direct insert agree at every boundary.
+ * - Fix round (review of 2026-11-01): a row is stamped when its writer
+ *   decided, not when its transaction began, and the limits are decided at
+ *   the transaction's time, counting rows committed after it; the service and
+ *   a direct writer meet on the tenant's resend lock before either holds a
+ *   resend key, so they never deadlock; the service takes that lock first.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -276,12 +281,13 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
   /** Make time pass for ledger rows: move them earlier, with the append-only guard off for that statement. */
   async function backdate(
     where: { tenantId: string; bookingId?: string },
-    minutes: number,
+    minutes: number | string,
   ): Promise<void> {
+    const by = typeof minutes === "number" ? `${minutes} minutes` : minutes;
     await world.admin.begin(async (tx) => {
       await tx`alter table public.booking_email_resends disable trigger booking_email_resends_append_only`;
       await tx`update public.booking_email_resends
-                  set created_at = created_at - make_interval(mins => ${minutes})
+                  set created_at = created_at - ${by}::text::interval
                 where tenant_id = ${where.tenantId}
                   and (${where.bookingId ?? null}::uuid is null
                        or booking_id = ${where.bookingId ?? null}::uuid)`;
@@ -289,12 +295,16 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     });
   }
 
-  /** Set a booking's newest ledger row to `at` minus `ago`, exactly, on the database clock's text. */
+  /**
+   * Set a booking's newest ledger row to `at` minus `ago`, exactly: `at` is
+   * the database clock's text, cast on the server, since a string bound as a
+   * timestamptz parameter passes through a JS Date and loses its microseconds.
+   */
   async function newestAt(bookingId: string, at: string, ago: string): Promise<void> {
     await world.admin.begin(async (tx) => {
       await tx`alter table public.booking_email_resends disable trigger booking_email_resends_append_only`;
       await tx`update public.booking_email_resends
-                  set created_at = ${at}::timestamptz - ${ago}::interval
+                  set created_at = ${at}::text::timestamptz - ${ago}::interval
                 where booking_id = ${bookingId}
                   and generation = (select max(generation) from public.booking_email_resends
                                      where booking_id = ${bookingId})`;
@@ -353,6 +363,32 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     return row?.n ?? -1;
   }
 
+  /** The backends waiting for the tenant's resend lock. */
+  async function resendLockWaiters(tenant: CheckoutFixture): Promise<number[]> {
+    const rows = await world.admin<{ pid: number }[]>`
+      select pid from pg_locks
+       where locktype = 'advisory' and not granted and objsubid = 1
+         and ((classid::bigint << 32) | objid::bigint)
+             = hashtextextended(${`tidegrid.booking_resend:${tenant.id}`}, 0)`;
+    return rows.map((r) => r.pid);
+  }
+
+  /** Lock requests not yet granted, of any kind, on the whole server. */
+  async function waitingLocks(): Promise<number> {
+    const [row] = await world.admin<{ n: number }[]>`
+      select count(*)::int as n from pg_locks where not granted`;
+    return row?.n ?? 0;
+  }
+
+  /** A promise and the function that settles it. */
+  function gate(): { opened: Promise<void>; open: () => void } {
+    let open = () => {};
+    const opened = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { opened, open };
+  }
+
   async function poll(what: string, done: () => Promise<boolean>): Promise<void> {
     for (let i = 0; i < 200; i += 1) {
       if (await done()) return;
@@ -390,9 +426,9 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
       mail: new FakeEmailProvider({ db: runtime.db, environment: "local" }),
     };
     [A, B, R] = await Promise.all([
-      createCheckoutFixture(admin, runtime.db, "rsdb-a", { days: 20 }),
+      createCheckoutFixture(admin, runtime.db, "rsdb-a", { days: 30 }),
       createCheckoutFixture(admin, runtime.db, "rsdb-b", { days: 4 }),
-      createCheckoutFixture(admin, runtime.db, "rsdb-r", { days: 30 }),
+      createCheckoutFixture(admin, runtime.db, "rsdb-r", { days: 50 }),
     ]);
     for (const t of [A, B, R]) await addLocalHostname(admin, t);
     tripsA = tripAllocator(A);
@@ -626,6 +662,35 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     expect(await ledgerOf(b.bookingId)).toEqual([]);
     expect(await ledgerOf(foreign.bookingId)).toHaveLength(1);
 
+    // The facts function runs as its caller: under A, B's booking has nothing,
+    // although B has a ledger row. A row naming B's tenant learns nothing
+    // either: generation 1 is all A can see, not B's next (2).
+    const ctx = staffContext(A.id);
+    const seen = await inTenantTransaction(world.db, ctx, (trx) =>
+      sql<{
+        deliverable: number;
+        newest_at: Date | null;
+        operator_resends: number;
+        operator_available_at: Date | null;
+      }>`select * from app.booking_resend_facts(${B.id}, ${foreign.bookingId}, now())`.execute(trx),
+    );
+    expect(seen.rows).toEqual([
+      { deliverable: 0, newest_at: null, operator_resends: 0, operator_available_at: null },
+    ]);
+    const intoB = await inTenantTransaction(world.db, ctx, (trx) =>
+      sql`insert into booking_email_resends (tenant_id, booking_id, generation, kind, message_id)
+          values (${B.id}, ${foreign.bookingId}, 99, 'confirmation', ${foreignResend.messageId})`.execute(
+        trx,
+      ),
+    ).then(
+      () => "ok",
+      (e: { code?: string; constraint_name?: string; message?: string }) =>
+        `${e.code}:${e.constraint_name}:${e.message}`,
+    );
+    expect(intoB).toBe(
+      `23514:booking_email_resends_sequence:booking ${foreign.bookingId} takes staff resend generation 1, not 99`,
+    );
+
     // Rule 10, as the admin with the check off for that statement: a row
     // cannot pair one tenant with another tenant's booking or message.
     const [own] = await messagesOf(world.admin, b.bookingId);
@@ -717,6 +782,7 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     // write. The 50th row lands, on another booking, before it continues.
     const conn = await world.admin.reserve();
     let result: ResendResult | undefined;
+    let committed = false;
     try {
       await conn`begin`;
       await conn`lock table public.email_messages in share row exclusive mode`;
@@ -727,6 +793,8 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
            where relation = 'public.email_messages'::regclass and not granted`;
         return (row?.n ?? 0) > 0;
       });
+      // Past the tenant's lock: both of 0014's insert triggers off, in this transaction only.
+      await conn`alter table public.email_messages disable trigger email_messages_staff_resend_lock`;
       await conn`alter table public.booking_email_resends disable trigger booking_email_resends_check`;
       const [m] = await conn<{ id: string }[]>`
         insert into public.email_messages (tenant_id, dedupe_key, template, template_version,
@@ -739,9 +807,12 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
                     (tenant_id, booking_id, generation, kind, message_id, actor_type)
                   values (${R.id}, ${seeded.bookingId}, 50, 'confirmation', ${m?.id ?? ""}, 'system')`;
       await conn`alter table public.booking_email_resends enable trigger booking_email_resends_check`;
+      await conn`alter table public.email_messages enable trigger email_messages_staff_resend_lock`;
       await conn`commit`;
+      committed = true;
       result = await pending;
     } finally {
+      if (!committed) await conn`rollback`;
       conn.release();
     }
     const [fiftieth] = await world.admin<{ at: Date }[]>`
@@ -914,5 +985,225 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     expect(await ledgerOf(bare.bookingId)).toEqual([
       expect.objectContaining({ actor_type: "system", actor_id: null, api_request_id: null }),
     ]);
+  });
+
+  it("DB11. the service takes the tenant's resend lock first: the others wait on it holding no booking or email_messages lock", async () => {
+    await clearHour(R);
+    const targets: Booked[] = [];
+    for (let i = 0; i < 6; i += 1) targets.push(await book(world, R, tripsR.shared(), 1));
+    const conn = await world.admin.reserve();
+    let held = -1;
+    let results: ResendResult[] = [];
+    let open = true;
+    try {
+      await conn`begin`;
+      // The first resend to take the lock waits at its audit row, holding it.
+      await conn`lock table public.audit_events in share row exclusive mode`;
+      const all = Promise.all(targets.map((b) => serviceResend(R, b.bookingId, "confirmation")));
+      await poll("five resends waiting on the tenant's resend lock", async () => {
+        return (await resendLockWaiters(R)).length === 5;
+      });
+      const waiters = await resendLockWaiters(R);
+      const [row] = await world.admin<{ n: number }[]>`
+        select count(*)::int as n from pg_locks
+         where pid in ${world.admin(waiters)} and granted
+           and relation in ('public.bookings'::regclass, 'public.email_messages'::regclass)`;
+      held = row?.n ?? -1;
+      await conn`commit`;
+      open = false;
+      results = await all;
+    } finally {
+      if (open) await conn`rollback`;
+      conn.release();
+    }
+    expect(held).toBe(0);
+    expect(results.map((r) => r.kind)).toEqual(Array(6).fill("queued"));
+  });
+
+  it("DB12. a direct writer and a service resend meet on the tenant's resend lock at the direct writer's message insert: no deadlock", async () => {
+    // The direct writer first, on the same booking: the service waits for the
+    // lock, holding nothing, instead of on the direct writer's key.
+    const b = await book(world, A, tripsA.shared(), 1);
+    const first = gate();
+    let messageWritten = false;
+    const ctx = staffContext(A.id);
+    const bypass = outcome(
+      inTenantTransaction(world.db, ctx, async (trx) => {
+        const made = await enqueueMessage(trx, ctx, {
+          dedupeKey: `booking.resend:${b.bookingId}:1`,
+          template: "booking_confirmation",
+          templateVersion: 1,
+          to: { email: "synthetic.direct@example.test" },
+          bookingId: b.bookingId,
+          content: { subject: "Direct resend", blocks: [{ kind: "paragraph", text: "First." }] },
+        });
+        messageWritten = true;
+        await first.opened;
+        await sql`insert into booking_email_resends (tenant_id, booking_id, generation, kind, message_id)
+                  values (${A.id}, ${b.bookingId}, 1, 'confirmation', ${made.messageId})`.execute(
+          trx,
+        );
+      }),
+    );
+    await poll("the direct writer's message", async () => messageWritten);
+    const service = serviceResend(A, b.bookingId, "confirmation").catch((e: { code?: string }) => ({
+      error: e.code ?? String(e),
+    }));
+    await poll("the service to wait", async () => (await waitingLocks()) > 0);
+    first.open();
+    expect(await bypass).toBe("ok");
+    expect(await service).toMatchObject({ kind: "refused", code: "too_soon" });
+
+    // The service first: at 49 an hour, it holds the lock at its audit row;
+    // a direct writer on another booking waits at its message insert, before
+    // it holds a resend key, then is refused _rate once the service commits.
+    await clearHour(R);
+    const seeded = await book(world, R, tripsR.shared(), 1);
+    await seed(
+      R,
+      seeded.bookingId,
+      Array.from({ length: 49 }, (_, i) => i + 1),
+    );
+    const viaService = await book(world, R, tripsR.shared(), 1);
+    const other = await book(world, R, tripsR.shared(), 1);
+    const conn = await world.admin.reserve();
+    let written: boolean | null = null;
+    let open = true;
+    let answers: [ResendResult, string] | null = null;
+    try {
+      await conn`begin`;
+      await conn`lock table public.audit_events in share row exclusive mode`;
+      const pending = serviceResend(R, viaService.bookingId, "confirmation");
+      await poll("the service at its audit row", async () => {
+        const [row] = await world.admin<{ n: number }[]>`
+          select count(*)::int as n from pg_locks
+           where relation = 'public.audit_events'::regclass and not granted`;
+        return (row?.n ?? 0) > 0;
+      });
+      let directWritten = false;
+      const directCtx = staffContext(R.id);
+      const directly = outcome(
+        inTenantTransaction(world.db, directCtx, async (trx) => {
+          const made = await enqueueMessage(trx, directCtx, {
+            dedupeKey: `booking.resend:${other.bookingId}:1`,
+            template: "booking_confirmation",
+            templateVersion: 1,
+            to: { email: "synthetic.direct@example.test" },
+            bookingId: other.bookingId,
+            content: { subject: "Direct resend", blocks: [{ kind: "paragraph", text: "Late." }] },
+          });
+          directWritten = true;
+          await sql`insert into booking_email_resends (tenant_id, booking_id, generation, kind, message_id)
+                    values (${R.id}, ${other.bookingId}, 1, 'confirmation', ${made.messageId})`.execute(
+            trx,
+          );
+        }),
+      );
+      await poll("the direct writer to wait on the tenant's resend lock", async () => {
+        return (await resendLockWaiters(R)).length === 1;
+      });
+      written = directWritten;
+      await conn`commit`;
+      open = false;
+      answers = [await pending, await directly];
+    } finally {
+      if (open) await conn`rollback`;
+      conn.release();
+    }
+    expect(answers?.[0]).toMatchObject({ kind: "queued" });
+    expect(answers?.[1]).toBe("23514:booking_email_resends_rate");
+    expect(written).toBe(false);
+  });
+
+  it("DB13. a writer that held its transaction open is stamped when it decided, so the next writer's 10 minutes run from then (P6)", async () => {
+    const b = await book(world, A, tripsA.shared(), 1);
+    const started = gate();
+    const resume = gate();
+    let began = "";
+    const ctx = staffContext(A.id);
+    const held = outcome(
+      inTenantTransaction(world.db, ctx, async (trx) => {
+        const { rows } = await sql<{ now: string }>`select now()::text as now`.execute(trx);
+        began = rows[0]?.now ?? "";
+        started.open();
+        await resume.opened;
+        await directWrite(trx, ctx, { bookingId: b.bookingId, generation: 1 });
+      }),
+    );
+    await started.opened;
+    // Three seconds pass on the database clock while the transaction stays open.
+    await poll("three seconds after it began", async () => {
+      const [row] = await world.admin<{ ok: boolean }[]>`
+        select clock_timestamp() >= ${began}::text::timestamptz + interval '3 seconds' as ok`;
+      return row?.ok === true;
+    });
+    resume.open();
+    expect(await held).toBe("ok");
+    const [row] = await world.admin<{ late: boolean }[]>`
+      select created_at >= date_trunc('milliseconds', ${began}::text::timestamptz) + interval '3 seconds' as late
+        from public.booking_email_resends where booking_id = ${b.bookingId}`;
+    expect(row?.late).toBe(true);
+    // Moved back 9:58.5, the row still bars the next writer: stamped at its
+    // transaction's start instead, it would have let it through.
+    await backdate({ tenantId: A.id, bookingId: b.bookingId }, "9 minutes 58.5 seconds");
+    expect(await outcome(direct(A, { bookingId: b.bookingId, generation: 2 }))).toBe(
+      "23514:booking_email_resends_interval",
+    );
+  });
+
+  it("DB14. the limits count rows committed after the writer's transaction began: a later resend bars it, and so does a full hour", async () => {
+    // A resend of the same booking commits while S is open; S is then too soon.
+    const b = await book(world, A, tripsA.shared(), 1);
+    const sOpen = gate();
+    const sGo = gate();
+    let sNow = "";
+    const ctx = staffContext(A.id);
+    const s = outcome(
+      inTenantTransaction(world.db, ctx, async (trx) => {
+        const { rows } = await sql<{ now: string }>`select now()::text as now`.execute(trx);
+        sNow = rows[0]?.now ?? "";
+        sOpen.open();
+        await sGo.opened;
+        await directWrite(trx, ctx, { bookingId: b.bookingId, generation: 2 });
+      }),
+    );
+    await sOpen.opened;
+    expect(await outcome(direct(A, { bookingId: b.bookingId, generation: 1 }))).toBe("ok");
+    const [later] = await world.admin<{ after: boolean }[]>`
+      select created_at > ${sNow}::text::timestamptz as after
+        from public.booking_email_resends where booking_id = ${b.bookingId}`;
+    expect(later?.after).toBe(true);
+    sGo.open();
+    expect(await s).toBe("23514:booking_email_resends_interval");
+
+    // 50 resends commit on another booking while S2 is open; S2 is then over the hour's cap.
+    await clearHour(R);
+    const own = await book(world, R, tripsR.shared(), 1);
+    const busy = await book(world, R, tripsR.shared(), 1);
+    const s2Open = gate();
+    const s2Go = gate();
+    let s2Now = "";
+    const ctx2 = staffContext(R.id);
+    const s2 = outcome(
+      inTenantTransaction(world.db, ctx2, async (trx) => {
+        const { rows } = await sql<{ now: string }>`select now()::text as now`.execute(trx);
+        s2Now = rows[0]?.now ?? "";
+        s2Open.open();
+        await s2Go.opened;
+        await directWrite(trx, ctx2, { bookingId: own.bookingId, generation: 1 });
+      }),
+    );
+    await s2Open.opened;
+    await seed(
+      R,
+      busy.bookingId,
+      Array.from({ length: 50 }, (_, i) => i + 1),
+    );
+    const [fresh] = await world.admin<{ n: number }[]>`
+      select count(*)::int as n from public.booking_email_resends
+       where booking_id = ${busy.bookingId} and created_at > ${s2Now}::text::timestamptz`;
+    expect(fresh?.n).toBe(50);
+    s2Go.open();
+    expect(await s2).toBe("23514:booking_email_resends_rate");
   });
 });

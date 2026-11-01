@@ -813,6 +813,46 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
       ]);
     });
 
+    it("runs the staff resend functions as their caller, and lets the runtime execute only the facts (0014)", async () => {
+      const rows = await admin`
+        select p.proname, p.prosecdef, p.provolatile,
+               has_function_privilege('tidegrid_app', p.oid, 'EXECUTE') as runtime_execute
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'app'
+           and p.proname in ('booking_resend_facts', 'check_booking_email_resend',
+                             'check_booking_resend_recorded', 'lock_booking_resend')
+         order by p.proname`;
+      // The check trigger must stay VOLATILE: its statements then each take a
+      // fresh snapshot, so the counts after the resend lock see what committed
+      // before it was granted.
+      expect(rows.map((r) => ({ ...r }))).toEqual([
+        {
+          proname: "booking_resend_facts",
+          prosecdef: false,
+          provolatile: "s",
+          runtime_execute: true,
+        },
+        {
+          proname: "check_booking_email_resend",
+          prosecdef: false,
+          provolatile: "v",
+          runtime_execute: false,
+        },
+        {
+          proname: "check_booking_resend_recorded",
+          prosecdef: false,
+          provolatile: "v",
+          runtime_execute: false,
+        },
+        {
+          proname: "lock_booking_resend",
+          prosecdef: false,
+          provolatile: "v",
+          runtime_execute: false,
+        },
+      ]);
+    });
+
     it("keeps the membership role constraint equal to the API contract", async () => {
       const [row] = await admin`
         select pg_get_constraintdef(c.oid) as def

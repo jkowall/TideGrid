@@ -58,6 +58,14 @@ describe.skipIf(!env)("migration 0014 backfills the staff resend ledger", () => 
     return url;
   }
 
+  /** Migrate through 0014 only, so a later file never changes what these cases apply. */
+  async function migrateThrough0014(url: string) {
+    return migrate(
+      url,
+      (await loadMigrations()).filter((f) => f.name <= LATEST),
+    );
+  }
+
   async function onDatabase<T>(url: string, fn: (sql: Sql) => Promise<T>): Promise<T> {
     const sql = postgres(url, { max: 1, onnotice: () => {} });
     try {
@@ -87,7 +95,7 @@ describe.skipIf(!env)("migration 0014 backfills the staff resend ledger", () => 
       tenantId: string;
       bookingId: string | null;
       key: string;
-      template?: string;
+      template?: string | undefined;
       minutesAgo?: number;
       state?: "queued" | "canceled" | "attempted_canceled" | "sent";
     },
@@ -169,7 +177,7 @@ describe.skipIf(!env)("migration 0014 backfills the staff resend ledger", () => 
       await message(tx, { tenantId, bookingId, key: `booking.confirmed:${bookingId}` });
     });
 
-    expect((await migrate(url)).applied).toEqual([LATEST]);
+    expect((await migrateThrough0014(url)).applied).toEqual([LATEST]);
 
     await onDatabase(url, async (sql) => {
       const rows = await sql<
@@ -227,20 +235,27 @@ describe.skipIf(!env)("migration 0014 backfills the staff resend ledger", () => 
       ]);
       const [facts] = await sql<{ deliverable: number; newest: boolean; operator: number }[]>`
         select f.deliverable,
-               f.newest_at = (select created_at from public.email_messages where id = ${ids.sent ?? ""}) as newest,
+               f.newest_at = (select date_trunc('milliseconds', created_at) from public.email_messages
+                               where id = ${ids.sent ?? ""}) as newest,
                f.operator_resends as operator
           from app.booking_resend_facts(${tenantId}, ${bookingId}, now()) f`;
       expect(facts).toEqual({ deliverable: 3, newest: true, operator: 4 });
     });
   });
 
-  it("fails on a key it cannot parse strictly, and the database stays at 0013", async () => {
-    const cases: [string, (tenantId: string, bookingId: string) => string, boolean][] = [
-      ["bad", () => "booking.resend:bad", false],
-      ["lead_zero", (_, b) => `booking.resend:${b}:01`, true],
-      ["other_booking", () => `booking.resend:${randomUUID()}:1`, true],
+  it("fails on a key it cannot parse strictly, or a template that is no resend's, and the database stays at 0013", async () => {
+    const cases: [
+      string,
+      (tenantId: string, bookingId: string) => string,
+      boolean,
+      string | undefined,
+    ][] = [
+      ["bad", () => "booking.resend:bad", false, undefined],
+      ["lead_zero", (_, b) => `booking.resend:${b}:01`, true, undefined],
+      ["other_booking", () => `booking.resend:${randomUUID()}:1`, true, undefined],
+      ["template", (_, b) => `booking.resend:${b}:1`, true, "booking_manage_link"],
     ];
-    for (const [name, key, withBooking] of cases) {
+    for (const [name, key, withBooking, template] of cases) {
       const tenantId = randomUUID();
       const bookingId = randomUUID();
       const url = await scratch(name, async (tx) => {
@@ -249,9 +264,15 @@ describe.skipIf(!env)("migration 0014 backfills the staff resend ledger", () => 
           tenantId,
           bookingId: withBooking ? bookingId : null,
           key: key(tenantId, bookingId),
+          template,
         });
       });
-      await expect(migrate(url), name).rejects.toThrow(`Migration ${LATEST} failed`);
+      // The strict parse's own refusal, not some later error.
+      await expect(migrateThrough0014(url), name).rejects.toThrow(
+        new RegExp(
+          `Migration ${LATEST.replaceAll(".", "\\.")} failed: staff resend message .* names no booking, generation, and kind for the ledger`,
+        ),
+      );
       const state = await onDatabase(
         url,
         (sql) => sql<{ latest: string; ledger: string | null }[]>`

@@ -15,8 +15,9 @@ import { deployed, deployedEnv, openSignedIn, signIn, tenantManifests } from "./
  * B's booking, B's trip, B's reference, B's resend (key K), the same key K
  * with another reason, and B's message list. These must find nothing: 404
  * booking_not_found for the resend and the list, and 404 again, not 422, for
- * the second resend, which shows the first stored no key. The probe table is
- * printed as one JSON line.
+ * the second resend, which shows the first stored no key. No answer on either
+ * side carries B's data or any address. The probe table is printed as one
+ * JSON line.
  *
  * The new probes write nothing in deployed mode. Under B's tenant id the
  * membership 404 comes before the key's claim. Under the own tenant the
@@ -251,7 +252,7 @@ test("a one-tenant identity reads nothing of another tenant through the console"
   if (!deployed) expect(own.tenantSlug).toBe("demo-harbor");
 
   // What no answer may carry: B's ids, any other tenant's slug or name, B's
-  // booker, and, under B's tenant id, any address at all.
+  // booker, and, on either side, any address at all.
   const others = tenantManifests().filter((t) => t.slug !== own.tenantSlug);
   expect(others.length, "another tenant in config/tenants").toBeGreaterThan(0);
   const foreignData = [
