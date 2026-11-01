@@ -451,7 +451,7 @@ async function doRollback(
   }
   if (!live) {
     throw new Failure(
-      `wrangler rollback exited 0, but ${anchor} is not live alone (live: ${after.join(", ") || "none"}). A declined prompt aborts the rollback; nothing was rolled back`,
+      `wrangler rollback exited 0, but ${anchor} is not live alone (live: ${after.join(", ") || "none"}). A declined prompt aborts the rollback. Check with: pnpm exec wrangler deployments list (in ${w.dir}) before retrying`,
     );
   }
   updateFlags(deps, (f) => {
