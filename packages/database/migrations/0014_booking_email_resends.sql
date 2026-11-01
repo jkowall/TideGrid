@@ -31,16 +31,22 @@
 -- with a service resend; PostgreSQL detects it, and no service path takes
 -- that order.
 --
--- Clocks (fix round, coordinator decision of 2026-11-01). A ledger row is
--- stamped at its writer's clock once it holds the lock, to the millisecond:
--- a writer that held its transaction open is stamped when it decided, not
--- when it began. The limits are decided at the writer's transaction time,
--- now(), to the millisecond: the instant and the precision the service
--- decides at, so the two agree at every boundary. Since now() is no later
--- than the stamp, and the counts take every row committed before the lock
--- was granted, with no upper bound on its time, a row admitted at now() also
--- keeps the limits at its stamp; deciding at now() only refuses more, and
--- only for a writer that held its transaction open.
+-- The clock (fix round, coordinator decision A of 2026-11-01). A ledger row
+-- is stamped, and the limits are decided, at the writer's transaction time,
+-- date_trunc('milliseconds', now()): the instant and the precision the
+-- service decides at, and its message's own time, so the service, the
+-- trigger, and the messages read agree at every boundary. The counts take
+-- every row committed before the tenant's lock was granted, with no upper
+-- bound on its time. A transaction's time is its start, so a writer that held
+-- its transaction open would carry an old stamp past the 10 minutes and the
+-- hour (review probe P6). So a resend whose transaction has run longer than
+-- app.booking_resend_max_transaction() (30 s, or less if the transaction
+-- asks) is refused, at its ledger insert and again at commit
+-- (booking_email_resends_late). A stamp therefore lags its commit by at most
+-- 30 s: that is the slack against the 10-minute and hourly rules. One way
+-- around the commit check remains: a writer that brings the deferred check
+-- forward with SET CONSTRAINTS ... IMMEDIATE and then holds its transaction
+-- is bounded only up to that moment. The service never does.
 --
 -- Applying this file. The backfill reads email_messages, and the foreign
 -- keys and triggers lock email_messages and bookings. A request in flight
@@ -187,11 +193,36 @@ $$;
 
 -- The check ----------------------------------------------------------------------
 
+-- The longest a resend's transaction may run: 30 s. A transaction may ask for
+-- less with app.resend_max_transaction (tests do), never more; an empty
+-- setting means 30 s, and a malformed or negative one closes the bound, so
+-- every resend in that transaction is late.
+CREATE FUNCTION app.booking_resend_max_transaction() RETURNS interval
+  LANGUAGE plpgsql STABLE
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  asked text := pg_catalog.current_setting('app.resend_max_transaction', true);
+  wanted interval;
+BEGIN
+  IF asked IS NULL OR asked = '' THEN
+    RETURN interval '30 seconds';
+  END IF;
+  BEGIN
+    wanted := asked::interval;
+  EXCEPTION WHEN others THEN
+    RETURN interval '0';
+  END;
+  RETURN greatest(interval '0', least(interval '30 seconds', wanted));
+END;
+$$;
+
 -- Every ledger row, for every writer: its actor from the transaction, under
--- READ COMMITTED only, under the tenant's resend lock, stamped at the clock
--- once the lock is held, the booking's next generation, naming the message
--- this transaction queued for it, and within the limits decided at the
--- transaction's time (see Clocks above). The lock is taken in its own
+-- READ COMMITTED only, under the tenant's resend lock, from a transaction
+-- that has not run past its bound, stamped at the transaction's time, the
+-- booking's next generation, naming the message this transaction queued for
+-- it, and within the limits decided at the transaction's time (see The clock
+-- above). The lock is taken in its own
 -- statement, and the function is VOLATILE, so every statement after it takes
 -- a fresh snapshot and reads what was committed before the lock was granted;
 -- a REPEATABLE READ or SERIALIZABLE writer would read a snapshot from before
@@ -205,9 +236,11 @@ CREATE FUNCTION app.check_booking_email_resend() RETURNS trigger
 DECLARE
   latest integer;
   facts record;
-  -- When the limits are decided: the transaction's time, as the service reads it.
+  -- The row's time, and when the limits are decided: the transaction's
+  -- time, as the service and the message read it.
   decided timestamptz := pg_catalog.date_trunc('milliseconds', pg_catalog.now());
 BEGIN
+  NEW.created_at := decided;
   NEW.actor_type := coalesce(app.setting_or_null('app.actor_type'), 'system');
   NEW.actor_id := app.setting_or_null('app.actor_id');
   NEW.api_request_id := app.setting_or_null('app.request_id');
@@ -218,8 +251,12 @@ BEGIN
   END IF;
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('tidegrid.booking_resend:' || NEW.tenant_id::text, 0));
-  -- Read once, after the lock: when this writer decided, whenever it began.
-  NEW.created_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
+  -- Waiting for the lock counts: the stamp must not lag the decision by more.
+  IF pg_catalog.clock_timestamp() - pg_catalog.now() > app.booking_resend_max_transaction() THEN
+    RAISE EXCEPTION 'this staff resend''s transaction has run longer than %',
+      app.booking_resend_max_transaction()
+      USING ERRCODE = '23514', CONSTRAINT = 'booking_email_resends_late';
+  END IF;
   SELECT max(r.generation) INTO latest
     FROM public.booking_email_resends r
    WHERE r.tenant_id = NEW.tenant_id AND r.booking_id = NEW.booking_id;
@@ -283,7 +320,10 @@ CREATE TRIGGER email_messages_staff_resend_lock
   EXECUTE FUNCTION app.lock_booking_resend();
 
 -- Checked at commit: a booking.resend: message commits only with its ledger
--- row, so a writer that queues one and skips the ledger is refused (D4 A).
+-- row, so a writer that queues one and skips the ledger is refused (D4 A),
+-- and only while its transaction is within its bound, so a writer cannot
+-- hold a stamped resend open past the 10 minutes or the hour
+-- (booking_email_resends_late).
 -- This goes beyond the waiver precedent, which binds no message to its
 -- delivery row at commit. A build from before 0014 writes no ledger row, so
 -- its resends fail here until it is rolled forward (owner item O3).
@@ -297,6 +337,11 @@ BEGIN
         WHERE r.tenant_id = NEW.tenant_id AND r.message_id = NEW.id) THEN
     RAISE EXCEPTION 'staff resend message % commits only with its ledger row', NEW.id
       USING ERRCODE = '23514', CONSTRAINT = 'email_messages_staff_resend';
+  END IF;
+  IF pg_catalog.clock_timestamp() - pg_catalog.now() > app.booking_resend_max_transaction() THEN
+    RAISE EXCEPTION 'staff resend message % commits only within % of its transaction''s start',
+      NEW.id, app.booking_resend_max_transaction()
+      USING ERRCODE = '23514', CONSTRAINT = 'booking_email_resends_late';
   END IF;
   RETURN NULL;
 END;
@@ -328,6 +373,9 @@ CREATE TRIGGER booking_email_resends_append_only BEFORE UPDATE ON public.booking
 REVOKE ALL ON FUNCTION app.check_booking_email_resend() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_booking_resend_recorded() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.lock_booking_resend() FROM PUBLIC;
+-- The triggers run as the writer and read the bound.
+REVOKE ALL ON FUNCTION app.booking_resend_max_transaction() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.booking_resend_max_transaction() TO tidegrid_app;
 -- The service reads the facts before it decides.
 REVOKE ALL ON FUNCTION app.booking_resend_facts(uuid, uuid, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.booking_resend_facts(uuid, uuid, timestamptz) TO tidegrid_app;

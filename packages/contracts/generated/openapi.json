@@ -23136,7 +23136,7 @@
           "bookings"
         ],
         "summary": "Send a booking's email again",
-        "description": "Owners and booking staff. Sends the booking's confirmation (with a new management link) or its cancellation notice again, as a new message, to the booker's address on file, rendered from the booking as it is now. The new link is minted when the email is sent; earlier links are superseded then, and still renew. An earlier email of the same kind still waiting to go out is canceled (code resent). The reason code is recorded in the audit history. Never a retry of an earlier message: delivery sends each message at most once.\n\nLimits, for every staff member and request: at most 5 sends again per booking that were attempted or are still waiting, at least 10 minutes after the booking's last one, and 50 an hour per operator. Idempotent by key: a refusal is the key's stored answer and replays as the same 409; send again with a new key.\n\nOrder: authentication (401), membership (404), permission (403), the key's replay, the booking (404), then booking_email_off (409) when this environment sends no email, which stores nothing for the key.",
+        "description": "Owners and booking staff. Sends the booking's confirmation (with a new management link) or its cancellation notice again, as a new message, to the booker's address on file, rendered from the booking as it is now. The new link is minted when the email is sent; earlier links are superseded then, and still renew. An earlier email of the same kind still waiting to go out is canceled (code resent). The reason code is recorded in the audit history. Never a retry of an earlier message: delivery sends each message at most once.\n\nLimits, for every staff member and request: at most 5 sends again per booking that were attempted or are still waiting, at least 10 minutes after the booking's last one, and 50 an hour per operator. Idempotent by key: a refusal is the key's stored answer and replays as the same 409; send again with a new key.\n\nOrder: authentication (401), membership (404), permission (403), the key's replay, the booking (404), then booking_email_off (409) when this environment sends no email, which stores nothing for the key.\n\nA request whose work ran longer than the database allows a resend (30 s, as when it waited behind other resends) answers 503 booking_email_busy: nothing was sent or stored, so the same request may be sent again with the same key.",
         "security": [
           {
             "accessJwt": []
@@ -23424,6 +23424,40 @@
           },
           "422": {
             "description": "idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The request ran longer than a resend may (booking_email_busy); nothing was sent or stored for the key, so send the same request again",
             "content": {
               "application/json": {
                 "schema": {

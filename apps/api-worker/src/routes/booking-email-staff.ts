@@ -27,6 +27,16 @@ export function emailDelivery(env: Bindings): "on" | "off" {
 
 type Refusal = Exclude<ResendResult, { kind: "queued" } | { kind: "not_found" }>;
 
+/**
+ * The database refused the resend because its transaction ran past its bound
+ * (migration 0014, booking_email_resends_late), at the ledger insert or at
+ * commit. The whole transaction rolled back, the key's claim with it.
+ */
+function ranTooLong(error: unknown): boolean {
+  const e = error as { code?: unknown; constraint_name?: unknown } | null;
+  return e?.code === "23514" && e.constraint_name === "booking_email_resends_late";
+}
+
 /** A refusal's code and words for staff; times are instants, never personal data. */
 function refusalBody(refused: Refusal): { code: string; message: string } {
   const after = refused.availableAt ? `; try after ${refused.availableAt.toISOString()}` : "";
@@ -94,6 +104,7 @@ export function registerBookingEmailStaffRoutes(app: OpenAPIHono<AppEnv>, deps: 
       "Owners and booking staff. Sends the booking's confirmation (with a new management link) or its cancellation notice again, as a new message, to the booker's address on file, rendered from the booking as it is now. The new link is minted when the email is sent; earlier links are superseded then, and still renew. An earlier email of the same kind still waiting to go out is canceled (code resent). The reason code is recorded in the audit history. Never a retry of an earlier message: delivery sends each message at most once.",
       "Limits, for every staff member and request: at most 5 sends again per booking that were attempted or are still waiting, at least 10 minutes after the booking's last one, and 50 an hour per operator. Idempotent by key: a refusal is the key's stored answer and replays as the same 409; send again with a new key.",
       "Order: authentication (401), membership (404), permission (403), the key's replay, the booking (404), then booking_email_off (409) when this environment sends no email, which stores nothing for the key.",
+      "A request whose work ran longer than the database allows a resend (30 s, as when it waited behind other resends) answers 503 booking_email_busy: nothing was sent or stored, so the same request may be sent again with the same key.",
     ].join("\n\n"),
     security: staffSecurity,
     request: {
@@ -117,6 +128,9 @@ export function registerBookingEmailStaffRoutes(app: OpenAPIHono<AppEnv>, deps: 
         "Email is off in this environment (booking_email_off, not stored for the key); the booking's state has no email of this kind (booking_email_kind_mismatch); the trip has ended (booking_trip_over); the refund failed (booking_email_refund_failed); sent again 5 times already (booking_email_resend_limit); sent again under 10 minutes ago (booking_email_too_soon); the operator's hourly limit is reached (booking_email_rate_limited); an earlier email of this kind is being sent right now (booking_email_in_progress); or the email could not be built (booking_email_invalid). Every refusal but booking_email_off is final for its Idempotency-Key",
       ),
       422: errorBody("idempotency_key_reused"),
+      503: errorBody(
+        "The request ran longer than a resend may (booking_email_busy); nothing was sent or stored for the key, so send the same request again",
+      ),
     },
   });
 
@@ -126,7 +140,7 @@ export function registerBookingEmailStaffRoutes(app: OpenAPIHono<AppEnv>, deps: 
     const input = c.req.valid("json");
     const notFound = () =>
       new ApiError(404, "booking_not_found", "No such booking for this tenant");
-    const { body, replayed } = await withStaffTenant(
+    const answer = withStaffTenant(
       c,
       deps,
       {
@@ -177,6 +191,14 @@ export function registerBookingEmailStaffRoutes(app: OpenAPIHono<AppEnv>, deps: 
         };
       },
     );
+    const { body, replayed } = await answer.catch((error: unknown) => {
+      if (!ranTooLong(error)) throw error;
+      throw new ApiError(
+        503,
+        "booking_email_busy",
+        "This took too long and nothing was sent; send it again",
+      );
+    });
     if (replayed) c.header("Idempotent-Replayed", "true");
     if ("refusal" in body) {
       const refusal = body.refusal as { code: string; message: string };
