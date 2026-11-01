@@ -81,6 +81,53 @@ describe("rollback postcondition: done only when exactly the anchor is live", ()
     expect(loadJournal(deps).flags.rolledBack ?? []).toEqual([]);
   });
 
+  it("reads the listing once more after 5 s, and rolls back when it has caught up", async () => {
+    let reads = 0;
+    const { deps, printed } = setUp(() => {
+      reads += 1;
+      return reads === 1 ? listing(v(2)) : listing(v(1));
+    });
+    const start = deps.now().getTime();
+    expect(await run(deps), printed.join("\n")).toBe(0);
+    expect(reads).toBe(2);
+    expect(deps.now().getTime() - start).toBeGreaterThanOrEqual(5000);
+    expect(lastRollback(deps)?.result).toBe("done");
+    expect(lastRollback(deps)?.versionAfter).toEqual([v(1)]);
+  });
+
+  it("reads once more after an unreadable listing, and rolls back when the second read works", async () => {
+    let reads = 0;
+    const { deps, printed } = setUp(() => {
+      reads += 1;
+      return reads === 1 ? { code: 1, stdout: "" } : listing(v(1));
+    });
+    expect(await run(deps), printed.join("\n")).toBe(0);
+    expect(lastRollback(deps)?.result).toBe("done");
+    expect(lastRollback(deps)?.note ?? "").not.toMatch(/unreadable/);
+  });
+
+  it("reads only once when the anchor is live at the first read", async () => {
+    let reads = 0;
+    const { deps } = setUp(() => {
+      reads += 1;
+      return listing(v(1));
+    });
+    const start = deps.now().getTime();
+    expect(await run(deps)).toBe(0);
+    expect(reads).toBe(1);
+    expect(deps.now().getTime() - start).toBe(0);
+  });
+
+  it("reads twice, no more, before it fails", async () => {
+    let reads = 0;
+    const { deps } = setUp(() => {
+      reads += 1;
+      return listing(v(2));
+    });
+    expect(await run(deps)).toBe(1);
+    expect(reads).toBe(2);
+  });
+
   it("fails, and keeps the rolled-back flag, when the listing cannot be read afterwards", async () => {
     const { deps, printed } = setUp(() => ({ code: 1, stdout: "" }));
     expect(await run(deps)).toBe(1);
