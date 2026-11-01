@@ -42,11 +42,22 @@
 -- hour (review probe P6). So a resend whose transaction has run longer than
 -- app.booking_resend_max_transaction() (30 s, or less if the transaction
 -- asks) is refused, at its ledger insert and again at commit
--- (booking_email_resends_late). A stamp therefore lags its commit by at most
--- 30 s: that is the slack against the 10-minute and hourly rules. One way
--- around the commit check remains: a writer that brings the deferred check
--- forward with SET CONSTRAINTS ... IMMEDIATE and then holds its transaction
--- is bounded only up to that moment. The service never does.
+-- (booking_email_resends_late). For the service, and for any writer that
+-- does none of the below, a stamp lags its commit by at most 30 s: that is
+-- the slack against the 10-minute and hourly rules.
+--
+-- The commit check bounds the stamp only up to the moment its deferred event
+-- runs; any wait after that, before the commit record, is unbounded. That is
+-- a class, not one escape (final check of 2026-11-01): a deferred foreign key
+-- whose referenced row another session holds FOR UPDATE (such as
+-- waiver_requests_superseded_by_fkey from 0010 or booking_cancellations_refund
+-- from 0009) makes COMMIT wait after the check; PREPARE TRANSACTION, where
+-- max_prepared_transactions > 0, ends the check and leaves COMMIT PREPARED
+-- for later (the bound relies on it being 0, which the catalog suite checks);
+-- SET CONSTRAINTS ... IMMEDIATE runs the check early. Each needs a writer
+-- holding tidegrid_app's credentials that bypasses the service, the same
+-- threat class as before. The service does none of these. Bounding sends at
+-- the delivery claim instead is a possible pre-pilot follow-up.
 --
 -- Applying this file. The backfill reads email_messages, and the foreign
 -- keys and triggers lock email_messages and bookings. A request in flight
@@ -222,10 +233,12 @@ $$;
 -- that has not run past its bound, stamped at the transaction's time, the
 -- booking's next generation, naming the message this transaction queued for
 -- it, and within the limits decided at the transaction's time (see The clock
--- above). The lock is taken in its own
--- statement, and the function is VOLATILE, so every statement after it takes
--- a fresh snapshot and reads what was committed before the lock was granted;
--- a REPEATABLE READ or SERIALIZABLE writer would read a snapshot from before
+-- above). The message's insert has already taken the tenant's lock (the lock
+-- trigger below), so the ledger statement starts with a snapshot taken after
+-- it was granted. Taking the lock again here, in its own statement, in a
+-- VOLATILE function whose statements each take a fresh snapshot, is a second
+-- line, kept in case a writer reaches this insert without that message lock.
+-- A REPEATABLE READ or SERIALIZABLE writer would read a snapshot from before
 -- the lock and could pass a limit, so it is refused (as 0006 refuses capacity
 -- changes). Runs as the writer, under its row-level security, and filters by
 -- tenant explicitly.

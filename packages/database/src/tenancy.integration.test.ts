@@ -823,9 +823,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
                              'check_booking_email_resend', 'check_booking_resend_recorded',
                              'lock_booking_resend')
          order by p.proname`;
-      // The check trigger must stay VOLATILE: its statements then each take a
-      // fresh snapshot, so the counts after the resend lock see what committed
-      // before it was granted.
+      // The message-insert lock already gives the ledger statement a snapshot
+      // taken after the resend lock was granted. VOLATILE on the check trigger,
+      // so each of its statements takes a fresh snapshot after its own second
+      // take of the lock, is kept as a second line.
       expect(rows.map((r) => ({ ...r }))).toEqual([
         {
           proname: "booking_resend_facts",
