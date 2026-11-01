@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { main } from "../src/cli.ts";
+import { treeMigrations } from "../src/commands/preflight.ts";
 import { classifyHost, classifyUrl } from "../src/gate.ts";
 import { loadJournal, saveJournal } from "../src/journal.ts";
-import { fakeDeps, headSha, json, providerExecs } from "./helpers.ts";
+import { fakeDeps, headSha, json, providerExecs, repoRoot } from "./helpers.ts";
 
 describe("target classification (invariant 1)", () => {
   it("counts loopback and *.localhost as local, everything else as live", () => {
@@ -112,7 +113,8 @@ describe("a live target refuses unless every gate condition holds", () => {
             database: "ok",
             environment: "local",
             version: "dev",
-            migrations: { latest: "0013_sweep_fairness.sql" },
+            // The tree's last migration, as smoke derives it.
+            migrations: { latest: treeMigrations(repoRoot).at(-1) },
           });
         }
         if (c.url.endsWith("/v1/public/tenant")) {
