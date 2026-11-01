@@ -1125,14 +1125,21 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
       sql`select set_config('app.resend_max_transaction', '1 second', true)`.execute(trx);
     // At the insert: the transaction began more than the bound before it.
     const early = await book(world, A, tripsA.shared(), 1);
+    let refusedAt = "commit";
     const atInsert = await outcome(
       inTenantTransaction(world.db, ctx, async (trx) => {
         await bound(trx);
         await sql`select pg_sleep(1.2)`.execute(trx);
-        await directWrite(trx, ctx, { bookingId: early.bookingId, generation: 1 });
+        await directWrite(trx, ctx, { bookingId: early.bookingId, generation: 1 }).catch(
+          (error: unknown) => {
+            refusedAt = "insert";
+            throw error;
+          },
+        );
       }),
     );
-    expect(atInsert).toBe("23514:booking_email_resends_late");
+    // Refused at the insert itself, not only at commit.
+    expect([atInsert, refusedAt]).toEqual(["23514:booking_email_resends_late", "insert"]);
     // At commit: written in time, then held open past the bound.
     const held = await book(world, A, tripsA.shared(), 1);
     const atCommit = await outcome(
@@ -1257,6 +1264,7 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     // At the ledger insert: the service's transaction had already run past the bound.
     const slow = await book(world, A, tripsA.shared(), 1);
     const slowBefore = await messagesOf(world.admin, slow.bookingId);
+    let serviceThrew = false;
     const atInsert = await inTenantTransaction(world.db, ctx, async (trx) => {
       await sql`select set_config('app.resend_max_transaction', '1 second', true)`.execute(trx);
       await sql`select pg_sleep(1.2)`.execute(trx);
@@ -1264,9 +1272,14 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
         bookingId: slow.bookingId,
         kind: "confirmation",
         reason: "other",
+      }).catch((error: unknown) => {
+        serviceThrew = true;
+        throw error;
       });
     }).then(() => "committed", lateError);
+    // The service's own call fails, at its ledger insert, before any audit row.
     expect(atInsert).toEqual({ code: "23514", constraint: "booking_email_resends_late" });
+    expect(serviceThrew).toBe(true);
     // At commit: the service queued it in time, then the caller's
     // transaction ran past the bound before it committed.
     const held = await book(world, A, tripsA.shared(), 1);
