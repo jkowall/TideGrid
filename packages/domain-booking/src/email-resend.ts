@@ -13,14 +13,20 @@
  * guest asks for later supersedes it in turn: the link in the email sent last
  * opens the booking.
  *
- * Limits, counted from committed email_messages rows under the tenant's
- * resend lock and the booking's row lock, across every request and every
- * staff member, exactly (owner decision D4 A, 2026-10-29; a database trigger
- * is a pre-pilot follow-up): at most 5
- * deliverable resends per booking for ever (attempted, or still waiting), at
- * least 10 minutes after the booking's newest resend of any state, and 50
- * resends an hour per operator. The generation is separate from the count:
- * 1 plus the highest generation the booking has, in any state.
+ * Limits, held by the database for every writer (owner decision D4 A,
+ * 2026-10-29, and migration 0014): at most 5 deliverable resends per booking
+ * for ever (attempted, or still waiting), at least 10 minutes after the
+ * booking's newest resend of any state, and 50 resends an hour per operator.
+ * Each resend writes a row in the append-only ledger `booking_email_resends`
+ * beside its message; `app.booking_resend_facts` counts the ledger by those
+ * rules, and the ledger's trigger decides them again, under the tenant's
+ * resend lock, for every writer. The service reads the same facts first, so
+ * its refusals stay typed, ordered, and before any write; a limit the trigger
+ * raises anyway (a writer that bypassed the lock) is mapped to the same typed
+ * refusal. The generation is separate from the count: 1 plus the highest
+ * generation the booking's ledger has, in any state. The time limits use the
+ * database clock on the send path; `at` replaces it for the availability read
+ * only (tests).
  *
  * Every refusal is decided before any write, in RESEND_REFUSAL_ORDER. A
  * refused request changes nothing. An earlier email of the same template still
@@ -128,8 +134,6 @@ function keyPrefix(bookingId: string): string {
   return `${STAFF_RESEND_TOPIC}:${bookingId}:`;
 }
 
-const generationPattern = "^booking\\.resend:[0-9a-f-]{36}:([0-9]{1,9})$";
-
 const later = (a: Date, minutes: number) => new Date(a.getTime() + minutes * 60_000);
 
 /**
@@ -164,7 +168,13 @@ async function databaseNow(trx: TenantTransaction): Promise<Date> {
 
 const asDate = (v: Date | string) => (typeof v === "string" ? new Date(v) : v);
 
-/** The facts for one booking and kind; null when the booking is not this tenant's. */
+/**
+ * The facts for one booking and kind at `at`; null when the booking is not
+ * this tenant's. The limits' counts come from `app.booking_resend_facts`
+ * (0014), the one counting definition the ledger's trigger also uses: the
+ * booking's deliverable resends, its newest of any state, and the operator's
+ * resends in the hour before `at`, with when the 50th newest is an hour old.
+ */
 async function loadFacts(
   trx: TenantTransaction,
   tenantId: string,
@@ -172,13 +182,14 @@ async function loadFacts(
   kind: ResendKind,
   at: Date,
 ): Promise<ResendFacts | null> {
-  const prefix = keyPrefix(bookingId);
   const { rows } = await sql<{
     state: "confirmed" | "canceled";
     ends_at: Date | string;
     refund_failed: boolean;
     deliverable: number;
-    newest_resend_at: Date | string | null;
+    newest_at: Date | string | null;
+    operator_resends: number;
+    operator_available_at: Date | string | null;
     sending: number;
   }>`
     select b.state, t.ends_at,
@@ -186,51 +197,31 @@ async function loadFacts(
                      join payment_refunds r on r.tenant_id = c.tenant_id and r.id = c.refund_id
                     where c.tenant_id = b.tenant_id and c.booking_id = b.id
                       and r.state = 'failed') as refund_failed,
-           (select count(*)::int from email_messages m
-             where m.tenant_id = b.tenant_id and m.booking_id = b.id
-               and starts_with(m.dedupe_key, ${prefix})
-               and (m.state <> 'canceled' or m.attempts > 0)) as deliverable,
-           (select max(m.created_at) from email_messages m
-             where m.tenant_id = b.tenant_id and m.booking_id = b.id
-               and starts_with(m.dedupe_key, ${prefix})) as newest_resend_at,
+           f.deliverable, f.newest_at, f.operator_resends, f.operator_available_at,
            (select count(*)::int from email_messages m
              where m.tenant_id = b.tenant_id and m.booking_id = b.id
                and m.template = ${templates[kind].key} and m.state = 'sending') as sending
       from bookings b
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
+      cross join lateral app.booking_resend_facts(b.tenant_id, b.id, ${at}::timestamptz) f
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
   const row = rows[0];
   if (!row) return null;
-  // The operator's resends in the hour before `at`, and the 50th newest of
-  // them: once it is an hour old, the count is under the cap again.
-  const { rows: operator } = await sql<{ n: number; fiftieth: Date | string | null }>`
-    with recent as (
-      select m.created_at from email_messages m
-       where m.tenant_id = ${tenantId}
-         and starts_with(m.dedupe_key, ${`${STAFF_RESEND_TOPIC}:`})
-         and m.created_at > ${at}::timestamptz - interval '1 hour')
-    select (select count(*)::int from recent) as n,
-           (select created_at from recent order by created_at desc
-             offset ${MAX_OPERATOR_RESENDS_PER_HOUR - 1} limit 1) as fiftieth`.execute(trx);
-  const recent = operator[0];
   return {
     bookingState: row.state,
     tripEndsAt: asDate(row.ends_at),
     refundFailed: row.refund_failed,
     deliverable: row.deliverable,
-    newestResendAt: row.newest_resend_at === null ? null : asDate(row.newest_resend_at),
-    operatorResends: recent?.n ?? 0,
-    operatorAvailableAt: recent?.fiftieth ? later(asDate(recent.fiftieth), 60) : null,
+    newestResendAt: row.newest_at === null ? null : asDate(row.newest_at),
+    operatorResends: row.operator_resends,
+    operatorAvailableAt:
+      row.operator_available_at === null ? null : asDate(row.operator_available_at),
     sending: row.sending,
   };
 }
 
-/**
- * The first refusal for a resend of `kind` at `at`, or null when none
- * applies. Reads only; the caller has found the booking. The send path calls
- * it after taking the booking's lock and its earlier messages' locks.
- */
-export async function resendRefusal(
+/** The first refusal at `at`; the caller has found the booking. */
+async function firstRefusal(
   trx: TenantTransaction,
   tenantId: string,
   bookingId: string,
@@ -240,6 +231,36 @@ export async function resendRefusal(
   const facts = await loadFacts(trx, tenantId, bookingId, kind, at);
   if (!facts) throw new Error("a booking for a resend was not found");
   return refusalsOf(facts, kind, at)[0] ?? null;
+}
+
+/**
+ * The first refusal for a resend of `kind` now, on the database clock, or
+ * null when none applies. Reads only; the caller has found the booking. The
+ * send path decides this way after taking the booking's lock and its earlier
+ * messages' locks.
+ */
+export async function resendRefusal(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+  kind: ResendKind,
+): Promise<ResendRefusal | null> {
+  return firstRefusal(trx, tenantId, bookingId, kind, await databaseNow(trx));
+}
+
+const limitConstraints: Record<string, ResendRefusalCode> = {
+  booking_email_resends_limit: "limit",
+  booking_email_resends_interval: "too_soon",
+  booking_email_resends_rate: "rate_limited",
+};
+
+/** The limit the ledger's trigger raised, if that is what this error is (0014). */
+function limitRefused(error: unknown): ResendRefusalCode | null {
+  const e = error as { code?: unknown; constraint_name?: unknown } | null;
+  if (e?.code !== "23514" || typeof e.constraint_name !== "string") return null;
+  return Object.hasOwn(limitConstraints, e.constraint_name)
+    ? (limitConstraints[e.constraint_name] ?? null)
+    : null;
 }
 
 /**
@@ -281,8 +302,10 @@ export async function resendAvailability(
  * The operator's resends, one at a time: a transaction-scoped advisory lock
  * per tenant, so the hourly count is read and written by one resend at a time
  * and the cap is exact. Taken first, before any row lock, as checkout's
- * advisory locks are; nothing else takes this key, so a resend waiting for it
- * holds nothing another path needs (README, Lock order).
+ * advisory locks are. Only the ledger's trigger (0014) takes this key besides,
+ * when the ledger row is written; advisory transaction locks stack, so for
+ * this path the second take is a no-op. A resend waiting for it holds nothing
+ * another path needs (README, Lock order).
  */
 async function lockTenantResends(trx: TenantTransaction, tenantId: string): Promise<void> {
   await sql`select pg_advisory_xact_lock(hashtextextended(${`tidegrid.booking_resend:${tenantId}`}, 0))`.execute(
@@ -316,17 +339,17 @@ async function lockCancellationRefund(
  * never wait behind it); the earlier emails of the same template that have
  * not gone out (`FOR UPDATE`); for a cancellation notice, the refund row
  * (`FOR SHARE`); then every refusal, decided from what is committed, before
- * any write; then, under a savepoint, the earlier queued emails canceled as
- * `resent` and the new message written; then one audit row. A composer that
- * refuses the booking's data answers `email_invalid` with everything rolled
- * back to the savepoint. `at` replaces the database clock for the time
- * limits, for tests; the route never passes it.
+ * any write, on the database clock; then, under a savepoint, the earlier queued
+ * emails canceled as `resent`, the new message written, and its ledger row;
+ * then one audit row. A composer that refuses the booking's data answers
+ * `email_invalid`, and a limit the ledger's trigger raises answers its typed
+ * refusal, each with everything rolled back to the savepoint. Any other error
+ * propagates, and the caller's transaction (the key's claim) rolls back.
  */
 export async function resendBookingEmail(
   trx: TenantTransaction,
   ctx: TenantContext,
   input: { bookingId: string; kind: ResendKind; reason: ResendReason },
-  options: { at?: Date } = {},
 ): Promise<ResendResult> {
   const { bookingId, kind, reason } = input;
   if (!Object.hasOwn(templates, kind)) {
@@ -354,8 +377,9 @@ export async function resendBookingEmail(
        for update`.execute(trx);
   if (kind === "cancellation") await lockCancellationRefund(trx, tenantId, bookingId);
 
-  const at = options.at ?? (await databaseNow(trx));
-  const refusal = await resendRefusal(trx, tenantId, bookingId, kind, at);
+  // Read once: the transaction's time on the database clock, as the trigger reads it.
+  const at = await databaseNow(trx);
+  const refusal = await firstRefusal(trx, tenantId, bookingId, kind, at);
   if (refusal) return { kind: "refused", code: refusal.code, availableAt: refusal.availableAt };
 
   const { rows: earlier } = await sql<{
@@ -369,10 +393,8 @@ export async function resendBookingEmail(
      limit 1`.execute(trx);
   const prefix = keyPrefix(bookingId);
   const { rows: generations } = await sql<{ highest: number }>`
-    select coalesce(max(substring(dedupe_key from ${generationPattern})::int), 0) as highest
-      from email_messages
-     where tenant_id = ${tenantId} and booking_id = ${bookingId}
-       and starts_with(dedupe_key, ${prefix})`.execute(trx);
+    select coalesce(max(generation), 0)::int as highest from booking_email_resends
+     where tenant_id = ${tenantId} and booking_id = ${bookingId}`.execute(trx);
   const generation = (generations[0]?.highest ?? 0) + 1;
 
   const canceledMessageIds: string[] = [];
@@ -397,17 +419,38 @@ export async function resendBookingEmail(
         ? await enqueueConfirmationEmail(trx, ctx, bookingId, { dedupeKey: key })
         : await enqueueCancellationEmail(trx, ctx, bookingId, { dedupeKey: key });
     if (made.duplicate) {
-      // The generation is read under the booking's lock, so its key is new
-      // unless another writer bypassed this service: refuse to answer success.
+      // The generation is read from the ledger under the tenant's resend lock,
+      // and a message without its ledger row cannot commit (0014), so its key
+      // is new: refuse to answer success.
       throw new Error(`a staff resend for generation ${generation} already exists`);
     }
     messageId = made.messageId;
+    // The trigger stamps the time and the actor, and decides the limits again.
+    await trx
+      .insertInto("booking_email_resends")
+      .values({
+        tenant_id: tenantId,
+        booking_id: bookingId,
+        generation,
+        kind,
+        message_id: messageId,
+      })
+      .execute();
     await sql`release savepoint booking_email_resend`.execute(trx);
   } catch (error) {
-    if (!(error instanceof TypeError) && !(error instanceof RangeError)) throw error;
+    const limit = limitRefused(error);
+    if (!(error instanceof TypeError) && !(error instanceof RangeError) && limit === null) {
+      throw error;
+    }
     await sql`rollback to savepoint booking_email_resend`.execute(trx);
     await sql`release savepoint booking_email_resend`.execute(trx);
-    return { kind: "refused", code: "email_invalid", availableAt: null };
+    if (limit === null) return { kind: "refused", code: "email_invalid", availableAt: null };
+    // A row landed after the check, past the tenant's lock, which only a
+    // writer with the trigger off can do: read the facts again for when the
+    // limit lifts.
+    const facts = await loadFacts(trx, tenantId, bookingId, kind, at);
+    const again = facts ? refusalsOf(facts, kind, at).find((r) => r.code === limit) : undefined;
+    return { kind: "refused", code: limit, availableAt: again?.availableAt ?? null };
   }
 
   const { rows: written } = await sql<{ created_at: Date | string }>`
