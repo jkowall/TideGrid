@@ -5694,7 +5694,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -6995,7 +6995,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -8202,7 +8202,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -8459,7 +8459,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12463,7 +12463,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -12653,7 +12653,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -14153,7 +14153,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15392,7 +15392,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -17646,7 +17646,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {
@@ -18664,7 +18664,7 @@
             }
           },
           "413": {
-            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {

@@ -16,6 +16,9 @@ export const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 
 const webhookPrefix = "/v1/webhooks/payments/";
 
+/** The routes a guest page calls cross-origin, as in src/hostnames/cors.ts. */
+const guestRoutePrefixes = ["/v1/public/", "/v1/fake-provider/"] as const;
+
 /**
  * The one place a per-route limit lives. Payment provider events keep their
  * 64 KiB; every other path, documented or not, gets the default. A route that
@@ -126,11 +129,17 @@ export function declarePayloadTooLarge(app: OpenAPIHono<AppEnv>): void {
   for (const def of app.openAPIRegistry.definitions) {
     if (def.type !== "route" || !def.route.request?.body) continue;
     if (def.route.responses[413]) continue;
-    const kib = bodyLimitFor(def.route.path) / 1024;
+    const path = def.route.path;
+    const kib = bodyLimitFor(path) / 1024;
+    // A guest page calls these cross-origin, and the cap answers before CORS.
+    const guestRoute = guestRoutePrefixes.some((prefix) => path.startsWith(prefix));
+    const browsers = guestRoute
+      ? "; a cross-origin browser gets this answer without CORS headers, so it cannot read it"
+      : "";
     def.route.responses = {
       ...def.route.responses,
       413: errorBody(
-        `The request body is larger than this route accepts, ${kib} KiB (payload_too_large)`,
+        `The request body is larger than this route accepts, ${kib} KiB${browsers} (payload_too_large)`,
       ),
     };
   }
