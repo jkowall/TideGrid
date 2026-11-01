@@ -271,12 +271,13 @@ describe.skipIf(!env)("request body cap through the API", () => {
         headers: { "idempotency-key": `quote-${randomUUID()}`, "cf-connecting-ip": "192.0.2.10" },
       });
       expect([res.status, res.json.error?.code]).toEqual([413, "payload_too_large"]);
-      expect(res.headers.get("access-control-allow-origin")).toBeNull();
-      expect(res.headers.get("vary") ?? "").toMatch(/Origin/);
       expect(limiterKeys).toEqual([]);
       // A sentinel lookup after it, so a straggling count would show up too.
       expect((await lookupOnce()).status).toBe(200);
       expect(await callsSince(base, 1)).toBe(1);
+      // No CORS decision was made, so the browser cannot read it (D3).
+      expect(res.headers.get("access-control-allow-origin")).toBeNull();
+      expect(res.headers.get("vary") ?? "").toMatch(/Origin/);
     }
   });
 
