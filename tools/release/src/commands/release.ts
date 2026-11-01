@@ -418,11 +418,18 @@ async function doRollback(
     );
   }
   const code = await wranglerOnTerminal(deps, worker, ["rollback", anchor]);
-  const after = await deployedVersions(deps, worker).catch(() => null);
+  const readAfter = () => deployedVersions(deps, worker).catch(() => null);
+  let after = await readAfter();
   // wrangler 4.135.0 exits 0 when the owner declines its changed-secrets
   // prompt (10220; cli.js:349407-349415), so exit 0 alone proves nothing:
   // the rollback is done only when exactly the anchor is live afterwards.
-  const live = after !== null && sameIds(after, [anchor]);
+  const anchorAlone = (ids: string[] | null) => ids !== null && sameIds(ids, [anchor]);
+  if (code === 0 && !anchorAlone(after)) {
+    // The listing can trail a finished rollback: read it once more.
+    await deps.sleep(5000);
+    after = await readAfter();
+  }
+  const live = anchorAlone(after);
   const note =
     "bound resources stay; secret changes now need wrangler versions secret put, then versions deploy";
   record(deps, {
