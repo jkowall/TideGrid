@@ -21,12 +21,15 @@
  * beside its message; `app.booking_resend_facts` counts the ledger by those
  * rules, and the ledger's trigger decides them again, under the tenant's
  * resend lock, for every writer. The service reads the same facts first, so
- * its refusals stay typed, ordered, and before any write; a limit the trigger
- * raises anyway (a writer that bypassed the lock) is mapped to the same typed
- * refusal. The generation is separate from the count: 1 plus the highest
- * generation the booking's ledger has, in any state. The time limits use the
- * database clock on the send path; `at` replaces it for the availability read
- * only (tests).
+ * its refusals stay typed, ordered, and before any write. Both decide at the
+ * transaction's time, `now()` to the millisecond, so they agree at every
+ * boundary; the trigger stamps the row at the clock once it holds the lock.
+ * A limit the trigger raises anyway means a row landed past the tenant's
+ * lock, which only a writer with 0014's triggers off can do; it is mapped to
+ * the same typed refusal, with when it lifts from the database's facts. The
+ * generation is separate from the count: 1 plus the highest generation the
+ * booking's ledger has, in any state. `at` replaces the clock for the
+ * availability read only (tests).
  *
  * Every refusal is decided before any write, in RESEND_REFUSAL_ORDER. A
  * refused request changes nothing. An earlier email of the same template still
@@ -159,8 +162,10 @@ export function refusalsOf(facts: ResendFacts, kind: ResendKind, at: Date): Rese
   return out;
 }
 
+/** The transaction's time, to the millisecond: the instant the ledger's trigger decides at. */
 async function databaseNow(trx: TenantTransaction): Promise<Date> {
-  const { rows } = await sql<{ now: Date }>`select now() as now`.execute(trx);
+  const { rows } = await sql<{ now: Date }>`
+    select date_trunc('milliseconds', now()) as now`.execute(trx);
   const now = rows[0]?.now;
   if (!now) throw new Error("the database clock did not answer");
   return new Date(now);
@@ -246,6 +251,15 @@ export async function resendRefusal(
   kind: ResendKind,
 ): Promise<ResendRefusal | null> {
   return firstRefusal(trx, tenantId, bookingId, kind, await databaseNow(trx));
+}
+
+/** When a limit the trigger raised lifts, from the facts: the interval's end, or the hour's. */
+function liftsAt(facts: ResendFacts, code: ResendRefusalCode): Date | null {
+  if (code === "too_soon" && facts.newestResendAt) {
+    return later(facts.newestResendAt, STAFF_RESEND_INTERVAL_MINUTES);
+  }
+  if (code === "rate_limited") return facts.operatorAvailableAt;
+  return null;
 }
 
 const limitConstraints: Record<string, ResendRefusalCode> = {
@@ -445,12 +459,12 @@ export async function resendBookingEmail(
     await sql`rollback to savepoint booking_email_resend`.execute(trx);
     await sql`release savepoint booking_email_resend`.execute(trx);
     if (limit === null) return { kind: "refused", code: "email_invalid", availableAt: null };
-    // A row landed after the check, past the tenant's lock, which only a
-    // writer with the trigger off can do: read the facts again for when the
-    // limit lifts.
+    // The trigger decided at the same instant and precision as the check
+    // above, after the D5 cancellations, so it refuses only when a row landed
+    // past the tenant's lock, which only a writer with 0014's triggers off can
+    // do. When the limit lifts comes from the database's facts, read again.
     const facts = await loadFacts(trx, tenantId, bookingId, kind, at);
-    const again = facts ? refusalsOf(facts, kind, at).find((r) => r.code === limit) : undefined;
-    return { kind: "refused", code: limit, availableAt: again?.availableAt ?? null };
+    return { kind: "refused", code: limit, availableAt: facts ? liftsAt(facts, limit) : null };
   }
 
   const { rows: written } = await sql<{ created_at: Date | string }>`

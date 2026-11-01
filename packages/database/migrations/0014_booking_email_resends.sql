@@ -19,12 +19,35 @@
 -- writer cannot skip the ledger. The service's eligibility refusals (kind,
 -- trip over, refund failed, in progress) stay in the service (D5 A).
 --
--- Lock order for a ledger writer: the tenant's resend lock
+-- Lock order for a resend writer: the tenant's resend lock
 -- (pg_advisory_xact_lock(hashtextextended('tidegrid.booking_resend:' ||
--- tenant, 0))), which the service takes first, before any row lock; the
--- trigger takes it again, a no-op for the service. A writer that locks the
--- booking before this key can deadlock with a service resend; PostgreSQL
--- detects it, and no service path takes that order.
+-- tenant, 0))), which the service takes first, before any row lock. Every
+-- booking.resend: message insert takes it too, before the message's key is
+-- claimed, and so does every ledger row; for the service both are no-ops,
+-- since advisory transaction locks stack. A writer that bypasses the service
+-- therefore waits for a service resend before it holds any resend key, and
+-- the two cannot deadlock on the dedupe key (review of 2026-11-01). A writer
+-- that locks the booking before its first resend message can still deadlock
+-- with a service resend; PostgreSQL detects it, and no service path takes
+-- that order.
+--
+-- Clocks (fix round, coordinator decision of 2026-11-01). A ledger row is
+-- stamped at its writer's clock once it holds the lock, to the millisecond:
+-- a writer that held its transaction open is stamped when it decided, not
+-- when it began. The limits are decided at the writer's transaction time,
+-- now(), to the millisecond: the instant and the precision the service
+-- decides at, so the two agree at every boundary. Since now() is no later
+-- than the stamp, and the counts take every row committed before the lock
+-- was granted, with no upper bound on its time, a row admitted at now() also
+-- keeps the limits at its stamp; deciding at now() only refuses more, and
+-- only for a writer that held its transaction open.
+--
+-- Applying this file. The backfill reads email_messages, and the foreign
+-- keys and triggers lock email_messages and bookings. A request in flight
+-- that already holds a row lock there may deadlock with the file, and either
+-- side may be the one aborted. Apply it before the API release that uses it,
+-- in a quiet window (owner item O2); the file rolls back alone on a lock
+-- timeout or a deadlock, and a rerun is safe.
 --
 -- Tenancy follows packages/database/README.md: tenant_id on every row,
 -- composite tenant foreign keys, forced row-level security with a
@@ -128,11 +151,15 @@ $$;
 
 -- What the limits are decided from, at p_at, by D4's counting rules: the
 -- booking's deliverable resends (state not canceled, or attempted at least
--- once), its newest resend of any state, the operator's resends of any state
--- in the hour before p_at, and, once there are 50, when the 50th newest is an
--- hour old. The service reads it to decide and to answer when a limit lifts;
--- the trigger reads it to decide again. Invoker: row-level security applies,
--- and it filters by tenant explicitly.
+-- once), its newest resend of any state, to the millisecond (the precision
+-- both deciders compare at; a backfilled row keeps its microseconds), the
+-- operator's resends of any state stamped after the hour before p_at, and,
+-- once there are 50, when the 50th newest is an hour old. No count has an
+-- upper bound on created_at: a row stamped after p_at, by a writer that
+-- committed while the caller's transaction was open, still counts. The
+-- service reads it to decide and to answer when a limit lifts; the trigger
+-- reads it to decide again. Invoker: row-level security applies, and it
+-- filters by tenant explicitly.
 CREATE FUNCTION app.booking_resend_facts(p_tenant uuid, p_booking uuid, p_at timestamptz)
   RETURNS TABLE (deliverable integer, newest_at timestamptz, operator_resends integer,
                  operator_available_at timestamptz)
@@ -145,7 +172,7 @@ CREATE FUNCTION app.booking_resend_facts(p_tenant uuid, p_booking uuid, p_at tim
        JOIN public.email_messages m ON m.tenant_id = r.tenant_id AND m.id = r.message_id
       WHERE r.tenant_id = p_tenant AND r.booking_id = p_booking
         AND (m.state <> 'canceled' OR m.attempts > 0)),
-    (SELECT max(r.created_at)
+    (SELECT date_trunc('milliseconds', max(r.created_at))
        FROM public.booking_email_resends r
       WHERE r.tenant_id = p_tenant AND r.booking_id = p_booking),
     (SELECT count(*)::integer
@@ -160,24 +187,27 @@ $$;
 
 -- The check ----------------------------------------------------------------------
 
--- Every ledger row, for every writer: stamped from the transaction, under
--- READ COMMITTED only, under the tenant's resend lock, the booking's next
--- generation, naming the message this transaction queued for it, and within
--- the limits at now(). The lock is taken in its own statement, so every
--- statement after it reads what was committed before it was granted; a
--- REPEATABLE READ or SERIALIZABLE writer would read a snapshot from before
+-- Every ledger row, for every writer: its actor from the transaction, under
+-- READ COMMITTED only, under the tenant's resend lock, stamped at the clock
+-- once the lock is held, the booking's next generation, naming the message
+-- this transaction queued for it, and within the limits decided at the
+-- transaction's time (see Clocks above). The lock is taken in its own
+-- statement, and the function is VOLATILE, so every statement after it takes
+-- a fresh snapshot and reads what was committed before the lock was granted;
+-- a REPEATABLE READ or SERIALIZABLE writer would read a snapshot from before
 -- the lock and could pass a limit, so it is refused (as 0006 refuses capacity
 -- changes). Runs as the writer, under its row-level security, and filters by
 -- tenant explicitly.
 CREATE FUNCTION app.check_booking_email_resend() RETURNS trigger
-  LANGUAGE plpgsql
+  LANGUAGE plpgsql VOLATILE
   SET search_path = pg_catalog, pg_temp
   AS $$
 DECLARE
   latest integer;
   facts record;
+  -- When the limits are decided: the transaction's time, as the service reads it.
+  decided timestamptz := pg_catalog.date_trunc('milliseconds', pg_catalog.now());
 BEGIN
-  NEW.created_at := now();
   NEW.actor_type := coalesce(app.setting_or_null('app.actor_type'), 'system');
   NEW.actor_id := app.setting_or_null('app.actor_id');
   NEW.api_request_id := app.setting_or_null('app.request_id');
@@ -188,6 +218,8 @@ BEGIN
   END IF;
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('tidegrid.booking_resend:' || NEW.tenant_id::text, 0));
+  -- Read once, after the lock: when this writer decided, whenever it began.
+  NEW.created_at := pg_catalog.date_trunc('milliseconds', pg_catalog.clock_timestamp());
   SELECT max(r.generation) INTO latest
     FROM public.booking_email_resends r
    WHERE r.tenant_id = NEW.tenant_id AND r.booking_id = NEW.booking_id;
@@ -205,15 +237,16 @@ BEGIN
           AND m.template = CASE NEW.kind WHEN 'confirmation' THEN 'booking_confirmation'
                                          ELSE 'booking_canceled' END
           AND m.state = 'queued' AND m.attempts = 0
+          -- Queued by this transaction: its stamp is the transaction's time.
           AND m.created_at = now()) THEN
     RAISE EXCEPTION 'a staff resend names the message this transaction queued for its booking, generation, and kind'
       USING ERRCODE = '23514', CONSTRAINT = 'booking_email_resends_message';
   END IF;
-  SELECT * INTO facts FROM app.booking_resend_facts(NEW.tenant_id, NEW.booking_id, now());
+  SELECT * INTO facts FROM app.booking_resend_facts(NEW.tenant_id, NEW.booking_id, decided);
   IF facts.deliverable >= 5 THEN
     RAISE EXCEPTION 'booking % has 5 deliverable staff resends', NEW.booking_id
       USING ERRCODE = '23514', CONSTRAINT = 'booking_email_resends_limit';
-  ELSIF facts.newest_at + interval '10 minutes' > now() THEN
+  ELSIF facts.newest_at + interval '10 minutes' > decided THEN
     RAISE EXCEPTION 'booking %''s newest staff resend is under 10 minutes old', NEW.booking_id
       USING ERRCODE = '23514', CONSTRAINT = 'booking_email_resends_interval';
   ELSIF facts.operator_resends >= 50 THEN
@@ -227,13 +260,35 @@ $$;
 CREATE TRIGGER booking_email_resends_check BEFORE INSERT ON public.booking_email_resends
   FOR EACH ROW EXECUTE FUNCTION app.check_booking_email_resend();
 
+-- Before a booking.resend: message is inserted, and so before its key is
+-- claimed: the tenant's resend lock. The service already holds it (a
+-- no-op). Any other writer waits here for a service resend in progress,
+-- holding no resend key, instead of claiming a key the service is about to
+-- claim and then waiting for the lock the service holds, which deadlocked
+-- (review of 2026-11-01, probe P1).
+CREATE FUNCTION app.lock_booking_resend() RETURNS trigger
+  LANGUAGE plpgsql VOLATILE
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('tidegrid.booking_resend:' || NEW.tenant_id::text, 0));
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER email_messages_staff_resend_lock
+  BEFORE INSERT ON public.email_messages
+  FOR EACH ROW
+  WHEN (starts_with(NEW.dedupe_key, 'booking.resend:'))
+  EXECUTE FUNCTION app.lock_booking_resend();
+
 -- Checked at commit: a booking.resend: message commits only with its ledger
 -- row, so a writer that queues one and skips the ledger is refused (D4 A).
 -- This goes beyond the waiver precedent, which binds no message to its
 -- delivery row at commit. A build from before 0014 writes no ledger row, so
 -- its resends fail here until it is rolled forward (owner item O3).
 CREATE FUNCTION app.check_booking_resend_recorded() RETURNS trigger
-  LANGUAGE plpgsql
+  LANGUAGE plpgsql VOLATILE
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
@@ -272,6 +327,7 @@ CREATE TRIGGER booking_email_resends_append_only BEFORE UPDATE ON public.booking
 -- SELECT and INSERT come from the default privileges in 0001; nothing more.
 REVOKE ALL ON FUNCTION app.check_booking_email_resend() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_booking_resend_recorded() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.lock_booking_resend() FROM PUBLIC;
 -- The service reads the facts before it decides.
 REVOKE ALL ON FUNCTION app.booking_resend_facts(uuid, uuid, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.booking_resend_facts(uuid, uuid, timestamptz) TO tidegrid_app;

@@ -806,6 +806,8 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
       await conn`insert into public.booking_email_resends
                     (tenant_id, booking_id, generation, kind, message_id, actor_type)
                   values (${R.id}, ${seeded.bookingId}, 50, 'confirmation', ${m?.id ?? ""}, 'system')`;
+      // The message's check at commit runs now, so the table has no pending event to block the ALTER.
+      await conn`set constraints email_messages_staff_resend immediate`;
       await conn`alter table public.booking_email_resends enable trigger booking_email_resends_check`;
       await conn`alter table public.email_messages enable trigger email_messages_staff_resend_lock`;
       await conn`commit`;
