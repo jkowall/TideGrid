@@ -21,9 +21,13 @@
  * beside its message; `app.booking_resend_facts` counts the ledger by those
  * rules, and the ledger's trigger decides them again, under the tenant's
  * resend lock, for every writer. The service reads the same facts first, so
- * its refusals stay typed, ordered, and before any write. Both decide at the
- * transaction's time, `now()` to the millisecond, so they agree at every
- * boundary; the trigger stamps the row at the clock once it holds the lock.
+ * its refusals stay typed, ordered, and before any write. Both decide, and
+ * the trigger stamps the row, at the transaction's time, `now()` to the
+ * millisecond, so they agree at every boundary. A resend whose transaction
+ * has run longer than 30 s is refused (`booking_email_resends_late`, at the
+ * ledger insert and at commit), so a stamp lags its commit by at most 30 s;
+ * that error propagates, and the route answers it as 503
+ * `booking_email_busy`, with nothing written.
  * A limit the trigger raises anyway means a row landed past the tenant's
  * lock, which only a writer with 0014's triggers off can do; it is mapped to
  * the same typed refusal, with when it lifts from the database's facts. The
