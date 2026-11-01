@@ -425,7 +425,9 @@ async function doRollback(
   // the rollback is done only when exactly the anchor is live afterwards.
   const anchorAlone = (ids: string[] | null) => ids !== null && sameIds(ids, [anchor]);
   if (code === 0 && !anchorAlone(after)) {
-    // The listing can trail a finished rollback: read it once more.
+    // A precaution in case the listing trails a finished rollback (unverified):
+    // read it once more.
+    out(deps, `The listing does not show ${anchor} alone yet; reading it again in 5 s.`);
     await deps.sleep(5000);
     after = await readAfter();
   }

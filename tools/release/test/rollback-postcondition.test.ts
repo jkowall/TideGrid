@@ -17,14 +17,14 @@ const listing = (...ids: string[]) => ({
 });
 
 /** A live, approved journal with one done p3 release of the API, v(1) to v(2). */
-function setUp(afterRollback: () => { code: number; stdout: string }) {
+function setUp(afterRollback: () => { code: number; stdout: string }, rollbackCode = 0) {
   let rolled = false;
   const f = fakeDeps({
     answers: ["tidegrid-api", v(1).slice(0, 8), "yes"],
     exec: (c) => {
       if (c.args.includes("rollback")) {
         rolled = true;
-        return { code: 0, stdout: "" };
+        return { code: rollbackCode, stdout: "" };
       }
       if (c.args.includes("deployments")) return rolled ? afterRollback() : listing(v(2));
       return undefined;
@@ -90,7 +90,8 @@ describe("rollback postcondition: done only when exactly the anchor is live", ()
     const start = deps.now().getTime();
     expect(await run(deps), printed.join("\n")).toBe(0);
     expect(reads).toBe(2);
-    expect(deps.now().getTime() - start).toBeGreaterThanOrEqual(5000);
+    expect(deps.now().getTime() - start).toBe(5000);
+    expect(printed.join("\n")).toMatch(/reading it again in 5 s/);
     expect(lastRollback(deps)?.result).toBe("done");
     expect(lastRollback(deps)?.versionAfter).toEqual([v(1)]);
   });
@@ -128,9 +129,30 @@ describe("rollback postcondition: done only when exactly the anchor is live", ()
     expect(reads).toBe(2);
   });
 
-  it("fails, and keeps the rolled-back flag, when the listing cannot be read afterwards", async () => {
-    const { deps, printed } = setUp(() => ({ code: 1, stdout: "" }));
+  it("fails at once, with no second read and no wait, when wrangler exits non-zero", async () => {
+    let reads = 0;
+    const { deps, printed } = setUp(() => {
+      reads += 1;
+      return listing(v(2));
+    }, 1);
+    const start = deps.now().getTime();
     expect(await run(deps)).toBe(1);
+    expect(reads).toBe(1);
+    expect(deps.now().getTime() - start).toBe(0);
+    expect(printed.join("\n")).toMatch(/FAILED: wrangler rollback exited 1/);
+    expect(lastRollback(deps)?.result).toBe("failed");
+    expect(loadJournal(deps).flags.rolledBack ?? []).toEqual([]);
+  });
+
+  it("fails, and keeps the rolled-back flag, when the listing cannot be read on either read", async () => {
+    let reads = 0;
+    const { deps, printed } = setUp(() => {
+      reads += 1;
+      return { code: 1, stdout: "" };
+    });
+    expect(await run(deps)).toBe(1);
+    expect(reads).toBe(2);
+    expect(lastRollback(deps)?.note).toMatch(/unreadable/);
     expect(printed.join("\n")).toMatch(/FAILED: .*wrangler deployments list/);
     expect(lastRollback(deps)?.result).toBe("failed");
     // Conservative: the rollback may have run, so secret edits keep pointing
