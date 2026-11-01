@@ -20,23 +20,30 @@ function approve(deps: ReturnType<typeof fakeDeps>["deps"]) {
   saveJournal(deps, j);
 }
 
-/** Health answers "old" until the deploy runs, then this build. */
-function withHealth(migrations: unknown) {
+/**
+ * Health answers "old" until the deploy runs, then this build. `migrations`
+ * may be a function of the read count, to model a probe that fails first.
+ */
+function withHealth(migrations: unknown, answers: string[] = ["tidegrid-api"]) {
   let deployed = false;
+  let reads = 0;
   const f = fakeDeps({
-    answers: ["tidegrid-api"],
+    answers,
     exec: (c) => {
       if (c.args.includes("release")) deployed = true;
       return undefined;
     },
-    fetch: (c) =>
-      c.url.endsWith("/v1/health")
-        ? json(200, {
-            version: deployed ? "aaaaaaa" : "old",
-            database: "ok",
-            ...(migrations === undefined ? {} : { migrations }),
-          })
-        : undefined,
+    fetch: (c) => {
+      if (!c.url.endsWith("/v1/health")) return undefined;
+      reads += 1;
+      const m = typeof migrations === "function" ? migrations(reads) : migrations;
+      if (m === "error") return json(200, { version: "old", database: "error", migrations: null });
+      return json(200, {
+        version: deployed ? "aaaaaaa" : "old",
+        database: "ok",
+        ...(m === undefined ? {} : { migrations: m }),
+      });
+    },
   });
   approve(f.deps);
   return f;
@@ -74,9 +81,26 @@ describe("an API release waits for the database to reach the tree's last migrati
     expect(printed.join("\n")).toMatch(/WARN .*ahead of the tree/);
   });
 
-  it("releases with a warning when the live health cannot say", async () => {
-    const { deps, printed } = withHealth(undefined);
+  it("asks before releasing when the live health cannot say, and releases on yes", async () => {
+    const { deps, printed, prompts } = withHealth(undefined, ["tidegrid-api", "yes"]);
     expect(await main(releaseApi, deps), printed.join("\n")).toBe(0);
     expect(printed.join("\n")).toMatch(/WARN .*could not read the database's migrations/);
+    expect(prompts.some((p) => p.includes(treeLatest))).toBe(true);
+  });
+
+  it("refuses, before any provider call, when the health cannot say and the answer is not yes", async () => {
+    const { deps, execs } = withHealth(undefined, ["tidegrid-api", "no"]);
+    expect(await main(releaseApi, deps)).toBe(3);
+    expect(providerExecs(execs)).toEqual([]);
+  });
+
+  it("reads again past a failed database probe, and refuses when the database is behind", async () => {
+    // Read 1 is the already-released check; read 2 is the guard's first.
+    const { deps, execs, printed } = withHealth((n: number) =>
+      n <= 2 ? "error" : { latest: "0001_foundation.sql" },
+    );
+    expect(await main(releaseApi, deps)).toBe(3);
+    expect(printed.join("\n")).toMatch(/database is at 0001_foundation\.sql/);
+    expect(providerExecs(execs)).toEqual([]);
   });
 });
