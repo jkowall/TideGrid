@@ -691,6 +691,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         waiver_evidence: ["INSERT", "SELECT"],
         // Sweep fairness (0013): one stamp per tenant and sweep.
         sweep_turns: ["INSERT", "SELECT"],
+        // Staff resend ledger (0014): append-only, no UPDATE columns.
+        booking_email_resends: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

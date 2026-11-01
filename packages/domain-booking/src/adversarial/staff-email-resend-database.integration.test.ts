@@ -392,7 +392,7 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
     [A, B, R] = await Promise.all([
       createCheckoutFixture(admin, runtime.db, "rsdb-a", { days: 20 }),
       createCheckoutFixture(admin, runtime.db, "rsdb-b", { days: 4 }),
-      createCheckoutFixture(admin, runtime.db, "rsdb-r", { days: 10 }),
+      createCheckoutFixture(admin, runtime.db, "rsdb-r", { days: 30 }),
     ]);
     for (const t of [A, B, R]) await addLocalHostname(admin, t);
     tripsA = tripAllocator(A);
