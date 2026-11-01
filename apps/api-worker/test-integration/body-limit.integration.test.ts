@@ -127,6 +127,11 @@ describe.skipIf(!env)("request body cap through the API", () => {
     if (opts.origin) headers.set("origin", opts.origin);
     if (opts.as) headers.set("cf-access-jwt-assertion", await token(opts.as));
     if (opts.body !== undefined) headers.set("content-type", "application/json");
+    // A string body declares its length, as a browser or curl does; nothing
+    // adds it for an in-process request. A stream goes without one (chunked).
+    if (typeof opts.body === "string" && !headers.has("content-length")) {
+      headers.set("content-length", String(Buffer.byteLength(opts.body)));
+    }
     const on = opts.console ? markConsoleGateway(bindings()) : bindings();
     const res = await app.request(
       `https://api.test${path}`,
@@ -261,6 +266,7 @@ describe.skipIf(!env)("request body cap through the API", () => {
 
   it("spends no limiter call and no hostname lookup on an oversize body", async () => {
     const big = JSON.stringify({ pad: "x".repeat(MB) });
+    // A declared length takes the early refusal; a chunked body is counted.
     for (const sent of [() => big, () => chunked(big)]) {
       preflightProjection.clear();
       limiterKeys.length = 0;
@@ -271,6 +277,7 @@ describe.skipIf(!env)("request body cap through the API", () => {
         headers: { "idempotency-key": `quote-${randomUUID()}`, "cf-connecting-ip": "192.0.2.10" },
       });
       expect([res.status, res.json.error?.code]).toEqual([413, "payload_too_large"]);
+      expect(res.headers.get("cache-control")).toBe("no-store");
       expect(limiterKeys).toEqual([]);
       // A sentinel lookup after it, so a straggling count would show up too.
       expect((await lookupOnce()).status).toBe(200);

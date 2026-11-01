@@ -88,6 +88,23 @@ async function read(res: Response) {
 
 const refused = { status: 413, code: "payload_too_large", idMatches: true };
 
+/**
+ * A body that declares its length. Neither `app.request` nor `fetch` adds a
+ * Content-Length to a string body inside the Workers runtime, so the header
+ * is set by hand; without it a case takes the counting path, not the early
+ * refusal.
+ */
+const withLength = (bytes: number) => ({
+  body: padded(bytes),
+  extra: { "content-length": String(bytes) },
+});
+
+/** The cap's own marks on a refusal (invariant 5). */
+function expectMarked(got: { headers: Headers }, label: string) {
+  expect(got.headers.get("cache-control"), label).toBe("no-store");
+  expect(got.headers.get("vary") ?? "", label).toMatch(/(^|,\s*)Origin(,|$)/i);
+}
+
 describe("request body cap", () => {
   const routes = [
     ["POST", "/v1/public/quotes"],
@@ -100,37 +117,51 @@ describe("request body cap", () => {
   ] as const;
 
   for (const [method, path] of routes) {
-    it(`${method} ${path}: 1 MB with a Content-Length answers 413`, async () => {
-      const { headers: _h, ...got } = await send(method, path, padded(MB));
+    it(`${method} ${path}: 1 MB with a Content-Length answers 413 without reading`, async () => {
+      const { body, extra } = withLength(MB);
+      const { headers: h, ...got } = await send(method, path, body, extra);
       expect(got).toEqual(refused);
+      expectMarked({ headers: h }, path);
     });
     it(`${method} ${path}: 1 MB chunked answers 413`, async () => {
-      const { headers: _h, ...got } = await send(method, path, chunked(MB));
+      const { headers: h, ...got } = await send(method, path, chunked(MB));
       expect(got).toEqual(refused);
+      expectMarked({ headers: h }, path);
     });
   }
 
   it("through the real entrypoint, 1 MB with a length or chunked answers 413", async () => {
-    for (const body of [padded(MB), chunked(MB)]) {
+    const sent: [string, BodyInit, Record<string, string>][] = [
+      ["length", padded(MB), { "content-length": String(MB) }],
+      ["chunked", chunked(MB), {}],
+    ];
+    for (const [label, body, extra] of sent) {
       const res = await SELF.fetch("https://api.test/v1/public/quotes", {
         method: "POST",
-        headers,
+        headers: { ...headers, ...extra },
         body,
         duplex: "half",
       } as RequestInit);
-      const { headers: _h, ...got } = await read(res);
-      expect(got).toEqual(refused);
+      const { headers: h, ...got } = await read(res);
+      expect(got, label).toEqual(refused);
+      expectMarked({ headers: h }, label);
     }
   });
 
-  it("lets exactly 16 KiB reach validation and refuses one byte more", async () => {
+  it("lets exactly 16 KiB reach validation and refuses one byte more, declared or counted", async () => {
     expect(MAX_REQUEST_BODY_BYTES).toBe(16_384);
-    const at = await send("POST", "/v1/public/quotes", padded(16_384));
-    expect([at.status, at.code]).toEqual([400, "validation_failed"]);
-    const over = await send("POST", "/v1/public/quotes", padded(16_385));
-    expect([over.status, over.code]).toEqual([413, "payload_too_large"]);
+    const at = withLength(16_384);
+    const atDeclared = await send("POST", "/v1/public/quotes", at.body, at.extra);
+    expect([atDeclared.status, atDeclared.code]).toEqual([400, "validation_failed"]);
+    const atChunked = await send("POST", "/v1/public/quotes", chunked(16_384));
+    expect([atChunked.status, atChunked.code]).toEqual([400, "validation_failed"]);
+    const over = withLength(16_385);
+    const overDeclared = await send("POST", "/v1/public/quotes", over.body, over.extra);
+    expect([overDeclared.status, overDeclared.code]).toEqual([413, "payload_too_large"]);
+    expectMarked(overDeclared, "declared 16,385");
     const overChunked = await send("POST", "/v1/public/quotes", chunked(16_385));
     expect([overChunked.status, overChunked.code]).toEqual([413, "payload_too_large"]);
+    expectMarked(overChunked, "chunked 16,385");
   });
 
   it("keeps the webhook's 64 KiB: 65,536 bytes pass the cap, 65,537 do not", async () => {
@@ -142,23 +173,51 @@ describe("request body cap", () => {
     const path = "/v1/webhooks/payments/fake";
     expect(bodyLimitFor(path)).toBe(65_536);
     expect(bodyLimitFor("/v1/webhooks/other")).toBe(16_384);
-    const plain = { "content-type": "application/json" };
     // No Origin: the route refuses browsers. An unsigned body is the route's 400.
-    const send64 = async (body: BodyInit) =>
+    const send64 = async (body: BodyInit, extra: Record<string, string> = {}) =>
       read(
         await app.request(
           `https://api.test${path}`,
-          { method: "POST", headers: plain, body, duplex: "half" } as RequestInit,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json", ...extra },
+            body,
+            duplex: "half",
+          } as RequestInit,
           fake,
           createExecutionContext(),
         ),
       );
-    const at = await send64(padded(65_536));
-    expect([at.status, at.code]).toEqual([400, "signature_invalid"]);
+    const at = withLength(65_536);
+    const atDeclared = await send64(at.body, at.extra);
+    expect([atDeclared.status, atDeclared.code]).toEqual([400, "signature_invalid"]);
     const atChunked = await send64(chunked(65_536));
     expect([atChunked.status, atChunked.code]).toEqual([400, "signature_invalid"]);
-    const over = await send64(chunked(65_537));
-    expect([over.status, over.code]).toEqual([413, "payload_too_large"]);
+    const over = withLength(65_537);
+    const overDeclared = await send64(over.body, over.extra);
+    expect([overDeclared.status, overDeclared.code]).toEqual([413, "payload_too_large"]);
+    const overChunked = await send64(chunked(65_537));
+    expect([overChunked.status, overChunked.code]).toEqual([413, "payload_too_large"]);
+  });
+
+  it("refuses a declared oversize body without reading a byte of it", async () => {
+    let pulls = 0;
+    const watched = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          // 16 chunks of 64 KiB, about 1 MB, then the end.
+          if (pulls++ < 16) controller.enqueue(new Uint8Array(64 * 1024));
+          else controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const got = await send("POST", "/v1/public/quotes", watched, {
+      "content-length": String(MB),
+    });
+    expect([got.status, got.code]).toEqual([413, "payload_too_large"]);
+    expectMarked(got, "declared 1 MB stream");
+    expect(pulls).toBe(0);
   });
 
   it("never lets a small declared length admit a large body", async () => {
@@ -170,12 +229,13 @@ describe("request body cap", () => {
 
   it("marks every refusal no-store and Vary: Origin, public and staff alike", async () => {
     for (const path of ["/v1/public/quotes", "/v1/staff/tenants/x/members"]) {
-      for (const body of [padded(MB), chunked(MB)]) {
-        const got = await send("POST", path, body);
-        expect(got.status, path).toBe(413);
-        expect(got.headers.get("cache-control"), path).toBe("no-store");
-        expect(got.headers.get("vary") ?? "", path).toMatch(/(^|,\s*)Origin(,|$)/i);
-      }
+      const { body, extra } = withLength(MB);
+      const declared = await send("POST", path, body, extra);
+      expect(declared.status, path).toBe(413);
+      expectMarked(declared, `${path} declared`);
+      const streamed = await send("POST", path, chunked(MB));
+      expect(streamed.status, path).toBe(413);
+      expectMarked(streamed, `${path} chunked`);
     }
   });
 
@@ -187,10 +247,21 @@ describe("request body cap", () => {
         else controller.error(new Error("client went away"));
       },
     });
-    const got = await send("POST", "/v1/public/quotes", broken);
-    expect([got.status, got.code]).toEqual([400, "bad_request"]);
-    // The cap's own answer, not the validator's.
-    expect(got.headers.get("cache-control")).toBe("no-store");
+    // A path with no route: without the cap it would be a 404, and nothing
+    // else on it sets no-store or reads the body.
+    const res = await app.request(
+      "https://api.test/v1/nope",
+      { method: "POST", headers, body: broken, duplex: "half" } as RequestInit,
+      bindings,
+      createExecutionContext(),
+    );
+    expect(res.status).toBe(400);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const json = (await res.json()) as { error?: { code?: string; message?: string } };
+    expect(json.error).toMatchObject({
+      code: "bad_request",
+      message: "The request body could not be read",
+    });
   });
 });
 
@@ -273,6 +344,7 @@ describe("what the cap hands on", () => {
 });
 
 type Schema = {
+  $ref?: string;
   type?: string | string[];
   properties?: Record<string, Schema>;
   items?: Schema;
@@ -292,7 +364,10 @@ type Operation = {
   requestBody?: { content: Record<string, { schema: Schema }> };
   responses: Record<string, { description?: string }>;
 };
-type Doc = { paths: Record<string, Record<string, Operation>> };
+type Doc = {
+  paths: Record<string, Record<string, Operation>>;
+  components?: { schemas?: Record<string, Schema> };
+};
 
 async function contract(): Promise<Doc> {
   const res = await app.request("https://api.test/v1/openapi.json", {}, bindings);
@@ -330,14 +405,47 @@ function boundedPattern(pattern: string): boolean {
   return true;
 }
 
-/** Every unbounded array, string, or open map in a request schema. */
-function unbounded(schema: Schema, at: string, out: string[]): string[] {
-  for (const branch of [...(schema.oneOf ?? []), ...(schema.anyOf ?? []), ...(schema.allOf ?? [])])
-    unbounded(branch, at, out);
+/**
+ * Every unbounded array, string, or open map in a request schema. A `$ref` is
+ * followed into `components.schemas` (each target once), an unresolvable one
+ * is reported, and so is a node that says nothing of its shape.
+ */
+function unbounded(
+  node: Schema,
+  at: string,
+  out: string[],
+  components: Record<string, Schema> = {},
+  seen = new Set<string>(),
+): string[] {
+  let schema = node;
+  if (schema.$ref !== undefined) {
+    const name = schema.$ref.startsWith("#/components/schemas/")
+      ? schema.$ref.slice("#/components/schemas/".length)
+      : undefined;
+    const target = name === undefined ? undefined : components[name];
+    if (!target) {
+      out.push(`${at}: unresolved $ref ${schema.$ref}`);
+      return out;
+    }
+    if (seen.has(schema.$ref)) return out;
+    seen.add(schema.$ref);
+    schema = target;
+  }
+  const recurse = (child: Schema, where: string) => unbounded(child, where, out, components, seen);
+  const branches = [...(schema.oneOf ?? []), ...(schema.anyOf ?? []), ...(schema.allOf ?? [])];
+  for (const branch of branches) recurse(branch, at);
   const types = Array.isArray(schema.type) ? schema.type : schema.type ? [schema.type] : [];
+  if (
+    types.length === 0 &&
+    branches.length === 0 &&
+    schema.enum === undefined &&
+    schema.const === undefined
+  ) {
+    out.push(`${at}: schema without a type`);
+  }
   if (types.includes("array")) {
     if (schema.maxItems === undefined) out.push(`${at}: array without maxItems`);
-    if (schema.items) unbounded(schema.items, `${at}[]`, out);
+    if (schema.items) recurse(schema.items, `${at}[]`);
   }
   if (types.includes("string")) {
     const bounded =
@@ -350,10 +458,10 @@ function unbounded(schema: Schema, at: string, out: string[]): string[] {
     if (!bounded) out.push(`${at}: string without a bound`);
   }
   for (const [key, child] of Object.entries(schema.properties ?? {}))
-    unbounded(child, `${at}.${key}`, out);
+    recurse(child, `${at}.${key}`);
   if (typeof schema.additionalProperties === "object") {
     if (schema.maxProperties === undefined) out.push(`${at}: open map without maxProperties`);
-    unbounded(schema.additionalProperties, `${at}{}`, out);
+    recurse(schema.additionalProperties, `${at}{}`);
   }
   return out;
 }
@@ -363,8 +471,12 @@ describe("the published contract", () => {
     const withBody = operations(await contract()).filter(({ op }) => op.requestBody);
     expect(withBody.length).toBeGreaterThanOrEqual(23);
     expect(withBody.filter(({ op }) => !op.responses["413"]).map(({ name }) => name)).toEqual([]);
-    for (const { op } of withBody) {
-      expect(op.responses["413"]?.description).toMatch(/\(payload_too_large\)$/);
+    for (const { name, op } of withBody) {
+      const description = op.responses["413"]?.description ?? "";
+      expect(description, name).toMatch(/\(payload_too_large\)$/);
+      // A guest page calls these cross-origin, and the cap answers before CORS.
+      const guestRoute = / \/v1\/(public|fake-provider)\//.test(name);
+      expect(/without CORS headers/.test(description), name).toBe(guestRoute);
     }
   });
 
@@ -389,12 +501,31 @@ describe("the published contract", () => {
   });
 
   it("bounds every request array, string, and map (by rule, not by luck)", async () => {
+    const doc = await contract();
+    const components = doc.components?.schemas ?? {};
     const found: string[] = [];
-    for (const { name, op } of operations(await contract())) {
+    for (const { name, op } of operations(doc)) {
       for (const [type, media] of Object.entries(op.requestBody?.content ?? {}))
-        unbounded(media.schema, `${name} ${type}`, found);
+        unbounded(media.schema, `${name} ${type}`, found, components);
     }
     expect(found).toEqual([]);
+    // The scan itself: a reference is followed, a cycle ends, and a node with
+    // no shape, an unknown reference, or an open map is reported.
+    const refs: Record<string, Schema> = {
+      Codes: { type: "array", items: { type: "string", maxLength: 4 } },
+      Loop: { type: "object", properties: { next: { $ref: "#/components/schemas/Loop" } } },
+    };
+    expect(unbounded({ $ref: "#/components/schemas/Codes" }, "r", [], refs)).toEqual([
+      "r: array without maxItems",
+    ]);
+    expect(unbounded({ $ref: "#/components/schemas/Loop" }, "l", [], refs)).toEqual([]);
+    expect(unbounded({ $ref: "#/components/schemas/Gone" }, "g", [], refs)).toEqual([
+      "g: unresolved $ref #/components/schemas/Gone",
+    ]);
+    expect(unbounded({}, "u", [])).toEqual(["u: schema without a type"]);
+    expect(
+      unbounded({ type: "object", additionalProperties: { type: "integer" } }, "m", []),
+    ).toEqual(["m: open map without maxProperties"]);
     expect(boundedPattern("^[a-z][a-z0-9_]{0,31}$")).toBe(true);
     expect(boundedPattern("^[a-z]+$")).toBe(false);
     expect(boundedPattern("^a{2,}$")).toBe(false);
