@@ -50,7 +50,9 @@ const run = (deps: ReturnType<typeof fakeDeps>["deps"]) =>
   main(["release", "api", "--phase", "p7", "--rollback", "--live", "--go", "A8"], deps);
 
 function lastRollback(deps: ReturnType<typeof fakeDeps>["deps"]) {
-  return loadJournal(deps).entries.filter((e) => e.step === "rollback").at(-1);
+  return loadJournal(deps)
+    .entries.filter((e) => e.step === "rollback")
+    .at(-1);
 }
 
 describe("rollback postcondition: done only when exactly the anchor is live", () => {

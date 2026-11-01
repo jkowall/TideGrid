@@ -265,10 +265,15 @@ describe("correctness F1 and safety F4: the Stripe window closes before P10 and 
 
 describe("safety F3: the rollback anchor is the build that was live before the last release", () => {
   it("targets the version before a failed release, and makes the owner type it", async () => {
+    let rolled = false;
     const { deps, execs, prompts, printed } = fakeDeps({
       configs: configsWith("c1", "c2"),
       answers: ["tidegrid-api", v(1).slice(0, 8), "yes"],
-      exec: (c) => (c.args.includes("deployments") ? listing(v(2)) : undefined),
+      // v(2) is live until the rollback runs; then the anchor alone is.
+      exec: (c) => {
+        if (c.args.includes("rollback")) rolled = true;
+        return c.args.includes("deployments") ? listing(rolled ? v(1) : v(2)) : undefined;
+      },
     });
     approve(deps);
     const j = loadJournal(deps);

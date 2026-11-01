@@ -418,18 +418,42 @@ async function doRollback(
     );
   }
   const code = await wranglerOnTerminal(deps, worker, ["rollback", anchor]);
-  const after = await deployedVersions(deps, worker).catch(() => [] as string[]);
+  const after = await deployedVersions(deps, worker).catch(() => null);
+  // wrangler 4.135.0 exits 0 when the owner declines its changed-secrets
+  // prompt (10220; cli.js:349407-349415), so exit 0 alone proves nothing:
+  // the rollback is done only when exactly the anchor is live afterwards.
+  const live = after !== null && sameIds(after, [anchor]);
+  const note =
+    "bound resources stay; secret changes now need wrangler versions secret put, then versions deploy";
   record(deps, {
     phase,
     step: "rollback",
     gate,
     worker,
-    result: code === 0 ? "done" : "failed",
+    result: code === 0 && live ? "done" : "failed",
     versionBefore: before,
-    versionAfter: after,
-    note: "bound resources stay; secret changes now need wrangler versions secret put, then versions deploy",
+    versionAfter: after ?? [],
+    note:
+      code === 0 && after === null
+        ? `deployments listing unreadable after the rollback; ${note}`
+        : note,
   });
   if (code !== 0) throw new Failure(`wrangler rollback exited ${code}`);
+  if (after === null) {
+    // The rollback may have run: keep refusing plain secret edits until the
+    // owner reads the listing.
+    updateFlags(deps, (f) => {
+      f.rolledBack = [...new Set([...(f.rolledBack ?? []), worker])];
+    });
+    throw new Failure(
+      `wrangler rollback exited 0, but the deployments could not be read. Check with: pnpm exec wrangler deployments list (in ${w.dir}) before any secret change`,
+    );
+  }
+  if (!live) {
+    throw new Failure(
+      `wrangler rollback exited 0, but ${anchor} is not live alone (live: ${after.join(", ") || "none"}). A declined prompt aborts the rollback; nothing was rolled back`,
+    );
+  }
   updateFlags(deps, (f) => {
     f.rolledBack = [...new Set([...(f.rolledBack ?? []), worker])];
   });
