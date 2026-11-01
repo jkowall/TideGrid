@@ -860,6 +860,18 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
       ]);
     });
 
+    it("runs with prepared transactions off, which the staff resend bound relies on (0014)", async () => {
+      // PREPARE TRANSACTION would let a writer pass the commit check and then
+      // wait unbounded before COMMIT PREPARED. Neon and the test images keep it
+      // off; if a server turns it on, this fails here, loudly.
+      const [row] = await admin<{ setting: string }[]>`
+        select setting from pg_settings where name = 'max_prepared_transactions'`;
+      expect(
+        row?.setting,
+        "max_prepared_transactions must be 0: the resend bound (0014) relies on it",
+      ).toBe("0");
+    });
+
     it("keeps the membership role constraint equal to the API contract", async () => {
       const [row] = await admin`
         select pg_get_constraintdef(c.oid) as def

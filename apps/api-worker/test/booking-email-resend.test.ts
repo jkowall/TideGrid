@@ -20,7 +20,7 @@ const state = vi.hoisted(() => ({
   replay: null as null | { status: number; body: Record<string, unknown> },
   bookingExists: true,
   /** Where the database refuses a resend that ran past its bound (0014): at the service's insert, or at commit. */
-  late: null as null | "service" | "commit",
+  late: null as null | "service" | "commit" | "other",
   log: [] as string[],
 }));
 
@@ -29,6 +29,14 @@ function lateError(): Error {
   return Object.assign(new Error("staff resend transaction ran longer than its bound"), {
     code: "23514",
     constraint_name: "booking_email_resends_late",
+  });
+}
+
+/** Another check the database raises at commit: not the bound, so not a 503. */
+function otherCheckError(): Error {
+  return Object.assign(new Error("staff resend message commits only with its ledger row"), {
+    code: "23514",
+    constraint_name: "email_messages_staff_resend",
   });
 }
 
@@ -91,6 +99,7 @@ vi.mock("@tidegrid/database", async (importOriginal) => {
         const out = await fn(fakeTrx());
         // The deferred check at commit refuses it: the transaction rolls back.
         if (state.late === "commit") throw lateError();
+        if (state.late === "other") throw otherCheckError();
         state.log.push("commit");
         return out;
       } catch (error) {
@@ -346,4 +355,11 @@ describe("the resend route's order (G2.16b)", () => {
       expect(state.log).not.toContain("commit");
     },
   );
+
+  it("answers any other check the database raises at commit as a 500, not booking_email_busy", async () => {
+    state.late = "other";
+    const res = await post({ settings: { EMAIL_PROVIDER: "fake" } });
+    expect([res.status, res.code]).toEqual([500, "internal_error"]);
+    expect(state.log.at(-1)).toBe("rollback");
+  });
 });

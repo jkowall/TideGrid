@@ -1183,6 +1183,8 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
       }),
     );
     await sOpen.opened;
+    // A later millisecond than S's: the stamp is truncated to it, S's now() is not.
+    await sleep(2);
     expect(await outcome(direct(A, { bookingId: b.bookingId, generation: 1 }))).toBe("ok");
     const [later] = await world.admin<{ after: boolean }[]>`
       select created_at > ${sNow}::text::timestamptz as after
@@ -1209,6 +1211,7 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
       }),
     );
     await s2Open.opened;
+    await sleep(2);
     await seed(
       R,
       busy.bookingId,
