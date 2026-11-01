@@ -72,6 +72,8 @@ export async function capRequestBody(c: Context<AppEnv>, next: Next): Promise<vo
   const limit = bodyLimitFor(c.req.path);
   const declared = raw.headers.get("content-length");
   if (declared !== null && /^\d+$/.test(declared) && Number(declared) > limit) {
+    // Nothing will read it; tell the runtime to stop receiving it.
+    body.cancel().catch(() => undefined);
     throw tooLarge(c);
   }
 
