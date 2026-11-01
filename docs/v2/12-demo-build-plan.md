@@ -235,6 +235,13 @@ The adapter, the shim, and the delivery job are in [packages/domain-messaging](.
 - **D-E5 B, D-E6 A: logs.** The cron logs each sweep's `turn_count`, `pass_count`, `deferred_tenant_count`, and `stamp_failure_count`; the hostname sweep's `expiry_only_turn_count`, `provider_call_count`, and `retry_after_seconds` when set; and `tidegrid.email_sweep.account_fault` on every email summary. A failed stamp logs as `*_stamp_failed`, never as a tenant failure. How to read an email stop is in the [messaging README](../../packages/domain-messaging/README.md#delivery).
 - **Not proven.** No Neon run: 0013 and the four sweeps first run on Neon on Nov 1. The bound is proven in unit tests only, integration asserts relative order, and the residuals are inferred.
 
+**Public body-size cap (proposed hardening, coordinator defaults, pending owner confirmation).** Built on 2026-11-01 under the owner's authorization of 2026-10-31, on branch `build/public-body-cap`; no pull request until after P11 of the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md) (D9). The defaults are in the [decision register](06-decision-register.md#pending-owner-confirmation-public-body-size-cap-coordinator-defaults-2026-11-01).
+
+- **The cap (D1, D2).** Every request body the API Worker reads is counted before any parse, CORS lookup, limiter, or database call: 16 KiB, and 64 KiB for payment provider events. A declared Content-Length only refuses early; later code sees the counted length, and the bytes pass through unchanged, so a signed webhook still verifies. `GET` and `HEAD` are not capped.
+- **The contract.** Over the limit answers 413 `payload_too_large` in the shared error shape, declared on every operation with a request body. Bodyless `POST`, `PUT`, `PATCH`, and `DELETE` operations and unknown paths are capped too, uniformly, without a declared 413.
+- **Placement (D3).** Before CORS, so an oversize request spends no lookup and no limiter call, and CORS and the route still share one lookup. The cost: a cross-origin browser cannot read the 413. No guest flow sends 16 KiB, and the console is same-origin.
+- **Not verified, and not relied on.** Cloudflare's edge framing of Content-Length for HTTP/2 and HTTP/3; whether the edge ever hands the Worker a body on a `GET` or `HEAD`; and the memory a body near the platform's 100 MB limit takes in production. The memory bound, about twice the limit plus one chunk, is checked by review, not by a test. Bodies under 16 KiB still parse before the per-address limiter.
+
 **Owner confirmations, 2026-10-19.** The owner kept the current behavior on each of these:
 
 - A late payment that arrives after the seats are gone is refunded in full and raises an exception for the operator. There is no grace period.
