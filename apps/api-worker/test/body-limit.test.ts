@@ -144,15 +144,15 @@ describe("request body cap", () => {
     expect(bodyLimitFor("/v1/webhooks/other")).toBe(16_384);
     const plain = { "content-type": "application/json" };
     // No Origin: the route refuses browsers. An unsigned body is the route's 400.
-    const send64 = (body: BodyInit) =>
-      app
-        .request(
+    const send64 = async (body: BodyInit) =>
+      read(
+        await app.request(
           `https://api.test${path}`,
           { method: "POST", headers: plain, body, duplex: "half" } as RequestInit,
           fake,
           createExecutionContext(),
-        )
-        .then(read);
+        ),
+      );
     const at = await send64(padded(65_536));
     expect([at.status, at.code]).toEqual([400, "signature_invalid"]);
     const atChunked = await send64(chunked(65_536));
@@ -376,7 +376,7 @@ describe("the published contract", () => {
   it("adds a 413 once, to request bodies only", () => {
     const route = (body: boolean, responses: Record<string, unknown>) => ({
       type: "route" as const,
-      route: { ...(body ? { request: { body: {} } } : {}), responses },
+      route: { path: "/v1/x", ...(body ? { request: { body: {} } } : {}), responses },
     });
     const own = { description: "own" };
     const defs = [route(true, {}), route(false, {}), route(true, { 413: own })];

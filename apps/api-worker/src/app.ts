@@ -4,6 +4,7 @@ import type { Context, Next } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
 import { requireStaffOrigin } from "./auth/guards.ts";
+import { capRequestBody, declarePayloadTooLarge } from "./body-limit.ts";
 import type { AppDeps, AppEnv } from "./context.ts";
 import { releaseDb } from "./db.ts";
 import { ApiError } from "./errors.ts";
@@ -77,6 +78,11 @@ export function createApp(deps: AppDeps = {}) {
       duration_ms: Date.now() - started,
     });
   });
+
+  // Every request body is counted before CORS, the limiters, validation, or a
+  // database sees it; an oversize one answers 413 (src/body-limit.ts).
+  // Before CORS, so the counted request is the one CORS and the route share.
+  app.use("*", capRequestBody);
 
   // Browser origins: the configured allowlist, plus verified tenant hostnames
   // on the public routes (G2.14b; see src/hostnames/cors.ts). Credentials are
@@ -175,6 +181,8 @@ export function createApp(deps: AppDeps = {}) {
   // Staff resend of a booking's email (G2.16b).
   registerBookingEmailStaffRoutes(app, deps);
 
+  // After every route: the cap's 413 on each operation with a request body.
+  declarePayloadTooLarge(app);
   app.doc31("/v1/openapi.json", {
     openapi: "3.1.0",
     info: { title: "TideGrid API", version: "0.0.0" },
