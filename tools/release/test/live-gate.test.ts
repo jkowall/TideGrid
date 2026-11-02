@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { main } from "../src/cli.ts";
 import { classifyHost, classifyUrl } from "../src/gate.ts";
 import { loadJournal, saveJournal } from "../src/journal.ts";
-import { fakeDeps, headSha, json, providerExecs } from "./helpers.ts";
+import { fakeDeps, headSha, json, migratedHealth, providerExecs } from "./helpers.ts";
 
 describe("target classification (invariant 1)", () => {
   it("counts loopback and *.localhost as local, everything else as live", () => {
@@ -211,7 +211,11 @@ describe("wrangler runs on the owner's terminal with a clean environment (invari
       fetch: (c) => {
         if (c.url === "https://api.tidegrid.us/v1/health") {
           healthCalls++;
-          return json(200, { version: healthCalls > 1 ? "aaaaaaa" : "b87e269", database: "ok" });
+          return json(200, {
+            version: healthCalls > 1 ? "aaaaaaa" : "b87e269",
+            database: "ok",
+            ...migratedHealth,
+          });
         }
         return undefined;
       },

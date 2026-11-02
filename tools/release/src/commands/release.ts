@@ -29,6 +29,7 @@ import {
   workers,
   wranglerOnTerminal,
 } from "../wrangler.ts";
+import { treeMigrations } from "./preflight.ts";
 
 /** The gate each phase's releases need. A rollback also accepts A4. */
 export const releaseGateFor: Partial<Record<Phase, string>> = {
@@ -107,7 +108,7 @@ export function releasePlan(worker: Worker, phase: Phase, rollback: boolean): Pl
     target: w.name,
     notes: [
       banner,
-      "Re-checked just before wrangler: HEAD = approved origin/main, clean migrations, not dirty, clean build env, phase guard.",
+      "Re-checked just before wrangler: HEAD = approved origin/main, clean migrations, not dirty, clean build env, phase guard; for the API, the live database at the tree's last migration (from /v1/health).",
     ],
     steps: [
       {
@@ -157,6 +158,70 @@ async function healthVersion(deps: Deps): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * The live database's last applied migration, from the API's health (which
+ * reads the database), or undefined when the health cannot say.
+ */
+async function databaseMigration(deps: Deps): Promise<string | null | undefined> {
+  try {
+    const res = await deps.fetch(`${apiBase}/v1/health`, {
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) return undefined;
+    const body = (await res.json()) as {
+      database?: unknown;
+      migrations?: { latest?: unknown } | null;
+    };
+    // A failed database probe reports no migrations; that says nothing.
+    if (body.database !== "ok") return undefined;
+    const latest = body.migrations?.latest;
+    if (latest === null) return null;
+    return typeof latest === "string" ? latest : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * An API release waits for the database to reach the tree's last migration:
+ * code released onto an older schema fails on the tables it expects (from
+ * 0014, every staff email resend). A database ahead of the tree is allowed,
+ * since migrations are forward-only and additive. When the health cannot
+ * report (a failed database probe is memoized for 10 s), it reads again for
+ * 15 s, then asks: a down API can still be redeployed, but never silently.
+ */
+async function assertSchemaReady(deps: Deps): Promise<void> {
+  const tree = treeMigrations(deps.repoRoot).at(-1);
+  if (!tree) return;
+  const read = await poll(
+    deps,
+    async () => {
+      const db = await databaseMigration(deps);
+      return db === undefined ? null : { db };
+    },
+    { intervalMs: 5_000, timeoutMs: 15_000 },
+  );
+  if (read === null) {
+    out(deps, `WARN could not read the database's migrations from ${apiBase}/v1/health`);
+    if (
+      !(await confirmYes(
+        deps,
+        `Is the database already at ${tree} (nov1 db status), so the API may be released without this check?`,
+      ))
+    ) {
+      throw new Refusal("the database's migrations could not be read; nothing ran");
+    }
+    return;
+  }
+  const { db } = read;
+  if (db === null || db < tree) {
+    throw new Refusal(
+      `the database is at ${db ?? "no migration"}, behind the tree's ${tree}. Apply the migrations first (nov1 db), then release the API; the health memoizes for 10 s`,
+    );
+  }
+  if (db > tree) out(deps, `WARN the database is at ${db}, ahead of the tree's ${tree}`);
 }
 
 /** Whether the release took: the API reports this build; the console redirects to Access; the guest hosts serve. */
@@ -320,6 +385,7 @@ export async function release(deps: Deps, args: Args): Promise<number> {
     });
     return 0;
   }
+  if (worker === "api") await assertSchemaReady(deps);
   const done = lastDone(journal, "release", worker);
   if (worker !== "api" && !has(args, "again") && done?.sha === state.head && !killSwitch) {
     out(
