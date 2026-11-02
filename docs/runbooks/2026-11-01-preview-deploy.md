@@ -172,7 +172,7 @@ Rules for the day apply. Run it right after P2.4.
 **P3.2 Release the API.** Go/no-go: **D5** (this release brings the first `*/15` cron to Neon main; pause it in P11 if D5 says so). `nov1 release api --phase p3 --live --go A4` (type `tidegrid-api` back).
 - Command it runs: `pnpm --filter @tidegrid/api-worker run release` (`wrangler deploy --var BUILD_ID:$(git describe --always --dirty)`), on the terminal, with an allowlisted environment. Version ids before and after come from `wrangler deployments list --json`, ids only; the listing's author emails are dropped.
 - Expect: the API goes first, because the guest Worker binds `tidegrid-api#GuestGateway`.
-- Verify: `GET https://api.tidegrid.us/v1/health` shows `version` = the build id, `environment` preview, `database` ok, `migrations.latest` = the tree's last file (memoized 10 s). `nov1` polls it as the release's postcondition.
+- Verify: `GET https://api.tidegrid.us/v1/health` shows `version` = the build id, `environment` preview, `database` ok, `migrations.latest` = the tree's last file (memoized 10 s). `nov1` polls `version` as the release's postcondition; check `migrations.latest` yourself in the same response. (After Nov 1, `nov1 release api` also refuses while the live database is behind the tree's last migration; when the health cannot report it for 15 s, it asks before releasing.)
 
 **P3.3 Secrets (A2).** `nov1 secrets preview --generate FAKE_PAYMENT_WEBHOOK_SECRET --phase p3 --live --go A2`, then `nov1 secrets preview --list --live --go A2`. Every secret change names the current phase with `--phase`: a put is guarded against that phase, and a delete (feature off) runs in any phase.
 - Command it runs: `sh -c 'openssl rand -hex 32 | pnpm exec wrangler secret put FAKE_PAYMENT_WEBHOOK_SECRET'` in `apps/api-worker`. The value goes from openssl into wrangler and never through `nov1`. At least 32 characters (`apps/api-worker/src/env.ts:27`).
@@ -184,6 +184,7 @@ Rules for the day apply. Run it right after P2.4.
 3. Config: revert C1, then release. Static CORS is the documented rollback (12:168).
 - After a code rollback, a secret change fails with error 10215 (cli.js:299145); `nov1 secrets` refuses and prints the `wrangler versions secret put` then `wrangler versions deploy` path.
 - A rollback leaves bound resources unchanged (cli.js:349363). Whether it changes crons or secrets is not documented (unverified).
+- If wrangler asks whether to roll back although secrets changed (10220), answer yes: declining aborts the rollback but still exits 0 and prints success (cli.js:349407-349415). `nov1` counts a rollback as done only when the anchor alone is live afterwards, and otherwise fails with the live versions; an unreadable listing also fails and sets the rolled-back flag, which clears on that Worker's next release; check `wrangler deployments list` before retrying.
 
 ## P4. Console and guest deploy (A4, owner terminal)
 
