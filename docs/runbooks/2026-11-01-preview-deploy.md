@@ -184,7 +184,7 @@ Rules for the day apply. Run it right after P2.4.
 3. Config: revert C1, then release. Static CORS is the documented rollback (12:168).
 - After a code rollback, a secret change fails with error 10215 (cli.js:299145); `nov1 secrets` refuses and prints the `wrangler versions secret put` then `wrangler versions deploy` path.
 - A rollback leaves bound resources unchanged (cli.js:349363). Whether it changes crons or secrets is not documented (unverified).
-- If wrangler asks whether to roll back although secrets changed (10220), answer yes: declining aborts the rollback but still exits 0 and prints success (cli.js:349407-349415). `nov1` counts a rollback as done only when the anchor alone is live afterwards, and otherwise fails with the live versions; an unreadable listing also fails and sets the rolled-back flag, which clears on that Worker's next release; check `wrangler deployments list` before retrying.
+- If wrangler asks whether to roll back although secrets changed (10220), answer yes: declining aborts the rollback but still exits 0 and prints success (cli.js:349407-349415). `nov1` counts a rollback as done only when the anchor alone is live afterwards. If wrangler exits 0 and the listing does not yet show the anchor alone, `nov1` says so and reads it once more after 5 s (a precaution; listing lag is unverified). It then fails with the live versions; a listing unreadable on both reads also fails and sets the rolled-back flag, which clears on that Worker's next release; check `wrangler deployments list` before retrying.
 
 ## P4. Console and guest deploy (A4, owner terminal)
 
