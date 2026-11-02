@@ -8,10 +8,20 @@ import { deployed, deployedEnv, openSignedIn, signIn, tenantManifests } from "./
  * 1280. A one-tenant identity first proves, from /api/v1/me, that it holds
  * exactly one membership. Then it asks the console API for another tenant
  * B's booking detail, trip roster, a booking search by B's reference, and
- * B's day CSV, under B's tenant id. Every answer must be the same 404 or 403
- * error shape, with no B data in the body. The same identity then asks its
- * own tenant for B's booking, B's trip, and B's reference, which must find
- * nothing. The probe table is printed as one JSON line.
+ * B's day CSV, B's email resend (POST .../emails/resend with a fresh
+ * Idempotency-Key and a valid body), and B's message list, under B's tenant
+ * id. Every answer must be the same 404 or 403 error shape, with no B data
+ * and no address in the body. The same identity then asks its own tenant for
+ * B's booking, B's trip, B's reference, B's resend (key K), the same key K
+ * with another reason, and B's message list. These must find nothing: 404
+ * booking_not_found for the resend and the list, and 404 again, not 422, for
+ * the second resend, which shows the first stored no key. No answer on either
+ * side carries B's data or any address. The probe table is printed as one
+ * JSON line.
+ *
+ * The new probes write nothing in deployed mode. Under B's tenant id the
+ * membership 404 comes before the key's claim. Under the own tenant the
+ * booking lookup throws its 404, so the claim rolls back with the transaction.
  *
  * Local (the console-browser CI job): Ava Owner, the owner of Demo Harbor
  * only, signs in with the local link. B is Demo Reef. B's booking is made
@@ -182,19 +192,28 @@ async function localForeignBooking(request: APIRequestContext): Promise<Foreign>
 }
 
 /** A console API call from the signed-in page, the way the console makes it. */
-async function consoleCall(page: Page, method: "GET" | "POST", path: string, body?: unknown) {
+async function consoleCall(
+  page: Page,
+  method: "GET" | "POST",
+  path: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {},
+) {
   return page.evaluate(
-    async ({ method, path, body }): Promise<Answer> => {
+    async ({ method, path, body, extraHeaders }): Promise<Answer> => {
       const res = await fetch(path, {
         method,
         credentials: "same-origin",
         ...(body === null
-          ? {}
-          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+          ? { headers: extraHeaders }
+          : {
+              headers: { "content-type": "application/json", ...extraHeaders },
+              body: JSON.stringify(body),
+            }),
       });
       return { status: res.status, text: await res.text() };
     },
-    { method, path, body: body ?? null },
+    { method, path, body: body ?? null, extraHeaders },
   );
 }
 
@@ -233,7 +252,7 @@ test("a one-tenant identity reads nothing of another tenant through the console"
   if (!deployed) expect(own.tenantSlug).toBe("demo-harbor");
 
   // What no answer may carry: B's ids, any other tenant's slug or name, B's
-  // booker, and, under B's tenant id, any address at all.
+  // booker, and, on either side, any address at all.
   const others = tenantManifests().filter((t) => t.slug !== own.tenantSlug);
   expect(others.length, "another tenant in config/tenants").toBeGreaterThan(0);
   const foreignData = [
@@ -246,42 +265,121 @@ test("a one-tenant identity reads nothing of another tenant through the console"
   ];
   const leaks = (answer: Answer) => foreignData.filter((value) => answer.text.includes(value));
 
-  // 2. Under B's tenant id, the four probes. 3. Under its own tenant id, B's
-  // booking, trip, and reference, which must find nothing.
+  // 2. Under B's tenant id, the probes. 3. Under its own tenant id, B's
+  // booking, trip, reference, resend, and message list, which must find nothing.
   const theirs = `/api/v1/staff/tenants/${encodeURIComponent(foreign.tenantId)}`;
   const mine = `/api/v1/staff/tenants/${encodeURIComponent(own.tenantId)}`;
   const booking = encodeURIComponent(foreign.bookingId);
   const trip = encodeURIComponent(foreign.tripId);
-  const plan: { probe: string; method: "GET" | "POST"; path: string; body?: unknown }[] = [
-    { probe: "tenant B: booking detail", method: "GET", path: `${theirs}/bookings/${booking}` },
-    { probe: "tenant B: trip roster", method: "GET", path: `${theirs}/trips/${trip}/roster` },
+  const resendKey = randomUUID();
+  const resend = (reason: string) => ({ kind: "confirmation", reason });
+  interface Step {
+    probe: string;
+    side: "tenant B" | "own tenant";
+    method: "GET" | "POST";
+    path: string;
+    body?: unknown;
+    headers?: Record<string, string>;
+    /** The own-tenant answer; tenant B's answers share one refusal shape instead. */
+    expect?: { status: number; code: string | null };
+  }
+  const plan: Step[] = [
+    {
+      probe: "tenant B: booking detail",
+      side: "tenant B",
+      method: "GET",
+      path: `${theirs}/bookings/${booking}`,
+    },
+    {
+      probe: "tenant B: trip roster",
+      side: "tenant B",
+      method: "GET",
+      path: `${theirs}/trips/${trip}/roster`,
+    },
     {
       probe: "tenant B: search by reference",
+      side: "tenant B",
       method: "POST",
       path: `${theirs}/booking-searches`,
       body: { q: foreign.reference },
     },
     {
       probe: "tenant B: day CSV",
+      side: "tenant B",
       method: "GET",
       path: `${theirs}/booking-day-export?date=${encodeURIComponent(foreign.date)}`,
     },
-    { probe: "own tenant: B's booking", method: "GET", path: `${mine}/bookings/${booking}` },
-    { probe: "own tenant: B's trip roster", method: "GET", path: `${mine}/trips/${trip}/roster` },
+    {
+      probe: "tenant B: resend B's confirmation",
+      side: "tenant B",
+      method: "POST",
+      path: `${theirs}/bookings/${booking}/emails/resend`,
+      body: resend("other"),
+      headers: { "idempotency-key": randomUUID() },
+    },
+    {
+      probe: "tenant B: B's messages",
+      side: "tenant B",
+      method: "GET",
+      path: `${theirs}/bookings/${booking}/messages`,
+    },
+    {
+      probe: "own tenant: B's booking",
+      side: "own tenant",
+      method: "GET",
+      path: `${mine}/bookings/${booking}`,
+      expect: { status: 404, code: null },
+    },
+    {
+      probe: "own tenant: B's trip roster",
+      side: "own tenant",
+      method: "GET",
+      path: `${mine}/trips/${trip}/roster`,
+      expect: { status: 404, code: null },
+    },
     {
       probe: "own tenant: search by B's reference",
+      side: "own tenant",
       method: "POST",
       path: `${mine}/booking-searches`,
       body: { q: foreign.reference },
+      expect: { status: 200, code: null },
+    },
+    {
+      probe: "own tenant: resend B's confirmation (key K)",
+      side: "own tenant",
+      method: "POST",
+      path: `${mine}/bookings/${booking}/emails/resend`,
+      body: resend("other"),
+      headers: { "idempotency-key": resendKey },
+      expect: { status: 404, code: "booking_not_found" },
+    },
+    {
+      probe: "own tenant: resend again, key K, another reason",
+      side: "own tenant",
+      method: "POST",
+      path: `${mine}/bookings/${booking}/emails/resend`,
+      body: resend("guest_did_not_receive"),
+      headers: { "idempotency-key": resendKey },
+      expect: { status: 404, code: "booking_not_found" },
+    },
+    {
+      probe: "own tenant: B's messages",
+      side: "own tenant",
+      method: "GET",
+      path: `${mine}/bookings/${booking}/messages`,
+      expect: { status: 404, code: "booking_not_found" },
     },
   ];
   const answers: Answer[] = [];
-  for (const step of plan) answers.push(await consoleCall(page, step.method, step.path, step.body));
+  for (const step of plan) {
+    answers.push(await consoleCall(page, step.method, step.path, step.body, step.headers));
+  }
   const at = (i: number) => answers[i] as Answer;
+  // No answer on either side carries an address of any kind.
   const leaksAt = (i: number) => {
     const found = leaks(at(i));
-    // Under B's tenant id no answer carries an address of any kind.
-    if (i < 4 && at(i).text.includes("@")) found.push("@");
+    if (at(i).text.includes("@")) found.push("@");
     return found;
   };
 
@@ -302,22 +400,23 @@ test("a one-tenant identity reads nothing of another tenant through the console"
   );
 
   const shapes = new Set<string>();
-  for (let i = 0; i < 4; i++) {
-    const probe = plan[i]?.probe;
-    expect([403, 404], `${probe}: a refusal`).toContain(at(i).status);
-    expect(errorCode(at(i)), `${probe}: the error shape`).not.toBeNull();
-    expect(leaksAt(i), `${probe}: no B data`).toEqual([]);
+  plan.forEach((step, i) => {
+    if (step.side !== "tenant B") return;
+    expect([403, 404], `${step.probe}: a refusal`).toContain(at(i).status);
+    expect(errorCode(at(i)), `${step.probe}: the error shape`).not.toBeNull();
+    expect(leaksAt(i), `${step.probe}: no B data`).toEqual([]);
     shapes.add(`${at(i).status} ${errorCode(at(i))}`);
-  }
+  });
   expect([...shapes], "tenant B: one refusal shape for every probe").toHaveLength(1);
 
-  for (const [i, status] of [
-    [4, 404],
-    [5, 404],
-    [6, 200],
-  ] as const) {
-    expect(at(i).status, plan[i]?.probe).toBe(status);
-    expect(leaksAt(i), `${plan[i]?.probe}: no B data`).toEqual([]);
-  }
-  expect(JSON.parse(at(6).text)).toMatchObject({ results: [], total: 0 });
+  plan.forEach((step, i) => {
+    if (step.side !== "own tenant" || !step.expect) return;
+    expect(at(i).status, step.probe).toBe(step.expect.status);
+    if (step.expect.code) {
+      expect(errorCode(at(i)), `${step.probe}: the code`).toBe(step.expect.code);
+    }
+    expect(leaksAt(i), `${step.probe}: no B data`).toEqual([]);
+  });
+  const search = plan.findIndex((step) => step.probe === "own tenant: search by B's reference");
+  expect(JSON.parse(at(search).text)).toMatchObject({ results: [], total: 0 });
 });

@@ -691,6 +691,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         waiver_evidence: ["INSERT", "SELECT"],
         // Sweep fairness (0013): one stamp per tenant and sweep.
         sweep_turns: ["INSERT", "SELECT"],
+        // Staff resend ledger (0014): append-only, no UPDATE columns.
+        booking_email_resends: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -809,6 +811,66 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         { proname: "hostname_sweep_tenants", prosecdef: true, runtime_execute: true },
         { proname: "resolve_hostname", prosecdef: true, runtime_execute: true },
       ]);
+    });
+
+    it("runs the staff resend functions as their caller, and lets the runtime execute only the facts and the bound (0014)", async () => {
+      const rows = await admin`
+        select p.proname, p.prosecdef, p.provolatile,
+               has_function_privilege('tidegrid_app', p.oid, 'EXECUTE') as runtime_execute
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'app'
+           and p.proname in ('booking_resend_facts', 'booking_resend_max_transaction',
+                             'check_booking_email_resend', 'check_booking_resend_recorded',
+                             'lock_booking_resend')
+         order by p.proname`;
+      // The message-insert lock already gives the ledger statement a snapshot
+      // taken after the resend lock was granted. VOLATILE on the check trigger,
+      // so each of its statements takes a fresh snapshot after its own second
+      // take of the lock, is kept as a second line.
+      expect(rows.map((r) => ({ ...r }))).toEqual([
+        {
+          proname: "booking_resend_facts",
+          prosecdef: false,
+          provolatile: "s",
+          runtime_execute: true,
+        },
+        {
+          proname: "booking_resend_max_transaction",
+          prosecdef: false,
+          provolatile: "s",
+          runtime_execute: true,
+        },
+        {
+          proname: "check_booking_email_resend",
+          prosecdef: false,
+          provolatile: "v",
+          runtime_execute: false,
+        },
+        {
+          proname: "check_booking_resend_recorded",
+          prosecdef: false,
+          provolatile: "v",
+          runtime_execute: false,
+        },
+        {
+          proname: "lock_booking_resend",
+          prosecdef: false,
+          provolatile: "v",
+          runtime_execute: false,
+        },
+      ]);
+    });
+
+    it("runs with prepared transactions off, which the staff resend bound relies on (0014)", async () => {
+      // PREPARE TRANSACTION would let a writer pass the commit check and then
+      // wait unbounded before COMMIT PREPARED. Neon and the test images keep it
+      // off; if a server turns it on, this fails here, loudly.
+      const [row] = await admin<{ setting: string }[]>`
+        select setting from pg_settings where name = 'max_prepared_transactions'`;
+      expect(
+        row?.setting,
+        "max_prepared_transactions must be 0: the resend bound (0014) relies on it",
+      ).toBe("0");
     });
 
     it("keeps the membership role constraint equal to the API contract", async () => {

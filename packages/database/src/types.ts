@@ -1119,6 +1119,30 @@ export interface SweepTurnsTable {
   run_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
+/** The email a staff resend sends again (G2.16b). */
+export type BookingResendKind = "confirmation" | "cancellation";
+
+/**
+ * One staff resend of a booking's email (0014, G2.16b follow-up): append-only
+ * for every role. A trigger stamps the time and the actor, takes the tenant's
+ * resend lock, checks the generation and the message this transaction queued
+ * for it, and holds the limits for every writer.
+ */
+export interface BookingEmailResendsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  /** 1 plus the booking's highest; the last part of its message's key. */
+  generation: Fixed<number>;
+  kind: Fixed<BookingResendKind>;
+  /** The booking.resend: message the same transaction queued (email_messages). */
+  message_id: Fixed<string>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  api_request_id: ColumnType<string | null, never, never>;
+}
+
 export interface Database
   extends PricingTables,
     CheckoutTables,
@@ -1147,6 +1171,8 @@ export interface Database
   capacity_holds: CapacityHoldsTable;
   // Sweep fairness (0013).
   sweep_turns: SweepTurnsTable;
+  // Staff resend ledger (0014).
+  booking_email_resends: BookingEmailResendsTable;
 }
 
 export type { Generated, GeneratedAlways };

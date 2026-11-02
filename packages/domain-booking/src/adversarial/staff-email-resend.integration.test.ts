@@ -12,9 +12,11 @@
  * - The link rule: the resend's token is minted at send time; the earlier
  *   link is superseded then, never revoked, so it still renews.
  * - Limits across requests and staff, counted from committed rows under the
- *   booking's lock: 5 deliverable resends, 10 minutes apart, 50 an hour per
- *   operator. Time-dependent cases use the service's `at` clock, since the
- *   email_messages trigger fixes created_at to now() (0009:579, 592-612).
+ *   tenant's resend lock: 5 deliverable resends, 10 minutes apart, 50 an hour
+ *   per operator. Since 0014 the database holds them on the database clock,
+ *   from the resend ledger: time passes by moving the tenant's ledger rows
+ *   earlier (passMinutes), and earlier resends are seeded by the admin with
+ *   the ledger's check off (seedResend). Availability reads still take `at`.
  * - Every refusal is decided before any write, in a fixed order, and a
  *   refused request leaves every earlier message as it was.
  * - Audit names ids and codes only; status reads flag a resend and carry no
@@ -35,7 +37,6 @@ import {
   cancelMessage,
   createCloudflareEmailProvider,
   type EmailProvider,
-  enqueueMessage,
   FakeEmailProvider,
   listBookingMessages,
   type SendEmailBinding,
@@ -193,16 +194,15 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     tenant: CheckoutFixture,
     bookingId: string,
     kind: ResendKind,
-    options: { reason?: ResendReason; at?: Date; actor?: string } = {},
+    options: { reason?: ResendReason; actor?: string } = {},
   ): Promise<ResendResult> {
     const ctx = staffContext(tenant.id, options.actor ?? staffOne);
     return inTenantTransaction(world.db, ctx, (trx) =>
-      resendBookingEmail(
-        trx,
-        ctx,
-        { bookingId, kind, reason: options.reason ?? "guest_did_not_receive" },
-        options.at ? { at: options.at } : {},
-      ),
+      resendBookingEmail(trx, ctx, {
+        bookingId,
+        kind,
+        reason: options.reason ?? "guest_did_not_receive",
+      }),
     );
   }
 
@@ -218,12 +218,27 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     return result;
   }
 
-  /** The database clock `minutes` from now: the service's `at` for time passing. */
+  /** The database clock `minutes` from now: an availability read's `at`. */
   async function dbLater(minutes: number): Promise<Date> {
     const [row] = await world.admin<{ at: Date }[]>`
       select now() + make_interval(mins => ${minutes}) as at`;
     if (!row) throw new Error("no clock");
     return row.at;
+  }
+
+  /**
+   * Make `minutes` pass for the tenant's resend limits: its ledger rows move
+   * earlier, in one admin transaction, with the append-only guard off for
+   * that statement only (as the waiver suite moves its deliveries).
+   */
+  async function passMinutes(tenant: CheckoutFixture, minutes: number): Promise<void> {
+    await world.admin.begin(async (tx) => {
+      await tx`alter table public.booking_email_resends disable trigger booking_email_resends_append_only`;
+      await tx`update public.booking_email_resends
+                  set created_at = created_at - make_interval(mins => ${minutes})
+                where tenant_id = ${tenant.id}`;
+      await tx`alter table public.booking_email_resends enable trigger booking_email_resends_append_only`;
+    });
   }
 
   async function resendRows(bookingId: string): Promise<ResendRow[]> {
@@ -267,23 +282,31 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     return done.cancellation;
   }
 
-  /** An earlier staff resend written straight through enqueueMessage, as another writer would. */
+  /**
+   * An earlier staff resend, seeded by the admin: its message and its ledger
+   * row, with the ledger's check trigger off for this one transaction, so a
+   * fixture can stand past the limits.
+   */
   async function seedResend(
     tenant: CheckoutFixture,
     bookingId: string,
     generation: number,
-    template = "booking_confirmation",
   ): Promise<string> {
-    return asSystem(world.db, tenant.id, async (trx, ctx) => {
-      const made = await enqueueMessage(trx, ctx, {
-        dedupeKey: `booking.resend:${bookingId}:${generation}`,
-        template,
-        templateVersion: 1,
-        to: { email: "synthetic.seeded@example.test" },
-        bookingId,
-        content: { subject: "Seeded resend", blocks: [{ kind: "paragraph", text: "Seeded." }] },
-      });
-      return made.messageId;
+    return world.admin.begin(async (tx) => {
+      await tx`alter table public.booking_email_resends disable trigger booking_email_resends_check`;
+      const [m] = await tx<{ id: string }[]>`
+        insert into public.email_messages (tenant_id, dedupe_key, template, template_version,
+            booking_id, to_email, from_name, subject, html_body, text_body)
+        values (${tenant.id}, ${`booking.resend:${bookingId}:${generation}`},
+                'booking_confirmation', 1, ${bookingId}, 'synthetic.seeded@example.test',
+                'Synthetic Operator', 'Seeded resend', '<p>Seeded.</p>', 'Seeded.')
+        returning id`;
+      if (!m) throw new Error("setup: no seeded message");
+      await tx`insert into public.booking_email_resends
+                  (tenant_id, booking_id, generation, kind, message_id, actor_type)
+                values (${tenant.id}, ${bookingId}, ${generation}, 'confirmation', ${m.id}, 'system')`;
+      await tx`alter table public.booking_email_resends enable trigger booking_email_resends_check`;
+      return m.id;
     });
   }
 
@@ -465,8 +488,9 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     await deliverMail(world, A.id);
     const first = queued(await resend(A, b.bookingId, "confirmation"));
     await deliverMail(world, A.id);
-    const [row] = await resendRows(b.bookingId);
-    if (!row) throw new Error("no resend row");
+    const [row] = await world.admin<{ created_at: Date }[]>`
+      select created_at from public.booking_email_resends where booking_id = ${b.bookingId}`;
+    if (!row) throw new Error("no ledger row");
     const after = new Date(row.created_at.getTime() + 10 * 60_000);
     const early = await resend(A, b.bookingId, "confirmation");
     expect(early).toEqual({ kind: "refused", code: "too_soon", availableAt: after });
@@ -477,7 +501,8 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
       remaining: 4,
       blockedBy: "too_soon",
     });
-    const later = queued(await resend(A, b.bookingId, "confirmation", { at: await dbLater(11) }));
+    await passMinutes(A, 11);
+    const later = queued(await resend(A, b.bookingId, "confirmation"));
     expect(later.generation).toBe(2);
     expect(later.messageId).not.toBe(first.messageId);
   });
@@ -486,17 +511,18 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     const b = await book(world, A, tripsA.shared(), 1);
     await deliverMail(world, A.id);
     for (let k = 0; k < 5; k += 1) {
+      if (k > 0) await passMinutes(A, 11);
       const sent = queued(
         await resend(A, b.bookingId, "confirmation", {
-          at: await dbLater(11 * k),
           actor: k % 2 === 0 ? staffOne : staffTwo,
         }),
       );
       expect(sent.generation).toBe(k + 1);
       await deliverMail(world, A.id);
     }
+    // The limit is decided before too_soon, so the sixth needs no time to pass.
     const at = await dbLater(55);
-    expect(await resend(A, b.bookingId, "confirmation", { at })).toEqual({
+    expect(await resend(A, b.bookingId, "confirmation")).toEqual({
       kind: "refused",
       code: "limit",
       availableAt: null,
@@ -535,7 +561,8 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     expect(await messagesOf(world.admin, b.bookingId)).toEqual(before);
     expect(await auditRows(b.bookingId)).toEqual([]);
 
-    const allowed = queued(await resend(C, b.bookingId, "confirmation", { at: await dbLater(61) }));
+    await passMinutes(C, 61);
+    const allowed = queued(await resend(C, b.bookingId, "confirmation"));
     expect(allowed.canceledMessageIds).toEqual([before[0]?.id]);
   });
 
@@ -550,7 +577,8 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
       last_error_code: "booking_canceled",
     });
     await deliverMail(world, A.id);
-    const notice = queued(await resend(A, b.bookingId, "cancellation", { at: await dbLater(11) }));
+    await passMinutes(A, 11);
+    const notice = queued(await resend(A, b.bookingId, "cancellation"));
     expect(notice.generation).toBe(2);
     expect((await resendRows(b.bookingId)).map((r) => [r.dedupe_key, r.template])).toEqual([
       [`booking.resend:${b.bookingId}:1`, "booking_confirmation"],
@@ -565,7 +593,8 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     const b = await book(world, A, tripsA.shared(), 1);
     await deliverMail(world, A.id);
     const first = queued(await resend(A, b.bookingId, "confirmation"));
-    const second = queued(await resend(A, b.bookingId, "confirmation", { at: await dbLater(11) }));
+    await passMinutes(A, 11);
+    const second = queued(await resend(A, b.bookingId, "confirmation"));
     expect(second.generation).toBe(2);
     expect(second.canceledMessageIds).toEqual([first.messageId]);
     expect(await messageOf(world.admin, first.messageId)).toMatchObject({
@@ -870,7 +899,8 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
       state: "queued",
       attempts: 1,
     });
-    const second = queued(await resend(A, b.bookingId, "confirmation", { at: await dbLater(11) }));
+    await passMinutes(A, 11);
+    const second = queued(await resend(A, b.bookingId, "confirmation"));
     expect(second.canceledMessageIds).toEqual([first.messageId]);
     expect(await messageOf(world.admin, first.messageId)).toMatchObject({
       state: "canceled",

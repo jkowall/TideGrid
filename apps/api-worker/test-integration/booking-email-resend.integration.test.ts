@@ -479,4 +479,103 @@ describe.skipIf(!env)("staff resend of a booking's email: the API (G2.16b)", () 
     }
     expect(await messageCount(b.bookingId)).toBe(1);
   });
+
+  // The 30 s bound is real time, so these cases shorten it for the runtime
+  // role (each request opens its own connection, which reads the role's
+  // setting at login) and restore it after. The suite runs alone: this
+  // package's files run one at a time and packages one at a time.
+  it("answers 503 booking_email_busy when 0014 refuses a resend as late, at its ledger insert or at commit, and stores nothing", async () => {
+    const b = await booked(A, tripsA);
+    const own = paths(A.id, b.bookingId);
+    const bound = (value: "0" | "2 seconds") =>
+      admin.unsafe(`alter role tidegrid_app set app.resend_max_transaction = '${value}'`);
+    const ledgerCount = async () => {
+      const [row] = await admin<{ n: number }[]>`
+        select count(*)::int as n from public.booking_email_resends
+         where booking_id = ${b.bookingId}`;
+      return row?.n ?? 0;
+    };
+    const nothingStored = async (key: string) => {
+      expect(await storedKeys(A.id, key)).toBe(0);
+      expect(await messageCount(b.bookingId)).toBe(1);
+      expect(await ledgerCount()).toBe(0);
+      expect(await auditCount(b.bookingId)).toBe(0);
+    };
+
+    let release = () => {};
+    let holder: Promise<unknown> = Promise.resolve();
+    const atCommit = randomUUID();
+    try {
+      // At the ledger insert: a zero bound has passed by the time the
+      // service writes its ledger row.
+      await bound("0");
+      const atInsert = randomUUID();
+      const early = await request("POST", own.resend, {
+        as: A.owner,
+        key: atInsert,
+        body: confirmation,
+      });
+      expect([early.status, early.json.error?.code]).toEqual([503, "booking_email_busy"]);
+      await nothingStored(atInsert);
+
+      // At commit: the ledger insert passes within 2 s, then the request
+      // waits on its audit insert behind a lock the admin holds for 2.5 s,
+      // so only the deferred check at commit can refuse it.
+      await bound("2 seconds");
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let locked = () => {};
+      const isLocked = new Promise<void>((resolve) => {
+        locked = resolve;
+      });
+      holder = admin.begin(async (tx) => {
+        await tx`lock table public.audit_events in share mode`;
+        locked();
+        await released;
+      });
+      await isLocked;
+      const pending = request("POST", own.resend, {
+        as: A.owner,
+        key: atCommit,
+        body: confirmation,
+      });
+      let waiter: { pid: number } | undefined;
+      for (let i = 0; i < 400 && !waiter; i++) {
+        [waiter] = await admin<{ pid: number }[]>`
+          select l.pid from pg_locks l join pg_stat_activity a on a.pid = l.pid
+           where l.relation = 'public.audit_events'::regclass and not l.granted
+             and a.usename = 'tidegrid_app'`;
+        if (!waiter) await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(waiter, "the resend never waited on its audit insert").toBeDefined();
+      // Its ledger insert ran and passed: the row's lock is still held. A
+      // refused insert aborts the transaction before the audit insert.
+      const held = await admin<{ mode: string }[]>`
+        select mode from pg_locks
+         where pid = ${waiter?.pid ?? 0} and granted
+           and relation = 'public.booking_email_resends'::regclass`;
+      expect(held.map((h) => h.mode)).toContain("RowExclusiveLock");
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      release();
+      await holder;
+      const late = await pending;
+      expect([late.status, late.json.error?.code]).toEqual([503, "booking_email_busy"]);
+      await nothingStored(atCommit);
+    } finally {
+      release();
+      await holder.catch(() => undefined);
+      await admin.unsafe("alter role tidegrid_app reset app.resend_max_transaction");
+    }
+
+    // Nothing was stored for the key, so the same request goes through.
+    const sent = await request("POST", own.resend, {
+      as: A.owner,
+      key: atCommit,
+      body: confirmation,
+    });
+    expect([sent.status, sent.headers.get("idempotent-replayed")]).toEqual([201, null]);
+    expect(await messageCount(b.bookingId)).toBe(2);
+    expect(await ledgerCount()).toBe(1);
+  });
 });
