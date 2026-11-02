@@ -8,6 +8,23 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-02: G2.16b follow-up and the body cap merge before the Nov 1 deploy, owner decision
+
+The Nov 1 runbook had not run: no `nov1` journal, the live API at `b87e269`, and Neon main at `0002_tenancy_access_audit.sql`. `main` now has pull request 52, so `nov1 release api` refuses while the live database is behind the tree's last migration (`assertSchemaReady` in `tools/release/src/commands/release.ts`). The coordinator asked the owner on 2026-11-02, through its question tool. Recorded verbatim:
+
+- Question: "The Nov 1 deploy hasn't run yet (no nov1 journal; live API b87e269, Neon at 0002). Should the two held release-tool guards merge before the deploy, with a new freeze SHA?"
+- Selected option: "Lift hold entirely", whose text reads: "Also merge 0014 (staff resend limits) before the deploy. More app and schema change rides into the first deploy; not recommended."
+- Second question: "When do you plan to run the deploy runbook (it is dated 2026-11-01)?" The owner typed: "Can you just do P11 for me?" That answer sets no date. This goal takes no live step.
+
+This is the authority to merge the G2.16b follow-up (`0014`) and then the public body cap (`build/public-body-cap`) before the deploy, with a new freeze SHA at P0.1. The tooling-upgrade goal is not built; it rebases onto both later. It replaces these items of the [2026-11-01 entry](#2026-11-01-g216b-follow-up-database-held-resend-limits-coordinator-defaults-pending-owner-confirmation), which is not otherwise edited:
+
+- **D10, replaced.** One pull request, now, before the deploy. Merge order: this goal, then the body cap, then the tooling upgrade. It no longer waits for P11 or the P12 evidence pull request.
+- **O1, closed.** The pull request no longer waits for P11. Opening it, and merging, are still the coordinator's steps for the owner.
+- **O2, replaced.** No deploy has run, so nothing applies `0014` to Neon main ahead of the merge. The deploy's P2 (`nov1 db`) applies `0003` to `0014` together, from the frozen tree. Until then, the schema guard refuses an API release whose tree is ahead of the live database. A release from `main` with this goal merged and Neon main short of `0014` is refused, not passed.
+- **O3, narrowed.** It now matters only for a rollback to a build from before this goal that writes `booking.resend:` messages. Such builds run from `c6ed4ea` (pull request 48, G2.16b) up to this goal's merge. The live build `b87e269` is not one: `git merge-base --is-ancestor c6ed4ea b87e269` fails, its tree has only migrations `0001` and `0002`, and `git grep` finds neither `booking.resend` nor `email_messages` in its `apps` or `packages`. The runbook's P3 code rollback anchor is that same `b87e269` (runbook P3 rollback, step 2). So the planned rollback cannot refuse a staff resend at commit, and from P2.3 to P3.2, `b87e269` serves no resend at all. A pre-0014 build with the resend route goes live only if someone releases one by hand, which the schema guard does not prevent, since the database would be ahead of its tree.
+- **The proposal to the coordinator, closed.** The release tool now checks `migrations.latest` before an API release (pull request 52).
+- **O4 and O5 stay open.** O4: confirm D1 to D11 at merge. O5: the defensive security reviewer stays the owner's call.
+
 ### 2026-11-01: G2.16b follow-up, database-held resend limits (coordinator defaults, pending owner confirmation)
 
 The owner authorized building the G2.16b follow-up on 2026-10-31. It fulfils the follow-up that D4 A of [2026-10-29](#2026-10-29-g216b-staff-email-resend-owner-decisions) named: migration `0014` with an append-only resend table and a trigger that decides the limits, as `waiver_deliveries` does. That entry is not edited. The coordinator took the goal packet's recommended defaults for D1 to D11. They bind the demo build only, until the owner confirms or replaces them (O4). The limits themselves are D4 A's, unchanged: 5 deliverable resends per booking, 10 minutes after the newest of any state, 50 of any state per operator per hour. The design is in the [database README](../../packages/database/README.md#staff-resend-ledger-0014) and the [booking README](../../packages/domain-booking/README.md#staff-resend-of-a-bookings-email-g216b).
@@ -21,7 +38,7 @@ The owner authorized building the G2.16b follow-up on 2026-10-31. It fulfils the
 - **D7 A: the trigger takes the tenant's resend lock**, the key the service takes first, and refuses any isolation level but READ COMMITTED (SQLSTATE 25000), so the limits are exact for every writer it admits.
 - **D8 A: the backfill is in 0014,** behind the RLS-bypass guard of 0009, with a strict key parse (no leading zeros, the key's booking equal to the message's) and a count check.
 - **D9 A: the isolation probes** are the resend POST and the booking's messages read, under both tenant ids.
-- **D10 A: one pull request,** after P11 and the P12 evidence pull request, in either order with the tooling-upgrade and body-cap goals; rebase on whichever lands first. The merge is tied to O2.
+- **D10 A: one pull request,** after P11 and the P12 evidence pull request, in either order with the tooling-upgrade and body-cap goals; rebase on whichever lands first. The merge is tied to O2. Replaced on [2026-11-02](#2026-11-02-g216b-follow-up-and-the-body-cap-merge-before-the-nov-1-deploy-owner-decision): merge before the deploy.
 - **D11: one combined independent review** on the stronger configuration. The defensive security reviewer also reviews tenancy and triggers only if O5 is given. No UI review: there is no UI change.
 
 **Fix round of 2026-11-01 (coordinator decisions after the adversarial review of `3da840c`; 0014 was edited in place, as it was not merged).**
@@ -38,13 +55,13 @@ The owner authorized building the G2.16b follow-up on 2026-10-31. It fulfils the
 - **Invoker, pinned.** The catalog suite pins the five 0014 functions as SECURITY INVOKER and fixes their volatility. The runtime may execute only `app.booking_resend_facts` and `app.booking_resend_max_transaction`.
 
 **Needs the owner.**
-- **O1.** Commits for this goal were authorized on 2026-10-31. The pull request waits: none was opened during the Nov 1 deploy window.
-- **O2.** Apply `0014` to Neon main after a backup branch, with the cron paused or in a quiet window, immediately before the merge; then release the API from the merge. No API release from `main` may run between the merge and O2, including releases for other goals. Recommended order: migrate, merge, release. A request in flight that holds a row lock on `email_messages` or `bookings` can deadlock with the file's backfill and triggers, and either side may be aborted. The file then rolls back alone, and a rerun is safe.
-- **O3.** Accept that, with `0014` on Neon main, an API build from before this goal refuses staff resends at commit (a 500, nothing written) until rolled forward. It covers the window between O2 and the release, and any rollback.
+- **O1.** Commits for this goal were authorized on 2026-10-31. The pull request waits: none was opened during the Nov 1 deploy window. Closed on [2026-11-02](#2026-11-02-g216b-follow-up-and-the-body-cap-merge-before-the-nov-1-deploy-owner-decision).
+- **O2.** Apply `0014` to Neon main after a backup branch, with the cron paused or in a quiet window, immediately before the merge; then release the API from the merge. No API release from `main` may run between the merge and O2, including releases for other goals. Recommended order: migrate, merge, release. A request in flight that holds a row lock on `email_messages` or `bookings` can deadlock with the file's backfill and triggers, and either side may be aborted. The file then rolls back alone, and a rerun is safe. Replaced on [2026-11-02](#2026-11-02-g216b-follow-up-and-the-body-cap-merge-before-the-nov-1-deploy-owner-decision): the deploy's P2 applies `0003` to `0014` together.
+- **O3.** Accept that, with `0014` on Neon main, an API build from before this goal refuses staff resends at commit (a 500, nothing written) until rolled forward. It covers the window between O2 and the release, and any rollback. Narrowed on [2026-11-02](#2026-11-02-g216b-follow-up-and-the-body-cap-merge-before-the-nov-1-deploy-owner-decision): the live build and the rollback anchor, `b87e269`, write no resend.
 - **O4.** Confirm D1 to D11 at merge.
 - **O5.** Authorize the defensive security reviewer for D11.
 
-**Proposed to the coordinator.** The release tool's API postcondition checks the build id and `database: "ok"`, not `migrations.latest` (`tools/release/src/commands/release.ts`). With this goal merged and `0014` missing on Neon main, a release would pass and every booking's Email card would answer 500. A real `migrations.latest` postcondition belongs to whichever goal owns `tools/release`.
+**Proposed to the coordinator.** The release tool's API postcondition checks the build id and `database: "ok"`, not `migrations.latest` (`tools/release/src/commands/release.ts`). With this goal merged and `0014` missing on Neon main, a release would pass and every booking's Email card would answer 500. A real `migrations.latest` postcondition belongs to whichever goal owns `tools/release`. Closed on [2026-11-02](#2026-11-02-g216b-follow-up-and-the-body-cap-merge-before-the-nov-1-deploy-owner-decision): pull request 52 refuses an API release while the database is behind.
 
 ### 2026-10-30: G2.16b merge timing changed, owner decision
 

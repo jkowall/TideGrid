@@ -20,11 +20,11 @@ Branch `build/g2.16b-followup-db-limits`, rebased on `main` at `027d876` (pull r
   - "The operator's hourly count scans the tenant's messages by key prefix, with no index; fine at demo scale." Closed: the count reads the ledger by `(tenant_id, created_at)`.
   - The mistyped booker address item stays open.
 - **Not proven, or open:**
-  - CI has not run; the pull request waits for P11 (D10 A, O1).
+  - CI has not run: no pull request is open yet. It no longer waits for P11. The owner decided on 2026-11-02 to merge this goal before the Nov 1 deploy, which has not run ([decision register](v2/06-decision-register.md#2026-11-02-g216b-follow-up-and-the-body-cap-merge-before-the-nov-1-deploy-owner-decision); D10 and O1 replaced).
   - The two templates' keys are not pinned: a `booking_confirmation` or `booking_canceled` message under another key is not a resend and is not bound (D4 C, proposed).
   - The eligibility refusals stay in the service (D5 A): a bypass writer can resend a confirmation for a canceled booking within the limits.
   - The waiver ledger's `send_after` hole (D6) is recorded, not fixed.
-  - The release tool's API postcondition checks the build id and `database: "ok"`, not `migrations.latest`, so a release from `main` with this goal merged and `0014` missing on Neon main would pass while every Email card answered 500. Proposed to the coordinator; O2 ties the merge to the migration meanwhile.
+  - Closed on 2026-11-02: the release tool did not check `migrations.latest`. Pull request 52 now refuses an API release while the live database is behind the tree's last migration, so a release with this goal merged and `0014` missing on Neon main is refused. The deploy's P2 applies `0003` to `0014` together (O2 replaced).
   - A resend's stamp may lag its commit by up to 30 s (the fix round's bound): measured by commit times, a booking's resend may commit 9 minutes 30 seconds after its previous one, and 51 of the operator's within 59 minutes 30 seconds. Those figures hold for the service and for writers that wait for nothing after the commit check's deferred event runs. Any wait after it, before the commit record, is unbounded: a deferred foreign key whose referenced row another session holds (the final check's probe let two resends commit 45 ms apart), `PREPARE TRANSACTION` where `max_prepared_transactions` is above 0, or `SET CONSTRAINTS ... IMMEDIATE`. Each needs a direct writer with `tidegrid_app`'s credentials. Bounding sends at the delivery claim is a possible pre-pilot follow-up.
   - The console gives up on a call after 15 s, so a resend refused at the 30 s bound shows "can't reach TideGrid" rather than `booking_email_busy`; the failure is not final and the dialog keeps the key.
   - No security review (O5).
@@ -88,6 +88,14 @@ The coordinator's final check of `7bb40f7` (run `wf_ec178112-382`) found no must
   - The trigger's second take of the lock, and its VOLATILE marking, are now described as a second line behind the message lock.
   - The booking README's test list covers DB11 to DB16.
 - **Local runs** on the final code: `pnpm test:local-db integration` on a fresh PostgreSQL 17 container passed in 128 s, every integration suite (849 passed, 2 skipped). `pnpm check` passed.
+
+#### Merge from main, November 2, 2026
+
+The owner decided on 2026-11-02 to merge this goal before the Nov 1 deploy, which has not run ([decision register](v2/06-decision-register.md#2026-11-02-g216b-follow-up-and-the-body-cap-merge-before-the-nov-1-deploy-owner-decision)). The branch merged `origin/main` at `7a75fad` (pull request 52, the release tool's schema guard), with no rebase.
+
+- **One conflict,** in `tools/release/test/live-gate.test.ts`. It now takes main's `migratedHealth` helper, which reads the tree's last migration as smoke does. That replaces this branch's own `treeMigrations` call from the first entry above, and its now unused imports are gone. No other file on the branch used them.
+- **O3, checked.** The live build and the runbook's P3 rollback anchor, `b87e269`, predate the resend route (`c6ed4ea`, pull request 48): it is not an ancestor, `b87e269` has migrations `0001` and `0002` only, and `git grep` finds no `booking.resend` or `email_messages` in its `apps` or `packages`. So it cannot write a resend that 0014 would refuse at commit.
+- **Local runs** on the merge: `pnpm check` passed, with unit tests 3,289 passed (`tools/release` 128 of 128), the doc links, and the prototype's 29. `pnpm test:local-db integration` on a fresh PostgreSQL 17 container passed in 149 s, every integration suite (849 passed, 2 skipped). The browser parts were not run here.
 
 ## 2026-10-30
 
