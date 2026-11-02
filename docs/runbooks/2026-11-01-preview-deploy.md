@@ -211,6 +211,9 @@ nov1 smoke --profile preview --base https://api.tidegrid.us \
 
 - Expect (preview profile): health as in P3.2; `GET /v1/public/tenant` with each host's Origin returns its slug and echoes the Origin in `Access-Control-Allow-Origin`; the shared 404 for the workers.dev origin, an unpublished host, the other host with a port, an http Origin, and a trailing dot; each host's `/manifest.webmanifest` names its own brand; each page carries the CSP from `apps/guest-site/public/_headers:2`; `GET /v1/me` on the public API answers 404 (`gateway.ts:23-35`).
 - First exercised today (not provable in CI): the http and port negatives, the staff 404, the release CSP, and the 429 budget. CI's local profile runs the tenant echo, the trailing-dot and unpublished-host negatives, health, and the brand.
+- Proposed manual check, the body-size cap, only when the release SHA contains it (owner decision of 2026-11-02 in the [decision register](../v2/06-decision-register.md#pending-owner-confirmation-public-body-size-cap-coordinator-defaults-2026-11-01)). `nov1 smoke` does not send it. One chunked 1 MB POST, no Content-Length:
+  `head -c 1048576 /dev/zero | tr '\0' ' ' | curl -sS -o /dev/null -D - -X POST -H 'Content-Type: application/json' -T - https://api.tidegrid.us/v1/public/quotes`.
+  Expect 413 with `Cache-Control: no-store`. The cap refuses before CORS, the limiter, and any database call, so it writes nothing and spends no limiter budget; the owner decides whether A0 covers it. What the edge answers is unverified: local `wrangler dev` mostly answered a proxy 500. Record any other answer as not shown; it is not a rollback trigger.
 - Rollback: not applicable.
 
 ## P6. Acceptance on the fake (A5 authorizes test traffic)
