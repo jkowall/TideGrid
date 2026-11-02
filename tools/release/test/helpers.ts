@@ -1,10 +1,14 @@
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { treeMigrations } from "../src/commands/preflight.ts";
 import type { Deps, Env, ExecOptions, ExecResult, SqlClient } from "../src/core.ts";
 import { type Configs, parseJsonc } from "../src/phase.ts";
 
 export const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
+
+/** What a live health reports when the database is at the tree's last migration. */
+export const migratedHealth = { migrations: { latest: treeMigrations(repoRoot).at(-1) } };
 
 /**
  * The api and guest wrangler.jsonc as main had them before any Nov 1 config
