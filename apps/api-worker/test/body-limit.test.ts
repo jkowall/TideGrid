@@ -200,14 +200,18 @@ describe("request body cap", () => {
     expect([overChunked.status, overChunked.code]).toEqual([413, "payload_too_large"]);
   });
 
-  it("refuses a declared oversize body without reading a byte of it", async () => {
+  it("refuses a declared oversize body without reading a byte of it, and cancels it", async () => {
     let pulls = 0;
+    let cancels = 0;
     const watched = new ReadableStream<Uint8Array>(
       {
         pull(controller) {
           // 16 chunks of 64 KiB, about 1 MB, then the end.
           if (pulls++ < 16) controller.enqueue(new Uint8Array(64 * 1024));
           else controller.close();
+        },
+        cancel() {
+          cancels++;
         },
       },
       { highWaterMark: 0 },
@@ -218,6 +222,31 @@ describe("request body cap", () => {
     expect([got.status, got.code]).toEqual([413, "payload_too_large"]);
     expectMarked(got, "declared 1 MB stream");
     expect(pulls).toBe(0);
+    // The cap does not await the cancel, so let it settle.
+    await vi.waitFor(() => expect(cancels).toBe(1));
+  });
+
+  it("stops reading a chunked body once it crosses the limit, and cancels the rest", async () => {
+    let pulls = 0;
+    let cancels = 0;
+    const watched = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          // 16 chunks of 10 KiB, 160 KiB, then the end. The second crosses 16 KiB.
+          if (pulls++ < 16) controller.enqueue(new Uint8Array(10 * 1024).fill(32));
+          else controller.close();
+        },
+        cancel() {
+          cancels++;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const got = await send("POST", "/v1/public/quotes", watched);
+    expect([got.status, got.code]).toEqual([413, "payload_too_large"]);
+    expectMarked(got, "chunked 160 KiB stream");
+    expect(pulls).toBeLessThan(16);
+    await vi.waitFor(() => expect(cancels).toBe(1));
   });
 
   it("never lets a small declared length admit a large body", async () => {
