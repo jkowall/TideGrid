@@ -245,7 +245,8 @@ describe("request body cap", () => {
     const got = await send("POST", "/v1/public/quotes", watched);
     expect([got.status, got.code]).toEqual([413, "payload_too_large"]);
     expectMarked(got, "chunked 160 KiB stream");
-    expect(pulls).toBeLessThan(16);
+    // Two pulls reach 20 KiB; one more allows for a read ahead.
+    expect(pulls).toBeLessThanOrEqual(3);
     await vi.waitFor(() => expect(cancels).toBe(1));
   });
 
