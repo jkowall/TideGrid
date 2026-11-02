@@ -2,6 +2,106 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-01
+
+### G2.16b follow-up: database-held resend limits verification, November 1, 2026
+
+Branch `build/g2.16b-followup-db-limits`, rebased on `main` at `027d876` (pull request 51). Local runs only: no pull request was opened during the Nov 1 deploy window, so CI has not run. Decisions D1 to D11 are coordinator defaults pending owner confirmation ([decision register](v2/06-decision-register.md#2026-11-01-g216b-follow-up-database-held-resend-limits-coordinator-defaults-pending-owner-confirmation)).
+
+- **What it adds.** Migration `0014_booking_email_resends.sql`: the append-only ledger `booking_email_resends` under forced row-level security, `app.booking_resend_facts` (D4's counting rules in one SQL function, D2 A), a check trigger that stamps the actor (D1 B), refuses any isolation level but READ COMMITTED (25000), takes the tenant's resend lock, binds the row to the message its transaction queued, and refuses `_limit`, `_interval`, and `_rate` (D7 A); a deferred check that a `booking.resend:` message commits only with its ledger row (D4 A); and a backfill behind the 0009 guard with a strict key parse and a count check (D8 A). The service reads the facts, writes the ledger row in its savepoint, reads the database clock on the send path (D6 A), and maps a trigger's limit refusal to its typed refusal (D3 A). `isolation.spec.ts` probes the resend POST and the messages read under both tenant ids (D9 A). Design: the [database README](../packages/database/README.md#staff-resend-ledger-0014) and the [booking README](../packages/domain-booking/README.md#staff-resend-of-a-bookings-email-g216b).
+- **Failing first** (commit `518ad8a`, the tests alone). On 0013: DB1 committed the bypass message (`expected 'ok' to be '23514:email_messages_staff_resend'`); the backfill test applied nothing and its strict-parse cases did not fail. DB2 to DB10 failed there only for the missing table (42P01), which does not count. Against a staged 0014 whose check trigger only stamped, with no deferred check (logged, not committed): DB1, DB2, DB3, DB4, DB5, DB7, DB8, and DB9 red; DB6 and DB10 green, as they test the guards and the stamping the stage kept.
+- **Green.** The new suite `staff-email-resend-database.integration.test.ts`, 10 of 10; the existing `staff-email-resend.integration.test.ts`, 34 of 34, with time passing by moving ledger rows earlier and earlier resends seeded by the admin with the check off; `migrate-0014.integration.test.ts` and `tenancy.integration.test.ts`, 25 of 25.
+- **Mutants** (each on a fresh container, logged, not committed; each turned exactly one case red): no advisory lock in the trigger, DB4 (all six writers counted 49 and committed); no deferred check, DB1; `attempts > 0` dropped from the facts function, DB3 (`attempted: 4`); no isolation check, DB9 (the stale REPEATABLE READ writer committed the 51st); no mapping in the service, DB7 (the `_rate` error propagated). For the isolation spec, a stored own-tenant 404 made the same-key probe answer 422, and a skipped membership check made the tenant B probes answer 200 or 201; both red in both projects.
+- **O3, shown.** `main`'s service and suite against 0014: 19 of 34 failed, each with `staff resend message ... commits only with its ledger row`. A build from before this goal cannot send a staff resend once 0014 is on its database.
+- **Local runs on the final code**: `pnpm test:local-db integration` on a fresh PostgreSQL 17 container passed in 143 s, every integration suite (841 passed, 2 skipped). `pnpm test:local-db console` passed 10 of 10 at 375 and 1280 in 38 s; the probe table printed the five new rows (six tenant B probes in all, each `404 tenant_not_found`; each own-tenant resend or messages probe `404 booking_not_found`), with no leaks. `pnpm check` passed. On the way it found `tools/release/test/live-gate.test.ts`, "a local target runs with no gate", red on this branch (1 failed, 119 passed): its mocked health answer named `0013_sweep_fairness.sql`, and the smoke check compares that with the tree's last migration, now `0014`. The mock now takes the name from `treeMigrations`, as smoke does, so it holds on `main` and here alike (120 of 120); the coordinator authorized that one change outside this goal's paths.
+- **Closes**, from the [G2.16b entry of October 30](#g216b-staff-email-resend-verification-october-30-2026):
+  - "The limits bind the service, not the database (D4 A); a trigger in `0014` is due before any pilot tenant." Closed on this branch: the trigger binds every writer.
+  - "`isolation.spec.ts` has no resend probe. ..." Closed on this branch: the resend POST, with a fresh `Idempotency-Key` and a valid body, and the messages read, under both tenant ids.
+  - "The operator's hourly count scans the tenant's messages by key prefix, with no index; fine at demo scale." Closed: the count reads the ledger by `(tenant_id, created_at)`.
+  - The mistyped booker address item stays open.
+- **Not proven, or open:**
+  - CI has not run: no pull request is open yet. It no longer waits for P11. The owner decided on 2026-11-02 to merge this goal before the Nov 1 deploy, which has not run ([decision register](v2/06-decision-register.md#2026-11-02-g216b-follow-up-merges-before-the-nov-1-deploy-owner-decision); D10 and O1 replaced).
+  - The two templates' keys are not pinned: a `booking_confirmation` or `booking_canceled` message under another key is not a resend and is not bound (D4 C, proposed).
+  - The eligibility refusals stay in the service (D5 A): a bypass writer can resend a confirmation for a canceled booking within the limits.
+  - The waiver ledger's `send_after` hole (D6) is recorded, not fixed.
+  - Closed on 2026-11-02, with a limit: the release tool did not check `migrations.latest`. Pull request 52 now refuses an API release when the health reports `database` ok and a `migrations.latest` behind the tree's last migration, or none. When the health cannot say for 15 s, it asks the owner, and a yes releases with no check (`assertSchemaReady` in `tools/release/src/commands/release.ts`). So the runbook's P2 must finish before P3.2. P2 applies `0003` to `0014` together (O2 replaced).
+  - A resend's stamp may lag its commit by up to 30 s (the fix round's bound): measured by commit times, a booking's resend may commit 9 minutes 30 seconds after its previous one, and 51 of the operator's within 59 minutes 30 seconds. Those figures hold for the service and for writers that wait for nothing after the commit check's deferred event runs. Any wait after it, before the commit record, is unbounded: a deferred foreign key whose referenced row another session holds (the final check's probe let two resends commit 45 ms apart), `PREPARE TRANSACTION` where `max_prepared_transactions` is above 0, or `SET CONSTRAINTS ... IMMEDIATE`. Each needs a direct writer with `tidegrid_app`'s credentials. Bounding sends at the delivery claim is a possible pre-pilot follow-up.
+  - The console gives up on a call after 15 s, so a resend refused at the 30 s bound shows "can't reach TideGrid" rather than `booking_email_busy`; the failure is not final and the dialog keeps the key.
+  - No security review (O5).
+
+#### Fix round, November 1, 2026
+
+The coordinator's adversarial review of `3da840c` (run `wf_fcd75283-bba`, five dimensions, three skeptics per finding) left no must-fix after the skeptics; the counting rules matched the service in every probe. Its should-fix items and nits were fixed on this branch, with 0014 edited in place (it is not merged), under coordinator decisions recorded in the [decision register](v2/06-decision-register.md#2026-11-01-g216b-follow-up-database-held-resend-limits-coordinator-defaults-pending-owner-confirmation).
+
+- **What changed.**
+  - The ledger row is stamped, and the limits are decided, at the transaction's time to the millisecond. That is the service's instant and its message's time.
+  - A resend whose transaction ran longer than 30 s, or less if the transaction asks through `app.resend_max_transaction`, is refused `booking_email_resends_late` at its insert and at commit. The route answers that as 503 `booking_email_busy`, with nothing written or stored.
+  - Every `booking.resend:` message insert takes the tenant's resend lock before its key is claimed, which removes the deadlock the review found (probe P1).
+  - The catalog pins the five 0014 functions as invoker, with their volatility and the runtime's EXECUTE. The facts function is called across tenants as the runtime.
+  - DB8's boundary is cast on the server, so it is exactly 10:00.
+  - The service's own lock and the direct writer's wait at its message insert are tested.
+  - `migrate-0014` migrates only through 0014, asserts the parse's own error, and adds a template case.
+  - Stale comments in `isolation.spec.ts` are fixed.
+  - A clock stamp taken after the lock was tried first and dropped: it moved the ledger time off the message's time, so the API's availability read (`booking-email-resend.integration.test.ts:277-283`, read only here) came out 23 ms later, and a writer could still hold its transaction after the stamp.
+- **Failing first** (commits `0a04b0a` and `c7a2710`, tests alone).
+  - On the reviewed 0014: DB12 (the service got 40P01), the old DB13 (stamped at the transaction's start), DB7 (no lock trigger), the catalog row, and the backfill facts (newest_at not at milliseconds).
+  - On the clock-stamp 0014: the new DB13 (`'ok'`, no late check), DB15 (no bound function), DB16 (`'committed'`), the catalog row, and both workerd route cases (500 `internal_error`).
+  - DB11 and DB14 pin behavior that already held. Their mutants are below.
+- **Green.**
+  - The new suite, 16 of 16.
+  - The existing suite, 34 of 34.
+  - `migrate-0014`, `tenancy`, and `migrate-upgrade`, 27 of 27.
+  - The workerd route test, 52 of 52.
+  - With a dummy `0015` present, `migrate-0014` still passed.
+- **Mutants** (each on a fresh container, not committed; each turned the named cases red):
+  - interval `>=`: DB8 (direct `_interval` and service `too_soon` at 10:00)
+  - no service lock: DB11 (25 relation locks held by the waiters) and DB12
+  - an upper bound on the newest resend: DB14; on the hourly count: DB14
+  - SECURITY DEFINER on the facts function: DB5 (B's facts seen from A) and the catalog row
+  - no lock at the message: DB12 (40P01)
+  - neither lock: DB4 and DB12
+  - no template check in the backfill: `migrate-0014`
+  - no late check at the insert: DB13 and DB16 (refused only at commit)
+  - no late check at commit: DB13 and DB16
+  - the bound without `least`: DB15 (`01:00:00`); a malformed setting read as 30 s: DB15
+- **The service under the bound.** Measured locally, a service resend's transaction runs about 20 ms, and the last of 20 at once on one tenant about 450 ms, queued on the tenant's lock.
+  - A delivery claim it waits for is a short transaction; the provider call, bounded at 10 s, is outside it.
+  - At Neon's round trips, a resend is about 25 statements, so reaching 30 s would take over 100 resends of one tenant at once.
+  - The bound stays at 30 s.
+- **Local runs on the final code**:
+  - `pnpm test:local-db integration` on a fresh PostgreSQL 17 container passed in 127 s, every integration suite (848 passed, 2 skipped), the API resend suite unchanged among them.
+  - `pnpm test:local-db console` passed 10 of 10 at 375 and 1280, all 12 probes in each project leak-free.
+  - `pnpm check` passed.
+
+#### Final round, November 1, 2026
+
+The coordinator's final check of `7bb40f7` (run `wf_ec178112-382`) found no must-fix: the 503 mapping, the locks, the setting, and the service path held.
+
+- **The residual is a class.** 0014's header, the [database README](../packages/database/README.md#staff-resend-ledger-0014), and the decision register now say the commit check bounds a stamp only up to its deferred event. The 9 min 30 s and 59 min 30 s figures hold for the service and for writers that wait for nothing after it.
+  - The check's probes: P1 and P3, a deferred foreign key wait, let two resends commit 45 ms apart; P4 is PREPARE TRANSACTION.
+  - The catalog suite now fails unless `max_prepared_transactions` is 0, and the bound relies on that. No migration asserts it.
+- **DB14's flake.** Its precondition compared a millisecond stamp with S's microsecond `now()`, so it failed when the direct writer began in S's millisecond; the check saw this in 25 of 150 runs. DB14 now waits 2 ms after S opens and keeps the strict `>`.
+  - 20 runs of DB14 alone all passed.
+  - The upper-bound mutant still turns it red.
+- **The 503 is the exact constraint.** A workerd case answers another 23514 at commit (`email_messages_staff_resend`) as 500. Mapping every 23514 to 503 turned that case red, 1 failed and 52 passed.
+- **Documented, no code change.** A 30 s late refusal reaches the console only after its 15 s timeout, so staff see "can't reach TideGrid"; the failure is not final and the key is kept.
+  - The trigger's second take of the lock, and its VOLATILE marking, are now described as a second line behind the message lock.
+  - The booking README's test list covers DB11 to DB16.
+- **Local runs** on the final code: `pnpm test:local-db integration` on a fresh PostgreSQL 17 container passed in 128 s, every integration suite (849 passed, 2 skipped). `pnpm check` passed.
+
+#### Merge from main, November 2, 2026
+
+The owner's selection of 2026-11-02 authorizes merging this goal before the Nov 1 deploy, which has not run ([decision register](v2/06-decision-register.md#2026-11-02-g216b-follow-up-merges-before-the-nov-1-deploy-owner-decision)). It does not name the public body cap, which the coordinator holds for the owner's explicit confirmation. The branch merged `origin/main` at `7a75fad` (pull request 52, the release tool's schema guard), then at `a44e5fa` (pull request 53, the rollback listing re-read), with no rebase.
+
+- **One conflict,** in `tools/release/test/live-gate.test.ts`. It now takes main's `migratedHealth` helper, which reads the tree's last migration as smoke does. That replaces this branch's own `treeMigrations` call from the first entry above, and its now unused imports are gone. No other file on the branch used them.
+- **O3, checked.** The live build and the runbook's P3 rollback anchor, `b87e269`, predate the resend route (`c6ed4ea`, pull request 48): it is not an ancestor, `b87e269` has migrations `0001` and `0002` only, and `git grep` finds no `booking.resend` or `email_messages` in its `apps` or `packages`. So it cannot write a resend that 0014 would refuse at commit.
+- **Local runs** on the merge: `pnpm check` passed, with unit tests 3,289 passed (`tools/release` 128 of 128), the doc links, and the prototype's 29. `pnpm test:local-db integration` on a fresh PostgreSQL 17 container passed in 149 s, every integration suite (849 passed, 2 skipped). The browser parts were not run here.
+- **Review items, same day.** Docs: the D8 order in the demo build plan names the booking check (404) before `booking_email_off`, as the route runs it. The register entry no longer lists the body cap as owner-authorized, and marks the merge order as a coordinator default. The schema guard is described as it is: it refuses only when the health reports `database` ok and a `migrations.latest` behind the tree's, or none; when the health cannot say for 15 s, it asks the owner, and a yes releases with no check. The runbook's D2, decision table, and P0.1 say the Oct 31 freeze at `027d876` is superseded and the SHA is approved again after the 2026-11-02 merges; P1 and P2.3 count 12 migrations, 0003 to 0014, from the 0002 that `/v1/health` reported for Neon main on 2026-11-02; P3.2 says the guard applies to this deploy, with the yes caveat.
+- **New tests.**
+  - `tools/release/test/smoke-migrations.test.ts`: smoke fails when the health reports `0002_tenancy_access_audit.sql`, written by hand, against the tree's last migration. It covers existing behavior. Mutant (logged, not committed): the comparison in `smoke.ts` changed from `!==` to "ahead of the tree" only; the case went red (`expected +0 not to be +0`, smoke exited 0), 1 failed and 1 passed.
+  - `booking-email-resend.integration.test.ts`, the last case: the real route answers 503 `booking_email_busy` for a real 0014 refusal, twice. With `app.resend_max_transaction` set to `0` for `tidegrid_app`, the ledger insert refuses. With `2 seconds`, the admin holds a SHARE lock on `audit_events` for 2.5 s; the test sees the request wait on its audit insert while it holds its ledger row's lock, so only the deferred check at commit can refuse. Each time nothing is stored (no key, message, ledger, or audit row), and the same key then answers 201. The role setting is reset in a `finally`. A setting of `0` alone cannot reach the commit check: the insert check reads the same bound first. It covers existing behavior; no production code changed. Mutants (each on a fresh container, logged, not committed): the route's constraint match renamed, the case red at the insert step (500 `internal_error`, 1 failed and 264 passed); the commit-time check in 0014 disabled, the case red at the commit step (201), with DB13 and DB16 in `staff-email-resend-database.integration.test.ts` also red under it (they were skipped in a second run only so the API suite could run, since the integration run stops at the first failing package).
+- **Local runs** after the review items: `pnpm install --frozen-lockfile`, then `pnpm check` passed, with unit tests 3,296 passed (`tools/release` 135 of 135), doc links across 95 Markdown files, and the prototype's 29. `pnpm test:local-db integration` on a fresh PostgreSQL 17 container passed in 150 s, every integration suite (850 passed, 2 skipped; the API's 265 of 265). The browser parts were not run here.
+
 ## 2026-10-30
 
 ### G2.16b final check verification, October 30, 2026

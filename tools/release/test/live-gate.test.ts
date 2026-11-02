@@ -112,7 +112,8 @@ describe("a live target refuses unless every gate condition holds", () => {
             database: "ok",
             environment: "local",
             version: "dev",
-            migrations: { latest: "0013_sweep_fairness.sql" },
+            // The tree's last migration, as smoke derives it.
+            ...migratedHealth,
           });
         }
         if (c.url.endsWith("/v1/public/tenant")) {

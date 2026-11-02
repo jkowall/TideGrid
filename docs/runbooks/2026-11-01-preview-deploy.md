@@ -10,7 +10,7 @@
 
 Two decisions shape the whole day. Answer them before Oct 31.
 
-- **D2. What is in the release SHA? (owner call, go/no-go at P0.1.)** Options: (a) main after #31 only; (b) main plus hardening #32 (merged 2026-10-28 as `e93f0aa`, migration `0013_sweep_fairness.sql`); (c) also wait for #26. Recommendation: **(b), frozen on Oct 31**, because #32 is already on main. Without #26 the cron's `accountFault` log and the hostname sweep budget fix are absent, and the G2.16-live checklist item for `scheduled.ts` is recorded as not shown. Prompt: *"Freeze main at `<sha>`, with or without #26? Go / no-go."*
+- **D2. What is in the release SHA? (owner call, go/no-go at P0.1.)** Options: (a) main after #31 only; (b) main plus hardening #32 (merged 2026-10-28 as `e93f0aa`, migration `0013_sweep_fairness.sql`); (c) also wait for #26. Recommendation: **(b), frozen on Oct 31**, because #32 is already on main. Without #26 the cron's `accountFault` log and the hostname sweep budget fix are absent, and the G2.16-live checklist item for `scheduled.ts` is recorded as not shown. Prompt: *"Freeze main at `<sha>`, with or without #26? Go / no-go."* **Superseded on 2026-11-02.** The Oct 31 freeze at `027d876` no longer holds. Approve the release SHA again (`nov1 approve-sha <sha> --frozen`) on `main` after the 2026-11-02 merges. That `main` holds pull requests 52 (the release tool's schema guard) and 53 (the rollback listing re-read), both merged, and the G2.16b follow-up (migration `0014`), which the owner's selection of 2026-11-02 authorizes to merge first. The public body cap is in it only if the owner confirms it ([decision register](../v2/06-decision-register.md#2026-11-02-g216b-follow-up-merges-before-the-nov-1-deploy-owner-decision)).
 - **D11. Does the external human review apply before P7 to P10? (owner call, go/no-go at the top of P7, P8, P9, and P10.)** The build execution and agent plan ([doc 10](../v2/10-build-execution-and-agent-plan.md)) asks for a qualified external human review before the first live use of money, tenancy, or security-sensitive production changes. Options: (a) not required for synthetic data and test mode; (b) required. Default: **(a) for test mode and synthetic data**, with (b) kept for the Core live gate. Prompt: *"External review waived for this synthetic, test-mode step? Go / no-go."*
 
 ## Rules for the day (repeated at the top of every phase)
@@ -66,7 +66,7 @@ Build-time defaults, already applied: **D10(a)** step 9 by tree equality; **D12(
 | # | Decision | Default and why | Asked at |
 |---|---|---|---|
 | D1 | Preview database: (a) Neon main; (b) a long-lived staging branch (12:27); (c) a branch per session | (a): Hyperdrive `0857f556` and `DATABASE_URL` already point at main, and the role password is set there | P2 top |
-| D2 | Release SHA contents | (b), frozen Oct 31 | top, P0.1 |
+| D2 | Release SHA contents | (b), frozen Oct 31; superseded 2026-11-02: approve again on `main` after the 2026-11-02 merges (D2 above) | top, P0.1 |
 | D3 | Fake payments on the public preview: (a) P3 to the end of P9; (b) never; (c) always | (a): steps 2, 4, 5, 6 and P7's steps 3 and 8 need it. Anyone holding a paymentRef can confirm a synthetic booking | P3.3, P9 end |
 | D4 | Steps 5 and 7 identity: (a) a third Access-allowed address owning demo-harbor only; (b) an admin membership delete; (c) step 7 not shown | (a): reversible by removing the address from Access; keeps the owner's address out of the console | P2.4, P6 |
 | D5 | The `*/15` cron on the free plan: (a) keep; (b) pause outside windows (C6); (c) hourly | (b): about 96 wakes a day, each holding compute for the 5-minute autosuspend. Since #32 each run also stamps `sweep_turns` per due tenant (same wakes, a few more writes). Check [Neon pricing](https://neon.com/pricing) | P3.2, P11 |
@@ -99,6 +99,7 @@ The docs pull request (`docs/nov1-runbook-v2`: the decision-register entry and t
 ## P0. Prep, Oct 29 to 31 (no live calls)
 
 **P0.1 Freeze the release SHA (Oct 31).**
+- Superseded on 2026-11-02: the Oct 31 freeze at `027d876` does not hold. Run the command below again on `main` after the 2026-11-02 merges (see D2).
 - Go/no-go: **D2**.
 - Command: `git fetch origin && git rev-parse origin/main`, then `nov1 approve-sha <sha> --frozen` (it records the tree id and the last migration file, and asks for the first 12 characters back).
 - Verify (**D10(a)**): the four CI jobs are green on the pull request whose merge produced the SHA, and that run's test merge commit has the same tree. Retrieve it (tried on run 40761591333 on 2026-10-28): `gh run view <run id> --log | grep -A1 "git log -1 --format=%H"` prints the merge commit; `git fetch origin <merge>`; then `git rev-parse <merge>^{tree}` must equal `git rev-parse <sha>^{tree}`. The integration, browser, and console-browser jobs run only on pull requests, so a merge commit on main is never itself the head of a run. Branch protection is absent, so merge only when the pull request's last run was against current main.
@@ -126,7 +127,7 @@ nov1 preflight --offline --phase p3
 nov1 preflight --network --go A0
 ```
 
-- Expect: every check PASS; `CLOUDFLARE_API_TOKEN stripped` if the env file was sourced; the login type is OAuth; the pending migrations listed from the tree (0003 to 0013 on main at `894839e`; read from the tree, so a later migration shows up); the deployed version ids of the three Workers.
+- Expect: every check PASS; `CLOUDFLARE_API_TOKEN stripped` if the env file was sourced; the login type is OAuth; the pending migrations listed from the tree (with the G2.16b follow-up merged, 0003 to 0014: 12 files after `0002_tenancy_access_audit.sql`, Neon main's last migration as `/v1/health` reported it on 2026-11-02; read from the tree, so a later migration shows up); the deployed version ids of the three Workers.
 - Verify: `dig` shows no record for `demo-harbor.book.tidegrid.us` or `demo-reef.book.tidegrid.us`. A record on either is a hard stop for P4.2: a non-TTY deploy would override it (cli.js:153833-153836), and `nov1` always deploys on the terminal so wrangler would prompt.
 - Rollback: not applicable.
 
@@ -144,7 +145,7 @@ Rules for the day apply. Go/no-go: **D1** (Neon main as the preview database). T
 - Rollback: deleting the branch later takes its own approval. This is the only branch create today.
 
 **P2.3 Migrate.** `nov1 db migrate --live --go A1`.
-- Expect: each file in its own transaction (`migrate.ts`), under the advisory lock, with `lock_timeout 5000 ms` and `statement_timeout 120000 ms` per file (08:190; override with `TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS` and `TIDEGRID_MIGRATE_STATEMENT_TIMEOUT_MS`); the role assertions pass; `applied 11 migration(s)` on main at `894839e` (more if a later migration lands).
+- Expect: each file in its own transaction (`migrate.ts`), under the advisory lock, with `lock_timeout 5000 ms` and `statement_timeout 120000 ms` per file (08:190; override with `TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS` and `TIDEGRID_MIGRATE_STATEMENT_TIMEOUT_MS`); the role assertions pass; `applied 12 migration(s)`, 0003 to 0014, with the G2.16b follow-up merged and Neon main at 0002 as `/v1/health` reported it on 2026-11-02 (more if a later migration lands).
 - Verify: `nov1 db status --live --go A1` shows every file applied.
 - Rollback: there are no down migrations. A timeout rolls back that file only, and main stays at an intermediate version. Do not release the API until a forward fix lands, or restore from P2.2 (its own approval; it resets everything written after the restore point).
 
@@ -172,7 +173,7 @@ Rules for the day apply. Run it right after P2.4.
 **P3.2 Release the API.** Go/no-go: **D5** (this release brings the first `*/15` cron to Neon main; pause it in P11 if D5 says so). `nov1 release api --phase p3 --live --go A4` (type `tidegrid-api` back).
 - Command it runs: `pnpm --filter @tidegrid/api-worker run release` (`wrangler deploy --var BUILD_ID:$(git describe --always --dirty)`), on the terminal, with an allowlisted environment. Version ids before and after come from `wrangler deployments list --json`, ids only; the listing's author emails are dropped.
 - Expect: the API goes first, because the guest Worker binds `tidegrid-api#GuestGateway`.
-- Verify: `GET https://api.tidegrid.us/v1/health` shows `version` = the build id, `environment` preview, `database` ok, `migrations.latest` = the tree's last file (memoized 10 s). `nov1` polls `version` as the release's postcondition; check `migrations.latest` yourself in the same response. (After Nov 1, `nov1 release api` also refuses while the live database is behind the tree's last migration; when the health cannot report it for 15 s, it asks before releasing.)
+- Verify: `GET https://api.tidegrid.us/v1/health` shows `version` = the build id, `environment` preview, `database` ok, `migrations.latest` = the tree's last file (memoized 10 s). `nov1` polls `version` as the release's postcondition; check `migrations.latest` yourself in the same response. The schema guard (pull request 52) is on `main` and applies to this release: `nov1 release api` refuses when the health reports `database` ok and a `migrations.latest` behind the tree's last migration, or none. When the health cannot say for 15 s, it asks whether the database is already at the tree's last migration, and a yes releases with no check. So P2.3 must finish first; answer yes only after `nov1 db status` shows every file applied.
 
 **P3.3 Secrets (A2).** `nov1 secrets preview --generate FAKE_PAYMENT_WEBHOOK_SECRET --phase p3 --live --go A2`, then `nov1 secrets preview --list --live --go A2`. Every secret change names the current phase with `--phase`: a put is guarded against that phase, and a delete (feature off) runs in any phase.
 - Command it runs: `sh -c 'openssl rand -hex 32 | pnpm exec wrangler secret put FAKE_PAYMENT_WEBHOOK_SECRET'` in `apps/api-worker`. The value goes from openssl into wrangler and never through `nov1`. At least 32 characters (`apps/api-worker/src/env.ts:27`).
@@ -360,7 +361,7 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 | Input | Phase or gate | Needed by | Status |
 |---|---|---|---|
 | D1, D3 to D9, D11, D15, D16 answers | each prompt | Nov 1 | pending |
-| D2: is #26 in the SHA | P0.1 | Oct 31 | pending (#32 is on main) |
+| D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | pending; approve again on main (D2) |
 | Neon allowance reset, with its UTC time | P1 | Nov 1 | unknown |
 | Free-plan history window and branch limits | P2.2 | Nov 1 | unknown |
 | `NEON_DATABASE_URL`, `NEON_API_KEY`, `NEON_PROJECT_ID` in the owner's shell | P2 | Nov 1 | in the env file (not read) |
