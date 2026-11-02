@@ -361,7 +361,7 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 | Input | Phase or gate | Needed by | Status |
 |---|---|---|---|
 | D1, D3 to D9, D11, D15, D16 answers | each prompt | Nov 1 | pending |
-| D2: is #26 in the SHA | P0.1 | Oct 31 | pending (#32 is on main) |
+| D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | pending; approve again on main (D2) |
 | Neon allowance reset, with its UTC time | P1 | Nov 1 | unknown |
 | Free-plan history window and branch limits | P2.2 | Nov 1 | unknown |
 | `NEON_DATABASE_URL`, `NEON_API_KEY`, `NEON_PROJECT_ID` in the owner's shell | P2 | Nov 1 | in the env file (not read) |
