@@ -14,6 +14,7 @@ import {
   fakeDeps,
   headSha,
   json,
+  migratedHealth,
   providerExecs,
 } from "./helpers.ts";
 
@@ -234,7 +235,11 @@ describe("correctness F1 and safety F4: the Stripe window closes before P10 and 
       answers: ["tidegrid-api"],
       fetch: (c) =>
         c.url.endsWith("/v1/health")
-          ? json(200, { version: ++health > 1 ? "aaaaaaa" : "old", database: "ok" })
+          ? json(200, {
+              version: ++health > 1 ? "aaaaaaa" : "old",
+              database: "ok",
+              ...migratedHealth,
+            })
           : undefined,
     });
     approve(deps, { cutoverDone: true });
@@ -252,7 +257,11 @@ describe("correctness F1 and safety F4: the Stripe window closes before P10 and 
       answers: ["tidegrid-api"],
       fetch: (c) =>
         c.url.endsWith("/v1/health")
-          ? json(200, { version: ++health > 1 ? "aaaaaaa" : "old", database: "ok" })
+          ? json(200, {
+              version: ++health > 1 ? "aaaaaaa" : "old",
+              database: "ok",
+              ...migratedHealth,
+            })
           : undefined,
     });
     approve(deps, { cutoverDone: true });
