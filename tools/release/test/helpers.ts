@@ -156,7 +156,7 @@ export function fakeDeps(o: FakeOptions = {}) {
       (() => {
         throw new Error("unexpected database connection");
       }),
-    nodeVersion: "24.22.1",
+    nodeVersion: readFileSync(join(repoRoot, ".nvmrc"), "utf8").trim(),
     configs: () => structuredClone(o.configs ?? fixtureConfigs()),
   };
   return { deps, execs, fetches, printed, prompts };
