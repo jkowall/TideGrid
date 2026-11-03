@@ -20,6 +20,8 @@ const DAY_MS = 86_400_000;
  * (2026-10-28: Node 24.22.1 with ICU 78.3 against CI's postgres:17 image added
  * Winnipeg, with its alias Rainy_River, and Inuvik. The image was unchanged;
  * Node 24.21.0 had agreed on both.)
+ * (2026-11-03: Node 24.22.2 with ICU 79.1 and tz 2026e against the same image:
+ * no new drift.)
  */
 const KNOWN_DRIFT = new Set([
   "America/Vancouver",
