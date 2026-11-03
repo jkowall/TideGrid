@@ -85,6 +85,8 @@ export interface FakeOptions {
   now?: Date;
   /** The Worker configs; default: the committed fixture (main before any config branch). */
   configs?: Configs;
+  /** The running Node version; default: the one `.nvmrc` pins. */
+  nodeVersion?: string;
 }
 
 export const headSha = "a".repeat(40);
@@ -156,7 +158,7 @@ export function fakeDeps(o: FakeOptions = {}) {
       (() => {
         throw new Error("unexpected database connection");
       }),
-    nodeVersion: readFileSync(join(repoRoot, ".nvmrc"), "utf8").trim(),
+    nodeVersion: o.nodeVersion ?? readFileSync(join(repoRoot, ".nvmrc"), "utf8").trim(),
     configs: () => structuredClone(o.configs ?? fixtureConfigs()),
   };
   return { deps, execs, fetches, printed, prompts };
