@@ -206,6 +206,45 @@ describe("Stripe webhook verification", () => {
     }
   });
 
+  it("refuses a TideGrid success or cancel whose intent is not card only as payload_invalid (D5)", async () => {
+    const { fixture, verify, signed, intent } = harness();
+    const { ref: paidRef } = await intent();
+    const { ref: canceledRef } = await intent(reef, 7300);
+    const terminal: [string, Record<string, unknown>][] = [
+      ["payment_intent.succeeded", fixture.succeed(paidRef)],
+      ["payment_intent.canceled", fixture.cancel(canceledRef)],
+    ];
+    const notCardOnly: unknown[] = [
+      ["card", "us_bank_account"],
+      ["us_bank_account", "card"],
+      ["link"],
+      ["us_bank_account"],
+      ["card", "card"],
+      [],
+      ["Card"],
+      [["card"]],
+      "card",
+      null,
+      { 0: "card", length: 1 },
+    ];
+    for (const [type, object] of terminal) {
+      expect(object.payment_method_types, type).toEqual(["card"]);
+      const good = (await fixture.event(type, object)).payload;
+      // The control: the same event, card only, is TideGrid's payment.
+      expect(accepted(await verify(await signed(good))).payment, type).not.toBeNull();
+      for (const methods of notCardOnly) {
+        const body = { ...good, data: { object: { ...object, payment_method_types: methods } } };
+        const label = `${type} ${JSON.stringify(methods)}`;
+        expect(rejection(await verify(await signed(body))), label).toBe("payload_invalid");
+      }
+      const { payment_method_types: _, ...missing } = object;
+      const body = { ...good, data: { object: missing } };
+      expect(rejection(await verify(await signed(body))), `${type} missing`).toBe(
+        "payload_invalid",
+      );
+    }
+  });
+
   it("verifies a body close to the 64 KiB route limit", async () => {
     const { fixture, verify, intent } = harness();
     const { ref } = await intent();
@@ -327,6 +366,31 @@ describe("Stripe event mapping", () => {
       ),
     );
     expect(euro.type).toBe("other");
+    // Nor is a sale TideGrid did not make by another payment method.
+    const bank = accepted(
+      await verify(
+        await fixture.event("payment_intent.succeeded", {
+          ...succeeded,
+          payment_method_types: ["us_bank_account"],
+        }),
+      ),
+    );
+    expect(bank.type).toBe("other");
+  });
+
+  it("records a TideGrid intent's non-terminal event as other whatever its methods", async () => {
+    const { fixture, verify, intent } = harness();
+    const { ref } = await intent();
+    const pending = { ...fixture.intent(ref), payment_method_types: ["card", "us_bank_account"] };
+    const cases: [string, string][] = [
+      ["payment_intent.processing", "processing"],
+      ["payment_intent.requires_action", "requires_action"],
+      ["payment_intent.payment_failed", "requires_payment_method"],
+    ];
+    for (const [type, status] of cases) {
+      const event = accepted(await verify(await fixture.event(type, { ...pending, status })));
+      expect(event, type).toMatchObject({ type: "other", providerType: type, payment: null });
+    }
   });
 });
 
