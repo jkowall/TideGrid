@@ -231,6 +231,11 @@ interface StripeIntent {
   latestCharge: unknown;
 }
 
+/** Exactly ["card"]: no redirect and no asynchronous method can pay the intent. */
+function isCardOnly(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 1 && value[0] === "card";
+}
+
 function parseIntent(value: unknown): StripeIntent {
   if (!isRecord(value)) throw malformed();
   const { id, object, status, amount, amount_received, currency, client_secret, metadata } = value;
@@ -407,7 +412,11 @@ function parseStripeEvent(
       !stripePaymentIntentPattern.test(ref) ||
       intent.status !== (succeeded ? "succeeded" : "canceled") ||
       !isAmount(amount) ||
-      intent.currency !== "usd"
+      intent.currency !== "usd" ||
+      // Card only (D5). Every intent TideGrid creates is, so another method
+      // here is an anomaly: refused so Stripe retries, not recorded as other,
+      // which the inbox would settle as ignored for good.
+      !isCardOnly(intent.payment_method_types)
     ) {
       return null;
     }
