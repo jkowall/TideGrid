@@ -3,10 +3,9 @@
   "name": "tidegrid-guest",
   "main": "worker/index.ts",
   "compatibility_date": "2026-08-22",
-  // The current deployed URL stays until the G2.14b live step turns it off
-  // with the demo.tidegrid.us cutover (D9, a coordinator default pending owner
-  // confirmation).
-  "workers_dev": true,
+  // Off since the demo.tidegrid.us cutover (D9, a coordinator default pending
+  // owner confirmation; Nov 1 runbook C4).
+  "workers_dev": false,
   // Preview subdomains, one Workers Custom Domain per synthetic tenant (D8(a),
   // a coordinator default pending owner confirmation): Universal SSL covers
   // only first-level subdomains, and a custom domain brings its own
@@ -14,7 +13,10 @@
   // every manifest in config/tenants. Not deployed until the live step.
   "routes": [
     { "pattern": "demo-harbor.book.tidegrid.us", "custom_domain": true },
-    { "pattern": "demo-reef.book.tidegrid.us", "custom_domain": true }
+    { "pattern": "demo-reef.book.tidegrid.us", "custom_domain": true },
+    // The demo.tidegrid.us cutover to demo-harbor (Nov 1 runbook C4, P8,
+    // D8(a)). The platform row is written once by the admin connection.
+    { "pattern": "demo.tidegrid.us", "custom_domain": true }
   ],
   "assets": {
     "directory": "./dist",
