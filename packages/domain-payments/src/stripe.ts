@@ -231,6 +231,11 @@ interface StripeIntent {
   latestCharge: unknown;
 }
 
+/** Exactly ["card"]: no redirect and no asynchronous method can pay the intent. */
+function isCardOnly(value: unknown): boolean {
+  return Array.isArray(value) && value.length === 1 && value[0] === "card";
+}
+
 function parseIntent(value: unknown): StripeIntent {
   if (!isRecord(value)) throw malformed();
   const { id, object, status, amount, amount_received, currency, client_secret, metadata } = value;
@@ -247,7 +252,9 @@ function parseIntent(value: unknown): StripeIntent {
     (client_secret !== undefined && client_secret !== null && typeof client_secret !== "string") ||
     !isRecord(metadata) ||
     // A test key never sees a live object.
-    value.livemode !== false
+    value.livemode !== false ||
+    // Card only (D5), checked on the answer as well as asked for.
+    !isCardOnly(value.payment_method_types)
   ) {
     throw malformed();
   }
