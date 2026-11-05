@@ -330,14 +330,15 @@ describe("idempotent creation", () => {
         },
         body,
       });
-    const small = await post("amount=10&currency=usd");
+    const card = "allowed_payment_method_types[]=card";
+    const small = await post(`amount=10&currency=usd&${card}`);
     expect(small.status).toBe(400);
-    const unknown = await post("amount=5000&currency=usd&application_fee_amount=1");
+    const unknown = await post(`amount=5000&currency=usd&${card}&application_fee_amount=1`);
     expect(unknown.status).toBe(400);
-    const fixed = await post("amount=5000&currency=usd");
+    const fixed = await post(`amount=5000&currency=usd&${card}`);
     expect(fixed.status).toBe(200);
     expect(fixed.headers.get("idempotent-replayed")).toBeNull();
-    const again = await post("amount=5000&currency=usd");
+    const again = await post(`amount=5000&currency=usd&${card}`);
     expect(again.headers.get("idempotent-replayed")).toBe("true");
   });
 
@@ -488,6 +489,128 @@ describe("Stripe's errors", () => {
       body: JSON.stringify({ ...intent, client_secret: "pi_Other_secret_abc" }),
     });
     expect(await unavailable(provider.createPayment(input))).toBe("stripe_malformed_response");
+  });
+});
+
+/** Payment method lists a card-only intent must never carry (D5). */
+const notCardOnly: unknown[] = [
+  ["card", "us_bank_account"],
+  ["us_bank_account", "card"],
+  ["us_bank_account"],
+  ["link"],
+  ["card", "card"],
+  ["Card"],
+  [],
+  "card",
+  null,
+  undefined,
+];
+
+describe("card only (D5)", () => {
+  const postIntent = (fixture: Fixture, key: string, body: string) =>
+    fixture.fetch("https://api.stripe.com/v1/payment_intents", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${fixture.secretKey}`,
+        "stripe-version": STRIPE_API_VERSION,
+        "stripe-account": harbor,
+        "idempotency-key": key,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+
+  it("the fixture takes exactly allowed_payment_method_types[]=card, and nothing wider or missing", async () => {
+    // A test tripwire, not Stripe's behavior: TideGrid creates card-only
+    // intents only (D5), whatever Stripe would answer to another list.
+    const fixture = createStripeFixture();
+    const lists = [
+      "",
+      "&allowed_payment_method_types[]=card&allowed_payment_method_types[]=us_bank_account",
+      "&allowed_payment_method_types[]=us_bank_account",
+      "&allowed_payment_method_types[]=link",
+      "&allowed_payment_method_types[]=card&allowed_payment_method_types[]=card",
+      "&allowed_payment_method_types[]=Card",
+      "&allowed_payment_method_types[]=",
+    ];
+    for (const [index, list] of lists.entries()) {
+      const response = await postIntent(
+        fixture,
+        `card-only:refused:${index}`,
+        `amount=5000&currency=usd${list}`,
+      );
+      expect(response.status, list).toBe(400);
+      const body = (await response.json()) as { error: { type: string; code: string } };
+      expect(body.error, list).toMatchObject({
+        type: "invalid_request_error",
+        code: "fixture_tripwire_card_only",
+      });
+    }
+    expect(fixture.intentIds()).toHaveLength(0);
+    const accepted = await postIntent(
+      fixture,
+      "card-only:accepted",
+      "amount=5000&currency=usd&allowed_payment_method_types[]=card",
+    );
+    expect(accepted.status).toBe(200);
+    const intent = (await accepted.json()) as Record<string, unknown>;
+    expect(intent.payment_method_types).toEqual(["card"]);
+    expect(intent.allowed_payment_method_types).toEqual(["card"]);
+    expect(fixture.intentIds()).toHaveLength(1);
+    // A refusal at validation is not saved: the same key runs once fixed.
+    const refused = await postIntent(fixture, "card-only:fixed", "amount=5000&currency=usd");
+    expect(refused.status).toBe(400);
+    const fixed = await postIntent(
+      fixture,
+      "card-only:fixed",
+      "amount=5000&currency=usd&allowed_payment_method_types[]=card",
+    );
+    expect(fixed.status).toBe(200);
+    expect(fixed.headers.get("idempotent-replayed")).toBeNull();
+    expect(fixture.intentIds()).toHaveLength(2);
+  });
+
+  it("refuses a created intent that is not card only", async () => {
+    const { fixture, provider } = harness();
+    const input = createInput();
+    const created = await provider.createPayment(input);
+    const intent = fixture.intent(created.paymentRef);
+    for (const types of notCardOnly) {
+      fixture.answerNext({
+        status: 200,
+        body: JSON.stringify({ ...intent, payment_method_types: types }),
+      });
+      expect(await unavailable(provider.createPayment(input)), JSON.stringify(types)).toBe(
+        "stripe_malformed_response",
+      );
+    }
+    const { payment_method_types: _, ...withoutTypes } = intent;
+    fixture.answerNext({ status: 200, body: JSON.stringify(withoutTypes) });
+    expect(await unavailable(provider.createPayment(input))).toBe("stripe_malformed_response");
+    // The same answer with the list intact still passes.
+    fixture.answerNext({ status: 200, body: JSON.stringify(intent) });
+    expect((await provider.createPayment(input)).paymentRef).toBe(created.paymentRef);
+  });
+
+  it("refuses a retrieved intent that is not card only", async () => {
+    const { fixture, provider } = harness();
+    const created = await paid(fixture, provider);
+    const read = { accountRef: harbor, paymentRef: created.paymentRef };
+    const intent = {
+      ...fixture.intent(created.paymentRef),
+      latest_charge: fixture.charge(created.paymentRef),
+    };
+    for (const types of notCardOnly) {
+      fixture.answerNext({
+        status: 200,
+        body: JSON.stringify({ ...intent, payment_method_types: types }),
+      });
+      expect(await unavailable(provider.retrievePayment(read)), JSON.stringify(types)).toBe(
+        "stripe_malformed_response",
+      );
+    }
+    fixture.answerNext({ status: 200, body: JSON.stringify(intent) });
+    expect(await provider.retrievePayment(read)).toMatchObject({ status: "succeeded" });
   });
 });
 

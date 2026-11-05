@@ -3,20 +3,29 @@
  * adapter calls, with direct-charge state per connected account, idempotent
  * POSTs, and signed snapshot events.
  *
- * Recorded-shape, modeled on documentation, unverified against live. The
- * bodies follow the API reference, trimmed to the fields that matter, and no
- * body here was captured from Stripe. Synthetic ids, keys, and accounts only.
+ * Recorded-shape, modeled on documentation. The bodies follow the API
+ * reference, trimmed to the fields that matter, and no body here was captured
+ * from Stripe. Live observation, 2026-11-05, one test-mode run: the endive
+ * 400 for `payment_method_types`, and a card-only intent answering ["card"]
+ * for both `payment_method_types` and `allowed_payment_method_types`. Those
+ * two answers are consistent with it, written by hand, not compared field by
+ * field. Everything else is unverified against live.
+ * Synthetic ids, keys, and accounts only.
  * Thin events are unsupported: they carry no `data.object`, and the adapter
  * refuses them.
  *
  * Like Stripe, a POST with an idempotency key saves its answer only once it
  * has executed: a parameter-validation error is not saved, so the same key
  * runs again once the request is fixed. A declined confirmation leaves a
- * failed charge as the intent's latest charge. One behavior is not Stripe's:
- * a call with no Stripe-Account header is refused as a test tripwire
+ * failed charge as the intent's latest charge. Two behaviors are not
+ * Stripe's. A call with no Stripe-Account header is refused as a test tripwire
  * (`fixture_tripwire_stripe_account_missing`), where Stripe would run it on the
- * platform account. The adapter's own check is the real guard. An account the
- * key cannot reach answers 403 `account_invalid`.
+ * platform account. A create whose allowed_payment_method_types is missing or
+ * anything but exactly ["card"] is refused as a test tripwire
+ * (`fixture_tripwire_card_only`), whatever Stripe would answer: TideGrid
+ * creates card-only intents only (D5). The adapter's own checks are the real
+ * guards.
+ * An account the key cannot reach answers 403 `account_invalid`.
  *
  * The rules for replacing these bodies with sanitized sandbox
  * captures are in the package README, and `stripe-fixture-hygiene.test.ts`
@@ -199,6 +208,8 @@ interface Intent {
   amountReceived: number;
   lastPaymentError: Record<string, unknown> | null;
   canceledAt: number | null;
+  /** The allowed_payment_method_types the intent was created with. */
+  paymentMethodTypes: string[];
 }
 
 interface Refund {
@@ -364,8 +375,10 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
     on_behalf_of: null,
     payment_method: intent.paymentMethodId,
     payment_method_options: { card: { request_three_d_secure: "automatic" } },
-    payment_method_types: ["card"],
-    allowed_payment_method_types: ["card"],
+    // Both as given at creation. Observed live on 2026-11-05: a card-only
+    // intent answered ["card"] for both.
+    payment_method_types: [...intent.paymentMethodTypes],
+    allowed_payment_method_types: [...intent.paymentMethodTypes],
     processing: null,
     receipt_email: null,
     review: null,
@@ -468,6 +481,20 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
       ),
     );
 
+  // A test tripwire, not Stripe's behavior. TideGrid creates card-only intents
+  // only (D5), so the fixture refuses any other list, or none, whatever Stripe
+  // would answer.
+  const notCardOnly = () =>
+    invalid(
+      400,
+      errorBody(
+        "invalid_request_error",
+        "fixture_tripwire_card_only",
+        'Fixture tripwire: allowed_payment_method_types must be exactly ["card"].',
+        "allowed_payment_method_types",
+      ),
+    );
+
   const unknownParameter = (name: string) =>
     invalid(
       400,
@@ -506,6 +533,8 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         if (name === "payment_method_types") return removedPaymentMethodTypes();
         if (name !== "allowed_payment_method_types") return unknownParameter(`${name}[]`);
       }
+      const allowed = read.lists.get("allowed_payment_method_types");
+      if (allowed?.length !== 1 || allowed[0] !== "card") return notCardOnly();
       const amount = parseAmount(read.fields.get("amount"));
       if (amount === null) {
         return invalid(
@@ -561,6 +590,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         amountReceived: 0,
         lastPaymentError: null,
         canceledAt: null,
+        paymentMethodTypes: allowed,
       };
       intents.set(id, intent);
       return json(200, renderIntent(intent));
@@ -922,6 +952,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         amountReceived: 0,
         lastPaymentError: null,
         canceledAt: null,
+        paymentMethodTypes: ["card"],
       };
       intents.set(id, intent);
       return renderIntent(intent);
