@@ -120,17 +120,38 @@ export async function committedIsCutover(deps: Deps, rev: string): Promise<boole
 /**
  * The merge that carries C4 into `head`: on head's first-parent history, the
  * latest commit whose committed guest config is the cutover set while its
- * first parent's is not. Null when head's tree does not carry the cutover.
+ * first parent's is not. Null when head's tree does not carry the cutover, or
+ * when the transition sits on a commit with no readable first parent.
+ *
+ * Refuses a shallow clone: its boundary commit lists as touching the config
+ * and its parent is unreadable, which would name C7 (or any later commit) as
+ * the C4 merge and let an approval of that commit stand in for C4's.
  */
 export async function cutoverMerge(deps: Deps, head: string): Promise<string | null> {
   if (!(await committedIsCutover(deps, head))) return null;
+  if ((await git(deps, ["rev-parse", "--is-shallow-repository"])) === "true") {
+    throw new Refusal(
+      "the clone is shallow, so the C4 merge cannot be found in its history (git fetch --unshallow)",
+    );
+  }
   const touched = (await git(deps, ["rev-list", "--first-parent", head, "--", configPaths.guest]))
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
   for (const sha of touched) {
     if (!(await committedIsCutover(deps, sha))) return null;
+    // An unreadable parent (a root commit) is not evidence of a transition.
+    if (!(await hasCommit(deps, `${sha}^1`))) return null;
     if (!(await committedIsCutover(deps, `${sha}^1`))) return sha;
   }
   return null;
+}
+
+async function hasCommit(deps: Deps, rev: string): Promise<boolean> {
+  const r = await deps.exec("git", ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`], {
+    cwd: deps.repoRoot,
+    env: childEnv(deps),
+    stdio: "pipe",
+  });
+  return r.code === 0;
 }

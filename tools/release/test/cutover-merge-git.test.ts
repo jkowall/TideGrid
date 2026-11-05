@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { Refusal } from "../src/core.ts";
 import { cutoverMerge } from "../src/git.ts";
 import { configPaths } from "../src/phase.ts";
 import { configsWith, fakeDeps } from "./helpers.ts";
@@ -62,12 +63,12 @@ beforeAll(() => {
   sha.c4again = mergeBranch("c4-again", () => write(configPaths.guest, cutover));
 });
 
-function realDeps() {
+function realDeps(root = dir) {
   const { deps } = fakeDeps({ env: { PATH: process.env.PATH ?? "/usr/bin" } });
-  deps.repoRoot = dir;
+  deps.repoRoot = root;
   deps.exec = async (cmd, args, options) => {
     const r = spawnSync(cmd, [...args], {
-      cwd: options.cwd ?? dir,
+      cwd: options.cwd ?? root,
       env: options.env as NodeJS.ProcessEnv,
       encoding: "utf8",
     });
@@ -92,5 +93,39 @@ describe("cutoverMerge on real git history", () => {
 
   it("names the re-merge, not the first C4 merge, after a revert", async () => {
     expect(await cutoverMerge(realDeps(), sha.c4again as string)).toBe(sha.c4again);
+  });
+
+  it("refuses a shallow clone instead of naming C7 as the C4 merge", async () => {
+    // History stops at C7, so C7^1 is unreadable and must not read as "not cutover".
+    const shallow = mkdtempSync(join(tmpdir(), "nov1-cutover-shallow-"));
+    run("branch", "-f", "at-c7", sha.c7 as string);
+    execFileSync(
+      "git",
+      ["clone", "-q", "--depth", "1", "--branch", "at-c7", `file://${dir}`, shallow],
+      { env: gitEnv },
+    );
+    const deps = realDeps(shallow);
+    const head = execFileSync("git", ["-C", shallow, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    expect(head).toBe(sha.c7);
+    await expect(cutoverMerge(deps, head)).rejects.toThrow(Refusal);
+    await expect(cutoverMerge(deps, head)).rejects.toThrow(/shallow/);
+  });
+
+  it("names no merge when the cutover config is in a root commit, which has no parent to compare", async () => {
+    const root = mkdtempSync(join(tmpdir(), "nov1-cutover-root-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "commit.gpgsign=false", ...args], {
+        cwd: root,
+        env: gitEnv,
+        encoding: "utf8",
+      }).trim();
+    git("init", "-q", "-b", "main");
+    mkdirSync(dirname(join(root, configPaths.guest)), { recursive: true });
+    writeFileSync(join(root, configPaths.guest), `${JSON.stringify(cutover, null, 2)}\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "root carries C4");
+    expect(await cutoverMerge(realDeps(root), git("rev-parse", "HEAD"))).toBeNull();
   });
 });

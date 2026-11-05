@@ -185,6 +185,23 @@ describe("db platform binds to the approved C4 merge in the committed tree", () 
     expect(sql.statements).toEqual([]);
   });
 
+  it("refuses a shallow clone, where HEAD's unreadable parent would make C7 look like C4", async () => {
+    // History stops at HEAD (C7): rev-list names it, and its parent is missing.
+    const { deps, sql, printed } = ready({
+      configs: withC4,
+      guestHistory: [headSha],
+      committed: { [headSha]: withC4 },
+      exec: (c) =>
+        c.cmd === "git" && c.args.join(" ") === "rev-parse --is-shallow-repository"
+          ? { code: 0, stdout: "true\n" }
+          : undefined,
+    });
+    approve(deps, { sha: headSha, gate: "A10" });
+    expect(await main(platform, deps)).toBe(3);
+    expect(printed.join("\n")).toMatch(/the clone is shallow/);
+    expect(sql.statements).toEqual([]);
+  });
+
   it("reads HEAD's committed tree, not the working tree", async () => {
     // The working tree carries C4 (an uncommitted edit); HEAD's tree does not.
     const { deps, sql, printed } = ready({
