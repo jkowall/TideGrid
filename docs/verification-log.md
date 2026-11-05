@@ -8,9 +8,9 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 The [Nov 1 runbook](runbooks/2026-11-01-preview-deploy.md) ran from 22:29 UTC on November 4 to 02:16 UTC on November 5, 2026. It used synthetic data, Stripe test mode, and no SMS. The coordinator ran each live step through `nov1` on the owner's instruction to complete the work. The [decision register](v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings) records that reading and every departure from the runbook.
 
-**Sources.** The `nov1` journal, the `nov1 evidence` draft, the run logs, `stripe-smoke*.out`, and `neon-evidence.txt`, all in the owner's handoff folder (`~/.claude/projects/-Users-jkowall-TideGrid/handoff/nov1`). Lines marked *coordinator-reported* were seen live by the coordinator in tool output that was not saved. The Worker log tails were deleted at cleanup, as the runbook requires for private artifacts.
+**Sources.** The `nov1` journal, the `nov1 evidence` draft, the run logs, `stripe-smoke*.out`, and `neon-evidence.txt`, all in the owner's handoff folder (`~/.claude/projects/-Users-jkowall-TideGrid/handoff/nov1`). Lines marked *coordinator-reported* were seen live by the coordinator in tool output that was not saved. The Worker log tails were deleted at cleanup with the other private artifacts.
 
-- **P1 preflight** ran earlier in the session and passed. Its output was not saved.
+- **P1 preflight**, *coordinator-reported*: it ran earlier in the session and passed. Its output was not saved.
 - **P2, Neon main.**
   - The restore point `pre-nov1-e111043` (`br-weathered-dew-b4gd9p8v`, 01:14:26 UTC) was created first.
   - 12 migrations applied, `0003` to `0014`, and status read 14 of 14.
@@ -21,8 +21,8 @@ The [Nov 1 runbook](runbooks/2026-11-01-preview-deploy.md) ran from 22:29 UTC on
   - `FAKE_PAYMENT_WEBHOOK_SECRET` was put.
   - Both preview hosts answered 200 with valid certificates within the release's poll.
 - **P5 smoke.** 13 of 13 checks passed.
-  - The body cap check sent one chunked 1 MB HTTP/1.1 POST to `/v1/public/quotes`, which answered 413.
-  - *Coordinator-reported:* a second identical request, sent to read the body, answered 413 with `Cache-Control: no-store`. Its body was the API's own error JSON, `payload_too_large` with a request id. That the Worker, not the edge, answered is an inference from that body.
+  - The body cap check sent one chunked 1 MB HTTP/1.1 POST to `/v1/public/quotes`, which answered 413 with `Cache-Control: no-store` (logged).
+  - *Coordinator-reported:* a second identical request, sent to read the body, answered the same. Its body was the API's own error JSON, `payload_too_large` with a request id. That the Worker, not the edge, answered is an inference from that body.
 - **P6 acceptance.**
   - Step 1 passed, 8 of 8 (both brands, at 375 and 1280).
   - Steps 2 and 4 passed: a Demo Reef dive `KYYPAJ8Y`, canceled with `full_refund`, and a Demo Harbor charter `DS00NSQJ`.
@@ -58,7 +58,7 @@ The [Nov 1 runbook](runbooks/2026-11-01-preview-deploy.md) ran from 22:29 UTC on
   - Push runs on `main` run only the `checks` job; the other three jobs are skipped. Each deployed SHA's push run passed `checks`. `9086a18`'s run was first canceled by the next push, then rerun, and passed at 02:26 UTC.
   - Five SHAs were released before their push run finished.
 - **Neon** (`neon-evidence.txt`, fetched 02:32 UTC).
-  - The month's consumption read 5,572 active seconds and 1,404 compute seconds. An earlier read at 02:18 showed lower figures, so the API lags.
+  - The month's consumption read 5,572 active seconds and 1,404 compute seconds. *Coordinator-reported:* an earlier read at 02:18 showed lower figures, so the API lags.
   - Main's compute suspended at 01:58:46 UTC, about 8 minutes after the 01:50 smoke traffic. It suspended again at 02:21:31, 5 minutes after the P11 release. Both times Hyperdrive was bound, so its idle pool did not block autosuspend.
   - The owner's +2 h and +24 h consumption reads remain.
 - **Not shown, with dependencies.**
