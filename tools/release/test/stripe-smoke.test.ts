@@ -114,7 +114,10 @@ describe("stripe-smoke against the Stripe fixture", () => {
         return json(200, { booking: { state: "canceled" } });
       }
       if (path === "/v1/public/manage/booking")
-        return json(200, { refund: refunded ? { state: "succeeded" } : null });
+        // The ManagedBookingResponse shape: the refund sits under booking.
+        return json(200, {
+          booking: { refund: refunded ? { state: "succeeded", amount: 6500 } : null },
+        });
       return json(404, {});
     };
 
