@@ -23,7 +23,7 @@ Naming: the working name is TideGrid. The existing theme board says Tideline Gri
 
 ## Prototype
 
-The public demo is at [demo.tidegrid.us](https://demo.tidegrid.us). It simulates booking, payment, messages, and signatures; use fictional guest details. Cloudflare serves a managed `robots.txt` at HTTP 200 on this zone; that file is not in the repository.
+Since 2026-11-04, [demo.tidegrid.us](https://demo.tidegrid.us) serves the demo build's synthetic Demo Harbor guest site (the Nov 1 runbook's P8 cutover), not this prototype. The prototype simulates booking, payment, messages, and signatures; run it locally and use fictional guest details. Cloudflare serves a managed `robots.txt` at HTTP 200 on this zone; that file is not in the repository.
 
 Run it locally from the repository root, then open `http://127.0.0.1:4287`:
 

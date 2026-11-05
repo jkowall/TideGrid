@@ -1,6 +1,8 @@
 # Nov 1, 2026: preview deploy and demo acceptance (runbook, proposed)
 
-**Status.** Proposed, prepared, and dry-run only. Nothing in this file has run against Cloudflare, Neon, or Stripe. On Nov 1 the owner runs every live step from the owner's own terminal, after a go given at the time. Every decision below is a coordinator default until the owner confirms it. TideGrid stays exploratory; this runbook commits the owner to nothing.
+**Status.** Prepared on 2026-10-28 as a proposed runbook, with every decision a coordinator default until confirmed. It ran on 2026-11-04, driven by the coordinator on the owner's instruction; see the run note below. TideGrid stays exploratory; this runbook commits the owner to nothing.
+
+**Run, 2026-11-04.** It ran from 22:29 UTC on November 4 to 02:16 UTC on November 5, 2026, driven by the coordinator on the owner's instruction: P0 to P6, P8, P9 with P9.6, and P11. P7 was not run, and P10 stays deferred. The results are in the [verification log](../verification-log.md#demo-acceptance-on-the-preview-deployment-the-november-1-runbook-november-4-2026). The decisions and departures are in the [decision register](../v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings).
 
 **Where it comes from.** The [demo build plan](../v2/12-demo-build-plan.md) (its Demo acceptance section and the G2.14b-live and G2.16-live items), the [hosting plan](../v2/08-build-hosting-and-operations.md) (migration and rollback policy), and the [decision register](../v2/06-decision-register.md), which wins every conflict. The commands are `tools/release` ([README](../../tools/release/README.md)).
 
@@ -342,13 +344,13 @@ nov1 evidence --ci <deployed sha>=<PR run merge sha>[,...] --out nov1-evidence.m
 
 - Whether `wrangler rollback` changes crons or secrets. Observed: it does not roll back bound resources (cli.js:349363), and a secret edit after a rollback fails with 10215 (cli.js:299145).
 - How wrangler 4.125.0 (`deploy:demo`) behaves without a TTY. Observed for 4.135.0 only (cli.js:153833-153836).
-- Whether `triggers.crons: []` removes the schedule on deploy.
-- Whether Hyperdrive's idle pool blocks Neon autosuspend.
-- How long certificate issuance takes for `*.book.tidegrid.us`.
+- Whether `triggers.crons: []` removes the schedule on deploy. Observed 2026-11-04: it does. Cloudflare's schedules API returned `{"schedules": []}` after the P11 release.
+- Whether Hyperdrive's idle pool blocks Neon autosuspend. Observed 2026-11-04: it does not. Neon suspended main's compute at 01:58:46 and 02:21:31 UTC with Hyperdrive bound (Neon's operations list, saved with the run's evidence).
+- How long certificate issuance takes for `*.book.tidegrid.us`. Observed 2026-11-04: both preview hosts, and later `demo.tidegrid.us`, answered 200 with a valid certificate inside the release's own poll.
 - What a certificate renewal reports for an active SaaS hostname.
-- Whether the installed Stripe CLI honors `STRIPE_API_KEY`.
+- Whether the installed Stripe CLI honors `STRIPE_API_KEY`. Coordinator-reported 2026-11-04: it does. `stripe events resend` ran with it and no `--api-key`.
 - Whether destinations must be verified for an unrestricted send binding.
-- Whether `neondb_owner` writes the seed's payment accounts on main as the CI superuser does.
+- Whether `neondb_owner` writes the seed's payment accounts on main as the CI superuser does. Observed 2026-11-04: it does. The P2.4 seed created 2 fake payment accounts.
 
 ## Not taken on Nov 1
 

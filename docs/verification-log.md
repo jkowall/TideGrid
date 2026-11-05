@@ -2,6 +2,79 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-04
+
+### Demo acceptance on the preview deployment (the November 1 runbook), November 4, 2026
+
+The [Nov 1 runbook](runbooks/2026-11-01-preview-deploy.md) ran from 22:29 UTC on November 4 to 02:16 UTC on November 5, 2026. It used synthetic data, Stripe test mode, and no SMS. The coordinator ran each live step through `nov1` on the owner's instruction to complete the work. The [decision register](v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings) records that reading and every departure from the runbook.
+
+**Sources.** The `nov1` journal, the `nov1 evidence` draft, the run logs, `stripe-smoke*.out`, and `neon-evidence.txt`, all in the owner's handoff folder (`~/.claude/projects/-Users-jkowall-TideGrid/handoff/nov1`). Lines marked *coordinator-reported* were seen live by the coordinator in tool output that was not saved. The Worker log tails were deleted at cleanup with the other private artifacts.
+
+- **P1 preflight**, *coordinator-reported*: it ran earlier in the session and passed. Its output was not saved.
+- **P2, Neon main.**
+  - The restore point `pre-nov1-e111043` (`br-weathered-dew-b4gd9p8v`, 01:14:26 UTC) was created first.
+  - 12 migrations applied, `0003` to `0014`, and status read 14 of 14.
+  - The seed ran twice under D4(c), with no owner variables: 892 trips, 2 fake payment accounts, and 3 waiver templates. The second run changed nothing.
+- **P3 and P4, releases from `e111043`** (main plus C1, pull request 57).
+  - The API went from `48b60afa` to `c8a4be73`, the console from `3fd3533a` to `c57e1c74`, and the guest site from `f8ac3585` to `fd64138f`.
+  - The health check read `e111043`, database ok, and `0014`.
+  - `FAKE_PAYMENT_WEBHOOK_SECRET` was put.
+  - Both preview hosts answered 200 with valid certificates within the release's poll.
+- **P5 smoke.** 13 of 13 checks passed.
+  - The body cap check sent one chunked 1 MB HTTP/1.1 POST to `/v1/public/quotes`, which answered 413 with `Cache-Control: no-store` (logged).
+  - *Coordinator-reported:* a second identical request, sent to read the body, answered the same. Its body was the API's own error JSON, `payload_too_large` with a request id. That the Worker, not the edge, answered is an inference from that body.
+- **P6 acceptance.**
+  - Step 1 passed, 8 of 8 (both brands, at 375 and 1280).
+  - Steps 2 and 4 passed on the guest side: a Demo Reef dive `KYYPAJ8Y`, canceled with `full_refund`, and a Demo Harbor charter `DS00NSQJ`. Step 4's console observation, checked by hand during step 5, is not shown.
+  - Step 6 passed on both tenants: 1 winner, 7 capacity 409s, nothing left. Limited calls were 23 on Reef and 17 on Harbor. It shows no oversell, serialized through one address.
+  - Steps 5 and 7 are not shown: D4(c), with no Access identity for them.
+- **P7 email.** Not shown. It needs the owner's sender domain onboarding, the recipient allowlist, and a phone for step 8. `EMAIL_ALLOWED_RECIPIENTS` was never put, so `nov1 secrets --list` reports it missing from P7 on; that report is expected.
+- **P8 cutover.** C4 (pull request 58) and C7 (pull request 59) were merged and approved under A10. Then:
+  - The platform row `demo.tidegrid.us` to demo-harbor was created. It is permanent.
+  - The name was detached from `tidegrid-prototype` through the Workers Domains API, the call the dashboard makes. The DELETE returned an empty body, which the script could not parse, so the run stopped there.
+  - *Coordinator-reported:* a separate read then showed no attachment, and the name answered 530.
+  - The resumed guest release `27a56c8e` attached it with no override prompt, and all three hosts answered 200 with valid certificates.
+  - The smoke passed 9 of 9, the guest workers.dev host answered 404, and the step 1 rerun on `demo.tidegrid.us` passed 4 of 4.
+- **P9, the Stripe test-mode window on demo-harbor.**
+  - *Coordinator-reported:* the sandbox's account is named "Tidegrid sandbox", and of its two connected accounts only one (`acct_<redacted>`, the exact id in the owner's private evidence) has fees paid by the account and losses on Stripe.
+  - That account read back (logged) with fees paid by the account, losses on Stripe, a full dashboard, and card payments active. It is now demo-harbor's permanent stripe payment account.
+  - A webhook endpoint was created on API version `2026-09-30.endive` with the five `payment_intent` types. The log line's `connect False` is a bad label in the coordinator's script, which tested `application is None`. The webhook confirmation step passing is the functional evidence that it is a Connect endpoint.
+  - C5 (pull request 61) was released.
+  - **First `stripe-smoke`:** failed at checkout with 503 `payment_provider_unavailable`. Stripe had answered 400 because endive removed `payment_method_types`. Pull request 63 moved the adapter to `allowed_payment_method_types[]=card`, verified live in test mode first, and the hermetic fixture now models endive.
+  - **Second run:** failed at its refund poll, while its refund `re_3UYG1C…` had succeeded at Stripe and on Neon main 4 s after the cancel. The smoke read the refund from the wrong path, and its mock agreed. Pull request 64 fixed that.
+  - **Third run:** passed all nine steps: account, quote, checkout on Stripe, decline 402 `card_declined`, pay, webhook confirmation, manage session, cancel, and refund `succeeded`. It ran from pull request 64's reviewed head, `008f2c0`, before its merge.
+  - **A14,** *coordinator-reported* (the tail was deleted at cleanup). Between the second and third runs, `stripe events resend` redelivered the second run's succeeded event, `evt_3UYG1C…`. It ran with `STRIPE_API_KEY`, no `--api-key`, and `--webhook-endpoint`. The Worker log showed outcome `confirmed` with `duplicate: true`, a 200, and no `payload_mismatch` line. Stripe stamped the event with the account's default version, `2026-08-26.dahlia`.
+  - **demo-reef on Stripe.** Not shown. There is no second compliant account.
+- **P9.6, the window closed.**
+  - The C5 revert (pull request 62) was released, so the API runs on the fake again.
+  - Both Stripe secrets were deleted.
+  - The fake was then turned off (D3(a)), so checkout answers 503 `payments_unavailable` until a payment secret is put again.
+  - The webhook endpoint was disabled.
+- **P10.** Deferred by default (D9).
+- **P11, the cron paused.** C6 (pull request 60) was released as `99464dec`, under A19. The journal shows `cronPaused: true`, and Cloudflare's schedules API returns `{"schedules": []}`.
+- **Step 9, tree equality (D10(a)), partly shown.** The runbook asks for the four green jobs on the pull request whose merge produced each deployed SHA, with that run's test merge commit on the same tree.
+  - **Shown for three SHAs.** Each pull request run passed all four jobs (checks, integration, browser, console-browser). Its test merge commit, read from the checkout step and fetched, has the deployed SHA's tree:
+    - `e111043` (pull request 57): [run 41924415423](https://github.com/jkowall/TideGrid/actions/runs/41924415423), test merge `c515a95fa6c447312646e5a0900f90ec8349c28a`. Both trees are `cf9acb37068a0bb3fdfbef8f4be0ccd81fbf9d91`.
+    - `cca8880` (pull request 61): [run 41949990797](https://github.com/jkowall/TideGrid/actions/runs/41949990797), test merge `6966f6e47dc2d0eb93a1617068b75a147b4a1e1b`. Both trees are `22c00cd02a80b799ebacb31622dab9a6a54b514f`.
+    - `c62acb7` (pull request 63): [run 41951902686](https://github.com/jkowall/TideGrid/actions/runs/41951902686), test merge `e9afd6faea300eea74a95c6bcea37cf4c1181b4a`. Both trees are `5618403c31ee77f8505b7005e855ff98533af5d1`.
+  - **Not shown:** `91a4faa` (59), `1f39feb` (62), and `9086a18` (60). Each pull request merged after `main` had moved past the base its run tested.
+  - Push runs on `main` do not stand in for step 9: they run only the `checks` job, and the three PostgreSQL and browser jobs run on pull requests only (`.github/workflows/ci.yml`). Each deployed SHA's push run passed `checks`. `9086a18`'s run was first canceled by the next push, then rerun, and passed at 02:26 UTC.
+  - Five SHAs were released before their push run finished.
+- **Neon** (`neon-evidence.txt`, fetched 02:32 UTC).
+  - The month's consumption read 5,572 active seconds and 1,404 compute seconds. *Coordinator-reported:* an earlier read at 02:18 showed lower figures, so the API lags.
+  - Main's compute suspended at 01:58:46 UTC, about 8 minutes after the 01:50 smoke traffic. It suspended again at 02:21:31, 5 minutes after the P11 release. Both times Hyperdrive was bound, so its idle pool did not block autosuspend.
+  - The owner's +2 h and +24 h consumption reads remain.
+- **Not shown, with dependencies.**
+  - P6 steps 5 and 7, and step 4's console observation: a D4 identity and an Access one-time PIN.
+  - All of P7: owner inputs. Steps 3 and 8 depend on it.
+  - demo-reef on Stripe: a second compliant account.
+  - The isolation probe table (step 7).
+  - Step 9 for three SHAs.
+- **Defects found and fixed during the run.**
+  - Pull request 63 is the endive parameter.
+  - Pull request 64 is the smoke's refund path.
+  - The coordinator's independent review of 63 proposed two hardening follow-ups, neither blocking: the fixture should accept only `["card"]`, and the adapter should refuse an intent whose `payment_method_types` is not exactly `["card"]`.
+
 ## 2026-11-02
 
 ### Public body-size cap refresh, November 2, 2026
