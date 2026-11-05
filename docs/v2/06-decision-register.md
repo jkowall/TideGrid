@@ -31,7 +31,7 @@ The coordinator reads these as the owner's go for every runbook gate it could ru
 - **D16, (a).** The existing `sk_test_` key was used.
 - **D9, (a).** One database connection per GuestGateway call is accepted for owner-only traffic.
 - **Departures from the runbook,** each the coordinator's choice under the reading above:
-  - Two unplanned code pull requests, 63 (the Stripe endive parameter) and 64 (the smoke's refund path), were built, reviewed, and merged inside the P9 window.
+  - Two unplanned code pull requests were built and reviewed. 63 (the Stripe endive parameter) merged and was released inside the P9 window. 64 (the smoke's refund path, tooling only, never released) merged at 02:17:12 UTC, after the run ended. The passing third smoke ran from its reviewed head, `008f2c0`, before the merge.
   - Pull request 60 was merged by the P11 script.
   - The P5 body cap POST was sent under A0, which the runbook had left to the owner.
   - P8 step 3 used the Workers Domains API, not the dashboard.
