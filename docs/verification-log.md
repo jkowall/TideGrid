@@ -12,7 +12,7 @@ The [Nov 1 runbook](runbooks/2026-11-01-preview-deploy.md) ran from 22:29 UTC on
 
 - **P1 preflight**, *coordinator-reported*: it ran earlier in the session and passed. Its output was not saved.
 - **P2, Neon main.**
-  - The restore point `pre-nov1-e111043` (`br-weathered-dew-b4gd9p8v`, 01:14:26 UTC) was created first.
+  - The restore point `pre-nov1-e111043` (`br-weathered-dew-b4gd9p8v`, 01:14:26 UTC) was created first. It was deleted on 2026-11-05 at the owner's request (see the [decision register](v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings)).
   - 12 migrations applied, `0003` to `0014`, and status read 14 of 14.
   - The seed ran twice under D4(c), with no owner variables: 892 trips, 2 fake payment accounts, and 3 waiver templates. The second run changed nothing.
 - **P3 and P4, releases from `e111043`** (main plus C1, pull request 57).

@@ -37,9 +37,9 @@ The coordinator reads these as the owner's go for every runbook gate it could ru
   - P8 step 3 used the Workers Domains API, not the dashboard.
   - For P9 inputs, the coordinator chose the sandbox's one compliant connected account for demo-harbor. It created the webhook endpoint through Stripe's API in test mode, then disabled it in P9.6. demo-reef has no Stripe account.
   - Pull requests 59, 60, and 62 merged after `main` had moved past the base their CI tested. Five SHAs were released before their push run on `main` finished. Step 9 is therefore shown for three of six SHAs (see the verification log).
-- **Not run, not deleted.**
+- **Not run, and the restore branch.**
   - P7 was not run. It needs the sender domain onboarding, the recipient allowlist, and a phone.
-  - The restore branch `pre-nov1-e111043` was not deleted; deleting it takes its own approval.
+  - The restore branch `pre-nov1-e111043` was kept through the run, because deleting it takes its own approval. On 2026-11-05 the owner asked for it to be deleted ("delete the restore branch"), and the coordinator deleted `br-weathered-dew-b4gd9p8v` through Neon's API. Neon then listed only `main`, so no restore point from the run remains.
 
 ### 2026-11-02: G2.16b follow-up merges before the Nov 1 deploy, owner decision
 
