@@ -240,8 +240,11 @@ export async function runStripeSmoke(
   const refunded = await poll(
     deps,
     async () => {
+      // ManagedBookingResponse (packages/contracts/src/self-service.ts): the
+      // refund sits under booking, as { state, amount } or null.
       const b = await call("GET", "/v1/public/manage/booking", { headers: auth });
-      const state = (b.json.refund as { state?: string } | null | undefined)?.state;
+      const booking = b.json.booking as { refund?: { state?: string } | null } | undefined;
+      const state = booking?.refund?.state;
       return state === "succeeded" ? state : null;
     },
     { intervalMs: 3_000, timeoutMs: 90_000 },
