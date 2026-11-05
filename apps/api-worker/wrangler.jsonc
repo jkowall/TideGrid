@@ -26,20 +26,22 @@
     // Cf-Access-Jwt-Assertion header against them.
     "CF_ACCESS_TEAM_DOMAIN": "winter-feather-7169.cloudflareaccess.com",
     "CF_ACCESS_AUD": "9e89e2b88c98e68596a7433251be06f0b7013c38540aa3c1c7c6feec0c52e78f",
-    // Public routes keep the static allowlist until the G2.14b live step turns
-    // on verified tenant origins. Custom hostnames are off: HOSTNAME_PROVIDER
-    // is unset, and CF_SAAS_ZONE_ID and the CF_SAAS_API_TOKEN secret wait for
-    // the owner to enable Cloudflare for SaaS.
-    "PUBLIC_CORS": "static"
-    // Transactional email is off: EMAIL_PROVIDER is unset and there is no
-    // send_email binding, so messages stay queued. The Cloudflare Email
-    // Service adapter (G2.16a) is built but waits for the owner's live step,
-    // G2.16-live. That step adds, beside these vars and only once authorized:
-    //   "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["<sender, set at G2.16-live>"] }]
-    // and "EMAIL_PROVIDER": "cloudflare" here, with the recipient allowlist as
-    // the EMAIL_ALLOWED_RECIPIENTS secret (wrangler secret put). No
-    // destination address is ever committed. Named environments do not
-    // inherit the binding.
+    // Payments on the preview (Nov 1 runbook C1, D3(a)): the fake provider,
+    // with FAKE_PAYMENT_WEBHOOK_SECRET as a Wrangler secret. A production
+    // configuration refuses the fake. C5 changes only the next line.
+    "PAYMENT_PROVIDER": "fake",
+    // Email (G2.16-live, C2): when on, EMAIL_PROVIDER and EMAIL_FROM_ADDRESS
+    // are the lines right after this comment, and the send_email binding
+    // follows "vars". Without them email is off and messages stay queued.
+    //
+    // Custom hostnames (G2.14b-live, C3, deferred): when on,
+    // HOSTNAME_PROVIDER and CF_SAAS_ZONE_ID are the lines right after this
+    // comment. CF_SAAS_API_TOKEN is a Wrangler secret.
+    //
+    // Verified tenant origins on public routes (G2.14b-live, C1); "static"
+    // is the rollback. This key stays last, so each config change above adds
+    // its own lines without touching another's.
+    "PUBLIC_CORS": "dynamic"
   },
   // DATABASE_URL is a secret (wrangler secret put DATABASE_URL) holding the
   // tidegrid_app role's direct Neon connection string. It is the fallback; the
