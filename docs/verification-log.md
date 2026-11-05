@@ -6,11 +6,23 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ### Demo acceptance on the preview deployment (the November 1 runbook), November 4, 2026
 
-The [Nov 1 runbook](runbooks/2026-11-01-preview-deploy.md) ran on 2026-11-04 from 22:29 to 02:16 UTC (November 5 in UTC). It used synthetic data, Stripe test mode, and no SMS. The coordinator ran each live step through `nov1` on the owner's instruction to complete the work, as recorded in the [decision register](v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings). The journal draft from `nov1 evidence` holds every step, gate, and Worker version id; it stays in the owner's handoff folder.
+The [Nov 1 runbook](runbooks/2026-11-01-preview-deploy.md) ran from 22:29 UTC on November 4 to 02:16 UTC on November 5, 2026. It used synthetic data, Stripe test mode, and no SMS. The coordinator ran each live step through `nov1` on the owner's instruction to complete the work. The [decision register](v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings) records that reading and every departure from the runbook.
 
-- **P2, Neon main.** The restore point `pre-nov1-e111043` (`br-weathered-dew-b4gd9p8v`, 01:14:26 UTC) was created first. Then 12 migrations applied, `0003` to `0014`, and status read 14 of 14. The seed ran twice under D4(c), with no owner variables: 892 trips, 2 fake payment accounts, 3 waiver templates. The second run changed nothing.
-- **P3 and P4, releases from `e111043`** (main plus C1, pull request 57). The API went from `48b60afa` to `c8a4be73`, the console from `3fd3533a` to `c57e1c74`, and the guest site from `f8ac3585` to `fd64138f`. The health check read `e111043`, database ok, and `0014`. `FAKE_PAYMENT_WEBHOOK_SECRET` was put. Both preview hosts answered 200 with valid certificates within the release's poll.
-- **P5 smoke.** 13 of 13 checks passed. The body cap check, one chunked 1 MB HTTP/1.1 POST to `/v1/public/quotes`, answered 413 `payload_too_large` with `Cache-Control: no-store`, from the Worker, not the edge.
+**Sources.** The `nov1` journal, the `nov1 evidence` draft, the run logs, `stripe-smoke*.out`, and `neon-evidence.txt`, all in the owner's handoff folder (`~/.claude/projects/-Users-jkowall-TideGrid/handoff/nov1`). Lines marked *coordinator-reported* were seen live by the coordinator in tool output that was not saved. The Worker log tails were deleted at cleanup, as the runbook requires for private artifacts.
+
+- **P1 preflight** ran earlier in the session and passed. Its output was not saved.
+- **P2, Neon main.**
+  - The restore point `pre-nov1-e111043` (`br-weathered-dew-b4gd9p8v`, 01:14:26 UTC) was created first.
+  - 12 migrations applied, `0003` to `0014`, and status read 14 of 14.
+  - The seed ran twice under D4(c), with no owner variables: 892 trips, 2 fake payment accounts, and 3 waiver templates. The second run changed nothing.
+- **P3 and P4, releases from `e111043`** (main plus C1, pull request 57).
+  - The API went from `48b60afa` to `c8a4be73`, the console from `3fd3533a` to `c57e1c74`, and the guest site from `f8ac3585` to `fd64138f`.
+  - The health check read `e111043`, database ok, and `0014`.
+  - `FAKE_PAYMENT_WEBHOOK_SECRET` was put.
+  - Both preview hosts answered 200 with valid certificates within the release's poll.
+- **P5 smoke.** 13 of 13 checks passed.
+  - The body cap check sent one chunked 1 MB HTTP/1.1 POST to `/v1/public/quotes`, which answered 413.
+  - *Coordinator-reported:* a second identical request, sent to read the body, answered 413 with `Cache-Control: no-store`. Its body was the API's own error JSON, `payload_too_large` with a request id. That the Worker, not the edge, answered is an inference from that body.
 - **P6 acceptance.**
   - Step 1 passed, 8 of 8 (both brands, at 375 and 1280).
   - Steps 2 and 4 passed: a Demo Reef dive `KYYPAJ8Y`, canceled with `full_refund`, and a Demo Harbor charter `DS00NSQJ`.
@@ -19,27 +31,46 @@ The [Nov 1 runbook](runbooks/2026-11-01-preview-deploy.md) ran on 2026-11-04 fro
 - **P7 email.** Not shown. It needs the owner's sender domain onboarding, the recipient allowlist, and a phone for step 8. `EMAIL_ALLOWED_RECIPIENTS` was never put, so `nov1 secrets --list` reports it missing from P7 on; that report is expected.
 - **P8 cutover.** C4 (pull request 58) and C7 (pull request 59) were merged and approved under A10. Then:
   - The platform row `demo.tidegrid.us` to demo-harbor was created. It is permanent.
-  - The name was detached from `tidegrid-prototype` through the Workers Domains API, the call the dashboard makes.
-  - The guest release `27a56c8e` attached it, and all three hosts answered 200 with valid certificates.
+  - The name was detached from `tidegrid-prototype` through the Workers Domains API, the call the dashboard makes. The DELETE returned an empty body, which the script could not parse, so the run stopped there.
+  - *Coordinator-reported:* a separate read then showed no attachment, and the name answered 530.
+  - The resumed guest release `27a56c8e` attached it with no override prompt, and all three hosts answered 200 with valid certificates.
   - The smoke passed 9 of 9, the guest workers.dev host answered 404, and the step 1 rerun on `demo.tidegrid.us` passed 4 of 4.
 - **P9, the Stripe test-mode window on demo-harbor.**
-  - The connected account `acct_1UHZQ0LJ2VEnBefL` in the "Tidegrid sandbox" read back with fees paid by the account, losses on Stripe, a full dashboard, and card payments active. It is now demo-harbor's permanent stripe payment account.
-  - A Connect webhook endpoint was created on API version `2026-09-30.endive` with the five `payment_intent` types.
-  - C5 (pull request 61) was released. The first `stripe-smoke` failed at checkout with 503 `payment_provider_unavailable`. Stripe had answered 400 because endive removed `payment_method_types`. Pull request 63 moved the adapter to `allowed_payment_method_types[]=card`, verified live in test mode first, and the hermetic fixture now models endive.
-  - The second run failed at its refund poll, while the refund had succeeded at Stripe and on Neon main 4 s after the cancel. The smoke read the refund from the wrong path, and its mock agreed. Pull request 64 fixed that.
-  - The third run passed all nine steps: account, quote, checkout on Stripe, decline 402 `card_declined`, pay, webhook confirmation, manage session, cancel, and refund `succeeded`. It ran from pull request 64's reviewed head, `008f2c0`, before its merge.
-  - **A14.** `stripe events resend` with `STRIPE_API_KEY` and `--webhook-endpoint` redelivered `evt_3UYG1C…`. The Worker log showed outcome `confirmed` with `duplicate: true`, a 200, and no `payload_mismatch` line. Stripe stamped the event with the account's default version, `2026-08-26.dahlia`.
-  - **demo-reef on Stripe.** Not shown. The sandbox has no second account with Stripe-held fees and losses.
-- **P9.6, the window closed.** The C5 revert (pull request 62) was released, so the API runs on the fake again. Both Stripe secrets were deleted. Then the fake was turned off (D3(a)), so checkout answers 503 `payments_unavailable` until a payment secret is put again. The webhook endpoint was disabled.
+  - *Coordinator-reported:* the sandbox's account is named "Tidegrid sandbox", and of its two connected accounts only `acct_1UHZQ0LJ2VEnBefL` has fees paid by the account and losses on Stripe.
+  - That account read back (logged) with fees paid by the account, losses on Stripe, a full dashboard, and card payments active. It is now demo-harbor's permanent stripe payment account.
+  - A webhook endpoint was created on API version `2026-09-30.endive` with the five `payment_intent` types. The log line's `connect False` is a bad label in the coordinator's script, which tested `application is None`. The webhook confirmation step passing is the functional evidence that it is a Connect endpoint.
+  - C5 (pull request 61) was released.
+  - **First `stripe-smoke`:** failed at checkout with 503 `payment_provider_unavailable`. Stripe had answered 400 because endive removed `payment_method_types`. Pull request 63 moved the adapter to `allowed_payment_method_types[]=card`, verified live in test mode first, and the hermetic fixture now models endive.
+  - **Second run:** failed at its refund poll, while its refund `re_3UYG1C…` had succeeded at Stripe and on Neon main 4 s after the cancel. The smoke read the refund from the wrong path, and its mock agreed. Pull request 64 fixed that.
+  - **Third run:** passed all nine steps: account, quote, checkout on Stripe, decline 402 `card_declined`, pay, webhook confirmation, manage session, cancel, and refund `succeeded`. It ran from pull request 64's reviewed head, `008f2c0`, before its merge.
+  - **A14,** *coordinator-reported* (the tail was deleted at cleanup). Between the second and third runs, `stripe events resend` redelivered the second run's succeeded event, `evt_3UYG1C…`. It ran with `STRIPE_API_KEY`, no `--api-key`, and `--webhook-endpoint`. The Worker log showed outcome `confirmed` with `duplicate: true`, a 200, and no `payload_mismatch` line. Stripe stamped the event with the account's default version, `2026-08-26.dahlia`.
+  - **demo-reef on Stripe.** Not shown. There is no second compliant account.
+- **P9.6, the window closed.**
+  - The C5 revert (pull request 62) was released, so the API runs on the fake again.
+  - Both Stripe secrets were deleted.
+  - The fake was then turned off (D3(a)), so checkout answers 503 `payments_unavailable` until a payment secret is put again.
+  - The webhook endpoint was disabled.
 - **P10.** Deferred by default (D9).
 - **P11, the cron paused.** C6 (pull request 60) was released as `99464dec`, under A19. The journal shows `cronPaused: true`, and Cloudflare's schedules API returns `{"schedules": []}`.
-- **Step 9, tree equality.** Six SHAs were deployed: `e111043`, `91a4faa`, `cca8880`, `c62acb7`, `1f39feb`, and `9086a18`. Each was tested by its own push run on `main`, so its tree equals the tested tree by construction. Each run passed; their URLs are in the evidence draft. The draft's wording, "the PR run's merge commit", is wrong for these pairs.
-- **Neon.** The month's consumption at 02:18 UTC read 2,532 active seconds and 642 compute seconds. Neon's operations list shows `suspend_compute` at 01:58:46 UTC, about 8 minutes after the 01:50 smoke traffic, with Hyperdrive bound. So Hyperdrive's idle pool did not block autosuspend. The owner's +2 h and +24 h consumption reads remain.
-- **Not shown, with dependencies.** P6 steps 5 and 7 (a D4 identity and an Access one-time PIN). All of P7 (owner inputs). Steps 3 and 8 (P7). demo-reef on Stripe (a second compliant account). The isolation probe table (step 7).
+- **Step 9, tree equality (D10(a)), partly shown.** The runbook asks for the four green jobs on the pull request whose merge produced each deployed SHA, with that run's test merge commit on the same tree.
+  - **Shown:** the trees match for `e111043` (pull request 57), `cca8880` (61), and `c62acb7` (63).
+  - **Not shown:** `91a4faa` (59), `1f39feb` (62), and `9086a18` (60). Each pull request merged after `main` had moved past the base its run tested.
+  - Push runs on `main` run only the `checks` job; the other three jobs are skipped. Each deployed SHA's push run passed `checks`. `9086a18`'s run was first canceled by the next push, then rerun, and passed at 02:26 UTC.
+  - Five SHAs were released before their push run finished.
+- **Neon** (`neon-evidence.txt`, fetched 02:32 UTC).
+  - The month's consumption read 5,572 active seconds and 1,404 compute seconds. An earlier read at 02:18 showed lower figures, so the API lags.
+  - Main's compute suspended at 01:58:46 UTC, about 8 minutes after the 01:50 smoke traffic. It suspended again at 02:21:31, 5 minutes after the P11 release. Both times Hyperdrive was bound, so its idle pool did not block autosuspend.
+  - The owner's +2 h and +24 h consumption reads remain.
+- **Not shown, with dependencies.**
+  - P6 steps 5 and 7: a D4 identity and an Access one-time PIN.
+  - All of P7: owner inputs. Steps 3 and 8 depend on it.
+  - demo-reef on Stripe: a second compliant account.
+  - The isolation probe table (step 7).
+  - Step 9 for three SHAs.
 - **Defects found and fixed during the run.**
   - Pull request 63 is the endive parameter.
   - Pull request 64 is the smoke's refund path.
-  - The review of 63 proposed two hardening follow-ups, neither blocking: the fixture should accept only `["card"]`, and the adapter should refuse an intent whose `payment_method_types` is not exactly `["card"]`.
+  - The coordinator's independent review of 63 proposed two hardening follow-ups, neither blocking: the fixture should accept only `["card"]`, and the adapter should refuse an intent whose `payment_method_types` is not exactly `["card"]`.
 
 ## 2026-11-02
 
