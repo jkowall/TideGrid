@@ -8,7 +8,5 @@
     "directory": "./prototypes/guest-flow",
     "not_found_handling": "none"
   },
-  "routes": [
-    { "pattern": "demo.tidegrid.us", "custom_domain": true }
-  ]
+  "routes": []
 }
