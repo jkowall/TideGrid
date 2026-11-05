@@ -536,7 +536,9 @@ export class StripePaymentProvider implements PaymentProvider {
     form.set("amount", String(input.amount));
     form.set("currency", "usd");
     // Card only (D5): no redirects and no asynchronous methods against the hold.
-    form.append("payment_method_types[]", "card");
+    // 2026-09-30.endive removed payment_method_types (a 400); its replacement
+    // keeps the explicit list, so dashboard settings cannot widen it.
+    form.append("allowed_payment_method_types[]", "card");
     form.set(`metadata[${STRIPE_PAYMENT_METADATA_KEY}]`, input.clientReference);
     const sent = await this.#send("POST", "/v1/payment_intents", account, form, {
       idempotencyKey: input.idempotencyKey,

@@ -104,7 +104,7 @@ createStripePaymentProvider({
 
 | Port member | Stripe call | Mapping |
 |---|---|---|
-| `createPayment` | `POST /v1/payment_intents`: `amount`, `currency=usd`, `payment_method_types[]=card` (D5), `metadata[tidegrid_payment_id]` | `succeeded` is succeeded, `canceled` is failed, anything else pending. An answer for another payment, amount, or currency is refused as `malformed_response`. No `application_fee_amount`, ever. |
+| `createPayment` | `POST /v1/payment_intents`: `amount`, `currency=usd`, `allowed_payment_method_types[]=card` (D5; `2026-09-30.endive` refuses `payment_method_types` with a 400), `metadata[tidegrid_payment_id]` | `succeeded` is succeeded, `canceled` is failed, anything else pending. An answer for another payment, amount, or currency is refused as `malformed_response`. No `application_fee_amount`, ever. |
 | `retrievePayment` | `GET /v1/payment_intents/{id}?expand[]=latest_charge` | The same status map; `amountRefunded` from the expanded charge. A 404 `resource_missing` is null. |
 | `refundPayment` | `GET /v1/refunds?payment_intent=&limit=100`, up to 5 pages, then `POST /v1/refunds` with `metadata[tidegrid_refund_key]` | `succeeded` is succeeded; `failed` and `canceled` are failed with Stripe's `failure_reason`. `pending` and `requires_action` are an unknown outcome (D3). |
 | `verifyWebhook` | none | Below. |

@@ -151,7 +151,7 @@ describe("the Stripe adapter's requests", () => {
     expect(request?.form).toEqual([
       ["amount", "5000"],
       ["currency", "usd"],
-      ["payment_method_types[]", "card"],
+      ["allowed_payment_method_types[]", "card"],
       ["metadata[tidegrid_payment_id]", input.clientReference],
     ]);
     expect(request?.form.some(([k]) => k.includes("application_fee"))).toBe(false);
@@ -281,6 +281,38 @@ describe("idempotent creation", () => {
     expect(
       await rejectedCode(provider.createPayment({ ...input, clientReference: randomUUID() })),
     ).toBe("idempotency_key_reused");
+    expect(fixture.intentIds()).toHaveLength(1);
+  });
+
+  it("refuses payment_method_types as 2026-09-30.endive does, and takes allowed_payment_method_types", async () => {
+    // Observed live on 2026-11-05 (Nov 1 runbook P9): under endive the old
+    // parameter is a 400, so a card-only intent needs its replacement.
+    expect(STRIPE_API_VERSION).toBe("2026-09-30.endive");
+    const fixture = createStripeFixture();
+    const post = (key: string, body: string) =>
+      fixture.fetch("https://api.stripe.com/v1/payment_intents", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${fixture.secretKey}`,
+          "stripe-version": STRIPE_API_VERSION,
+          "stripe-account": harbor,
+          "idempotency-key": key,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body,
+      });
+    const old = await post("endive:old", "amount=5000&currency=usd&payment_method_types[]=card");
+    expect(old.status).toBe(400);
+    const refusal = (await old.json()) as { error: { type: string; message: string } };
+    expect(refusal.error.type).toBe("invalid_request_error");
+    expect(refusal.error.message).toMatch(/payment_method_types.*no longer supported/);
+    const current = await post(
+      "endive:current",
+      "amount=5000&currency=usd&allowed_payment_method_types[]=card",
+    );
+    expect(current.status).toBe(200);
+    const intent = (await current.json()) as { allowed_payment_method_types: string[] };
+    expect(intent.allowed_payment_method_types).toEqual(["card"]);
     expect(fixture.intentIds()).toHaveLength(1);
   });
 
