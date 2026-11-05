@@ -12,6 +12,8 @@ This is a snapshot of the nine-slide customer deck, including the Important link
 
 ## Demo link
 
+**Note, 2026-11-04.** `demo.tidegrid.us` now serves the demo build's synthetic Demo Harbor guest site, not the prototype this section was written for. The approval step and the sentences below describe the prototype. The owner should review them before any use.
+
 The public prototype at [demo.tidegrid.us](https://demo.tidegrid.us) may be included in a follow-up only after the owner approves the session script in [the prototype README](../../prototypes/guest-flow/README.md). Until then, send the PDF alone. The demo is a clickable concept with sample data, not a product, and any message that links it must say so.
 
 The two sentences below are optional. Append one to the matching draft only once the approval above is recorded. The existing drafts are unchanged.

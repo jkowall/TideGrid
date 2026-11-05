@@ -10,7 +10,8 @@
   // a coordinator default pending owner confirmation): Universal SSL covers
   // only first-level subdomains, and a custom domain brings its own
   // certificate. A test keeps this list equal to previewHostnameFor(slug) for
-  // every manifest in config/tenants. Not deployed until the live step.
+  // every manifest in config/tenants, plus the platform name below. Deployed
+  // since the Nov 1 runbook's P4 (preview names) and P8 (demo.tidegrid.us).
   "routes": [
     { "pattern": "demo-harbor.book.tidegrid.us", "custom_domain": true },
     { "pattern": "demo-reef.book.tidegrid.us", "custom_domain": true },
