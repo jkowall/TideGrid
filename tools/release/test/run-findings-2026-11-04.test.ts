@@ -105,6 +105,30 @@ describe("approvals count from their gate's phase on (owner decision 2026-11-04)
     expect(code).toBe(3);
     expect(printed.join("\n")).toMatch(/counts from P11 on/);
   });
+
+  it("lets --frozen upgrade a SHA first approved with --go P0.1, and then the release passes the approval check", async () => {
+    const twelve = headSha.slice(0, 12);
+    const { deps, printed } = fakeDeps({
+      configs: configsWith("c1"),
+      answers: [twelve, twelve, twelve],
+    });
+    expect(await main(["approve-sha", headSha, "--go", "P0.1"], deps)).toBe(0);
+    expect(printed.join("\n")).toMatch(/it counts nowhere/);
+    expect(await main(["approve-sha", headSha, "--frozen"], deps)).toBe(0);
+    expect(printed.join("\n")).not.toMatch(/already approved under P0\.1/);
+    const mine = loadJournal(deps).approved.filter((a) => a.sha === headSha);
+    expect(mine.map((a) => [a.gate, a.frozen === true])).toEqual([
+      ["P0.1", false],
+      ["P0.1", true],
+    ]);
+    // A second --frozen is a duplicate; a --go P0.1 after the freeze adds nothing either.
+    expect(await main(["approve-sha", headSha, "--frozen"], deps)).toBe(0);
+    expect(printed.at(-1)).toMatch(/already approved under P0\.1 \(frozen\)/);
+    expect(loadJournal(deps).approved.filter((a) => a.sha === headSha)).toHaveLength(2);
+    printed.length = 0;
+    await main(["preflight", "--phase", "p3", "--offline", "--skip-build"], deps);
+    expect(printed.join("\n")).not.toMatch(/counts nowhere|not in the journal's approved/);
+  });
 });
 
 describe("db platform binds to the approved C4 merge in the committed tree", () => {

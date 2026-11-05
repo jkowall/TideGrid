@@ -54,8 +54,16 @@ export async function approveSha(deps: Deps, args: Args): Promise<number> {
   ).trim();
   if (typed !== sha.slice(0, 12)) throw new Refusal("typed SHA did not match; nothing recorded");
   const journal = loadJournal(deps);
-  if (journal.approved.some((a) => a.sha === sha && a.gate === gate)) {
-    out(deps, `${sha.slice(0, 12)} is already approved under ${gate}`);
+  // A non-frozen P0.1 approval counts nowhere, so --frozen must still record
+  // the freeze for that SHA; the earlier entry stays as the audit trail.
+  const same = journal.approved.find(
+    (a) => a.sha === sha && a.gate === gate && (a.frozen === true || !frozen),
+  );
+  if (same) {
+    out(
+      deps,
+      `${sha.slice(0, 12)} is already approved under ${gate}${same.frozen ? " (frozen)" : ""}`,
+    );
     return 0;
   }
   journal.approved.push({
