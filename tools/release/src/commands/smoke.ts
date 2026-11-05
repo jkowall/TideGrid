@@ -119,8 +119,9 @@ export async function smoke(deps: Deps, args: Args): Promise<number> {
     printPlan(deps, smokePlan(profile));
     return 0;
   }
+  let gate: string | undefined;
   if (profile.name === "preview") {
-    await liveGate(
+    gate = await liveGate(
       deps,
       { live: true, go: flag(args, "go") },
       {
@@ -132,19 +133,28 @@ export async function smoke(deps: Deps, args: Args): Promise<number> {
     );
   }
   const results = await runSmoke(deps, profile, flag(args, "build"));
-  const failed = results.filter((r) => !r.ok);
-  for (const r of results)
-    out(deps, `${r.ok ? "PASS" : "FAIL"}  ${r.check}${r.host ? ` ${r.host}` : ""}: ${r.detail}`);
+  const ran = results.filter((r) => !r.notRun);
+  const notRun = results.filter((r) => r.notRun);
+  const failed = ran.filter((r) => !r.ok);
+  for (const r of results) {
+    const label = r.notRun ? "NOT RUN" : r.ok ? "PASS" : "FAIL";
+    out(deps, `${label}  ${r.check}${r.host ? ` ${r.host}` : ""}: ${r.detail}`);
+  }
+  const skipped = notRun.length
+    ? `, ${notRun.length} not run (${notRun.map((r) => r.check).join(", ")})`
+    : "";
   if (profile.name === "preview") {
+    // The gate says which phase this is: A0 is the P5 smoke, A10 the P8 rerun.
     record(deps, {
-      phase: "p5",
+      phase: gate === "A10" ? "p8" : "p5",
       step: "smoke",
+      ...(gate ? { gate } : {}),
       result: failed.length ? "failed" : "done",
-      note: `${results.length - failed.length}/${results.length} passed`,
+      note: `${ran.length - failed.length}/${ran.length} passed${skipped}`,
     });
   }
   if (failed.length) throw new Failure(`smoke: ${failed.length} check(s) failed`);
-  out(deps, `smoke passed: ${results.length} checks, profile ${profile.name}`);
+  out(deps, `smoke passed: ${ran.length} checks${skipped}, profile ${profile.name}`);
   return 0;
 }
 
@@ -153,6 +163,8 @@ export interface SmokeResult {
   host?: string;
   ok: boolean;
   detail: string;
+  /** The profile lists the check, but the targets given cannot exercise it. */
+  notRun?: boolean;
 }
 
 export async function runSmoke(
@@ -242,8 +254,16 @@ export async function runSmoke(
     await notFound("negative-unpublished-host", `${profile.guestScheme}://${sample}`);
   }
   if (checks.has("negative-workers-dev")) await notFound("negative-workers-dev", workersDevOrigin);
-  if (checks.has("negative-port") && hostB)
-    await notFound("negative-port", `https://${hostB.host}:8443`);
+  if (checks.has("negative-port")) {
+    if (hostB) await notFound("negative-port", `https://${hostB.host}:8443`);
+    else
+      push({
+        check: "negative-port",
+        ok: true,
+        notRun: true,
+        detail: "needs a second host (another tenant's host with a port); give --hosts h1,h2",
+      });
+  }
   if (checks.has("negative-http") && hostA) await notFound("negative-http", `http://${hostA.host}`);
   if (checks.has("staff-route-404")) {
     const a = await any("GET", "/v1/me");

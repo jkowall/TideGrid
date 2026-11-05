@@ -11,9 +11,8 @@ import { type Args, flag, has, onlyFlags } from "../args.ts";
 import { type Deps, Failure, out, type Plan, printPlan, Refusal } from "../core.ts";
 import { assertNoDbHazard, childEnv, present } from "../env.ts";
 import { classifyUrl, displayHost, liveGate } from "../gate.ts";
-import { git, releaseState } from "../git.ts";
+import { approvalProblem, committedIsCutover, cutoverMerge, git, releaseState } from "../git.ts";
 import { lastDone, loadJournal, record } from "../journal.ts";
-import { isCutoverConfig } from "../phase.ts";
 import { assertArgvSafe } from "../redact.ts";
 import { treeMigrations } from "./preflight.ts";
 
@@ -358,20 +357,30 @@ async function platform(
       throw new Refusal(
         "the journal does not show step 6 (last-seat) passed; P8 runs after acceptance",
       );
-    // Bound to the C4 merge itself: the tree must carry the cutover config,
-    // and HEAD (that tree) must be approved under A10. A C7 approval alone
-    // never unlocks the permanent platform row.
-    if (!isCutoverConfig(deps.configs())) {
+    // Bound to the C4 merge itself (owner decision 2026-11-04): HEAD's
+    // committed tree, not the working tree, must carry the cutover config;
+    // the merge that brought C4 into HEAD's first-parent history must be
+    // approved under A10; and HEAD must hold an approval that counts in P8.
+    // A C7 merge approved on top of an unapproved C4 never unlocks the
+    // permanent platform row.
+    const state = await releaseState(deps, "p8", journal);
+    if (!(await committedIsCutover(deps, state.head))) {
       throw new Refusal(
-        "this tree does not carry the C4 cutover config (demo.tidegrid.us route, workers_dev off); merge C4 first",
+        "HEAD's committed tree does not carry the C4 cutover config (demo.tidegrid.us route, workers_dev off); merge C4 first",
       );
     }
-    const state = await releaseState(deps, journal);
-    if (!journal.approved.some((a) => a.gate === "A10" && a.sha === state.head)) {
+    const c4 = await cutoverMerge(deps, state.head);
+    if (!c4) {
       throw new Refusal(
-        "HEAD, the tree that carries C4, is not approved under A10 (nov1 approve-sha <C4 merge> --go A10)",
+        "could not find the merge that carries C4 on HEAD's first-parent history; nothing written",
       );
     }
+    if (!journal.approved.some((a) => a.gate === "A10" && a.sha === c4)) {
+      throw new Refusal(
+        `the C4 merge ${c4.slice(0, 12)} is not approved under A10 (nov1 approve-sha ${c4.slice(0, 12)} --go A10)`,
+      );
+    }
+    if (!state.approved) throw new Refusal(approvalProblem(state));
   }
   const sql = deps.sql(url);
   try {

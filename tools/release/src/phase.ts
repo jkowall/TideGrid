@@ -6,7 +6,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Journal } from "./journal.ts";
+import type { Journal, Worker } from "./journal.ts";
 
 export const phases = [
   "p0",
@@ -78,13 +78,47 @@ export interface Configs {
   guest: WorkerConfig;
 }
 
+export const configPaths = {
+  api: "apps/api-worker/wrangler.jsonc",
+  guest: "apps/guest-site/wrangler.jsonc",
+} as const;
+
 export function loadConfigs(repoRoot: string): Configs {
   const read = (path: string) =>
     parseJsonc(readFileSync(join(repoRoot, path), "utf8")) as WorkerConfig;
-  return {
-    api: read("apps/api-worker/wrangler.jsonc"),
-    guest: read("apps/guest-site/wrangler.jsonc"),
-  };
+  return { api: read(configPaths.api), guest: read(configPaths.guest) };
+}
+
+/**
+ * The phase from which a HEAD approval under each gate counts (owner decision
+ * 2026-11-04, phase-forward). The frozen release SHA counts everywhere; a
+ * config merge approved under its gate counts in that gate's phase and later,
+ * never earlier. A gate not listed here never counts.
+ */
+export const approvalGatePhase = {
+  "P0.1": "p0",
+  A3: "p3",
+  A8: "p7",
+  A10: "p8",
+  A13: "p9",
+  A17: "p10",
+  A19: "p11",
+} as const satisfies Record<string, Phase>;
+export type ApprovalGate = keyof typeof approvalGatePhase;
+
+/** The phase an approval gate counts from; undefined for anything that is not one. */
+export function approvalGateFrom(gate: string): Phase | undefined {
+  return Object.hasOwn(approvalGatePhase, gate)
+    ? approvalGatePhase[gate as ApprovalGate]
+    : undefined;
+}
+
+export function approvalCounts(a: { gate: string; frozen?: boolean }, phase: Phase): boolean {
+  // Only the frozen release SHA counts everywhere: `approve-sha --go P0.1`
+  // without --frozen records an approval that counts nowhere.
+  if (a.gate === "P0.1") return a.frozen === true;
+  const from = approvalGateFrom(a.gate);
+  return from !== undefined && order(from) <= order(phase);
 }
 
 /** The sender when EMAIL_FROM_ADDRESS is unset (apps/api-worker/src/email.ts:60). */
@@ -101,7 +135,16 @@ export interface GuardResult {
  * The guard for `phase`. The journal says what earlier phases already did, so
  * a cutover that happened (P8) stays allowed in later phases.
  */
-export function phaseGuard(phase: Phase, configs: Configs, journal: Journal): GuardResult {
+/**
+ * `worker` is the Worker about to be released; omitted (preflight, secrets),
+ * every check applies. The cron checks concern the API only.
+ */
+export function phaseGuard(
+  phase: Phase,
+  configs: Configs,
+  journal: Journal,
+  worker?: Worker,
+): GuardResult {
   const refusals: string[] = [];
   const warnings: string[] = [];
   const vars = configs.api.vars ?? {};
@@ -152,9 +195,15 @@ export function phaseGuard(phase: Phase, configs: Configs, journal: Journal): Gu
   }
 
   const crons = configs.api.triggers?.crons ?? [];
-  if (journal.flags.cronPaused && crons.length > 0) {
+  const apiRelease = worker === undefined || worker === "api";
+  if (apiRelease && journal.flags.cronPaused && crons.length > 0) {
     warnings.push(
       "the journal says the cron is paused, but this config carries a cron: releasing it restarts the */15 wakes",
+    );
+  }
+  if (apiRelease && crons.length === 0 && phase !== "p11" && journal.flags.cronPaused !== true) {
+    warnings.push(
+      "the API config carries no cron outside P11, and the journal records no pause: releasing the API stops the */15 wakes (C6 belongs to P11, D5)",
     );
   }
   return { refusals, warnings };

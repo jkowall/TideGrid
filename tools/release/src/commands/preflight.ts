@@ -110,7 +110,7 @@ export async function preflight(deps: Deps, args: Args): Promise<number> {
   }
 
   const journal = loadJournal(deps);
-  const state = await releaseState(deps, journal);
+  const state = await releaseState(deps, phase, journal);
   const problems = releaseStateProblems(state);
   add({
     name: "release state (invariant 3)",

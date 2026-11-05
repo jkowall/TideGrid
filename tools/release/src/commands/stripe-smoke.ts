@@ -242,10 +242,16 @@ export async function runStripeSmoke(
     async () => {
       // ManagedBookingResponse (packages/contracts/src/self-service.ts): the
       // refund sits under booking, as { state, amount } or null.
+      // A failed refund is final (an operator exception, RefundState), so
+      // stop polling on it rather than wait out the 90 s.
       const b = await call("GET", "/v1/public/manage/booking", { headers: auth });
-      const booking = b.json.booking as { refund?: { state?: string } | null } | undefined;
-      const state = booking?.refund?.state;
-      return state === "succeeded" ? state : null;
+      const booking = b.json.booking as
+        | { refund?: { state?: string; failureCode?: string | null } | null }
+        | undefined;
+      const refund = booking?.refund;
+      if (refund?.state === "succeeded") return "succeeded";
+      if (refund?.state === "failed") return `failed (${refund.failureCode ?? "no failure code"})`;
+      return null;
     },
     { intervalMs: 3_000, timeoutMs: 90_000 },
   );

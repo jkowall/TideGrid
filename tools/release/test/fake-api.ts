@@ -1,6 +1,6 @@
 /**
- * A small in-memory stand-in for the public API, enough for last-seat,
- * isolation, and stripe-smoke unit tests: trips with capacity, quotes,
+ * A small in-memory stand-in for the public API, enough for the last-seat and
+ * isolation unit tests (stripe-smoke uses contract-fixtures.ts): trips with capacity, quotes,
  * checkouts that hold seats (with the 3-open-checkouts-per-client rule), the
  * fake pay control, and a per-tenant limiter that answers 429 after 30.
  */

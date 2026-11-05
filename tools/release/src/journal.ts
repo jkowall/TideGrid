@@ -33,6 +33,8 @@ export interface Entry {
   buildId?: string;
   versionBefore?: string[];
   versionAfter?: string[];
+  /** The secret's name, on secret-put and secret-delete entries (journals before 2026-11-04 carry it in the note). */
+  secret?: string;
   note?: string;
 }
 
