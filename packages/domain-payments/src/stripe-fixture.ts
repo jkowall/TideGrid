@@ -365,6 +365,7 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
     payment_method: intent.paymentMethodId,
     payment_method_options: { card: { request_three_d_secure: "automatic" } },
     payment_method_types: ["card"],
+    allowed_payment_method_types: ["card"],
     processing: null,
     receipt_email: null,
     review: null,
@@ -457,6 +458,16 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
   const duplicate = () =>
     invalid(400, errorBody("invalid_request_error", null, "Duplicate parameter"));
 
+  const removedPaymentMethodTypes = () =>
+    invalid(
+      400,
+      errorBody(
+        "invalid_request_error",
+        null,
+        "The `payment_method_types` parameter is no longer supported. Payment methods are now managed from your Dashboard settings (https://dashboard.stripe.com/settings/payment_methods).",
+      ),
+    );
+
   const unknownParameter = (name: string) =>
     invalid(
       400,
@@ -491,7 +502,9 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
         if (name !== "amount" && name !== "currency") return unknownParameter(name);
       }
       for (const name of read.lists.keys()) {
-        if (name !== "payment_method_types") return unknownParameter(`${name}[]`);
+        // As Stripe answers under 2026-09-30.endive, observed on 2026-11-05.
+        if (name === "payment_method_types") return removedPaymentMethodTypes();
+        if (name !== "allowed_payment_method_types") return unknownParameter(`${name}[]`);
       }
       const amount = parseAmount(read.fields.get("amount"));
       if (amount === null) {

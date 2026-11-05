@@ -79,7 +79,7 @@ describe("stripe-smoke against the Stripe fixture", () => {
           body: new URLSearchParams([
             ["amount", "6500"],
             ["currency", "usd"],
-            ["payment_method_types[]", "card"],
+            ["allowed_payment_method_types[]", "card"],
           ]).toString(),
         });
         const intent = (await created.json()) as { id: string; client_secret: string };
