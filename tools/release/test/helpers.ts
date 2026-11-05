@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { treeMigrations } from "../src/commands/preflight.ts";
 import type { Deps, Env, ExecOptions, ExecResult, SqlClient } from "../src/core.ts";
-import { type Configs, parseJsonc } from "../src/phase.ts";
+import { type Configs, configPaths, parseJsonc } from "../src/phase.ts";
 
 export const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 
@@ -87,6 +87,14 @@ export interface FakeOptions {
   configs?: Configs;
   /** The running Node version; default: the one `.nvmrc` pins. */
   nodeVersion?: string;
+  /**
+   * Committed trees for `git show <rev>:<config path>`, keyed by rev (a SHA, or
+   * `<sha>^1` for its first parent). null: the file is not in that tree.
+   * Default: HEAD's committed tree is `configs`, and no other rev has one.
+   */
+  committed?: Record<string, Configs | null>;
+  /** `git rev-list --first-parent HEAD -- <guest config>`, newest first. Default: [HEAD]. */
+  guestHistory?: string[];
 }
 
 export const headSha = "a".repeat(40);
@@ -131,11 +139,28 @@ export function fakeDeps(o: FakeOptions = {}) {
     if (!res) throw new Error(`unexpected fetch ${call.method} ${call.url}`);
     return res;
   };
+  const committedGit = (call: ExecCall): ExecResult | undefined => {
+    if (call.cmd !== "git") return undefined;
+    if (call.args[0] === "rev-list" && call.args.includes("--first-parent"))
+      return { code: 0, stdout: `${(o.guestHistory ?? [headSha]).join("\n")}\n` };
+    const show = call.args[0] === "show" ? /^(.+):(.+)$/.exec(call.args[1] ?? "") : null;
+    if (!show) return undefined;
+    const [, rev, path] = show as unknown as [string, string, string];
+    const tree =
+      o.committed && rev in o.committed
+        ? o.committed[rev]
+        : rev === headSha || rev === "HEAD"
+          ? (o.configs ?? fixtureConfigs())
+          : null;
+    const worker = path === configPaths.api ? "api" : path === configPaths.guest ? "guest" : null;
+    if (!tree || !worker) return { code: 128, stdout: "" };
+    return { code: 0, stdout: JSON.stringify(tree[worker]) };
+  };
   const deps: Deps = {
     exec: async (cmd, args, options) => {
       const call = { cmd, args: [...args], options };
       execs.push(call);
-      return o.exec?.(call) ?? defaultGit(call) ?? { code: 0, stdout: "[]" };
+      return o.exec?.(call) ?? committedGit(call) ?? defaultGit(call) ?? { code: 0, stdout: "[]" };
     },
     fetch: fetchImpl,
     localFetch: fetchImpl,

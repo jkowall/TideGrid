@@ -12,7 +12,7 @@ import { type Args, flag, onlyFlags } from "../args.ts";
 import { type Deps, Failure, out, type Plan, printPlan, Refusal } from "../core.ts";
 import { liveGate } from "../gate.ts";
 import { assertReleasable } from "../git.ts";
-import { loadJournal, record } from "../journal.ts";
+import { type Journal, loadJournal, record } from "../journal.ts";
 import { type Phase, parsePhase, phaseGuard, phaseIndex } from "../phase.ts";
 import {
   deployedVersions,
@@ -34,9 +34,53 @@ export const secretSets: Record<SecretSet, { names: string[]; gate: string; phas
 
 /** The names expected after each set is on: cumulative, in phase order, DATABASE_URL always. */
 export function expectedNames(set: SecretSet): string[] {
-  const chain: SecretSet[] = ["preview", "email", "stripe", "saas"];
   const upto = chain.slice(0, chain.indexOf(set) + 1);
   return ["DATABASE_URL", ...upto.flatMap((s) => secretSets[s].names)].sort();
+}
+
+const chain: SecretSet[] = ["preview", "email", "stripe", "saas"];
+
+/**
+ * What the journal says is on the API now: each name's last done put or
+ * delete, in journal order. Entries before 2026-11-04 carry the name only at
+ * the start of the note ("NAME; journaled, ...").
+ */
+export function journaledSecrets(journal: Journal): { put: string[]; deleted: string[] } {
+  const last = new Map<string, "put" | "deleted">();
+  for (const e of journal.entries) {
+    if (e.result !== "done" || (e.worker !== undefined && e.worker !== "api")) continue;
+    if (e.step !== "secret-put" && e.step !== "secret-delete") continue;
+    const name = e.secret ?? /^([A-Z][A-Z0-9_]*);/.exec(e.note ?? "")?.[1];
+    if (name) last.set(name, e.step === "secret-put" ? "put" : "deleted");
+  }
+  const pick = (v: "put" | "deleted") =>
+    [...last]
+      .filter(([, s]) => s === v)
+      .map(([n]) => n)
+      .sort();
+  return { put: pick("put"), deleted: pick("deleted") };
+}
+
+/**
+ * The names `--list` checks for a set, from what was actually put rather than
+ * from the phase chain (finding of 2026-11-04: with P7 skipped, the email name
+ * was expected from P7 on and --list exited 1). Required: DATABASE_URL, the
+ * set's own names, and every name the journal shows put and not deleted since.
+ * Tolerated: an earlier set's name the journal never mentions, present or not
+ * (a journal from before nov1 recorded it, or the phase did not run). Anything
+ * else present, a deleted name included, is not expected.
+ */
+export function expectedFor(
+  set: SecretSet,
+  journal: Journal,
+): { required: string[]; tolerated: string[] } {
+  const j = journaledSecrets(journal);
+  const required = new Set(["DATABASE_URL", ...secretSets[set].names, ...j.put]);
+  const tolerated = chain
+    .slice(0, chain.indexOf(set))
+    .flatMap((s) => secretSets[s].names)
+    .filter((n) => !required.has(n) && !j.deleted.includes(n));
+  return { required: [...required].sort(), tolerated: tolerated.sort() };
 }
 
 /** Only FAKE_PAYMENT_WEBHOOK_SECRET is generated: at least 32 characters (env.ts:27). */
@@ -64,7 +108,9 @@ export function secretsPlan(set: SecretSet): Plan {
         commands: [
           "pnpm exec wrangler secret list --format json (cwd apps/api-worker; names only)",
         ],
-        expect: [`after this set: ${expectedNames(set).join(", ")}`],
+        expect: [
+          `after this set, if every earlier phase ran: ${expectedNames(set).join(", ")}. --list requires DATABASE_URL, this set, and what the journal shows put; an earlier set the journal never mentions is tolerated`,
+        ],
         rollback: ["not applicable (read-only)"],
       },
       ...s.names.map((name, i) => ({
@@ -140,13 +186,19 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
 
   if (!name) {
     const names = await secretNames(deps);
-    const expected = expectedNames(set);
-    const missing = expected.filter((n) => !names.includes(n));
-    const extra = names.filter((n) => !expected.includes(n));
+    const { required, tolerated } = expectedFor(set, loadJournal(deps));
+    const missing = required.filter((n) => !names.includes(n));
+    const extra = names.filter((n) => !required.includes(n) && !tolerated.includes(n));
     out(deps, `secret names: ${names.join(", ") || "(none)"}`);
+    out(deps, `expected (this set and the journal's puts): ${required.join(", ")}`);
+    if (tolerated.length)
+      out(
+        deps,
+        `earlier sets the journal never mentions, tolerated either way: ${tolerated.join(", ")}`,
+      );
     out(
       deps,
-      `missing for ${set}: ${missing.join(", ") || "none"}; not expected yet: ${extra.join(", ") || "none"}`,
+      `missing for ${set}: ${missing.join(", ") || "none"}; not expected: ${extra.join(", ") || "none"}`,
     );
     return missing.length || extra.length ? 1 : 0;
   }
@@ -157,7 +209,7 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
     // whatever config is merged: a delete changes no code and no config.
     out(deps, `feature off: ${name} (no phase guard for a delete)`);
   } else {
-    await assertReleasable(deps);
+    await assertReleasable(deps, phase);
     const guard = phaseGuard(phase, deps.configs(), journal);
     if (guard.refusals.length) throw new Refusal(`phase guard: ${guard.refusals.join("; ")}`);
   }
@@ -186,6 +238,7 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
     result: code === 0 ? "done" : "failed",
     versionBefore: before,
     versionAfter: after,
+    secret: name,
     note: `${name}; journaled, not a rollback anchor`,
   });
   if (code !== 0)

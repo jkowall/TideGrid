@@ -363,10 +363,10 @@ export async function release(deps: Deps, args: Args): Promise<number> {
   }
 
   // Invariants 3, 7, and 11, again, just before acting.
-  const state = await assertReleasable(deps);
+  const state = await assertReleasable(deps, phase);
   assertNoBuildLeak(deps, killSwitch ? ["GUEST_SW_KILL_SWITCH"] : []);
   const journal = loadJournal(deps);
-  const guard = phaseGuard(phase, deps.configs(), journal);
+  const guard = phaseGuard(phase, deps.configs(), journal, worker);
   for (const warning of guard.warnings) out(deps, `WARN ${warning}`);
   if (guard.refusals.length) throw new Refusal(`phase guard: ${guard.refusals.join("; ")}`);
 

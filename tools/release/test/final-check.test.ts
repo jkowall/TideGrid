@@ -113,7 +113,7 @@ describe("secret changes are journaled, but are not rollback anchors", () => {
       exec: (c) => (c.args.includes("deployments") ? listing(v(3)) : undefined),
     });
     const j = loadJournal(deps);
-    j.approved.push({ sha: headSha, tree: "t", gate: "P0.1", at: "x" });
+    j.approved.push({ sha: headSha, tree: "t", gate: "P0.1", at: "x", frozen: true });
     saveJournal(deps, j);
     expect(
       await main(

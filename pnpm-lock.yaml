@@ -643,6 +643,9 @@ importers:
         specifier: ^3.4.0
         version: 3.4.9
     devDependencies:
+      '@tidegrid/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@tidegrid/domain-payments':
         specifier: workspace:*
         version: link:../../packages/domain-payments

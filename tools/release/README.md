@@ -32,11 +32,11 @@ nov1 help
 | `stripe-smoke` | Server-side Stripe test-mode run; test keys only; spawns nothing |
 | `payment-account set <slug> stripe` | Admin insert of a stripe payment account from `STRIPE_ACCT_<SLUG>` |
 | `hostname-disable <slug> <hostname>` | The only path to `hostnames disable`; custom rows only |
-| `approve-sha <sha>` | Add the frozen SHA or a config merge to the approved list |
+| `approve-sha <sha>` | Add the frozen SHA or a config merge to the approved list; an approval counts from its gate's phase on |
 | `evidence` | Draft the verification-log entry; step 9 by tree equality |
 
 Exit codes: 0 done, 1 a check failed, 2 usage, 3 refused (nothing changed).
 
 ## Tests
 
-`pnpm --filter @tidegrid/release test` runs the unit tests with injected `exec`, `fetch`, and database clients: dry runs make no provider call, every gate refusal, wrangler stdio and environment, redaction, the phase guard, the rate budget, and the refusals of `db platform`, `payment-account`, and `hostname-disable`. CI Part B also runs `smoke`, `last-seat`, and `isolation` for real with `--profile local` (`apps/guest-site/e2e/full/release-scripts.spec.ts`).
+`pnpm --filter @tidegrid/release test` runs the unit tests with injected `exec`, `fetch`, and database clients. Public API bodies in the stripe-smoke test come from `test/contract-fixtures.ts`, which parses each with its `@tidegrid/contracts` schema, so a mock cannot drift from the contract. The suite covers: dry runs make no provider call, every gate refusal, wrangler stdio and environment, redaction, the phase guard, the rate budget, and the refusals of `db platform`, `payment-account`, and `hostname-disable`. CI Part B also runs `smoke`, `last-seat`, and `isolation` for real with `--profile local` (`apps/guest-site/e2e/full/release-scripts.spec.ts`).

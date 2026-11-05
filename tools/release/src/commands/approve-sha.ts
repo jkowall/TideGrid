@@ -2,15 +2,19 @@
  * nov1 approve-sha <sha> (P0.1, P3.1, P7, P8, P9, P11). Adds a commit to the
  * journal's approved list: the frozen release SHA (--frozen), or a config
  * merge under its gate. Every live step refuses a HEAD that is not on it
- * (invariant 3). Local: git reads and the journal only.
+ * (invariant 3), and an approval counts only from its gate's phase on
+ * (approvalGatePhase, owner decision 2026-11-04). Local: git reads and the
+ * journal only.
  */
 import { type Args, flag, onlyFlags } from "../args.ts";
 import { type Deps, out, Refusal } from "../core.ts";
 import { childEnv } from "../env.ts";
 import { git } from "../git.ts";
 import { loadJournal, saveJournal } from "../journal.ts";
+import { approvalGatePhase } from "../phase.ts";
 
-export const approveGates = ["P0.1", "A3", "A8", "A10", "A13", "A17", "A19"] as const;
+/** The gates an approval may name. Each counts from its phase on (approvalGatePhase). */
+export const approveGates = Object.keys(approvalGatePhase) as (keyof typeof approvalGatePhase)[];
 
 export async function approveSha(deps: Deps, args: Args): Promise<number> {
   onlyFlags(args, ["go", "frozen"]);
@@ -50,8 +54,16 @@ export async function approveSha(deps: Deps, args: Args): Promise<number> {
   ).trim();
   if (typed !== sha.slice(0, 12)) throw new Refusal("typed SHA did not match; nothing recorded");
   const journal = loadJournal(deps);
-  if (journal.approved.some((a) => a.sha === sha && a.gate === gate)) {
-    out(deps, `${sha.slice(0, 12)} is already approved under ${gate}`);
+  // A non-frozen P0.1 approval counts nowhere, so --frozen must still record
+  // the freeze for that SHA; the earlier entry stays as the audit trail.
+  const same = journal.approved.find(
+    (a) => a.sha === sha && a.gate === gate && (a.frozen === true || !frozen),
+  );
+  if (same) {
+    out(
+      deps,
+      `${sha.slice(0, 12)} is already approved under ${gate}${same.frozen ? " (frozen)" : ""}`,
+    );
     return 0;
   }
   journal.approved.push({
@@ -63,9 +75,13 @@ export async function approveSha(deps: Deps, args: Args): Promise<number> {
     ...(lastMigration ? { lastMigration } : {}),
   });
   saveJournal(deps, journal);
+  const counts =
+    gate === "P0.1" && !frozen
+      ? "it counts nowhere: only the frozen SHA (--frozen) counts under P0.1"
+      : `it counts from ${approvalGatePhase[gate as keyof typeof approvalGatePhase].toUpperCase()} on`;
   out(
     deps,
-    `approved ${sha} (tree ${tree}, last migration ${lastMigration ?? "none"}) under ${gate}`,
+    `approved ${sha} (tree ${tree}, last migration ${lastMigration ?? "none"}) under ${gate}; ${counts}`,
   );
   return 0;
 }

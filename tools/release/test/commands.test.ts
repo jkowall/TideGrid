@@ -233,7 +233,7 @@ describe("secrets", () => {
     expect(generatable).toEqual(["FAKE_PAYMENT_WEBHOOK_SECRET"]);
     const { deps, execs } = fakeDeps({ answers: ["tidegrid-api", "FAKE_PAYMENT_WEBHOOK_SECRET"] });
     const j = loadJournal(deps);
-    j.approved.push({ sha: headSha, tree: "t", gate: "P0.1", at: "x" });
+    j.approved.push({ sha: headSha, tree: "t", gate: "P0.1", at: "x", frozen: true });
     saveJournal(deps, j);
     expect(
       await main(
@@ -264,7 +264,7 @@ describe("secrets", () => {
       answers: ["tidegrid-api", "EMAIL_ALLOWED_RECIPIENTS"],
     });
     const j = loadJournal(deps);
-    j.approved.push({ sha: headSha, tree: "t", gate: "P0.1", at: "x" });
+    j.approved.push({ sha: headSha, tree: "t", gate: "P0.1", at: "x", frozen: true });
     j.flags.rolledBack = ["api"];
     saveJournal(deps, j);
     expect(
