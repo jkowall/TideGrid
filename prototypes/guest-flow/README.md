@@ -14,7 +14,7 @@ Open [the local prototype](http://127.0.0.1:4287) and use fictional guest detail
 
 ## Public demo and deployment
 
-The public demo is [demo.tidegrid.us](https://demo.tidegrid.us). Cloudflare Workers serves the static assets using [the deployment configuration](../../wrangler.prototype.jsonc); the main `tidegrid.us` site is separate. Deploy from the repository root with an authenticated Cloudflare account, and only when the owner asks:
+Until 2026-11-04 the public demo was [demo.tidegrid.us](https://demo.tidegrid.us). That name now serves the demo build's synthetic Demo Harbor guest site (the Nov 1 runbook's P8 cutover), and [the deployment configuration](../../wrangler.prototype.jsonc) no longer routes it. The prototype Worker is not redeployed. The main `tidegrid.us` site is separate. Deploy from the repository root with an authenticated Cloudflare account, and only when the owner asks:
 
 ```sh
 npx --yes wrangler@4.125.0 deploy --config wrangler.prototype.jsonc --dry-run
