@@ -19,12 +19,13 @@ What changed: `approvalGatePhase` and `approvalCounts` in `tools/release/src/pha
 
 ### 2026-11-05: payments and the cron back on, owner decision
 
-The owner asked: "turn payments and the cron back on". This replaces D5(b), the pause between windows, and ends D3(a)'s fake-off state. The owner set no end date, so the `*/15` cron runs until a later decision. That is about 96 Neon wakes a day on the free plan (D5).
+The owner asked: "turn payments and the cron back on". This replaces D5(b), the pause between windows, and ends the fake-off state that closed D3(a). The owner set no end date, so the `*/15` cron and the fake provider both stay on until a later decision. The cron means about 96 Neon wakes a day on the free plan (D5). The fake carries D3's risk with no end date on the public hosts: anyone holding a paymentRef can confirm a synthetic booking.
 
 - **Cron.** C6 was reverted by pull request 71 (merge `dd30fc8`), approved under A19, and released in P11 as API version `4a40fede`. The journal flag `cronPaused` is now false, and Cloudflare's schedules API lists `*/15 * * * *`.
-- **Payments.** A new `FAKE_PAYMENT_WEBHOOK_SECRET` was generated under A2 (openssl into wrangler, no value handled). The provider stays the fake. Stripe stays off: no Stripe secrets, and the webhook endpoint stays disabled.
+- **Payments, the coordinator's reading.** The coordinator read "payments" as the fake provider. Stripe was not asked about. A new `FAKE_PAYMENT_WEBHOOK_SECRET` was generated under A2 (openssl into wrangler, no value handled).
+- **Stripe stays off, per the journal.** `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` were deleted on 2026-11-05 at 02:14 and 02:15 UTC and never put again. Stripe's webhook endpoint was disabled then; this run did not recheck either, since it made no Stripe call.
 - **Verification.** See the [verification log](../verification-log.md#payments-and-the-cron-back-on-november-6-2026).
-- **Shipped with it.** The release also carried pull requests 63 to 70 to the API. Their runtime changes are the Stripe card-only checks (#67, #68), which cannot run on the fake. No migration was added after `0014`.
+- **Shipped with it.** The release also carried pull requests 64 to 70 to the API; #63 was already live in `9086a18`. Their only runtime change is the Stripe card-only checks (#67, #68), which cannot run on the fake. No migration was added after `0014`.
 
 ### 2026-11-05: Nov 1 run, owner ratification of the coordinator's readings
 
