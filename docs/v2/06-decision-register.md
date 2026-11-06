@@ -17,6 +17,15 @@ Reviews of the 2026-11-04 run found that `nov1` accepted a HEAD approved under a
 
 What changed: `approvalGatePhase` and `approvalCounts` in `tools/release/src/phase.ts`; `releaseState` takes the phase. `db platform` checks P8, reads HEAD's committed guest config with `git show`, and finds the C4 merge on HEAD's first-parent history (`cutoverMerge` in `tools/release/src/git.ts`). `approve-sha` still accepts any main commit under any listed gate; the option that also checked a commit's config against its gate was not chosen. Two coordinator readings, from the independent review: only a `--frozen` approval counts under P0.1, so `approve-sha --go P0.1` without `--frozen` counts nowhere; and after a C4 revert and a re-merge, `db platform` binds to the re-merge, the latest commit where the config becomes the cutover set, not the first. Canonical: the [runbook's config branches and P8](../runbooks/2026-11-01-preview-deploy.md#p8-cutover-of-demotidegridus-a10-last-on-the-acceptance-track).
 
+### 2026-11-05: payments and the cron back on, owner decision
+
+The owner asked: "turn payments and the cron back on". This replaces D5(b), the pause between windows, and ends D3(a)'s fake-off state. The owner set no end date, so the `*/15` cron runs until a later decision. That is about 96 Neon wakes a day on the free plan (D5).
+
+- **Cron.** C6 was reverted by pull request 71 (merge `dd30fc8`), approved under A19, and released in P11 as API version `4a40fede`. The journal flag `cronPaused` is now false, and Cloudflare's schedules API lists `*/15 * * * *`.
+- **Payments.** A new `FAKE_PAYMENT_WEBHOOK_SECRET` was generated under A2 (openssl into wrangler, no value handled). The provider stays the fake. Stripe stays off: no Stripe secrets, and the webhook endpoint stays disabled.
+- **Verification.** See the [verification log](../verification-log.md#payments-and-the-cron-back-on-november-6-2026).
+- **Shipped with it.** The release also carried pull requests 63 to 70 to the API. Their runtime changes are the Stripe card-only checks (#67, #68), which cannot run on the fake. No migration was added after `0014`.
+
 ### 2026-11-05: Nov 1 run, owner ratification of the coordinator's readings
 
 The coordinator put six questions about the 2026-11-04 entry below to the owner, one at a time, in its question tool. D4(c) and the entry's list of departures from the runbook were not put as separate questions. The owner's selections:

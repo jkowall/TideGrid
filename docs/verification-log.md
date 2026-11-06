@@ -2,6 +2,19 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-06
+
+### Payments and the cron back on, November 6, 2026
+
+On the owner's request ([decision register](v2/06-decision-register.md#2026-11-05-payments-and-the-cron-back-on-owner-decision)), run from 01:11 to 01:12 UTC through `nov1`, with scripted type-backs as the owner permits for runs they direct:
+
+- **A19.** The C6 revert merge `dd30fc8` (pull request 71) was approved and released as API `4a40fede`. Health read `dd30fc8`, database ok, and `0014`.
+- **Schedules.** Before the release Cloudflare's schedules API returned `[]`; after it, `*/15 * * * *`. The journal's `cronPaused` is false.
+- **A2.** `FAKE_PAYMENT_WEBHOOK_SECRET` was generated and put; the live version is now `331152ef`.
+- **Smoke.** 13 of 13 checks passed.
+- **A booking on the fake.** The Demo Harbor booking test passed: charter `2KVK8E6R`.
+- **Before the release.** An independent review replayed `nov1`'s approve, release, and secret commands against a copy of the journal, with no network calls, and all three returned 0.
+
 ## 2026-11-04
 
 ### Demo acceptance on the preview deployment (the November 1 runbook), November 4, 2026
