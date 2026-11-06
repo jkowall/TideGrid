@@ -34,7 +34,7 @@ describe.skipIf(!env)("guest link origins", () => {
   });
   afterAll(async () => {
     await runtime?.end();
-    await admin?.end();
+    await admin?.end({ timeout: 5 });
   });
 
   it("allows a *.localhost link origin only in local development", async () => {

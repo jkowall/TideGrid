@@ -210,7 +210,7 @@ describe.skipIf(!env)("pricing API against a real database as the runtime role",
 
   afterAll(async () => {
     await runtime?.end();
-    await admin?.end();
+    await admin?.end({ timeout: 5 });
   });
 
   describe("offer", () => {

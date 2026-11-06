@@ -102,8 +102,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
   });
 
   afterAll(async () => {
-    await runtime?.end();
-    await admin?.end();
+    await runtime?.end({ timeout: 5 });
+    await admin?.end({ timeout: 5 });
   });
 
   const tenantTables = [

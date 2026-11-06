@@ -59,8 +59,8 @@ describe.skipIf(!env)("sweep turns (0013)", () => {
 
   afterAll(async () => {
     await handle?.end();
-    await runtime?.end();
-    await admin?.end();
+    await runtime?.end({ timeout: 5 });
+    await admin?.end({ timeout: 5 });
   });
 
   describe("the stamp table as the runtime", () => {

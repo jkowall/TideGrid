@@ -134,7 +134,7 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
 
   afterAll(async () => {
     await runtime?.end();
-    await admin?.end();
+    await admin?.end({ timeout: 5 });
   });
 
   for (const environment of environments) {

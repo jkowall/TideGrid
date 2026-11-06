@@ -32,7 +32,7 @@ describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
         SELECT has_table_privilege('tidegrid_app', 'schema_migrations', 'INSERT') AS ok`;
       expect(write?.ok).toBe(false);
     } finally {
-      await sql.end();
+      await sql.end({ timeout: 5 });
     }
   }, 60_000);
 
@@ -90,7 +90,7 @@ describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
         { name: "hostname_sweep_tenants", args: "p_limit integer", ...common },
       ]);
     } finally {
-      await sql.end();
+      await sql.end({ timeout: 5 });
     }
   }, 30_000);
 
@@ -130,7 +130,7 @@ describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
         await admin.unsafe(`DROP ROLE ${group}`);
       }
     } finally {
-      await admin.end();
+      await admin.end({ timeout: 5 });
     }
     expect((await migrate(url as string)).applied).toEqual([]);
   }, 60_000);
@@ -164,7 +164,7 @@ describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
         await admin.unsafe(`DROP ROLE ${group}`);
       }
     } finally {
-      await admin.end();
+      await admin.end({ timeout: 5 });
     }
   }, 60_000);
 });

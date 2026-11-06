@@ -41,7 +41,7 @@ describe.skipIf(!env)("runtime zone data against PostgreSQL", () => {
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await admin?.end({ timeout: 5 });
   });
 
   it("reads offsets and day boundaries the same for every accepted zone, apart from known drift", async () => {
