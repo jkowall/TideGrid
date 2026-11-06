@@ -17,6 +17,16 @@ Reviews of the 2026-11-04 run found that `nov1` accepted a HEAD approved under a
 
 What changed: `approvalGatePhase` and `approvalCounts` in `tools/release/src/phase.ts`; `releaseState` takes the phase. `db platform` checks P8, reads HEAD's committed guest config with `git show`, and finds the C4 merge on HEAD's first-parent history (`cutoverMerge` in `tools/release/src/git.ts`). `approve-sha` still accepts any main commit under any listed gate; the option that also checked a commit's config against its gate was not chosen. Two coordinator readings, from the independent review: only a `--frozen` approval counts under P0.1, so `approve-sha --go P0.1` without `--frozen` counts nowhere; and after a C4 revert and a re-merge, `db platform` binds to the re-merge, the latest commit where the config becomes the cutover set, not the first. Canonical: the [runbook's config branches and P8](../runbooks/2026-11-01-preview-deploy.md#p8-cutover-of-demotidegridus-a10-last-on-the-acceptance-track).
 
+### 2026-11-05: payments and the cron back on, owner decision
+
+The owner asked: "turn payments and the cron back on". This replaces D5(b), the pause between windows, and ends the fake-off state that closed D3(a). The owner set no end date, so the `*/15` cron and the fake provider both stay on until a later decision. The cron means about 96 Neon wakes a day on the free plan (D5). The fake carries D3's risk with no end date on the public hosts: anyone holding a paymentRef can confirm a synthetic booking.
+
+- **Cron.** C6 was reverted by pull request 71 (merge `dd30fc8`), approved under A19, and released in P11 as API version `4a40fede`. The journal flag `cronPaused` is now false, and Cloudflare's schedules API lists `*/15 * * * *`.
+- **Payments, the coordinator's reading.** The coordinator read "payments" as the fake provider. Stripe was not asked about. A new `FAKE_PAYMENT_WEBHOOK_SECRET` was generated under A2 (openssl into wrangler, no value handled).
+- **Stripe stays off, per the journal.** `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` were deleted on 2026-11-05 at 02:14 and 02:15 UTC and never put again. Stripe's webhook endpoint was disabled then; this run did not recheck either, since it made no Stripe call.
+- **Verification.** See the [verification log](../verification-log.md#payments-and-the-cron-back-on-november-6-2026).
+- **Shipped with it.** The release also carried pull requests 64 to 70 to the API; #63 was already live in `9086a18`. Their only runtime change is the Stripe card-only checks (#67, #68), which cannot run on the fake. No migration was added after `0014`.
+
 ### 2026-11-05: Nov 1 run, owner ratification of the coordinator's readings
 
 The coordinator put six questions about the 2026-11-04 entry below to the owner, one at a time, in its question tool. D4(c) and the entry's list of departures from the runbook were not put as separate questions. The owner's selections:

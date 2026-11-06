@@ -2,6 +2,21 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-06
+
+### Payments and the cron back on, November 6, 2026
+
+This ran on the owner's request of 2026-11-05 local time ([decision register](v2/06-decision-register.md#2026-11-05-payments-and-the-cron-back-on-owner-decision)). The coordinator ran it through `nov1` from 01:11 to 01:12 UTC on November 6. Scripted type-backs answered targets declared up front, as the owner permits for runs they direct.
+
+**Sources.** `run-reenable.log` and `journal.json` in the owner's handoff folder (`~/.claude/projects/-Users-jkowall-TideGrid/handoff/nov1`).
+
+- **A19.** The C6 revert merge `dd30fc8` (pull request 71) was approved and released as API `4a40fede`. Health read `dd30fc8`, database ok, and `0014`.
+- **Schedules.** Before the release Cloudflare's schedules API returned `[]`; after it, `*/15 * * * *`. The journal's `cronPaused` is false.
+- **A2.** `FAKE_PAYMENT_WEBHOOK_SECRET` was generated and put; the live version is now `331152ef`.
+- **Smoke.** 13 of 13 checks passed.
+- **A booking on the fake.** The Demo Harbor booking test passed through the fake's "Simulate successful payment": booking reference `2KVK8E6R` (Private Half-Day Charter). It is a permanent synthetic booking, not canceled.
+- **Before the release,** *coordinator-reported*, output not saved. An independent review replayed `nov1`'s approve, release, and secret commands against a copy of the journal, with no network calls, and all three returned 0.
+
 ## 2026-11-04
 
 ### Demo acceptance on the preview deployment (the November 1 runbook), November 4, 2026
