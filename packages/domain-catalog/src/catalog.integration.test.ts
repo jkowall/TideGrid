@@ -157,7 +157,7 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
 
   afterAll(async () => {
     await runtime?.end();
-    await admin?.end();
+    await admin?.end({ timeout: 5 });
   });
 
   describe("generation across clock changes", () => {
@@ -465,7 +465,7 @@ describe.skipIf(!env)("catalog services against a real database as the runtime r
         );
         expect(await attempt("delete from scheduled_trips where id = $1")).toBe("42501");
       } finally {
-        await raw.end();
+        await raw.end({ timeout: 5 });
       }
     });
   });

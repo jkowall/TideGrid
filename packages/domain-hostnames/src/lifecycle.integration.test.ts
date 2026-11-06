@@ -140,8 +140,8 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
   afterAll(async () => {
     await runtimeDb?.end();
     await adminDb?.end();
-    await runtime?.end();
-    await admin?.end();
+    await runtime?.end({ timeout: 5 });
+    await admin?.end({ timeout: 5 });
   });
 
   it("requests, records, activates, and resolves only after both provider states are active", async () => {

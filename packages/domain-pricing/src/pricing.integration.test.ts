@@ -331,7 +331,7 @@ describe.skipIf(!env)("pricing services against a real database as the runtime r
 
   afterAll(async () => {
     await runtime?.end();
-    await admin?.end();
+    await admin?.end({ timeout: 5 });
   });
 
   const cruiseQuote = (tenantId: string, tripId: string, extra: { promotionCode?: string } = {}) =>

@@ -236,8 +236,8 @@ describe.skipIf(!env)("the hostname sweep takes fair turns across tenants", () =
     } finally {
       await runtimeDb?.end();
       await adminDb?.end();
-      await runtime?.end();
-      await admin?.end();
+      await runtime?.end({ timeout: 5 });
+      await admin?.end({ timeout: 5 });
     }
   });
 

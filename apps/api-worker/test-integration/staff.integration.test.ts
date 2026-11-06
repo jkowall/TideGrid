@@ -160,7 +160,7 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
   });
 
   afterAll(async () => {
-    await admin?.end();
+    await admin?.end({ timeout: 5 });
   });
 
   describe("magic-link sign-in", () => {

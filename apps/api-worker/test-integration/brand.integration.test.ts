@@ -181,8 +181,8 @@ describe.skipIf(!env)("public brand bootstrap against a real database as the run
   });
 
   afterAll(async () => {
-    await runtime?.end();
-    await admin?.end();
+    await runtime?.end({ timeout: 5 });
+    await admin?.end({ timeout: 5 });
   });
 
   it("returns each tenant's own active brand to its own origin", async () => {

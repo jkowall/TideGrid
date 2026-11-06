@@ -101,8 +101,8 @@ describe.skipIf(!env)("adversarial tenancy, privileged-function, and credential 
   });
 
   afterAll(async () => {
-    await runtime?.end();
-    await admin?.end();
+    await runtime?.end({ timeout: 5 });
+    await admin?.end({ timeout: 5 });
   });
 
   describe("tenant context", () => {
@@ -190,7 +190,7 @@ describe.skipIf(!env)("adversarial tenancy, privileged-function, and credential 
         );
         expect({ pids: pids.size, plans }).toEqual({ pids: 1, plans: { generic: 8, custom: 0 } });
       } finally {
-        await conn.end();
+        await conn.end({ timeout: 5 });
       }
     });
 
@@ -222,7 +222,7 @@ describe.skipIf(!env)("adversarial tenancy, privileged-function, and credential 
           afterReset: 0,
         });
       } finally {
-        await conn.end();
+        await conn.end({ timeout: 5 });
       }
     });
 
@@ -379,7 +379,7 @@ describe.skipIf(!env)("adversarial tenancy, privileged-function, and credential 
         expect(notices.filter((n) => forbidden.some((f) => n.includes(f)))).toEqual([]);
       } finally {
         await admin.unsafe(`drop function if exists public.adv_leak_${run}(text)`);
-        await conn.end();
+        await conn.end({ timeout: 5 });
       }
     });
   });
@@ -413,7 +413,7 @@ describe.skipIf(!env)("adversarial tenancy, privileged-function, and credential 
           tempFunction: "42501",
         });
       } finally {
-        await conn.end();
+        await conn.end({ timeout: 5 });
       }
     });
 
@@ -581,8 +581,8 @@ describe.skipIf(!env)("adversarial tenancy, privileged-function, and credential 
           ],
         });
       } finally {
-        await c1.end();
-        await c2.end();
+        await c1.end({ timeout: 5 });
+        await c2.end({ timeout: 5 });
       }
     });
 
@@ -608,7 +608,7 @@ describe.skipIf(!env)("adversarial tenancy, privileged-function, and credential 
         // More than one backend took part, so the limit held under real concurrency.
         expect(new Set(results.map((r) => r.pid)).size).toBeGreaterThan(1);
       } finally {
-        await pool.end();
+        await pool.end({ timeout: 5 });
       }
     });
 

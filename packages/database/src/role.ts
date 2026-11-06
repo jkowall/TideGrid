@@ -86,7 +86,7 @@ export async function setRuntimeRolePassword(adminUrl: string, password: string)
     // quotes and backslashes, so the literal cannot be broken out of.
     await sql.unsafe(`ALTER ROLE tidegrid_app LOGIN PASSWORD '${password}'`);
   } finally {
-    await sql.end();
+    await sql.end({ timeout: 5 });
   }
 }
 
