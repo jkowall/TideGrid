@@ -19,7 +19,7 @@ What changed: `approvalGatePhase` and `approvalCounts` in `tools/release/src/pha
 
 ### 2026-11-05: Nov 1 run, owner ratification of the coordinator's readings
 
-The coordinator put the readings in the 2026-11-04 entry below to the owner one at a time, in its question tool. The owner's selections:
+The coordinator put six questions about the 2026-11-04 entry below to the owner, one at a time, in its question tool. D4(c) and the entry's list of departures from the runbook were not put as separate questions. The owner's selections:
 
 - **Item 1, the per-gate go.** Question: "Do you ratify that reading for the run that already happened?" Selected: "Ratify (Recommended)". The run's gates A0 to A5, A10 to A14, and A19 now carry the owner's after-the-fact go.
 - **Item 2, scripted type-backs.** Question: "For future runs, which should hold?" Selected: "Allow scripted (Recommended)", whose text reads: "Scripted type-backs are allowed when you direct an unattended run, with targets declared up front. I'd fold the guard into nov1 itself in a reviewed PR, so it is tested and not a loose script." Folding the guard into `nov1` is proposed, not built.
@@ -32,14 +32,14 @@ The coordinator put the readings in the 2026-11-04 entry below to the owner one 
 
 On 2026-11-04 the owner told the coordinator, more than once, to keep going without being asked and to complete all the work: "Just keep going. Why are you stopping? I want you to complete all the work." Later: "The only reason I want you to stop is when your quota gets to 80% for the week." Earlier, asked for the D4 address and the Neon allowance reset time, the owner answered "unknown" to both.
 
-The coordinator reads these as the owner's go for every runbook gate it could run without owner-only inputs: A0 to A5, A10 to A14, and A19. A14 is the runbook's "owner's own command"; the coordinator ran it under the same reading. It also reads them as a go for the defaults below. This is the coordinator's reading, not a recorded per-gate go. **Ratified by the owner on 2026-11-05,** with conditions for later runs: see the entry above.
+The coordinator reads these as the owner's go for every runbook gate it could run without owner-only inputs: A0 to A5, A10 to A14, and A19. A14 is the runbook's "owner's own command"; the coordinator ran it under the same reading. It also reads them as a go for the defaults below. This is the coordinator's reading, not a recorded per-gate go. **Ratified by the owner on 2026-11-05:** the per-gate go, the scripted type-backs and secret files (with conditions for later runs), D11, D8, D3, D5, D7, D9, D15, D16, and the P9 inputs. D4(c) and the departures below were not put as separate questions: see the entry above.
 
 - **Type-backs.** `nov1` asks the owner to type each target back. On this run two scripts, kept outside the repository, answered those prompts: `confirm-guard.exp` and `secret-guard.exp`.
   - Each answered only targets declared before each step.
   - `confirm-guard.exp` answered `nov1`'s "Type yes" question only where a step allowed it, and stopped on any other target and on any wrangler yes/no prompt.
   - `secret-guard.exp` also answered wrangler's secret value prompt from a file, and confirmed a secret delete only for the name declared for that step.
   - *Coordinator-reported:* before any A1 step, the database host was checked against Neon's API as main's read_write endpoint.
-  - This departs from the gate's design (`tools/release/src/gate.ts:4-5`). It is recorded so the owner can decide whether it stands for later runs.
+  - This departs from the gate's design (`tools/release/src/gate.ts:4-5`). It is recorded so the owner can decide whether it stands for later runs (decided 2026-11-05, see above).
 - **Secrets.** The Stripe key and the webhook signing secret reached wrangler's prompt from 0600 files under the owner's private folder. The files were deleted after use. `tools/release/src/commands/secrets.ts` says the owner types or pipes values, so this is a delegated departure too.
 - **D4, (c).** The seed ran with no owner variables, and P6 steps 5 and 7 are not shown.
 - **D8, (a).** P6 had no fail, so `demo.tidegrid.us` was cut over to demo-harbor, and the platform row is permanent. The entry below that keeps the cutover a separately authorized operational step is satisfied by the coordinator's reading, not by a separate owner go.
