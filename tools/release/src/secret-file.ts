@@ -24,6 +24,7 @@ import {
   readSync,
   realpathSync,
   type Stats,
+  unlinkSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, sep } from "node:path";
 import { type Deps, Refusal } from "./core.ts";
@@ -86,8 +87,14 @@ function inGitWorkTree(real: string): boolean {
   }
 }
 
+/** The checked file, so cleanup removes that file and nothing swapped in at its path. */
+export interface FileIdentity {
+  dev: number;
+  ino: number;
+}
+
 /** Read the file once, check where it lives and who can read it, and return its one line. */
-function readPrivateLine(deps: Deps, path: string): Buffer {
+function readPrivateLine(deps: Deps, path: string): { line: Buffer; identity: FileIdentity } {
   if (!isAbsolute(path)) throw new Refusal("--from-file needs an absolute path");
   let st: ReturnType<typeof lstatSync>;
   try {
@@ -139,7 +146,7 @@ function readPrivateLine(deps: Deps, path: string): Buffer {
       buf.fill(0);
       throw new Refusal("--from-file must hold one line: the secret alone");
     }
-    return line;
+    return { line, identity: { dev: fst.dev, ino: fst.ino } };
   } finally {
     closeSync(fd);
   }
@@ -194,6 +201,22 @@ function assertPairedKey(journal: Journal, phase: Phase): void {
 }
 
 /**
+ * Remove the file only if the path still names the file that was checked
+ * and read: a regular file, not a symlink, same device and inode. Anything
+ * else is left in place. True when it removed the file.
+ */
+export function removeCheckedFile(path: string, identity: FileIdentity): boolean {
+  try {
+    const st = lstatSync(path);
+    if (!st.isFile() || st.dev !== identity.dev || st.ino !== identity.ino) return false;
+    unlinkSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The test-mode value for `name` from `path`, or a Refusal. The caller sends
  * it to wrangler's stdin and zeroes the buffer. Nothing here prints the value
  * or turns it into a string.
@@ -204,7 +227,7 @@ export function readTestSecret(
   path: string,
   journal: Journal,
   phase: Phase,
-): Buffer {
+): { value: Buffer; identity: FileIdentity } {
   assertFileName(name);
   if (name === "STRIPE_WEBHOOK_SECRET") {
     // Checked before the file is read: a refusal here never touches the value.
@@ -215,7 +238,7 @@ export function readTestSecret(
     }
     assertPairedKey(journal, phase);
   }
-  const value = readPrivateLine(deps, path);
+  const { line: value, identity } = readPrivateLine(deps, path);
   const refuse = (why: string): never => {
     value.fill(0);
     throw new Refusal(why);
@@ -228,5 +251,5 @@ export function readTestSecret(
   } else if (!shaped(value, ["whsec_"], 24)) {
     refuse("STRIPE_WEBHOOK_SECRET from a file must be a webhook signing secret (whsec_...)");
   }
-  return value;
+  return { value, identity };
 }

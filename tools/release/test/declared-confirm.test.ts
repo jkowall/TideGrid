@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -433,6 +434,42 @@ describe("secret values from a test-mode file", () => {
         deps,
       ),
     ).toBe(3);
+  });
+
+  for (const argv of [["--from-file="], ["--from-file", ""]]) {
+    it(`refuses an empty path (${JSON.stringify(argv)}) before any wrangler call, even unattended`, async () => {
+      const { deps, execs, printed, prompts } = stripeDeps();
+      const [first, ...rest] = put("STRIPE_SECRET_KEY");
+      const withEmpty = [first as string, ...rest.slice(0, 3), ...argv, ...rest.slice(3)];
+      expect(await main(withEmpty, deps)).toBe(3);
+      expect(printed.join("\n")).toMatch(/absolute path/);
+      expect(execs.filter((e) => e.args.includes("wrangler"))).toEqual([]);
+      expect(prompts).toEqual([]);
+    });
+  }
+
+  it("does not remove a file swapped in at the path during the put, and says the secret file was not removed", async () => {
+    const file = secretFile(testKey);
+    const moved = `${file}-moved`;
+    const { deps, printed } = stripeDeps({
+      exec: (c) => {
+        if (c.args.includes("put")) {
+          renameSync(file, moved);
+          writeFileSync(file, "an unrelated file", { mode: 0o600 });
+        }
+        return undefined;
+      },
+    });
+    expect(await main(put("STRIPE_SECRET_KEY", file), deps)).toBe(1);
+    expect(readFileSync(file, "utf8")).toBe("an unrelated file");
+    expect(existsSync(moved)).toBe(true);
+    expect(printed.join("\n")).toMatch(/not removed/i);
+    expect(printed.join("\n")).not.toMatch(/^removed /m);
+    const entry = loadJournal(deps)
+      .entries.filter((e) => e.step === "secret-put")
+      .at(-1);
+    expect(entry?.result).toBe("done");
+    expect(entry?.note).toMatch(/file NOT removed/);
   });
 
   it("keeps the file when wrangler fails, and says so", async () => {

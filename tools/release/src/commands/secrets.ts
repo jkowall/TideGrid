@@ -17,14 +17,13 @@
  * code (cli.js:299145), so it is journaled with the version ids before and
  * after. It is not a rollback anchor: --rollback undoes releases only.
  */
-import { unlinkSync } from "node:fs";
 import { type Args, flag, onlyFlags } from "../args.ts";
 import { type Deps, Failure, out, type Plan, printPlan, Refusal } from "../core.ts";
 import { liveGate } from "../gate.ts";
 import { assertReleasable } from "../git.ts";
 import { type Journal, loadJournal, record } from "../journal.ts";
 import { type Phase, parsePhase, phaseGuard, phaseIndex } from "../phase.ts";
-import { assertFileName, readTestSecret } from "../secret-file.ts";
+import { assertFileName, readTestSecret, removeCheckedFile } from "../secret-file.ts";
 import {
   deployedVersions,
   onTerminal,
@@ -241,9 +240,14 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
   }
 
   // Every refusal comes before the first wrangler call, the version listing included.
-  const value = fromFile ? readTestSecret(deps, name, fromFile, journal, phase) : undefined;
+  // Presence, not truthiness: an empty path (`--from-file=`, an unset
+  // variable) must reach readTestSecret and be refused, never fall through
+  // to wrangler's value prompt.
+  const file =
+    fromFile !== undefined ? readTestSecret(deps, name, fromFile, journal, phase) : undefined;
+  const value = file?.value;
 
-  const source = generate ? "generated" : fromFile ? "test-file" : del ? undefined : "typed";
+  const source = generate ? "generated" : file ? "test-file" : del ? undefined : "typed";
   let code: number;
   let before: string[] = [];
   try {
@@ -278,12 +282,13 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
   const after = await deployedVersions(deps, "api").catch(() => [] as string[]);
   let fileNote = "";
   let fileLeft = false;
-  if (fromFile) {
+  if (file && fromFile !== undefined) {
     if (code === 0) {
-      try {
-        unlinkSync(fromFile);
+      // Only the file that was checked: if the path now names another file
+      // (renamed and replaced during the put), nothing is removed.
+      if (removeCheckedFile(fromFile, file.identity)) {
         fileNote = "; value from a test-mode file, file removed";
-      } catch {
+      } else {
         fileLeft = true;
         fileNote = "; value from a test-mode file, file NOT removed";
       }
@@ -304,7 +309,7 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
     note: `${name}; journaled, not a rollback anchor${fileNote}`,
   });
   if (code !== 0) {
-    if (fromFile) out(deps, `secret file kept for a retry: ${fromFile}`);
+    if (file) out(deps, `secret file kept for a retry: ${fromFile}`);
     throw new Failure(`wrangler secret ${del ? "delete" : "put"} ${name} exited ${code}`);
   }
   out(
@@ -312,9 +317,12 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
     `${name} ${del ? "deleted" : "set"}; live version now ${after.join(", ")} (journaled; not a rollback anchor, --rollback undoes releases only)`,
   );
   if (fileLeft) {
-    out(deps, `WARN the secret is set, but nov1 could not remove ${fromFile}; remove it now`);
+    out(
+      deps,
+      `WARN the secret is set, but the secret file was not removed: ${fromFile} is gone or is no longer the file nov1 read. Find and remove the secret file now`,
+    );
     return 1;
   }
-  if (fromFile) out(deps, `removed ${fromFile}`);
+  if (file) out(deps, `removed ${fromFile}`);
   return 0;
 }
