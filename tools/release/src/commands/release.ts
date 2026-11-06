@@ -10,7 +10,7 @@
 import { type Args, flag, has, onlyFlags } from "../args.ts";
 import { banner, type Deps, Failure, out, type Plan, poll, printPlan, Refusal } from "../core.ts";
 import { assertNoBuildLeak } from "../env.ts";
-import { confirmYes, liveGate } from "../gate.ts";
+import { confirmYes, liveGate, typedOnly } from "../gate.ts";
 import { assertReleasable, git } from "../git.ts";
 import {
   type Entry,
@@ -208,6 +208,7 @@ async function assertSchemaReady(deps: Deps): Promise<void> {
     if (
       !(await confirmYes(
         deps,
+        "db-at-tree",
         `Is the database already at ${tree} (nov1 db status), so the API may be released without this check?`,
       ))
     ) {
@@ -313,6 +314,8 @@ export async function release(deps: Deps, args: Args): Promise<number> {
 
   const verify = has(args, "verify");
   if (verify && rollback) throw new Refusal("--verify and --rollback contradict");
+
+  if (rollback && deps.declared) throw new Refusal(typedOnly);
 
   // The anchor is shown, with the release it undoes, before the owner types it back.
   let anchor: string | undefined;
@@ -472,6 +475,7 @@ async function doRollback(
   if (
     !(await confirmYes(
       deps,
+      "feature-off",
       `Is the feature already off, or not needed, before rolling ${w.name} back?`,
     ))
   ) {
@@ -483,6 +487,9 @@ async function doRollback(
       `${anchor} is already live on ${w.name}; nothing to roll back to. Pass --to <an earlier version id>`,
     );
   }
+  // Journaled before wrangler runs, so a rollback interrupted after it took
+  // effect still shows (the webhook-secret pairing reads it).
+  record(deps, { phase, step: "rollback", gate, worker, result: "started", versionBefore: before });
   const code = await wranglerOnTerminal(deps, worker, ["rollback", anchor]);
   const readAfter = () => deployedVersions(deps, worker).catch(() => null);
   let after = await readAfter();

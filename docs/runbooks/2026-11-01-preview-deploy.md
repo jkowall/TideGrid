@@ -18,7 +18,7 @@ Two decisions shape the whole day. Answer them before Oct 31.
 ## Rules for the day (repeated at the top of every phase)
 
 1. `nov1` is the only deploy path today. Never run `pnpm --filter <app> run release` or `pnpm deploy:demo` directly.
-2. Every `nov1` command is a dry run unless it gets `--live`. A live run also needs `--go <gate>`, a terminal on stdin and stdout, `CI` unset, and the target typed back.
+2. Every `nov1` command is a dry run unless it gets `--live`. A live run also needs `--go <gate>`, a terminal on stdin and stdout, `CI` unset, and the target typed back. In an unattended run the owner directs, `--confirm <targets>` declares the type-backs up front instead (see the [release tool's safety model](../../tools/release/README.md#declared-confirmations-unattended-runs)).
 3. Run in a fresh shell on `main` at an approved SHA. Never `export DATABASE_URL`. Source the env file only in the owner's own terminal; `nov1` reads names and strips `CLOUDFLARE_API_TOKEN` from every wrangler child (releases use the OAuth login).
 4. Never run `app-role:password` or `test:integration` against Neon main. Either rotates `tidegrid_app` and breaks Hyperdrive.
 5. Never use `hostnames disable` as a rollback for a preview or platform name. A disabled name is permanent (`0011_custom_hostname_lifecycle.sql:91-94`).

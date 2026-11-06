@@ -8,7 +8,7 @@
  * listing also carries each author's email (cli.js:348974,349090).
  */
 import { join } from "node:path";
-import { type Deps, Failure, Refusal } from "./core.ts";
+import { type Deps, type ExecOptions, Failure, Refusal } from "./core.ts";
 import { announceStrip, childEnv } from "./env.ts";
 import type { Worker } from "./journal.ts";
 import { assertArgvSafe } from "./redact.ts";
@@ -29,7 +29,7 @@ export async function onTerminal(
   deps: Deps,
   cmd: string,
   args: readonly string[],
-  options: { cwd?: string; extraEnv?: Record<string, string> } = {},
+  options: { cwd?: string; extraEnv?: Record<string, string>; stdin?: ExecOptions["stdin"] } = {},
 ): Promise<number> {
   assertArgvSafe(cmd, args);
   announceStrip(deps);
@@ -37,14 +37,25 @@ export async function onTerminal(
     cwd: options.cwd ?? deps.repoRoot,
     env: childEnv(deps, options.extraEnv ?? {}),
     stdio: "inherit",
+    ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
   });
   return code;
 }
 
-/** `wrangler <args>` from the Worker's own directory, on the terminal. */
-export function wranglerOnTerminal(deps: Deps, worker: Worker, args: readonly string[]) {
+/**
+ * `wrangler <args>` from the Worker's own directory, on the terminal. stdout
+ * and stderr are always the terminal; stdin is too unless `stdin` says
+ * otherwise (ExecOptions.stdin).
+ */
+export function wranglerOnTerminal(
+  deps: Deps,
+  worker: Worker,
+  args: readonly string[],
+  stdin?: ExecOptions["stdin"],
+) {
   return onTerminal(deps, "pnpm", ["exec", "wrangler", ...args], {
     cwd: join(deps.repoRoot, workers[worker].dir),
+    ...(stdin === undefined ? {} : { stdin }),
   });
 }
 

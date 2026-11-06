@@ -20,6 +20,8 @@ export interface ApprovedSha {
   /** The frozen release SHA (P0.1) rather than a later config merge. */
   frozen?: boolean;
   lastMigration?: string;
+  /** Present when the first 12 came from --confirm rather than the owner's keyboard. */
+  confirmation?: "declared";
 }
 
 export interface Entry {
@@ -27,7 +29,8 @@ export interface Entry {
   phase: string;
   step: string;
   gate?: string;
-  result: "started" | "done" | "failed" | "skipped" | "refused";
+  /** answered: a declared confirmation satisfied a prompt; the step it gated is its own entry. */
+  result: "started" | "done" | "failed" | "skipped" | "refused" | "answered";
   worker?: Worker;
   sha?: string;
   buildId?: string;
@@ -35,6 +38,12 @@ export interface Entry {
   versionAfter?: string[];
   /** The secret's name, on secret-put and secret-delete entries (journals before 2026-11-04 carry it in the note). */
   secret?: string;
+  /** On confirm entries: the answer came from --confirm (owner decision 2026-11-05). */
+  confirmation?: "declared";
+  /** On confirm entries: what the prompts asked for. */
+  targets?: string[];
+  /** On secret-put entries: where the value came from. Absent on journals before 2026-11-05. */
+  source?: "typed" | "generated" | "test-file";
   note?: string;
 }
 

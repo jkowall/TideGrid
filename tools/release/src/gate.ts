@@ -3,8 +3,16 @@
  * with no gate. Any other target is live, and a live run needs all of: --live,
  * --go <gate>, a terminal on stdin and stdout, CI unset, and the owner typing
  * the target back. Without --live, a live target only prints its plan.
+ *
+ * An unattended run the owner directs may declare the type-backs up front
+ * with --confirm (owner decision 2026-11-05, item 2). Then nov1 asks nothing:
+ * each prompt is satisfied only when its exact answer was declared, anything
+ * else refuses with nothing run, and both outcomes are journaled as declared.
+ * The terminal and CI rules still hold.
  */
-import { type Deps, out, Refusal } from "./core.ts";
+import { type Declared, type Deps, out, Refusal } from "./core.ts";
+import { record } from "./journal.ts";
+import { hasSecretShape } from "./redact.ts";
 
 export type TargetKind = "local" | "live";
 
@@ -71,6 +79,10 @@ export async function liveGate(deps: Deps, opts: LiveOptions, spec: GateSpec): P
   }
   out(deps, `LIVE (gate ${opts.go}): ${spec.action}`);
   if (spec.readOnly) return opts.go;
+  if (deps.declared) {
+    declaredCheck(deps, deps.declared, opts.go, spec.confirm, spec.action);
+    return opts.go;
+  }
   for (const expected of spec.confirm) {
     const typed = (await deps.prompt(`Type ${expected} to continue, anything else stops: `)).trim();
     if (typed !== expected)
@@ -79,7 +91,89 @@ export async function liveGate(deps: Deps, opts: LiveOptions, spec: GateSpec): P
   return opts.go;
 }
 
-/** Ask a yes or no question; only an exact "yes" goes ahead. */
-export async function confirmYes(deps: Deps, question: string): Promise<boolean> {
+/**
+ * The yes/no attestations nov1 cannot check itself. Under --confirm each is
+ * answered only by declaring `yes:<id>` (owner selection 2026-11-05).
+ */
+export const yesQuestions = {
+  "db-at-tree": "the database is already at the tree's last migration (first API release)",
+  "feature-off": "the feature is already off, or not needed, before a rollback",
+} as const;
+
+export type YesQuestion = keyof typeof yesQuestions;
+
+/**
+ * Commands whose own wrangler step asks questions --confirm cannot answer.
+ * `wrangler rollback` (4.135.0) asks for a message (cli.js:349347), whether to
+ * deploy to 100% (cli.js:349367), and, when secrets changed since the anchor,
+ * whether to go on (cli.js:349392). That last one is a new question the
+ * owner has not ruled on, so a rollback stays typed, and yes:feature-off,
+ * which only a rollback asks, cannot be declared until it is.
+ */
+export const typedOnly =
+  "a rollback is typed by the owner: wrangler asks for a message, a 100% deploy, and a changed-secrets answer that --confirm does not cover";
+
+/**
+ * Ask a yes or no question; only an exact "yes" goes ahead. Under --confirm
+ * the question is not asked: it goes ahead only when `yes:<id>` is declared,
+ * and otherwise refuses.
+ */
+export async function confirmYes(deps: Deps, id: YesQuestion, question: string): Promise<boolean> {
+  if (deps.declared) {
+    declaredCheck(deps, deps.declared, undefined, [`yes:${id}`], question);
+    return true;
+  }
   return (await deps.prompt(`${question} Type yes to go ahead: `)).trim() === "yes";
+}
+
+/** Parse --confirm: comma-separated, each entry exactly what the owner would type. */
+export function parseDeclared(raw: string): Declared {
+  const targets = raw.split(",").map((t) => t.trim());
+  if (targets.some((t) => t === ""))
+    throw new Refusal("--confirm has an empty entry; list each target once, comma-separated");
+  for (const t of targets) {
+    if (hasSecretShape(t)) throw new Refusal("a --confirm entry looks like a secret or an id");
+    if (t === "yes:feature-off") throw new Refusal(`--confirm yes:feature-off: ${typedOnly}`);
+    if (t.startsWith("yes:") && !Object.hasOwn(yesQuestions, t.slice(4))) {
+      throw new Refusal(
+        `--confirm ${t} names no question; the questions are ${Object.keys(yesQuestions)
+          .filter((q) => q !== "feature-off")
+          .map((q) => `yes:${q}`)
+          .join(", ")}`,
+      );
+    }
+  }
+  return { targets, used: new Set() };
+}
+
+/**
+ * Satisfy a type-back from the declared targets, or refuse. Journals the
+ * outcome either way, so the journal shows the answer was declared, not typed.
+ */
+export function declaredCheck(
+  deps: Deps,
+  declared: Declared,
+  gate: string | undefined,
+  expected: readonly string[],
+  action: string,
+): void {
+  for (const t of expected) declared.used.add(t);
+  const missing = expected.filter((t) => !declared.targets.includes(t));
+  const entry = {
+    phase: "-",
+    step: "confirm",
+    ...(gate ? { gate } : {}),
+    confirmation: "declared" as const,
+    targets: [...expected],
+  };
+  if (missing.length) {
+    record(deps, { ...entry, result: "refused", note: `not declared: ${missing.join(", ")}` });
+    throw new Refusal(
+      `--confirm does not cover this step; not declared: ${missing
+        .map((t) => (t.startsWith("yes:") ? `${t} (--confirm ${t})` : t))
+        .join(", ")}. Nothing ran`,
+    );
+  }
+  record(deps, { ...entry, result: "answered", note: action });
+  out(deps, `confirmed from --confirm, declared, not typed: ${expected.join(", ")}`);
 }

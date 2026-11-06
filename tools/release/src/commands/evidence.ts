@@ -51,7 +51,7 @@ export function renderEvidence(journal: Journal, trees: TreeCheck[], now: Date):
   lines.push("**Approved SHAs.**");
   for (const a of journal.approved) {
     lines.push(
-      `- ${a.sha} (tree ${a.tree}) under ${a.gate}${a.frozen ? ", the frozen release SHA" : ""}${a.lastMigration ? `, last migration ${a.lastMigration}` : ""}.`,
+      `- ${a.sha} (tree ${a.tree}) under ${a.gate}${a.frozen ? ", the frozen release SHA" : ""}${a.confirmation === "declared" ? ", declared, not typed" : ""}${a.lastMigration ? `, last migration ${a.lastMigration}` : ""}.`,
     );
   }
   lines.push("");

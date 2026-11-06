@@ -21,6 +21,14 @@ export interface ExecOptions {
    * captured for parsing (read-only listings with --json only).
    */
   stdio: "inherit" | "pipe";
+  /**
+   * With stdio inherit only. Absent: stdin is the owner's terminal too.
+   * "null": no stdin, so wrangler treats the run as non-interactive and its
+   * own yes/no prompt takes its fallback (a declared secret delete only).
+   * Bytes: written to the child's stdin and closed (a validated test-mode
+   * secret from a file; never printed, never in argv).
+   */
+  stdin?: "null" | Uint8Array;
 }
 
 export interface ExecResult {
@@ -74,6 +82,19 @@ export interface Deps {
    * inject fixtures, so the suite never depends on what main's configs say.
    */
   configs: () => Configs;
+  /**
+   * The targets an unattended run declared with --confirm (owner decision
+   * 2026-11-05). Absent: every type-back is typed by the owner. Set only by
+   * main(), never under CI.
+   */
+  declared?: Declared;
+}
+
+/** Declared confirmations: what the owner would have typed, given up front. */
+export interface Declared {
+  targets: readonly string[];
+  /** Targets a prompt asked for, to name the ones never asked. */
+  used: Set<string>;
 }
 
 /** A refusal: the command stops and changes nothing. Exit code 3. */
