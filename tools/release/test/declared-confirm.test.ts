@@ -258,7 +258,7 @@ function stripeDeps(o: Parameters<typeof fakeDeps>[0] = {}, entries: Entry[] = [
   return { ...f, sent: () => sent };
 }
 
-const put = (name: string, file?: string, confirm = `tidegrid-api,${name}`) => [
+const putArgs = (name: string, file?: string, confirm = `tidegrid-api,${name}`) => [
   "secrets",
   "stripe",
   "--put",
@@ -287,7 +287,7 @@ describe("secret values from a test-mode file", () => {
   it("puts an sk_test_ key from a 0600 file through wrangler's stdin, then removes the file", async () => {
     const file = secretFile(`${testKey}\n`);
     const { deps, execs, printed, prompts, sent } = stripeDeps();
-    expect(await main(put("STRIPE_SECRET_KEY", file), deps), printed.join("\n")).toBe(0);
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), deps), printed.join("\n")).toBe(0);
     expect(prompts).toEqual([]);
     expect(sent()).toBe(testKey);
     const call = execs.find((e) => e.args.includes("put"));
@@ -313,7 +313,7 @@ describe("secret values from a test-mode file", () => {
     const { deps, prompts, sent } = stripeDeps({
       answers: ["tidegrid-api", "STRIPE_SECRET_KEY"],
     });
-    expect(await main(put("STRIPE_SECRET_KEY", file, ""), deps)).toBe(0);
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file, ""), deps)).toBe(0);
     expect(prompts).toHaveLength(2);
     expect(sent()).toBe(restrictedKey);
   });
@@ -347,7 +347,7 @@ describe("secret values from a test-mode file", () => {
     it(`refuses ${name}, spawns no wrangler, and leaves the file`, async () => {
       const file = make();
       const { deps, execs, printed } = stripeDeps();
-      expect(await main(put(secret, file), deps)).toBe(3);
+      expect(await main(putArgs(secret, file), deps)).toBe(3);
       expect(printed.join("\n")).toMatch(why);
       expect(execs.filter((e) => e.args.includes("wrangler"))).toEqual([]);
       if (file.startsWith("/") && !file.startsWith("/nonexistent"))
@@ -359,7 +359,7 @@ describe("secret values from a test-mode file", () => {
     const file = secretFile(testKey);
     linkSync(file, `${file}-second`);
     const { deps, execs, printed } = stripeDeps();
-    expect(await main(put("STRIPE_SECRET_KEY", file), deps)).toBe(3);
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), deps)).toBe(3);
     expect(printed.join("\n")).toMatch(/hard link/);
     expect(execs.filter((e) => e.args.includes("wrangler"))).toEqual([]);
   });
@@ -371,7 +371,7 @@ describe("secret values from a test-mode file", () => {
     const file = join(top, "notes", "stripe-key");
     writeFileSync(file, testKey, { mode: 0o600 });
     const { deps, execs, printed } = stripeDeps();
-    expect(await main(put("STRIPE_SECRET_KEY", file), deps)).toBe(3);
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), deps)).toBe(3);
     expect(printed.join("\n")).toMatch(/git work tree/);
     expect(execs.filter((e) => e.args.includes("wrangler"))).toEqual([]);
   });
@@ -382,7 +382,7 @@ describe("secret values from a test-mode file", () => {
     writeFileSync(file, testKey, { mode: 0o600 });
     const { deps, execs, printed } = stripeDeps();
     const inRepo = { ...deps, repoRoot: root };
-    expect(await main(put("STRIPE_SECRET_KEY", file), inRepo)).toBe(3);
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), inRepo)).toBe(3);
     expect(printed.join("\n")).toMatch(/outside the repository/);
     expect(execs.filter((e) => e.args.includes("wrangler"))).toEqual([]);
   });
@@ -439,7 +439,7 @@ describe("secret values from a test-mode file", () => {
   for (const argv of [["--from-file="], ["--from-file", ""]]) {
     it(`refuses an empty path (${JSON.stringify(argv)}) before any wrangler call, even unattended`, async () => {
       const { deps, execs, printed, prompts } = stripeDeps();
-      const [first, ...rest] = put("STRIPE_SECRET_KEY");
+      const [first, ...rest] = putArgs("STRIPE_SECRET_KEY");
       const withEmpty = [first as string, ...rest.slice(0, 3), ...argv, ...rest.slice(3)];
       expect(await main(withEmpty, deps)).toBe(3);
       expect(printed.join("\n")).toMatch(/absolute path/);
@@ -460,7 +460,7 @@ describe("secret values from a test-mode file", () => {
         return undefined;
       },
     });
-    expect(await main(put("STRIPE_SECRET_KEY", file), deps)).toBe(1);
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), deps)).toBe(1);
     expect(readFileSync(file, "utf8")).toBe("an unrelated file");
     expect(existsSync(moved)).toBe(true);
     expect(printed.join("\n")).toMatch(/not removed/i);
@@ -472,12 +472,48 @@ describe("secret values from a test-mode file", () => {
     expect(entry?.note).toMatch(/file NOT removed/);
   });
 
+  it("removes the file before the post-put version listing, so a stalled listing cannot leave it", async () => {
+    const file = secretFile(testKey);
+    let put = false;
+    let presentAtListing: boolean | undefined;
+    const { deps } = stripeDeps({
+      exec: (c) => {
+        if (c.args.includes("put")) put = true;
+        else if (put && c.args.includes("deployments")) presentAtListing = existsSync(file);
+        return undefined;
+      },
+    });
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), deps)).toBe(0);
+    expect(presentAtListing).toBe(false);
+  });
+
+  it("does not report removal when a hard link was made during the put", async () => {
+    const file = secretFile(testKey);
+    const second = `${file}-second`;
+    const { deps, printed } = stripeDeps({
+      exec: (c) => {
+        if (c.args.includes("put")) linkSync(file, second);
+        return undefined;
+      },
+    });
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), deps)).toBe(1);
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(second)).toBe(true);
+    expect(printed.join("\n")).toMatch(/hard link/);
+    expect(printed.join("\n")).not.toMatch(/^removed /m);
+    expect(
+      loadJournal(deps)
+        .entries.filter((e) => e.step === "secret-put")
+        .at(-1)?.note,
+    ).toMatch(/NOT fully removed/);
+  });
+
   it("keeps the file when wrangler fails, and says so", async () => {
     const file = secretFile(testKey);
     const { deps, printed } = stripeDeps({
       exec: (c) => (c.args.includes("put") ? { code: 1, stdout: "" } : undefined),
     });
-    expect(await main(put("STRIPE_SECRET_KEY", file), deps)).toBe(1);
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), deps)).toBe(1);
     expect(existsSync(file)).toBe(true);
     expect(printed.join("\n")).toMatch(/file kept/);
     expect(
@@ -489,7 +525,7 @@ describe("secret values from a test-mode file", () => {
 
   it("refuses a declared put without --from-file: nobody would answer wrangler's prompt", async () => {
     const { deps, execs, printed } = stripeDeps();
-    expect(await main(put("STRIPE_SECRET_KEY"), deps)).toBe(3);
+    expect(await main(putArgs("STRIPE_SECRET_KEY"), deps)).toBe(3);
     expect(printed.join("\n")).toMatch(/--from-file/);
     expect(execs.filter((e) => e.args.includes("wrangler"))).toEqual([]);
   });
@@ -501,7 +537,7 @@ describe("a webhook secret from a file is paired with a test key", () => {
   it("puts whsec_ when the shell's key is a test key and the journal shows a test-file key put in this phase", async () => {
     const file = secretFile(whsec);
     const { deps, printed, sent } = stripeDeps({ env }, [keyPut("test-file")]);
-    expect(await main(put("STRIPE_WEBHOOK_SECRET", file), deps), printed.join("\n")).toBe(0);
+    expect(await main(putArgs("STRIPE_WEBHOOK_SECRET", file), deps), printed.join("\n")).toBe(0);
     expect(sent()).toBe(whsec);
     expect(existsSync(file)).toBe(false);
   });
@@ -555,7 +591,7 @@ describe("a webhook secret from a file is paired with a test key", () => {
     it(`refuses with ${name}`, async () => {
       const file = secretFile(whsec);
       const { deps, execs, printed } = stripeDeps(o, entries);
-      expect(await main(put("STRIPE_WEBHOOK_SECRET", file), deps)).toBe(3);
+      expect(await main(putArgs("STRIPE_WEBHOOK_SECRET", file), deps)).toBe(3);
       expect(printed.join("\n")).toMatch(why);
       expect(execs.filter((e) => e.args.includes("wrangler") && e.args.includes("put"))).toEqual(
         [],
@@ -567,7 +603,7 @@ describe("a webhook secret from a file is paired with a test key", () => {
   it("refuses a malformed webhook secret", async () => {
     const file = secretFile("whsec_short");
     const { deps } = stripeDeps({ env }, [keyPut("test-file")]);
-    expect(await main(put("STRIPE_WEBHOOK_SECRET", file), deps)).toBe(3);
+    expect(await main(putArgs("STRIPE_WEBHOOK_SECRET", file), deps)).toBe(3);
   });
 });
 

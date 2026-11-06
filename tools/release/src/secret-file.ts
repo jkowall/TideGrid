@@ -203,16 +203,21 @@ function assertPairedKey(journal: Journal, phase: Phase): void {
 /**
  * Remove the file only if the path still names the file that was checked
  * and read: a regular file, not a symlink, same device and inode. Anything
- * else is left in place. True when it removed the file.
+ * else is left in place ("other"). A hard link made since the read keeps the
+ * secret at a name nov1 does not know: this name is removed, but the result
+ * is "linked", never "removed".
  */
-export function removeCheckedFile(path: string, identity: FileIdentity): boolean {
+export function removeCheckedFile(
+  path: string,
+  identity: FileIdentity,
+): "removed" | "linked" | "other" {
   try {
     const st = lstatSync(path);
-    if (!st.isFile() || st.dev !== identity.dev || st.ino !== identity.ino) return false;
+    if (!st.isFile() || st.dev !== identity.dev || st.ino !== identity.ino) return "other";
     unlinkSync(path);
-    return true;
+    return st.nlink === 1 ? "removed" : "linked";
   } catch {
-    return false;
+    return "other";
   }
 }
 
