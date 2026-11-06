@@ -368,7 +368,7 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 
 | Input | Phase or gate | Needed by | Status |
 |---|---|---|---|
-| D1, D3 to D9, D11, D15, D16 answers | each prompt | Nov 1 | D1 answered by the owner before the run; D4 applied as (c) after the owner answered "unknown"; the rest applied on 2026-11-04 and ratified on 2026-11-05, see the [decision register](../v2/06-decision-register.md#2026-11-05-nov-1-run-owner-ratification-of-the-coordinators-readings) |
+| D1, D3 to D9, D11, D15, D16 answers | each prompt | Nov 1 | D1 applied as (a), its use for this run ratified with item 1; D4 applied as (c) after the owner answered "unknown"; D6 not reached (P7 not run); D3, D5, D7 to D9, D11, D15, and D16 applied on 2026-11-04 and ratified on 2026-11-05, see the [decision register](../v2/06-decision-register.md#2026-11-05-nov-1-run-owner-ratification-of-the-coordinators-readings) |
 | D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | pending; approve again on main (D2) |
 | Neon allowance reset, with its UTC time | P1 | Nov 1 | unknown |
 | Free-plan history window and branch limits | P2.2 | Nov 1 | unknown |
