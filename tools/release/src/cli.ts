@@ -31,6 +31,7 @@ import { smoke } from "./commands/smoke.ts";
 import { stripeSmoke } from "./commands/stripe-smoke.ts";
 import { type Deps, Failure, out, Refusal, type SqlClient } from "./core.ts";
 import { DeployedGateRefusal } from "./deployed-gate.ts";
+import { parseDeclared } from "./gate.ts";
 import { nodeLocalFetch } from "./http.ts";
 import { loadConfigs } from "./phase.ts";
 import { redact } from "./redact.ts";
@@ -56,7 +57,7 @@ export const usage = `nov1 <command> [options]   (dry run unless --live on a liv
   preflight [--phase pN] [--offline | --network --go A0] [--allow-branch] [--skip-build]
   db status|backup|migrate|seed|outbox-summary [--url-env NEON_DATABASE_URL] [--d14 a|b] --live --go A1
   db platform <slug> [--url-env NAME] --live --go A10
-  secrets preview|email|stripe|saas [--list | --put NAME | --generate NAME | --delete NAME] --phase pN --live --go <gate>
+  secrets preview|email|stripe|saas [--list | --put NAME [--from-file <path>] | --generate NAME | --delete NAME] --phase pN --live --go <gate>
   release api|console|guest --phase pN [--rollback [--to <version id>] | --verify] [--kill-switch] [--again] --live --go <gate>
   smoke --profile local|preview --base <api> --hosts h1,h2 [--build <id>] [--live --go A0]
   last-seat --profile local|preview --api <api> --hosts h1,h2 [--live --go A5]
@@ -67,6 +68,14 @@ export const usage = `nov1 <command> [options]   (dry run unless --live on a liv
   hostname-disable <slug> <hostname> [--url-env NAME] --live --go A18
   approve-sha <sha> --go <gate> | --frozen
   evidence [--ci <deployed sha>=<merge sha>,...] [--out <file>.md]
+
+  Any command: --confirm <target>[,<target>...] answers the type-backs from this
+  list instead of the keyboard (an unattended run the owner directs; never CI;
+  a terminal is still required). Each entry is exactly what would be typed:
+  a Worker name, a host, a secret name, a SHA's first 12, or yes:db-at-tree.
+  Anything not declared refuses. A rollback stays typed.
+  secrets <set> --put NAME --from-file <path>: a Stripe test-mode value from a
+  0600 file outside the repository, removed after a done put.
 `;
 
 function sqlClient(url: string): SqlClient {
@@ -86,11 +95,23 @@ export function realDeps(): Deps {
   return {
     exec: (cmd, args, options) =>
       new Promise((done, fail) => {
+        if (options.stdin !== undefined && options.stdio === "pipe")
+          throw new Error("exec: stdin is for stdio inherit only");
         const child = spawn(cmd, [...args], {
           cwd: options.cwd ?? repoRoot,
           env: options.env as NodeJS.ProcessEnv,
-          stdio: options.stdio === "inherit" ? "inherit" : ["ignore", "pipe", "inherit"],
+          stdio:
+            options.stdio === "pipe"
+              ? ["ignore", "pipe", "inherit"]
+              : options.stdin === undefined
+                ? "inherit"
+                : [options.stdin === "null" ? "ignore" : "pipe", "inherit", "inherit"],
         });
+        if (options.stdin instanceof Uint8Array) {
+          // A child that exits before reading must not crash nov1 with EPIPE.
+          child.stdin?.on("error", () => {});
+          child.stdin?.end(options.stdin);
+        }
         let stdout = "";
         child.stdout?.on("data", (d: Buffer) => {
           stdout += d.toString("utf8");
@@ -137,7 +158,22 @@ export async function main(argv: readonly string[], deps: Deps): Promise<number>
     return 2;
   }
   try {
-    return await command(deps, parseArgs(rest));
+    const args = parseArgs(rest);
+    const declared = args.flags.get("confirm");
+    if (declared === undefined) return await command(deps, args);
+    // Declared confirmations (owner decision 2026-11-05): never in CI, and
+    // taken out of the command's own flags so each command needs no change.
+    if (deps.env.CI)
+      throw new Refusal(
+        "CI is set: --confirm is for an unattended run the owner directs, never CI",
+      );
+    args.flags.delete("confirm");
+    const withDeclared: Deps = { ...deps, declared: parseDeclared(String(declared)) };
+    const code = await command(withDeclared, args);
+    const d = withDeclared.declared as NonNullable<Deps["declared"]>;
+    const unused = d.targets.filter((t) => !d.used.has(t));
+    if (unused.length) out(deps, `note: declared but not asked: ${unused.join(", ")}`);
+    return code;
   } catch (err) {
     if (err instanceof Refusal || err instanceof DeployedGateRefusal) {
       out(deps, `REFUSED: ${err.message}`);

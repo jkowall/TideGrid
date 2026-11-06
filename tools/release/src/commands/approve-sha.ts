@@ -9,6 +9,7 @@
 import { type Args, flag, onlyFlags } from "../args.ts";
 import { type Deps, out, Refusal } from "../core.ts";
 import { childEnv } from "../env.ts";
+import { declaredCheck } from "../gate.ts";
 import { git } from "../git.ts";
 import { loadJournal, saveJournal } from "../journal.ts";
 import { approvalGatePhase } from "../phase.ts";
@@ -49,10 +50,15 @@ export async function approveSha(deps: Deps, args: Args): Promise<number> {
     .filter((f) => f.endsWith(".sql"))
     .sort()
     .at(-1);
-  const typed = (
-    await deps.prompt(`Type the first 12 characters of ${sha} to approve it under ${gate}: `)
-  ).trim();
-  if (typed !== sha.slice(0, 12)) throw new Refusal("typed SHA did not match; nothing recorded");
+  if (deps.declared) {
+    // Declared, not typed (owner decision 2026-11-05): the run named these 12 up front.
+    declaredCheck(deps, deps.declared, gate, [sha.slice(0, 12)], `approve ${sha} under ${gate}`);
+  } else {
+    const typed = (
+      await deps.prompt(`Type the first 12 characters of ${sha} to approve it under ${gate}: `)
+    ).trim();
+    if (typed !== sha.slice(0, 12)) throw new Refusal("typed SHA did not match; nothing recorded");
+  }
   const journal = loadJournal(deps);
   // A non-frozen P0.1 approval counts nowhere, so --frozen must still record
   // the freeze for that SHA; the earlier entry stays as the audit trail.
@@ -73,6 +79,7 @@ export async function approveSha(deps: Deps, args: Args): Promise<number> {
     at: deps.now().toISOString(),
     ...(frozen ? { frozen: true } : {}),
     ...(lastMigration ? { lastMigration } : {}),
+    ...(deps.declared ? { confirmation: "declared" as const } : {}),
   });
   saveJournal(deps, journal);
   const counts =

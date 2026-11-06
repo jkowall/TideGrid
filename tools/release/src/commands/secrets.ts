@@ -3,17 +3,28 @@
  *
  * Secret values never pass through nov1: `wrangler secret put NAME` reads the
  * value from the owner's terminal, or from `openssl rand -hex 32` piped inside
- * a shell nov1 starts with no secret in its argv. `wrangler secret list`
+ * a shell nov1 starts with no secret in its argv. The one exception is
+ * --from-file (owner decision 2026-11-05, item 3): a Stripe test-mode value
+ * from a 0600 file outside the repository, checked by readTestSecret, written
+ * to wrangler's stdin, zeroed, and the file removed after a done put.
+ *
+ * Under --confirm (declared, not typed) a put needs --from-file, since nobody
+ * would answer wrangler's value prompt; a delete gives wrangler no stdin, so
+ * its own "permanently delete" prompt takes its non-interactive yes (wrangler
+ * 4.135.0 confirm2, cli.js:133743) for the one name nov1 checked was declared.
+ * `wrangler secret list`
  * (names only) is the verification. Each put or delete deploys the running
  * code (cli.js:299145), so it is journaled with the version ids before and
  * after. It is not a rollback anchor: --rollback undoes releases only.
  */
+import { unlinkSync } from "node:fs";
 import { type Args, flag, onlyFlags } from "../args.ts";
 import { type Deps, Failure, out, type Plan, printPlan, Refusal } from "../core.ts";
 import { liveGate } from "../gate.ts";
 import { assertReleasable } from "../git.ts";
 import { type Journal, loadJournal, record } from "../journal.ts";
 import { type Phase, parsePhase, phaseGuard, phaseIndex } from "../phase.ts";
+import { assertFileName, readTestSecret } from "../secret-file.ts";
 import {
   deployedVersions,
   onTerminal,
@@ -99,7 +110,8 @@ export function secretsPlan(set: SecretSet): Plan {
     command: `secrets ${set}`,
     target: workers.api.name,
     notes: [
-      "Values are typed by the owner at wrangler's prompt, or generated and piped in the owner's terminal. Never argv, --var, a file, or stdout.",
+      "Values are typed by the owner at wrangler's prompt, or generated and piped in the owner's terminal. Never argv, --var, or stdout.",
+      "A file only with --from-file, and only for a Stripe test-mode value: an sk_test_/rk_test_ STRIPE_SECRET_KEY, or a whsec_ STRIPE_WEBHOOK_SECRET paired with one. 0600, outside the repository, removed after a done put. Live keys are always typed by the owner.",
     ],
     steps: [
       {
@@ -137,7 +149,7 @@ export function secretsPlan(set: SecretSet): Plan {
 }
 
 export async function secrets(deps: Deps, args: Args): Promise<number> {
-  onlyFlags(args, ["live", "go", "put", "generate", "delete", "list", "phase"]);
+  onlyFlags(args, ["live", "go", "put", "generate", "delete", "list", "phase", "from-file"]);
   const set = parseSet(args.positional[0]);
   const s = secretSets[set];
   const put = flag(args, "put");
@@ -156,6 +168,15 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
   }
   if (generate !== undefined && !generatable.includes(generate)) {
     throw new Refusal(`${generate} is typed by the owner; use --put`);
+  }
+  const fromFile = flag(args, "from-file");
+  if (fromFile !== undefined) {
+    if (put === undefined) throw new Refusal("--from-file goes with --put only");
+    assertFileName(put);
+  } else if (put !== undefined && deps.declared) {
+    throw new Refusal(
+      "under --confirm a put needs --from-file: nobody would answer wrangler's value prompt",
+    );
   }
   // The phase the day is in, not the set's home phase: a later phase's
   // config may already be merged (review F2). Required for any change.
@@ -219,17 +240,57 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
     );
   }
 
-  const before = await deployedVersions(deps, "api");
+  // Every refusal comes before the first wrangler call, the version listing included.
+  const value = fromFile ? readTestSecret(deps, name, fromFile, journal, phase) : undefined;
+
+  const source = generate ? "generated" : fromFile ? "test-file" : del ? undefined : "typed";
   let code: number;
-  if (generate) {
-    // The value goes from openssl straight into wrangler's stdin; nov1 never holds it.
-    code = await onTerminal(deps, "sh", ["-c", generateCommand(generate)], {
-      cwd: `${deps.repoRoot}/apps/api-worker`,
+  let before: string[] = [];
+  try {
+    before = await deployedVersions(deps, "api");
+    // Journaled before wrangler runs, so an interrupted change still shows
+    // (the webhook pairing rule reads it).
+    record(deps, {
+      phase,
+      step: del ? "secret-delete" : "secret-put",
+      gate,
+      worker: "api",
+      result: "started",
+      versionBefore: before,
+      secret: name,
+      ...(source ? { source } : {}),
     });
-  } else {
-    code = await wranglerOnTerminal(deps, "api", ["secret", del ? "delete" : "put", name]);
+    if (generate) {
+      // The value goes from openssl straight into wrangler's stdin; nov1 never holds it.
+      code = await onTerminal(deps, "sh", ["-c", generateCommand(generate)], {
+        cwd: `${deps.repoRoot}/apps/api-worker`,
+      });
+    } else if (value) {
+      code = await wranglerOnTerminal(deps, "api", ["secret", "put", name], value);
+    } else if (del && deps.declared) {
+      code = await wranglerOnTerminal(deps, "api", ["secret", "delete", name], "null");
+    } else {
+      code = await wranglerOnTerminal(deps, "api", ["secret", del ? "delete" : "put", name]);
+    }
+  } finally {
+    value?.fill(0);
   }
   const after = await deployedVersions(deps, "api").catch(() => [] as string[]);
+  let fileNote = "";
+  let fileLeft = false;
+  if (fromFile) {
+    if (code === 0) {
+      try {
+        unlinkSync(fromFile);
+        fileNote = "; value from a test-mode file, file removed";
+      } catch {
+        fileLeft = true;
+        fileNote = "; value from a test-mode file, file NOT removed";
+      }
+    } else {
+      fileNote = "; value from a test-mode file, file kept for a retry";
+    }
+  }
   record(deps, {
     phase,
     step: del ? "secret-delete" : "secret-put",
@@ -239,13 +300,21 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
     versionBefore: before,
     versionAfter: after,
     secret: name,
-    note: `${name}; journaled, not a rollback anchor`,
+    ...(source ? { source } : {}),
+    note: `${name}; journaled, not a rollback anchor${fileNote}`,
   });
-  if (code !== 0)
+  if (code !== 0) {
+    if (fromFile) out(deps, `secret file kept for a retry: ${fromFile}`);
     throw new Failure(`wrangler secret ${del ? "delete" : "put"} ${name} exited ${code}`);
+  }
   out(
     deps,
     `${name} ${del ? "deleted" : "set"}; live version now ${after.join(", ")} (journaled; not a rollback anchor, --rollback undoes releases only)`,
   );
+  if (fileLeft) {
+    out(deps, `WARN the secret is set, but nov1 could not remove ${fromFile}; remove it now`);
+    return 1;
+  }
+  if (fromFile) out(deps, `removed ${fromFile}`);
   return 0;
 }
