@@ -49,19 +49,21 @@ jobs:
         run: |
           got=$(git rev-parse HEAD)
           echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$WANT" ]; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A blank input tests the checked-out commit, under the same rules.
+            want=${WANT:-$got}
             if [ "$GITHUB_REF" != refs/heads/main ]; then
               echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
             fi
-            if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+            if ! printf '%s' "$want" | grep -Eqx '[0-9a-f]{40}'; then
               echo "::error::give the full 40-character SHA"; exit 1
             fi
-            if [ "$got" != "$WANT" ]; then
-              echo "::error::asked for $WANT but checked out $got"; exit 1
+            if [ "$got" != "$want" ]; then
+              echo "::error::asked for $want but checked out $got"; exit 1
             fi
             git fetch --no-tags --quiet --unshallow origin main
-            if ! git merge-base --is-ancestor "$WANT" FETCH_HEAD; then
-              echo "::error::$WANT is not on main"; exit 1
+            if ! git merge-base --is-ancestor "$want" FETCH_HEAD; then
+              echo "::error::$want is not on main"; exit 1
             fi
           fi
       - uses: pnpm/action-setup@v4
@@ -108,19 +110,21 @@ jobs:
         run: |
           got=$(git rev-parse HEAD)
           echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$WANT" ]; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A blank input tests the checked-out commit, under the same rules.
+            want=${WANT:-$got}
             if [ "$GITHUB_REF" != refs/heads/main ]; then
               echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
             fi
-            if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+            if ! printf '%s' "$want" | grep -Eqx '[0-9a-f]{40}'; then
               echo "::error::give the full 40-character SHA"; exit 1
             fi
-            if [ "$got" != "$WANT" ]; then
-              echo "::error::asked for $WANT but checked out $got"; exit 1
+            if [ "$got" != "$want" ]; then
+              echo "::error::asked for $want but checked out $got"; exit 1
             fi
             git fetch --no-tags --quiet --unshallow origin main
-            if ! git merge-base --is-ancestor "$WANT" FETCH_HEAD; then
-              echo "::error::$WANT is not on main"; exit 1
+            if ! git merge-base --is-ancestor "$want" FETCH_HEAD; then
+              echo "::error::$want is not on main"; exit 1
             fi
           fi
       - uses: pnpm/action-setup@v4
@@ -168,19 +172,21 @@ jobs:
         run: |
           got=$(git rev-parse HEAD)
           echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$WANT" ]; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A blank input tests the checked-out commit, under the same rules.
+            want=${WANT:-$got}
             if [ "$GITHUB_REF" != refs/heads/main ]; then
               echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
             fi
-            if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+            if ! printf '%s' "$want" | grep -Eqx '[0-9a-f]{40}'; then
               echo "::error::give the full 40-character SHA"; exit 1
             fi
-            if [ "$got" != "$WANT" ]; then
-              echo "::error::asked for $WANT but checked out $got"; exit 1
+            if [ "$got" != "$want" ]; then
+              echo "::error::asked for $want but checked out $got"; exit 1
             fi
             git fetch --no-tags --quiet --unshallow origin main
-            if ! git merge-base --is-ancestor "$WANT" FETCH_HEAD; then
-              echo "::error::$WANT is not on main"; exit 1
+            if ! git merge-base --is-ancestor "$want" FETCH_HEAD; then
+              echo "::error::$want is not on main"; exit 1
             fi
           fi
       - uses: pnpm/action-setup@v4
@@ -265,19 +271,21 @@ jobs:
         run: |
           got=$(git rev-parse HEAD)
           echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$WANT" ]; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A blank input tests the checked-out commit, under the same rules.
+            want=${WANT:-$got}
             if [ "$GITHUB_REF" != refs/heads/main ]; then
               echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
             fi
-            if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+            if ! printf '%s' "$want" | grep -Eqx '[0-9a-f]{40}'; then
               echo "::error::give the full 40-character SHA"; exit 1
             fi
-            if [ "$got" != "$WANT" ]; then
-              echo "::error::asked for $WANT but checked out $got"; exit 1
+            if [ "$got" != "$want" ]; then
+              echo "::error::asked for $want but checked out $got"; exit 1
             fi
             git fetch --no-tags --quiet --unshallow origin main
-            if ! git merge-base --is-ancestor "$WANT" FETCH_HEAD; then
-              echo "::error::$WANT is not on main"; exit 1
+            if ! git merge-base --is-ancestor "$want" FETCH_HEAD; then
+              echo "::error::$want is not on main"; exit 1
             fi
           fi
       - uses: pnpm/action-setup@v4
