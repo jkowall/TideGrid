@@ -267,7 +267,7 @@ G2.16-live checklist (12:206-212) on Nov 1:
 | `E_DELIVERY_FAILED` to Rejected with a specific code | Not taken: a code change. Record any observed failure code |
 | `messageId` versus `payload.messageId` | Recorded in P12, from the A9 send |
 | CR or LF probe in the display name and subject | Not taken by default: it needs a send outside the adapter, a separate owner go |
-| Cron `accountFault` log and alert | Not shown: blocked on #26 (`scheduled.ts`) |
+| Cron `accountFault` log and alert | Not shown: blocked on #26 (`scheduled.ts`). Update, 2026-11-07: #26 (`b6d0247`) is in every SHA released from `e111043` on, so the cron logs `tidegrid.email_sweep.account_fault` (`apps/api-worker/src/scheduled.ts`). The alert is not set up, and with P7 not run the field is not exercised |
 | The after-commit claim window | Recorded in P12: whether the step 3 confirmation left after commit or through the cron, from `outbox-summary` timing |
 | An account-level stop as a page | Not taken: the owner watches the dashboard during P7. A follow-up |
 
@@ -369,7 +369,7 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 | Input | Phase or gate | Needed by | Status |
 |---|---|---|---|
 | D1, D3 to D9, D11, D15, D16 answers | each prompt | Nov 1 | D1 applied as (a), its use for this run ratified with item 1; D4 applied as (c) after the owner answered "unknown"; D6 pending, the owner's call at the top of P7, which was not run; D3, D5, D7 to D9, D11, D15, and D16 applied on 2026-11-04 and ratified on 2026-11-05, see the [decision register](../v2/06-decision-register.md#2026-11-05-nov-1-run-owner-ratification-of-the-coordinators-readings) |
-| D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | pending; approve again on main (D2) |
+| D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | settled by the run: #26 (`b6d0247`) is an ancestor of `e111043` and of every later released SHA (`git merge-base --is-ancestor`, checked 2026-11-07) |
 | Neon allowance reset, with its UTC time | P1 | Nov 1 | unknown |
 | Free-plan history window and branch limits | P2.2 | Nov 1 | unknown |
 | `NEON_DATABASE_URL`, `NEON_API_KEY`, `NEON_PROJECT_ID` in the owner's shell | P2 | Nov 1 | in the env file (not read) |

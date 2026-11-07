@@ -221,7 +221,7 @@ The owner decided the two questions the hardening goal left open (standing goal 
 
 ### Pending owner confirmation: Nov 1 runbook (coordinator defaults, 2026-10-28)
 
-**Status:** Coordinator defaults for the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md), standing goal item 6, pending owner confirmation. The runbook is prepared and dry-run only. Every live step on Nov 1 is the owner's own, after a go given at the time, under the external-action rule below.
+**Status:** Coordinator defaults for the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md), standing goal item 6, pending owner confirmation. The runbook is prepared and dry-run only. Update, 2026-11-07: the runbook ran from 2026-11-04 to 2026-11-05, and the owner ratified the run-time readings for that run on 2026-11-05 (see the [ratification entry](#2026-11-05-nov-1-run-owner-ratification-of-the-coordinators-readings)). The build-time defaults below were not put to the owner. Every live step on Nov 1 is the owner's own, after a go given at the time, under the external-action rule below.
 
 Build-time defaults, applied to the prepared scripts:
 

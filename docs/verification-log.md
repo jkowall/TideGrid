@@ -2,6 +2,18 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-07
+
+### Step 9 for the live API dd30fc8, November 7, 2026
+
+This records demo acceptance step 9 for the API's live SHA, `dd30fc8` (the merge of pull request 71), released on November 6 as `4a40fede`. It uses the same tree equality method (D10(a)) as the November 4 entry below. It was written from git and the GitHub Actions API, with no access to the `nov1` journal and no live call.
+
+- **The pull request run.** [Run 42141157514](https://github.com/jkowall/TideGrid/actions/runs/42141157514), event `pull_request`, head `9603d86`, completed 2026-11-06 at 01:07 UTC. All four jobs succeeded: checks, integration, browser, and console-browser.
+- **The tree.** The run's test merge commit is `412387b0587310673da1e2695c0d4ae06d14ef5e`, with parents `818a4ef` and `9603d86`, the same parents as `dd30fc8`. `git rev-parse` gives tree `cb0fef55158bbc024d6c2b0b5de0dc0ddd1d5318` for both.
+- **The push run on `main`.** [Run 42142133952](https://github.com/jkowall/TideGrid/actions/runs/42142133952) ran the `checks` job only, from 01:11:25 to 01:14:46 UTC, and passed. The entry below puts the release between 01:11 and 01:12, so `dd30fc8` was released before its push run finished, as five SHAs were on November 4.
+- **Step 9 now.** Shown for four of the seven SHAs released since November 4: `e111043`, `cca8880`, and `c62acb7` (below), and `dd30fc8`. Still not shown: `91a4faa` (pull request 59, the guest Worker's live release), `1f39feb` (62), and `9086a18` (60). The live Workers are the API at `dd30fc8`, shown; the console at `e111043`, shown; and the guest site at `91a4faa`, not shown.
+- **Neon.** No consumption read since November 5 at 02:32 UTC is recorded. The `*/15` cron runs again since November 6, so a current read is the owner's to take.
+
 ## 2026-11-06
 
 ### Payments and the cron back on, November 6, 2026
