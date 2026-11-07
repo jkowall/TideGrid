@@ -42,6 +42,7 @@ import {
   StaffTestPaymentResponse,
   TripOfferResponse,
   TripRosterResponse,
+  unguardBookingReference,
 } from "@tidegrid/contracts";
 import { createDb, inTenantTransaction } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
@@ -551,7 +552,9 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
         ]);
         const at = (r: string[] | undefined, column: string) => r?.[header.indexOf(column)];
         for (const m of made.filter((x) => x.tripId === tripId)) {
-          const line = rows.find((r) => at(r, "Booking reference") === m.reference);
+          const line = rows.find(
+            (r) => unguardBookingReference(at(r, "Booking reference") ?? "") === m.reference,
+          );
           expect(at(line, "Source")).toBe("staff_assisted");
         }
         expect(at(rows.at(-1), "Row")).toBe("Total");

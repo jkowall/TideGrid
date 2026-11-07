@@ -25,6 +25,7 @@ import {
   bookingDayExportColumns,
   bookingDayExportGuestColumns,
   type Quote,
+  unguardBookingReference,
 } from "@tidegrid/contracts";
 import { createDb, inTenantTransaction } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
@@ -944,7 +945,13 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
     it("has one row per booking with its order's money and a total row equal to the ledger", async () => {
       const rows = parseCsv((await exported(A.owner)).text);
       const header = rows[0] ?? [];
-      const col = (r: string[] | undefined, name: string) => r?.[header.indexOf(name)];
+      // A number-shaped reference is written with a leading apostrophe; read it back whole.
+      const col = (r: string[] | undefined, name: string) => {
+        const cell = r?.[header.indexOf(name)];
+        return name === "Booking reference" && cell !== undefined
+          ? unguardBookingReference(cell)
+          : cell;
+      };
       const bookingRows = rows.slice(1, -1);
       const total = rows.at(-1);
       // By departure, then trip, then confirmation: the charter and the shared
@@ -1033,7 +1040,13 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
     it("carries refunds and their states, and leaves a pending refund out of net", async () => {
       const rows = parseCsv((await exported(A.finance, fx.day.d2)).text);
       const header = rows[0] ?? [];
-      const col = (r: string[] | undefined, name: string) => r?.[header.indexOf(name)];
+      // A number-shaped reference is written with a leading apostrophe; read it back whole.
+      const col = (r: string[] | undefined, name: string) => {
+        const cell = r?.[header.indexOf(name)];
+        return name === "Booking reference" && cell !== undefined
+          ? unguardBookingReference(cell)
+          : cell;
+      };
       const byRef = (ref: string) => rows.find((r) => col(r, "Booking reference") === ref);
       const refunded = byRef(fx.refunded.reference);
       expect(col(refunded, "Refund state")).toBe("succeeded");
@@ -1081,7 +1094,11 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
     it("keeps a booker's name from running as a spreadsheet formula", async () => {
       const rows = parseCsv((await exported(A.owner, fx.day.d1)).text);
       const header = rows[0] ?? [];
-      const row = rows.find((r) => r[header.indexOf("Booking reference")] === fx.formula.reference);
+      const row = rows.find(
+        (r) =>
+          unguardBookingReference(r[header.indexOf("Booking reference")] ?? "") ===
+          fx.formula.reference,
+      );
       expect(row?.[header.indexOf("Booker name")]).toBe(`'${people.formula.name}`);
     });
 

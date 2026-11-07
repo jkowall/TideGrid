@@ -155,7 +155,8 @@ export type BookingDayTotalsResponse = z.infer<typeof BookingDayTotalsResponse>;
  * gets the two booker columns after these, and no role gets any other.
  * G2.12d appended Source (direct or staff_assisted) after Generated at, a
  * contract change: a reader that takes columns by position still finds every
- * earlier column where it was.
+ * earlier column where it was. Positions never change; a booking reference a
+ * spreadsheet would read as a number is written with a leading apostrophe.
  */
 export const bookingDayExportColumns = [
   "Row",

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
+import { unguardBookingReference } from "@tidegrid/contracts";
 import { cspViolations, deployed, deployedEnv, openSignedIn, signIn } from "./helpers.ts";
 
 /**
@@ -188,7 +189,9 @@ for (const operator of operators) {
     const [header, ...rows] = parseCsv(readFileSync(file, "utf8"));
     const at = (r: string[] | undefined, column: string) => r?.[(header ?? []).indexOf(column)];
     expect(header).toContain("Source");
-    const line = rows.find((r) => at(r, "Booking reference") === reference);
+    const line = rows.find(
+      (r) => unguardBookingReference(at(r, "Booking reference") ?? "") === reference,
+    );
     expect(at(line, "Source")).toBe("staff_assisted");
 
     expect(violations).toEqual([]);

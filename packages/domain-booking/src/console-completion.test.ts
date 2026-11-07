@@ -1,9 +1,15 @@
-import { bookingDayExportColumns, bookingDayExportGuestColumns } from "@tidegrid/contracts";
+import {
+  bookingDayExportColumns,
+  bookingDayExportGuestColumns,
+  isNumberShapedReference,
+  unguardBookingReference,
+} from "@tidegrid/contracts";
 import { describe, expect, it } from "vitest";
 import {
   csvField,
   csvInstant,
   csvMoney,
+  csvReference,
   csvText,
   dayExportFileName,
   renderCsv,
@@ -11,6 +17,7 @@ import {
 } from "./csv.ts";
 import { type DayReport, type DayReportRow, totalsOf } from "./day-report.ts";
 import { emailFragment, escapeLike, nameWords, referencePrefix, searchFields } from "./search.ts";
+import { newBookingReference } from "./secrets.ts";
 
 /**
  * A minimal RFC 4180 reader, enough to read back what renderCsv writes. It
@@ -112,6 +119,36 @@ describe("CSV fields", () => {
     expect(csvText(input)).toBe(expected);
   });
 
+  it.each(["01234567", "12345678", "12345E67", "00012E34", "12E45678", "1E999999"])(
+    "keeps the reference %s from being read as a number",
+    (ref) => {
+      expect(csvReference(ref)).toBe(`'${ref}`);
+      expect(unguardBookingReference(csvReference(ref))).toBe(ref);
+    },
+  );
+
+  it.each(["2KVK8E6R", "DS00NSQJ", "QKG6ERBF", "0X1A2B3C", "0B101010", "1234567E", "E1234567"])(
+    "leaves the reference %s alone",
+    (ref) => {
+      expect(csvReference(ref)).toBe(ref);
+      expect(unguardBookingReference(ref)).toBe(ref);
+    },
+  );
+
+  it("guards a reference exactly when it is number-shaped, over many references", () => {
+    // Issued references are never number-shaped, so also test shaped ones made from them.
+    for (let i = 0; i < 10_000; i++) {
+      const issued = newBookingReference();
+      const shaped = `${i}`.padStart(8, "0");
+      const withE = `${i}E${i % 97}`;
+      for (const ref of [issued, shaped, withE]) {
+        const cell = csvReference(ref);
+        expect(cell.startsWith("'")).toBe(isNumberShapedReference(ref));
+        expect(unguardBookingReference(cell)).toBe(ref);
+      }
+    }
+  });
+
   it("leaves ordinary text and inner signs alone", () => {
     expect(csvText("Maya Okonkwo-Reyes")).toBe("Maya Okonkwo-Reyes");
     expect(csvText("José Núñez")).toBe("José Núñez");
@@ -211,6 +248,24 @@ describe("a day's export", () => {
     expect(finance[0]).toHaveLength(27);
     for (const rows of [staff, finance]) {
       for (const r of rows) expect(r).toHaveLength(rows[0]?.length ?? 0);
+    }
+  });
+
+  it("writes a number-shaped reference with an apostrophe and changes nothing else", () => {
+    const plain = renderDayExport(day, { name: "Demo Harbor" }, { withBooker: true });
+    const shaped: DayReport = {
+      ...day,
+      rows: day.rows.map((r, i) => (i === 0 ? { ...r, reference: "12345E67" } : r)),
+    };
+    const a = parseCsv(plain);
+    const b = parseCsv(renderDayExport(shaped, { name: "Demo Harbor" }, { withBooker: true }));
+    const column = (a[0] ?? []).indexOf("Booking reference");
+    expect(b[1]?.[column]).toBe("'12345E67");
+    expect(unguardBookingReference(b[1]?.[column] ?? "")).toBe("12345E67");
+    for (let i = 0; i < a.length; i++) {
+      expect(b[i]?.filter((_, c) => c !== column || i !== 1)).toEqual(
+        a[i]?.filter((_, c) => c !== column || i !== 1),
+      );
     }
   });
 

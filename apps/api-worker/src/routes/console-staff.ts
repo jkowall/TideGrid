@@ -180,7 +180,7 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "Export a day's bookings as CSV",
     description:
-      "Every role. One row per booking on trips departing on one local date, with its ledger, then a total row equal to the day's control totals. Stable columns; owners and booking staff also get the booker's name and email, and finance gets the financial columns only. UTF-8 with a byte order mark and CRLF lines; text a person typed is kept from running as a spreadsheet formula. The file name holds the operator's slug and the date only. Each export is recorded in the audit history.",
+      "Every role. One row per booking on trips departing on one local date, with its ledger, then a total row equal to the day's control totals. Stable columns; owners and booking staff also get the booker's name and email, and finance gets the financial columns only. UTF-8 with a byte order mark and CRLF lines; text a person typed is kept from running as a spreadsheet formula, and a booking reference a spreadsheet would read as a number starts with an apostrophe. The file name holds the operator's slug and the date only. Each export is recorded in the audit history.",
     security: staffSecurity,
     request: { params: StaffTenantParams, query: BookingDayQuery },
     responses: {

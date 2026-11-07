@@ -1,3 +1,7 @@
+import {
+  bookingReferencePattern as contractPattern,
+  isNumberShapedReference,
+} from "@tidegrid/contracts";
 import { describe, expect, it } from "vitest";
 import {
   bookingReferencePattern,
@@ -44,5 +48,12 @@ describe("booking references", () => {
       seen.add(ref);
     }
     expect(seen.size).toBe(2000);
+  });
+
+  it("are never ones a spreadsheet would read as a number", () => {
+    expect(contractPattern.source).toBe(bookingReferencePattern.source);
+    for (let i = 0; i < 10_000; i++) {
+      expect(isNumberShapedReference(newBookingReference())).toBe(false);
+    }
   });
 });
