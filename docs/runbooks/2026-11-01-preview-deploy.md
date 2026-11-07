@@ -269,7 +269,7 @@ G2.16-live checklist (12:206-212) on Nov 1:
 | CR or LF probe in the display name and subject | Not taken by default: it needs a send outside the adapter, a separate owner go |
 | Cron `accountFault` log and alert | Not shown: blocked on #26 (`scheduled.ts`). Update, 2026-11-07: the log is in the code. Hardening Part E (pull request 37, `0618f7b`, D-E5 B) added `tidegrid.email_sweep.account_fault` to each email sweep summary in `apps/api-worker/src/scheduled.ts`. Both it and #26 (`b6d0247`) are in `e111043` and every later released SHA. Email is off on the preview, so the cron skips the email sweep (`email_sweep_skipped`) and has not emitted the field; that is read from the code, not from a deployed log. The alert is not set up |
 | The after-commit claim window | Recorded in P12: whether the step 3 confirmation left after commit or through the cron, from `outbox-summary` timing. Update, 2026-11-07: the window now counts from a ready connection, capped at the request's start plus 30 s; the measurement stays open |
-| An account-level stop as a page | Not taken: the owner watches the dashboard during P7. A follow-up |
+| An account-level stop as a page | Not taken: the owner watches the dashboard during P7. A follow-up. Update, 2026-11-07: migration 0015 gives an account fault's attempt back, so an outage no longer drains the queue; the page itself stays a follow-up |
 
 ## P8. Cutover of demo.tidegrid.us (A10, last on the acceptance track)
 

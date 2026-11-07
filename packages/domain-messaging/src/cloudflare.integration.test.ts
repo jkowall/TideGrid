@@ -610,13 +610,21 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
     it("refuses a give-back of two, to failed, on a queued row, too soon, or with a provider's id", async () => {
       const T = await newTenant("rule");
       const id = await enqueue(T, "rule-shapes", addr("a2"));
+      const stamp = async () =>
+        (
+          await admin<{ at: string | null }[]>`
+            select last_attempt_at::text as at from public.email_messages where id = ${id}`
+        )[0]?.at ?? null;
       // Two counted claims, so a decrement of two would not cross zero.
       await claim(id);
+      const first = await stamp();
       await admin`update public.email_messages
                      set state = 'queued', last_error_code = 'provider_rate_limited',
                          next_attempt_at = now() + interval '1 minute'
                    where id = ${id}`;
       await claim(id);
+      const second = await stamp();
+      expect(second).not.toBe(first);
       const code = "provider_quota_exceeded";
       expect(await giveBack(id, { code, by: 2 })).toBe("email_messages_transition");
       expect(await giveBack(id, { code, state: "failed" })).toBe("email_messages_transition");
@@ -625,9 +633,11 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
         await giveBack(id, { code, providerId: "cfh_0000000000000000000000000000000000000000" }),
       ).toBe("email_messages_transition");
       expect(await row(id)).toMatchObject({ state: "sending", attempts: 2 });
-      // A good give-back keeps the time of the claim that still counts.
+      // A good give-back keeps the time of the claim it gave back: the
+      // database never stored the first claim's time once the second came.
       expect(await giveBack(id, { code })).toBeNull();
       expect(await row(id)).toMatchObject({ state: "queued", attempts: 1, last_attempted: true });
+      expect(await stamp()).toBe(second);
       // On a queued row, a decrement is the old rule's refusal.
       expect(await giveBack(id, { code, wait: "20 minutes" })).toBe("email_messages_transition");
       expect(await row(id)).toMatchObject({ state: "queued", attempts: 1 });
@@ -649,20 +659,44 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
       const cf = cloudflare({ timeoutMs: 10_000 });
       const D = await newTenant("dl2");
       const ids = [await enqueue(D, "dl2", addr("dl2")), await enqueue(D, "dl3", addr("dl3"))];
-      // The first check has room for one 10 s send and the 2 s margin; by
-      // the second, 5 s have passed and it has not.
+      // Each read moves the clock 1 s. The first check has room for one
+      // 10 s send and the 2 s margin, and so does the check after its claim;
+      // by the next message's check it has not.
       let now = 1_000_000;
       const report = await deliver(D, cf.provider, {
         deadline: now + 12_500,
         clock: () => {
           const t = now;
-          now += 5_000;
+          now += 1_000;
           return t;
         },
       });
       expect(report).toMatchObject({ claimed: 1, sent: 1, stopped: "deadline" });
       const states = (await Promise.all(ids.map(row))).map((r) => r.state).sort();
       expect(states).toEqual(["queued", "sent"]);
+    });
+
+    it("never calls the provider when the claim itself ran past the time for a send", async () => {
+      const cf = cloudflare({ timeoutMs: 10_000 });
+      const D = await newTenant("dl3");
+      const id = await enqueue(D, "dl-late", addr("dl3"));
+      // The check before the claim passes; the claim then takes 5 s, so a
+      // 10 s send would end past the deadline.
+      const reads = [1_000_000, 1_005_000];
+      const report = await deliver(D, cf.provider, {
+        deadline: 1_000_000 + 12_500,
+        clock: () => reads.shift() ?? 1_010_000,
+      });
+      expect(report).toMatchObject({ claimed: 1, sent: 0, retried: 1, stopped: "deadline" });
+      expect(report.items).toEqual([
+        expect.objectContaining({ messageId: id, outcome: "retry", code: "deadline_reached" }),
+      ]);
+      expect(cf.callsFor(id)).toBe(0);
+      expect(await row(id)).toMatchObject({
+        state: "queued",
+        attempts: 1,
+        last_error_code: "deadline_reached",
+      });
     });
   });
 });

@@ -107,6 +107,17 @@ describe("a booking's email in words (G2.16b)", () => {
         false,
       ),
     ).toBe("Next try [2026-11-04T14:10:00.000Z]. The email service hasn't taken it yet.");
+    const givenBack = message({
+      state: "queued",
+      attempts: 0,
+      sentAt: null,
+      failureCode: "sender_not_verified",
+      nextAttemptAt: null,
+    });
+    expect(whenText(givenBack, when, false)).toBe(
+      "Waiting to try again. The email service hasn't taken it yet.",
+    );
+    expect(whenText(givenBack, when, true)).toBe("Email is off here, so it waits.");
     expect(
       whenText(
         message({

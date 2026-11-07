@@ -56,6 +56,7 @@ export {
 } from "./cloudflare-errors.ts";
 export {
   ACCOUNT_FAULT_RETRY_SECONDS,
+  DEADLINE_REACHED,
   DEFAULT_GUEST_LINK_ORIGIN,
   DEFAULT_LEASE_SECONDS,
   type DeliveryItem,

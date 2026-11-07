@@ -70,11 +70,20 @@ describe.skipIf(!env)("after-commit delivery's window", () => {
     return { tenantId, messageId: done.messageId };
   }
 
-  /** Runs after-commit delivery with the clock reading `readyAfter`, then `claimAt`. */
-  async function deliverWith(tenantId: string, readyAfter: number, claimAt: number) {
+  /**
+   * Runs after-commit delivery. The clock reads the request's start, then
+   * each offset in turn (the ready connection first, then delivery's checks),
+   * then the last offset again.
+   */
+  async function deliverWith(tenantId: string, offsets: number[]) {
     const start = 1_800_000_000_000;
-    const reads = [start, start + readyAfter];
-    const clock = () => reads.shift() ?? start + claimAt;
+    const reads = [start, ...offsets.map((o) => start + o)];
+    const last = start + (offsets.at(-1) ?? 0);
+    let clockReads = 0;
+    const clock = () => {
+      clockReads += 1;
+      return reads.shift() ?? last;
+    };
     const fake = new FakeEmailProvider({ db: runtime.db, environment: "local" });
     let sends = 0;
     // Bounded like the Cloudflare adapter, so each claim reserves 10 s plus the margin.
@@ -89,7 +98,12 @@ describe.skipIf(!env)("after-commit delivery's window", () => {
     };
     const deps: AppDeps = { emailProvider: () => provider, emailClock: clock };
     const pending: Promise<unknown>[] = [];
-    const log = { info: () => {}, error: () => {}, warn: () => {} };
+    const logged: Record<string, unknown>[] = [];
+    const log = {
+      info: (_event: string, attributes: Record<string, unknown>) => void logged.push(attributes),
+      error: () => {},
+      warn: () => {},
+    };
     const c = {
       env: {
         ENVIRONMENT: "local",
@@ -103,7 +117,8 @@ describe.skipIf(!env)("after-commit delivery's window", () => {
     deliverAfterCommit(c as never, deps, tenantId);
     expect(pending).toHaveLength(1);
     await Promise.all(pending);
-    return sends;
+    const summary = logged.find((a) => a["event.name"] === "email_delivery");
+    return { sends, stopped: summary?.["tidegrid.email.stopped"] ?? null, clockReads };
   }
 
   async function stateOf(messageId: string) {
@@ -114,25 +129,44 @@ describe.skipIf(!env)("after-commit delivery's window", () => {
 
   it("sends after a 15 s connect: the window counts from the ready connection", async () => {
     const { tenantId, messageId } = await tenantWithMail("slow-connect");
-    expect(await deliverWith(tenantId, 15_000, 15_000)).toBe(1);
+    // Start, ready, the check before the claim, the check after it, the next check.
+    expect(await deliverWith(tenantId, [15_000, 15_000])).toMatchObject({
+      sends: 1,
+      clockReads: 5,
+    });
     expect(await stateOf(messageId)).toEqual({ state: "sent", attempts: 1 });
   });
 
   it("sends at 10 s after a 5 s connect, which the old 18 s window from the start refused", async () => {
     const { tenantId, messageId } = await tenantWithMail("five-ten");
-    expect(await deliverWith(tenantId, 5_000, 10_000)).toBe(1);
+    expect(await deliverWith(tenantId, [5_000, 10_000])).toMatchObject({ sends: 1 });
     expect(await stateOf(messageId)).toEqual({ state: "sent", attempts: 1 });
   });
 
   it("claims nothing once a send could end past the 30 s budget, and leaves the mail queued", async () => {
     const { tenantId, messageId } = await tenantWithMail("past-budget");
-    expect(await deliverWith(tenantId, 19_000, 19_000)).toBe(0);
+    expect(await deliverWith(tenantId, [19_000, 19_000])).toEqual({
+      sends: 0,
+      stopped: "deadline",
+      clockReads: 3,
+    });
     expect(await stateOf(messageId)).toEqual({ state: "queued", attempts: 0 });
+  });
+
+  it("never starts a send once a slow claim leaves no time for it, and retries it later", async () => {
+    const { tenantId, messageId } = await tenantWithMail("slow-claim");
+    // Ready at 5 s (deadline 23 s); the check before the claim at 5 s passes,
+    // and the claim takes until 14 s, when a 10 s send would end at 24 s.
+    expect(await deliverWith(tenantId, [5_000, 5_000, 14_000])).toMatchObject({
+      sends: 0,
+      stopped: "deadline",
+    });
+    expect(await stateOf(messageId)).toEqual({ state: "queued", attempts: 1 });
   });
 
   it("sends at once on a ready connection", async () => {
     const { tenantId, messageId } = await tenantWithMail("at-once");
-    expect(await deliverWith(tenantId, 0, 0)).toBe(1);
+    expect(await deliverWith(tenantId, [0, 0])).toMatchObject({ sends: 1 });
     expect(await stateOf(messageId)).toEqual({ state: "sent", attempts: 1 });
   });
 });

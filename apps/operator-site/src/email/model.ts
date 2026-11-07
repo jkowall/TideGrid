@@ -66,10 +66,13 @@ export function stateView(
 export const failureCopy: Record<MessageFailureCode, string> = {
   provider_unavailable: "The email service was unavailable. TideGrid tries again on its own.",
   bounced: "The guest's mail server refused it. The address may be wrong.",
-  retries_exhausted: "TideGrid tried six times and the email service never took it.",
+  retries_exhausted:
+    "TideGrid tried six times and the email service never took it, not counting checks during an email service outage.",
   link_host_unmapped:
     "The operator's booking site isn't set up yet, so the email's link had nowhere to go.",
   send_error: "Something went wrong preparing it. TideGrid tries again on its own.",
+  deadline_reached:
+    "There wasn't time to send it with the request. TideGrid tries again on its own.",
   outcome_unknown:
     "The email service did not answer, so TideGrid did not try again, to avoid a second working link. Send it again if the guest did not get it.",
   delivery_failed:
@@ -124,8 +127,11 @@ export function whenText(
 ): string {
   switch (message.state) {
     case "queued":
-      if (message.attempts === 0 && message.failureCode !== null && message.nextAttemptAt) {
-        return `Next try ${when(message.nextAttemptAt)}. The email service hasn't taken it yet.`;
+      if (message.attempts === 0 && message.failureCode !== null) {
+        if (emailOff) return "Email is off here, so it waits.";
+        return message.nextAttemptAt
+          ? `Next try ${when(message.nextAttemptAt)}. The email service hasn't taken it yet.`
+          : "Waiting to try again. The email service hasn't taken it yet.";
       }
       if (message.attempts === 0) {
         return emailOff

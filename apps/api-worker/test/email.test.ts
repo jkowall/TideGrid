@@ -247,10 +247,10 @@ describe("after-commit delivery (G2.16a)", () => {
       const deadline = afterCommitDeadline({ startedAt: s, readyAt: s + ready });
       expect(deadline).toBe(Math.min(s + ready + AFTER_COMMIT_BUDGET_MS, s + WAIT_UNTIL_BUDGET_MS));
       expect(deadline).toBeLessThanOrEqual(s + WAIT_UNTIL_BUDGET_MS);
-      // The last claim happens before deadline - reserve, so its send ends by the deadline.
-      expect(deadline - reserve + CLOUDFLARE_SEND_TIMEOUT_MS).toBeLessThanOrEqual(
-        s + WAIT_UNTIL_BUDGET_MS - 2_000,
-      );
+      // That the send itself ends by the deadline is delivery's to hold: it
+      // checks again after the claim and calls the provider only while a
+      // whole send still fits (the after-commit integration suite covers a
+      // slow claim). Here only the window's bounds are checked.
       // A slower connection never shortens the window.
       expect(deadline).toBeGreaterThanOrEqual(previous);
       previous = deadline;

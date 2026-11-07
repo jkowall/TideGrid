@@ -89,6 +89,12 @@ export const DEFAULT_LEASE_SECONDS = 120;
 export const DEADLINE_MARGIN_MS = 2_000;
 /** Why a message whose outcome nobody knows fails on a provider that does not deduplicate. */
 export const OUTCOME_UNKNOWN = "outcome_unknown";
+/**
+ * A claimed message the run had no time left to send: the claim took long
+ * enough that a send could end past the deadline, so the provider was never
+ * called. It retries as a counted attempt (G2.16-live prep review, 2026-11-07).
+ */
+export const DEADLINE_REACHED = "deadline_reached";
 
 /**
  * Whether a repeat with the same key is safe on this provider: only when it
@@ -524,6 +530,12 @@ async function deliverWithOrigin(
       };
     } else {
       const { row, url } = claimed;
+      // The claim itself takes time. Check again before the provider, so a
+      // send never starts once it could end past the deadline: the bound
+      // holds by construction, whatever the claim cost.
+      const late =
+        options.deadline !== undefined &&
+        clock() + (options.provider.sendTimeoutMs ?? 0) >= options.deadline;
       let result:
         | { kind: "sent"; providerMessageId: string }
         | { kind: "retry"; code: string; giveBack?: boolean }
@@ -532,49 +544,54 @@ async function deliverWithOrigin(
       // Whether the provider was called at all: a throw before it is a known
       // "not sent" on every provider (review note F2).
       let attempted = false;
-      try {
-        const html =
-          row.link_slot && url ? fillLinkSlot(row.html_body, row.link_slot, url) : row.html_body;
-        const text =
-          row.link_slot && url ? fillLinkSlot(row.text_body, row.link_slot, url) : row.text_body;
-        const email = {
-          idempotencyKey: row.id,
-          tenantId,
-          from: { email: options.fromAddress, name: row.from_name },
-          replyTo: row.reply_to,
-          to: { email: row.to_email, name: row.to_name },
-          subject: row.subject,
-          html,
-          text,
-        };
-        attempted = true;
-        const sent = await options.provider.send(email);
-        result = { kind: "sent", providerMessageId: sent.providerMessageId };
-      } catch (error) {
-        const dedupes = providerDeduplicates(options.provider);
-        if (error instanceof EmailProviderRejectedError) {
-          result = { kind: "failed", code: error.code };
-        } else if (error instanceof EmailProviderUnavailableError) {
-          accountFault = error.scope === "account";
-          // Retried with the same key when the provider deduplicates, or when
-          // it said the email was not sent; otherwise never repeated (D1 B).
-          // An account-level fault the provider says took nothing gives its
-          // attempt back (0015); every other retry counts.
-          result =
-            dedupes || error.outcome === "not_sent"
-              ? givesAttemptBack(error)
-                ? { kind: "retry", code: error.code, giveBack: true }
-                : { kind: "retry", code: error.code }
-              : { kind: "failed", code: OUTCOME_UNKNOWN };
-        } else {
-          // Not the provider's answer. Before the call, nothing was sent, so
-          // it retries anywhere; after it, nobody knows, so it retries with
-          // the same key only where a repeat is safe.
-          options.onSendError?.(row.id, error);
-          result =
-            !attempted || dedupes
-              ? { kind: "retry", code: "send_error" }
-              : { kind: "failed", code: OUTCOME_UNKNOWN };
+      if (late) {
+        result = { kind: "retry", code: DEADLINE_REACHED };
+        report.stopped = "deadline";
+      } else {
+        try {
+          const html =
+            row.link_slot && url ? fillLinkSlot(row.html_body, row.link_slot, url) : row.html_body;
+          const text =
+            row.link_slot && url ? fillLinkSlot(row.text_body, row.link_slot, url) : row.text_body;
+          const email = {
+            idempotencyKey: row.id,
+            tenantId,
+            from: { email: options.fromAddress, name: row.from_name },
+            replyTo: row.reply_to,
+            to: { email: row.to_email, name: row.to_name },
+            subject: row.subject,
+            html,
+            text,
+          };
+          attempted = true;
+          const sent = await options.provider.send(email);
+          result = { kind: "sent", providerMessageId: sent.providerMessageId };
+        } catch (error) {
+          const dedupes = providerDeduplicates(options.provider);
+          if (error instanceof EmailProviderRejectedError) {
+            result = { kind: "failed", code: error.code };
+          } else if (error instanceof EmailProviderUnavailableError) {
+            accountFault = error.scope === "account";
+            // Retried with the same key when the provider deduplicates, or when
+            // it said the email was not sent; otherwise never repeated (D1 B).
+            // An account-level fault the provider says took nothing gives its
+            // attempt back (0015); every other retry counts.
+            result =
+              dedupes || error.outcome === "not_sent"
+                ? givesAttemptBack(error)
+                  ? { kind: "retry", code: error.code, giveBack: true }
+                  : { kind: "retry", code: error.code }
+                : { kind: "failed", code: OUTCOME_UNKNOWN };
+          } else {
+            // Not the provider's answer. Before the call, nothing was sent, so
+            // it retries anywhere; after it, nobody knows, so it retries with
+            // the same key only where a repeat is safe.
+            options.onSendError?.(row.id, error);
+            result =
+              !attempted || dedupes
+                ? { kind: "retry", code: "send_error" }
+                : { kind: "failed", code: OUTCOME_UNKNOWN };
+          }
         }
       }
       item = await record(db, ctx, row, result);
@@ -586,8 +603,9 @@ async function deliverWithOrigin(
     else if (item.outcome === "failed") report.failed += 1;
     else if (item.outcome === "canceled") report.canceled += 1;
     else report.superseded += 1;
-    // Every other email would meet the same account-level fault now (D2 B).
-    if (report.stopped === "account_fault") break;
+    // Every other email would meet the same account-level fault now (D2 B),
+    // and a run out of time claims no more.
+    if (report.stopped !== null) break;
   }
   return report;
 }
