@@ -1113,6 +1113,44 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
       expect(row?.[header.indexOf("Booker name")]).toBe(`'${people.formula.name}`);
     });
 
+    it("guards a legacy number-shaped reference in the CSV, and search finds it pasted back", async () => {
+      // New references are never number-shaped (2026-11-07), so one made before
+      // that is set here on the throwaway database, past the reference's
+      // immutability trigger, and restored afterwards.
+      const [target] = await admin<{ id: string; reference: string }[]>`
+        select b.id, b.reference from public.bookings b
+          join public.scheduled_trips t on t.id = b.trip_id
+         where b.tenant_id = ${A.id} and t.local_date = ${fx.day.d0}::date
+         order by b.id limit 1`;
+      if (!target) throw new Error("setup: no booking on the day");
+      const setReference = (reference: string) =>
+        admin.begin(async (tx) => {
+          await tx`set local session_replication_role = replica`;
+          await tx`update public.bookings set reference = ${reference} where id = ${target.id}`;
+        });
+      const legacy = "01234567";
+      await setReference(legacy);
+      try {
+        for (const as of [A.owner, A.finance]) {
+          const rows = parseCsv((await exported(as)).text);
+          const column = (rows[0] ?? []).indexOf("Booking reference");
+          const cells = rows.slice(1, -1).map((r) => r[column]);
+          expect(cells, as).toContain(`'${legacy}`);
+          expect(cells.map((c) => unguardBookingReference(c ?? ""))).toContain(legacy);
+          // Only the number-shaped reference carries the guard.
+          expect(cells.filter((c) => c?.startsWith("'"))).toEqual([`'${legacy}`]);
+        }
+        for (const q of [`'${legacy}`, ` '${legacy} `, `'0123`]) {
+          const found = await search(A.id, A.finance, { q });
+          expect(found.status, q).toBe(200);
+          const ids = (found.json.results as { id: string }[] | undefined)?.map((r) => r.id);
+          expect(ids, q).toContain(target.id);
+        }
+      } finally {
+        await setReference(target.reference);
+      }
+    });
+
     it("exports a day with no bookings as a header and a zero total row", async () => {
       const rows = parseCsv((await exported(A.staff, fx.day.empty)).text);
       expect(rows).toHaveLength(2);

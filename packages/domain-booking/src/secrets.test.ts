@@ -2,7 +2,7 @@ import {
   bookingReferencePattern as contractPattern,
   isNumberShapedReference,
 } from "@tidegrid/contracts";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bookingReferencePattern,
   clientKeyFor,
@@ -48,6 +48,27 @@ describe("booking references", () => {
       seen.add(ref);
     }
     expect(seen.size).toBe(2000);
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("draws again, deterministically, when a draw is number-shaped", () => {
+    // Bytes index the 32-character alphabet: 0 to 9 are digits, 14 is E, 10 to 17 are A to H.
+    const draws = [
+      [0, 1, 2, 3, 4, 5, 6, 7], // 01234567: digits only
+      [1, 2, 3, 4, 5, 14, 6, 7], // 12345E67: scientific notation
+      [10, 11, 12, 13, 14, 15, 16, 17], // ABCDEFGH
+    ];
+    const spy = vi
+      .spyOn(crypto, "getRandomValues")
+      .mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+        const next = draws.shift();
+        if (!next || !(array instanceof Uint8Array)) throw new Error("unexpected draw");
+        array.set(next);
+        return array;
+      });
+    expect(newBookingReference()).toBe("ABCDEFGH");
+    expect(spy).toHaveBeenCalledTimes(3);
   });
 
   it("are never ones a spreadsheet would read as a number", () => {

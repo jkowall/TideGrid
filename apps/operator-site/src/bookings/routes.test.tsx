@@ -910,8 +910,31 @@ describe("the calendar's booked count", () => {
     expect(link.getAttribute("href")).toBe(
       `/bookings?day=2026-11-05&trip=${sunset}&source=staff_assisted`,
     );
-    expect(link.textContent).toMatch(/^3 booked: see the staff bookings for Sunset Harbor Cruise/);
+    // The count is every source's seats, so the name says so while a source is set.
+    expect(link.textContent).toMatch(
+      /^3 booked from every source: see the staff bookings for Sunset Harbor Cruise/,
+    );
     expect(params()).toEqual({ source: "staff_assisted" });
+  });
+
+  it("forgets the source when the rail's Calendar link opens the calendar afresh", async () => {
+    shellApi({ [route.trips()]: () => json({ trips: booked }) });
+    renderShell("/calendar?source=direct", me("owner"));
+    await screen.findAllByRole("heading", { level: 4 });
+    expect((screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement).value).toBe(
+      "direct",
+    );
+    const nav = screen.getByRole("navigation", { name: /console/i });
+    fireEvent.click(within(nav).getByRole("link", { name: "Calendar" }));
+    await waitFor(() => expect(window.location.search).toBe(""));
+    await screen.findAllByRole("heading", { level: 4 });
+    expect((screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement).value).toBe("");
+    expect(screen.queryByText("Seat counts cover bookings from every source.")).toBeNull();
+    expect(
+      within(seatsLine(/Sunset Harbor Cruise/))
+        .getByRole("link")
+        .getAttribute("href"),
+    ).toBe(`/bookings?day=2026-11-05&trip=${sunset}`);
   });
 
   it("sets and clears the source from the control", async () => {

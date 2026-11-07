@@ -830,7 +830,8 @@ function Capacity({
       >
         {booked}
         <VisuallyHidden>
-          : see the {bookingsNoun(source)} for {tripLine(trip)}
+          {/* The count is seats from every source, even while the link narrows. */}
+          {source ? " from every source" : ""}: see the {bookingsNoun(source)} for {tripLine(trip)}
         </VisuallyHidden>
       </ConsoleLink>
       {after}

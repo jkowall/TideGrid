@@ -883,9 +883,20 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       for (const terms of cases) {
         for (const withBooker of [true, false]) {
           const expected = await reference(A.id, terms.q, withBooker, terms, source);
+          // The same terms with no source, which the baseline already holds to its
+          // whole outcome: a sourced page must be exactly its rows of that source.
+          const wide = await sourced(A.id, { ...terms, limit: 100, withBooker });
+          if (wide.kind !== "ok") throw new Error(`search: ${wide.kind}`);
+          expect(wide.total).toBeLessThanOrEqual(100);
+          const ofSource = wide.results.filter((r) => r.source === source);
           for (const limit of [1, 2, 25]) {
             const found = await sourced(A.id, { ...terms, source, limit, withBooker });
             if (found.kind !== "ok") throw new Error(`search: ${found.kind}`);
+            expect(found.results).toStrictEqual(ofSource.slice(0, limit));
+            expect(found.nextAfter).toBe(
+              ofSource.length > limit ? (ofSource[limit - 1]?.id ?? null) : null,
+            );
+            expect(found.matchedOn).toStrictEqual(wide.matchedOn);
             expect({
               source,
               terms,
