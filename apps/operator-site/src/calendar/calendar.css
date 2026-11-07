@@ -440,3 +440,14 @@
   margin-block: calc((var(--tap-min) - 1lh) / -2);
   font-weight: var(--weight-semibold);
 }
+.cal-bar__source {
+  flex: 0 1 14rem;
+  min-width: min(100%, 12rem);
+  margin: 0;
+}
+.cal-source-note {
+  max-width: var(--measure);
+  margin: 0;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}

@@ -5,6 +5,7 @@ import {
   EmptyState,
   Icon,
   Notice,
+  SelectField,
   Skeleton,
   StatusBadge,
   VisuallyHidden,
@@ -24,7 +25,13 @@ import {
   zoneCity,
 } from "@tidegrid/design-system/format";
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { bookingsHref } from "../bookings/model.ts";
+import {
+  bookingsHref,
+  bookingsNoun,
+  type ListSource,
+  readSource,
+  sourceFilterOptions,
+} from "../bookings/model.ts";
 import { ConsoleButtonLink, ConsoleLink, hereAddress } from "../navigation.tsx";
 import { newBookingHref } from "../new-booking/model.ts";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
@@ -54,7 +61,9 @@ import {
  * with no controls.
  *
  * The shell keys this page on the operator, so switching operators starts it
- * afresh: its zone, week, dialog, and last change never carry over.
+ * afresh: its zone, dialog, and last change never carry over. The week and
+ * the source stay in the address, which the switch keeps, so the new page
+ * reads them again.
  */
 
 type Load =
@@ -100,6 +109,10 @@ export function CalendarPage({
     new URLSearchParams(window.location.search).has("week")
       ? readWeek(window.location.search, todayIn())
       : null,
+  );
+  // The source the booked-count links carry into the day list.
+  const [source, setSource] = useState<ListSource | undefined>(() =>
+    readSource(window.location.search),
   );
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -175,18 +188,21 @@ export function CalendarPage({
     }
   }, [weekStart]);
 
-  // The address keeps the week, so a reload shows the same one.
+  // The address keeps the week and the source, so a reload shows the same ones.
+  // An unknown source is dropped here, as the day list drops it.
   useEffect(() => {
     if (!weekStart) return;
     const params = new URLSearchParams(window.location.search);
     if (weekStart === thisWeek) params.delete("week");
     else params.set("week", weekStart);
+    if (source) params.set("source", source);
+    else params.delete("source");
     const search = params.toString() ? `?${params}` : "";
     if (search !== window.location.search) {
       const { pathname, hash } = window.location;
       window.history.replaceState(window.history.state, "", `${pathname}${search}${hash}`);
     }
-  }, [weekStart, thisWeek]);
+  }, [weekStart, thisWeek, source]);
 
   // "Try again" is gone once the week arrives, so the week's heading takes focus.
   useEffect(() => {
@@ -307,7 +323,16 @@ export function CalendarPage({
               <span className="cal-bar__word">Next</span> <VisuallyHidden>week</VisuallyHidden>
             </Button>
           </nav>
+          <SelectField
+            label="Source"
+            className="cal-bar__source"
+            value={source ?? ""}
+            onChange={(e) => setSource(e.target.value ? (e.target.value as ListSource) : undefined)}
+            options={sourceFilterOptions.map((o) => ({ value: o.value, label: o.label }))}
+          />
         </div>
+
+        {source && <p className="cal-source-note">Seat counts cover bookings from every source.</p>}
 
         {!canChange && (
           <p className="cal-readonly">
@@ -362,6 +387,7 @@ export function CalendarPage({
               today={today}
               canChange={canChange}
               canBook={canBook}
+              source={source}
               done={done}
               onAction={(trip, kind) => setDialog({ trip, kind })}
             />
@@ -553,6 +579,7 @@ function Week({
   today,
   canChange,
   canBook,
+  source,
   done,
   onAction,
 }: {
@@ -562,6 +589,7 @@ function Week({
   canChange: boolean;
   /** Owners and booking staff book for a guest (G2.12d); the API decides. */
   canBook: boolean;
+  source: ListSource | undefined;
   done: Done | null;
   onAction: (trip: StaffTrip, kind: ActionKind) => void;
 }) {
@@ -645,6 +673,7 @@ function Week({
                     showZone={showZone}
                     canChange={canChange}
                     canBook={canBook}
+                    source={source}
                     done={done?.tripId === trip.tripId ? done.what : undefined}
                     onAction={onAction}
                   />
@@ -664,6 +693,7 @@ function TripRow({
   showZone,
   canChange,
   canBook,
+  source,
   done,
   onAction,
 }: {
@@ -672,6 +702,7 @@ function TripRow({
   showZone: boolean;
   canChange: boolean;
   canBook: boolean;
+  source: ListSource | undefined;
   done: string | undefined;
   onAction: (trip: StaffTrip, kind: ActionKind) => void;
 }) {
@@ -720,7 +751,7 @@ function TripRow({
           </li>
           <li>
             <Icon name="users" />
-            <Capacity trip={trip} departed={departed} />
+            <Capacity trip={trip} departed={departed} source={source} />
           </li>
           <li>
             <Icon name="hourglass" />
@@ -779,15 +810,28 @@ function TripRow({
  * named with the trip for anyone hearing a list of links. Every role can open
  * the list; the API decides what each one sees there.
  */
-function Capacity({ trip, departed }: { trip: StaffTrip; departed: boolean }) {
+function Capacity({
+  trip,
+  departed,
+  source,
+}: {
+  trip: StaffTrip;
+  departed: boolean;
+  source: ListSource | undefined;
+}) {
   const { before, booked, after } = capacityParts(trip, departed);
   if (!booked) return <span>{before}</span>;
   return (
     <span>
       {before}
-      <ConsoleLink href={bookingsHref(trip.localDate, trip.tripId)} className="cal-trip__booked">
+      <ConsoleLink
+        href={bookingsHref(trip.localDate, trip.tripId, source)}
+        className="cal-trip__booked"
+      >
         {booked}
-        <VisuallyHidden>: see the bookings for {tripLine(trip)}</VisuallyHidden>
+        <VisuallyHidden>
+          : see the {bookingsNoun(source)} for {tripLine(trip)}
+        </VisuallyHidden>
       </ConsoleLink>
       {after}
     </span>
