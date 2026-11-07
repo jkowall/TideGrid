@@ -223,7 +223,9 @@ export function removeCheckedFile(
 ): "removed" | "linked" | "other" {
   let fd: number | undefined;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // O_NONBLOCK: a FIFO swapped in at the path opens at once and is refused
+    // below, instead of blocking for a writer. A regular file is unaffected.
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const held = fstatSync(fd);
     if (!held.isFile() || held.dev !== identity.dev || held.ino !== identity.ino) return "other";
     const st = lstatSync(path);

@@ -8,6 +8,8 @@
  * file outside the repository only for a Stripe test-mode key, or a webhook
  * secret paired with one, and the file is removed after a done put.
  */
+
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -529,6 +531,28 @@ describe("secret values from a test-mode file", () => {
         .entries.filter((e) => e.step === "secret-put")
         .at(-1),
     ).toMatchObject({ result: "done", versionAfter: [] });
+  });
+
+  it("never blocks on a FIFO swapped in at the path, and leaves the secret", () => {
+    const file = secretFile(testKey);
+    const st = lstatSync(file);
+    const moved = `${file}-moved`;
+    renameSync(file, moved);
+    execFileSync("mkfifo", [file]);
+    // In a child with a hard timeout: a blocking open would hang this process.
+    const module = new URL("../src/secret-file.ts", import.meta.url).href;
+    const run = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const m = await import(${JSON.stringify(module)}); process.stdout.write(m.removeCheckedFile(${JSON.stringify(file)}, { dev: ${st.dev}, ino: ${st.ino} }));`,
+      ],
+      { timeout: 10_000, encoding: "utf8" },
+    );
+    expect(run.signal).toBeNull();
+    expect(run.stdout).toBe("other");
+    expect(existsSync(moved)).toBe(true);
   });
 
   it("counts a hard link made between the identity check and the unlink", () => {
