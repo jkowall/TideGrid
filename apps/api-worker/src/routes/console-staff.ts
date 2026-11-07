@@ -75,7 +75,7 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "Search bookings",
     description:
-      "Every role. Bookings across every day by reference, by the booker's name or email, and by departure dates, a page at a time, with how many match. Owners and booking staff match on, and receive, the booker's name and email; for finance the text matches booking references only and no booker is sent. A POST, so the terms never enter a URL.",
+      "Every role. Bookings across every day by reference, by the booker's name or email, by departure dates, and optionally narrowed to one booking source, a page at a time, with how many match. Owners and booking staff match on, and receive, the booker's name and email; for finance the text matches booking references only and no booker is sent. A POST, so the terms never enter a URL.",
     security: staffSecurity,
     request: {
       params: StaffTenantParams,
@@ -87,7 +87,7 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         description: "The bookings found",
       },
       400: errorBody(
-        "A malformed search (validation_failed), from after to (invalid_range), or a cursor this search does not find (cursor_invalid)",
+        "A malformed search or source (validation_failed), from after to (invalid_range), or a cursor this search does not find (cursor_invalid)",
       ),
       401: errorBody("Not signed in"),
       403: errorBody("Role or origin does not allow this"),
@@ -110,6 +110,7 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           ...(input.q === undefined ? {} : { q: input.q }),
           ...(input.from === undefined ? {} : { from: input.from }),
           ...(input.to === undefined ? {} : { to: input.to }),
+          ...(input.source === undefined ? {} : { source: input.source }),
           ...(input.after === undefined ? {} : { after: input.after }),
           limit: input.limit,
           withBooker: seesBooker(ctx),
@@ -120,6 +121,7 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           total: found.total,
           nextAfter: found.nextAfter,
           matchedOn: found.matchedOn,
+          source: input.source ?? null,
         };
       },
     );

@@ -24,6 +24,7 @@ const form = (over: Partial<SearchForm> = {}): SearchForm => ({
   text: "",
   from: "",
   to: "",
+  source: "",
   ...over,
 });
 
@@ -309,6 +310,56 @@ describe("searches compared, and named", () => {
   });
 });
 
+describe("a source narrows a search", () => {
+  it("carries a chosen source with the terms, and leaves it out otherwise", () => {
+    const staff = criteriaOf(form({ text: "maya", source: "staff_assisted" }), true);
+    expect(staff).toEqual({ kind: "ok", criteria: { q: "maya", source: "staff_assisted" } });
+    const dates = criteriaOf(form({ from: "2026-11-01", source: "direct" }), false);
+    expect(dates).toEqual({ kind: "ok", criteria: { from: "2026-11-01", source: "direct" } });
+    const none = criteriaOf(form({ text: "maya" }), true);
+    expect(none).toEqual({ kind: "ok", criteria: { q: "maya" } });
+  });
+
+  it("refuses a source alone, and says a source only narrows", () => {
+    const owner = criteriaOf(form({ source: "staff_assisted" }), true);
+    expect(owner).toEqual({
+      kind: "invalid",
+      problems: {
+        text: "Enter a name, an email, or a booking reference, or choose dates. A source narrows a search.",
+      },
+    });
+    const finance = criteriaOf(form({ source: "direct" }), false);
+    expect(finance).toEqual({
+      kind: "invalid",
+      problems: { text: "Enter a booking reference, or choose dates. A source narrows a search." },
+    });
+  });
+
+  it("takes a changed source as a new search", () => {
+    expect(
+      sameCriteria({ q: "maya", source: "direct" }, { q: "maya", source: "staff_assisted" }),
+    ).toBe(false);
+    expect(sameCriteria({ q: "maya", source: "direct" }, { q: "maya" })).toBe(false);
+    expect(sameCriteria({ q: "maya", source: "direct" }, { q: "maya", source: "direct" })).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    [{ q: "maya", source: "staff_assisted" as const }, "Staff bookings matching “maya”."],
+    [
+      { q: "maya", from: "2026-11-01", to: "2026-11-30", source: "direct" as const },
+      "Online bookings matching “maya”, departing Nov 1 to 30, 2026.",
+    ],
+    [
+      { from: "2026-11-04", to: "2026-11-04", source: "staff_assisted" as const },
+      "Staff bookings departing Nov 4, 2026.",
+    ],
+  ])("names %j in words", (criteria, words) => {
+    expect(termsText(criteria)).toBe(words);
+  });
+});
+
 describe("the last search each operator ran", () => {
   beforeEach(forgetSearches);
   afterEach(forgetSearches);
@@ -320,17 +371,27 @@ describe("the last search each operator ran", () => {
 
   it("hands back what an operator ran, and nothing to another operator", () => {
     rememberSearch(tenantId, form({ text: "maya", from: "2026-11-01" }));
-    expect(recallSearch(tenantId)).toEqual({ text: "maya", from: "2026-11-01", to: "" });
+    expect(recallSearch(tenantId)).toEqual({
+      text: "maya",
+      from: "2026-11-01",
+      to: "",
+      source: "",
+    });
     expect(recallSearch(otherTenantId)).toBeUndefined();
     rememberSearch(otherTenantId, form({ text: "QKG6" }));
-    expect(recallSearch(otherTenantId)).toEqual({ text: "QKG6", from: "", to: "" });
+    expect(recallSearch(otherTenantId)).toEqual({ text: "QKG6", from: "", to: "", source: "" });
     expect(recallSearch(tenantId)?.text).toBe("maya");
   });
 
   it("keeps only the latest search of an operator", () => {
     rememberSearch(tenantId, form({ text: "maya" }));
     rememberSearch(tenantId, form({ text: "luis", to: "2026-11-30" }));
-    expect(recallSearch(tenantId)).toEqual({ text: "luis", from: "", to: "2026-11-30" });
+    expect(recallSearch(tenantId)).toEqual({
+      text: "luis",
+      from: "",
+      to: "2026-11-30",
+      source: "",
+    });
   });
 
   it("hands back a copy, so changing it, or the form it came from, changes nothing remembered", () => {
@@ -347,7 +408,12 @@ describe("the last search each operator ran", () => {
   it("remembers an emptied form as empty, which is not the same as nothing", () => {
     rememberSearch(tenantId, form({ text: "maya" }));
     rememberSearch(tenantId, form());
-    expect(recallSearch(tenantId)).toEqual({ text: "", from: "", to: "" });
+    expect(recallSearch(tenantId)).toEqual({ text: "", from: "", to: "", source: "" });
+  });
+
+  it("remembers the source with the terms", () => {
+    rememberSearch(tenantId, form({ text: "maya", source: "staff_assisted" }));
+    expect(recallSearch(tenantId)?.source).toBe("staff_assisted");
   });
 
   it("forgets every operator's search at once", () => {

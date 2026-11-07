@@ -4,6 +4,7 @@ import {
   EmptyState,
   Icon,
   Notice,
+  SelectField,
   Skeleton,
   StatusBadge,
   TextField,
@@ -11,11 +12,19 @@ import {
 } from "@tidegrid/design-system/components";
 import { formatMoney, formatTripTime, todayIn, zoneCity } from "@tidegrid/design-system/format";
 import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
-import { bookingHref, bookingStates, dayText, guestsText, paymentCopy } from "../bookings/model.ts";
+import {
+  bookingHref,
+  bookingStates,
+  dayText,
+  guestsText,
+  paymentCopy,
+  sourceFilterOptions,
+} from "../bookings/model.ts";
 import { ReadFailed } from "../bookings/States.tsx";
 import { focusIsLost } from "../focus.ts";
 import type { ReadFailure } from "../http.ts";
 import { ConsoleLink } from "../navigation.tsx";
+import { sourceText } from "../new-booking/model.ts";
 import { type FocusOnArrival, PageHeader } from "../PageHeader.tsx";
 import { canSeeGuests, roleNames } from "../roles.ts";
 import { type SearchPage as Page, type SearchCriteria, searchBookings } from "./api.ts";
@@ -51,7 +60,7 @@ type Load =
   /** `retrying`: "Try again" is working; the notice stays so focus stays on it. */
   | { kind: "failed"; reason: ReadFailure; failures: number; retrying: boolean };
 
-const emptyForm: SearchForm = { text: "", from: "", to: "" };
+const emptyForm: SearchForm = { text: "", from: "", to: "", source: "" };
 
 export function SearchPage({
   membership,
@@ -187,7 +196,7 @@ export function SearchPage({
     if (problemSaid) setProblemSaid("");
   };
 
-  const hasInput = Boolean(form.text || form.from || form.to);
+  const hasInput = Boolean(form.text || form.from || form.to || form.source);
   const typed = criteriaOf(form, seesGuests);
   // Busy only for the terms on their way: changed terms can be searched at once.
   const searching =
@@ -261,6 +270,13 @@ export function SearchPage({
                 onChange={(e) => change("to")(e.target.value)}
               />
             </fieldset>
+            <SelectField
+              label="Source"
+              name="source"
+              value={form.source}
+              onChange={(e) => change("source")(e.target.value)}
+              options={sourceFilterOptions.map((o) => ({ value: o.value, label: o.label }))}
+            />
             <div className="bs-actions">
               <Button
                 type="submit"
@@ -466,6 +482,14 @@ function ResultItem({ result, seesGuests }: { result: BookingSearchResult; seesG
             <StatusBadge tone={state.tone} icon={state.icon}>
               {state.label}
             </StatusBadge>
+            {/* Who took it, as the day list shows it. A guest's own booking, or a source this
+                console does not know yet, shows none. No channel: finance's search never joins it. */}
+            {result.source === "staff_assisted" && (
+              <StatusBadge tone="neutral" icon="user">
+                <VisuallyHidden>Source: </VisuallyHidden>
+                {sourceText(result.source, undefined)}
+              </StatusBadge>
+            )}
           </dd>
         </div>
       </dl>

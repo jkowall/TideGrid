@@ -670,7 +670,13 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
         const res = await search(A.id, A.finance, { q });
         expect(res.status, res.text).toBe(200);
         const body = BookingSearchResponse.parse(res.json);
-        expect(body).toEqual({ results: [], total: 0, nextAfter: null, matchedOn: ["reference"] });
+        expect(body).toEqual({
+          results: [],
+          total: 0,
+          nextAfter: null,
+          matchedOn: ["reference"],
+          source: null,
+        });
       }
       const dated = await search(A.id, A.finance, { from: fx.day.d0, to: fx.day.d2 });
       expect(dated.status).toBe(200);
@@ -797,6 +803,11 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
         { from: "2026-02-30" },
         { q: "maya", limit: 101 },
         { q: "maya", after: "not-a-uuid" },
+        { q: "maya", source: "complimentary" },
+        { q: "maya", source: "" },
+        { q: "maya", source: null },
+        // A source narrows a search and is not one by itself.
+        { source: "direct" },
       ]) {
         const res = await search(A.id, A.owner, body);
         expect(res.status, JSON.stringify(body)).toBe(400);

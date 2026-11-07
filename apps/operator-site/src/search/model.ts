@@ -1,5 +1,6 @@
 import { bookingReferencePrefix } from "@tidegrid/contracts/references";
 import { formatDate, formatDateRange, isLocalDate } from "@tidegrid/design-system/format";
+import type { ListSource } from "../bookings/model.ts";
 import type { SearchCriteria } from "./api.ts";
 
 /**
@@ -23,6 +24,8 @@ export interface SearchForm {
   text: string;
   from: string;
   to: string;
+  /** Empty is every source. It narrows a search and is never asked alone. */
+  source: "" | ListSource;
 }
 
 export type FieldProblems = Partial<Record<keyof SearchForm, string>>;
@@ -44,9 +47,10 @@ export function criteriaOf(
   const from = form.from.trim();
   const to = form.to.trim();
   if (!text && !from && !to) {
-    problems.text = seesGuests
+    const base = seesGuests
       ? "Enter a name, an email, or a booking reference, or choose dates."
       : "Enter a booking reference, or choose dates.";
+    problems.text = form.source ? `${base} A source narrows a search.` : base;
   } else if (text.length === 1) {
     problems.text = "Enter at least 2 characters.";
   } else if (text.length > 120) {
@@ -69,14 +73,27 @@ export function criteriaOf(
       ...(text ? { q: text } : {}),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
+      ...(form.source ? { source: form.source } : {}),
     },
   };
 }
 
 /** Whether two searches ask the same thing: a form trimmed differently asks the same. */
 export function sameCriteria(a: SearchCriteria | null, b: SearchCriteria | null): boolean {
-  return a !== null && b !== null && a.q === b.q && a.from === b.from && a.to === b.to;
+  return (
+    a !== null &&
+    b !== null &&
+    a.q === b.q &&
+    a.from === b.from &&
+    a.to === b.to &&
+    a.source === b.source
+  );
 }
+
+const sourceLead: Record<ListSource, string> = {
+  direct: "Online bookings",
+  staff_assisted: "Staff bookings",
+};
 
 /**
  * What a search asked, in words, for the results it found: "Matching “maya”,
@@ -84,7 +101,7 @@ export function sameCriteria(a: SearchCriteria | null, b: SearchCriteria | null)
  * results say which terms they belong to.
  */
 export function termsText(criteria: SearchCriteria): string {
-  const { q, from, to } = criteria;
+  const { q, from, to, source } = criteria;
   const dates =
     from && to
       ? from === to
@@ -95,8 +112,13 @@ export function termsText(criteria: SearchCriteria): string {
         : to
           ? `departing on or before ${formatDate(to, "short", { year: true })}`
           : "";
-  if (q === undefined) return `${dates.charAt(0).toUpperCase()}${dates.slice(1)}.`;
-  return dates ? `Matching “${q}”, ${dates}.` : `Matching “${q}”.`;
+  const lead = source ? sourceLead[source] : "";
+  if (q === undefined) {
+    if (lead) return `${lead} ${dates}.`;
+    return `${dates.charAt(0).toUpperCase()}${dates.slice(1)}.`;
+  }
+  const matching = lead ? `${lead} matching` : "Matching";
+  return dates ? `${matching} “${q}”, ${dates}.` : `${matching} “${q}”.`;
 }
 
 /**

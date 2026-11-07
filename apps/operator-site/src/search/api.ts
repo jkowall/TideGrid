@@ -12,7 +12,7 @@ import {
   isTripSummary,
   type Read,
 } from "../bookings/api.ts";
-import { bookingStates } from "../bookings/model.ts";
+import { bookingStates, type ListSource } from "../bookings/model.ts";
 import { call, failureOf, tenantPath } from "../http.ts";
 
 /**
@@ -25,6 +25,8 @@ export interface SearchCriteria {
   q?: string | undefined;
   from?: string | undefined;
   to?: string | undefined;
+  /** Only this source's bookings. It narrows a search; it is never asked alone. */
+  source?: ListSource | undefined;
 }
 
 export interface SearchPage {
@@ -64,6 +66,7 @@ export async function searchBookings(
     ...(criteria.q ? { q: criteria.q } : {}),
     ...(criteria.from ? { from: criteria.from } : {}),
     ...(criteria.to ? { to: criteria.to } : {}),
+    ...(criteria.source ? { source: criteria.source } : {}),
     ...(options.after ? { after: options.after } : {}),
     limit: options.limit ?? 25,
   };
@@ -79,6 +82,11 @@ export async function searchBookings(
     );
     if (!res.ok) return { kind: "failed", reason: await failureOf(res) };
     const data = (await res.json().catch(() => null)) as Partial<BookingSearchResponse> | null;
+    // An API that ignores source answers unfiltered. Refuse that rather than show it as filtered.
+    const echo = data?.source;
+    if (criteria.source ? echo !== criteria.source : echo !== undefined && echo !== null) {
+      return { kind: "failed", reason: "unreadable" };
+    }
     if (
       !Array.isArray(data?.results) ||
       !data.results.every(isResult) ||

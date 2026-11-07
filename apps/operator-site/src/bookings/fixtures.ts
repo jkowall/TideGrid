@@ -825,6 +825,7 @@ export function searchBody(over: Partial<SearchResponse> = {}): SearchResponse {
     total: 2,
     nextAfter: null,
     matchedOn: ["reference", "booker_name", "booker_email"],
+    source: null,
     ...over,
   };
 }

@@ -32,6 +32,8 @@ export interface BookingSearchQuery {
   q?: string;
   from?: string;
   to?: string;
+  /** Only this source's bookings. It narrows; the route refuses a source alone. */
+  source?: BookingSource;
   limit: number;
   after?: string;
   withBooker: boolean;
@@ -186,6 +188,9 @@ export async function searchBookings(
   if (query.from !== undefined) conditions.push(sql`t.local_date >= ${query.from}::date`);
   if (query.to !== undefined) conditions.push(sql`t.local_date <= ${query.to}::date`);
   if (query.q !== undefined) conditions.push(textCondition(query.q, withBooker));
+  // A parameter, never text: the route has checked it is a source. On the booking itself,
+  // so finance's search still never joins the checkout.
+  if (query.source !== undefined) conditions.push(sql`b.source = ${query.source}`);
   const where = sql.join(conditions, sql` and `);
   // Finance's search never joins the checkout, where the booker's details live.
   const bookerJoin: RawBuilder<unknown> = withBooker
