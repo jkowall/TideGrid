@@ -960,6 +960,28 @@ describe("roles", () => {
     ).toBeTruthy();
   });
 
+  it.each(["owner", "booking_staff", "finance"] as const)(
+    "offers %s the Source control, with a note on seat counts once a source is set",
+    async (role) => {
+      api({ [tripsPath()]: [() => json({ trips: week })] });
+      render(<CalendarPage membership={membership(role)} focusHeading={false} />);
+      await screen.findByRole("region", { name: /^Sunday, November 1/ });
+      const control = screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement;
+      expect([...control.options].map((o) => o.textContent)).toEqual([
+        "All sources",
+        "Online, by the guest",
+        "Staff bookings",
+      ]);
+      const note = "Seat counts cover bookings from every source.";
+      expect(screen.queryByText(note)).toBeNull();
+      fireEvent.change(control, { target: { value: "staff_assisted" } });
+      expect(screen.getByText(note)).toBeTruthy();
+      expect(window.location.search).toBe("?source=staff_assisted");
+      // The source never changes the week the API is asked for.
+      expect(document.querySelectorAll(".cal-trip")).toHaveLength(week.length);
+    },
+  );
+
   it.each([
     ["owner", true],
     ["booking_staff", true],

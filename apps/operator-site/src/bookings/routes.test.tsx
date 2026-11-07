@@ -893,4 +893,109 @@ describe("the calendar's booked count", () => {
       cleanup();
     }
   });
+
+  // Owner decision A: the calendar carries the source; its seat counts stay for every source.
+  const booked = [seats({ kind: "seats", total: 20, remaining: 15, held: 2, confirmed: 3 })];
+
+  it("carries a source from the address into the booked count's link and name", async () => {
+    shellApi({ [route.trips()]: () => json({ trips: booked }) });
+    renderShell("/calendar?source=staff_assisted", me("owner"));
+    await screen.findByRole("heading", { level: 2, name: "Nov 1 to 7, 2026" });
+    await screen.findAllByRole("heading", { level: 4 });
+    expect((screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement).value).toBe(
+      "staff_assisted",
+    );
+    expect(screen.getByText("Seat counts cover bookings from every source.")).toBeTruthy();
+    const link = within(seatsLine(/Sunset Harbor Cruise/)).getByRole("link");
+    expect(link.getAttribute("href")).toBe(
+      `/bookings?day=2026-11-05&trip=${sunset}&source=staff_assisted`,
+    );
+    // The count is every source's seats, so the name says so while a source is set.
+    expect(link.textContent).toMatch(
+      /^3 booked from every source: see the staff bookings for Sunset Harbor Cruise/,
+    );
+    expect(params()).toEqual({ source: "staff_assisted" });
+  });
+
+  it("forgets the source when the rail's Calendar link opens the calendar afresh", async () => {
+    shellApi({ [route.trips()]: () => json({ trips: booked }) });
+    renderShell("/calendar?source=direct", me("owner"));
+    await screen.findAllByRole("heading", { level: 4 });
+    expect((screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement).value).toBe(
+      "direct",
+    );
+    const nav = screen.getByRole("navigation", { name: /console/i });
+    fireEvent.click(within(nav).getByRole("link", { name: "Calendar" }));
+    await waitFor(() => expect(window.location.search).toBe(""));
+    await screen.findAllByRole("heading", { level: 4 });
+    expect((screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement).value).toBe("");
+    expect(screen.queryByText("Seat counts cover bookings from every source.")).toBeNull();
+    expect(
+      within(seatsLine(/Sunset Harbor Cruise/))
+        .getByRole("link")
+        .getAttribute("href"),
+    ).toBe(`/bookings?day=2026-11-05&trip=${sunset}`);
+  });
+
+  it("sets and clears the source from the control", async () => {
+    await showWeek(booked);
+    expect(screen.queryByText("Seat counts cover bookings from every source.")).toBeNull();
+    const control = screen.getByRole("combobox", { name: "Source" });
+    fireEvent.change(control, { target: { value: "direct" } });
+    await waitFor(() => expect(params()).toEqual({ source: "direct" }));
+    expect(
+      within(seatsLine(/Sunset Harbor Cruise/))
+        .getByRole("link")
+        .getAttribute("href"),
+    ).toBe(`/bookings?day=2026-11-05&trip=${sunset}&source=direct`);
+    fireEvent.change(control, { target: { value: "" } });
+    await waitFor(() => expect(params()).toEqual({}));
+    expect(
+      within(seatsLine(/Sunset Harbor Cruise/))
+        .getByRole("link")
+        .getAttribute("href"),
+    ).toBe(`/bookings?day=2026-11-05&trip=${sunset}`);
+  });
+
+  it("drops an unknown source from the address", async () => {
+    shellApi({ [route.trips()]: () => json({ trips: booked }) });
+    renderShell("/calendar?source=walk_in&week=2026-11-08", me("owner"));
+    await screen.findByRole("heading", { level: 2, name: "Nov 8 to 14, 2026" });
+    await waitFor(() => expect(params()).toEqual({ week: "2026-11-08" }));
+    expect((screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement).value).toBe("");
+    expect(screen.queryByText("Seat counts cover bookings from every source.")).toBeNull();
+  });
+
+  it("keeps the source and the week when another operator is chosen, and loads that operator's week", async () => {
+    const reef = "7d1e5b3a-1c2f-4a8e-9b61-0a1c2e3f4a02";
+    const both: MeResponse = {
+      ...me("owner"),
+      memberships: [
+        membership("owner"),
+        { tenantId: reef, tenantSlug: "demo-reef", tenantName: "Demo Reef Divers", role: "owner" },
+      ],
+    };
+    const reefWeeks: string[] = [];
+    shellApi({
+      [route.trips()]: () => json({ trips: booked }),
+      [route.trips(reef)]: (call: Call) => {
+        reefWeeks.push(call.query.toString());
+        return json({ trips: [] });
+      },
+    });
+    // The week is in the address, so the page needs no catalog to know it.
+    renderShell("/calendar?week=2026-11-08&source=staff_assisted", both);
+    await screen.findByRole("heading", { level: 2, name: "Nov 8 to 14, 2026" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Operator" }), {
+      target: { value: reef },
+    });
+    await waitFor(() => expect(reefWeeks).toHaveLength(1));
+    // The shell drops only the trip and day, so the week and the source carry over.
+    expect(reefWeeks).toEqual(["from=2026-11-08&to=2026-11-14"]);
+    await screen.findByRole("region", { name: "No trips this week" });
+    expect((screen.getByRole("combobox", { name: "Source" }) as HTMLSelectElement).value).toBe(
+      "staff_assisted",
+    );
+    expect(params()).toEqual({ week: "2026-11-08", source: "staff_assisted" });
+  });
 });

@@ -743,7 +743,7 @@ describe("returning to the page after signing in", () => {
     const App = await loadApp();
     // The search memory of the console that was just loaded, not another copy of it.
     const { rememberSearch, recallSearch } = await import("./search/model.ts");
-    rememberSearch(tenantId, { text: "maya", from: "", to: "" });
+    rememberSearch(tenantId, { text: "maya", from: "", to: "", source: "" });
     expect(recallSearch(tenantId)).toBeDefined();
     render(<App />);
     await heading("Overview");
@@ -766,7 +766,7 @@ describe("returning to the page after signing in", () => {
     );
     const App = await loadApp();
     const { rememberSearch, recallSearch } = await import("./search/model.ts");
-    rememberSearch(tenantId, { text: "maya", from: "", to: "" });
+    rememberSearch(tenantId, { text: "maya", from: "", to: "", source: "" });
     keep(entry(bookingPath));
     render(<App />);
     await heading("Overview");

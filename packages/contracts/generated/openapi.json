@@ -15752,7 +15752,7 @@
           "bookings"
         ],
         "summary": "Search bookings",
-        "description": "Every role. Bookings across every day by reference, by the booker's name or email, and by departure dates, a page at a time, with how many match. Owners and booking staff match on, and receive, the booker's name and email; for finance the text matches booking references only and no booker is sent. A POST, so the terms never enter a URL.",
+        "description": "Every role. Bookings across every day by reference, by the booker's name or email, by departure dates, and optionally narrowed to one booking source, a page at a time, with how many match. Owners and booking staff match on, and receive, the booker's name and email; for finance the text matches booking references only and no booker is sent. A POST, so the terms never enter a URL.",
         "security": [
           {
             "accessJwt": []
@@ -15797,6 +15797,14 @@
                     "format": "date",
                     "description": "Last departure date at the marina, inclusive"
                   },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "direct",
+                      "staff_assisted"
+                    ],
+                    "description": "Only bookings of this source, as the day list's filter does: the results, the count, and the cursor. Exactly direct or staff_assisted; any other value, an empty one, or null answers 400 validation_failed. It narrows a search and is not a criterion on its own"
+                  },
                   "limit": {
                     "type": "integer",
                     "minimum": 1,
@@ -15809,7 +15817,7 @@
                     "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking this search finds answers 400 cursor_invalid"
                   }
                 },
-                "description": "A booking search. At least one of q, from, and to"
+                "description": "A booking search. At least one of q, from, and to; a source only narrows it"
               }
             }
           }
@@ -16032,13 +16040,26 @@
                         ]
                       },
                       "description": "What q was matched against for this role: every field for owners and booking staff, the reference only for finance. Empty when there is no q"
+                    },
+                    "source": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "direct",
+                        "staff_assisted",
+                        null
+                      ],
+                      "description": "The source the results and the count are filtered to; null for every source"
                     }
                   },
                   "required": [
                     "results",
                     "total",
                     "nextAfter",
-                    "matchedOn"
+                    "matchedOn",
+                    "source"
                   ],
                   "description": "Bookings that match a search, a page at a time"
                 }
@@ -16046,7 +16067,7 @@
             }
           },
           "400": {
-            "description": "A malformed search (validation_failed), from after to (invalid_range), or a cursor this search does not find (cursor_invalid)",
+            "description": "A malformed search or source (validation_failed), from after to (invalid_range), or a cursor this search does not find (cursor_invalid)",
             "content": {
               "application/json": {
                 "schema": {
@@ -16551,7 +16572,7 @@
           "bookings"
         ],
         "summary": "Export a day's bookings as CSV",
-        "description": "Every role. One row per booking on trips departing on one local date, with its ledger, then a total row equal to the day's control totals. Stable columns; owners and booking staff also get the booker's name and email, and finance gets the financial columns only. UTF-8 with a byte order mark and CRLF lines; text a person typed is kept from running as a spreadsheet formula. The file name holds the operator's slug and the date only. Each export is recorded in the audit history.",
+        "description": "Every role. One row per booking on trips departing on one local date, with its ledger, then a total row equal to the day's control totals. Stable columns; owners and booking staff also get the booker's name and email, and finance gets the financial columns only. UTF-8 with a byte order mark and CRLF lines; text a person typed is kept from running as a spreadsheet formula, and a booking reference a spreadsheet would read as a number starts with an apostrophe. The file name holds the operator's slug and the date only. Each export is recorded in the audit history.",
         "security": [
           {
             "accessJwt": []

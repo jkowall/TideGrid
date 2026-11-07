@@ -19,9 +19,32 @@ export function normalizeBookingReference(input: string): string | null {
   return bookingReferencePattern.test(compact) ? compact : null;
 }
 
-/** Case ignored, spaces and hyphens dropped, O as 0, I and L as 1. */
+/**
+ * True when a spreadsheet could read the reference as a number: digits only,
+ * or digits, one E, and digits (scientific notation).
+ */
+export function isNumberShapedReference(ref: string): boolean {
+  return /^[0-9]+(E[0-9]+)?$/.test(ref);
+}
+
+/**
+ * A reference cell from the day's CSV export, without the one leading
+ * apostrophe that guards a number-shaped reference. Lossless: the reference
+ * alphabet has no apostrophe.
+ */
+export function unguardBookingReference(cell: string): string {
+  return cell.startsWith("'") ? cell.slice(1) : cell;
+}
+
+/**
+ * Case ignored, spaces and hyphens dropped, then one leading apostrophe
+ * (pasted from the export), O as 0, I and L as 1. Separators go first, so a
+ * guarded reference pasted with a space or a hyphen around it still reads.
+ */
 function readAsReference(input: string): string {
-  return input.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+  return unguardBookingReference(input.toUpperCase().replace(/[\s-]/g, ""))
+    .replace(/O/g, "0")
+    .replace(/[IL]/g, "1");
 }
 
 const referencePrefixPattern = /^[0-9A-HJKMNP-TV-Z]{2,8}$/;

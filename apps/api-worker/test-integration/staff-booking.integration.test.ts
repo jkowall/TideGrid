@@ -42,6 +42,7 @@ import {
   StaffTestPaymentResponse,
   TripOfferResponse,
   TripRosterResponse,
+  unguardBookingReference,
 } from "@tidegrid/contracts";
 import { createDb, inTenantTransaction } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
@@ -551,7 +552,9 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
         ]);
         const at = (r: string[] | undefined, column: string) => r?.[header.indexOf(column)];
         for (const m of made.filter((x) => x.tripId === tripId)) {
-          const line = rows.find((r) => at(r, "Booking reference") === m.reference);
+          const line = rows.find(
+            (r) => unguardBookingReference(at(r, "Booking reference") ?? "") === m.reference,
+          );
           expect(at(line, "Source")).toBe("staff_assisted");
         }
         expect(at(rows.at(-1), "Row")).toBe("Total");
@@ -1408,6 +1411,127 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
       });
       expect([twice, res.status, res.json.error?.code]).toEqual([twice, 400, "validation_failed"]);
     }
+  });
+
+  // Search by source -------------------------------------------------------------------------
+
+  const searchPath = (t: string) => `${base(t)}/booking-searches`;
+  const referenceOf = async (id: string) => {
+    const [row] = await admin<{ reference: string }[]>`
+      select reference from public.bookings where id = ${id}`;
+    return row?.reference ?? "";
+  };
+
+  it("G2.12: searches a day by source for every role, with the echo, the ids in order, and no other operator's booking", async () => {
+    const { a, b } = await mixedDays();
+    for (const as of [A.owner, A.staff, A.finance]) {
+      for (const source of sources) {
+        const res = await request("POST", searchPath(A.id), {
+          as,
+          body: { from: a.date, to: a.date, limit: 100, ...(source ? { source } : {}) },
+        });
+        expect(res.status, res.text).toBe(200);
+        const found = BookingSearchResponse.parse(res.json);
+        expect(found.source).toBe(source ?? null);
+        const want = await listedIds(A.id, a.date, source);
+        expect(found.results.map((r) => r.id)).toEqual(want);
+        expect(found.total).toBe(want.length);
+        const expected =
+          source === "direct"
+            ? a.direct
+            : source === "staff_assisted"
+              ? a.staff
+              : [...a.staff, ...a.direct];
+        expect(new Set(found.results.map((r) => r.id))).toEqual(new Set(expected));
+        if (source) for (const r of found.results) expect(r.source).toBe(source);
+        for (const id of [...b.staff, ...b.direct]) {
+          expect(found.results.some((r) => r.id === id)).toBe(false);
+        }
+        // Finance never gets the booker.
+        expect(keysOf(res.json).has("booker")).toBe(as !== A.finance);
+      }
+    }
+  });
+
+  it("G2.12: pages a source's search one booking at a time, and refuses a cursor outside it", async () => {
+    const { a, b } = await mixedDays();
+    for (const source of ["direct", "staff_assisted"] as const) {
+      const seen: string[] = [];
+      let after: string | undefined;
+      for (let page = 0; page < 10; page++) {
+        const res = await request("POST", searchPath(A.id), {
+          as: A.owner,
+          body: { from: a.date, to: a.date, source, limit: 1, ...(after ? { after } : {}) },
+        });
+        expect(res.status, res.text).toBe(200);
+        const found = BookingSearchResponse.parse(res.json);
+        expect(found.source).toBe(source);
+        expect(found.results.length).toBeLessThanOrEqual(1);
+        seen.push(...found.results.map((r) => r.id));
+        if (!found.nextAfter) break;
+        after = found.nextAfter;
+      }
+      expect(seen).toEqual(await listedIds(A.id, a.date, source));
+    }
+    const cases: [string, { source: Source; after: string }][] = [
+      ["a direct booking, staff asked", { source: "staff_assisted", after: a.direct[0] ?? "" }],
+      ["a staff booking, direct asked", { source: "direct", after: a.staff[0] ?? "" }],
+      ["another operator's staff booking", { source: "staff_assisted", after: b.staff[0] ?? "" }],
+    ];
+    for (const [label, body] of cases) {
+      const res = await request("POST", searchPath(A.id), {
+        as: A.owner,
+        body: { from: a.date, to: a.date, ...body },
+      });
+      expect([label, res.status, res.json.error?.code]).toEqual([label, 400, "cursor_invalid"]);
+    }
+    // The same cursor is good with no source.
+    const fine = await request("POST", searchPath(A.id), {
+      as: A.owner,
+      body: { from: a.date, to: a.date, after: a.staff[0] ?? "" },
+    });
+    expect(fine.status, fine.text).toBe(200);
+  });
+
+  it("G2.12: answers another operator's staff on this route with the one 404, whatever the source", async () => {
+    const { a } = await mixedDays();
+    const unknown = await request("POST", searchPath(randomUUID()), {
+      as: B.staff,
+      body: { from: a.date, to: a.date, source: "staff_assisted" },
+    });
+    expect(unknown.status).toBe(404);
+    for (const source of sources) {
+      const other = await request("POST", searchPath(A.id), {
+        as: B.staff,
+        body: { from: a.date, to: a.date, ...(source ? { source } : {}) },
+      });
+      expect([other.status, other.json.error?.code]).toEqual([
+        unknown.status,
+        unknown.json.error?.code,
+      ]);
+    }
+  });
+
+  it("G2.12: lets finance find a staff booking by its reference under its source, and nothing under the other", async () => {
+    const { a } = await mixedDays();
+    const id = a.staff[0] ?? "";
+    const reference = await referenceOf(id);
+    const under = async (source: Source) => {
+      const res = await request("POST", searchPath(A.id), {
+        as: A.finance,
+        body: { q: reference, source },
+      });
+      expect(res.status, res.text).toBe(200);
+      return BookingSearchResponse.parse(res.json);
+    };
+    const staff = await under("staff_assisted");
+    expect(staff.results.map((r) => r.id)).toEqual([id]);
+    expect(staff.source).toBe("staff_assisted");
+    expect(staff.results[0]?.booker).toBeUndefined();
+    const direct = await under("direct");
+    expect(direct.results).toEqual([]);
+    expect(direct.total).toBe(0);
+    expect(direct.source).toBe("direct");
   });
 
   // Last of the cases on the mixed days: its blackouts close them to booking.

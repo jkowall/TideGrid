@@ -65,6 +65,7 @@ import {
 } from "./test-fixtures.ts";
 
 type Sql = ReturnType<typeof postgres>;
+type Source = NonNullable<BookingSearchQuery["source"]>;
 
 const env = inject("integrationDb");
 
@@ -211,7 +212,9 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
   const idsB: string[] = [];
   /** Local departure dates of A's shared trips 0 and 3, and of A's last trip. */
   const days = { first: "", fourth: "", last: "" };
-  const refs = { canceled: "", staff: "" };
+  const refs = { canceled: "", staff: "", staffLate: "", staffB: "" };
+  /** B's staff booking, whose email matches A's "walkup" desk booking. */
+  const idsStaffB: string[] = [];
 
   /** The search as the console runs it: one read-only snapshot as the runtime role. */
   const search = (
@@ -244,10 +247,12 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     q: string | undefined,
     withBooker: boolean,
     dates: { from?: string; to?: string } = {},
+    source?: Source,
   ): Promise<string[]> {
     const conditions: RawBuilder<unknown>[] = [sql`b.tenant_id = ${tenantId}`];
     if (dates.from !== undefined) conditions.push(sql`t.local_date >= ${dates.from}::date`);
     if (dates.to !== undefined) conditions.push(sql`t.local_date <= ${dates.to}::date`);
+    if (source !== undefined) conditions.push(sql`b.source = ${source}`);
     if (q !== undefined) {
       const parts: RawBuilder<unknown>[] = [];
       const prefix = referencePrefix(q);
@@ -280,7 +285,12 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
    * One query through the b6d0247 search and through today's, in one
    * snapshot as the runtime role. Every field of the two outcomes must agree.
    */
-  async function same(tenantId: string, query: BookingSearchQuery): Promise<BookingSearchOutcome> {
+  async function same(
+    tenantId: string,
+    query: Omit<BookingSearchQuery, "source">,
+  ): Promise<BookingSearchOutcome> {
+    // The frozen baseline ignores source, so a query with one cannot be compared with it.
+    expect((query as BookingSearchQuery).source).toBeUndefined();
     const [before, after] = await inTenantTransaction(
       runtime.db,
       guestContext(tenantId),
@@ -298,7 +308,7 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
   /** Every page of a search, each one checked by `same`, until nextAfter is null. */
   async function pageThrough(
     tenantId: string,
-    query: Omit<BookingSearchQuery, "after">,
+    query: Omit<BookingSearchQuery, "after" | "source">,
   ): Promise<{ ids: string[]; total: number; pages: number }> {
     const ids: string[] = [];
     let total: number | undefined;
@@ -426,6 +436,12 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       }),
     );
     if (result.kind !== "canceled") throw new Error(`cancel: ${JSON.stringify(result)}`);
+    // A second desk booking in A, off the first day, that no fixed-count text matches.
+    refs.staffLate = await staffAssisted(A, tripsA.shared(), {
+      name: "Marina Dockhand",
+      email: "dockhand@desk.test",
+    });
+    references.push(refs.staffLate);
     // The other tenant has guests whose names and emails A's searches would match.
     for (const booker of [
       { name: "Luis Fernández", email: "luis.fernandez@gmail.test" },
@@ -435,6 +451,14 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
         (await confirmBooking(runtime.db, provider, B, tripsB.shared(), 1, { booker })).bookingId,
       );
     }
+    // And a desk booking in B whose email matches A's "walkup", for the escape and isolation cases.
+    refs.staffB = await staffAssisted(B, tripsB.shared(), {
+      name: "Walkup Remote",
+      email: "walkup@gmail.test",
+    });
+    const [staffB] = await admin<{ id: string }[]>`
+      select id from public.bookings where tenant_id = ${B.id} and reference = ${refs.staffB}`;
+    idsStaffB.push(staffB?.id ?? "");
     // Synthetic, throwaway database only: two bookings on the first shared
     // trip get the same confirmation instant, so the order falls to the
     // booking's id. Each fixture booking confirms in its own transaction, so
@@ -835,6 +859,129 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     expect(paged.ids).toEqual(found.results.map((r) => r.id));
   });
 
+  /** The search with a source, as the console runs it. The frozen baseline ignores source, so `same` is not used. */
+  const sourced = (tenantId: string, query: BookingSearchQuery) =>
+    inTenantTransaction(
+      runtime.db,
+      guestContext(tenantId),
+      (trx) => searchBookings(trx, tenantId, query),
+      snapshotRead,
+    );
+
+  it("narrows to one source: ids, order, count, and every result's source match the reference condition", async () => {
+    const sources: Source[] = ["direct", "staff_assisted"];
+    const prefix = references[0]?.slice(0, 4);
+    const cases: { q?: string; from?: string; to?: string }[] = [
+      { q: "gmail" },
+      { q: "test" },
+      ...(prefix === undefined ? [] : [{ q: prefix }]),
+      { q: "walkup" },
+      { from: days.first },
+      { from: days.first, to: days.fourth },
+    ];
+    for (const source of sources) {
+      for (const terms of cases) {
+        for (const withBooker of [true, false]) {
+          const expected = await reference(A.id, terms.q, withBooker, terms, source);
+          // The same terms with no source, which the baseline already holds to its
+          // whole outcome: a sourced page must be exactly its rows of that source.
+          const wide = await sourced(A.id, { ...terms, limit: 100, withBooker });
+          if (wide.kind !== "ok") throw new Error(`search: ${wide.kind}`);
+          expect(wide.total).toBeLessThanOrEqual(100);
+          const ofSource = wide.results.filter((r) => r.source === source);
+          for (const limit of [1, 2, 25]) {
+            const found = await sourced(A.id, { ...terms, source, limit, withBooker });
+            if (found.kind !== "ok") throw new Error(`search: ${found.kind}`);
+            expect(found.results).toStrictEqual(ofSource.slice(0, limit));
+            expect(found.nextAfter).toBe(
+              ofSource.length > limit ? (ofSource[limit - 1]?.id ?? null) : null,
+            );
+            expect(found.matchedOn).toStrictEqual(wide.matchedOn);
+            expect({
+              source,
+              terms,
+              withBooker,
+              limit,
+              ids: found.results.map((r) => r.id),
+            }).toEqual({ source, terms, withBooker, limit, ids: expected.slice(0, limit) });
+            expect(found.total).toBe(expected.length);
+            expect(found.results.every((r) => r.source === source)).toBe(true);
+          }
+        }
+      }
+    }
+    // The desk's two bookings are all of the staff source, and the rest are direct.
+    expect(
+      await reference(A.id, undefined, false, { from: days.first }, "staff_assisted"),
+    ).toHaveLength(2);
+    expect((await reference(A.id, "walkup", true, {}, "staff_assisted")).length).toBe(1);
+    expect(await reference(A.id, "walkup", true, {}, "direct")).toEqual([]);
+    expect((await reference(A.id, "dockhand", true, {}, "staff_assisted")).length).toBe(1);
+    // The two sources split every booking: nothing is lost or counted twice.
+    const all = await reference(A.id, undefined, false, { from: days.first });
+    const direct = await reference(A.id, undefined, false, { from: days.first }, "direct");
+    const staff = await reference(A.id, undefined, false, { from: days.first }, "staff_assisted");
+    expect([...direct, ...staff].sort()).toEqual([...all].sort());
+  });
+
+  it("pages to the end under each source, and refuses a cursor of the other source or another tenant", async () => {
+    for (const source of ["direct", "staff_assisted"] as const) {
+      for (const withBooker of [true, false]) {
+        const expected = await reference(A.id, undefined, withBooker, { from: days.first }, source);
+        const seen: string[] = [];
+        let after: string | undefined;
+        for (let page = 0; page < 60; page++) {
+          const found = await sourced(A.id, {
+            from: days.first,
+            source,
+            limit: 1,
+            withBooker,
+            ...(after === undefined ? {} : { after }),
+          });
+          if (found.kind !== "ok") throw new Error(`search: ${found.kind}`);
+          expect(found.total).toBe(expected.length);
+          seen.push(...found.results.map((r) => r.id));
+          if (!found.nextAfter) break;
+          after = found.nextAfter;
+        }
+        expect({ source, withBooker, seen }).toEqual({ source, withBooker, seen: expected });
+      }
+    }
+    const direct = await reference(A.id, undefined, true, { from: days.first }, "direct");
+    const staff = await reference(A.id, undefined, true, { from: days.first }, "staff_assisted");
+    const refused = [
+      { source: "staff_assisted" as const, after: direct[0] ?? "" },
+      { source: "direct" as const, after: staff[0] ?? "" },
+      { source: "staff_assisted" as const, after: idsStaffB[0] ?? "" },
+      { source: "direct" as const, after: idsStaffB[0] ?? "" },
+    ];
+    for (const { source, after } of refused) {
+      for (const withBooker of [true, false]) {
+        const found = await sourced(A.id, {
+          from: days.first,
+          source,
+          limit: 2,
+          after,
+          withBooker,
+        });
+        expect({ source, after, withBooker, kind: found.kind }).toEqual({
+          source,
+          after,
+          withBooker,
+          kind: "cursor_invalid",
+        });
+      }
+    }
+    // The same cursor, with no source, is a booking the search finds.
+    const open = await sourced(A.id, {
+      from: days.first,
+      limit: 2,
+      after: staff[0] ?? "",
+      withBooker: true,
+    });
+    expect(open.kind).toBe("ok");
+  });
+
   /** Every statement one search emits, as compiled, with its parameters. */
   async function capture(tenantId: string, query: BookingSearchQuery) {
     const captured: { sql: string; parameters: readonly unknown[] }[] = [];
@@ -897,6 +1044,14 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
     const gmail = await reference(A.id, "gmail", true);
     const everyDay = await reference(A.id, undefined, false, { from: days.first });
     const prefix = references[0]?.slice(0, 4) ?? "";
+    const staffDay = await reference(
+      A.id,
+      undefined,
+      false,
+      { from: days.first },
+      "staff_assisted",
+    );
+    const directDay = await reference(A.id, undefined, false, { from: days.first }, "direct");
     const queries: BookingSearchQuery[] = [
       { q: "gmail", limit: 2, withBooker: true },
       { q: "gmail", limit: 1, after: gmail[0] ?? "", withBooker: true },
@@ -906,6 +1061,26 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       { q: prefix, limit: 25, withBooker: false },
       { from: days.first, limit: 2, withBooker: false },
       { from: days.first, limit: 1, after: everyDay[0] ?? "", withBooker: false },
+      // A source only narrows the matches: the same shape, with and without a cursor.
+      { q: "gmail", source: "staff_assisted", limit: 2, withBooker: true },
+      { q: "gmail", source: "direct", limit: 1, withBooker: true },
+      { from: days.first, source: "staff_assisted", limit: 1, withBooker: true },
+      { from: days.first, source: "direct", limit: 2, withBooker: false },
+      { from: days.first, source: "staff_assisted", limit: 1, withBooker: false },
+      {
+        from: days.first,
+        source: "direct",
+        limit: 1,
+        after: directDay[0] ?? "",
+        withBooker: false,
+      },
+      {
+        from: days.first,
+        source: "staff_assisted",
+        limit: 1,
+        after: staffDay[0] ?? "",
+        withBooker: true,
+      },
     ];
     for (const query of queries) {
       const { found, captured } = await capture(A.id, query);
@@ -1015,8 +1190,23 @@ describe.skipIf(!env)("console booking search: the trigram spike and the result 
       const found = await search(B.id, r, true);
       expect(found.kind === "ok" && found.results.map((x) => x.reference)).not.toContain(r);
     }
+    // B's desk booking shares an email with A's, and a source never lets it through.
+    expect(idsStaffB).toHaveLength(1);
+    for (const q of ["Walkup", "walkup@gmail", refs.staffB]) {
+      for (const withBooker of [true, false]) {
+        const found = await sourced(A.id, { q, source: "staff_assisted", limit: 25, withBooker });
+        if (found.kind !== "ok") throw new Error(`search: ${found.kind}`);
+        expect(found.results.map((r) => r.id)).not.toContain(idsStaffB[0]);
+        const expected = await reference(A.id, q, withBooker, {}, "staff_assisted");
+        expect({ q, withBooker, ids: found.results.map((r) => r.id) }).toEqual({
+          q,
+          withBooker,
+          ids: expected,
+        });
+      }
+    }
     // B's matching bookings change neither A's count nor A's pages.
-    for (const q of ["Fernández", "luis", "gmail", "test"]) {
+    for (const q of ["Fernández", "luis", "gmail", "test", "walkup"]) {
       const expected = await reference(A.id, q, true);
       const paged = await pageThrough(A.id, { q, limit: 2, withBooker: true });
       expect({ q, ids: paged.ids, total: paged.total }).toEqual({

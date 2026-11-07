@@ -82,6 +82,9 @@ export async function baselineSearch(
   tenantId: string,
   query: BookingSearchQuery,
 ): Promise<BookingSearchOutcome> {
+  // The frozen search predates the source filter (2026-11-07): refuse one
+  // rather than answer unfiltered.
+  if (query.source !== undefined) throw new Error("the b6d0247 baseline has no source");
   const { withBooker } = query;
   const conditions: RawBuilder<unknown>[] = [sql`b.tenant_id = ${tenantId}`];
   if (query.from !== undefined) conditions.push(sql`t.local_date >= ${query.from}::date`);

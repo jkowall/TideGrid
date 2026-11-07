@@ -64,6 +64,9 @@ export const BookingSearchRequest = z
       "First departure date at the marina, inclusive. Bookings are found by their trip's local date",
     ),
     to: QueryDate.optional().describe("Last departure date at the marina, inclusive"),
+    source: BookingSource.optional().describe(
+      "Only bookings of this source, as the day list's filter does: the results, the count, and the cursor. Exactly direct or staff_assisted; any other value, an empty one, or null answers 400 validation_failed. It narrows a search and is not a criterion on its own",
+    ),
     limit: z.number().int().min(1).max(100).default(25),
     after: Uuid.optional().describe(
       "Cursor: the last booking id of the previous page (nextAfter). One that names no booking this search finds answers 400 cursor_invalid",
@@ -72,7 +75,7 @@ export const BookingSearchRequest = z
   .refine((r) => r.q !== undefined || r.from !== undefined || r.to !== undefined, {
     message: "Give text to find, a date, or both",
   })
-  .describe("A booking search. At least one of q, from, and to");
+  .describe("A booking search. At least one of q, from, and to; a source only narrows it");
 export type BookingSearchRequest = z.input<typeof BookingSearchRequest>;
 
 export const BookingSearchResult = z.object({
@@ -102,6 +105,9 @@ export const BookingSearchResponse = z
       .describe(
         "What q was matched against for this role: every field for owners and booking staff, the reference only for finance. Empty when there is no q",
       ),
+    source: BookingSource.nullable().describe(
+      "The source the results and the count are filtered to; null for every source",
+    ),
   })
   .describe("Bookings that match a search, a page at a time");
 export type BookingSearchResponse = z.infer<typeof BookingSearchResponse>;
@@ -155,7 +161,8 @@ export type BookingDayTotalsResponse = z.infer<typeof BookingDayTotalsResponse>;
  * gets the two booker columns after these, and no role gets any other.
  * G2.12d appended Source (direct or staff_assisted) after Generated at, a
  * contract change: a reader that takes columns by position still finds every
- * earlier column where it was.
+ * earlier column where it was. Positions never change; a booking reference a
+ * spreadsheet would read as a number is written with a leading apostrophe.
  */
 export const bookingDayExportColumns = [
   "Row",

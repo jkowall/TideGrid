@@ -2,6 +2,7 @@
  * Small, pure helpers: the guest's capability secret, the per-client key, and
  * booking references. Runs in Workers and Node.
  */
+import { isNumberShapedReference } from "@tidegrid/contracts";
 
 /** 32 random bytes, base64url without padding: 43 characters. */
 export const checkoutSecretPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -33,9 +34,15 @@ export function clientKeyFor(tenantId: string, address: string): Promise<string>
 const referenceAlphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export const bookingReferencePattern = /^[0-9A-HJKMNP-TV-Z]{8}$/;
 
-/** Eight unbiased random characters, 40 bits; the database keeps them unique per tenant. */
+/**
+ * Eight unbiased random characters, 40 bits; the database keeps them unique per
+ * tenant. One a spreadsheet would read as a number is drawn again (about 1 in
+ * 6,900), so a copied reference stays whole.
+ */
 export function newBookingReference(): string {
-  let out = "";
-  for (const b of crypto.getRandomValues(new Uint8Array(8))) out += referenceAlphabet[b & 31];
-  return out;
+  for (;;) {
+    let out = "";
+    for (const b of crypto.getRandomValues(new Uint8Array(8))) out += referenceAlphabet[b & 31];
+    if (!isNumberShapedReference(out)) return out;
+  }
 }

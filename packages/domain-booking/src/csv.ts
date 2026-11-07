@@ -7,8 +7,18 @@
  * with =, +, -, @, a tab, or a carriage return is prefixed with an apostrophe,
  * so a spreadsheet shows it rather than running it as a formula (CSV
  * injection). Numbers this module writes itself never start with one of those.
+ *
+ * A booking reference never starts with one of those either, but a
+ * spreadsheet reads one that is digits, or digits around one E, as a number.
+ * Such a reference is prefixed with an apostrophe too (about 1 in 6,900), and
+ * `unguardBookingReference` in the contracts removes it. Any other reference
+ * is written as is.
  */
-import { bookingDayExportColumns, bookingDayExportGuestColumns } from "@tidegrid/contracts";
+import {
+  bookingDayExportColumns,
+  bookingDayExportGuestColumns,
+  isNumberShapedReference,
+} from "@tidegrid/contracts";
 import type { DayReport, DayReportMoney, DayReportRow } from "./day-report.ts";
 
 const byteOrderMark = "\ufeff";
@@ -22,6 +32,11 @@ export function csvField(value: string): string {
 /** Text from a person, kept from being read as a formula. */
 export function csvText(value: string): string {
   return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+}
+
+/** A booking reference, kept from being read as a number by a spreadsheet. */
+export function csvReference(ref: string): string {
+  return isNumberShapedReference(ref) ? `'${ref}` : ref;
 }
 
 /**
@@ -98,7 +113,7 @@ export function renderDayExport(
     csvInstant(r.trip.startsAt),
     csvText(r.trip.productName),
     csvText(r.trip.boatName),
-    r.reference,
+    csvReference(r.reference),
     r.state,
     r.paymentState,
     r.refundState ?? "",

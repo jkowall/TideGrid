@@ -93,6 +93,11 @@ const bookingNouns: Record<ListSource | "all", [string, string]> = {
   staff_assisted: ["staff booking", "staff bookings"],
 };
 
+/** The plural noun for a source's bookings: "bookings", "staff bookings", "online bookings". */
+export function bookingsNoun(source?: ListSource): string {
+  return bookingNouns[source ?? "all"][1];
+}
+
 /** "1 booking", "2 staff bookings", "1 online booking": a count that names the filter's source. */
 export function bookingsText(count: number, source?: ListSource): string {
   const [one, many] = bookingNouns[source ?? "all"];
