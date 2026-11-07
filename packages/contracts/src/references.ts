@@ -37,13 +37,12 @@ export function unguardBookingReference(cell: string): string {
 }
 
 /**
- * Case ignored, one leading apostrophe (pasted from the export) and spaces and
- * hyphens dropped, O as 0, I and L as 1.
+ * Case ignored, spaces and hyphens dropped, then one leading apostrophe
+ * (pasted from the export), O as 0, I and L as 1. Separators go first, so a
+ * guarded reference pasted with a space or a hyphen around it still reads.
  */
 function readAsReference(input: string): string {
-  return unguardBookingReference(input)
-    .toUpperCase()
-    .replace(/[\s-]/g, "")
+  return unguardBookingReference(input.toUpperCase().replace(/[\s-]/g, ""))
     .replace(/O/g, "0")
     .replace(/[IL]/g, "1");
 }

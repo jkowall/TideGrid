@@ -51,6 +51,15 @@ describe("booking references", () => {
     expect(bookingReferencePrefix("'0123")).toBe("0123");
   });
 
+  it("drops spaces and hyphens before the pasted apostrophe (review on #78)", () => {
+    expect(normalizeBookingReference(" '01234567 ")).toBe("01234567");
+    expect(normalizeBookingReference("\t'0123-4567\n")).toBe("01234567");
+    expect(bookingReferencePrefix("-'01234567")).toBe("01234567");
+    expect(bookingReferencePrefix(" ' 0123")).toBe("0123");
+    // Still only one apostrophe: a second one is not a reference character.
+    expect(normalizeBookingReference(" ''01234567")).toBeNull();
+  });
+
   it("refuses anything that cannot be a reference", () => {
     for (const bad of [
       "",
