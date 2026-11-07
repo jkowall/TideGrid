@@ -21,11 +21,12 @@ on:
 permissions:
   contents: read
 
-# A pull request's newer push cancels its older run. A run on main or a
-# dispatch is keyed by its commit, so no later push cancels it and each
-# released SHA keeps its own complete run.
+# A pull request's newer push cancels its older run. A push run on main is
+# keyed by its event and commit, so no later push cancels it and each
+# released SHA keeps its own complete run. A dispatch waits only behind
+# another dispatch on the same SHA, and GitHub keeps the newest one pending.
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || inputs.sha || github.sha }}
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || inputs.sha || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -36,18 +37,32 @@ jobs:
         with:
           ref: ${{ inputs.sha }}
       - name: The commit under test
-        # Step 9 evidence: the commit and tree this run tested. On a pull
-        # request it is the test merge commit; on main and on a dispatch it is
-        # the released SHA itself. A dispatch must name a full SHA, read from
-        # the environment, never interpolated into the script.
+        # Step 9 evidence: the commit and tree this job tested, and the
+        # workflow file that ran. On a pull request HEAD is the test merge
+        # commit; on main and on a dispatch it is the released SHA itself. A
+        # dispatch runs only from main, on a full SHA already on main, so no
+        # unreviewed commit runs here. It is checked before any install or
+        # test code, and the input is read from the environment, never
+        # interpolated into the script.
         env:
           WANT: ${{ inputs.sha }}
         run: |
           got=$(git rev-parse HEAD)
-          echo "commit $got tree $(git rev-parse 'HEAD^{tree}')"
-          if [ -n "$WANT" ] && [ "$got" != "$WANT" ]; then
-            echo "::error::asked for $WANT but checked out $got; give the full 40-character SHA"
-            exit 1
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$WANT" ]; then
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
+            fi
+            if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error::give the full 40-character SHA"; exit 1
+            fi
+            if [ "$got" != "$WANT" ]; then
+              echo "::error::asked for $WANT but checked out $got"; exit 1
+            fi
+            git fetch --no-tags --quiet --unshallow origin main
+            if ! git merge-base --is-ancestor "$WANT" FETCH_HEAD; then
+              echo "::error::$WANT is not on main"; exit 1
+            fi
           fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -80,6 +95,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.sha }}
+      - name: The commit under test
+        # Step 9 evidence: the commit and tree this job tested, and the
+        # workflow file that ran. On a pull request HEAD is the test merge
+        # commit; on main and on a dispatch it is the released SHA itself. A
+        # dispatch runs only from main, on a full SHA already on main, so no
+        # unreviewed commit runs here. It is checked before any install or
+        # test code, and the input is read from the environment, never
+        # interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$WANT" ]; then
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
+            fi
+            if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error::give the full 40-character SHA"; exit 1
+            fi
+            if [ "$got" != "$WANT" ]; then
+              echo "::error::asked for $WANT but checked out $got"; exit 1
+            fi
+            git fetch --no-tags --quiet --unshallow origin main
+            if ! git merge-base --is-ancestor "$WANT" FETCH_HEAD; then
+              echo "::error::$WANT is not on main"; exit 1
+            fi
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -112,6 +155,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.sha }}
+      - name: The commit under test
+        # Step 9 evidence: the commit and tree this job tested, and the
+        # workflow file that ran. On a pull request HEAD is the test merge
+        # commit; on main and on a dispatch it is the released SHA itself. A
+        # dispatch runs only from main, on a full SHA already on main, so no
+        # unreviewed commit runs here. It is checked before any install or
+        # test code, and the input is read from the environment, never
+        # interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$WANT" ]; then
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
+            fi
+            if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error::give the full 40-character SHA"; exit 1
+            fi
+            if [ "$got" != "$WANT" ]; then
+              echo "::error::asked for $WANT but checked out $got"; exit 1
+            fi
+            git fetch --no-tags --quiet --unshallow origin main
+            if ! git merge-base --is-ancestor "$WANT" FETCH_HEAD; then
+              echo "::error::$WANT is not on main"; exit 1
+            fi
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -181,6 +252,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.sha }}
+      - name: The commit under test
+        # Step 9 evidence: the commit and tree this job tested, and the
+        # workflow file that ran. On a pull request HEAD is the test merge
+        # commit; on main and on a dispatch it is the released SHA itself. A
+        # dispatch runs only from main, on a full SHA already on main, so no
+        # unreviewed commit runs here. It is checked before any install or
+        # test code, and the input is read from the environment, never
+        # interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$WANT" ]; then
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
+            fi
+            if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error::give the full 40-character SHA"; exit 1
+            fi
+            if [ "$got" != "$WANT" ]; then
+              echo "::error::asked for $WANT but checked out $got"; exit 1
+            fi
+            git fetch --no-tags --quiet --unshallow origin main
+            if ! git merge-base --is-ancestor "$WANT" FETCH_HEAD; then
+              echo "::error::$WANT is not on main"; exit 1
+            fi
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
