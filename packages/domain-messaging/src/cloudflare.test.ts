@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ACCOUNT_FAULT_CODES,
   EmailProviderRejectedError,
   EmailProviderUnavailableError,
+  givesAttemptBack,
   type OutgoingEmail,
   providerMessageIdPattern,
 } from "./adapter.ts";
@@ -14,7 +16,11 @@ import {
   type RecipientPolicy,
   type SendEmailBinding,
 } from "./cloudflare.ts";
-import { classifyCloudflareError, cloudflareAmbiguousRule } from "./cloudflare-errors.ts";
+import {
+  classifyCloudflareError,
+  cloudflareAmbiguousRule,
+  cloudflareErrorTable,
+} from "./cloudflare-errors.ts";
 import {
   CLOUDFLARE_ERROR_CODES,
   type CloudflareEmailFixture,
@@ -222,6 +228,22 @@ describe("the Cloudflare email adapter: errors", () => {
   it("pins every one of the 21 documented codes", () => {
     expect(TABLE.map((r) => r[0]).sort()).toEqual([...CLOUDFLARE_ERROR_CODES].sort());
     expect(TABLE).toHaveLength(21);
+  });
+
+  it("lists exactly the account-scope codes as the ones that give their attempt back (0015)", () => {
+    const accountCodes = new Set(
+      [...cloudflareErrorTable.values()].filter((r) => r.scope === "account").map((r) => r.code),
+    );
+    expect([...accountCodes].sort()).toEqual([...ACCOUNT_FAULT_CODES].sort());
+    const fault = (code: string, outcome: "not_sent" | "unknown", scope: "account" | "message") =>
+      new EmailProviderUnavailableError(code, "synthetic", { outcome, scope });
+    expect(givesAttemptBack(fault("provider_quota_exceeded", "not_sent", "account"))).toBe(true);
+    // Only when the provider said it took nothing, at account scope, with a known code.
+    expect(givesAttemptBack(fault("provider_quota_exceeded", "unknown", "account"))).toBe(false);
+    expect(givesAttemptBack(fault("provider_quota_exceeded", "not_sent", "message"))).toBe(false);
+    expect(givesAttemptBack(fault("provider_rate_limited", "not_sent", "account"))).toBe(false);
+    expect(givesAttemptBack(new EmailProviderRejectedError("sender_not_verified"))).toBe(false);
+    expect(givesAttemptBack(new Error("sender_not_verified"))).toBe(false);
   });
 
   it("fails E_DELIVERY_FAILED for good with a neutral code, and keeps the rest ambiguous", () => {

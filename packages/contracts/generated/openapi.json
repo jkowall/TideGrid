@@ -12015,14 +12015,16 @@
                           },
                           "attempts": {
                             "type": "integer",
-                            "minimum": 0
+                            "minimum": 0,
+                            "description": "Counted delivery attempts. An account-level provider fault gives its attempt back, so a queued message can carry an error with no counted attempt"
                           },
                           "lastAttemptAt": {
                             "type": [
                               "string",
                               "null"
                             ],
-                            "format": "date-time"
+                            "format": "date-time",
+                            "description": "When the latest counted attempt was claimed; null while none counts"
                           },
                           "nextAttemptAt": {
                             "type": [

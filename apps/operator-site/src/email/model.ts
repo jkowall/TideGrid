@@ -44,7 +44,9 @@ export function stateView(
 ): StateView {
   switch (message.state) {
     case "queued":
-      return message.attempts > 0
+      // An account-level fault gives its attempt back (0015), so a message
+      // can wait again with an error and no counted attempt.
+      return message.attempts > 0 || message.failureCode !== null
         ? { tone: "pending", icon: "refresh", label: "Trying again" }
         : { tone: "pending", icon: "clock", label: "Waiting to send" };
     case "sending":
@@ -80,8 +82,10 @@ export const failureCopy: Record<MessageFailureCode, string> = {
   provider_rate_limited:
     "The email service asked TideGrid to slow down. It tries again on its own.",
   provider_quota_exceeded: "The day's email limit was reached. TideGrid tries again later.",
-  sender_not_verified: "The sending address isn't verified with the email service yet.",
-  provider_account_suspended: "The email account is suspended, so nothing can be sent.",
+  sender_not_verified:
+    "The sending address isn't verified with the email service yet. TideGrid keeps checking on its own.",
+  provider_account_suspended:
+    "The email account is suspended, so nothing can be sent. TideGrid keeps checking on its own.",
   recipient_changed: "Not sent: the address changed before it went out.",
   access_withdrawn: "Not sent: what it asked for was no longer needed.",
   booking_canceled: "Not sent: the booking was canceled first.",
@@ -120,6 +124,9 @@ export function whenText(
 ): string {
   switch (message.state) {
     case "queued":
+      if (message.attempts === 0 && message.failureCode !== null && message.nextAttemptAt) {
+        return `Next try ${when(message.nextAttemptAt)}. The email service hasn't taken it yet.`;
+      }
       if (message.attempts === 0) {
         return emailOff
           ? `Queued ${when(message.createdAt)}. Email is off here, so it waits.`

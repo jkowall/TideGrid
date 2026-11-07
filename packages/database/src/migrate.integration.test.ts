@@ -94,6 +94,51 @@ describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
     }
   }, 30_000);
 
+  // Email account faults (0015) replace the email message trigger function in place.
+  it("keeps the email message trigger's settings and binding after 0015, with the give-back", async () => {
+    const sql = postgres(url as string, { max: 1, prepare: false });
+    try {
+      const [applied] = await sql<{ ok: boolean }[]>`
+        SELECT EXISTS (SELECT 1 FROM schema_migrations
+                        WHERE name = '0015_email_account_fault_retry.sql') AS ok`;
+      expect(applied?.ok).toBe(true);
+      const [fn] = await sql<
+        {
+          definer: boolean;
+          config: string[];
+          runtime: boolean;
+          public_execute: boolean;
+          gives_back: boolean;
+          counts_claims: boolean;
+          bound: boolean;
+        }[]
+      >`
+        SELECT p.prosecdef AS definer,
+               p.proconfig AS config,
+               has_function_privilege('tidegrid_app', p.oid, 'EXECUTE') AS runtime,
+               EXISTS (SELECT 1 FROM aclexplode(p.proacl) x WHERE x.grantee = 0) AS public_execute,
+               p.prosrc LIKE '%only an account-level fault gives its attempt back%' AS gives_back,
+               p.prosrc LIKE '%attempts count claims only%' AS counts_claims,
+               EXISTS (SELECT 1 FROM pg_trigger t
+                        WHERE t.tgname = 'email_messages_rules'
+                          AND t.tgrelid = 'public.email_messages'::regclass
+                          AND t.tgfoid = p.oid) AS bound
+          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'app' AND p.proname = 'check_email_message'`;
+      expect(fn).toEqual({
+        definer: false,
+        config: ["search_path=pg_catalog, pg_temp"],
+        runtime: false,
+        public_execute: false,
+        gives_back: true,
+        counts_claims: true,
+        bound: true,
+      });
+    } finally {
+      await sql.end({ timeout: 5 });
+    }
+  }, 30_000);
+
   it("rejects a changed checksum on an applied migration", async () => {
     const files = await loadMigrations();
     const tampered = files.map((f, i) => (i === 0 ? { ...f, checksum: "0".repeat(64) } : f));

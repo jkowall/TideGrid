@@ -95,6 +95,35 @@ export class EmailProviderUnavailableError extends Error {
   }
 }
 
+/**
+ * The account-level fault codes whose retry gives its attempt back (G2.16-live
+ * prep, owner decision 2026-11-07). Migration 0015's trigger accepts a
+ * give-back for exactly these; a parity test keeps the two lists equal, and a
+ * new code needs a new migration.
+ */
+export const ACCOUNT_FAULT_CODES = [
+  "provider_quota_exceeded",
+  "sender_not_verified",
+  "provider_account_suspended",
+] as const;
+
+export function isAccountFaultCode(code: string): boolean {
+  return (ACCOUNT_FAULT_CODES as readonly string[]).includes(code);
+}
+
+/**
+ * Whether a failed send gives its attempt back: an account-level fault the
+ * provider says took nothing, with a code 0015 accepts. Anything else counts.
+ */
+export function givesAttemptBack(error: unknown): boolean {
+  return (
+    error instanceof EmailProviderUnavailableError &&
+    error.scope === "account" &&
+    error.outcome === "not_sent" &&
+    isAccountFaultCode(error.code)
+  );
+}
+
 /** The provider refused the email, such as a bounced address. Retrying cannot help. */
 export class EmailProviderRejectedError extends Error {
   constructor(

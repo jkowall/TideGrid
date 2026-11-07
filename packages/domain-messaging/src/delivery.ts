@@ -65,12 +65,23 @@ import {
   type EmailProvider,
   EmailProviderRejectedError,
   EmailProviderUnavailableError,
+  givesAttemptBack,
 } from "./adapter.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
 import { fillLinkSlot } from "./render.ts";
 
-/** Attempts before a temporarily failing message fails for good. */
+/**
+ * Counted attempts before a temporarily failing message fails for good. An
+ * account-level fault gives its attempt back (0015), so it never counts.
+ */
 export const MAX_DELIVERY_ATTEMPTS = 6;
+/**
+ * Seconds before a message retries after an account-level fault gave its
+ * attempt back (coordinator default, 2026-11-07, pending owner
+ * confirmation). Under the 15-minute cron, so each cron run checks once
+ * whether the account recovered; the database refuses anything under 60 s.
+ */
+export const ACCOUNT_FAULT_RETRY_SECONDS = 600;
 /** Seconds before attempt n + 1, after attempt n failed temporarily. */
 export const RETRY_BACKOFF_SECONDS = [60, 300, 900, 3600, 14_400] as const;
 export const DEFAULT_LEASE_SECONDS = 120;
@@ -381,7 +392,7 @@ async function record(
   row: ClaimedRow,
   result:
     | { kind: "sent"; providerMessageId: string }
-    | { kind: "retry"; code: string }
+    | { kind: "retry"; code: string; giveBack?: boolean }
     | { kind: "failed"; code: string },
 ): Promise<DeliveryItem> {
   const attempt = row.attempts;
@@ -390,6 +401,17 @@ async function record(
     if (result.kind === "sent") {
       const { rows } = await sql<{ id: string }>`
         update email_messages set state = 'sent', provider_message_id = ${result.providerMessageId}
+         where tenant_id = ${ctx.tenantId} and id = ${row.id}
+           and state = 'sending' and attempts = ${attempt}
+        returning id`.execute(trx);
+      updated = rows.length;
+    } else if (result.kind === "retry" && result.giveBack) {
+      // An account-level fault: back to queued with the attempt given back
+      // (0015), before the exhaustion test, so an outage never exhausts it.
+      const { rows } = await sql<{ id: string }>`
+        update email_messages
+           set state = 'queued', attempts = attempts - 1, last_error_code = ${result.code},
+               next_attempt_at = now() + make_interval(secs => ${ACCOUNT_FAULT_RETRY_SECONDS})
          where tenant_id = ${ctx.tenantId} and id = ${row.id}
            and state = 'sending' and attempts = ${attempt}
         returning id`.execute(trx);
@@ -504,7 +526,7 @@ async function deliverWithOrigin(
       const { row, url } = claimed;
       let result:
         | { kind: "sent"; providerMessageId: string }
-        | { kind: "retry"; code: string }
+        | { kind: "retry"; code: string; giveBack?: boolean }
         | { kind: "failed"; code: string };
       let accountFault = false;
       // Whether the provider was called at all: a throw before it is a known
@@ -536,9 +558,13 @@ async function deliverWithOrigin(
           accountFault = error.scope === "account";
           // Retried with the same key when the provider deduplicates, or when
           // it said the email was not sent; otherwise never repeated (D1 B).
+          // An account-level fault the provider says took nothing gives its
+          // attempt back (0015); every other retry counts.
           result =
             dedupes || error.outcome === "not_sent"
-              ? { kind: "retry", code: error.code }
+              ? givesAttemptBack(error)
+                ? { kind: "retry", code: error.code, giveBack: true }
+                : { kind: "retry", code: error.code }
               : { kind: "failed", code: OUTCOME_UNKNOWN };
         } else {
           // Not the provider's answer. Before the call, nothing was sent, so

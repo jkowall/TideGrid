@@ -184,8 +184,16 @@ export const MessageStatus = z
       .describe("booking_confirmation, booking_manage_link, booking_canceled, ..."),
     templateVersion: z.number().int().min(1),
     state: MessageDeliveryState,
-    attempts: z.number().int().min(0),
-    lastAttemptAt: Instant.nullable(),
+    attempts: z
+      .number()
+      .int()
+      .min(0)
+      .describe(
+        "Counted delivery attempts. An account-level provider fault gives its attempt back, so a queued message can carry an error with no counted attempt",
+      ),
+    lastAttemptAt: Instant.nullable().describe(
+      "When the latest counted attempt was claimed; null while none counts",
+    ),
     nextAttemptAt: Instant.nullable().describe("While queued"),
     sentAt: Instant.nullable(),
     failedAt: Instant.nullable(),

@@ -21,8 +21,11 @@ import {
 import type {} from "@tidegrid/database/global-setup";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { cloudflareErrorTable } from "./cloudflare-errors.ts";
 import { createCloudflareEmailFixture } from "./cloudflare-fixture.ts";
 import {
+  ACCOUNT_FAULT_CODES,
+  ACCOUNT_FAULT_RETRY_SECONDS,
   createCloudflareEmailProvider,
   type DeliveryOptions,
   deliverTenantMessages,
@@ -145,8 +148,10 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
         provider: string | null;
         provider_message_id: string | null;
         wait: number | null;
+        last_attempted: boolean;
       }[]
     >`select state, attempts, last_error_code, provider, provider_message_id,
+             last_attempt_at is not null as last_attempted,
              case when state = 'queued' then extract(epoch from next_attempt_at - now())::int end as wait
         from public.email_messages where id = ${messageId}`;
     if (!r) throw new Error(`no message ${messageId}`);
@@ -409,7 +414,114 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
       expect(cf.fixture.sends).toHaveLength(1);
       const states = await Promise.all(ids.map(row));
       expect(states.map((s) => s.state)).toEqual(["queued", "queued", "queued"]);
-      expect(states.filter((s) => s.attempts === 1)).toHaveLength(1);
+      // The fault gave its attempt back (0015): nothing counts, and the one
+      // it met waits about ten minutes before the next check.
+      expect(states.map((s) => s.attempts)).toEqual([0, 0, 0]);
+      const met = states.find((s) => s.last_error_code === "sender_not_verified");
+      expect(met?.last_attempted).toBe(false);
+      expect(met?.wait).toBeGreaterThan(ACCOUNT_FAULT_RETRY_SECONDS - 30);
+      expect(met?.wait).toBeLessThanOrEqual(ACCOUNT_FAULT_RETRY_SECONDS);
+    });
+
+    it("give the attempt back for each documented account code; a rate limit still counts", async () => {
+      for (const [cfCode, code, attempts] of [
+        ["E_DAILY_LIMIT_EXCEEDED", "provider_quota_exceeded", 0],
+        ["E_SENDER_NOT_VERIFIED", "sender_not_verified", 0],
+        ["E_SENDER_DOMAIN_NOT_AVAILABLE", "sender_not_verified", 0],
+        ["E_ACCOUNT_SUSPENDED", "provider_account_suspended", 0],
+        ["E_RATE_LIMIT_EXCEEDED", "provider_rate_limited", 1],
+      ] as const) {
+        const cf = cloudflare();
+        const T = await newTenant("acct");
+        const id = await enqueue(T, `code-${cfCode}`, addr("acct1"));
+        cf.fixture.failNext(cfCode);
+        await deliver(T, cf.provider);
+        expect(await row(id), cfCode).toMatchObject({
+          state: "queued",
+          attempts,
+          last_error_code: code,
+        });
+      }
+    });
+
+    it("never exhaust an email, however long the outage lasts, and it sends once the account recovers", async () => {
+      const T = await newTenant("acct");
+      const id = await enqueue(T, "outage", addr("acct2"));
+      let calls = 0;
+      const quota: EmailProvider = {
+        name: "cloudflare",
+        deduplicates: false,
+        send: async () => {
+          calls += 1;
+          throw new EmailProviderUnavailableError(
+            "provider_quota_exceeded",
+            "the email provider did not take the message: provider_quota_exceeded",
+            { outcome: "not_sent", scope: "account" },
+          );
+        },
+      };
+      // More rounds than the six counted attempts allow.
+      for (let round = 0; round < 8; round++) {
+        await makeDue(id);
+        const report = await deliver(T, quota);
+        expect(report.stopped).toBe("account_fault");
+        expect(await row(id)).toMatchObject({
+          state: "queued",
+          attempts: 0,
+          last_attempted: false,
+          last_error_code: "provider_quota_exceeded",
+        });
+      }
+      expect(calls).toBe(8);
+      const cf = cloudflare();
+      await makeDue(id);
+      await deliver(T, cf.provider);
+      expect(await row(id)).toMatchObject({ state: "sent", attempts: 1, last_error_code: null });
+    });
+
+    it("keep the attempts message faults counted, and an account fault on the sixth leaves five", async () => {
+      const T = await newTenant("acct");
+      const id = await enqueue(T, "mixed", addr("acct3"));
+      let next: "rate" | "account" = "rate";
+      const provider: EmailProvider = {
+        name: "cloudflare",
+        deduplicates: false,
+        send: async () => {
+          if (next === "rate") {
+            throw new EmailProviderUnavailableError("provider_rate_limited", "slow down", {
+              outcome: "not_sent",
+              scope: "message",
+            });
+          }
+          throw new EmailProviderUnavailableError("sender_not_verified", "not verified", {
+            outcome: "not_sent",
+            scope: "account",
+          });
+        },
+      };
+      for (let i = 0; i < 5; i++) {
+        await makeDue(id);
+        await deliver(T, provider);
+      }
+      expect(await row(id)).toMatchObject({ state: "queued", attempts: 5, last_attempted: true });
+      // The sixth claim meets an account fault: not exhausted, back to five.
+      next = "account";
+      await makeDue(id);
+      await deliver(T, provider);
+      expect(await row(id)).toMatchObject({
+        state: "queued",
+        attempts: 5,
+        last_attempted: true,
+        last_error_code: "sender_not_verified",
+      });
+      // A counted sixth failure still exhausts it.
+      next = "rate";
+      await makeDue(id);
+      await deliver(T, provider);
+      expect(await row(id)).toMatchObject({
+        state: "failed",
+        last_error_code: "retries_exhausted",
+      });
     });
 
     it("stop the sweep after the first fault, whichever tenant meets it", async () => {
@@ -437,6 +549,88 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
       expect(report.accountFault).toBe(true);
       expect(report.complete).toBe(false);
       expect(report.retried).toBe(1);
+    });
+  });
+
+  describe("the 0015 give-back rule, as the database enforces it", () => {
+    /** Claims as the admin role would, under the trigger: one more attempt and a lease. */
+    async function claim(id: string) {
+      await admin`update public.email_messages set next_attempt_at = now() - interval '1 second'
+                 where id = ${id} and state = 'queued' and next_attempt_at > now()`;
+      await admin`update public.email_messages
+                     set state = 'sending', attempts = attempts + 1,
+                         lease_expires_at = now() + interval '2 minutes', provider = 'cloudflare'
+                   where id = ${id}`;
+    }
+    /** A give-back as written, and the constraint that refused it, or null. */
+    async function giveBack(
+      id: string,
+      fields: { code: string; by?: number; state?: string; wait?: string; providerId?: string },
+    ): Promise<string | null> {
+      try {
+        await admin`update public.email_messages
+                       set state = ${fields.state ?? "queued"},
+                           attempts = attempts - ${fields.by ?? 1},
+                           last_error_code = ${fields.code},
+                           next_attempt_at = now() + ${fields.wait ?? "10 minutes"}::interval,
+                           provider_message_id = ${fields.providerId ?? null}
+                     where id = ${id}`;
+        return null;
+      } catch (err) {
+        const e = err as { constraint_name?: string };
+        return e.constraint_name ?? "unknown";
+      }
+    }
+
+    it("accepts exactly the account-fault codes, and refuses every other code in the error table", async () => {
+      const T = await newTenant("rule");
+      const id = await enqueue(T, "rule-codes", addr("a1"));
+      const codes = new Set<string>([
+        ...[...cloudflareErrorTable.values()].map((r) => r.code),
+        "provider_unavailable",
+        "outcome_unknown",
+        "retries_exhausted",
+        "send_error",
+      ]);
+      for (const code of ACCOUNT_FAULT_CODES) expect(codes.has(code), code).toBe(true);
+      await claim(id);
+      for (const code of [...codes].sort()) {
+        const refused = await giveBack(id, { code });
+        if ((ACCOUNT_FAULT_CODES as readonly string[]).includes(code)) {
+          expect(refused, code).toBeNull();
+          expect(await row(id), code).toMatchObject({ state: "queued", attempts: 0 });
+          await claim(id);
+        } else {
+          expect(refused, code).toBe("email_messages_transition");
+          expect(await row(id), code).toMatchObject({ state: "sending", attempts: 1 });
+        }
+      }
+    });
+
+    it("refuses a give-back of two, to failed, on a queued row, too soon, or with a provider's id", async () => {
+      const T = await newTenant("rule");
+      const id = await enqueue(T, "rule-shapes", addr("a2"));
+      // Two counted claims, so a decrement of two would not cross zero.
+      await claim(id);
+      await admin`update public.email_messages
+                     set state = 'queued', last_error_code = 'provider_rate_limited',
+                         next_attempt_at = now() + interval '1 minute'
+                   where id = ${id}`;
+      await claim(id);
+      const code = "provider_quota_exceeded";
+      expect(await giveBack(id, { code, by: 2 })).toBe("email_messages_transition");
+      expect(await giveBack(id, { code, state: "failed" })).toBe("email_messages_transition");
+      expect(await giveBack(id, { code, wait: "30 seconds" })).toBe("email_messages_transition");
+      expect(
+        await giveBack(id, { code, providerId: "cfh_0000000000000000000000000000000000000000" }),
+      ).toBe("email_messages_transition");
+      expect(await row(id)).toMatchObject({ state: "sending", attempts: 2 });
+      // A good give-back keeps the time of the claim that still counts.
+      expect(await giveBack(id, { code })).toBeNull();
+      expect(await row(id)).toMatchObject({ state: "queued", attempts: 1, last_attempted: true });
+      // On a queued row, a decrement is the old rule's refusal.
+      expect(await giveBack(id, { code, wait: "20 minutes" })).toBe("email_messages_transition");
+      expect(await row(id)).toMatchObject({ state: "queued", attempts: 1 });
     });
   });
 

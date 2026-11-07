@@ -20,12 +20,15 @@ export {
   revokeGuestSessions,
 } from "./access.ts";
 export {
+  ACCOUNT_FAULT_CODES,
   type EmailFaultScope,
   type EmailProvider,
   type EmailProviderName,
   EmailProviderRejectedError,
   EmailProviderUnavailableError,
   type EmailSendOutcome,
+  givesAttemptBack,
+  isAccountFaultCode,
   type OutgoingEmail,
   providerMessageIdPattern,
 } from "./adapter.ts";
@@ -52,6 +55,7 @@ export {
   cloudflareErrorTable,
 } from "./cloudflare-errors.ts";
 export {
+  ACCOUNT_FAULT_RETRY_SECONDS,
   DEFAULT_GUEST_LINK_ORIGIN,
   DEFAULT_LEASE_SECONDS,
   type DeliveryItem,

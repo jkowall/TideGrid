@@ -73,6 +73,11 @@ describe("a booking's email in words (G2.16b)", () => {
       label: "Failed",
     });
     expect(stateView(message({ state: "queued", attempts: 0 })).label).toBe("Waiting to send");
+    // An account-level fault gave its attempt back (0015): it is retrying, not new.
+    expect(
+      stateView(message({ state: "queued", attempts: 0, failureCode: "provider_quota_exceeded" }))
+        .label,
+    ).toBe("Trying again");
     expect(stateView(message({ state: "queued", attempts: 2 })).label).toBe("Trying again");
   });
 
@@ -89,6 +94,19 @@ describe("a booking's email in words (G2.16b)", () => {
     expect(whenText(message({ state: "queued", attempts: 0, sentAt: null }), when, true)).toBe(
       "Queued [2026-11-04T14:00:00.000Z]. Email is off here, so it waits.",
     );
+    expect(
+      whenText(
+        message({
+          state: "queued",
+          attempts: 0,
+          sentAt: null,
+          failureCode: "sender_not_verified",
+          nextAttemptAt: "2026-11-04T14:10:00.000Z",
+        }),
+        when,
+        false,
+      ),
+    ).toBe("Next try [2026-11-04T14:10:00.000Z]. The email service hasn't taken it yet.");
     expect(
       whenText(
         message({
