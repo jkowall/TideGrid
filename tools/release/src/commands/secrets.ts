@@ -301,7 +301,9 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
       fileNote = "; value from a test-mode file, file kept for a retry";
     }
   }
-  const after = await deployedVersions(deps, "api").catch(() => [] as string[]);
+  // An incomplete cleanup is journaled and warned about at once: the listing
+  // is a network call that could stall until a time limit kills nov1 first.
+  const after = fileLeft ? [] : await deployedVersions(deps, "api").catch(() => [] as string[]);
   record(deps, {
     phase,
     step: del ? "secret-delete" : "secret-put",
@@ -320,7 +322,7 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
   }
   out(
     deps,
-    `${name} ${del ? "deleted" : "set"}; live version now ${after.join(", ")} (journaled; not a rollback anchor, --rollback undoes releases only)`,
+    `${name} ${del ? "deleted" : "set"}; ${fileLeft ? "live version not listed, cleanup first" : `live version now ${after.join(", ")}`} (journaled; not a rollback anchor, --rollback undoes releases only)`,
   );
   if (fileLeft === "linked") {
     out(

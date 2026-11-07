@@ -206,18 +206,35 @@ function assertPairedKey(journal: Journal, phase: Phase): void {
  * else is left in place ("other"). A hard link made since the read keeps the
  * secret at a name nov1 does not know: this name is removed, but the result
  * is "linked", never "removed".
+ *
+ * The file is held open from before the identity check until after the
+ * unlink, and its link count is read from that descriptor once the name is
+ * gone: only zero names left is "removed". A link made at any moment before
+ * the unlink, the gap between the check and the unlink included, is counted.
+ * Residual: if the path is swapped for another file inside that gap, the
+ * other file's name is removed; the held file then still has its name, so
+ * the result is "linked", never a false "removed". `beforeUnlink` is a test
+ * hook for that gap.
  */
 export function removeCheckedFile(
   path: string,
   identity: FileIdentity,
+  hooks: { beforeUnlink?: () => void } = {},
 ): "removed" | "linked" | "other" {
+  let fd: number | undefined;
   try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const held = fstatSync(fd);
+    if (!held.isFile() || held.dev !== identity.dev || held.ino !== identity.ino) return "other";
     const st = lstatSync(path);
-    if (!st.isFile() || st.dev !== identity.dev || st.ino !== identity.ino) return "other";
+    if (!st.isFile() || st.dev !== held.dev || st.ino !== held.ino) return "other";
+    hooks.beforeUnlink?.();
     unlinkSync(path);
-    return st.nlink === 1 ? "removed" : "linked";
+    return fstatSync(fd).nlink === 0 ? "removed" : "linked";
   } catch {
     return "other";
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 

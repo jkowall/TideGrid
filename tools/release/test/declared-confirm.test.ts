@@ -12,6 +12,7 @@ import {
   chmodSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -27,6 +28,7 @@ import { main } from "../src/cli.ts";
 import { treeMigrations } from "../src/commands/preflight.ts";
 import type { Deps } from "../src/core.ts";
 import { type Entry, loadJournal, saveJournal } from "../src/journal.ts";
+import { removeCheckedFile } from "../src/secret-file.ts";
 import {
   configsWith,
   type ExecCall,
@@ -506,6 +508,46 @@ describe("secret values from a test-mode file", () => {
         .entries.filter((e) => e.step === "secret-put")
         .at(-1)?.note,
     ).toMatch(/NOT fully removed/);
+  });
+
+  it("journals and warns about a late hard link without waiting for the version listing", async () => {
+    const file = secretFile(testKey);
+    const second = `${file}-second`;
+    let listed = false;
+    const { deps, printed } = stripeDeps({
+      exec: (c) => {
+        if (c.args.includes("put")) linkSync(file, second);
+        else if (c.args.includes("deployments") && existsSync(second)) listed = true;
+        return undefined;
+      },
+    });
+    expect(await main(putArgs("STRIPE_SECRET_KEY", file), deps)).toBe(1);
+    expect(listed).toBe(false);
+    expect(printed.join("\n")).toMatch(/live version not listed/);
+    expect(
+      loadJournal(deps)
+        .entries.filter((e) => e.step === "secret-put")
+        .at(-1),
+    ).toMatchObject({ result: "done", versionAfter: [] });
+  });
+
+  it("counts a hard link made between the identity check and the unlink", () => {
+    const file = secretFile(testKey);
+    const second = `${file}-late`;
+    const st = lstatSync(file);
+    const result = removeCheckedFile(
+      file,
+      { dev: st.dev, ino: st.ino },
+      { beforeUnlink: () => linkSync(file, second) },
+    );
+    expect(result).toBe("linked");
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(second)).toBe(true);
+    // With no link the same call reports a full removal.
+    const lone = secretFile(testKey);
+    const lst = lstatSync(lone);
+    expect(removeCheckedFile(lone, { dev: lst.dev, ino: lst.ino })).toBe("removed");
+    expect(existsSync(lone)).toBe(false);
   });
 
   it("keeps the file when wrangler fails, and says so", async () => {
