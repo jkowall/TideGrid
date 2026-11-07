@@ -40,6 +40,11 @@ describe("a booking's email in words (G2.16b)", () => {
       "The email service did not answer, so TideGrid did not try again, to avoid sending it twice. Send it again if the guest did not get it.",
     );
     expect(failureText("resent")).toBe("Replaced by a newer email before it went out.");
+    // A definite failure (owner decision, 2026-11-07): it does not claim the
+    // guest's server refused it, and it points staff at the address.
+    expect(failureText("delivery_failed")).toBe(
+      "The email service could not deliver it, and TideGrid did not try again. Check the address, then send it again.",
+    );
     expect(failureText("bounced")).toContain("refused it");
   });
 
@@ -62,7 +67,17 @@ describe("a booking's email in words (G2.16b)", () => {
       label: "Outcome unknown",
     });
     expect(stateView(message({ state: "failed", failureCode: "bounced" })).label).toBe("Failed");
+    expect(stateView(message({ state: "failed", failureCode: "delivery_failed" }))).toEqual({
+      tone: "blocked",
+      icon: "x-octagon",
+      label: "Failed",
+    });
     expect(stateView(message({ state: "queued", attempts: 0 })).label).toBe("Waiting to send");
+    // An account-level fault gave its attempt back (0015): it is retrying, not new.
+    expect(
+      stateView(message({ state: "queued", attempts: 0, failureCode: "provider_quota_exceeded" }))
+        .label,
+    ).toBe("Trying again");
     expect(stateView(message({ state: "queued", attempts: 2 })).label).toBe("Trying again");
   });
 
@@ -79,6 +94,30 @@ describe("a booking's email in words (G2.16b)", () => {
     expect(whenText(message({ state: "queued", attempts: 0, sentAt: null }), when, true)).toBe(
       "Queued [2026-11-04T14:00:00.000Z]. Email is off here, so it waits.",
     );
+    expect(
+      whenText(
+        message({
+          state: "queued",
+          attempts: 0,
+          sentAt: null,
+          failureCode: "sender_not_verified",
+          nextAttemptAt: "2026-11-04T14:10:00.000Z",
+        }),
+        when,
+        false,
+      ),
+    ).toBe("Next try [2026-11-04T14:10:00.000Z]. The email service hasn't taken it yet.");
+    const givenBack = message({
+      state: "queued",
+      attempts: 0,
+      sentAt: null,
+      failureCode: "sender_not_verified",
+      nextAttemptAt: null,
+    });
+    expect(whenText(givenBack, when, false)).toBe(
+      "Waiting to try again. The email service hasn't taken it yet.",
+    );
+    expect(whenText(givenBack, when, true)).toBe("Email is off here, so it waits.");
     expect(
       whenText(
         message({

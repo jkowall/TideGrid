@@ -74,13 +74,13 @@ export const cloudflareErrorTable: ReadonlyMap<string, CloudflareErrorRule> = ne
   ["E_SENDER_DOMAIN_NOT_AVAILABLE", account("sender_not_verified")],
   ["E_ACCOUNT_SUSPENDED", account("provider_account_suspended")],
   // E_DELIVERY_FAILED: description "Could not deliver the email", common
-  // causes "SMTP delivery failure, recipient server rejection". A rejection by
-  // the recipient's server means something was transmitted and refused, which
-  // points toward Rejected; an SMTP failure does not say. It stays ambiguous
-  // (coordinator default for D1), the safe direction: never sent again.
-  // Whether a Rejected code (such as recipient_rejected) would serve staff
-  // better is on the G2.16-live checklist.
-  ["E_DELIVERY_FAILED", ambiguous],
+  // causes "SMTP delivery failure, recipient server rejection". A definite
+  // failure with a neutral code (owner decision, 2026-11-07, replacing D1 B
+  // for this code only): it fails at once and is never sent again, as before,
+  // and staff read "could not deliver" rather than "outcome unknown". The
+  // code does not claim the recipient's server refused it, which Cloudflare's
+  // description does not prove.
+  ["E_DELIVERY_FAILED", rejected("delivery_failed")],
   // E_INTERNAL_SERVER_ERROR: "Internal service error", common cause "Email
   // Service temporarily unavailable"; whether the email was taken is unknown.
   ["E_INTERNAL_SERVER_ERROR", ambiguous],

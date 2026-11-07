@@ -61,10 +61,28 @@ export const DEFAULT_FROM_ADDRESS = "bookings@tidegrid.us";
 /** One Cloudflare send's bound: well inside the 120 s lease and the waitUntil budget. */
 export const CLOUDFLARE_SEND_TIMEOUT_MS = 10_000;
 /**
- * How long after-commit delivery may run. `waitUntil` allows 30 s after the
- * response; stopping new claims well before leaves the rest to the cron.
+ * `waitUntil` allows 30 s after the response. The after-commit window counts
+ * from a moment before the response, so this bound is never later than the
+ * runtime's.
+ */
+export const WAIT_UNTIL_BUDGET_MS = 30_000;
+/**
+ * How long after-commit delivery may run once its database connection is
+ * ready; stopping new claims well before the budget leaves the rest to the
+ * cron.
  */
 export const AFTER_COMMIT_BUDGET_MS = 18_000;
+
+/**
+ * After-commit delivery's deadline (G2.16-live prep, 2026-11-07): 18 s from
+ * the moment its connection is ready, never past the request's own start
+ * plus the 30 s `waitUntil` budget. A slow first connection no longer eats
+ * the window, and every send still ends inside the budget: delivery claims
+ * nothing once a send and its margin could pass the deadline.
+ */
+export function afterCommitDeadline(window: { startedAt: number; readyAt: number }): number {
+  return Math.min(window.readyAt + AFTER_COMMIT_BUDGET_MS, window.startedAt + WAIT_UNTIL_BUDGET_MS);
+}
 
 /**
  * The recipient allowlist, parsed: entries trimmed, empties dropped, and
@@ -215,22 +233,25 @@ export function deliversAfterCommit(env: Bindings, deps: AppDeps): boolean {
 
 /**
  * The run after-commit delivery makes: at most 10 messages, and none
- * claimed once a send could outlast the `waitUntil` budget (G2.16a).
+ * claimed once a send could outlast the `waitUntil` budget (G2.16a), with the
+ * deadline from `afterCommitDeadline`.
  */
 export function afterCommitDeliveryOptions(
   env: Bindings,
   provider: EmailProvider,
   runId: string,
-  startedAt: number,
+  window: { startedAt: number; readyAt: number },
   onSendError: DeliveryOptions["onSendError"],
+  clock?: () => number,
 ): DeliveryOptions {
   return {
     provider,
     ...deliverySettings(env),
     runId,
     limit: 10,
-    deadline: startedAt + AFTER_COMMIT_BUDGET_MS,
+    deadline: afterCommitDeadline(window),
     ...(onSendError ? { onSendError } : {}),
+    ...(clock ? { clock } : {}),
   };
 }
 
@@ -247,7 +268,9 @@ export function deliverAfterCommit(c: Context<AppEnv>, deps: AppDeps, tenantId: 
   const log = c.get("log");
   const runId = c.get("requestId");
   const env = c.env;
-  const startedAt = Date.now();
+  const clock = deps.emailClock ?? Date.now;
+  // Taken before the response is sent, so the 30 s cap is never late.
+  const startedAt = clock();
   c.executionCtx.waitUntil(
     (async () => {
       const handle = createDb(url, { max: 1 });
@@ -256,11 +279,20 @@ export function deliverAfterCommit(c: Context<AppEnv>, deps: AppDeps, tenantId: 
           ? deps.emailProvider(handle.db, env)
           : emailProvider(env, handle.db, log);
         if (!provider) return;
+        // The window counts from a ready connection; a slow connect is not
+        // spent from it, and a failure here leaves the mail to the cron.
+        await handle.sql`select 1`;
+        const readyAt = clock();
         const report = await deliverTenantMessages(
           handle.db,
           tenantId,
-          afterCommitDeliveryOptions(env, provider, runId, startedAt, (_messageId, error) =>
-            log.error("email_send_error", sendErrorAttributes(error)),
+          afterCommitDeliveryOptions(
+            env,
+            provider,
+            runId,
+            { startedAt, readyAt },
+            (_messageId, error) => log.error("email_send_error", sendErrorAttributes(error)),
+            clock,
           ),
         );
         log.info("email_delivery", {

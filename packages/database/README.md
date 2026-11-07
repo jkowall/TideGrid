@@ -197,6 +197,10 @@ Migration `0014_booking_email_resends.sql` (G2.16b follow-up) holds the staff re
 - **Backfill.** The file refuses to run unless its role bypasses row-level security (the 0009 guard), writes one ledger row per existing `booking.resend:` message (generation from the key, kind from the template, the message's time, actor `system`), refuses any key that does not parse strictly, names another booking, or carries another template, and checks the counts match. `src/migrate-0014.integration.test.ts` proves it on scratch databases. A request in flight that already holds a row lock on `email_messages` or `bookings` can deadlock with the file, and either may be aborted; apply it before the API release that uses it, in a quiet window (O2). The file rolls back alone, and a rerun is safe.
 - **Not held here.** The service's eligibility refusals (D5 A); the two templates' other keys (D4 C, proposed); the waiver ledger's `send_after` hole (D6, recorded only).
 
+## Email account faults (0015)
+
+Migration `0015_email_account_fault_retry.sql` (G2.16-live prep, owner decision 2026-11-07 in the [decision register](../../docs/v2/06-decision-register.md)) replaces `app.check_email_message()` in place: same name, owner, grants, settings, and trigger. Its one new branch lets a retry from `sending` to `queued` lower `attempts` by exactly one, only for the account-fault codes `provider_quota_exceeded`, `sender_not_verified`, and `provider_account_suspended`, with no provider id and a wait of at least a minute. At zero attempts it clears `last_attempt_at`, as the table's CHECK requires. Every other change to `attempts` is still refused as before. The codes are also `ACCOUNT_FAULT_CODES` in `packages/domain-messaging`, and a parity test keeps the lists equal; a new code needs a new migration. Apply it before the API release that gives attempts back.
+
 ## Tests
 
 - `pnpm test` runs unit tests.

@@ -3,6 +3,7 @@ import type { CloudflareEmailBuilder, SendEmailBinding } from "@tidegrid/domain-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AFTER_COMMIT_BUDGET_MS,
+  afterCommitDeadline,
   afterCommitDeliveryOptions,
   CLOUDFLARE_SEND_TIMEOUT_MS,
   deliversAfterCommit,
@@ -11,6 +12,7 @@ import {
   emailSettings,
   fakeEmailProvider,
   parseAllowedRecipients,
+  WAIT_UNTIL_BUDGET_MS,
 } from "../src/email.ts";
 import type { Bindings } from "../src/env.ts";
 
@@ -236,11 +238,35 @@ describe("after-commit delivery (G2.16a)", () => {
     expect(deliversAfterCommit(cloudflare(), { deliverEmailAfterCommit: false })).toBe(false);
   });
 
+  it("counts the window from a ready connection, and never ends past the 30 s budget", () => {
+    const s = 5_000_000;
+    // A send's reserve: the Cloudflare bound plus delivery's 2 s margin.
+    const reserve = CLOUDFLARE_SEND_TIMEOUT_MS + 2_000;
+    let previous = Number.NEGATIVE_INFINITY;
+    for (const ready of [0, 1_000, 5_000, 11_999, 12_000, 20_000, 45_000]) {
+      const deadline = afterCommitDeadline({ startedAt: s, readyAt: s + ready });
+      expect(deadline).toBe(Math.min(s + ready + AFTER_COMMIT_BUDGET_MS, s + WAIT_UNTIL_BUDGET_MS));
+      expect(deadline).toBeLessThanOrEqual(s + WAIT_UNTIL_BUDGET_MS);
+      // That the send itself ends by the deadline is delivery's to hold: it
+      // checks again after the claim and calls the provider only while a
+      // whole send and the 2 s margin that records it still fit (the after-commit integration suite covers a
+      // slow claim). Here only the window's bounds are checked.
+      // A slower connection never shortens the window.
+      expect(deadline).toBeGreaterThanOrEqual(previous);
+      previous = deadline;
+    }
+    // A 5 s connect used to leave 1 s to claim in; now it leaves 6 s.
+    expect(afterCommitDeadline({ startedAt: s, readyAt: s + 5_000 }) - reserve - (s + 5_000)).toBe(
+      6_000,
+    );
+  });
+
   it("passes a deadline inside the waitUntil budget", () => {
     const settings = cloudflare();
     const provider = emailProvider(settings, db);
     if (!provider) throw new Error("no provider");
-    const options = afterCommitDeliveryOptions(settings, provider, "req-1", 1_000_000, undefined);
+    const window = { startedAt: 1_000_000, readyAt: 1_000_000 };
+    const options = afterCommitDeliveryOptions(settings, provider, "req-1", window, undefined);
     expect(options).toMatchObject({
       provider,
       limit: 10,
@@ -248,8 +274,14 @@ describe("after-commit delivery (G2.16a)", () => {
       fromAddress: "bookings@tidegrid.us",
       environment: "preview",
     });
-    // The last claim leaves room for one send and the margin before 30 s.
-    expect(AFTER_COMMIT_BUDGET_MS).toBeLessThanOrEqual(30_000 - 2_000 - CLOUDFLARE_SEND_TIMEOUT_MS);
+    expect(options.clock).toBeUndefined();
+    const clock = () => 7;
+    expect(
+      afterCommitDeliveryOptions(settings, provider, "req-1", window, undefined, clock).clock,
+    ).toBe(clock);
+    // The window fits inside the budget, with room for one send and the margin.
+    expect(AFTER_COMMIT_BUDGET_MS).toBeLessThanOrEqual(WAIT_UNTIL_BUDGET_MS);
+    expect(AFTER_COMMIT_BUDGET_MS).toBeGreaterThan(CLOUDFLARE_SEND_TIMEOUT_MS + 2_000);
     expect(deliverySettings(settings)).toEqual({
       fromAddress: "bookings@tidegrid.us",
       guestLinkOrigin: "https://{slug}.book.tidegrid.us",

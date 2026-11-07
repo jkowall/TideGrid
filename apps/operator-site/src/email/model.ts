@@ -44,7 +44,9 @@ export function stateView(
 ): StateView {
   switch (message.state) {
     case "queued":
-      return message.attempts > 0
+      // An account-level fault gives its attempt back (0015), so a message
+      // can wait again with an error and no counted attempt.
+      return message.attempts > 0 || message.failureCode !== null
         ? { tone: "pending", icon: "refresh", label: "Trying again" }
         : { tone: "pending", icon: "clock", label: "Waiting to send" };
     case "sending":
@@ -64,12 +66,17 @@ export function stateView(
 export const failureCopy: Record<MessageFailureCode, string> = {
   provider_unavailable: "The email service was unavailable. TideGrid tries again on its own.",
   bounced: "The guest's mail server refused it. The address may be wrong.",
-  retries_exhausted: "TideGrid tried six times and the email service never took it.",
+  retries_exhausted:
+    "TideGrid tried six times and the email service never took it, not counting checks during an email service outage.",
   link_host_unmapped:
     "The operator's booking site isn't set up yet, so the email's link had nowhere to go.",
   send_error: "Something went wrong preparing it. TideGrid tries again on its own.",
+  deadline_reached:
+    "There wasn't time to send it with the request. TideGrid tries again on its own.",
   outcome_unknown:
     "The email service did not answer, so TideGrid did not try again, to avoid a second working link. Send it again if the guest did not get it.",
+  delivery_failed:
+    "The email service could not deliver it, and TideGrid did not try again. Check the address, then send it again.",
   invalid_message: "The email service refused the email as TideGrid built it.",
   recipient_suppressed:
     "The email service won't deliver to this address, because mail to it bounced or was reported before.",
@@ -78,8 +85,10 @@ export const failureCopy: Record<MessageFailureCode, string> = {
   provider_rate_limited:
     "The email service asked TideGrid to slow down. It tries again on its own.",
   provider_quota_exceeded: "The day's email limit was reached. TideGrid tries again later.",
-  sender_not_verified: "The sending address isn't verified with the email service yet.",
-  provider_account_suspended: "The email account is suspended, so nothing can be sent.",
+  sender_not_verified:
+    "The sending address isn't verified with the email service yet. TideGrid keeps checking on its own.",
+  provider_account_suspended:
+    "The email account is suspended, so nothing can be sent. TideGrid keeps checking on its own.",
   recipient_changed: "Not sent: the address changed before it went out.",
   access_withdrawn: "Not sent: what it asked for was no longer needed.",
   booking_canceled: "Not sent: the booking was canceled first.",
@@ -118,6 +127,12 @@ export function whenText(
 ): string {
   switch (message.state) {
     case "queued":
+      if (message.attempts === 0 && message.failureCode !== null) {
+        if (emailOff) return "Email is off here, so it waits.";
+        return message.nextAttemptAt
+          ? `Next try ${when(message.nextAttemptAt)}. The email service hasn't taken it yet.`
+          : "Waiting to try again. The email service hasn't taken it yet.";
+      }
       if (message.attempts === 0) {
         return emailOff
           ? `Queued ${when(message.createdAt)}. Email is off here, so it waits.`

@@ -348,7 +348,8 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     const rec = recorder();
     const b = await book(world, CF, tripsCF.shared(), 1, { booker: booker() });
     const cf = cloudflare(rec);
-    rec.failNext("E_DELIVERY_FAILED");
+    // An ambiguous code: since 2026-11-07, E_DELIVERY_FAILED is a definite failure.
+    rec.failNext("E_INTERNAL_SERVER_ERROR");
     await deliverMail(world, CF.id, cf);
     const [original] = await messagesOf(world.admin, b.bookingId);
     if (!original) throw new Error("setup: no confirmation");

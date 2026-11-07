@@ -161,7 +161,8 @@ describe.skipIf(!env)("booking email over the Cloudflare email adapter (G2.16a)"
   it("fails a confirmation with an unknown outcome once, and the guest recovers with a new link", async () => {
     const rec = recorder();
     const b = await book(world, A, trips.shared(), 1, { booker: booker() });
-    rec.failNext("E_DELIVERY_FAILED");
+    // An ambiguous code: since 2026-11-07, E_DELIVERY_FAILED is a definite failure (next case).
+    rec.failNext("E_INTERNAL_SERVER_ERROR");
     await deliverMail(world, A.id, cloudflare(rec));
     const [confirmation] = await messagesOf(world.admin, b.bookingId);
     if (!confirmation) throw new Error("setup: no confirmation");
@@ -171,6 +172,29 @@ describe.skipIf(!env)("booking email over the Cloudflare email adapter (G2.16a)"
 
     const asked = await asGuest(world.db, A.id, (trx, ctx) =>
       requestManageLink(trx, ctx, { bookingId: b.bookingId, requestKey: "cf-recover" }),
+    );
+    if (asked.kind !== "enqueued") throw new Error(`setup: ${asked.kind}`);
+    await deliverMail(world, A.id, cloudflare(rec));
+    const [fresh] = callsFor(rec, asked.messageId);
+    const token = fresh ? tokenIn(fresh.html) : null;
+    if (!token) throw new Error("no link in the new email");
+    expect((await redeem(world, A.id, token)).kind).toBe("opened");
+  });
+
+  it("fails a confirmation Cloudflare could not deliver once, as delivery_failed, and the guest recovers", async () => {
+    const rec = recorder();
+    const b = await book(world, A, trips.shared(), 1, { booker: booker() });
+    rec.failNext("E_DELIVERY_FAILED");
+    await deliverMail(world, A.id, cloudflare(rec));
+    const [confirmation] = await messagesOf(world.admin, b.bookingId);
+    if (!confirmation) throw new Error("setup: no confirmation");
+    expect(confirmation).toMatchObject({ state: "failed", last_error_code: "delivery_failed" });
+    // Never sent again on its own.
+    await deliverMail(world, A.id, cloudflare(rec));
+    expect(callsFor(rec, confirmation.id)).toHaveLength(1);
+
+    const asked = await asGuest(world.db, A.id, (trx, ctx) =>
+      requestManageLink(trx, ctx, { bookingId: b.bookingId, requestKey: "cf-delivery-failed" }),
     );
     if (asked.kind !== "enqueued") throw new Error(`setup: ${asked.kind}`);
     await deliverMail(world, A.id, cloudflare(rec));

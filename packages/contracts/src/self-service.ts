@@ -184,8 +184,16 @@ export const MessageStatus = z
       .describe("booking_confirmation, booking_manage_link, booking_canceled, ..."),
     templateVersion: z.number().int().min(1),
     state: MessageDeliveryState,
-    attempts: z.number().int().min(0),
-    lastAttemptAt: Instant.nullable(),
+    attempts: z
+      .number()
+      .int()
+      .min(0)
+      .describe(
+        "Counted delivery attempts. An account-level provider fault gives its attempt back, so a queued message can carry an error with no counted attempt",
+      ),
+    lastAttemptAt: Instant.nullable().describe(
+      "When the latest claim was made, including one an account-level fault gave back; null while no attempt counts",
+    ),
     nextAttemptAt: Instant.nullable().describe("While queued"),
     sentAt: Instant.nullable(),
     failedAt: Instant.nullable(),
@@ -194,7 +202,7 @@ export const MessageStatus = z
       .string()
       .nullable()
       .describe(
-        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error; from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, or resent: a newer email replaced it) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically",
+        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error, deadline_reached (the run ran out of time before sending it; it retries); from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), delivery_failed (the provider could not deliver it; not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, or resent: a newer email replaced it) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically",
       ),
     provider: z.enum(["fake", "cloudflare"]).nullable(),
     staffResend: z
@@ -217,6 +225,8 @@ export const MESSAGE_FAILURE_CODES = [
   "link_host_unmapped",
   "send_error",
   "outcome_unknown",
+  "delivery_failed",
+  "deadline_reached",
   "invalid_message",
   "recipient_suppressed",
   "recipient_not_allowed",

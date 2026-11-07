@@ -41,6 +41,11 @@ export interface AppDeps {
   /** False keeps committed mail queued for the test to deliver; default true. */
   deliverEmailAfterCommit?: boolean;
   /**
+   * The clock after-commit email delivery reads for its window, in epoch ms;
+   * tests script it. Apart from `now`, which pins sales cutoffs.
+   */
+  emailClock?: () => number;
+  /**
    * Replaces the waiver module's collaborators (src/waivers.ts), for tests:
    * the participant directory (G2.15).
    */
