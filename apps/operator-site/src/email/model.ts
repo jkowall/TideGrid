@@ -70,6 +70,8 @@ export const failureCopy: Record<MessageFailureCode, string> = {
   send_error: "Something went wrong preparing it. TideGrid tries again on its own.",
   outcome_unknown:
     "The email service did not answer, so TideGrid did not try again, to avoid a second working link. Send it again if the guest did not get it.",
+  delivery_failed:
+    "The email service could not deliver it, and TideGrid did not try again. Check the address, then send it again.",
   invalid_message: "The email service refused the email as TideGrid built it.",
   recipient_suppressed:
     "The email service won't deliver to this address, because mail to it bounced or was reported before.",

@@ -112,6 +112,7 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
       "dl3",
       "x+bounce",
       "x+fail-once",
+      "undeliverable",
     ].map(addr);
     const provider = createCloudflareEmailProvider({
       binding: fixture.binding,
@@ -229,6 +230,25 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
     await deliver(A, cf.provider);
     expect(await row(limited)).toMatchObject({ state: "sent", attempts: 2 });
     expect(cf.callsFor(limited)).toBe(2);
+  });
+
+  it("fails an email Cloudflare could not deliver at once, as delivery_failed, never sent again", async () => {
+    const cf = cloudflare();
+    const id = await enqueue(A, "undeliverable", addr("undeliverable"));
+    cf.fixture.failNext("E_DELIVERY_FAILED");
+    const report = await deliver(A, cf.provider);
+    expect(report.items).toEqual([
+      expect.objectContaining({ messageId: id, outcome: "failed", code: "delivery_failed" }),
+    ]);
+    expect(report.stopped).toBeNull();
+    expect(await row(id)).toMatchObject({
+      state: "failed",
+      attempts: 1,
+      last_error_code: "delivery_failed",
+      provider_message_id: null,
+    });
+    await deliver(A, cf.provider);
+    expect(cf.callsFor(id)).toBe(1);
   });
 
   it("fails a recipient off the allowlist with no binding call", async () => {

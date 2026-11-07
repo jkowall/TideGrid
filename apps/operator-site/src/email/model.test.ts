@@ -40,6 +40,11 @@ describe("a booking's email in words (G2.16b)", () => {
       "The email service did not answer, so TideGrid did not try again, to avoid sending it twice. Send it again if the guest did not get it.",
     );
     expect(failureText("resent")).toBe("Replaced by a newer email before it went out.");
+    // A definite failure (owner decision, 2026-11-07): it does not claim the
+    // guest's server refused it, and it points staff at the address.
+    expect(failureText("delivery_failed")).toBe(
+      "The email service could not deliver it, and TideGrid did not try again. Check the address, then send it again.",
+    );
     expect(failureText("bounced")).toContain("refused it");
   });
 
@@ -62,6 +67,11 @@ describe("a booking's email in words (G2.16b)", () => {
       label: "Outcome unknown",
     });
     expect(stateView(message({ state: "failed", failureCode: "bounced" })).label).toBe("Failed");
+    expect(stateView(message({ state: "failed", failureCode: "delivery_failed" }))).toEqual({
+      tone: "blocked",
+      icon: "x-octagon",
+      label: "Failed",
+    });
     expect(stateView(message({ state: "queued", attempts: 0 })).label).toBe("Waiting to send");
     expect(stateView(message({ state: "queued", attempts: 2 })).label).toBe("Trying again");
   });
