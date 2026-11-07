@@ -8,6 +8,26 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-07: step 9 on the released SHA, CI on every push to main (owner request; coordinator defaults pending owner confirmation)
+
+The Nov 1 run showed step 9 for only three of six released SHAs, because pull requests merged after `main` moved, and push runs on `main` ran only the `checks` job and could be canceled by the next push. The coordinator recommended, on 2026-11-07: "Make step 9 provable for every release. On pushes to `main`, CI runs only the basic checks job; the database and browser jobs run only on pull requests. Runs on `main` also cancel each other. This needs your OK on more Actions minutes." The owner replied: "then do the CI step 9 change". The coordinator reads that as the owner's go for this goal and for the added Actions minutes. It was not an answer to D10's options, so the readings below are coordinator defaults.
+
+What changed (`.github/workflows/ci.yml`, `tools/release/src/commands/evidence.ts`):
+
+- **All four jobs on every push to `main`.** The integration, browser, and console-browser jobs no longer run on pull requests only, so a merge commit that gets released has a four-job run of its own.
+- **No run on `main` is canceled.** Runs on `main` and dispatch runs are keyed by their commit; a pull request's newer push still cancels its older run.
+- **A dispatch on a named commit (D10 (b)).** `workflow_dispatch` takes a full `sha`, and every job checks it out. The checks job's first step after checkout, "The commit under test", prints the commit and its tree, and fails a dispatch that did not check out exactly the SHA given. The run is named `ci on <sha>`.
+- **`nov1 evidence`.** A `--ci` pair whose two SHAs are the same commit is worded as "the CI run tested this commit itself".
+
+Coordinator defaults, pending owner confirmation:
+
+- **Step 9 from now on.** A released SHA's step 9 is a green four-job push run on that SHA, or a green dispatch run on it, read from "The commit under test". D10 (a), tree equality with a pull request run's test merge commit, still serves SHAs released before this change and stays valid for any SHA.
+- **Older SHAs.** A dispatch runs the job steps of the `ci.yml` on the branch it is started from against the named commit's code and tests. `91a4faa`, `1f39feb`, `9086a18`, and `6139255` have the same `ci.yml` as `main` before this change (`git diff`, checked 2026-11-07), so after the merge a dispatch on each differs from its own job steps only by this change. A green dispatch counts as its step 9.
+- **Releasing before the run finishes is not fixed here.** Five SHAs on November 4 and `dd30fc8` on November 6 were released before their push run ended. Proposed follow-ups, not built: `nov1 approve-sha` or `release` refusing a SHA without a completed green four-job run whose head is that SHA; and a ruleset on `main` requiring the four checks, which is the owner's GitHub setting.
+- **Cost.** Each push to `main` now runs the three database and browser jobs too, in parallel with `checks`. On pull request run 42141157514 they took about 4, 2.5, and 1.5 minutes.
+
+Canonical: the workflow's comments, the [demo build plan's CI row](12-demo-build-plan.md#provider-and-environment-choices), and the [runbook's P12](../runbooks/2026-11-01-preview-deploy.md#p12-evidence).
+
 ### 2026-11-04: nov1 approvals count from their gate's phase, and the platform row binds to the approved C4 merge (owner decision)
 
 Reviews of the 2026-11-04 run found that `nov1` accepted a HEAD approved under any gate for every live step in every phase (`tools/release/src/git.ts`), and that `nov1 db platform` accepted a HEAD approved under A10 when only the C7 merge on top of C4 was approved, never the C4 merge itself. It also read the cutover config from the working tree, not HEAD's tree. The coordinator asked the owner on 2026-11-04, through its question tool. Recorded verbatim:

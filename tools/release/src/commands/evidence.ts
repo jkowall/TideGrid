@@ -2,8 +2,11 @@
  * nov1 evidence (P12). Drafts the verification-log entry "Demo acceptance on
  * the preview deployment, November 1, 2026" from the journal. Step 9 is checked
  * by tree equality (D10(a)): each deployed SHA's tree must equal the tree of
- * the PR run's test merge commit, which the run's checkout step prints after
- * `git log -1 --format=%H`. Fetch that commit first: `git fetch origin <merge>`.
+ * the commit a green four-job CI run tested, which the checks job's "The
+ * commit under test" step prints. For a pull request run that is its test
+ * merge commit; fetch it first: `git fetch origin <merge>`. Since all four jobs
+ * run on pushes to main and on a dispatch (2026-11-07), a run on the deployed
+ * SHA itself is passed as `<sha>=<the same full sha>`.
  *
  * The draft carries names, ids, references, and results only; it is redacted,
  * and a unit test asserts it holds no address outside the .test domains.
@@ -74,6 +77,12 @@ export function renderEvidence(journal: Journal, trees: TreeCheck[], now: Date):
   lines.push("**Step 9, tree equality (D10(a)).**");
   if (trees.length === 0) lines.push("- Not shown: no --ci pairs given.");
   for (const t of trees) {
+    if (t.merge.startsWith(t.deployed) && t.equal) {
+      lines.push(
+        `- ${t.deployed} tree ${t.deployedTree}: the CI run tested this commit itself (a push run on main or a dispatch).`,
+      );
+      continue;
+    }
     lines.push(
       `- ${t.deployed} tree ${t.deployedTree} ${t.equal ? "equals" : "DIFFERS FROM"} the PR run's merge commit ${t.merge} tree ${t.mergeTree}.`,
     );

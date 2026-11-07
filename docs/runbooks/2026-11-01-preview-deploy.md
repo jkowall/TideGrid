@@ -342,6 +342,7 @@ nov1 evidence --ci <deployed sha>=<PR run merge sha>[,...] --out nov1-evidence.m
 - The owner adds: per-step pass, fail, or not shown with its dependency; booking references; CSV totals; race counts; the isolation table; email authentication results; the `messageId` comparison; destination verification; the claim-window observation; the waiver hash; CI run URLs; Neon compute before and after.
 - The verification-log pull request follows #26 and the hardening Part E docs.
 - Traces and the storage state stay in `$NOV1_PRIVATE_DIR` and are deleted together.
+- Update, 2026-11-07, for later releases: every CI job now runs on each push to `main`, and a dispatch tests a named SHA ([decision register](../v2/06-decision-register.md#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-pending-owner-confirmation)). For a SHA with a green four-job run of its own, pass `<sha>=<the same full sha>`; the draft words it as tested directly. Read the commit and tree from the checks job's "The commit under test" step. Release only after that run is green.
 
 ## Unverified (labeled wherever they appear)
 

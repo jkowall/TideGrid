@@ -1,22 +1,54 @@
 name: ci
+# A dispatch names the commit it tested, so its run reads as step 9 evidence
+# for that SHA; other events keep the default name.
+run-name: ${{ inputs.sha && format('ci on {0}', inputs.sha) || '' }}
 
+# Demo acceptance step 9 asks for every check green on the released SHA. All
+# four jobs run on pull requests and on every push to main, so the merge
+# commit that gets released has a run of its own. A dispatch runs them on a
+# named commit, for a SHA released before this change or a canceled run.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-character commit SHA to check out and test (empty tests the branch head)
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
+# A pull request's newer push cancels its older run. A run on main or a
+# dispatch is keyed by its commit, so no later push cancels it and each
+# released SHA keeps its own complete run.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || inputs.sha || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: The commit under test
+        # Step 9 evidence: the commit and tree this run tested. On a pull
+        # request it is the test merge commit; on main and on a dispatch it is
+        # the released SHA itself. A dispatch must name a full SHA, read from
+        # the environment, never interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}')"
+          if [ -n "$WANT" ] && [ "$got" != "$WANT" ]; then
+            echo "::error::asked for $WANT but checked out $got; give the full 40-character SHA"
+            exit 1
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -34,7 +66,6 @@ jobs:
 
   integration:
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'pull_request' }}
     # A disposable PostgreSQL 17 container per run, so CI spends no Neon
     # quota. tools/local-db/local-db.sh starts it from the pinned image, the
     # same script and image a local run uses, and exports DATABASE_URL and
@@ -47,6 +78,8 @@ jobs:
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -72,12 +105,13 @@ jobs:
   # downloaded on the runner only.
   browser:
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'pull_request' }}
     env:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -140,12 +174,13 @@ jobs:
   # its own, apart from the guest site's, on ports 8981 and 5382.
   console-browser:
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'pull_request' }}
     env:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

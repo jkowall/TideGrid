@@ -53,7 +53,7 @@ The owner allows scripted type-backs when the owner directs an unattended run, w
 | `payment-account set <slug> stripe` | Admin insert of a stripe payment account from `STRIPE_ACCT_<SLUG>` |
 | `hostname-disable <slug> <hostname>` | The only path to `hostnames disable`; custom rows only |
 | `approve-sha <sha>` | Add the frozen SHA or a config merge to the approved list; an approval counts from its gate's phase on |
-| `evidence` | Draft the verification-log entry; step 9 by tree equality |
+| `evidence` | Draft the verification-log entry; step 9 by tree equality, or, for a SHA CI tested itself on `main` or by dispatch, `--ci <sha>=<the same full sha>` |
 
 Exit codes: 0 done, 1 a check failed, 2 usage, 3 refused (nothing changed).
 
