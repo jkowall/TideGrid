@@ -3,6 +3,7 @@ import type { AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
 import { allowedOrigins } from "../env.ts";
 import { publicOrigin, tenantForHost, tenantForOrigin } from "../public-tenant.ts";
+import { TtlProjection } from "./projection.ts";
 
 /**
  * Which browser origins may read an API answer (G2.14b). Origins bind to the
@@ -11,8 +12,9 @@ import { publicOrigin, tenantForHost, tenantForOrigin } from "../public-tenant.t
  *
  * - Every route: the configured ALLOWED_ORIGINS, as before.
  * - `/v1/public/*` and `/v1/fake-provider/*`, only when PUBLIC_CORS is
- *   "dynamic" (env.dev and env.test say so; unset or anything else is the
- *   static allowlist, the deployed default and the rollback):
+ *   "dynamic" (env.dev, env.test, and since the Nov 1 runbook's C1 the
+ *   deployed vars say so; unset or anything else is the static allowlist,
+ *   the rollback):
  *   - `/v1/public/tenant` echoes any origin the strict parser accepts. Its 200
  *     is that same host's public brand and its 404 is one constant body, and
  *     the guest page can show "not published" (and clear its service worker)
@@ -62,40 +64,9 @@ export async function allowedOrigin(origin: string, c: Context<AppEnv>): Promise
 export const PREFLIGHT_TTL_MS = 30_000;
 export const PREFLIGHT_MAX_ENTRIES = 1_000;
 
-export class PreflightProjection {
-  readonly #entries = new Map<string, { allowed: boolean; expires: number }>();
-
-  constructor(
-    readonly maxEntries = PREFLIGHT_MAX_ENTRIES,
-    readonly ttlMs = PREFLIGHT_TTL_MS,
-  ) {}
-
-  get(origin: string, now: number): boolean | undefined {
-    const entry = this.#entries.get(origin);
-    if (!entry) return undefined;
-    this.#entries.delete(origin);
-    if (entry.expires <= now) return undefined;
-    // Re-inserted, so iteration order is least recently used first.
-    this.#entries.set(origin, entry);
-    return entry.allowed;
-  }
-
-  set(origin: string, allowed: boolean, now: number): void {
-    this.#entries.delete(origin);
-    this.#entries.set(origin, { allowed, expires: now + this.ttlMs });
-    while (this.#entries.size > this.maxEntries) {
-      const oldest = this.#entries.keys().next().value;
-      if (oldest === undefined) break;
-      this.#entries.delete(oldest);
-    }
-  }
-
-  get size(): number {
-    return this.#entries.size;
-  }
-
-  clear(): void {
-    this.#entries.clear();
+export class PreflightProjection extends TtlProjection<boolean> {
+  constructor(maxEntries = PREFLIGHT_MAX_ENTRIES, ttlMs = PREFLIGHT_TTL_MS) {
+    super(maxEntries, ttlMs);
   }
 }
 

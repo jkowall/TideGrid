@@ -8,6 +8,20 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-07: GuestGateway keeps found answers for 10 seconds (owner request; coordinator defaults pending owner confirmation)
+
+The demo build plan's pre-release note for G2.14b-live says `GuestGateway` opens one database connection per call, four per page load, with no rate limit, and asks to "reuse a handle per isolate or cache the public experience for a few seconds, keeping the definite-miss path uncached, before real traffic". The Nov 1 runbook accepted it for owner-only traffic (D9 (a)). The coordinator recommended fixing it before the owner shares `demo.tidegrid.us` with operators. The owner replied: "then do the GuestGateway cache". The choices below are coordinator defaults.
+
+- **Cache, not a reused handle.** A Workers isolate cannot reuse one request's database connection in another request, so the gateway caches answers instead.
+- **What is kept.** Only `found` answers, in isolate memory, for 10 seconds, at most 1,000 hosts, least recently used out first. The key is the environment and the host as the strict rules parse it, so a host refused in an environment never reaches the cache there. The clock starts before the database read, so a kept answer is never older than 10 seconds from the read's start.
+- **What is never kept.** A `miss`, a `withheld` brand, and a database failure. The kill switch and the 503 always come from a fresh read.
+- **The cost.** A host disabled, or a brand republished, can keep its old `found` answer in one isolate for up to 10 seconds. The guest Worker serves the old manifest, icons, and service worker for that long, and the kill switch follows within the same bound. Data routes never read the cache.
+- **Shared code.** The CORS projection and this cache use one in-isolate class (`apps/api-worker/src/hostnames/projection.ts`); the CORS projection's rules are unchanged.
+- **Not done.** Misses are uncached and unlimited. Today the guest Worker answers only the attached preview names and `demo.tidegrid.us`, so a miss is rare; under Cloudflare for SaaS a fallback origin could send arbitrary hostnames, and a limit on misses belongs to G2.14b-live.
+- **Release.** It ships with the next API release, under its own go; nothing was released.
+
+Canonical: `apps/api-worker/src/hostnames/guest-gateway.ts`, the [API README](../../apps/api-worker/README.md), and the [demo build plan's G2.14b-live note](12-demo-build-plan.md#goal-sequence).
+
 ### 2026-11-07: step 9 on the released SHA, CI on every push to main (owner request; coordinator defaults pending owner confirmation)
 
 The Nov 1 run showed step 9 for only three of six released SHAs, because pull requests merged after `main` moved, and push runs on `main` ran only the `checks` job and could be canceled by the next push. The coordinator recommended, on 2026-11-07 (quoted without its file reference): "Make step 9 provable for every release. On pushes to `main`, CI runs only the basic checks job; the database and browser jobs run only on pull requests. Runs on `main` also cancel each other. This needs your OK on more Actions minutes." The owner replied: "then do the CI step 9 change". The coordinator reads that as the owner's go for this goal and for the added Actions minutes. It was not an answer to D10's options, so the readings below are coordinator defaults.

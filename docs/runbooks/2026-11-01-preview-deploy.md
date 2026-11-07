@@ -75,7 +75,7 @@ Build-time defaults, already applied: **D10(a)** step 9 by tree equality; **D12(
 | D6 | Sender: (a) a subdomain address; (b) the apex default `bookings@tidegrid.us`; (c) defer | (a): keeps a new DMARC policy off all `tidegrid.us` mail. C2 carries `bookings@mail.tidegrid.us` as a placeholder | P7 top |
 | D7 | Stripe-live placement: (a) a window after acceptance; (b) a staging Worker; (c) defer | (a): lowest setup cost; must not overlap P6 | P9 top |
 | D8 | Cutover today: (a) after acceptance, demo-harbor; (b) defer | (a) only if P6 has no fail; the platform row is permanent | P8 top |
-| D9 | GuestGateway opens one connection per call (12:169): (a) accept for owner-only traffic; (b) fix first | (a), with the P11 watch. SaaS stays deferred | P4.2, P10 |
+| D9 | GuestGateway opens one connection per call (12:169): (a) accept for owner-only traffic; (b) fix first | (a), with the P11 watch. SaaS stays deferred. Update, 2026-11-07: the fix is built, not released: `found` answers kept for 10 s ([decision register](../v2/06-decision-register.md#2026-11-07-guestgateway-keeps-found-answers-for-10-seconds-owner-request-coordinator-defaults-pending-owner-confirmation)) | P4.2, P10 |
 | D11 | External human review | (a) for test mode | top, P7 to P10 |
 | D15 | Webhook quick 2xx and IP allowlist (12:181): (a) accept inline, signature-only processing for the test-mode window; (b) land both first | (a) for synthetic test mode, risk recorded; (b) before any live-mode work | P9, before A11 |
 | D16 | Stripe key: (a) the existing `sk_test_`; (b) a new `rk_test_` | (a) unless `rk_test_` is confirmed to act through `Stripe-Account` | P9 top |
@@ -361,7 +361,7 @@ nov1 evidence --ci <deployed sha>=<PR run merge sha>[,...] --out nov1-evidence.m
 - A booted b87e269 Worker against the upgraded schema: replaced by the committed b87e269 query set (P0.2), because booting it needs its tree and toolchain in CI.
 - `release` and `deploy:demo` refusing without `NOV1_GO`: outside the owned paths; Rule 1 stands in. A follow-up needs owner approval.
 - Guards in `packages/database/src/testing.ts` and `app-role.ts` that refuse a host recorded as main: proposed as a separate goal; the `nov1 db` refusals are the mitigation.
-- The G2.11 Stripe Element, bounce ingestion, the webhook quick 2xx and IP allowlist (D15), the GuestGateway connection fix (D9), and a per-hostname route command for SaaS.
+- The G2.11 Stripe Element, bounce ingestion, the webhook quick 2xx and IP allowlist (D15), the GuestGateway connection fix (D9; built 2026-11-07, not released), and a per-hostname route command for SaaS.
 
 ## Owner inputs
 
