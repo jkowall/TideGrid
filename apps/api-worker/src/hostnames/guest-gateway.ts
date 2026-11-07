@@ -28,10 +28,15 @@ export type GuestHostAnswer =
 /**
  * The guest host projection: `found` answers only, kept in this isolate's
  * memory for at most 10 seconds and at most 1,000 hosts, least recently used
- * out first. One page load asks the gateway up to four times (the manifest,
+ * out first (coordinator defaults pending owner confirmation, in the decision
+ * register). One page load asks the gateway up to four times (the manifest,
  * two icons, and `/sw.js`), and before this each call opened and closed its
  * own database connection (the demo build plan's pre-release note on
- * G2.14b-live).
+ * G2.14b-live). Once a `found` answer is kept, later calls to the same
+ * isolate within 10 seconds open none. Calls that arrive before it is kept,
+ * or reach another isolate, still read the database: reads in flight are not
+ * shared, because a promise settled by another request's I/O is unsupported
+ * in Workers.
  *
  * - A `miss`, a `withheld` brand, and a database failure are never kept, so
  *   the kill switch and the 503 always come from a fresh read.
@@ -44,6 +49,7 @@ export type GuestHostAnswer =
  *   the projection there.
  * - Data routes never read it; tenant selection for data is resolved on each
  *   request, as before.
+ * - Callers get a copy, so a direct caller can never change a kept answer.
  */
 export const GUEST_HOST_TTL_MS = 10_000;
 export const GUEST_HOST_MAX_ENTRIES = 1_000;
@@ -65,7 +71,7 @@ export async function resolveGuestHost(env: Bindings, host: unknown): Promise<Gu
   const key = `${env.ENVIRONMENT ?? ""}|${parsed}`;
   const now = Date.now();
   const cached = guestHostProjection.get(key, now);
-  if (cached) return { kind: "found", experience: cached };
+  if (cached) return { kind: "found", experience: structuredClone(cached) };
   const url = databaseUrl(env);
   if (!url) throw new Error("database_unconfigured");
   const handle = createDb(url, { max: 1 });
@@ -83,7 +89,7 @@ export async function resolveGuestHost(env: Bindings, host: unknown): Promise<Gu
       });
       return { kind: "withheld" };
     }
-    guestHostProjection.set(key, found.experience, now);
+    guestHostProjection.set(key, structuredClone(found.experience), now);
     return { kind: "found", experience: found.experience };
   } finally {
     await handle.end();

@@ -1,6 +1,6 @@
 import { createExecutionContext, env, SELF } from "cloudflare:test";
 import { createFakeHostnameProvider } from "@tidegrid/domain-hostnames";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { Bindings } from "../src/env.ts";
 import { PreflightProjection, preflightProjection } from "../src/hostnames/cors.ts";
@@ -289,6 +289,9 @@ describe("public CORS without a database (G2.14b)", () => {
 });
 
 describe("GuestGateway (G2.14b)", () => {
+  beforeEach(() => guestHostProjection.clear());
+  afterEach(() => guestHostProjection.clear());
+
   it("exposes one method and no fetch, so no app route is reachable through it", () => {
     expect(Object.getOwnPropertyNames(GuestGateway.prototype).sort()).toEqual([
       "constructor",
@@ -323,7 +326,6 @@ describe("GuestGateway (G2.14b)", () => {
   });
 
   it("throws on an accepted host when the database is unreachable, which is not a miss", async () => {
-    guestHostProjection.clear();
     const gateway = new GuestGateway(createExecutionContext(), env);
     await expect(gateway.resolveHost("demo-harbor.book.tidegrid.us")).rejects.toThrow(
       /database_unconfigured/,
@@ -334,6 +336,8 @@ describe("GuestGateway (G2.14b)", () => {
 });
 
 describe("the guest host projection (G2.14b-live pre-release note)", () => {
+  beforeEach(() => guestHostProjection.clear());
+  afterEach(() => guestHostProjection.clear());
   const host = "demo-harbor.book.tidegrid.us";
   const experience = { tenant: { slug: "demo-harbor", name: "Demo Harbor" } };
   const keyFor = (environment: string | undefined) => `${environment ?? ""}|${host}`;
@@ -341,6 +345,8 @@ describe("the guest host projection (G2.14b-live pre-release note)", () => {
   it("keeps found answers for 10 seconds and at most 1,000 hosts", () => {
     expect(GUEST_HOST_TTL_MS).toBe(10_000);
     expect(GUEST_HOST_MAX_ENTRIES).toBe(1_000);
+    expect(guestHostProjection.ttlMs).toBe(GUEST_HOST_TTL_MS);
+    expect(guestHostProjection.maxEntries).toBe(GUEST_HOST_MAX_ENTRIES);
     const cache = new TtlProjection<number>(GUEST_HOST_MAX_ENTRIES, GUEST_HOST_TTL_MS);
     for (let i = 0; i < 5_000; i++) cache.set(`h${i}.example.com`, i, 0);
     expect(cache.size).toBe(1_000);
@@ -349,7 +355,6 @@ describe("the guest host projection (G2.14b-live pre-release note)", () => {
   });
 
   it("answers a kept host without the database, and only in its own environment", async () => {
-    guestHostProjection.clear();
     // The test environment has no database, so any read would throw.
     guestHostProjection.set(keyFor(base.ENVIRONMENT), experience, Date.now());
     const gateway = new GuestGateway(createExecutionContext(), env);
@@ -360,11 +365,9 @@ describe("the guest host projection (G2.14b-live pre-release note)", () => {
       ENVIRONMENT: other,
     } as never);
     await expect(elsewhere.resolveHost(host)).rejects.toThrow(/database_unconfigured/);
-    guestHostProjection.clear();
   });
 
   it("reads afresh once the kept answer is 10 seconds old", async () => {
-    guestHostProjection.clear();
     guestHostProjection.set(keyFor(base.ENVIRONMENT), experience, Date.now() - GUEST_HOST_TTL_MS);
     const gateway = new GuestGateway(createExecutionContext(), env);
     await expect(gateway.resolveHost(host)).rejects.toThrow(/database_unconfigured/);
@@ -372,7 +375,6 @@ describe("the guest host projection (G2.14b-live pre-release note)", () => {
   });
 
   it("never consults it for a host the strict rules refuse", async () => {
-    guestHostProjection.clear();
     // Even a kept entry under the raw, non-canonical spelling cannot answer.
     guestHostProjection.set(
       `${base.ENVIRONMENT ?? ""}|Demo-Harbor.book.tidegrid.us`,
@@ -381,6 +383,5 @@ describe("the guest host projection (G2.14b-live pre-release note)", () => {
     );
     const gateway = new GuestGateway(createExecutionContext(), env);
     expect(await gateway.resolveHost("Demo-Harbor.book.tidegrid.us")).toEqual({ kind: "miss" });
-    guestHostProjection.clear();
   });
 });

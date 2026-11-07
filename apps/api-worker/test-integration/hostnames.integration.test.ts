@@ -47,6 +47,7 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
     bDisabled: `disabled-${run}.example.com`,
     aLater: `later-${run}.example.com`,
     aCached: `cached-${run}.example.com`,
+    withheld: `withheld-${run}.example.com`,
     unknown: `nobody-${run}.example.com`,
   };
 
@@ -335,6 +336,21 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
     // A miss is never kept: the next call reads afresh again.
     expect(guestHostProjection.get(key, Date.now())).toBeUndefined();
     await expect(resolveGuestHost(unreachable as never, hosts.aCached)).rejects.toThrow();
+  });
+
+  it("never keeps a withheld answer", async () => {
+    // A tenant whose stored name fails the public contract (angle brackets
+    // pass the table's length check, not BrandText), so its host is withheld.
+    const [bad] = await admin<{ id: string }[]>`
+      insert into public.tenants (slug, display_name)
+      values (${`withheld-${run}`}, ${"Bad <Name>"}) returning id`;
+    await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
+      values (${hosts.withheld}, ${bad?.id ?? ""}, 'preview', 'active', now())`;
+    const key = `preview|${hosts.withheld}`;
+    expect(await resolveGuestHost(bindings("preview") as never, hosts.withheld)).toEqual({
+      kind: "withheld",
+    });
+    expect(guestHostProjection.get(key, Date.now())).toBeUndefined();
   });
 
   it("serves the guest Worker only public brand fields through GuestGateway", async () => {

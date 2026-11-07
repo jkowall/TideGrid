@@ -2,9 +2,10 @@
  * A short-lived, size-capped map kept in one isolate's memory: each entry
  * lives at most `ttlMs`, and past `maxEntries` the least recently used goes
  * first. It never leaves the isolate, so it crosses no process, network, or
- * storage boundary and needs no signature (the demo build plan's reading of
- * the target architecture's "signed, short-lived projection"). The CORS
- * projection and the guest host projection both use it.
+ * storage boundary and needs no signature (the decision register's reading of
+ * the hosting plan's "signed, short-lived projection", first for the CORS
+ * projection and, since 2026-11-07, for the guest host projection). Both use
+ * it.
  */
 export class TtlProjection<V> {
   readonly #entries = new Map<string, { value: V; expires: number }>();

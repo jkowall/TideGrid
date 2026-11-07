@@ -407,6 +407,8 @@ test("a disabled host fails closed after a hard reload and its service worker un
   // A disabled name never comes back, so this runs once, at one width.
   test.skip(test.info().project.name !== "desktop", "runs once");
   if (!host || !admin) return;
+  // Room for the reload, the unregister, and the gateway's 10 s bound.
+  test.setTimeout(120_000);
   const slug = tenants[1]?.slug ?? "demo-reef";
   const name = tenants[1]?.name ?? "Demo Reef Divers";
   await page.goto(hostUrl(host));
@@ -431,6 +433,15 @@ test("a disabled host fails closed after a hard reload and its service worker un
   await expect
     .poll(async () => serviceWorkerState(page), { timeout: 15_000 })
     .toEqual({ registrations: 0, caches: [] });
-  const sw = await page.request.get(hostUrl(host, "/sw.js"));
-  expect(sw.headers()["clear-site-data"]).toBe('"cache"');
+  // The Worker half of the kill switch: the API's GuestGateway may keep the
+  // host's `found` answer for up to GUEST_HOST_TTL_MS (10 s) in one isolate,
+  // counted from the read when the page loaded, so /sw.js can lag the
+  // bootstrap's 404 by that long. Poll past the bound, never assume at once.
+  await expect
+    .poll(
+      async () =>
+        (await page.request.get(hostUrl(host, "/sw.js"))).headers()["clear-site-data"] ?? null,
+      { timeout: 20_000, intervals: [1_000] },
+    )
+    .toBe('"cache"');
 });
