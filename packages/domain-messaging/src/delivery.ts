@@ -530,12 +530,11 @@ async function deliverWithOrigin(
       };
     } else {
       const { row, url } = claimed;
-      // The claim itself takes time. Check again before the provider, so a
-      // send never starts once it could end past the deadline: the bound
-      // holds by construction, whatever the claim cost.
-      const late =
-        options.deadline !== undefined &&
-        clock() + (options.provider.sendTimeoutMs ?? 0) >= options.deadline;
+      // The claim itself takes time. Check again before the provider, with
+      // the same reserve as before the claim (a send and the margin that
+      // records it), so a send never starts once it or its record could end
+      // past the deadline: the bound holds by construction.
+      const late = options.deadline !== undefined && clock() + reserve >= options.deadline;
       let result:
         | { kind: "sent"; providerMessageId: string }
         | { kind: "retry"; code: string; giveBack?: boolean }

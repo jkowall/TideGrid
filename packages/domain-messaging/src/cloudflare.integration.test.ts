@@ -659,7 +659,7 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
       const cf = cloudflare({ timeoutMs: 10_000 });
       const D = await newTenant("dl2");
       const ids = [await enqueue(D, "dl2", addr("dl2")), await enqueue(D, "dl3", addr("dl3"))];
-      // Each read moves the clock 1 s. The first check has room for one
+      // Each read moves the clock 0.3 s. The first check has room for one
       // 10 s send and the 2 s margin, and so does the check after its claim;
       // by the next message's check it has not.
       let now = 1_000_000;
@@ -667,13 +667,29 @@ describe.skipIf(!env)("delivery over the Cloudflare email adapter (G2.16a)", () 
         deadline: now + 12_500,
         clock: () => {
           const t = now;
-          now += 1_000;
+          now += 300;
           return t;
         },
       });
       expect(report).toMatchObject({ claimed: 1, sent: 1, stopped: "deadline" });
       const states = (await Promise.all(ids.map(row))).map((r) => r.state).sort();
       expect(states).toEqual(["queued", "sent"]);
+    });
+
+    it("never calls the provider when the claim leaves room for the send but not its record", async () => {
+      const cf = cloudflare({ timeoutMs: 10_000 });
+      const D = await newTenant("dl3");
+      const id = await enqueue(D, "dl-margin", addr("dl3"));
+      // After a 1 s claim a 10 s send would still end inside the deadline,
+      // but not with the 2 s margin that records it (review thread on #76).
+      const reads = [1_000_000, 1_001_000];
+      const report = await deliver(D, cf.provider, {
+        deadline: 1_000_000 + 12_500,
+        clock: () => reads.shift() ?? 1_002_000,
+      });
+      expect(report).toMatchObject({ claimed: 1, sent: 0, retried: 1, stopped: "deadline" });
+      expect(cf.callsFor(id)).toBe(0);
+      expect(await row(id)).toMatchObject({ state: "queued", last_error_code: "deadline_reached" });
     });
 
     it("never calls the provider when the claim itself ran past the time for a send", async () => {

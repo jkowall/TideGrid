@@ -249,7 +249,7 @@ describe("after-commit delivery (G2.16a)", () => {
       expect(deadline).toBeLessThanOrEqual(s + WAIT_UNTIL_BUDGET_MS);
       // That the send itself ends by the deadline is delivery's to hold: it
       // checks again after the claim and calls the provider only while a
-      // whole send still fits (the after-commit integration suite covers a
+      // whole send and the 2 s margin that records it still fit (the after-commit integration suite covers a
       // slow claim). Here only the window's bounds are checked.
       // A slower connection never shortens the window.
       expect(deadline).toBeGreaterThanOrEqual(previous);
