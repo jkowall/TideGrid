@@ -10,9 +10,9 @@ This records demo acceptance step 9 for the API's live SHA, `dd30fc8` (the merge
 
 - **The pull request run.** [Run 42141157514](https://github.com/jkowall/TideGrid/actions/runs/42141157514), event `pull_request`, head `9603d86`, completed 2026-11-06 at 01:07 UTC. All four jobs succeeded: checks, integration, browser, and console-browser.
 - **The tree.** The run's test merge commit is `412387b0587310673da1e2695c0d4ae06d14ef5e`, with parents `818a4ef` and `9603d86`, the same parents as `dd30fc8`. `git rev-parse` gives tree `cb0fef55158bbc024d6c2b0b5de0dc0ddd1d5318` for both.
-- **The push run on `main`.** [Run 42142133952](https://github.com/jkowall/TideGrid/actions/runs/42142133952) ran the `checks` job only, from 01:11:25 to 01:14:46 UTC, and passed. The entry below puts the release between 01:11 and 01:12, so `dd30fc8` was released before its push run finished, as five SHAs were on November 4.
-- **Step 9 now.** Shown for four of the seven SHAs released since November 4: `e111043`, `cca8880`, and `c62acb7` (below), and `dd30fc8`. Still not shown: `91a4faa` (pull request 59, the guest Worker's live release), `1f39feb` (62), and `9086a18` (60). The live Workers are the API at `dd30fc8`, shown; the console at `e111043`, shown; and the guest site at `91a4faa`, not shown.
-- **Neon.** No consumption read since November 5 at 02:32 UTC is recorded. The `*/15` cron runs again since November 6, so a current read is the owner's to take.
+- **The push run on `main`.** [Run 42142133952](https://github.com/jkowall/TideGrid/actions/runs/42142133952) ran only the `checks` job (the other three were skipped), from 01:11:25 to 01:14:46 UTC, and passed. The entry below puts the whole `nov1` run, the release included, between 01:11 and 01:12, so `dd30fc8` was released before its push run finished, as five SHAs were on November 4.
+- **Step 9 now.** The entries below record seven SHAs released since November 4; four are shown: `e111043`, `cca8880`, and `c62acb7` (below), and `dd30fc8`. Still not shown: `91a4faa` (pull request 59), `1f39feb` (62), and `9086a18` (60). Per those entries, not read live: the API runs `dd30fc8`, shown; the console `e111043`, shown; and the guest site `91a4faa`, not shown.
+- **Neon.** No consumption read since November 5 at 02:32 UTC is recorded. The `*/15` cron was put back on November 6 (the entry below), so a current read is the owner's to take.
 
 ## 2026-11-06
 

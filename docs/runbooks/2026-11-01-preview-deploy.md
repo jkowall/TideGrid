@@ -2,7 +2,7 @@
 
 **Status.** Prepared on 2026-10-28 as a proposed runbook, with every decision a coordinator default until confirmed. It ran on 2026-11-04, driven by the coordinator on the owner's instruction; see the run note below. TideGrid stays exploratory; this runbook commits the owner to nothing.
 
-**Run, 2026-11-04.** It ran from 22:29 UTC on November 4 to 02:16 UTC on November 5, 2026, driven by the coordinator on the owner's instruction: P0 to P6, P8, P9 with P9.6, and P11. P7 was not run, and P10 stays deferred. The results are in the [verification log](../verification-log.md#demo-acceptance-on-the-preview-deployment-the-november-1-runbook-november-4-2026). The decisions and departures are in the [decision register](../v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings).
+**Run, 2026-11-04.** It ran from 22:29 UTC on November 4 to 02:16 UTC on November 5, 2026, driven by the coordinator on the owner's instruction: P0 to P6, P8, P9 with P9.6, and P11. P7 was not run, and P10 stays deferred. The results are in the [verification log](../verification-log.md#demo-acceptance-on-the-preview-deployment-the-november-1-runbook-november-4-2026). The decisions and departures are in the [decision register](../v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings). Update, 2026-11-06: on the owner's decision of 2026-11-05, the C6 revert (pull request 71, `dd30fc8`) was released as API `4a40fede`, so the `*/15` cron runs again, and `FAKE_PAYMENT_WEBHOOK_SECRET` was put again under A2, so the fake takes payments again. Stripe stays off: its secrets were deleted at P9.6 and its webhook endpoint was disabled ([decision register](../v2/06-decision-register.md#2026-11-05-payments-and-the-cron-back-on-owner-decision)).
 
 **Where it comes from.** The [demo build plan](../v2/12-demo-build-plan.md) (its Demo acceptance section and the G2.14b-live and G2.16-live items), the [hosting plan](../v2/08-build-hosting-and-operations.md) (migration and rollback policy), and the [decision register](../v2/06-decision-register.md), which wins every conflict. The commands are `tools/release` ([README](../../tools/release/README.md)).
 
@@ -267,7 +267,7 @@ G2.16-live checklist (12:206-212) on Nov 1:
 | `E_DELIVERY_FAILED` to Rejected with a specific code | Not taken: a code change. Record any observed failure code |
 | `messageId` versus `payload.messageId` | Recorded in P12, from the A9 send |
 | CR or LF probe in the display name and subject | Not taken by default: it needs a send outside the adapter, a separate owner go |
-| Cron `accountFault` log and alert | Not shown: blocked on #26 (`scheduled.ts`). Update, 2026-11-07: #26 (`b6d0247`) is in every SHA released from `e111043` on, so the cron logs `tidegrid.email_sweep.account_fault` (`apps/api-worker/src/scheduled.ts`). The alert is not set up, and with P7 not run the field is not exercised |
+| Cron `accountFault` log and alert | Not shown: blocked on #26 (`scheduled.ts`). Update, 2026-11-07: the log is in the code. Hardening Part E (pull request 37, `0618f7b`, D-E5 B) added `tidegrid.email_sweep.account_fault` to each email sweep summary in `apps/api-worker/src/scheduled.ts`. Both it and #26 (`b6d0247`) are in `e111043` and every later released SHA. Email is off on the preview, so the cron skips the email sweep (`email_sweep_skipped`) and has not emitted the field; that is read from the code, not from a deployed log. The alert is not set up |
 | The after-commit claim window | Recorded in P12: whether the step 3 confirmation left after commit or through the cron, from `outbox-summary` timing |
 | An account-level stop as a page | Not taken: the owner watches the dashboard during P7. A follow-up |
 
@@ -369,14 +369,14 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 | Input | Phase or gate | Needed by | Status |
 |---|---|---|---|
 | D1, D3 to D9, D11, D15, D16 answers | each prompt | Nov 1 | D1 applied as (a), its use for this run ratified with item 1; D4 applied as (c) after the owner answered "unknown"; D6 pending, the owner's call at the top of P7, which was not run; D3, D5, D7 to D9, D11, D15, and D16 applied on 2026-11-04 and ratified on 2026-11-05, see the [decision register](../v2/06-decision-register.md#2026-11-05-nov-1-run-owner-ratification-of-the-coordinators-readings) |
-| D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | settled by the run: #26 (`b6d0247`) is an ancestor of `e111043` and of every later released SHA (`git merge-base --is-ancestor`, checked 2026-11-07) |
+| D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | answered by git, not asked: #26 (`b6d0247`) is an ancestor of `e111043` and of every later released SHA (`git merge-base --is-ancestor`, checked 2026-11-07). The P0.1 freeze of `e111043` was the coordinator's, under its 2026-11-04 reading; D2 was not put to the owner separately |
 | Neon allowance reset, with its UTC time | P1 | Nov 1 | unknown |
 | Free-plan history window and branch limits | P2.2 | Nov 1 | unknown |
 | `NEON_DATABASE_URL`, `NEON_API_KEY`, `NEON_PROJECT_ID` in the owner's shell | P2 | Nov 1 | in the env file (not read) |
-| `SEED_OWNER_EMAILS`, `SEED_SINGLE_TENANT_OWNER`, `SEED_OWNER_DISPLAY_NAME` | P2.4, D4 | Nov 1 | pending |
+| `SEED_OWNER_EMAILS`, `SEED_SINGLE_TENANT_OWNER`, `SEED_OWNER_DISPLAY_NAME` | P2.4, D4 | Nov 1 | not supplied; the seed ran under D4(c) with none |
 | The D4 address added to the Access policy | P6 | before step 5 | account change, its own go |
-| `FAKE_PAYMENT_WEBHOOK_SECRET`, generated and piped | P3.3 | Nov 1 | not set |
-| Gates A0 to A19, each at the time | each phase | Nov 1 | pending |
+| `FAKE_PAYMENT_WEBHOOK_SECRET`, generated and piped | P3.3 | Nov 1 | put at P3.3; the fake was turned off after P9 (D3(a)); a new value was put on 2026-11-06 under A2 |
+| Gates A0 to A19, each at the time | each phase | Nov 1 | A0 to A5, A10 to A14, and A19 run on the coordinator's reading, ratified 2026-11-05; A19 and A2 again on 2026-11-06; A6 to A9 and A15 to A18 not run (P7 and P10) |
 | A wrangler OAuth login with Workers deploy rights | P3, P4 | Nov 1 | used for past deploys |
 | A one-time-PIN sign-in as the D4 identity, saved to `$NOV1_PRIVATE_DIR` | P6 steps 5 and 7 | Nov 1 | pending |
 | Workers Paid | P7 | before P7 | observed yes |
@@ -384,8 +384,8 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 | `EMAIL_ALLOWED_RECIPIENTS`, the exact list | P7 | before P7 | pending |
 | Destination verification per address, if A9 shows it is needed | P7 | before steps 3 and 8 | unknown |
 | A phone for step 8 | P7 | Nov 1 | owner |
-| Cutover tenant | P8 | before P8 | default demo-harbor (12:148) |
-| Stripe test key, `STRIPE_ACCT_DEMO_HARBOR`, `STRIPE_ACCT_DEMO_REEF`, the webhook signing secret, Accounts v1 or v2, collector settings | P9 | before P9 | reportedly in the env file (not verified) |
+| Cutover tenant | P8 | before P8 | demo-harbor, cut over in P8 (12:148) |
+| Stripe test key, `STRIPE_ACCT_DEMO_HARBOR`, `STRIPE_ACCT_DEMO_REEF`, the webhook signing secret, Accounts v1 or v2, collector settings | P9 | before P9 | used in P9 for demo-harbor only; demo-reef has no compliant account; both Stripe secrets deleted at P9.6 |
 | Approval to use the installed Stripe CLI (`/opt/homebrew/bin/stripe`) for `events resend` | P9, A14 | before P9 | installed (observed) |
 | A second domain, payment details, a zone-scoped SaaS token, `CF_SAAS_ZONE_ID` | P10 | deferred | the zone has no custom-hostname quota |
 | Neon consumption at +2 h and +24 h | P11 | Nov 1 and 2 | owner |
