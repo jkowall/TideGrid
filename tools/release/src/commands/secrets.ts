@@ -279,23 +279,31 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
   } finally {
     value?.fill(0);
   }
-  const after = await deployedVersions(deps, "api").catch(() => [] as string[]);
+  // Cleanup comes before the post-put listing, a network call that could
+  // stall until a time limit kills nov1 and leaves the used file on disk.
   let fileNote = "";
-  let fileLeft = false;
+  let fileLeft: "" | "linked" | "other" = "";
   if (file && fromFile !== undefined) {
     if (code === 0) {
       // Only the file that was checked: if the path now names another file
       // (renamed and replaced during the put), nothing is removed.
-      if (removeCheckedFile(fromFile, file.identity)) {
+      const removed = removeCheckedFile(fromFile, file.identity);
+      if (removed === "removed") {
         fileNote = "; value from a test-mode file, file removed";
+      } else if (removed === "linked") {
+        fileLeft = "linked";
+        fileNote = "; value from a test-mode file, file NOT fully removed: a hard link remains";
       } else {
-        fileLeft = true;
+        fileLeft = "other";
         fileNote = "; value from a test-mode file, file NOT removed";
       }
     } else {
       fileNote = "; value from a test-mode file, file kept for a retry";
     }
   }
+  // An incomplete cleanup is journaled and warned about at once: the listing
+  // is a network call that could stall until a time limit kills nov1 first.
+  const after = fileLeft ? [] : await deployedVersions(deps, "api").catch(() => [] as string[]);
   record(deps, {
     phase,
     step: del ? "secret-delete" : "secret-put",
@@ -314,9 +322,16 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
   }
   out(
     deps,
-    `${name} ${del ? "deleted" : "set"}; live version now ${after.join(", ")} (journaled; not a rollback anchor, --rollback undoes releases only)`,
+    `${name} ${del ? "deleted" : "set"}; ${fileLeft ? "live version not listed, cleanup first" : `live version now ${after.join(", ")}`} (journaled; not a rollback anchor, --rollback undoes releases only)`,
   );
-  if (fileLeft) {
+  if (fileLeft === "linked") {
+    out(
+      deps,
+      `WARN the secret is set and ${fromFile} was removed, but another hard link to that file was made during the put, so the secret is still on disk under another name. Find and remove it now`,
+    );
+    return 1;
+  }
+  if (fileLeft === "other") {
     out(
       deps,
       `WARN the secret is set, but the secret file was not removed: ${fromFile} is gone or is no longer the file nov1 read. Find and remove the secret file now`,
