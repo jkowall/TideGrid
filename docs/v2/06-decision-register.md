@@ -16,6 +16,10 @@ The demo build plan's G2.16-live checklist lists code changes to make before ema
   - What changed: `packages/domain-messaging/src/cloudflare-errors.ts` maps it to Rejected `delivery_failed`; the contract's `MESSAGE_FAILURE_CODES` and the console's copy gain it. The email fails at once and is never sent again, as before. `E_INTERNAL_SERVER_ERROR`, an unknown code, and a timeout stay unknown outcomes.
   - A delivered copy cannot be ruled out: if `E_DELIVERY_FAILED` ever follows a copy that arrived, staff read "Failed", and a staff resend supersedes the earlier link, so the guest still holds one working link (G2.16b D3).
 - **Branch.** Question: "GitHub shows PR 75 still open, not merged (main is still at 6139255). This session can only push to the PR 75 branch. Where should the G2.16-live code prep go?" Selected: "Merge 75 first (Recommended)". This goal has its own pull request.
+- **The after-commit claim window (coordinator default, pending owner confirmation).** Not put as a question. After-commit delivery's deadline is now min(ready + 18 s, request start + 30 s): `afterCommitDeadline` in `apps/api-worker/src/email.ts`. "Ready" is after one `select 1` on the delivery's own connection; "request start" is read when the request schedules delivery, before the response is sent, so the cap is never later than the `waitUntil` budget.
+  - Every claim leaves room for a 10 s send and the 2 s margin, so every send ends by the deadline.
+  - Residual: at the cap, a send can end 2 s before the budget, leaving only the margin to record it. A cut during the record leaves the row `sending`, and it later fails as `outcome_unknown`: still at most once, but a delivered email can read as unknown.
+  - Unverified: whether the 30 s starts at the response or earlier on a client disconnect. If earlier, the cap is optimistic.
 
 ### 2026-11-07: GuestGateway keeps found answers for 10 seconds (owner request; coordinator defaults pending owner confirmation)
 
