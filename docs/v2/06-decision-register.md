@@ -8,6 +8,26 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-07: G2.12 follow-ups, search and calendar by source and number-shaped references (owner decisions; coordinator defaults pending owner confirmation)
+
+The demo build plan's G2.12 row left "the calendar and search by source" open, and the booking README recorded that about one booking reference in 6,900 looks like a number to a spreadsheet. The owner asked on 2026-11-07 to continue with the next goals. The coordinator put two questions through its question tool. Recorded verbatim:
+
+- **The calendar.** Question: "G2.12 still lists 'the calendar by source'. The calendar's numbers are seats held per trip, which is not the same as the day list's booking count. What should it mean?" Selected: "Carry the source (Recommended)", whose text reads: "The calendar gets a Source control (kept in the address). Each trip's booked-count link carries it into the day list. Seat counts stay for every source, with a note saying so. Console only, no API change."
+  - What changed: the week bar has a Source control for every role, kept in `?source=` (an unknown value is dropped). While a source is set, the note "Seat counts cover bookings from every source." shows, and each booked count links to that day's bookings of that trip and source. The source survives an operator switch, as the day list's does (G2.12e D4 A); so does the week, which the page re-reads from the address.
+- **The CSV.** Question: "In the day's CSV export, about 1 in 6,900 booking references look like a number (e.g. 12345E67 or 01234567), and Excel or Sheets silently turns them into something else on open. Which rule?" Selected: "Guard + stop new ones (Recommended)", whose text reads: "Prefix only number-shaped references with an apostrophe in the CSV, and have new bookings never draw a number-shaped reference, so the apostrophe fades out over time. No column moves; no cell becomes a formula."
+  - What changed: a reference matching `^[0-9]+(E[0-9]+)?$` (`isNumberShapedReference` in `packages/contracts/src/references.ts`) is written to the day's CSV with a leading apostrophe; every other reference is written as before. `newBookingReference` draws again whenever it draws such a shape, so new bookings never need the guard. The reference alphabet has no apostrophe, so `unguardBookingReference` restores the value exactly, and a reference pasted from a spreadsheet with its apostrophe still finds the booking in search.
+  - Unverified: how Excel, Google Sheets, and Numbers show the apostrophe; only LibreOffice behaviour has been observed in this repository. Existing number-shaped references keep the guard for as long as they appear.
+
+Coordinator defaults for search by source, not put as questions:
+
+- **A source narrows a search.** It is not a criterion on its own: a source alone would scan the whole tenant, like an open date range. The console says "A source narrows a search."
+- **It stays in the form, not the address,** like the search's other terms.
+- **The API echoes it.** The response names the source it applied (`null` for none), and the console refuses an answer whose echo does not match, as the day list does (G2.12e D9 A).
+- **It filters on the booking's source only,** never the checkout, so finance's search never joins the checkout. Results show a "Staff booking" badge for every role.
+- **No new index.** The predicate only narrows the search's one matching step, so the plan keeps its shape (the plan test runs source queries too); the benchmark stays optional.
+
+Canonical: the [operator console README](../../apps/operator-site/README.md) and the [booking contract](../../packages/domain-booking/README.md).
+
 ### 2026-11-07: G2.16-live code prep (owner decisions; coordinator defaults pending owner confirmation)
 
 The demo build plan's G2.16-live checklist lists code changes to make before email is switched on. The owner asked on 2026-11-07: "now do G2.16-live code prep". The coordinator put three questions through its question tool. Recorded verbatim:
