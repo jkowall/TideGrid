@@ -185,4 +185,59 @@ describe("the evidence draft (P12)", () => {
     // Review note F5: the draft never overstates step 6.
     expect(draft).toMatch(/serialized through one client address/);
   });
+
+  it("words step 9 by the resolved commit the CI run tested", () => {
+    const sha = "1".repeat(40);
+    const merge = "2".repeat(40);
+    const tree = "3".repeat(40);
+    const draft = renderEvidence(
+      emptyJournal(),
+      [
+        // A push run on main tested the released commit itself.
+        {
+          deployed: "1111111",
+          deployedCommit: sha,
+          merge: sha,
+          deployedTree: tree,
+          mergeTree: tree,
+          equal: true,
+        },
+        // A pull request run tested a merge commit with the same tree.
+        {
+          deployed: sha,
+          deployedCommit: sha,
+          merge,
+          deployedTree: tree,
+          mergeTree: tree,
+          equal: true,
+        },
+        // A short SHA that only prefixes an unrelated merge commit is not
+        // worded as tested itself, even with an equal tree.
+        {
+          deployed: "2222222",
+          deployedCommit: `2222222${"6".repeat(33)}`,
+          merge,
+          deployedTree: tree,
+          mergeTree: tree,
+          equal: true,
+        },
+        // A tree that differs is never worded as tested.
+        {
+          deployed: "4".repeat(7),
+          deployedCommit: "4".repeat(40),
+          merge,
+          deployedTree: "5".repeat(40),
+          mergeTree: tree,
+          equal: false,
+        },
+      ],
+      new Date("2026-11-07T00:00:00Z"),
+    );
+    expect(draft).toContain(`1111111 tree ${tree}: the CI run tested commit ${sha} itself`);
+    expect(draft).toContain(`${sha} tree ${tree} equals the PR run's merge commit ${merge}`);
+    expect(draft).toContain(`2222222 tree ${tree} equals the PR run's merge commit ${merge}`);
+    expect(draft).not.toMatch(/2222222[^\n]*itself/);
+    expect(draft).toContain("4444444 tree 5555555555555555555555555555555555555555 DIFFERS FROM");
+    expect(draft).not.toMatch(/4444444[^\n]*itself/);
+  });
 });

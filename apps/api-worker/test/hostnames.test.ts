@@ -1,9 +1,15 @@
 import { createExecutionContext, env, SELF } from "cloudflare:test";
 import { createFakeHostnameProvider } from "@tidegrid/domain-hostnames";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { Bindings } from "../src/env.ts";
 import { PreflightProjection, preflightProjection } from "../src/hostnames/cors.ts";
+import {
+  GUEST_HOST_MAX_ENTRIES,
+  GUEST_HOST_TTL_MS,
+  guestHostProjection,
+} from "../src/hostnames/guest-gateway.ts";
+import { TtlProjection } from "../src/hostnames/projection.ts";
 import { hostnameProvider, hostnameSettings } from "../src/hostnames.ts";
 import { GuestGateway } from "../src/index.ts";
 
@@ -283,6 +289,9 @@ describe("public CORS without a database (G2.14b)", () => {
 });
 
 describe("GuestGateway (G2.14b)", () => {
+  beforeEach(() => guestHostProjection.clear());
+  afterEach(() => guestHostProjection.clear());
+
   it("exposes one method and no fetch, so no app route is reachable through it", () => {
     expect(Object.getOwnPropertyNames(GuestGateway.prototype).sort()).toEqual([
       "constructor",
@@ -321,5 +330,58 @@ describe("GuestGateway (G2.14b)", () => {
     await expect(gateway.resolveHost("demo-harbor.book.tidegrid.us")).rejects.toThrow(
       /database_unconfigured/,
     );
+    // A failure is never kept.
+    expect(guestHostProjection.size).toBe(0);
+  });
+});
+
+describe("the guest host projection (G2.14b-live pre-release note)", () => {
+  beforeEach(() => guestHostProjection.clear());
+  afterEach(() => guestHostProjection.clear());
+  const host = "demo-harbor.book.tidegrid.us";
+  const experience = { tenant: { slug: "demo-harbor", name: "Demo Harbor" } };
+  const keyFor = (environment: string | undefined) => `${environment ?? ""}|${host}`;
+
+  it("keeps found answers for 10 seconds and at most 1,000 hosts", () => {
+    expect(GUEST_HOST_TTL_MS).toBe(10_000);
+    expect(GUEST_HOST_MAX_ENTRIES).toBe(1_000);
+    expect(guestHostProjection.ttlMs).toBe(GUEST_HOST_TTL_MS);
+    expect(guestHostProjection.maxEntries).toBe(GUEST_HOST_MAX_ENTRIES);
+    const cache = new TtlProjection<number>(GUEST_HOST_MAX_ENTRIES, GUEST_HOST_TTL_MS);
+    for (let i = 0; i < 5_000; i++) cache.set(`h${i}.example.com`, i, 0);
+    expect(cache.size).toBe(1_000);
+    expect(cache.get("h4999.example.com", 9_999)).toBe(4_999);
+    expect(cache.get("h4999.example.com", 10_000)).toBeUndefined();
+  });
+
+  it("answers a kept host without the database, and only in its own environment", async () => {
+    // The test environment has no database, so any read would throw.
+    guestHostProjection.set(keyFor(base.ENVIRONMENT), experience, Date.now());
+    const gateway = new GuestGateway(createExecutionContext(), env);
+    expect(await gateway.resolveHost(host)).toEqual({ kind: "found", experience });
+    const other = base.ENVIRONMENT === "preview" ? "staging" : "preview";
+    const elsewhere = new GuestGateway(createExecutionContext(), {
+      ...env,
+      ENVIRONMENT: other,
+    } as never);
+    await expect(elsewhere.resolveHost(host)).rejects.toThrow(/database_unconfigured/);
+  });
+
+  it("reads afresh once the kept answer is 10 seconds old", async () => {
+    guestHostProjection.set(keyFor(base.ENVIRONMENT), experience, Date.now() - GUEST_HOST_TTL_MS);
+    const gateway = new GuestGateway(createExecutionContext(), env);
+    await expect(gateway.resolveHost(host)).rejects.toThrow(/database_unconfigured/);
+    expect(guestHostProjection.size).toBe(0);
+  });
+
+  it("never consults it for a host the strict rules refuse", async () => {
+    // Even a kept entry under the raw, non-canonical spelling cannot answer.
+    guestHostProjection.set(
+      `${base.ENVIRONMENT ?? ""}|Demo-Harbor.book.tidegrid.us`,
+      experience,
+      Date.now(),
+    );
+    const gateway = new GuestGateway(createExecutionContext(), env);
+    expect(await gateway.resolveHost("Demo-Harbor.book.tidegrid.us")).toEqual({ kind: "miss" });
   });
 });

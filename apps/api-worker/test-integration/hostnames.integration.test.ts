@@ -16,7 +16,11 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { PREFLIGHT_TTL_MS, preflightProjection } from "../src/hostnames/cors.ts";
-import { resolveGuestHost } from "../src/hostnames/guest-gateway.ts";
+import {
+  GUEST_HOST_TTL_MS,
+  guestHostProjection,
+  resolveGuestHost,
+} from "../src/hostnames/guest-gateway.ts";
 
 type Sql = ReturnType<typeof postgres>;
 type Json = { error?: { code: string; message: string; requestId: string } } & Record<
@@ -42,6 +46,8 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
     aPending: `pending-${run}.example.com`,
     bDisabled: `disabled-${run}.example.com`,
     aLater: `later-${run}.example.com`,
+    aCached: `cached-${run}.example.com`,
+    withheld: `withheld-${run}.example.com`,
     unknown: `nobody-${run}.example.com`,
   };
 
@@ -127,6 +133,7 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
       (${hosts.b}, ${B.id}, 'preview', 'active', now()),
       (${hosts.aLocal}, ${A.id}, 'preview', 'active', now()),
       (${hosts.aLater}, ${A.id}, 'preview', 'active', now()),
+      (${hosts.aCached}, ${A.id}, 'preview', 'active', now()),
       (${hosts.bDisabled}, ${B.id}, 'custom', 'disabled', now())`;
     await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status) values
       (${hosts.aPending}, ${A.id}, 'custom', 'pending')`;
@@ -293,11 +300,57 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
     const trips = await call("preview", routes(A)[0] ?? "", origin);
     expect(trips.res.status).toBe(404);
     expect(trips.res.headers.get("access-control-allow-origin")).toBeNull();
-    // The guest Worker's gateway now answers a definite miss as well.
+    // The guest Worker's gateway now answers a definite miss as well. It
+    // was not asked before the disable, so it kept nothing; a kept `found`
+    // answer lasts at most GUEST_HOST_TTL_MS (the next case).
     const gateway = {
       resolveHost: (h: string) => resolveGuestHost(bindings("preview") as never, h),
     };
     expect(await gateway.resolveHost(hosts.aLater)).toEqual({ kind: "miss" });
+  });
+
+  it("keeps a found answer for at most 10 seconds and never keeps a miss", async () => {
+    const key = `preview|${hosts.aCached}`;
+    guestHostProjection.delete(key);
+    const first = await resolveGuestHost(bindings("preview") as never, hosts.aCached);
+    expect(first.kind).toBe("found");
+    if (first.kind !== "found") return;
+    // Kept: an unreachable database answers nothing, yet the host resolves,
+    // so the second call opened no connection.
+    const unreachable = {
+      ...bindings("preview"),
+      DATABASE_URL: "postgres://nobody:nothing@127.0.0.1:1/none",
+    };
+    expect(await resolveGuestHost(unreachable as never, hosts.aCached)).toEqual(first);
+    // A disable inside the window: the kept answer still serves (the stated
+    // cost), and the kill switch waits for the entry to expire.
+    await admin`select app.hostname_disable(${A.id}::uuid, ${hosts.aCached}, 'G2.14b cache integration')`;
+    expect((await resolveGuestHost(bindings("preview") as never, hosts.aCached)).kind).toBe(
+      "found",
+    );
+    // Once the entry is older than the TTL, the next call reads afresh.
+    guestHostProjection.set(key, first.experience, Date.now() - GUEST_HOST_TTL_MS);
+    expect(await resolveGuestHost(bindings("preview") as never, hosts.aCached)).toEqual({
+      kind: "miss",
+    });
+    // A miss is never kept: the next call reads afresh again.
+    expect(guestHostProjection.get(key, Date.now())).toBeUndefined();
+    await expect(resolveGuestHost(unreachable as never, hosts.aCached)).rejects.toThrow();
+  });
+
+  it("never keeps a withheld answer", async () => {
+    // A tenant whose stored name fails the public contract (angle brackets
+    // pass the table's length check, not BrandText), so its host is withheld.
+    const [bad] = await admin<{ id: string }[]>`
+      insert into public.tenants (slug, display_name)
+      values (${`withheld-${run}`}, ${"Bad <Name>"}) returning id`;
+    await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
+      values (${hosts.withheld}, ${bad?.id ?? ""}, 'preview', 'active', now())`;
+    const key = `preview|${hosts.withheld}`;
+    expect(await resolveGuestHost(bindings("preview") as never, hosts.withheld)).toEqual({
+      kind: "withheld",
+    });
+    expect(guestHostProjection.get(key, Date.now())).toBeUndefined();
   });
 
   it("serves the guest Worker only public brand fields through GuestGateway", async () => {

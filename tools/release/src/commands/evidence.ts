@@ -2,8 +2,14 @@
  * nov1 evidence (P12). Drafts the verification-log entry "Demo acceptance on
  * the preview deployment, November 1, 2026" from the journal. Step 9 is checked
  * by tree equality (D10(a)): each deployed SHA's tree must equal the tree of
- * the PR run's test merge commit, which the run's checkout step prints after
- * `git log -1 --format=%H`. Fetch that commit first: `git fetch origin <merge>`.
+ * the commit a green four-job CI run tested, which the checks job's "The
+ * commit under test" step prints. For a pull request run that is its test
+ * merge commit; fetch it first: `git fetch origin <merge>`. Since all four jobs
+ * run on pushes to main and on a dispatch (the 2026-11-07 change), a run on
+ * the deployed SHA itself is passed as `<sha>=<the same full sha>`. Which
+ * case a pair is comes from the resolved commits, never from a string prefix.
+ * Either way the draft records only what git shows; the run's URL and its
+ * four green jobs are the owner's to add.
  *
  * The draft carries names, ids, references, and results only; it is redacted,
  * and a unit test asserts it holds no address outside the .test domains.
@@ -18,6 +24,8 @@ import { redact } from "../redact.ts";
 
 export interface TreeCheck {
   deployed: string;
+  /** The deployed SHA resolved to its full commit id. */
+  deployedCommit: string;
   merge: string;
   deployedTree: string;
   mergeTree: string;
@@ -71,9 +79,17 @@ export function renderEvidence(journal: Journal, trees: TreeCheck[], now: Date):
     "**Step 6, what it shows.** No oversell through the deployed stack, with the racers serialized through one client address by the checkout's per-client lock (`packages/domain-booking/src/checkout.ts:177`). Concurrent hold acquisition is proven by the database race suites, not by this run.",
   );
   lines.push("");
-  lines.push("**Step 9, tree equality (D10(a)).**");
+  lines.push(
+    "**Step 9, the commit CI tested (D10 (a) tree equality, or a run on the SHA itself).**",
+  );
   if (trees.length === 0) lines.push("- Not shown: no --ci pairs given.");
   for (const t of trees) {
+    if (t.deployedCommit === t.merge) {
+      lines.push(
+        `- ${t.deployed} tree ${t.deployedTree}: the CI run tested commit ${t.merge} itself (a push run on main or a dispatch). Record the run's URL.`,
+      );
+      continue;
+    }
     lines.push(
       `- ${t.deployed} tree ${t.deployedTree} ${t.equal ? "equals" : "DIFFERS FROM"} the PR run's merge commit ${t.merge} tree ${t.mergeTree}.`,
     );
@@ -92,9 +108,17 @@ export async function evidence(deps: Deps, args: Args): Promise<number> {
   const journal = loadJournal(deps);
   const trees: TreeCheck[] = [];
   for (const { deployed, merge } of parseCiPairs(flag(args, "ci"))) {
+    const deployedCommit = await git(deps, ["rev-parse", `${deployed}^{commit}`]);
     const deployedTree = await git(deps, ["rev-parse", `${deployed}^{tree}`]);
     const mergeTree = await git(deps, ["rev-parse", `${merge}^{tree}`]);
-    trees.push({ deployed, merge, deployedTree, mergeTree, equal: deployedTree === mergeTree });
+    trees.push({
+      deployed,
+      deployedCommit,
+      merge,
+      deployedTree,
+      mergeTree,
+      equal: deployedTree === mergeTree,
+    });
   }
   const draft = renderEvidence(journal, trees, deps.now());
   const name = flag(args, "out");

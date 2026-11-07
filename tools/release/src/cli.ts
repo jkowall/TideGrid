@@ -67,7 +67,7 @@ export const usage = `nov1 <command> [options]   (dry run unless --live on a liv
   payment-account set <slug> stripe [--url-env NAME] --live --go A12
   hostname-disable <slug> <hostname> [--url-env NAME] --live --go A18
   approve-sha <sha> --go <gate> | --frozen
-  evidence [--ci <deployed sha>=<merge sha>,...] [--out <file>.md]
+  evidence [--ci <deployed sha>=<merge sha, or the same full sha>,...] [--out <file>.md]
 
   Any command: --confirm <target>[,<target>...] answers the type-backs from this
   list instead of the keyboard (an unattended run the owner directs; never CI;

@@ -2,7 +2,7 @@
 
 **Status.** Prepared on 2026-10-28 as a proposed runbook, with every decision a coordinator default until confirmed. It ran on 2026-11-04, driven by the coordinator on the owner's instruction; see the run note below. TideGrid stays exploratory; this runbook commits the owner to nothing.
 
-**Run, 2026-11-04.** It ran from 22:29 UTC on November 4 to 02:16 UTC on November 5, 2026, driven by the coordinator on the owner's instruction: P0 to P6, P8, P9 with P9.6, and P11. P7 was not run, and P10 stays deferred. The results are in the [verification log](../verification-log.md#demo-acceptance-on-the-preview-deployment-the-november-1-runbook-november-4-2026). The decisions and departures are in the [decision register](../v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings).
+**Run, 2026-11-04.** It ran from 22:29 UTC on November 4 to 02:16 UTC on November 5, 2026, driven by the coordinator on the owner's instruction: P0 to P6, P8, P9 with P9.6, and P11. P7 was not run, and P10 stays deferred. The results are in the [verification log](../verification-log.md#demo-acceptance-on-the-preview-deployment-the-november-1-runbook-november-4-2026). The decisions and departures are in the [decision register](../v2/06-decision-register.md#2026-11-04-nov-1-runbook-run-owner-instructions-and-coordinator-readings). Update, 2026-11-06: on the owner's decision of 2026-11-05, the C6 revert (pull request 71, `dd30fc8`) was released as API `4a40fede`, so the `*/15` cron runs again, and `FAKE_PAYMENT_WEBHOOK_SECRET` was put again under A2, so the fake takes payments again. Stripe stays off: its secrets were deleted at P9.6 and its webhook endpoint was disabled ([decision register](../v2/06-decision-register.md#2026-11-05-payments-and-the-cron-back-on-owner-decision)).
 
 **Where it comes from.** The [demo build plan](../v2/12-demo-build-plan.md) (its Demo acceptance section and the G2.14b-live and G2.16-live items), the [hosting plan](../v2/08-build-hosting-and-operations.md) (migration and rollback policy), and the [decision register](../v2/06-decision-register.md), which wins every conflict. The commands are `tools/release` ([README](../../tools/release/README.md)).
 
@@ -75,7 +75,7 @@ Build-time defaults, already applied: **D10(a)** step 9 by tree equality; **D12(
 | D6 | Sender: (a) a subdomain address; (b) the apex default `bookings@tidegrid.us`; (c) defer | (a): keeps a new DMARC policy off all `tidegrid.us` mail. C2 carries `bookings@mail.tidegrid.us` as a placeholder | P7 top |
 | D7 | Stripe-live placement: (a) a window after acceptance; (b) a staging Worker; (c) defer | (a): lowest setup cost; must not overlap P6 | P9 top |
 | D8 | Cutover today: (a) after acceptance, demo-harbor; (b) defer | (a) only if P6 has no fail; the platform row is permanent | P8 top |
-| D9 | GuestGateway opens one connection per call (12:169): (a) accept for owner-only traffic; (b) fix first | (a), with the P11 watch. SaaS stays deferred | P4.2, P10 |
+| D9 | GuestGateway opens one connection per call (12:169): (a) accept for owner-only traffic; (b) fix first | (a), with the P11 watch. SaaS stays deferred. Update, 2026-11-07: the fix is built, not released: `found` answers kept for 10 s ([decision register](../v2/06-decision-register.md#2026-11-07-guestgateway-keeps-found-answers-for-10-seconds-owner-request-coordinator-defaults-pending-owner-confirmation)) | P4.2, P10 |
 | D11 | External human review | (a) for test mode | top, P7 to P10 |
 | D15 | Webhook quick 2xx and IP allowlist (12:181): (a) accept inline, signature-only processing for the test-mode window; (b) land both first | (a) for synthetic test mode, risk recorded; (b) before any live-mode work | P9, before A11 |
 | D16 | Stripe key: (a) the existing `sk_test_`; (b) a new `rk_test_` | (a) unless `rk_test_` is confirmed to act through `Stripe-Account` | P9 top |
@@ -104,7 +104,7 @@ The docs pull request (`docs/nov1-runbook-v2`: the decision-register entry and t
 - Superseded on 2026-11-02: the Oct 31 freeze at `027d876` does not hold. Run the command below again on `main` after the 2026-11-02 merges (see D2).
 - Go/no-go: **D2**.
 - Command: `git fetch origin && git rev-parse origin/main`, then `nov1 approve-sha <sha> --frozen` (it records the tree id and the last migration file, and asks for the first 12 characters back).
-- Verify (**D10(a)**): the four CI jobs are green on the pull request whose merge produced the SHA, and that run's test merge commit has the same tree. Retrieve it (tried on run 40761591333 on 2026-10-28): `gh run view <run id> --log | grep -A1 "git log -1 --format=%H"` prints the merge commit; `git fetch origin <merge>`; then `git rev-parse <merge>^{tree}` must equal `git rev-parse <sha>^{tree}`. The integration, browser, and console-browser jobs run only on pull requests, so a merge commit on main is never itself the head of a run. Branch protection is absent, so merge only when the pull request's last run was against current main.
+- Verify (**D10(a)**): the four CI jobs are green on the pull request whose merge produced the SHA, and that run's test merge commit has the same tree. Retrieve it (tried on run 40761591333 on 2026-10-28): `gh run view <run id> --log | grep -A1 "git log -1 --format=%H"` prints the merge commit; `git fetch origin <merge>`; then `git rev-parse <merge>^{tree}` must equal `git rev-parse <sha>^{tree}`. The integration, browser, and console-browser jobs run only on pull requests, so a merge commit on main is never itself the head of a run. Branch protection is absent, so merge only when the pull request's last run was against current main. Update, 2026-11-07: from the merge of the [CI step 9 change](../v2/06-decision-register.md#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-pending-owner-confirmation), all four jobs also run on each push to `main`, and a dispatch tests a named SHA on `main`. For a SHA pushed after that merge, the check is a green four-job run on the SHA itself, read from "The commit under test" in each job. Tree equality stays the fallback.
 - Rollback: not applicable.
 
 **P0.2 The upgrade path is green in CI.** `packages/database/src/migrate-upgrade.integration.test.ts`, in the existing integration job on PostgreSQL 17: a scratch database; 0001 and 0002; the b87e269-era seed (`packages/database/test-fixtures/seed-0002-era.sql`); the b87e269 query set (`b87e269-queries.sql`) as `tidegrid_app`; migrate to the tree's last file; the query set again; today's seed twice (the second changes no row count); the query set a third time; drop the scratch database. First green: run 40761591333. Required, because CI otherwise migrates only empty databases, 0011 adds UNIQUE and CHECK constraints over existing `tenant_hostnames` rows, 0003 creates `btree_gist`, and the P3 code rollback needs b87e269 to work on the upgraded schema (08:193).
@@ -267,7 +267,7 @@ G2.16-live checklist (12:206-212) on Nov 1:
 | `E_DELIVERY_FAILED` to Rejected with a specific code | Not taken: a code change. Record any observed failure code |
 | `messageId` versus `payload.messageId` | Recorded in P12, from the A9 send |
 | CR or LF probe in the display name and subject | Not taken by default: it needs a send outside the adapter, a separate owner go |
-| Cron `accountFault` log and alert | Not shown: blocked on #26 (`scheduled.ts`) |
+| Cron `accountFault` log and alert | Not shown: blocked on #26 (`scheduled.ts`). Update, 2026-11-07: the log is in the code. Hardening Part E (pull request 37, `0618f7b`, D-E5 B) added `tidegrid.email_sweep.account_fault` to each email sweep summary in `apps/api-worker/src/scheduled.ts`. Both it and #26 (`b6d0247`) are in `e111043` and every later released SHA. Email is off on the preview, so the cron skips the email sweep (`email_sweep_skipped`) and has not emitted the field; that is read from the code, not from a deployed log. The alert is not set up |
 | The after-commit claim window | Recorded in P12: whether the step 3 confirmation left after commit or through the cron, from `outbox-summary` timing |
 | An account-level stop as a page | Not taken: the owner watches the dashboard during P7. A follow-up |
 
@@ -342,6 +342,7 @@ nov1 evidence --ci <deployed sha>=<PR run merge sha>[,...] --out nov1-evidence.m
 - The owner adds: per-step pass, fail, or not shown with its dependency; booking references; CSV totals; race counts; the isolation table; email authentication results; the `messageId` comparison; destination verification; the claim-window observation; the waiver hash; CI run URLs; Neon compute before and after.
 - The verification-log pull request follows #26 and the hardening Part E docs.
 - Traces and the storage state stay in `$NOV1_PRIVATE_DIR` and are deleted together.
+- Update, 2026-11-07, for later releases: from the merge of the CI step 9 change, every CI job runs on each push to `main`, and a dispatch tests a named SHA on `main` ([decision register](../v2/06-decision-register.md#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-pending-owner-confirmation)). For a SHA with a green four-job run of its own, pass `<sha>=<the same full sha>`; the draft words it as tested directly. Read the commit and tree from "The commit under test". Proposed, a coordinator default pending owner confirmation: release only after that run is green.
 
 ## Unverified (labeled wherever they appear)
 
@@ -360,7 +361,7 @@ nov1 evidence --ci <deployed sha>=<PR run merge sha>[,...] --out nov1-evidence.m
 - A booted b87e269 Worker against the upgraded schema: replaced by the committed b87e269 query set (P0.2), because booting it needs its tree and toolchain in CI.
 - `release` and `deploy:demo` refusing without `NOV1_GO`: outside the owned paths; Rule 1 stands in. A follow-up needs owner approval.
 - Guards in `packages/database/src/testing.ts` and `app-role.ts` that refuse a host recorded as main: proposed as a separate goal; the `nov1 db` refusals are the mitigation.
-- The G2.11 Stripe Element, bounce ingestion, the webhook quick 2xx and IP allowlist (D15), the GuestGateway connection fix (D9), and a per-hostname route command for SaaS.
+- The G2.11 Stripe Element, bounce ingestion, the webhook quick 2xx and IP allowlist (D15), the GuestGateway connection fix (D9; built 2026-11-07, not released), and a per-hostname route command for SaaS.
 
 ## Owner inputs
 
@@ -369,14 +370,14 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 | Input | Phase or gate | Needed by | Status |
 |---|---|---|---|
 | D1, D3 to D9, D11, D15, D16 answers | each prompt | Nov 1 | D1 applied as (a), its use for this run ratified with item 1; D4 applied as (c) after the owner answered "unknown"; D6 pending, the owner's call at the top of P7, which was not run; D3, D5, D7 to D9, D11, D15, and D16 applied on 2026-11-04 and ratified on 2026-11-05, see the [decision register](../v2/06-decision-register.md#2026-11-05-nov-1-run-owner-ratification-of-the-coordinators-readings) |
-| D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | pending; approve again on main (D2) |
+| D2: is #26 in the SHA | P0.1 | after the 2026-11-02 merges | answered by git, not asked: #26 (`b6d0247`) is an ancestor of `e111043` and of every later released SHA (`git merge-base --is-ancestor`, checked 2026-11-07). The P0.1 freeze of `e111043` was the coordinator's, under its 2026-11-04 reading; D2 was not put to the owner separately |
 | Neon allowance reset, with its UTC time | P1 | Nov 1 | unknown |
 | Free-plan history window and branch limits | P2.2 | Nov 1 | unknown |
 | `NEON_DATABASE_URL`, `NEON_API_KEY`, `NEON_PROJECT_ID` in the owner's shell | P2 | Nov 1 | in the env file (not read) |
-| `SEED_OWNER_EMAILS`, `SEED_SINGLE_TENANT_OWNER`, `SEED_OWNER_DISPLAY_NAME` | P2.4, D4 | Nov 1 | pending |
+| `SEED_OWNER_EMAILS`, `SEED_SINGLE_TENANT_OWNER`, `SEED_OWNER_DISPLAY_NAME` | P2.4, D4 | Nov 1 | not supplied; the seed ran under D4(c) with none |
 | The D4 address added to the Access policy | P6 | before step 5 | account change, its own go |
-| `FAKE_PAYMENT_WEBHOOK_SECRET`, generated and piped | P3.3 | Nov 1 | not set |
-| Gates A0 to A19, each at the time | each phase | Nov 1 | pending |
+| `FAKE_PAYMENT_WEBHOOK_SECRET`, generated and piped | P3.3 | Nov 1 | put at P3.3; the fake was turned off after P9 (D3(a)); a new value was put on 2026-11-06 under A2 |
+| Gates A0 to A19, each at the time | each phase | Nov 1 | A0 to A5, A10 to A14, and A19 run on the coordinator's reading, ratified 2026-11-05; A19 and A2 again on 2026-11-06; A6 to A9 and A15 to A18 not run (P7 and P10) |
 | A wrangler OAuth login with Workers deploy rights | P3, P4 | Nov 1 | used for past deploys |
 | A one-time-PIN sign-in as the D4 identity, saved to `$NOV1_PRIVATE_DIR` | P6 steps 5 and 7 | Nov 1 | pending |
 | Workers Paid | P7 | before P7 | observed yes |
@@ -384,8 +385,8 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 | `EMAIL_ALLOWED_RECIPIENTS`, the exact list | P7 | before P7 | pending |
 | Destination verification per address, if A9 shows it is needed | P7 | before steps 3 and 8 | unknown |
 | A phone for step 8 | P7 | Nov 1 | owner |
-| Cutover tenant | P8 | before P8 | default demo-harbor (12:148) |
-| Stripe test key, `STRIPE_ACCT_DEMO_HARBOR`, `STRIPE_ACCT_DEMO_REEF`, the webhook signing secret, Accounts v1 or v2, collector settings | P9 | before P9 | reportedly in the env file (not verified) |
+| Cutover tenant | P8 | before P8 | demo-harbor, cut over in P8 (12:148) |
+| Stripe test key, `STRIPE_ACCT_DEMO_HARBOR`, `STRIPE_ACCT_DEMO_REEF`, the webhook signing secret, Accounts v1 or v2, collector settings | P9 | before P9 | used in P9 for demo-harbor only; demo-reef has no compliant account; both Stripe secrets deleted at P9.6 |
 | Approval to use the installed Stripe CLI (`/opt/homebrew/bin/stripe`) for `events resend` | P9, A14 | before P9 | installed (observed) |
 | A second domain, payment details, a zone-scoped SaaS token, `CF_SAAS_ZONE_ID` | P10 | deferred | the zone has no custom-hostname quota |
 | Neon consumption at +2 h and +24 h | P11 | Nov 1 and 2 | owner |

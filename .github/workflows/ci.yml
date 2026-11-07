@@ -1,22 +1,71 @@
 name: ci
+# A dispatch names the commit it tested, so its run reads as step 9 evidence
+# for that SHA; other events keep the default name.
+run-name: ${{ inputs.sha && format('ci on {0}', inputs.sha) || '' }}
 
+# Demo acceptance step 9 asks for every check green on the released SHA. All
+# four jobs run on pull requests and on every push to main, so the merge
+# commit that gets released has a run of its own. A dispatch runs them on a
+# named commit, for a SHA released before this change or a canceled run.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-character commit SHA to check out and test (empty tests the branch head)
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
+# A pull request's newer push cancels its older run. A push run on main is
+# keyed by its event and commit, so no later push cancels it and each
+# released SHA keeps its own complete run. A dispatch waits only behind
+# another dispatch on the same SHA, and GitHub keeps the newest one pending.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.ref || inputs.sha || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: The commit under test
+        # Step 9 evidence: the commit and tree this job tested, and the
+        # workflow file that ran. On a pull request HEAD is the test merge
+        # commit; on main and on a dispatch it is the released SHA itself. A
+        # dispatch runs only from main, on a full SHA already on main, so no
+        # unreviewed commit runs here. It is checked before any install or
+        # test code, and the input is read from the environment, never
+        # interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A blank input tests the checked-out commit, under the same rules.
+            want=${WANT:-$got}
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
+            fi
+            if ! printf '%s' "$want" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error::give the full 40-character SHA"; exit 1
+            fi
+            if [ "$got" != "$want" ]; then
+              echo "::error::asked for $want but checked out $got"; exit 1
+            fi
+            git fetch --no-tags --quiet --unshallow origin main
+            if ! git merge-base --is-ancestor "$want" FETCH_HEAD; then
+              echo "::error::$want is not on main"; exit 1
+            fi
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -34,7 +83,6 @@ jobs:
 
   integration:
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'pull_request' }}
     # A disposable PostgreSQL 17 container per run, so CI spends no Neon
     # quota. tools/local-db/local-db.sh starts it from the pinned image, the
     # same script and image a local run uses, and exports DATABASE_URL and
@@ -47,6 +95,38 @@ jobs:
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: The commit under test
+        # Step 9 evidence: the commit and tree this job tested, and the
+        # workflow file that ran. On a pull request HEAD is the test merge
+        # commit; on main and on a dispatch it is the released SHA itself. A
+        # dispatch runs only from main, on a full SHA already on main, so no
+        # unreviewed commit runs here. It is checked before any install or
+        # test code, and the input is read from the environment, never
+        # interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A blank input tests the checked-out commit, under the same rules.
+            want=${WANT:-$got}
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
+            fi
+            if ! printf '%s' "$want" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error::give the full 40-character SHA"; exit 1
+            fi
+            if [ "$got" != "$want" ]; then
+              echo "::error::asked for $want but checked out $got"; exit 1
+            fi
+            git fetch --no-tags --quiet --unshallow origin main
+            if ! git merge-base --is-ancestor "$want" FETCH_HEAD; then
+              echo "::error::$want is not on main"; exit 1
+            fi
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -72,12 +152,43 @@ jobs:
   # downloaded on the runner only.
   browser:
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'pull_request' }}
     env:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: The commit under test
+        # Step 9 evidence: the commit and tree this job tested, and the
+        # workflow file that ran. On a pull request HEAD is the test merge
+        # commit; on main and on a dispatch it is the released SHA itself. A
+        # dispatch runs only from main, on a full SHA already on main, so no
+        # unreviewed commit runs here. It is checked before any install or
+        # test code, and the input is read from the environment, never
+        # interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A blank input tests the checked-out commit, under the same rules.
+            want=${WANT:-$got}
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
+            fi
+            if ! printf '%s' "$want" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error::give the full 40-character SHA"; exit 1
+            fi
+            if [ "$got" != "$want" ]; then
+              echo "::error::asked for $want but checked out $got"; exit 1
+            fi
+            git fetch --no-tags --quiet --unshallow origin main
+            if ! git merge-base --is-ancestor "$want" FETCH_HEAD; then
+              echo "::error::$want is not on main"; exit 1
+            fi
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -140,12 +251,43 @@ jobs:
   # its own, apart from the guest site's, on ports 8981 and 5382.
   console-browser:
     runs-on: ubuntu-24.04
-    if: ${{ github.event_name == 'pull_request' }}
     env:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: The commit under test
+        # Step 9 evidence: the commit and tree this job tested, and the
+        # workflow file that ran. On a pull request HEAD is the test merge
+        # commit; on main and on a dispatch it is the released SHA itself. A
+        # dispatch runs only from main, on a full SHA already on main, so no
+        # unreviewed commit runs here. It is checked before any install or
+        # test code, and the input is read from the environment, never
+        # interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            # A blank input tests the checked-out commit, under the same rules.
+            want=${WANT:-$got}
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::start a dispatch from main, so main's workflow runs"; exit 1
+            fi
+            if ! printf '%s' "$want" | grep -Eqx '[0-9a-f]{40}'; then
+              echo "::error::give the full 40-character SHA"; exit 1
+            fi
+            if [ "$got" != "$want" ]; then
+              echo "::error::asked for $want but checked out $got"; exit 1
+            fi
+            git fetch --no-tags --quiet --unshallow origin main
+            if ! git merge-base --is-ancestor "$want" FETCH_HEAD; then
+              echo "::error::$want is not on main"; exit 1
+            fi
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
