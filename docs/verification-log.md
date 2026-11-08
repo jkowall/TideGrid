@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Stage 0 pricing worksheet draft (W1-PRICING-WS), written November 8, 2026
+
+A proposed Stage 0 [pricing worksheet draft](customer/pricing-worksheet-draft.md) computes net managed booking value and the Core and Native prices from trailing 12-month volume and channel mix ([decision register](v2/06-decision-register.md#2026-11-08-w1-pricing-ws-stage-0-pricing-worksheet-draft-proposed-pending-owner-approval)). It restates the [commercial model](v2/03-commercial-model.md) and changes no price. The layout, the full-price-then-pilot-credit presentation, and the Step 6 checks are pending the owner's approval. Both worked examples are synthetic. No code changed. The reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed on the second run. The first run failed one timing-dependent test outside this goal (`packages/domain-messaging/src/cloudflare.test.ts`).
+- **Independent review.** Accept with listed fixes, three findings, all fixed. The Managed Launch credit now applies only when Managed Launch is in the full price. Step 1 counts dollar card redemptions only from purchased lots, as the fee base defines. The custom-quote check lists all six triggers from the commercial model.
+- **Two rechecks.** The first asked for a rebase onto main. The second: accept. It re-derived every number in both examples against the commercial model and found no errors.
+- **Telemetry.** About one hour of agent time across draft, review, and two fix rounds. Token use and cost per checkpoint: missing.
+
 ### A no-transaction runner mode for CREATE INDEX CONCURRENTLY (W1-MIG-CONC), built November 8, 2026
 
 The migration runner now runs a file whose first line is exactly `-- tidegrid:no-transaction` outside a transaction, so `CREATE INDEX CONCURRENTLY` can run ([decision register](v2/06-decision-register.md#2026-11-08-w1-mig-conc-a-no-transaction-runner-mode-for-create-index-concurrently-owner-go-coordinator-defaults-pending-owner-confirmation); the owner confirmed the D6 A standing rule on 2026-11-08, and D1 to D4 are coordinator defaults pending confirmation). Every other file still runs in one transaction. No migration in the tree uses the mode yet, and no real index was added. Nothing ran against Neon. The local runs and the reviews below are coordinator-reported.
