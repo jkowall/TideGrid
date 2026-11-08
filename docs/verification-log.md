@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### GuestGateway miss budget before Cloudflare for SaaS (W1-GW-MISS), built November 8, 2026
+
+GuestGateway now budgets lookups of unknown hostnames at 20 per 10 seconds per isolate, and caps reads of each recently found host at 20 under way per isolate ([decision register](v2/06-decision-register.md#2026-11-08-guestgateway-miss-budget-before-cloudflare-for-saas-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). A refused lookup answers `limited`, which the guest Worker serves as 503. No binding and no `wrangler.jsonc` change. Nothing was released. The local runs and the reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed. The hostnames integration suite passed on a throwaway local PostgreSQL 17.
+- **Independent review.** Accept with listed fixes, four findings, all fixed. A token now comes back at most 10 seconds after its lookup began, even when the lookup never settles. Known-host reads are capped. Refusals log at most twice per window.
+- **Security review.** Two findings. The cap on known-host reads fixed the second. The first is recorded, not fixed: a fresh isolate knows no host, so a flood of unknown hosts can make a live host answer 503 in that isolate while the flood lasts. It is the open risk for P10 in the register entry.
+- **Recheck.** The known-read cap was one counter per isolate, so one tenant's burst could limit another's host. It is now per host. Second recheck: accept, with a rebase onto main.
+- **Telemetry.** About two hours of agent time across build, two reviews, and two fix rounds. Token use and cost per checkpoint: missing.
+
 ### Stage 0 pricing worksheet draft (W1-PRICING-WS), written November 8, 2026
 
 A proposed Stage 0 [pricing worksheet draft](customer/pricing-worksheet-draft.md) computes net managed booking value and the Core and Native prices from trailing 12-month volume and channel mix ([decision register](v2/06-decision-register.md#2026-11-08-w1-pricing-ws-stage-0-pricing-worksheet-draft-proposed-pending-owner-approval)). It restates the [commercial model](v2/03-commercial-model.md) and changes no price. The layout, the full-price-then-pilot-credit presentation, and the Step 6 checks are pending the owner's approval. Both worked examples are synthetic. No code changed. The reviews below are coordinator-reported.

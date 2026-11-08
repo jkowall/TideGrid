@@ -1,13 +1,27 @@
 import { createExecutionContext, env, SELF } from "cloudflare:test";
 import { createFakeHostnameProvider } from "@tidegrid/domain-hostnames";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { Bindings } from "../src/env.ts";
 import { PreflightProjection, preflightProjection } from "../src/hostnames/cors.ts";
 import {
   GUEST_HOST_MAX_ENTRIES,
   GUEST_HOST_TTL_MS,
+  GUEST_KNOWN_MAX_ENTRIES,
+  GUEST_KNOWN_READS,
+  GUEST_KNOWN_TTL_MS,
+  GUEST_MISS_BUDGET,
+  GUEST_MISS_WINDOW_MS,
+  type GuestHostLookup,
   guestHostProjection,
+  guestKnownHosts,
+  guestKnownReads,
+  guestLimitedTally,
+  guestMissBudget,
+  KeyedLookupBudget,
+  LookupBudget,
+  RefusalTally,
+  resolveGuestHost,
 } from "../src/hostnames/guest-gateway.ts";
 import { TtlProjection } from "../src/hostnames/projection.ts";
 import { hostnameProvider, hostnameSettings } from "../src/hostnames.ts";
@@ -383,5 +397,401 @@ describe("the guest host projection (G2.14b-live pre-release note)", () => {
     );
     const gateway = new GuestGateway(createExecutionContext(), env);
     expect(await gateway.resolveHost("Demo-Harbor.book.tidegrid.us")).toEqual({ kind: "miss" });
+  });
+});
+
+describe("the guest miss budget (G2.14b-live, D1 to D3)", () => {
+  const reset = () => {
+    guestHostProjection.clear();
+    guestKnownHosts.clear();
+    guestKnownReads.clear();
+    guestMissBudget.clear();
+    guestLimitedTally.clear();
+  };
+  beforeEach(reset);
+  afterEach(reset);
+
+  // A database URL that is never dialed: every read goes through `lookup`.
+  const withDb = { ...base, DATABASE_URL: "postgres://unit:unit@db.invalid:5432/none" } as Bindings;
+  const experience = { tenant: { slug: "demo-harbor", name: "Demo Harbor" } };
+  const live = "demo-harbor.book.tidegrid.us";
+
+  /** A lookup that counts its reads and answers from a mutable table. */
+  function fakeDb(answers: Record<string, "found" | "withheld" | "throws"> = {}) {
+    const reads: string[] = [];
+    const lookup: GuestHostLookup = async (_env, host) => {
+      reads.push(host);
+      // Yield, so concurrent callers really overlap.
+      await new Promise((r) => setTimeout(r, 1));
+      const answer = answers[host];
+      if (answer === "throws") throw new Error("database down");
+      if (answer === "withheld") {
+        return { kind: "withheld", tenantId: "t", version: 1, reason: "BrandConfigInvalid" };
+      }
+      if (answer === "found") return { kind: "found", tenantId: "t", experience };
+      return { kind: "miss" };
+    };
+    return { reads, lookup, answers };
+  }
+
+  it("is 20 lookups per 10 seconds per isolate, with no binding", () => {
+    expect(GUEST_MISS_BUDGET).toBe(20);
+    expect(GUEST_MISS_WINDOW_MS).toBe(10_000);
+    expect(guestMissBudget.capacity).toBe(GUEST_MISS_BUDGET);
+    expect(guestMissBudget.windowMs).toBe(GUEST_MISS_WINDOW_MS);
+    expect(GUEST_KNOWN_TTL_MS).toBe(600_000);
+    expect(GUEST_KNOWN_MAX_ENTRIES).toBe(1_000);
+    expect(GUEST_KNOWN_READS).toBe(20);
+    expect(guestKnownReads.capacity).toBe(GUEST_KNOWN_READS);
+    expect(guestKnownReads.windowMs).toBe(GUEST_MISS_WINDOW_MS);
+    expect(guestKnownReads.maxKeys).toBe(GUEST_KNOWN_MAX_ENTRIES);
+    // The cache defaults the owner confirmed are unchanged.
+    expect(GUEST_HOST_TTL_MS).toBe(10_000);
+    expect(GUEST_HOST_MAX_ENTRIES).toBe(1_000);
+  });
+
+  it("never lets a 10-second span open more than its capacity of held lookups", () => {
+    const budget = new LookupBudget(3, 10_000);
+    const first = [budget.take(0), budget.take(0), budget.take(0)];
+    for (const hold of first) expect(hold).toBeDefined();
+    // Three lookups under way, or spent, hold every token.
+    expect(budget.take(0)).toBeUndefined();
+    expect(budget.take(9_999)).toBeUndefined();
+    expect(budget.available(9_999)).toBe(0);
+    // Each token comes back 10 seconds after its lookup began, released or not.
+    expect(budget.available(10_000)).toBe(3);
+    const found = budget.take(10_000);
+    expect(found).toBeDefined();
+    // A released token comes back at once.
+    if (found) budget.release(found);
+    expect(budget.available(10_000)).toBe(3);
+    // Releasing a token that already expired changes nothing.
+    if (first[0]) budget.release(first[0]);
+    expect(budget.available(10_000)).toBe(3);
+    // Staggered: one taken at 11 s and two at 15 s free at 21 s and 25 s.
+    budget.take(11_000);
+    budget.take(15_000);
+    budget.take(15_000);
+    expect(budget.take(20_999)).toBeUndefined();
+    expect(budget.available(21_000)).toBe(1);
+    expect(budget.available(25_000)).toBe(3);
+  });
+
+  it("tallies refusals per window: a leading-edge marker, then the closed window's total once", () => {
+    const tally = new RefusalTally(10_000);
+    expect(tally.flush(0)).toBeUndefined();
+    expect(tally.refuse(1_000)).toBe(true);
+    expect(tally.refuse(1_001)).toBe(false);
+    expect(tally.refuse(10_999)).toBe(false);
+    expect(tally.flush(10_999)).toBeUndefined();
+    expect(tally.flush(11_000)).toBe(3);
+    expect(tally.flush(11_000)).toBeUndefined();
+    expect(tally.refuse(11_000)).toBe(true);
+  });
+
+  it("opens at most 20 lookups for a flood of distinct unknown hosts, and none is a miss past that", async () => {
+    const db = fakeDb();
+    const flood = Array.from({ length: 1_000 }, (_, i) => `flood-${i}.example.com`);
+    // All at once, so lookups under way must hold their tokens.
+    const answers = await Promise.all(flood.map((h) => resolveGuestHost(withDb, h, db.lookup)));
+    expect(db.reads).toHaveLength(GUEST_MISS_BUDGET);
+    const kinds = answers.map((a) => a.kind);
+    expect(kinds.filter((k) => k === "miss")).toHaveLength(GUEST_MISS_BUDGET);
+    expect(kinds.filter((k) => k === "limited")).toHaveLength(1_000 - GUEST_MISS_BUDGET);
+    // One after another, too: still no read.
+    for (let i = 0; i < 100; i++) {
+      expect(await resolveGuestHost(withDb, `late-${i}.example.com`, db.lookup)).toEqual({
+        kind: "limited",
+      });
+    }
+    expect(db.reads).toHaveLength(GUEST_MISS_BUDGET);
+    // Nothing is kept for a miss or a limited answer.
+    expect(guestHostProjection.size).toBe(0);
+    expect(guestKnownHosts.size).toBe(0);
+  });
+
+  it("serves a definite miss only from a lookup, and a limited host reads once a token is free", async () => {
+    const db = fakeDb();
+    for (let i = 0; i < GUEST_MISS_BUDGET; i++) {
+      await resolveGuestHost(withDb, `spend-${i}.example.com`, db.lookup);
+    }
+    expect(await resolveGuestHost(withDb, "nobody.example.com", db.lookup)).toEqual({
+      kind: "limited",
+    });
+    expect(db.reads).not.toContain("nobody.example.com");
+    // The window passes (simulated by clearing the budget): the next call reads and misses.
+    guestMissBudget.clear();
+    expect(await resolveGuestHost(withDb, "nobody.example.com", db.lookup)).toEqual({
+      kind: "miss",
+    });
+    expect(db.reads.at(-1)).toBe("nobody.example.com");
+  });
+
+  it("gives the token back for a found answer and keeps it for a withheld brand or a failure", async () => {
+    const db = fakeDb({
+      [live]: "found",
+      "withheld.example.com": "withheld",
+      "broken.example.com": "throws",
+    });
+    expect((await resolveGuestHost(withDb, live, db.lookup)).kind).toBe("found");
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+    expect(await resolveGuestHost(withDb, "withheld.example.com", db.lookup)).toEqual({
+      kind: "withheld",
+    });
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET - 1);
+    await expect(resolveGuestHost(withDb, "broken.example.com", db.lookup)).rejects.toThrow(
+      /database down/,
+    );
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET - 2);
+    // A withheld or failed host is never kept, as found or as known.
+    expect(guestHostProjection.size).toBe(1);
+    expect(guestKnownHosts.size).toBe(1);
+    // Spent tokens bound a flood of a withheld host too.
+    for (let i = 0; i < 50; i++) await resolveGuestHost(withDb, "withheld.example.com", db.lookup);
+    expect(db.reads.filter((h) => h === "withheld.example.com")).toHaveLength(
+      GUEST_MISS_BUDGET - 1,
+    );
+  });
+
+  it("keeps found answers for 10 seconds unchanged, and lets a known host past a spent budget", async () => {
+    const db = fakeDb({ [live]: "found" });
+    const first = await resolveGuestHost(withDb, live, db.lookup);
+    expect(first).toEqual({ kind: "found", experience });
+    // Kept: the next call reads nothing.
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual(first);
+    expect(db.reads).toEqual([live]);
+    // A flood spends the budget.
+    for (let i = 0; i < 200; i++) {
+      await resolveGuestHost(withDb, `flood-${i}.example.com`, db.lookup);
+    }
+    expect(guestMissBudget.available(Date.now())).toBe(0);
+    // The kept answer expires: the known host reads afresh, past the spent budget.
+    const key = `${base.ENVIRONMENT ?? ""}|${live}`;
+    guestHostProjection.set(key, experience, Date.now() - GUEST_HOST_TTL_MS);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual(first);
+    expect(db.reads.filter((h) => h === live)).toHaveLength(2);
+  });
+
+  it("serves the kill switch to a disabled known host at once, then budgets it like any other", async () => {
+    const db = fakeDb({ [live]: "found" });
+    await resolveGuestHost(withDb, live, db.lookup);
+    for (let i = 0; i < 200; i++) {
+      await resolveGuestHost(withDb, `flood-${i}.example.com`, db.lookup);
+    }
+    // The operator's host is disabled and its kept answer expires.
+    delete db.answers[live];
+    guestHostProjection.clear();
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "miss" });
+    expect(guestKnownHosts.size).toBe(0);
+    // No longer known: with the budget spent, it is limited, never found.
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    expect(guestHostProjection.size).toBe(0);
+  });
+
+  it("drops a known host on a database failure, so an outage is budgeted too", async () => {
+    const db = fakeDb({ [live]: "found" });
+    await resolveGuestHost(withDb, live, db.lookup);
+    expect(guestKnownHosts.size).toBe(1);
+    db.answers[live] = "throws";
+    guestHostProjection.clear();
+    await expect(resolveGuestHost(withDb, live, db.lookup)).rejects.toThrow(/database down/);
+    expect(guestKnownHosts.size).toBe(0);
+    // Known hosts skip the budget, so that failure spent nothing.
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+    for (let i = 0; i < 50; i++) {
+      await resolveGuestHost(withDb, live, db.lookup).catch(() => undefined);
+    }
+    // One read as a known host, then at most the budget.
+    expect(db.reads.filter((h) => h === live)).toHaveLength(2 + GUEST_MISS_BUDGET);
+  });
+
+  it("resolves a newly activated host on its next lookup, since no miss is kept (D2)", async () => {
+    const db = fakeDb();
+    const fresh = "new-operator.example.com";
+    expect(await resolveGuestHost(withDb, fresh, db.lookup)).toEqual({ kind: "miss" });
+    db.answers[fresh] = "found";
+    expect(await resolveGuestHost(withDb, fresh, db.lookup)).toEqual({ kind: "found", experience });
+    expect(db.reads).toEqual([fresh, fresh]);
+  });
+
+  it("spends nothing on a host the strict rules refuse, or without a database", async () => {
+    const db = fakeDb();
+    for (let i = 0; i < 100; i++) {
+      expect(await resolveGuestHost(withDb, `Flood-${i}.example.com`, db.lookup)).toEqual({
+        kind: "miss",
+      });
+    }
+    await expect(resolveGuestHost(base, "nobody.example.com", db.lookup)).rejects.toThrow(
+      /database_unconfigured/,
+    );
+    expect(db.reads).toHaveLength(0);
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+  });
+});
+
+describe("the guest miss budget under review findings (W1-GW-MISS)", () => {
+  const reset = () => {
+    guestHostProjection.clear();
+    guestKnownHosts.clear();
+    guestKnownReads.clear();
+    guestMissBudget.clear();
+    guestLimitedTally.clear();
+  };
+  beforeEach(reset);
+  afterEach(() => {
+    vi.restoreAllMocks();
+    reset();
+  });
+
+  const withDb = { ...base, DATABASE_URL: "postgres://unit:unit@db.invalid:5432/none" } as Bindings;
+  const experience = { tenant: { slug: "demo-harbor", name: "Demo Harbor" } };
+  const live = "demo-harbor.book.tidegrid.us";
+  const hang: GuestHostLookup = () => new Promise(() => {});
+
+  /** A slow lookup that counts reads and the most reads under way at once. */
+  function slowDb(foundHosts: string[] = []) {
+    const stats = { reads: 0, open: 0, peak: 0 };
+    const lookup: GuestHostLookup = async (_env, host) => {
+      stats.reads += 1;
+      stats.open += 1;
+      stats.peak = Math.max(stats.peak, stats.open);
+      await new Promise((r) => setTimeout(r, 5));
+      stats.open -= 1;
+      return foundHosts.includes(host)
+        ? { kind: "found", tenantId: "t", experience }
+        : { kind: "miss" };
+    };
+    return { stats, lookup };
+  }
+
+  /** Freezes the clock at `start`; returns a setter to move it. */
+  function clock(start = 1_800_000_000_000) {
+    let now = start;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    return (ms: number) => {
+      now = start + ms;
+    };
+  }
+
+  it("gives a token back 10 seconds after its lookup began, even if the lookup never settles", async () => {
+    const at = clock();
+    for (let i = 0; i < GUEST_MISS_BUDGET; i++) {
+      void resolveGuestHost(withDb, `hang-${i}.example.com`, hang);
+    }
+    const db = slowDb([live]);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    at(GUEST_MISS_WINDOW_MS - 1);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    // A cancelled read never settles; its token still comes back.
+    at(GUEST_MISS_WINDOW_MS);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "found", experience });
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+  });
+
+  it("caps the reads of a known host under way at once, so a stampede at expiry is bounded", async () => {
+    const db = slowDb([live]);
+    expect((await resolveGuestHost(withDb, live, db.lookup)).kind).toBe("found");
+    guestHostProjection.clear();
+    db.stats.reads = 0;
+    db.stats.peak = 0;
+    const answers = await Promise.all(
+      Array.from({ length: 500 }, () => resolveGuestHost(withDb, live, db.lookup)),
+    );
+    expect(db.stats.peak).toBeLessThanOrEqual(GUEST_KNOWN_READS);
+    expect(db.stats.reads).toBeLessThanOrEqual(GUEST_KNOWN_READS);
+    const kinds = answers.map((a) => a.kind);
+    // Never a miss: a refused read is `limited`, the 503.
+    expect(kinds.filter((k) => k === "miss")).toHaveLength(0);
+    expect(kinds.filter((k) => k === "found")).toHaveLength(db.stats.reads);
+    // The miss budget was not touched by a known host.
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+  });
+
+  it("lets a known host's read that never settles go after 10 seconds too", async () => {
+    const at = clock();
+    const db = slowDb([live]);
+    await resolveGuestHost(withDb, live, db.lookup);
+    guestHostProjection.clear();
+    for (let i = 0; i < GUEST_KNOWN_READS; i++) void resolveGuestHost(withDb, live, hang);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    at(GUEST_MISS_WINDOW_MS);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "found", experience });
+  });
+
+  it("caps known reads per host, so one tenant's burst never limits another tenant's known host", async () => {
+    const at = clock();
+    const other = "other-harbor.book.tidegrid.us";
+    const db = slowDb([live, other]);
+    expect((await resolveGuestHost(withDb, live, db.lookup)).kind).toBe("found");
+    expect((await resolveGuestHost(withDb, other, db.lookup)).kind).toBe("found");
+    // Both kept answers expire; tenant A's reads hang and hold all its slots.
+    at(GUEST_HOST_TTL_MS);
+    for (let i = 0; i < GUEST_KNOWN_READS; i++) void resolveGuestHost(withDb, live, hang);
+    expect(guestKnownReads.available(`${withDb.ENVIRONMENT ?? ""}|${live}`, Date.now())).toBe(0);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    // Tenant B's known host in the same isolate still reads and is found.
+    expect(await resolveGuestHost(withDb, other, db.lookup)).toEqual({ kind: "found", experience });
+    // Neither touched the miss budget.
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+  });
+
+  it("keeps the per-host read slots bounded: settled hosts leave, and a full map refuses a new host", () => {
+    const keyed = new KeyedLookupBudget(2, 10_000, 2);
+    const a1 = keyed.take("a", 0);
+    const a2 = keyed.take("a", 0);
+    expect(a1 && a2).toBeTruthy();
+    expect(keyed.take("a", 0)).toBeUndefined();
+    const b = keyed.take("b", 0);
+    expect(b).toBeTruthy();
+    expect(keyed.size).toBe(2);
+    // Every key holds a token: a third host is refused, never let through.
+    expect(keyed.take("c", 0)).toBeUndefined();
+    // A key whose last token is released has no entry.
+    if (b) keyed.release("b", b, 1);
+    expect(keyed.size).toBe(1);
+    expect(keyed.take("c", 1)).toBeTruthy();
+    // Tokens that never come back expire, and a new key sweeps their entry.
+    expect(keyed.take("d", 9_999)).toBeUndefined();
+    expect(keyed.take("d", 10_001)).toBeTruthy();
+    // Both "a" and "c" held only expired tokens, so the sweep dropped both.
+    expect(keyed.size).toBe(1);
+    expect(keyed.available("a", 10_001)).toBe(2);
+  });
+
+  it("refuses a live host a cold isolate has not found while a flood holds the budget (open risk for P10)", async () => {
+    // A cold isolate: nothing kept, nothing known. This is a deliberate,
+    // recorded behavior pending the owner's decision, never a miss.
+    const db = slowDb([live]);
+    await Promise.all(
+      Array.from({ length: GUEST_MISS_BUDGET }, (_, i) =>
+        resolveGuestHost(withDb, `junk-${i}.example.com`, db.lookup),
+      ),
+    );
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    expect(guestHostProjection.size).toBe(0);
+  });
+
+  it("logs a flood when it starts and its window's total once the window closes", async () => {
+    const at = clock();
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      if (typeof line === "string" && line.includes("guest_host_lookup_limited")) lines.push(line);
+    });
+    const db = slowDb();
+    await Promise.all(
+      Array.from({ length: GUEST_MISS_BUDGET + 41 }, (_, i) =>
+        resolveGuestHost(withDb, `flood-${i}.example.com`, db.lookup),
+      ),
+    );
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] as string).message).toBe("guest_host_lookup_limited started");
+    // The flood stops. The window's total is written on the isolate's next call.
+    at(GUEST_MISS_WINDOW_MS);
+    await resolveGuestHost(withDb, "Not-Strict.example.com", db.lookup);
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[1] as string).message).toBe("guest_host_lookup_limited refused 41");
+    // Written once only.
+    await resolveGuestHost(withDb, "Not-Strict.example.com", db.lookup);
+    expect(lines).toHaveLength(2);
   });
 });

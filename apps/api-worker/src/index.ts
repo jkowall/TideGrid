@@ -35,7 +35,8 @@ export class ConsoleGateway extends WorkerEntrypoint<Bindings> {
  * Reachable only through the guest Worker's service binding (G2.14b). One
  * typed method, nothing else: it never forwards a request into the app and
  * never carries the console mark, so no staff or sign-in route is reachable
- * through it. See src/hostnames/guest-gateway.ts.
+ * through it. A host this isolate does not know answers `limited` once the
+ * isolate's miss budget is spent. See src/hostnames/guest-gateway.ts.
  */
 export class GuestGateway extends WorkerEntrypoint<Bindings> {
   async resolveHost(host: unknown): Promise<GuestHostAnswer> {
