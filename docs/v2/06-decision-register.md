@@ -8,6 +8,21 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W3-OPS-1, pilot infrastructure as code, plan only (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
+
+At 17:35 UTC on 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That waives the Validation gate and the O-VAL-2 dependency for this goal as a synthetic pull-forward. It allows Terraform written and checked with `terraform fmt` and `terraform validate` only: no plan against a real account, no state backend, no apply, no provider call.
+
+The goal adds Terraform modules under [`infra/terraform`](../../infra/terraform/README.md) for zones, Worker routes, queues and dead letter queues, private R2 buckets, Hyperdrive, scoped tokens, alerts, the Cloudflare for SaaS fallback origin, and Neon, composed into staging and production roots. It adds a CI workflow, `infra.yml`, with no secrets, and an [apply runbook](../runbooks/terraform-apply.md) that requires the owner's approval of each saved plan. The Terraform and Wrangler ownership split of the [hosting plan](08-build-hosting-and-operations.md#infrastructure-and-configuration-ownership) is unchanged, and `tidegrid_app` still comes only from migration 0001. Coordinator defaults, pending owner confirmation:
+
+- **D1, no secrets in state.** The hosting plan says Terraform state holds no secret values. A Hyperdrive configuration, an account token, and a new Neon project each store one. They are created only when an environment sets `allow_secrets_in_state`, which defaults to false. Turning it on would amend the hosting plan.
+- **D2, state in a versioned, KMS-encrypted S3 bucket with lockfile locking,** one key per environment, settings supplied from the owner's private location. R2 has no object versioning. It needs an account the owner does not have yet.
+- **D3, staging only reads the existing `tidegrid.us` zone.** Production gets its own account and zone, created by Terraform.
+- **D4, Wrangler keeps the custom domains it declares today.** Terraform's routes start empty.
+- **D5, production's waiver evidence lock period has no default.** It is a legal retention decision. Staging locks synthetic evidence for 1 day.
+- **D6, providers:** Cloudflare `~> 5.28` and the community Neon provider `kislerdm/neon` `~> 0.18`. No lock file is committed yet, because the goal's container could not reach the Terraform registry; CI validates and uploads the lock files it resolves.
+
+Not done: a plan per change in CI (it needs credentials and a backend), application alerts (W3-OPS-5), backup jobs and drills (W3-OPS-6). Security review: run by the goal's session on the Terraform, the workflow, and the runbook; see the pull request.
+
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
 The owner placed finalization exception resolution in the G2.12 row with the O-SCOPE choice "Booking fixes and email limits". The goal's start gate is that entry. Staff now mark a payment exception as followed up, with migration `0018` (provisional, claimed at merge) and its service in the [booking contract](../../packages/domain-booking/README.md#exception-resolution-w1-fin-exc). The owner gave no answer on who may resolve or what reason is required, so these are coordinator defaults, pending owner confirmation:
