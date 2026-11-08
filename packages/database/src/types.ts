@@ -1107,7 +1107,7 @@ export interface WaiverDeliveriesTable {
   actor_id: ColumnType<string | null, never, never>;
   api_request_id: ColumnType<string | null, never, never>;
   reason: FixedDefault<string | null>;
-  /** A generation the guest asked for themselves (0026, W1-WAIVER-RENEWAL D1). */
+  /** A generation the guest asked for themselves (0027, W1-WAIVER-RENEWAL D1). */
   guest_renewal: FixedDefault<boolean>;
 }
 
@@ -1201,7 +1201,7 @@ export interface WaiverRemindersTable {
   created_at: Stamped;
 }
 
-/** A staff reset of a waiver request's five sends (0026): five more may follow. */
+/** A staff reset of a waiver request's five sends (0027): five more may follow. */
 export interface WaiverSendResetsTable {
   id: Generated<string>;
   tenant_id: TenantColumn;

@@ -16,7 +16,7 @@ The third of the three waiver goals the owner pulled into the demo on 2026-11-08
 - **D2: staff can allow five more sends, with a reason, audited.** Once a waiver has been sent 5 times, owners and booking staff may reset the count from the console's Waivers card, up to 20 sends in all. Each reset is its own append-only row, and the audit history records the reason and the staff member.
 - **D3: a shared family address is flagged to staff, not blocked.** When a minor's parent or guardian has the same address as a participant's own address on the booking, the console says so and asks staff to check who signs at the dock. A family of minors sharing one guardian is not flagged.
 
-Migration `0026` (provisional, claimed at merge) and the service are in the [waiver contract](../../packages/domain-waivers/README.md#renewal-and-the-send-count-w1-waiver-renewal). Not built: verifying a mailbox beyond the link itself, bounce handling, the generic dock QR, R2, and field encryption. Security review under rule R9: run under the owner's standing go of 2026-11-08 (results in the [verification log](../verification-log.md#2026-11-08)).
+Migration `0027` (provisional, claimed at merge) and the service are in the [waiver contract](../../packages/domain-waivers/README.md#renewal-and-the-send-count-w1-waiver-renewal). Not built: verifying a mailbox beyond the link itself, bounce handling, the generic dock QR, R2, and field encryption. Security review under rule R9: run under the owner's standing go of 2026-11-08 (results in the [verification log](../verification-log.md#2026-11-08)).
 
 ### 2026-11-08: W3-G2.2b, tenant access remainder without managed OIDC and MFA (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
 

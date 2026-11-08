@@ -238,9 +238,9 @@ Migration `0020_waiver_staff_assisted.sql` (W1-G215-SIGNING; provisional number,
 - **Evidence.** `access_method` gains `staff_device` and `participant_qr`, `match_method` gains `staff_confirmed`, `recipient_email` may be null, and a new `assisted_by` names the staff member; `waiver_evidence_method_shape` pairs them. An insert trigger (`app.check_waiver_evidence_method`) holds each to the session's link: an emailed link's evidence records `email_link`, `signer_confirmed`, and its delivery's address; an assisted link's records its mode, `staff_confirmed`, and its staff member. Evidence stays append-only for every role.
 - The three trigger functions are invokers with `search_path` pinned and EXECUTE revoked from PUBLIC. No new index: the table's unique keys are its indexes (rule R4).
 
-## Waiver renewal and send-count resets (0026)
+## Waiver renewal and send-count resets (0027)
 
-Migration `0026_waiver_renewal.sql` (W1-WAIVER-RENEWAL; provisional number, claimed at merge) adds a guest's own renewal and a staff reset of the five sends. Contract: [packages/domain-waivers](../domain-waivers/README.md#renewal-and-the-send-count-w1-waiver-renewal).
+Migration `0027_waiver_renewal.sql` (W1-WAIVER-RENEWAL; provisional number, claimed at merge) adds a guest's own renewal and a staff reset of the five sends. Contract: [packages/domain-waivers](../domain-waivers/README.md#renewal-and-the-send-count-w1-waiver-renewal).
 
 - **`waiver_send_resets`**, tenant-owned, under rules 1 to 10: one row per reset, with its request, the generation it was at (5 to 15), the staff member, and the reason. Its insert trigger (`app.check_waiver_send_reset`, an invoker with `search_path` pinned, EXECUTE revoked from PUBLIC) requires a staff actor naming itself, a pending request, and a count used up at the request's latest generation. Append-only for every role.
 - **`waiver_deliveries.guest_renewal`**, a new boolean, false by default: a generation the guest asked for themselves. Booking hooks that run in a guest's transaction send as the guest too, so the actor alone does not mark one.

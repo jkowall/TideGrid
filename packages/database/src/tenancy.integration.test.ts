@@ -714,7 +714,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         support_agents: [],
         support_access_grants: [],
         tenant_deletion_requests: ["INSERT", "SELECT"],
-        // Waiver send-count resets (0026).
+        // Waiver send-count resets (0027).
         waiver_send_resets: ["INSERT", "SELECT"],
       };
       const rows = await admin`

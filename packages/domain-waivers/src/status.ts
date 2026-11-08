@@ -169,7 +169,7 @@ interface Row {
   refusal_retry_after: Date | null;
   /** When the booking's trip leaves. */
   starts_at: Date;
-  /** The generation the latest staff reset was at (0026); null when none. */
+  /** The generation the latest staff reset was at (0027); null when none. */
   reset_at: number | null;
   shared_address: boolean | null;
   /** The request's reminders (0025), oldest first. */
