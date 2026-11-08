@@ -131,12 +131,29 @@ describe.skipIf(!env)("the sender identity guard against a real database", () =>
     ["a Unicode confusable", "TіdeGrіd"],
     ["a Cf format character", "Guard‮Harbor"],
     ["a reserved staff name", "Customer Support"],
+    ["an unfolded Latin lookalike", "\u01ac\u0268\u0256\u0247\u0193\u024d\u0268\u0256"],
+    [
+      "unfolded text after the provisioned name",
+      "Guard Neutral Tours \u01c0 \u01ae\u0268\u0256\u025b \u01e4\u027d\u0268\u0256",
+    ],
+    ["staff words and a digit", "Support Team 2"],
   ])("refuses a stored brand named as %s and uses the neutral brand", async (_label, name) => {
     const id = await tenant("Guard Neutral Tours", brandConfig(name));
     const row = await enqueued(id);
     expect(row.from_name).toBe("Guard Neutral Tours");
     expect(row.reply_to).toBeNull();
     expect(row.html_body).not.toContain(name);
+  });
+
+  it("refuses a stored brand whose reply-to names TideGrid in its local part", async () => {
+    const id = await tenant(
+      "Guard Local Tours",
+      brandConfig("Guard Local Tours", "tidegrid.support@guard-harbor.test"),
+    );
+    const row = await enqueued(id);
+    expect(row.from_name).toBe("Guard Local Tours");
+    expect(row.reply_to).toBeNull();
+    expect(row.html_body).not.toContain("tidegrid.support");
   });
 
   it("refuses a stored brand whose reply-to sits on a TideGrid domain", async () => {

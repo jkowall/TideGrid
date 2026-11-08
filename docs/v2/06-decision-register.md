@@ -23,7 +23,9 @@ Coordinator defaults, pending owner confirmation:
 
 Observed: for the two synthetic brands, the rendered subject and both bodies match the baseline renderer byte for byte (a hash test). The published OpenAPI changed only in the brand name's description.
 
-Open: a security review of the spoofing cases (R9) and an independent review, both run by the lead. Two tenants provisioned with confusable names, an unverified reply-to, and lookalikes outside the hand-written table are recorded as residuals in the README.
+Review fixes, 2026-11-08: the independent review found that the skeleton silently dropped Latin letters it could not fold, so names such as "TɨdeGrɨd" passed and text made of such letters could be appended to a provisioned name and still bind. The rule now refuses any letter that does not fold to a to z, and the binding compares folded letters and digits with no letter dropped. Staff names with a digit or a filler word ("Support Team 2", "Do Not Reply", "Billing Dept") are now refused, and a contact address with TideGrid in its local part is refused too.
+
+Open: a security review of the spoofing cases (R9), run by the lead. Two tenants provisioned with confusable names, an unverified reply-to, the hand-written lookalike and staff-word lists, and the tightened name rule withholding a whole guest site for a stored brand that now fails are recorded as residuals in the README. Proposed, for the owner: run every active brand through the new rule before any non-synthetic brand is stored.
 
 Canonical: the [messaging README](../../packages/domain-messaging/README.md#sender-identity-w1-sender-guard) and the [brand contract](../../packages/contracts/src/brand.ts).
 

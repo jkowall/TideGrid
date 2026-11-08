@@ -137,6 +137,68 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     expect(sameSenderName("", "")).toBe(false);
   });
 
+  it.each([
+    // Review S1: Latin letters the skeleton cannot fold count for nothing, so
+    // they are refused rather than dropped.
+    ["unfolded lookalikes only", "ƬɨɖɇƓɍɨɖ"],
+    ["i with stroke", "TɨdeGrɨd"],
+    ["i with stroke and a staff word", "Tɨdegrɨd Support"],
+    ["d with tail", "TideGriɖ Billing"],
+    ["a dental click", "TǀdeGrǀd"],
+    ["unfolded lookalikes and staff words", "Ƭɨɖɇ Ɠɍɨɖ Billing Team"],
+    ["an open e", "Harbɛr"],
+    ["an unmapped small capital", "Hᴀrbor"],
+    // Review R1 and S2: digits, single letters, and filler do not rescue a
+    // name that is otherwise only staff or mailbox words.
+    ["a digit after staff words", "Support Team 2"],
+    ["a digit that reads as a letter", "Security Team 1"],
+    ["a country code", "Billing (US)"],
+    ["do not reply", "Do Not Reply"],
+    ["a department", "Billing Dept"],
+    ["a department, spelled out", "Payment Department"],
+    ["a help center", "Help Center"],
+    ["accounts payable", "Accounts Payable"],
+    ["a general postmaster", "Postmaster General"],
+  ])("refuses %s (review fixes)", (_label, name) => {
+    expect(senderNameProblem(name)).not.toBeNull();
+    expect(senderDisplayName(name)).toBeNull();
+    expect(accepts({ name })).toBe(false);
+  });
+
+  it("binds only to the same letters and digits: appended unfolded text does not bind", () => {
+    for (const name of [
+      "ƬɨɖɇƓɍɨɖ ꜱᴜᴘᴘꝋɍƭ (Demo Harbor Charters)",
+      "Demo Harbor Charters ǀ Ʈɨɖɛ Ǥɽɨɖ",
+      "Ɨɖ ɛʋɛɽɨ Demo Harbor Charters",
+      "Demo Harbor Charters 2",
+      "Demo Harbor Charters 26",
+    ]) {
+      expect(sameSenderName(name, "Demo Harbor Charters"), name).toBe(false);
+    }
+    expect(sameSenderName("Demo Harbor Charters!", "Demo Harbor Charters")).toBe(false);
+    expect(sameSenderName("Demo Harbor-Charters", "Demo Harbor Charters")).toBe(true);
+    expect(sameSenderName("Démo Harbor Charters", "Demo Harbor Charters")).toBe(true);
+  });
+
+  it("keeps a TideGrid name out of the contact local part (review S3)", () => {
+    for (const email of ["tidegrid.support@demo-harbor.test", "tidegrid-support@gmail.com"]) {
+      expect(contactEmailProblem(email), email).not.toBeNull();
+      expect(accepts({ contact: { email } }), email).toBe(false);
+    }
+  });
+
+  it("still accepts operator names with filler and digits beside an operator word", () => {
+    for (const name of [
+      "Harbor Office 2",
+      "Do Dive Center",
+      "Key West Help Center Kayaks",
+      "Ølfjord Tours",
+      "Straße Boats",
+    ]) {
+      expect(senderNameProblem(name), name).toBeNull();
+    }
+  });
+
   it("takes a name that already carries the suffix without doubling it", () => {
     expect(senderDisplayName("Demo Reef Divers via TideGrid")).toBe(
       "Demo Reef Divers via TideGrid",

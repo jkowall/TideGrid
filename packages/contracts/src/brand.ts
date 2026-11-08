@@ -688,15 +688,34 @@ const lookalikes: Record<string, string> = {
  * Cyrillic i, and "TideGricl" all read as "tidegrid".
  */
 export function senderSkeleton(text: string): string {
-  const folded = [...text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()]
+  return readAs(foldCharacters(text).replace(/[^a-z]/g, ""));
+}
+
+/** NFKD, mark removal, lowercasing, and the lookalike table, per character. */
+function foldCharacters(text: string): string {
+  return [...text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()]
     .map((ch) => lookalikes[ch] ?? ch)
     .join("");
-  return folded
-    .replace(/[^a-z]/g, "")
+}
+
+/** The multi-letter lookalikes: "cl" as "d", "rn" as "m", "vv" as "w", "l" as "i". */
+function readAs(letters: string): string {
+  return letters
     .replaceAll("cl", "d")
     .replaceAll("rn", "m")
     .replaceAll("vv", "w")
     .replaceAll("l", "i");
+}
+
+const anyLetter = /\p{L}/u;
+
+/**
+ * Whether every letter in the text folds to a to z. A letter that does not
+ * would vanish from the skeleton and so escape every check that reads it
+ * (review S1), so a name with one is refused instead.
+ */
+function lettersFold(text: string): boolean {
+  return [...text].every((ch) => !anyLetter.test(ch) || /^[a-z]+$/.test(foldCharacters(ch)));
 }
 
 /** The skeletons no sender name may contain: TideGrid itself. */
@@ -754,8 +773,56 @@ const staffWords = new Set(
     "the",
     "trust",
     "verification",
+    // Department, mailbox, and filler words (review R1 and S2): on their own
+    // or beside staff words they still read as a platform mailbox.
+    "and",
+    "at",
+    "center",
+    "centre",
+    "contact",
+    "contacts",
+    "department",
+    "departments",
+    "dept",
+    "do",
+    "don",
+    "donotreply",
+    "for",
+    "general",
+    "hello",
+    "inbox",
+    "news",
+    "newsletter",
+    "not",
+    "notice",
+    "notices",
+    "of",
+    "office",
+    "our",
+    "payable",
+    "receipt",
+    "receipts",
+    "receivable",
+    "refund",
+    "refunds",
+    "reservation",
+    "reservations",
+    "sales",
+    "update",
+    "updates",
+    "us",
+    "your",
   ].map(senderSkeleton),
 );
+
+/**
+ * A word that names nothing on its own: all digits, or one letter or none
+ * once folded. It neither makes a name staff-only nor rescues one ("Support
+ * Team 2", "Security Team 1").
+ */
+function neutralWord(word: string): boolean {
+  return /^[0-9]+$/.test(word) || senderSkeleton(word).length <= 1;
+}
 
 /**
  * Characters a sender name may use: Latin letters, ASCII digits, single
@@ -775,8 +842,11 @@ const domainLike = /[\p{L}\p{N}]\.\p{L}{2,}/u;
  * - anything but Latin letters, ASCII digits, single spaces, and `& ' ’ . , ! ( ) / + # -`
  *   (so CR, LF, every other control, every Cf format character, and Cyrillic or
  *   Greek lookalikes), or text not in composed, compatibility-folded form;
+ * - a Latin letter that does not fold to a to z ("ɨ", "ɖ", an unmapped small
+ *   capital), so no letter is invisible to the checks below;
  * - a name that reads as TideGrid in any spelling its skeleton folds;
- * - a name made only of staff and mailbox words;
+ * - a name made only of staff, mailbox, and filler words, ignoring digits and
+ *   single letters;
  * - the word "via" after the first word, which would name a second relay;
  * - a domain-like word, such as "tidegrid.us" or "paypal.com".
  */
@@ -796,17 +866,19 @@ export function senderNameProblem(name: string): string | null {
   if (![...name].some((ch) => latinLetter.test(ch))) {
     return "A sender name needs a letter";
   }
+  if (!lettersFold(name)) {
+    return "A sender name uses letters that read as a to z, with or without accents";
+  }
   const skeleton = senderSkeleton(name);
   if (reservedSkeletons.some((reserved) => skeleton.includes(reserved))) {
     return "A sender name may not use or imitate the TideGrid name";
   }
   if (domainLike.test(name)) return "A sender name may not contain a domain name";
-  const words = name
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w.length > 0)
-    .map(senderSkeleton);
+  const rawWords = name.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 0);
+  const words = rawWords.map(senderSkeleton);
   if (words.slice(1).includes("via")) return 'A sender name may not use "via" after its first word';
-  if (staffWords.has(skeleton) || (words.length > 0 && words.every((w) => staffWords.has(w)))) {
+  const naming = rawWords.filter((w) => !neutralWord(w)).map(senderSkeleton);
+  if (staffWords.has(skeleton) || (naming.length > 0 && naming.every((w) => staffWords.has(w)))) {
     return "A sender name may not be only staff or mailbox words";
   }
   return null;
@@ -828,20 +900,32 @@ export function senderDisplayName(name: string): string | null {
 /**
  * Whether two operator names read as the same name. Email binds a brand's
  * name to the tenant's provisioned name with this: a brand that reads as
- * another name is not used as the sender.
+ * another name is not used as the sender. Every letter must fold to a to z,
+ * and digits count, so text that the skeleton would drop cannot be appended
+ * to a provisioned name (review S1). Spaces, case, accents, and punctuation
+ * that reads as no letter do not count.
  */
 export function sameSenderName(a: string, b: string): boolean {
-  const sa = senderSkeleton(a);
-  return sa.length > 0 && sa === senderSkeleton(b);
+  if (typeof a !== "string" || typeof b !== "string" || !lettersFold(a) || !lettersFold(b)) {
+    return false;
+  }
+  const key = (text: string) => readAs(foldCharacters(text).replace(/[^a-z0-9]/g, ""));
+  const ka = key(a);
+  return /[a-z]/.test(ka) && ka === key(b);
 }
 
-/** A contact address may not sit on a domain that reads as TideGrid's. */
+/**
+ * A contact address may not read as TideGrid's, in its domain or in its
+ * local part ("tidegrid.support@..."), since it becomes the reply-to.
+ */
 export function contactEmailProblem(address: string): string | null {
   const at = address.lastIndexOf("@");
-  const domain = at === -1 ? address : address.slice(at + 1);
-  const skeleton = senderSkeleton(domain);
-  return reservedSkeletons.some((reserved) => skeleton.includes(reserved))
-    ? "A contact address may not use a TideGrid domain"
+  const parts = at === -1 ? [address] : [address.slice(0, at), address.slice(at + 1)];
+  return parts.some((part) => {
+    const skeleton = senderSkeleton(part);
+    return reservedSkeletons.some((reserved) => skeleton.includes(reserved));
+  })
+    ? "A contact address may not use or imitate the TideGrid name"
     : null;
 }
 

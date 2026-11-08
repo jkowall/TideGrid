@@ -220,6 +220,23 @@ describe("sender identity (W1-SENDER-GUARD)", () => {
     ["CR and LF header injection", "Harbor\r\nBcc: victim@example.test"],
     ["a bare LF", "Harbor\nX-Inj: 1"],
     ["angle brackets", "Harbor <ops@example.test>"],
+    // Review S1: Latin letters that do not fold to a to z.
+    ["unfolded lookalikes", "\u01ac\u0268\u0256\u0247\u0193\u024d\u0268\u0256"],
+    ["i with stroke", "T\u0268deGr\u0268d"],
+    [
+      "unfolded lookalikes and staff words",
+      "\u01ac\u0268\u0256\u0247 \u0193\u024d\u0268\u0256 Billing Team",
+    ],
+    [
+      "unfolded text around an operator name",
+      "\u01ac\u0268\u0256\u0247\u0193\u024d\u0268\u0256 (Demo Harbor Charters)",
+    ],
+    // Review R1 and S2: staff names with a digit or filler word.
+    ["do not reply", "Do Not Reply"],
+    ["staff words and a digit", "Support Team 2"],
+    ["staff words and a digit that reads as a letter", "Security Team 1"],
+    ["staff words and a country code", "Billing (US)"],
+    ["a department", "Billing Dept"],
   ])("never shows or sends %s as the operator", (_label, name) => {
     const out = renderEmail({ ...harbor, name }, golden, { slot });
     expect(emailOperatorName({ name })).toBe("Your trip operator");
