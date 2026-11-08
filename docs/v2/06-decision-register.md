@@ -8,6 +8,14 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-G215-REMINDERS, waiver reminders up to a completion cutoff (coordinator defaults pending owner confirmation)
+
+The second of the three waiver goals the owner pulled into the demo on 2026-11-08, under the [W1-G215-SIGNING entry](#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation), which quotes the owner. The goal's two open questions are owner decisions. The owner's message asked for the work to be done and did not answer them, so the coordinator's suggestions apply as defaults, pending owner confirmation:
+
+- **D1: two reminders, 72 and 24 hours before departure, none within 2 hours.** A slot is skipped when an email went out after it opened or in the 12 hours before, so no guest gets a reminder right after their first email.
+- **D2: reminders do not count against the staff resend limits.** They are not delivery generations, so they never use up the five sends or hold a staff resend, and the limits never count them. A reminder still waits 10 minutes after the participant's last delivery generation to the same address.
+
+Migration `0025` and the service are in the [waiver contract](../../packages/domain-waivers/README.md#reminders-w1-g215-reminders). A new cron step queues due reminders before the email sweep, and is skipped while email is off. No SMS, no change to staff resends. Canonical: the [database README](../../packages/database/README.md#waiver-reminders-0025).
 ### 2026-11-08: W3-G2.5-TAX, per-location tax rates entered by each operator (synthetic pull-forward; coordinator default in place of the CPA's answer)
 
 The tracker held this goal until the Validation gate passed and the register recorded a CPA's per-location tax answer. At 17:35 UTC on 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That waives the Validation gate and the O-VAL-2 dependency as a synthetic pull-forward. About the open pilot questions, the owner then wrote on 2026-11-08 at 19:58 UTC: "I already gave answers to this one, so nothing is needed for the pilot." The owner has no accountant, so there is no CPA step.

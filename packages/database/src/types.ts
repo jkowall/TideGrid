@@ -1174,6 +1174,21 @@ export interface WaiverAssistedLinksTable {
   api_request_id: ColumnType<string | null, never, never>;
 }
 
+export type WaiverReminderSlot = "72h" | "24h";
+
+/** A reminder email for an unsigned waiver (0025, W1-G215-REMINDERS). Append-only. */
+export interface WaiverRemindersTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  request_id: Fixed<string>;
+  booking_id: Fixed<string>;
+  participant_id: Fixed<string>;
+  slot: Fixed<WaiverReminderSlot>;
+  message_id: Fixed<string>;
+  recipient_email: Fixed<string>;
+  created_at: Stamped;
+}
+
 /** Tables added by the waiver migration (G2.15), merged into Database below. */
 interface WaiverTables {
   waiver_templates: WaiverTemplatesTable;
@@ -1183,10 +1198,11 @@ interface WaiverTables {
   waiver_signing_sessions: WaiverSigningSessionsTable;
   waiver_evidence: WaiverEvidenceTable;
   waiver_assisted_links: WaiverAssistedLinksTable;
+  waiver_reminders: WaiverRemindersTable;
 }
 
 /** The cron's cross-tenant sweeps that take fair turns (0013). */
-export type SweepName = "hold" | "checkout" | "email" | "hostname" | "outbox";
+export type SweepName = "hold" | "checkout" | "email" | "hostname" | "outbox" | "waiver_reminder";
 
 /**
  * When a sweep last started a turn for a tenant (0013, pre-pilot hardening).

@@ -7,6 +7,7 @@ import {
 } from "@tidegrid/domain-hostnames";
 import { sweepExpiredHolds } from "@tidegrid/domain-inventory";
 import { sweepEmail } from "@tidegrid/domain-messaging";
+import { defaultWaiverDeps, sweepWaiverReminders } from "@tidegrid/domain-waivers";
 import { createLogger, newRequestId } from "@tidegrid/observability";
 import { bookingHooks } from "./booking-hooks.ts";
 import { queueSender } from "./delivery.ts";
@@ -33,7 +34,9 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  *    processes inbox events a failed request left received, and sends refunds
  *    whose outcome is unknown again with their idempotency keys, a canceled
  *    booking's refund included.
- * 3. The email sweep (lane 1, the G2.16 shim) sends due messages, retries
+ * 3. The waiver reminder sweep (W1-G215-REMINDERS) queues the reminders
+ *    unsigned waivers are due, before the email sweep sends them. Skipped
+ *    when email is off. Then the email sweep (lane 1, the G2.16 shim) sends due messages, retries
  *    temporary failures, and finishes attempts whose lease lapsed. Skipped
  *    when email is off.
  * 4. The hostname sweep (G2.14b) reads the custom-hostname provider for every
@@ -149,9 +152,60 @@ export async function runScheduled(
       throw error;
     }
 
+    const provider = emailProvider(env, handle.db);
+
+    // 3a. Waiver reminders (W1-G215-REMINDERS): queue the reminder each
+    //     unsigned waiver is due, 72 and 24 hours before departure and none
+    //     within 2 hours, for the email sweep below to send. Skipped when
+    //     email is off, so nothing piles up that would go out late.
+    const reminderLog = createLogger(
+      { ...base, "event.name": "waiver_reminder_sweep" },
+      options.log,
+    );
+    if (!provider) {
+      reminderLog.info("waiver_reminder_sweep_skipped", {
+        "tidegrid.email.reason": emailSettings(env).kind,
+      });
+    } else {
+      started = Date.now();
+      try {
+        const report = await sweepWaiverReminders(handle.db, {
+          runId,
+          deps: defaultWaiverDeps,
+          onTenantError: (tenantId, error) =>
+            reminderLog.error("waiver_reminder_sweep_tenant_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
+          onStampError: (tenantId, error) =>
+            reminderLog.error("waiver_reminder_sweep_stamp_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
+        });
+        reminderLog.info("waiver_reminder_sweep", {
+          "tidegrid.waiver_reminder_sweep.tenant_count": report.tenants,
+          "tidegrid.waiver_reminder_sweep.queued_count": report.queued,
+          "tidegrid.waiver_reminder_sweep.skipped_count": report.skipped,
+          "tidegrid.waiver_reminder_sweep.failed_tenant_count": report.failedTenants,
+          "tidegrid.waiver_reminder_sweep.turn_count": report.turns,
+          "tidegrid.waiver_reminder_sweep.pass_count": report.passes,
+          "tidegrid.waiver_reminder_sweep.deferred_tenant_count": report.deferredTenants,
+          "tidegrid.waiver_reminder_sweep.stamp_failure_count": report.stampFailures,
+          "tidegrid.waiver_reminder_sweep.complete": report.complete,
+          duration_ms: Date.now() - started,
+        });
+      } catch (error) {
+        reminderLog.error("waiver_reminder_sweep_failed", {
+          ...errorAttributes(error),
+          duration_ms: Date.now() - started,
+        });
+        throw error;
+      }
+    }
+
     // 3. Email delivery (lane 1, the G2.16 shim): send due messages, retry
     //    temporary failures, and finish attempts whose lease lapsed.
-    const provider = emailProvider(env, handle.db);
     const emailLog = createLogger({ ...base, "event.name": "email_sweep" }, options.log);
     if (!provider) {
       emailLog.info("email_sweep_skipped", { "tidegrid.email.reason": emailSettings(env).kind });
