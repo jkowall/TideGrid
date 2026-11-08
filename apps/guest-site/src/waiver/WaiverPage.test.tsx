@@ -285,6 +285,15 @@ describe("the waiver page", () => {
     expect(screen.queryByRole("button", { name: "Email me a new link" })).toBeNull();
   });
 
+  it("sends a guest with an ended crew code back to the crew, with no emailed link offered", async () => {
+    stubApi(() => refusal(409, "waiver_code_ended"));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+    await screen.findByRole("heading", { name: "This signing code has ended" });
+    expect(screen.getByText(/Ask the crew at the dock for a new one/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Email me a new link" })).toBeNull();
+  });
+
   it("keeps the token when the network fails, so the guest can tap again", async () => {
     let first = true;
     stubApi(() => {

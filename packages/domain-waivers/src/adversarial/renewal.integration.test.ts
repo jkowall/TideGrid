@@ -338,4 +338,26 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
     );
     expect(read?.participants.map((p) => p.request?.sharedAddress)).toEqual([false, true, false]);
   }, 120_000);
+
+  it("does not flag minors whose own email fields hold their shared guardian's address", async () => {
+    const booked = await book(world, A, nextTrip(), 2, hooks);
+    const family = "fay.family@example.test";
+    for (const [position, kid] of [
+      [1, "Mo Kid"],
+      [2, "Ned Kid"],
+    ] as const) {
+      await name(
+        world,
+        A.id,
+        booked.bookingId,
+        position,
+        { ...minor(kid, { name: "Fay Family", email: family }), email: family },
+        hooks,
+      );
+    }
+    const read = await inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
+      listBookingWaivers(trx, A.id, booked.bookingId),
+    );
+    expect(read?.participants.map((p) => p.request?.sharedAddress)).toEqual([false, false]);
+  }, 120_000);
 });

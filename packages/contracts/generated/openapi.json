@@ -19182,7 +19182,7 @@
             }
           },
           "409": {
-            "description": "The link expired (waiver_link_expired), was already opened (waiver_link_used), or a newer email replaced it (waiver_link_replaced); or the waiver was signed (waiver_signed), replaced by a newer version (waiver_superseded), or is no longer needed (waiver_not_needed)",
+            "description": "The link expired (waiver_link_expired), was already opened (waiver_link_used), or a newer email replaced it (waiver_link_replaced), or a crew signing code no longer works (waiver_code_ended); or the waiver was signed (waiver_signed), replaced by a newer version (waiver_superseded), or is no longer needed (waiver_not_needed)",
             "content": {
               "application/json": {
                 "schema": {

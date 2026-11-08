@@ -152,6 +152,12 @@ function linkRefusal(result: Exclude<RedeemResult, { kind: "opened" }>): ApiErro
         "waiver_link_replaced",
         "A newer email replaced this link; use the link in the latest email",
       );
+    case "code_ended":
+      return new ApiError(
+        409,
+        "waiver_code_ended",
+        "This signing code no longer works; ask the crew for a new one",
+      );
     case "closed":
       return closedRefusal(result.state);
   }
@@ -223,7 +229,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       400: errorBody("Request did not match the contract"),
       404: errorBody("No operator at this address, or no such link here (waiver_link_invalid)"),
       409: errorBody(
-        "The link expired (waiver_link_expired), was already opened (waiver_link_used), or a newer email replaced it (waiver_link_replaced); or the waiver was signed (waiver_signed), replaced by a newer version (waiver_superseded), or is no longer needed (waiver_not_needed)",
+        "The link expired (waiver_link_expired), was already opened (waiver_link_used), or a newer email replaced it (waiver_link_replaced), or a crew signing code no longer works (waiver_code_ended); or the waiver was signed (waiver_signed), replaced by a newer version (waiver_superseded), or is no longer needed (waiver_not_needed)",
       ),
       429: errorBody("Too many requests from this address for this operator (rate_limited)"),
     },

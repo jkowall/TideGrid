@@ -109,8 +109,7 @@ const stops: Record<string, Stop> = {
     icon: "hourglass",
     tone: "warning",
     title: "This link has expired",
-    body: (op) =>
-      `Waiver links last a few days, and a code from the crew lasts 15 minutes. Ask for a new link below, or ask ${op}.`,
+    body: (op) => `Waiver links last a few days. Ask for a new link below, or ask ${op}.`,
   },
   waiver_link_replaced: {
     icon: "mail",
@@ -118,6 +117,13 @@ const stops: Record<string, Stop> = {
     title: "There's a newer link",
     body: (op) =>
       `Open the newest email from ${op} and use the link in it. Can't find it? Ask for a new link below, or ask the crew at the dock.`,
+  },
+  waiver_code_ended: {
+    icon: "hourglass",
+    tone: "warning",
+    title: "This signing code has ended",
+    body: () =>
+      "A code from the crew lasts 15 minutes and opens once. Ask the crew at the dock for a new one.",
   },
   renewal_sent: {
     icon: "mail",

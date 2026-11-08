@@ -71,7 +71,7 @@ The request email is a messaging-module message (template `waiver_request`, vers
 ## Links and sessions
 
 1. The guest page reads the token from the fragment and shows a start screen. Only the guest's tap sends it, in a POST body, so a mail scanner's GET or a link preview consumes nothing.
-2. `redeemWaiverToken` reads which request the link names, locks that request, then consumes the link once (`redeemAccessLink`) and opens a signing session for the request's signer. Another operator's token, an unknown one, or another purpose's is `invalid`; a link already opened is `used`; a replaced one is `replaced`; a link to a waiver that was signed, superseded, or ended is `closed`.
+2. `redeemWaiverToken` reads which request the link names, locks that request, then consumes the link once (`redeemAccessLink`) and opens a signing session for the request's signer. Another operator's token, an unknown one, or another purpose's is `invalid`; a link already opened is `used`; a replaced one is `replaced`; a staff-assisted code that is used, lapsed, or replaced while its waiver still waits is `code_ended` (the API's `waiver_code_ended`), so the page sends that guest back to the crew rather than offering an emailed link; a link to a waiver that was signed, superseded, or ended is `closed`.
 3. The session's secret goes back once, in the response body, and is sent afterwards as `Authorization: Bearer`. It is never in a URL.
 4. The session shows exactly its own request; the routes take no request id, so a session cannot reach another participant's waiver.
 

@@ -324,7 +324,7 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
     const first = await issued(A.id, staffA, req, "participant_qr");
     const second = await issued(A.id, staffA, req, "participant_qr");
     expect(first.token).not.toBe(second.token);
-    expect(await redeem(world, A.id, first.token)).toEqual({ kind: "replaced" });
+    expect(await redeem(world, A.id, first.token)).toEqual({ kind: "code_ended" });
     const [lifetimes] = await world.admin<{ link: number }[]>`
       select extract(epoch from (expires_at - created_at))::int as link
         from public.guest_access_links where id = ${second.linkId}`;
@@ -332,7 +332,7 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
 
     const opened = await redeem(world, A.id, second.token);
     if (opened.kind !== "opened") throw new Error(JSON.stringify(opened));
-    expect(await redeem(world, A.id, second.token)).toEqual({ kind: "used" });
+    expect(await redeem(world, A.id, second.token)).toEqual({ kind: "code_ended" });
     const [session] = await world.admin<{ seconds: number }[]>`
       select extract(epoch from (expires_at - created_at))::int as seconds
         from public.waiver_signing_sessions where id = ${opened.session.id}`;

@@ -210,7 +210,7 @@ async function rows(
            (r.required_signer = 'guardian' and cr.address is not null
             and exists (select 1 from booking_participants q
                          where q.tenant_id = b.tenant_id and q.booking_id = b.id
-                           and q.id <> p.id
+                           and q.id <> p.id and not q.is_minor
                            and nullif(lower(btrim(q.email)), '') = cr.address)) as shared_address,
            (select json_agg(json_build_object(
                      'slot', w.slot, 'queued_at', w.created_at, 'state', wm.state,

@@ -39,6 +39,12 @@ export type RedeemResult =
   | { kind: "used" }
   /** A newer email replaced this link, or the address changed. */
   | { kind: "replaced" }
+  /**
+   * A staff-assisted code that no longer opens (lapsed, used, or replaced)
+   * while its waiver still waits: only the crew issues another, so the page
+   * offers no emailed renewal.
+   */
+  | { kind: "code_ended" }
   /** The waiver no longer takes a signature: signed, superseded, or no longer needed. */
   | { kind: "closed"; state: Exclude<WaiverRequestState, "pending"> };
 
@@ -96,6 +102,11 @@ export async function redeemWaiverToken(
     token: input.token,
     purpose: WAIVER_LINK_PURPOSE,
   });
+  if (assisted && redeemed.kind !== "invalid" && redeemed.kind !== "redeemed") {
+    return request.state === "pending"
+      ? { kind: "code_ended" }
+      : { kind: "closed", state: request.state };
+  }
   switch (redeemed.kind) {
     case "invalid":
       return { kind: "invalid" };
