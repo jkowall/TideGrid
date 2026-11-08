@@ -8,6 +8,8 @@
 -- against another. If the build finds two sent messages with one id it fails,
 -- leaves an invalid index, and the runner names the repair
 -- (packages/database/README.md, "Repair after a failed concurrent build").
-CREATE UNIQUE INDEX CONCURRENTLY email_messages_provider_message_once
+-- IF NOT EXISTS: a rerun after a lost connection between the build and its
+-- record only records the file.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS email_messages_provider_message_once
   ON public.email_messages (provider, provider_message_id)
   WHERE provider_message_id IS NOT NULL
