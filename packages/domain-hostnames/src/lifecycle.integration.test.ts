@@ -1,15 +1,27 @@
 import { randomUUID } from "node:crypto";
+import type { Database } from "@tidegrid/database";
 import { createDb } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
+import { type Kysely, sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { createCloudflareHostnameProvider } from "./cloudflare.ts";
+import {
+  accountRefusalBody,
+  createCloudflareFixture,
+  recordedAccountRefusals,
+} from "./cloudflare-fixture.ts";
 import { createFakeHostnameProvider } from "./fake.ts";
 import {
   activateCustomHostname,
+  assertHostnameGuardHeld,
   disableHostname,
+  HostnameGuardBusyError,
+  HostnameGuardLostError,
   HostnameNameRefusedError,
   requestCustomHostname,
   sweepHostnames,
+  withHostnameGuard,
 } from "./lifecycle.ts";
 import {
   type CustomHostnameProvider,
@@ -997,6 +1009,205 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     expect(capped.complete).toBe(false);
   });
 
+  // W1-SAAS-PREP ------------------------------------------------------------------
+
+  const cfZone = "023e105f4ecef8ad9ca31a8372d0c353";
+  const cfToken = "test-token-Zq7Kx2Lm9Pw4Rt6Vb8Nc";
+
+  /**
+   * The Cloudflare client over the recorded-shape fixture, with ids of its
+   * own: provider ids are unique across the database.
+   */
+  function cloudflareOverFixture(tag: string) {
+    const fixture = createCloudflareFixture({
+      zoneId: cfZone,
+      apiToken: cfToken,
+      idNamespace: `${run}${tag}`.slice(0, 12).padEnd(12, "0"),
+    });
+    const make = (overrides: { apiToken?: string; zoneId?: string } = {}) =>
+      createCloudflareHostnameProvider({
+        zoneId: overrides.zoneId ?? cfZone,
+        apiToken: overrides.apiToken ?? cfToken,
+        routingTarget: "customers.tidegrid.us",
+        fetch: fixture.fetch,
+        sleep: async () => {},
+      });
+    return { fixture, provider: make(), make };
+  }
+
+  /** Request through the Cloudflare client, then activate once the fixture reports both active. */
+  async function activeCloudflareHost(
+    cf: ReturnType<typeof cloudflareOverFixture>,
+    tenantId: string,
+    host: string,
+  ) {
+    const requested = await requestCustomHostname(adminDb.db, cf.provider, {
+      tenantId,
+      hostname: host,
+      actor,
+    });
+    expect(requested).toMatchObject({
+      kind: "requested",
+      reading: { raw: { hostnameStatus: "pending", certificateStatus: "pending_validation" } },
+    });
+    cf.fixture.advance(host, { hostnameState: "active", certificateState: "active" });
+    const activated = await activateCustomHostname(adminDb.db, cf.provider, {
+      tenantId,
+      hostname: host,
+      actor,
+    });
+    expect(activated.kind).toBe("activated");
+  }
+
+  // UNVERIFIED against live Cloudflare until P10: whether a routine renewal
+  // reports `active` with `ssl.status` `pending_validation`. The fixture
+  // records that shape; the documented state is active and serving, with
+  // the certificate pending, and active again once the renewal finishes.
+  it("keeps a hostname serving through a recorded-shape certificate renewal (W1-SAAS-PREP)", async () => {
+    const cf = cloudflareOverFixture("a1");
+    const tenant = await isolatedTenant("cf-renew");
+    const host = name("cf-renew");
+    await activeCloudflareHost(cf, tenant, host);
+    expect(await state(host)).toMatchObject({
+      status: "active",
+      hostname_state: "active",
+      certificate_state: "active",
+    });
+
+    cf.fixture.renewing(host);
+    await due(tenant);
+    const renewing = await sweepHostnames(runtimeDb.db, {
+      provider: cf.provider,
+      runId: `sweep-${run}`,
+      onlyTenants: [tenant],
+    });
+    expect(renewing).toMatchObject({ checked: 1, demoted: 0, unread: 0, providerFault: null });
+    expect(await state(host)).toMatchObject({
+      status: "active",
+      hostname_state: "active",
+      certificate_state: "pending",
+    });
+    expect(await resolves(host)).toBe(tenant);
+    // Activation stays stricter: a renewing hostname is not activatable.
+    expect(
+      (
+        await activateCustomHostname(adminDb.db, cf.provider, {
+          tenantId: tenant,
+          hostname: host,
+          actor,
+        })
+      ).kind,
+    ).toBe("not_ready");
+
+    cf.fixture.renewed(host);
+    await due(tenant);
+    await sweepHostnames(runtimeDb.db, {
+      provider: cf.provider,
+      runId: `sweep-${run}`,
+      onlyTenants: [tenant],
+    });
+    expect(await state(host)).toMatchObject({ status: "active", certificate_state: "active" });
+    expect(await resolves(host)).toBe(tenant);
+  });
+
+  // UNVERIFIED against live Cloudflare until the first real request at P10:
+  // the codes and statuses are the fixture's recorded shapes.
+  it("maps recorded-shape account refusals from the Cloudflare client to providerFault, recording nothing (W1-SAAS-PREP)", async () => {
+    const cf = cloudflareOverFixture("b2");
+    const tenant = await isolatedTenant("cf-refusal");
+    const host = name("cf-refusal");
+    await activeCloudflareHost(cf, tenant, host);
+    const cases: {
+      label: string;
+      provider: CustomHostnameProvider;
+      fault: string;
+      arm?: () => void;
+    }[] = [
+      ...recordedAccountRefusals.map((refusal) => ({
+        label: refusal.label,
+        provider: cf.provider,
+        fault: `cloudflare_${refusal.code}`,
+        arm: () =>
+          cf.fixture.answerNext({ status: refusal.status, body: accountRefusalBody(refusal) }),
+      })),
+      {
+        label: "a rotated token",
+        provider: cf.make({ apiToken: `${cfToken}-rotated` }),
+        fault: "cloudflare_10000",
+      },
+      {
+        label: "a zone id the token does not reach",
+        provider: cf.make({ zoneId: "f0e1d2c3b4a5968778695a4b3c2d1e0f" }),
+        fault: "http_404",
+      },
+    ];
+    for (const c of cases) {
+      await due(tenant);
+      const before = await checkRow(host);
+      c.arm?.();
+      const report = await sweepHostnames(runtimeDb.db, {
+        provider: c.provider,
+        runId: `sweep-${run}`,
+        onlyTenants: [tenant],
+      });
+      expect({ label: c.label, fault: report.providerFault, checked: report.checked }).toEqual({
+        label: c.label,
+        fault: c.fault,
+        checked: 0,
+      });
+      expect(report.demoted).toBe(0);
+      expect(await checkRow(host)).toEqual(before);
+      expect(await resolves(host)).toBe(tenant);
+    }
+  });
+
+  it("counts the exact-name lookup against the call limit, and records nothing when it has no room (D-E12)", async () => {
+    const tenant = await isolatedTenant("cap-lookup");
+    const host = name("cap-lookup");
+    await activeHost(shared, tenant, host);
+    const providerId = (await state(host))?.provider_hostname_id ?? "";
+    await shared.remove(providerId);
+    await due(tenant);
+    const before = await checkRow(host);
+    const calls: string[] = [];
+    const counting = readsWith(
+      async (id, expected) => {
+        calls.push(`get ${expected}`);
+        return shared.get(id, expected);
+      },
+      async (h) => {
+        calls.push(`find ${h}`);
+        return shared.findByHostname(h);
+      },
+    );
+    const capped = await sweepHostnames(runtimeDb.db, {
+      provider: counting,
+      runId: `sweep-${run}`,
+      onlyTenants: [tenant],
+      maxProviderCalls: 1,
+    });
+    // Before the fix the lookup ran unchecked: two calls under a limit of one.
+    expect(calls).toEqual([`get ${host}`]);
+    expect(capped).toMatchObject({ providerCalls: 1, checked: 0, demoted: 0, complete: false });
+    expect(await checkRow(host)).toEqual(before);
+    expect(await resolves(host)).toBe(tenant);
+
+    // With room for the lookup, the next run confirms the record is gone.
+    calls.length = 0;
+    const next = await sweepHostnames(runtimeDb.db, {
+      provider: counting,
+      runId: `sweep-${run}`,
+      onlyTenants: [tenant],
+      maxProviderCalls: 2,
+    });
+    expect(calls).toEqual([`get ${host}`, `find ${host}`]);
+    expect(next).toMatchObject({ providerCalls: 2, checked: 1, demoted: 1 });
+    expect(await checkRow(host)).toMatchObject({
+      status: "disabled",
+      last_error_code: "provider_record_missing",
+    });
+  });
+
   it("guards the tables for every role", async () => {
     const provider = shared;
     const host = name("guard-a");
@@ -1129,5 +1340,97 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     expect(rows.length).toBeLessThanOrEqual(1);
     const many = await runtime`select * from app.hostname_sweep_tenants(1000000)`;
     expect(many.length).toBeLessThanOrEqual(1000);
+  });
+
+  // The per-hostname guard (recheck Q1, W1-SAAS-PREP) -------------------------------
+
+  it("holds one guard per hostname, whatever the tenant, and refuses a write without it", async () => {
+    const host = name("guarded");
+    const second = createDb(env?.adminUrl ?? "", { max: 1 });
+    try {
+      await withHostnameGuard(adminDb.db, host, async (guard) => {
+        await guard.db.transaction().execute((trx) => assertHostnameGuardHeld(trx, host));
+        // The same name waits and then gives up; another name does not wait.
+        await expect(
+          withHostnameGuard(second.db, host, async () => "entered", { waitMs: 300 }),
+        ).rejects.toBeInstanceOf(HostnameGuardBusyError);
+        expect(await withHostnameGuard(second.db, name("other"), async () => "entered")).toBe(
+          "entered",
+        );
+        // Another session does not hold it.
+        await expect(
+          second.db.transaction().execute((trx) => assertHostnameGuardHeld(trx, host)),
+        ).rejects.toBeInstanceOf(HostnameGuardLostError);
+      });
+      // Released when the guarded work ends, and after it throws.
+      await expect(
+        withHostnameGuard(second.db, host, async () => {
+          throw new Error("guarded work failed");
+        }),
+      ).rejects.toThrow("guarded work failed");
+      expect(await withHostnameGuard(adminDb.db, host, async () => "again", { waitMs: 300 })).toBe(
+        "again",
+      );
+
+      // A request handed a guard its session does not hold calls no provider.
+      const provider = createFakeHostnameProvider({ idPrefix: `guard-${run}` });
+      await expect(
+        requestCustomHostname(
+          adminDb.db,
+          provider,
+          { tenantId: A.id, hostname: host, actor },
+          { guard: { db: second.db, hostname: host } },
+        ),
+      ).rejects.toBeInstanceOf(HostnameGuardLostError);
+      expect(await provider.findByHostname(host)).toBeNull();
+      expect(
+        await admin`select 1 from public.tenant_hostnames where hostname = ${host}`,
+      ).toHaveLength(0);
+      // A guard lost after the create attaches nothing: the record stays an
+      // orphan for release, and the id is never stored.
+      let adminGuardDb: Kysely<Database> | undefined;
+      const losing: CustomHostnameProvider = {
+        name: provider.name,
+        routingTarget: () => provider.routingTarget(),
+        create: async (input) => {
+          const reading = await provider.create(input);
+          await adminGuardDb?.executeQuery(
+            sql`select pg_catalog.pg_advisory_unlock_all()`.compile(adminGuardDb),
+          );
+          return reading;
+        },
+        get: (id, h) => provider.get(id, h),
+        findByHostname: (h) => provider.findByHostname(h),
+        refreshValidation: (id, h) => provider.refreshValidation(id, h),
+        remove: (id) => provider.remove(id),
+      };
+      await expect(
+        withHostnameGuard(adminDb.db, host, (guard) => {
+          adminGuardDb = guard.db;
+          return requestCustomHostname(
+            adminDb.db,
+            losing,
+            { tenantId: A.id, hostname: host, actor },
+            { guard },
+          );
+        }),
+      ).rejects.toBeInstanceOf(HostnameGuardLostError);
+      expect(await provider.findByHostname(host)).not.toBeNull();
+      const [row] = await admin<{ id: string | null }[]>`
+        select provider_hostname_id as id from public.tenant_hostname_provisioning
+         where hostname = ${host}`;
+      expect(row).toEqual({ id: null });
+      // A guard for another name is refused before anything runs.
+      await expect(
+        requestCustomHostname(
+          adminDb.db,
+          provider,
+          { tenantId: A.id, hostname: name("guarded-other"), actor },
+          { guard: { db: second.db, hostname: host } },
+        ),
+      ).rejects.toThrow("the hostname guard names another hostname");
+    } finally {
+      await second.end();
+    }
   });
 });

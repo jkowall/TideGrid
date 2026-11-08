@@ -14,6 +14,7 @@ import {
   isActivatable,
   type ProviderHostname,
 } from "./provider.ts";
+import { isAccountLevelRefusal } from "./refusals.ts";
 
 /**
  * The custom-hostname lifecycle (G2.14b). Two halves with different
@@ -51,6 +52,118 @@ export class HostnameNameRefusedError extends Error {
   }
 }
 
+// The per-hostname guard ------------------------------------------------------------
+
+/**
+ * The per-hostname guard (recheck Q1, W1-SAAS-PREP). Every admin path that
+ * attaches a provider record to a name or deletes one holds it: `request`
+ * from its reservation check through the attach, and the admin CLI's
+ * `release` from its eligibility check through the delete, its audit rows,
+ * and any resumed request. So an attach never lands between release's check
+ * and its delete.
+ *
+ * It is a session-level PostgreSQL advisory lock keyed on the hostname alone,
+ * never the tenant, held on one pinned connection. A session lock, not a
+ * transaction lock, because no provider call is ever made inside a database
+ * transaction. It is taken by polling, never by a waiting statement, which
+ * would hold a snapshot (the migration runner's rule). Each write it protects
+ * first checks, in its own transaction, that this session still holds it, so
+ * a connection lost and silently reopened writes nothing.
+ *
+ * The admin connection must be a direct one: a transaction-mode pooler does
+ * not keep a session lock with the session that took it, and the check above
+ * then refuses the write.
+ */
+export interface HostnameGuard {
+  /** Bound to the one connection whose session holds the guard. Use only this inside. */
+  readonly db: Kysely<Database>;
+  readonly hostname: string;
+}
+
+/** The guard stayed busy for the whole wait. Nothing was read or changed. */
+export class HostnameGuardBusyError extends Error {
+  constructor(readonly hostname: string) {
+    super(`another hostname command holds ${hostname}; try again when it ends`);
+    this.name = "HostnameGuardBusyError";
+  }
+}
+
+/** The session no longer holds the guard, so the guarded write was refused. */
+export class HostnameGuardLostError extends Error {
+  constructor(readonly hostname: string) {
+    super(`the hostname guard on ${hostname} was lost; nothing was written`);
+    this.name = "HostnameGuardLostError";
+  }
+}
+
+/** Milliseconds between tries of the guard. */
+const GUARD_POLL_MS = 100;
+/**
+ * How long a command waits for the guard. A guarded release makes up to four
+ * provider calls (two lookups, a delete, and a resumed create), each bounded
+ * by the client's 15-second timeout, plus a lookup after a lost create.
+ */
+export const DEFAULT_HOSTNAME_GUARD_WAIT_MS = 120_000;
+
+function guardKey(hostname: string) {
+  return sql`pg_catalog.hashtextextended(${`tidegrid.hostname:${hostname.toLowerCase()}`}, 0)`;
+}
+
+/**
+ * Run `fn` holding the per-hostname guard. `fn` must use `guard.db` for every
+ * query: it is bound to the connection that holds the lock, and the pool may
+ * have no other connection to give.
+ */
+export async function withHostnameGuard<T>(
+  adminDb: Kysely<Database>,
+  hostname: string,
+  fn: (guard: HostnameGuard) => Promise<T>,
+  options: { waitMs?: number } = {},
+): Promise<T> {
+  const waitMs = options.waitMs ?? DEFAULT_HOSTNAME_GUARD_WAIT_MS;
+  return adminDb.connection().execute(async (db) => {
+    const started = Date.now();
+    for (;;) {
+      const { rows } = await sql<{ ok: boolean }>`
+        select pg_catalog.pg_try_advisory_lock(${guardKey(hostname)}) as ok`.execute(db);
+      if (rows[0]?.ok === true) break;
+      if (Date.now() - started >= waitMs) throw new HostnameGuardBusyError(hostname);
+      await new Promise((resolve) => setTimeout(resolve, GUARD_POLL_MS));
+    }
+    try {
+      return await fn({ db, hostname });
+    } finally {
+      // A lost session has dropped the lock already; nothing else to undo.
+      await sql`select pg_catalog.pg_advisory_unlock(${guardKey(hostname)})`
+        .execute(db)
+        .catch(() => undefined);
+    }
+  });
+}
+
+/**
+ * Throw unless this transaction's session holds the guard on `hostname`. Call
+ * it inside the transaction that makes the guarded write.
+ */
+export async function assertHostnameGuardHeld(
+  trx: Kysely<Database>,
+  hostname: string,
+): Promise<void> {
+  // A bigint advisory key shows in pg_locks as its high half in classid and
+  // its low half in objid, with objsubid 1.
+  const { rows } = await sql<{ held: boolean }>`
+    with k as (select ${guardKey(hostname)} as v)
+    select exists (
+      select 1 from pg_catalog.pg_locks l, k
+       where l.locktype = 'advisory' and l.granted
+         and l.pid = pg_catalog.pg_backend_pid()
+         and l.objsubid = 1
+         and l.classid = ((k.v >> 32) & 4294967295)::oid
+         and l.objid = (k.v & 4294967295)::oid
+    ) as held`.execute(trx);
+  if (rows[0]?.held !== true) throw new HostnameGuardLostError(hostname);
+}
+
 export type RequestOutcome =
   | { kind: "requested"; reading: ProviderHostname; adopted: boolean }
   /** The provider could not be reached; the name stays reserved and pending without a record. */
@@ -74,10 +187,38 @@ export async function requestCustomHostname(
   adminDb: Kysely<Database>,
   provider: CustomHostnameProvider,
   input: { tenantId: string; hostname: string; actor: AdminActor },
+  options: {
+    /**
+     * The guard on this hostname, when the caller holds it already, as
+     * release does when it resumes a request. Otherwise the request takes it.
+     */
+    guard?: HostnameGuard;
+  } = {},
 ): Promise<RequestOutcome> {
   const problem = customHostnameProblem(input.hostname);
   if (problem) throw new HostnameNameRefusedError(problem);
+  const { guard } = options;
+  if (guard) {
+    if (guard.hostname !== input.hostname) {
+      throw new Error("the hostname guard names another hostname");
+    }
+    return requestUnderGuard(guard, provider, input);
+  }
+  return withHostnameGuard(adminDb, input.hostname, (held) =>
+    requestUnderGuard(held, provider, input),
+  );
+}
+
+async function requestUnderGuard(
+  guard: HostnameGuard,
+  provider: CustomHostnameProvider,
+  input: { tenantId: string; hostname: string; actor: AdminActor },
+): Promise<RequestOutcome> {
+  const adminDb = guard.db;
   await inTenantTransaction(adminDb, adminContext(input.tenantId, input.actor), async (trx) => {
+    // Checked before any provider call too, so a connection that cannot keep
+    // the guard (a transaction-mode pooler) fails here, before a record exists.
+    await assertHostnameGuardHeld(trx, input.hostname);
     // Running the request again resumes a reservation of this tenant's that
     // never got its provider record, such as after an outage. Anything else
     // reserves the name now, or is refused because some tenant holds it.
@@ -130,6 +271,7 @@ export async function requestCustomHostname(
   // JSON travels as text and is cast in SQL: postgres.js would encode a
   // string sent for a jsonb parameter as a JSON string, not as the array.
   await inTenantTransaction(adminDb, adminContext(input.tenantId, input.actor), async (trx) => {
+    await assertHostnameGuardHeld(trx, input.hostname);
     await sql`select app.hostname_attach_provider(
         ${input.tenantId}::uuid, ${input.hostname}, ${reading.providerId},
         ${JSON.stringify(reading.instructions)}::text::jsonb)`.execute(trx);
@@ -224,8 +366,9 @@ export interface HostnameSweepOptions {
    * for the whole account; a run every 15 minutes stays far below that.
    * Past the limit the run reads the provider no more, but ended claims
    * still expire until the budget runs out. The limit is checked before each
-   * read; a read that finds no record adds its exact-name lookup unchecked,
-   * so a run makes at most one call more than the limit.
+   * call, the exact-name lookup after a missing record included, so a run
+   * makes at most this many calls. A missing record whose lookup the limit
+   * leaves no room for records nothing and stays due (D-E12, W1-SAAS-PREP).
    */
   maxProviderCalls?: number;
   /**
@@ -246,7 +389,13 @@ export interface HostnameSweepOptions {
   onStampError?: (tenantId: string, error: unknown) => void;
   /** Called as each tenant's turn starts, for tests and logs. */
   onTurnStart?: (tenantId: string, pass: number) => void;
-  /** Check only these tenants, as the admin CLI's fake run does. */
+  /**
+   * Check only these tenants, as the admin CLI's fake run does. The filter
+   * applies before the tenant limit (D-E11, W1-SAAS-PREP): the list is read
+   * at the list function's own ceiling of 1,000 rows, filtered, then cut to
+   * `tenantLimit`. A listed tenant past that ceiling is not reached, and
+   * `complete` then reads false.
+   */
   onlyTenants?: readonly string[];
   /**
    * The provider gave no reading for one record (a refusal about the record):
@@ -303,6 +452,8 @@ export const DEFAULT_HOSTNAME_SWEEP_PER_TENANT = 20;
 export const DEFAULT_HOSTNAME_SWEEP_TURN = 5;
 export const DEFAULT_HOSTNAME_SWEEP_PROVIDER_CALLS = 200;
 export const DEFAULT_HOSTNAME_SWEEP_BUDGET_MS = 20_000;
+/** The most rows app.hostname_sweep_tenants returns, whatever limit it is asked for (0011, 0013). */
+const LIST_CEILING = 1000;
 
 interface DueHostname {
   hostname: string;
@@ -316,30 +467,6 @@ class Throttled extends Error {
     super("the provider asked to wait");
   }
 }
-
-/**
- * Refusals about the account, the token, or the zone rather than one record:
- * any HTTP 401 or 403, whatever Cloudflare code it carries (an expired,
- * rotated, or mis-scoped token), these Cloudflare codes in addition, and an
- * exact-name lookup that cannot find the zone (404). Every other hostname
- * would get the same answer, so the run records nothing for the hostname it
- * was reading and reads the provider no more. The Cloudflare codes are its authentication and routing
- * errors as remembered from its API (invalid or missing token, bad
- * Authorization header, an object identifier that routes nowhere); they are
- * unverified against live Cloudflare and listed for G2.14b-live. Any code not
- * listed is treated as about the one record.
- */
-const accountLevelRefusals = new Set([
-  "http_401",
-  "http_403",
-  "cloudflare_9106",
-  "cloudflare_9109",
-  "cloudflare_10000",
-  "cloudflare_6003",
-  "cloudflare_6103",
-  "cloudflare_6111",
-  "cloudflare_7003",
-]);
 
 /**
  * The provider refused for the whole account: record nothing for this
@@ -359,7 +486,12 @@ export class HostnameSweepFault extends Error {
 type Reading =
   | { kind: "reading"; hostnameState: string; certificateState: string; errorCode: string | null }
   /** The provider gave no reading for this one record: record the code, change nothing. */
-  | { kind: "no_reading"; errorCode: string };
+  | { kind: "no_reading"; errorCode: string }
+  /**
+   * The record was missing by id and the call limit left no room for the
+   * exact-name lookup (D-E12, W1-SAAS-PREP): record nothing, keep it due.
+   */
+  | { kind: "lookup_capped" };
 
 const recordGone = (errorCode: string): Reading => ({
   kind: "reading",
@@ -378,14 +510,18 @@ const recordGone = (errorCode: string): Reading => ({
  *   gone (or replaced by a record with another id).
  *
  * Anything else is not a reading. 429 and 5xx throttle the run: it reads the
- * provider no more. An account-level refusal (see accountLevelRefusals, and a
- * lookup's 404, which means the zone itself is missing or out of the token's
- * reach) throws HostnameSweepFault, which records nothing for this hostname
- * and ends the run's provider reads. Any other
+ * provider no more. An account-level refusal (`isAccountLevelRefusal` in
+ * `refusals.ts`, and a lookup's 404, which means the zone itself is missing
+ * or out of the token's reach) throws HostnameSweepFault, which records
+ * nothing for this hostname and ends the run's provider reads. Any other
  * refusal is about this record (a malformed answer for it, an ambiguous name,
  * another 4xx for its id): it is recorded as no reading, which keeps the
  * states, backs the next check off, and lets the run go on to the next
  * hostname, so one odd record never blocks every later check.
+ *
+ * The exact-name lookup is a provider call like any other: `takeCall` counts
+ * it against the run's limit, and when the limit leaves no room the reading
+ * is `lookup_capped`, which records nothing (D-E12, W1-SAAS-PREP).
  *
  * Limit: if the token can reach another real zone and the zone id names it,
  * the lookup answers normally with no match and every hostname reads as
@@ -394,14 +530,14 @@ const recordGone = (errorCode: string): Reading => ({
 async function readHostname(
   provider: CustomHostnameProvider,
   item: DueHostname,
-  countCall: () => void,
+  takeCall: () => boolean,
 ): Promise<Reading> {
-  const refuse = (error: unknown, accountLevel: (code: string) => boolean): Reading => {
+  const refuse = (error: unknown, lookup: boolean): Reading => {
     if (error instanceof HostnameProviderUnavailableError) {
       throw new Throttled(error.retryAfterSeconds);
     }
     if (!(error instanceof HostnameProviderRejectedError)) throw error;
-    if (error.httpStatus === 401 || error.httpStatus === 403 || accountLevel(error.code)) {
+    if (isAccountLevelRefusal(error, { lookup })) {
       throw new HostnameSweepFault(error.code, item.provider_hostname_id);
     }
     return { kind: "no_reading", errorCode: error.code };
@@ -413,15 +549,15 @@ async function readHostname(
     if (error instanceof HostnameProviderRejectedError && error.code === "hostname_mismatch") {
       return recordGone("hostname_mismatch");
     }
-    return refuse(error, (code) => accountLevelRefusals.has(code));
+    return refuse(error, false);
   }
   if (!reading) {
-    countCall();
+    if (!takeCall()) return { kind: "lookup_capped" };
     let found: ProviderHostname | null;
     try {
       found = await provider.findByHostname(item.hostname);
     } catch (error) {
-      return refuse(error, (code) => code === "http_404" || accountLevelRefusals.has(code));
+      return refuse(error, true);
     }
     if (!found) return recordGone("provider_record_missing");
     if (found.providerId !== item.provider_hostname_id) {
@@ -474,6 +610,8 @@ export async function sweepHostnames(
   const perTenant = options.perTenantLimit ?? DEFAULT_HOSTNAME_SWEEP_PER_TENANT;
   const tenantLimit = options.tenantLimit ?? DEFAULT_HOSTNAME_SWEEP_TENANT_LIMIT;
   const quantum = options.turnHostnames ?? DEFAULT_HOSTNAME_SWEEP_TURN;
+  // The bound the list function applies: greatest(1, least(limit, 1000)).
+  const listLimit = Math.min(LIST_CEILING, Math.max(1, Math.trunc(tenantLimit) || 1));
   if (!Number.isInteger(quantum) || quantum < 1 || quantum > 1000) {
     throw new RangeError("turnHostnames is a whole number from 1 to 1000");
   }
@@ -512,8 +650,8 @@ export async function sweepHostnames(
   // ends the run, expiries included.
   let calls = 0;
   let readsStopped = false;
-  /** Rows the list returned before `onlyTenants`: a full list means more tenants may wait. */
-  let listedRows = 0;
+  /** The list may have left due tenants out: it filled its limit, or the filter's cut dropped some. */
+  let listTruncated = false;
   /** The call limit was reached, so rows that needed a read may remain. */
   let capHit = false;
   /** The budget ran out inside a turn. */
@@ -525,15 +663,26 @@ export async function sweepHostnames(
 
   const fair = await runFairSweep({
     listTenants: async () => {
-      const { rows } = await sql<{ tenant_id: string }>`
-        select tenant_id from app.hostname_sweep_tenants(${tenantLimit})`.execute(db);
-      listedRows = rows.length;
-      const ids = rows.map((r) => r.tenant_id);
-      // Applied after the limit, as before (a test's or the CLI's filter).
       const only = options.onlyTenants;
-      return only ? ids.filter((id) => only.includes(id)) : ids;
+      // With a filter, read up to the list function's ceiling and filter
+      // before the limit, so a listed tenant is never crowded out by tenants
+      // the filter drops (D-E11, W1-SAAS-PREP). The order is the function's.
+      const { rows } = await sql<{ tenant_id: string }>`
+        select tenant_id from app.hostname_sweep_tenants(${only ? LIST_CEILING : listLimit})`.execute(
+        db,
+      );
+      if (!only) {
+        listTruncated = rows.length >= listLimit;
+        return rows.map((r) => r.tenant_id);
+      }
+      const wanted = new Set(only);
+      const ids = rows.map((r) => r.tenant_id).filter((id) => wanted.has(id));
+      listTruncated = rows.length >= LIST_CEILING || ids.length > listLimit;
+      return ids.slice(0, listLimit);
     },
-    tenantLimit,
+    // With a filter the list's own check above knows whether the limit cut
+    // it, so the scheduler is not told a list of exactly `listLimit` is full.
+    tenantLimit: options.onlyTenants ? Math.min(LIST_CEILING, listLimit + 1) : tenantLimit,
     stamp: (tenantId) => recordSweepTurn(db, contextOf(tenantId), "hostname"),
     // A turn that can only expire claims leaves its tenant's place alone, so
     // a tenant reached after a stop goes first for reads on the next run.
@@ -601,8 +750,19 @@ export async function sweepHostnames(
           }
           calls += 1;
           const reading = await readHostname(options.provider, item, () => {
+            if (calls >= maxCalls) return false;
             calls += 1;
+            return true;
           });
+          if (reading.kind === "lookup_capped") {
+            // The record was missing by id and the limit left no room for the
+            // lookup that would confirm it: nothing is recorded, the row stays
+            // due, and the run reads the provider no more (D-E12).
+            readsStopped = true;
+            capHit = true;
+            capped = true;
+            continue;
+          }
           const hostnameState = reading.kind === "reading" ? reading.hostnameState : null;
           const certificateState = reading.kind === "reading" ? reading.certificateState : null;
           if (certificateState === "expiring") options.onExpiring?.(tenantId, item.hostname);
@@ -664,11 +824,9 @@ export async function sweepHostnames(
   report.deferredTenants = fair.deferredTenants;
   report.stampFailures = fair.stampFailures;
   report.providerCalls = calls;
-  // The bound the list function applies: greatest(1, least(limit, 1000)).
-  const listLimit = Math.min(1000, Math.max(1, Math.trunc(tenantLimit) || 1));
   report.complete =
     fair.complete &&
-    listedRows < listLimit &&
+    !listTruncated &&
     !capHit &&
     !cut &&
     !fullAtCap &&
