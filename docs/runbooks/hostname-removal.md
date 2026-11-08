@@ -65,7 +65,7 @@ The status line shows `provider id <id>`.
 
 #### H5b. No stored provider id
 
-The status line shows `no provider id, reserved at <time>`. This is a request interrupted before its id was stored, then disabled, or expired by the sweep. The stored-id check of H5a cannot succeed here, so do not use it. Run `hostnames release <slug> <hostname>`, a dry run, which looks the name up at the provider by exact match and changes nothing.
+The status line shows `no provider id, reserved at <time>`. This is a request interrupted before its id was stored, then disabled. The sweep never expires such a row: it reads only rows with a stored id, so an expired row goes by H5a. The stored-id check of H5a cannot succeed here, so do not use it. Run `hostnames release <slug> <hostname>`, a dry run, which looks the name up at the provider by exact match and changes nothing.
 
 - **No provider record.** The dry run prints `no provider record holds this name`. There is nothing to delete. An earlier `release` may have deleted it, for example one that ran after the claim ended: its `hostname.provider_released` audit row names the id. Record the dry run's output and go to H6.
 - **An orphan record.** The dry run prints the record's id and states and the reservation time. Before any delete, verify it independently against the original reservation:
