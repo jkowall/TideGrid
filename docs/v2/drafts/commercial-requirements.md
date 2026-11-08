@@ -15,11 +15,13 @@ Each requirement has four parts:
 - **Open question for counsel.** What counsel must answer before the requirement becomes agreement terms. These are questions, not answers.
 - **Gate.** Every requirement here belongs to [paid-pilot readiness](../07-company-formation-and-costs.md#paid-pilot-readiness-exit-gate), which is step 6 of the [Validation gate](../05-roadmap-validation.md#validation-gate). The readiness gate needs "counsel has approved the pilot agreement set and the operator-as-merchant-of-record presentation." No requirement here passes or claims any gate.
 
+A few requirements also carry an **Evidence note** where the observed evidence cuts against them. The note records the tension. It does not change the requirement.
+
 Some requirements are also checked again later, per operator, at the [Core live gate](../05-roadmap-validation.md#core-live-gate) or the [Native pilot gate](../05-roadmap-validation.md#native-pilot-gate). Those later checks are noted where a V2 source states them. They do not change the gate of the requirement itself.
 
 ## Evidence and hypotheses
 
-- **Observed evidence.** One operator interview is on file ([discovery call](../../../research/interviews/oceans-eight-dive-company-discovery-call.md)). It records that a prior platform account transfer took months and led to at least one refunded booking. It records no view on contract, data, support, or payment terms. No operator has reviewed any term in this draft.
+- **Observed evidence.** One operator interview is on file ([discovery call](../../../research/interviews/oceans-eight-dive-company-discovery-call.md)). It records that a prior platform account transfer took months and led to at least one refunded booking. It records two views that bear on these terms. The operator values its current platform's 24/7 support. The operator prefers no monthly fee to a recurring fee whose ongoing value is unclear, and suggested a higher percentage with no subscription as one option. Both cut against V2 decisions restated here: business-hours support only (ST-1), and a fixed monthly subscription paid even in months with no trips (PA-2, PT-1). One interview does not change a V2 decision, so no requirement changes. Those three requirements carry an evidence note. The interview records no view on contract or data terms. No operator has reviewed any term in this draft.
 - **Hypotheses.** The prices, the fee base, the support targets, and the store model in the V2 documents are planning hypotheses. The [commercial model](../03-commercial-model.md) states its prices are unvalidated. This draft inherits that status.
 - **Proposed.** The grouping, the requirement IDs, the open questions, and every item labeled **(proposed)**.
 
@@ -47,12 +49,13 @@ Observed on 2026-11-08, reading `main` at `1f748eb`: the worksheet, the CSV draf
 
 - **Requirement.** A 12-month initial term for Booking Core and for Native. Native requires Booking Core. No monthly, seasonal, or usage pause in the initial term. A seasonal operator pays the fixed subscription in months with no trips.
 - **Source.** [Pilot offer](../03-commercial-model.md#pilot-offer); the register rows Core price and Native price ([register](../06-decision-register.md#v2-product-and-commercial-decisions)).
+- **Evidence note.** The one interview on file records a preference for no monthly fee over a recurring fee of unclear value (see [Evidence and hypotheses](#evidence-and-hypotheses)). A subscription owed in months with no trips is the case that preference cuts against.
 - **Open question for counsel.** V2 sets no renewal mechanism. What renewal, notice, and price terms should follow month 12? The commercial model only asks whether two of three pilot operators "would renew at the full recurring price."
 - **Gate.** Paid-pilot readiness.
 
 ### PA-3. Pilot Native offer conditions
 
-- **Requirement.** The operator fits the pilot segment and standard scope. It signs both 12-month agreements, pays the $2,250 setup invoice before the Validation gate passes, and pays full recurring, extra-boat, pass-through, and custom-work charges. It uses one legal operator, one brand, one location, and one app pair. It supplies approvals, records, clean data, and provider accounts on schedule, joins weekly design reviews, completes acceptance testing on schedule, and accepts shared configuration with no source fork or exclusive feature. The offer ends after three paid, qualified operators. It cannot be stacked, transferred, converted to cash, extended to another brand, or used to fund custom work.
+- **Requirement.** The operator fits the pilot segment and standard scope. It signs both 12-month agreements, pays the $2,250 setup invoice before the Validation gate passes, and pays full recurring, extra-boat, pass-through, and custom-work charges. It uses one legal operator, one brand, one location, and one app pair. It supplies approved branding, waiver language, legal URLs, business records, clean data, provider accounts, and approvals on the agreed schedule, joins weekly design reviews, completes acceptance testing on schedule, and accepts shared configuration with no source fork or exclusive feature. The offer ends after three paid, qualified operators. It cannot be stacked, transferred, converted to cash, extended to another brand, or used to fund custom work.
 - **Source.** [Pilot Native offer controls](../03-commercial-model.md#pilot-native-offer-controls); the register row Pilot Native offer.
 - **Open question for counsel.** What follows when the operator misses a schedule obligation: a delay, a change order, loss of the credit, or termination? V2 states the obligations but no consequence.
 - **Gate.** Paid-pilot readiness.
@@ -212,6 +215,7 @@ Observed on 2026-11-08, reading `main` at `1f748eb`: the worksheet, the CSV draf
 
 - **Requirement.** Email or ticket support from 9:00 a.m. to 5:00 p.m. Eastern Time on US business days. Severity targets measure acknowledgement and initial triage: critical 1 business hour, high 4 business hours, normal 2 business days. No guaranteed resolution time, continuous human coverage, service-level agreement, or uptime credit. Monitoring frequency and recovery objectives are internal, not customer-facing.
 - **Source.** The register row Pilot support; [Solo-owner operating boundary](../08-build-hosting-and-operations.md#solo-owner-operating-boundary); the last item of [Commercial and operating gates](../05-roadmap-validation.md#commercial-and-operating-gates).
+- **Evidence note.** The one interview on file records that the operator values its current platform's 24/7 support (see [Evidence and hypotheses](#evidence-and-hypotheses)). Business-hours support is below that.
 - **Open question for counsel.** How are the targets stated so they stay targets, and what remedy, if any, applies when one is missed?
 - **Gate.** Paid-pilot readiness.
 
@@ -225,7 +229,7 @@ Observed on 2026-11-08, reading `main` at `1f748eb`: the worksheet, the CSV draf
 ### ST-3. Operator responsibilities
 
 - **Requirement.** The operator is responsible for approved waiver text, policies, prices, tax settings, business records, messaging consent, brand rights, customer remedies, and lawful customer communications. The operator supplies counsel-approved waiver text.
-- **Source.** [Customer and guest terms](../07-company-formation-and-costs.md#customer-and-guest-terms); [Security and privacy](../04-architecture.md#security-and-privacy); [Native liability waivers and intake](../02-product-scope.md#native-liability-waivers-and-intake).
+- **Source.** [Customer and guest terms](../07-company-formation-and-costs.md#customer-and-guest-terms); [Security and privacy](../04-architecture.md#security-and-privacy); [Native liability waivers and intake](../02-product-scope.md#native-liability-waivers-and-intake); [Target users and jobs](../02-product-scope.md#target-users-and-jobs) (the operator owner or manager approves customer remedies); [Core live gate](../05-roadmap-validation.md#core-live-gate) item 5 (the operator approves its price configuration).
 - **Open question for counsel.** What indemnity, if any, should cover operator-supplied content and settings?
 - **Gate.** Paid-pilot readiness. The operator's approval of its configuration is also a Core live gate item.
 
@@ -284,6 +288,7 @@ Observed on 2026-11-08, reading `main` at `1f748eb`: the worksheet, the CSV draf
 
 - **Requirement.** Booking Core at $149 a month plus 1.5% of net managed booking value, with two active boats and $75 a month for each more. Native at $399 a month plus 0.25%. A $3,000 Core annual minimum per contract year, counting only the Core subscription and the 1.5% fee. Subscription billed monthly, variable fee in arrears, any minimum shortfall invoiced after month 12. Negative fee adjustments carry forward against later variable fees or the contract-end reconciliation.
 - **Source.** [Pilot offer](../03-commercial-model.md#pilot-offer) and [Billing formulas](../03-commercial-model.md#billing-formulas); the register rows Core price, Native price, and Fleet entitlement; the [pricing worksheet draft](../../customer/pricing-worksheet-draft.md).
+- **Evidence note.** The one interview on file records a preference for no monthly fee, and suggests a higher percentage with no subscription as one option (see [Evidence and hypotheses](#evidence-and-hypotheses)). V2 keeps the fixed subscription.
 - **Open question for counsel.** V2 sets no payment due period, late fee, or suspension right for unpaid invoices. What should apply?
 - **Gate.** Paid-pilot readiness.
 
@@ -324,7 +329,7 @@ Observed on 2026-11-08, reading `main` at `1f748eb`: the worksheet, the CSV draf
 
 ### PT-7. Setup fee and Native delivery bands
 
-- **Requirement.** The Pilot Native setup is $2,250, invoiced and paid before the Validation gate passes. Standard Native setup follows the delivery bands: $4,500 up to 22 hours, $7,500 for 23 to 40 hours, a quote of at least $10,000 above 40 hours. A customer expected to cross a band needs the higher price or a signed change order before work starts. The $4,500 band is provisional.
+- **Requirement.** The Pilot Native setup is $2,250, invoiced and paid before the Validation gate passes. Standard Native setup follows the delivery bands: $4,500 up to 22 hours, $7,500 for 23 to 40 hours, a quote of at least $10,000 above 40 hours, only if setup gross margin stays at least 40%; otherwise Native is discontinued for that segment. A customer expected to cross a band needs the higher price or a signed change order before work starts. The $4,500 band is provisional.
 - **Source.** [Native setup](../03-commercial-model.md#native-setup); [Pilot Native offer controls](../03-commercial-model.md#pilot-native-offer-controls); the register rows Native setup bands and Native price evidence.
 - **Open question for counsel.** How is the pilot credit applied if a pilot operator's delivery crosses the $4,500 band? The [register entry for the pricing worksheet](../06-decision-register.md#2026-11-08-w1-pricing-ws-stage-0-pricing-worksheet-draft-proposed-pending-owner-approval) leaves this open for the owner.
 - **Gate.** Paid-pilot readiness.

@@ -19,6 +19,7 @@ The roadmap's Stage 0 asks to "Record the required pilot agreement, data, servic
 - **No commercial change.** No price, fee base rule, support target, or store rule changes. Where V2 is silent (renewal, early termination, payment due dates, when recurring fees start, retention periods, liability caps), the draft asks a question and decides nothing.
 - **Branch.** `goal/comm-req`, named by the coordinator. The goal file's name was `docs/stage0-commercial-requirements`.
 - **Not done.** No link from Stage 0 or any numbered document to the draft; that waits for the owner. The independent trace review and the verification log entry are the coordinator's.
+- **Review fixes, 2026-11-08.** The independent trace review found three gaps, now fixed. The evidence section had said the one interview records no view on support or payment terms. It does: the operator values 24/7 support and prefers no monthly fee. The draft now records that tension as observed evidence next to ST-1, PA-2, and PT-1, and changes no requirement. ST-3 now also cites the operator's approval of customer remedies and of its price configuration. PT-7 keeps the 40% setup margin condition above 40 hours, and PA-3 keeps the full list of operator supplies.
 
 Promotion to a numbered document is a later goal, after the owner's approval entry. Canonical: none until then.
 
