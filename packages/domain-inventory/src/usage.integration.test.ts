@@ -363,5 +363,62 @@ describe.skipIf(!env)("trip usage and the holds page (W1-INV-PRICING)", () => {
         await expect(page(limit)).rejects.toThrow(RangeError);
       }
     });
+
+    it("can place a hold from a transaction that began before a page was read ahead of that page's cursor", async () => {
+      // Review finding R3: created_at is now(), the transaction's start. A
+      // hold whose transaction began before a page was read, and committed
+      // after it, sorts before that page's cursor. The listing is advisory,
+      // and the first page still shows it, as the contract now says.
+      const trip = tripsA.shared();
+      const ctx = systemContext(A.id);
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      let begun!: () => void;
+      const started = new Promise<void>((resolve) => {
+        begun = resolve;
+      });
+      const early = inTenantTransaction(runtime.db, ctx, async (trx) => {
+        // The tenant context statement has run, so now() is fixed.
+        begun();
+        await gate;
+        const r = await acquireHold(trx, ctx, {
+          ownerRef: owner(),
+          tripId: trip,
+          partySize: 1,
+          ttlSeconds: 600,
+        });
+        if (r.kind !== "acquired") throw new Error(r.kind);
+        return r.hold;
+      });
+      try {
+        await started;
+        // Let the database clock move past the early transaction's start.
+        await as(A.id, (trx) => trx.executeQuery(CompiledQuery.raw("SELECT pg_sleep(0.05)")));
+        const late = await acquired(A.id, trip, 1);
+        const before = await as(A.id, (trx) => listTripHoldsPage(trx, A.id, trip, { limit: 1 }));
+        if (before.kind !== "ok") throw new Error(before.kind);
+        expect(before.holds.map((h) => h.id)).toEqual([late.id]);
+        expect(before.nextAfter).toBeNull();
+        open();
+        const held = await early;
+        expect(held.createdAt < late.createdAt).toBe(true);
+
+        // The cursor from the earlier read never reaches the early hold.
+        expect(
+          await as(A.id, (trx) =>
+            listTripHoldsPage(trx, A.id, trip, { limit: 10, after: late.id }),
+          ),
+        ).toEqual({ kind: "ok", holds: [], nextAfter: null });
+        // Reading again from the first page shows every hold.
+        const again = await as(A.id, (trx) => listTripHoldsPage(trx, A.id, trip, { limit: 10 }));
+        if (again.kind !== "ok") throw new Error(again.kind);
+        expect(again.holds.map((h) => h.id)).toEqual([held.id, late.id]);
+      } finally {
+        open();
+        await early.catch(() => undefined);
+      }
+    });
   });
 });

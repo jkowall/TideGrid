@@ -77,7 +77,7 @@ export const TripHoldsResponse = z
     capacity: TripCapacityDetail,
     holds: z.array(CapacityHold).describe("This page, oldest first: by creation, then by id"),
     nextAfter: Uuid.nullable().describe(
-      "Pass as after for the next page; null on the last page. Holds are never deleted and a hold's creation time never changes, so a cursor always returns the same holds in the same order, followed by any created since",
+      "Pass as after for the next page; null on the last page. Holds are never deleted and a hold's creation time never changes, so a cursor stays valid and a page never repeats a hold. A hold's creation time is the start of the transaction that made it, so a hold whose transaction began before a page was read and committed after it can land before that page's cursor. Read again from the first page to see every hold",
     ),
   })
   .describe(

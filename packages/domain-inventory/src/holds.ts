@@ -886,8 +886,11 @@ export type TripHoldsPage =
  * then id. The cursor is the last hold id of the previous page and must name
  * a hold on this trip; its position is read in SQL, so the database's own
  * precision orders the page. A hold's creation time never changes and holds
- * are never deleted, so a cursor stays valid and pages never repeat or skip
- * a hold; holds created later only add to the end.
+ * are never deleted, so a cursor stays valid and pages never repeat a hold.
+ * The creation time is now(), the start of the hold's transaction, so a hold
+ * whose transaction began before a page was read and committed after it can
+ * land before that page's cursor. Read again from the first page to see
+ * every hold.
  */
 export async function listTripHoldsPage(
   trx: TenantTransaction,

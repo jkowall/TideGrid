@@ -287,7 +287,7 @@ export const TripBookingsResponse = z
       .array(StaffBooking)
       .describe("This page, oldest first: by confirmation, then by id; canceled ones included"),
     nextAfter: Uuid.nullable().describe(
-      "Pass as after for the next page; null on the last page. A booking's confirmation time never changes and bookings are never deleted, so a cursor always returns the same bookings in the same order, followed by any confirmed since",
+      "Pass as after for the next page; null on the last page. A booking's confirmation time never changes and bookings are never deleted, so a cursor stays valid and a page never repeats a booking. A booking's confirmation time is the start of the transaction that confirmed it, so a booking whose transaction began before a page was read and committed after it can land before that page's cursor. Read again from the first page to see every booking",
     ),
   })
   .describe("The trip's bookings, a page at a time, oldest first");

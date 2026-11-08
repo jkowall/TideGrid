@@ -145,8 +145,11 @@ export async function listTripBookings(
  * cursor is the last booking id of the previous page and must name a booking
  * on this trip; its position is read in SQL, so the database's own precision
  * orders the page. A booking's confirmation time never changes and bookings
- * are never deleted, so pages never repeat or skip a booking; bookings
- * confirmed later only add to the end. Run it in one snapshot
+ * are never deleted, so a cursor stays valid and pages never repeat a
+ * booking. The confirmation time is now(), the start of the confirming
+ * transaction, so a booking whose transaction began before a page was read
+ * and committed after it can land before that page's cursor. Read again
+ * from the first page to see every booking. Run it in one snapshot
  * (`snapshotRead`) so the cursor check and the page agree.
  */
 export async function listTripBookingsPage(
