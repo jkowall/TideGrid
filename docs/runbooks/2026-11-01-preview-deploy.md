@@ -361,7 +361,7 @@ nov1 evidence --ci <deployed sha>=<PR run merge sha>[,...] --out nov1-evidence.m
 
 - A booted b87e269 Worker against the upgraded schema: replaced by the committed b87e269 query set (P0.2), because booting it needs its tree and toolchain in CI.
 - `release` and `deploy:demo` refusing without `NOV1_GO`: outside the owned paths; Rule 1 stands in. A follow-up needs owner approval.
-- Guards in `packages/database/src/testing.ts` and `app-role.ts` that refuse a host recorded as main: proposed as a separate goal; the `nov1 db` refusals are the mitigation.
+- Guards in `packages/database/src/testing.ts` and `app-role.ts` that refuse a host recorded as main: proposed as a separate goal; the `nov1 db` refusals are the mitigation. Update, 2026-11-08: built (W1-TEST-GUARDS). Integration setup and `app-role:password` refuse the Neon main host recorded as `NEON_MAIN_HOST`; with none recorded they refuse any Neon host unless `TIDEGRID_NEON_BRANCH=1` marks a throwaway branch, and `app-role` on main needs `--neon-main` ([decision register](../v2/06-decision-register.md#2026-11-08-w1-test-guards-guards-that-refuse-neon-main-in-test-setup-and-app-role-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation).
 - The G2.11 Stripe Element, bounce ingestion, the webhook quick 2xx and IP allowlist (D15), the GuestGateway connection fix (D9; built 2026-11-07, not released; update, 2026-11-08: released with the API in `b1461f3`, [verification log](../verification-log.md#o-rel-b1461f3-released-to-the-api-and-console-november-8-2026)), and a per-hostname route command for SaaS.
 
 ## Owner inputs
