@@ -805,6 +805,73 @@ function namesSecondRelay(chars: SenderChar[]): boolean {
 /** The skeletons no sender name may contain: TideGrid itself. */
 const reservedSkeletons = [senderSkeleton("TideGrid")];
 
+/** The raw letters `readAs` may hold back, to see whether the next one pairs with it. */
+const pairStarts = ["", "c", "r", "v"];
+const pairEnds: Record<string, [string, string]> = { c: ["l", "d"], r: ["n", "m"], v: ["v", "w"] };
+
+/**
+ * Whether some reading of the characters contains a reserved skeleton. Each
+ * digit or letter-like symbol may read as its letter, or as nothing (it stays
+ * a digit or separates; either way the skeleton drops it). Every other
+ * character reads as its folded letters, and one that folds to none is
+ * dropped, as `senderSkeleton` drops it. So "Tide!Grid" and "T!de!Gr!d" read
+ * as "tidegrid" once a "!" separates, and "Tide1Grid" once the 1 stays a
+ * digit (pull request review fix G2). Without the choices this is the
+ * skeleton's own containment test, so it refuses everything that refused.
+ *
+ * It runs `readAs` as a left-to-right scan, which gives the same result
+ * because its pairs use disjoint letters: a held "c", "r", or "v" either
+ * pairs with the next letter or is emitted as itself. A state is the held
+ * letter and the set of reserved prefixes matched so far, so the work is
+ * linear in the name's length however many characters are ambiguous.
+ */
+function readsAsReserved(chars: SenderChar[]): boolean {
+  return reservedSkeletons.some((reserved) => readsAsContaining(chars, reserved));
+}
+
+function readsAsContaining(chars: SenderChar[], target: string): boolean {
+  const full = 1 << target.length;
+  let found = false;
+  // A state packs the held letter's index in pairStarts and the prefix mask.
+  const emit = (mask: number, letter: string): number => {
+    let next = 1;
+    for (let k = 0; k < target.length; k += 1) {
+      if (mask & (1 << k) && target[k] === letter) next |= 1 << (k + 1);
+    }
+    if (next & full) found = true;
+    return next & (full - 1);
+  };
+  const feed = (state: number, letter: string): number => {
+    const held = pairStarts[state >> 16] as string;
+    let mask = state & 0xffff;
+    const pair = pairEnds[held];
+    if (pair && letter === pair[0]) return emit(mask, pair[1]);
+    if (held) mask = emit(mask, held);
+    const start = pairStarts.indexOf(letter);
+    if (start > 0) return (start << 16) | mask;
+    return emit(mask, letter === "l" ? "i" : letter);
+  };
+  let states = new Set([1]);
+  for (const c of chars) {
+    const next = new Set<number>();
+    for (const state of states) {
+      if (c.letters === null || c.ambiguous) next.add(state);
+      if (c.letters !== null) {
+        let s = state;
+        for (const letter of c.letters) s = feed(s, letter);
+        next.add(s);
+      }
+    }
+    if (found) return true;
+    states = next;
+  }
+  for (const state of states) {
+    const held = pairStarts[state >> 16] as string;
+    if (held) emit(state & 0xffff, held);
+  }
+  return found;
+}
+
 /**
  * Words that name a platform's staff or a system mailbox. A sender name made
  * only of these ("Support", "Billing Team", "No-Reply") reads as TideGrid's
@@ -963,7 +1030,9 @@ const domainLike = /[\p{L}\p{N}]\.\p{L}{2,}/u;
  *   compatibility-folded form;
  * - a Latin letter that does not fold to a to z ("ɨ", "ɖ", an unmapped small
  *   capital), so no letter is invisible to the checks below;
- * - a name that reads as TideGrid in any spelling its skeleton folds;
+ * - a name that reads as TideGrid in any spelling its skeleton folds, with
+ *   each digit or "!" read as its letter or as nothing ("Tide!Grid",
+ *   "T!de!Gr!d", "Tide1Grid");
  * - a domain-like word, such as "tidegrid.us" or "paypal.com";
  * - more than `maxSenderAmbiguousCharacters` digits and exclamation marks.
  * Each digit or "!" may read as its letter, stay a digit, or separate words,
@@ -994,11 +1063,11 @@ export function senderNameProblem(name: string): string | null {
     return "A sender name uses letters that read as a to z, with or without accents";
   }
   const skeleton = senderSkeleton(name);
-  if (reservedSkeletons.some((reserved) => skeleton.includes(reserved))) {
+  const chars = senderChars(name);
+  if (readsAsReserved(chars)) {
     return "A sender name may not use or imitate the TideGrid name";
   }
   if (domainLike.test(name)) return "A sender name may not contain a domain name";
-  const chars = senderChars(name);
   if (chars.filter((c) => c.ambiguous).length > maxSenderAmbiguousCharacters) {
     return `A sender name may use at most ${maxSenderAmbiguousCharacters} digits and exclamation marks`;
   }
@@ -1041,17 +1110,30 @@ export function sameSenderName(a: string, b: string): boolean {
   return /[a-z]/.test(ka) && ka === key(b);
 }
 
+/** An IDNA (Punycode) label, which a mail client shows decoded. */
+const idnaLabel = /(?:^|\.)xn--/i;
+
 /**
  * A contact address may not read as TideGrid's, in its domain or in its
- * local part ("tidegrid.support@..."), since it becomes the reply-to.
+ * local part ("tidegrid.support@..."), since it becomes the reply-to. Each
+ * part is read the way a sender name is, so a digit or a "!" may read as its
+ * letter or as nothing ("tide1grid@...", pull request review fix G2).
+ *
+ * An internationalized domain is refused outright (pull request review fix
+ * G3). "xn--tdegrd-pvfe.test" is ASCII, so it passes the ASCII address rule,
+ * but a mail client shows it decoded, here with Cyrillic letters that read
+ * as "tidegrid". Decoding it and folding the result would need a confusable
+ * table for every script; a letter outside it would vanish from the check,
+ * as review S1 found for names. The address rule already admits only ASCII,
+ * so refusing the ASCII form of a Unicode domain keeps that rule's intent.
  */
 export function contactEmailProblem(address: string): string | null {
   const at = address.lastIndexOf("@");
   const parts = at === -1 ? [address] : [address.slice(0, at), address.slice(at + 1)];
-  return parts.some((part) => {
-    const skeleton = senderSkeleton(part);
-    return reservedSkeletons.some((reserved) => skeleton.includes(reserved));
-  })
+  if (at !== -1 && idnaLabel.test(address.slice(at + 1))) {
+    return "A contact address may not use an internationalized (xn--) domain";
+  }
+  return parts.some((part) => readsAsReserved(senderChars(part)))
     ? "A contact address may not use or imitate the TideGrid name"
     : null;
 }

@@ -1,6 +1,7 @@
 import {
   BrandConfig,
   brandSchemaVersion,
+  contactEmailProblem,
   fallbackSenderName,
   sameSenderName,
   senderNameProblem,
@@ -60,5 +61,35 @@ export async function loadEmailBrand(
     accent: brand.colors.accent,
     contactEmail: brand.contact.email ?? null,
     contactPhone: brand.contact.phone ?? null,
+  };
+}
+
+/** A message's sender as stored with it: the operator's name and the reply-to. */
+export interface MessageSender {
+  fromName: string;
+  replyTo: string | null;
+}
+
+/**
+ * The sender a stored message goes out under, checked again at delivery
+ * against the tenant's current email brand (`loadEmailBrand`), so a message
+ * queued before the guard, or written by any other path, cannot send as
+ * another operator (pull request review fix G1). The stored name is kept
+ * only when it reads as the brand's name (`sameSenderName`), which is bound
+ * to the provisioned name; otherwise the brand's name replaces it, which is
+ * the provisioned name or "Your trip operator" when no brand binds. A stored
+ * reply-to is dropped when the contact rule refuses it (`contactEmailProblem`):
+ * one that reads as TideGrid's, or that sits on an internationalized domain.
+ */
+export function deliverySender(
+  stored: MessageSender,
+  brand: Pick<EmailBrand, "name">,
+): MessageSender {
+  return {
+    fromName: sameSenderName(stored.fromName, brand.name) ? stored.fromName : brand.name,
+    replyTo:
+      stored.replyTo !== null && contactEmailProblem(stored.replyTo) === null
+        ? stored.replyTo
+        : null,
   };
 }

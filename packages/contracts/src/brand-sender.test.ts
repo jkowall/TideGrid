@@ -384,6 +384,115 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     }
   });
 
+  // Pull request review fix G2: the reserved-name check reads each digit or
+  // "!" as its letter or as nothing, as the staff and relay checks do.
+  it.each([
+    "Tide!Grid",
+    "T!de!Gr!d",
+    "T1deGr1d",
+    "Tide-Grid",
+    "T!de Gr!d",
+    "Tide1Grid",
+    "Tide!Gr!d Tours",
+    "Harbor T!de 2 Gr!d",
+  ])("refuses %s, TideGrid under some reading of its digits and symbols (G2)", (name) => {
+    expect(senderNameProblem(name), name).toBe(
+      "A sender name may not use or imitate the TideGrid name",
+    );
+    expect(senderDisplayName(name), name).toBeNull();
+    expect(accepts({ name }), name).toBe(false);
+  });
+
+  it("refuses a name exactly when some reading of its digits and symbols contains TideGrid (G2 oracle)", () => {
+    // The oracle lists every reading: each digit or "!" is kept, so the
+    // skeleton reads it as its letter, or replaced by a space, so it drops.
+    const reads = (name: string): boolean => {
+      const at = [...name].flatMap((ch, i) => (/[0-9!]/.test(ch) ? [i] : []));
+      for (let pick = 0; pick < 1 << at.length; pick += 1) {
+        const chars = [...name];
+        at.forEach((i, bit) => {
+          if (pick & (1 << bit)) chars[i] = " ";
+        });
+        if (senderSkeleton(chars.join("")).includes("tidegrid")) return true;
+      }
+      return false;
+    };
+    const alphabet = [..."tidegrclnvmwTG!1023-"];
+    let seed = 20261108;
+    const random = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    // Half the names mutate TideGrid: a letter may become a lookalike, and
+    // any character may be inserted between two.
+    const variants: Record<string, string[]> = {
+      T: ["T", "t", "7"],
+      i: ["i", "!", "1", "l"],
+      d: ["d", "cl"],
+      e: ["e", "3"],
+      G: ["G", "g", "9"],
+      r: ["r"],
+    };
+    const mutated = () => {
+      let name = "";
+      for (const ch of "TideGrid") {
+        const options = variants[ch] ?? [ch];
+        name += options[random(options.length)];
+        if (random(3) === 0) name += alphabet[random(alphabet.length)];
+      }
+      return name;
+    };
+    let refused = 0;
+    for (let round = 0; round < 6000; round += 1) {
+      let name = "H";
+      if (round % 2 === 0) name += mutated();
+      else {
+        const length = 6 + random(9);
+        for (let i = 0; i < length; i += 1) name += alphabet[random(alphabet.length)];
+      }
+      const expected = reads(name);
+      if (expected) refused += 1;
+      const problem = senderNameProblem(name);
+      expect(problem === "A sender name may not use or imitate the TideGrid name", name).toBe(
+        expected,
+      );
+      const local = name.toLowerCase().replaceAll("!", "");
+      expect(contactEmailProblem(`${local}@harbor.test`) !== null, local).toBe(reads(local));
+    }
+    // The sample exercises the refusal, not only the pass.
+    expect(refused).toBeGreaterThan(300);
+    expect(refused).toBeLessThan(5500);
+  });
+
+  it("reads digits in a contact address as letters or as nothing (G2)", () => {
+    for (const email of [
+      "tide1grid@harbor.test",
+      "hello@tide2grid.test",
+      "t1de.gr1d@harbor.test",
+    ]) {
+      expect(contactEmailProblem(email), email).not.toBeNull();
+      expect(accepts({ contact: { email } }), email).toBe(false);
+    }
+    expect(contactEmailProblem("hello@demo-harbor.test")).toBeNull();
+    expect(contactEmailProblem("captain1987@riptide-grill.test")).toBeNull();
+  });
+
+  it("refuses an internationalized (xn--) contact domain (G3)", () => {
+    for (const email of [
+      "support@xn--tdegrd-pvfe.test",
+      "hello@XN--tdegrd-pvfe.test",
+      "hello@mail.xn--tdegrd-pvfe.test",
+    ]) {
+      expect(contactEmailProblem(email), email).toBe(
+        "A contact address may not use an internationalized (xn--) domain",
+      );
+      expect(accepts({ contact: { email } }), email).toBe(false);
+    }
+    // Only a label that starts with xn-- is IDNA.
+    expect(contactEmailProblem("xn--hello@harbor.test")).toBeNull();
+    expect(contactEmailProblem("hello@harbor-xn--.test")).toBeNull();
+  });
+
   it("takes a name that already carries the suffix without doubling it", () => {
     expect(senderDisplayName("Demo Reef Divers via TideGrid")).toBe(
       "Demo Reef Divers via TideGrid",

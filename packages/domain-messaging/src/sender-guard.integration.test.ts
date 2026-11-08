@@ -12,6 +12,7 @@ import type {} from "@tidegrid/database/global-setup";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createCloudflareEmailFixture } from "./cloudflare-fixture.ts";
+import { FakeEmailProvider } from "./fake.ts";
 import { createCloudflareEmailProvider, deliverTenantMessages, enqueueMessage } from "./index.ts";
 
 type Sql = ReturnType<typeof postgres>;
@@ -165,6 +166,84 @@ describe.skipIf(!env)("the sender identity guard against a real database", () =>
     expect(row.from_name).toBe("Guard Reply Tours");
     expect(row.reply_to).toBeNull();
     expect(row.html_body).not.toContain("tidegrid.us");
+  });
+
+  /** A queued message written past enqueueMessage, as one queued before the guard would be. */
+  async function stored(tenantId: string, fromName: string, replyTo: string | null) {
+    const [row] = await admin<{ id: string }[]>`
+      insert into public.email_messages (tenant_id, dedupe_key, template, template_version,
+        to_email, to_name, from_name, reply_to, subject, html_body, text_body)
+      values (${tenantId}, ${`test.guard:${randomUUID()}`}, 'test_message', 1, ${GUEST},
+              'Guard Guest', ${fromName}, ${replyTo}, 'Synthetic', '<p>Synthetic.</p>',
+              'Synthetic.')
+      returning id`;
+    if (!row) throw new Error("no message");
+    return row.id;
+  }
+
+  // Pull request review fix G1: delivery checks the stored sender again.
+  it("delivers a pending message stored with another operator's name and a TideGrid reply-to under the provisioned name", async () => {
+    await tenant("Guard Pending Reef", brandConfig("Guard Pending Reef"));
+    const impostor = await tenant(
+      "Guard Pending Impostor",
+      brandConfig("Guard Pending Impostor", "hello@guard-impostor.test"),
+    );
+    const cases: [string, string | null][] = [
+      ["Guard Pending Reef", "support@tidegrid.us"],
+      ["T!de!Gr!d", "support@xn--tdegrd-pvfe.test"],
+      ["GUARD PENDING IMPOSTOR", "tide1grid@guard-impostor.test"],
+      ["Guard Pending Impostor", "hello@guard-impostor.test"],
+    ];
+    const ids = [];
+    for (const [fromName, replyTo] of cases) ids.push(await stored(impostor, fromName, replyTo));
+
+    const fixture = createCloudflareEmailFixture();
+    const provider = createCloudflareEmailProvider({
+      binding: fixture.binding,
+      recipients: { kind: "only", addresses: new Set([GUEST]) },
+      environment: "local",
+    });
+    const report = await deliverTenantMessages(runtime.db, impostor, {
+      provider,
+      fromAddress: FROM,
+      runId: `run-${randomUUID()}`,
+    });
+    const sent = (id: string) => {
+      expect(report.items.find((i) => i.messageId === id)).toMatchObject({ outcome: "sent" });
+      const send = fixture.sends.find((s) => s.builder.headers["X-TideGrid-Message-Id"] === id);
+      if (!send) throw new Error("not sent");
+      return send.builder;
+    };
+    const [reef, lookalike, upper, clean] = ids as [string, string, string, string];
+    expect(sent(reef).from).toEqual({ email: FROM, name: "Guard Pending Impostor via TideGrid" });
+    expect(sent(reef).replyTo).toBeUndefined();
+    expect(sent(lookalike).from).toEqual({
+      email: FROM,
+      name: "Guard Pending Impostor via TideGrid",
+    });
+    expect(sent(lookalike).replyTo).toBeUndefined();
+    // A stored name that reads as the brand's name is kept as written.
+    expect(sent(upper).from).toEqual({ email: FROM, name: "GUARD PENDING IMPOSTOR via TideGrid" });
+    expect(sent(upper).replyTo).toBeUndefined();
+    expect(sent(clean).from).toEqual({ email: FROM, name: "Guard Pending Impostor via TideGrid" });
+    expect(sent(clean).replyTo).toBe("hello@guard-impostor.test");
+  });
+
+  it("delivers a stored impostor name through the fake provider under the provisioned name too", async () => {
+    await tenant("Guard Fake Reef", brandConfig("Guard Fake Reef"));
+    const impostor = await tenant("Guard Fake Impostor");
+    const id = await stored(impostor, "Guard Fake Reef", "support@tidegrid.us");
+    const fake = new FakeEmailProvider({ db: runtime.db, environment: "local" });
+    const report = await deliverTenantMessages(runtime.db, impostor, {
+      provider: fake,
+      fromAddress: FROM,
+      runId: `run-${randomUUID()}`,
+    });
+    expect(report.items.find((i) => i.messageId === id)).toMatchObject({ outcome: "sent" });
+    const [delivery] = await admin<{ from_name: string; reply_to: string | null }[]>`
+      select from_name, reply_to from public.fake_email_deliveries
+       where tenant_id = ${impostor} and idempotency_key = ${id}`;
+    expect(delivery).toEqual({ from_name: "Guard Fake Impostor", reply_to: null });
   });
 
   it("never sends under a reserved provisioned name either", async () => {
