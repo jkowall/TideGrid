@@ -10,6 +10,7 @@ import {
   FinalizationExceptionsResponse,
   normalizeBookingReference,
   StaffTenantParams,
+  TripBookingsQuery,
   TripBookingsResponse,
   TripParams,
   TripRosterResponse,
@@ -20,7 +21,7 @@ import {
   getTripRoster,
   listDayBookings,
   listExceptionsPage,
-  listTripBookings,
+  listTripBookingsPage,
 } from "@tidegrid/domain-booking";
 import { can } from "@tidegrid/domain-identity";
 import type { AppDeps, AppEnv } from "../context.ts";
@@ -84,14 +85,17 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "A trip's bookings",
     description:
-      "Owners and booking staff. Every booking on the trip, oldest first, with the booker's name and email, the order, and the payment.",
+      "Owners and booking staff. The trip's bookings, canceled ones included, a page at a time, oldest first, with the booker's name and email, the order, and the payment (W1-INV-PRICING: limit and after).",
     security: staffSecurity,
-    request: { params: TripParams },
+    request: { params: TripParams, query: TripBookingsQuery },
     responses: {
       200: {
         content: { "application/json": { schema: TripBookingsResponse } },
         description: "The trip's bookings",
       },
+      400: errorBody(
+        "A malformed limit or cursor (validation_failed), or a cursor that names no booking on this trip (cursor_invalid)",
+      ),
       401: errorBody("Not signed in"),
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or trip"),
@@ -100,14 +104,19 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(tripBookingsRoute, async (c) => {
     const { tenantId, tripId } = c.req.valid("param");
+    const { limit, after } = c.req.valid("query");
     const { body } = await withStaffTenant(
       c,
       deps,
       { tenantId, permission: "bookings.read", snapshot: true },
       async (trx) => {
-        const bookings = await listTripBookings(trx, tenantId, tripId);
-        if (!bookings) throw tripNotFound();
-        return { bookings: bookings.map((b) => ({ ...b })) };
+        const page = await listTripBookingsPage(trx, tenantId, tripId, {
+          limit,
+          ...(after === undefined ? {} : { after }),
+        });
+        if (!page) throw tripNotFound();
+        if (page.kind === "cursor_invalid") throw cursorInvalid();
+        return { bookings: page.bookings.map((b) => ({ ...b })), nextAfter: page.nextAfter };
       },
     );
     return c.json(body, 200);

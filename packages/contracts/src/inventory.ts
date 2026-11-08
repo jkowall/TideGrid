@@ -58,7 +58,29 @@ export const TripCapacityDetail = z.object({
 });
 export type TripCapacityDetail = z.infer<typeof TripCapacityDetail>;
 
+export const TripHoldsQuery = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .default(100)
+    .describe("Holds on this page; 1 to 200, 100 when absent (W1-INV-PRICING)"),
+  after: Uuid.optional().describe(
+    "Cursor: the last hold id of the previous page (nextAfter). One that names no hold on this trip of this operator answers 400 cursor_invalid",
+  ),
+});
+export type TripHoldsQuery = z.infer<typeof TripHoldsQuery>;
+
 export const TripHoldsResponse = z
-  .object({ capacity: TripCapacityDetail, holds: z.array(CapacityHold) })
-  .describe("Every hold on the trip, in any state, oldest first, with the capacity left now");
+  .object({
+    capacity: TripCapacityDetail,
+    holds: z.array(CapacityHold).describe("This page, oldest first: by creation, then by id"),
+    nextAfter: Uuid.nullable().describe(
+      "Pass as after for the next page; null on the last page. Holds are never deleted and a hold's creation time never changes, so a cursor always returns the same holds in the same order, followed by any created since",
+    ),
+  })
+  .describe(
+    "The trip's holds, in any state, a page at a time, oldest first, with the capacity left now",
+  );
 export type TripHoldsResponse = z.infer<typeof TripHoldsResponse>;

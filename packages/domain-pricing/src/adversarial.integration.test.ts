@@ -432,6 +432,20 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
           },
         ],
         [
+          // The marina's local days October 31 and November 1, 2026, at Dock A
+          // (America/New_York), which leaves daylight time on November 1: from
+          // local midnight at -04:00 to local midnight at -05:00 (W1-INV-PRICING).
+          "DOCKDAYS",
+          {
+            code: "DOCKDAYS",
+            discount: { kind: "percent", percentOffBp: 1000 },
+            startsAt: new Date("2026-10-31T00:00:00.000-04:00"),
+            endsAt: new Date("2026-11-02T00:00:00.000-05:00"),
+            products: { all: true },
+            reason: "fixture",
+          },
+        ],
+        [
           "RETIRED",
           {
             code: "RETIRED",
@@ -1090,6 +1104,76 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
         kind: "rejected",
         problems: [{ code: "promotion_not_applicable", reason: "not_started" }],
       });
+    });
+
+    it("decides by the quote instant at the marina's local midnights, across a daylight change (D1)", async () => {
+      // Owner decision D1 (2026-11-08): the quote instant decides, in
+      // [startsAt, endsAt). Neither the trip's date nor checkout is checked, so
+      // a code quoted in the window's last millisecond holds for the quote's
+      // 30 minutes. The reef trips depart at 21:00 at Dock A.
+      const wall = (iso: string) =>
+        new Intl.DateTimeFormat("en-CA", {
+          timeZone: "America/New_York",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          fractionalSecondDigits: 3,
+          hourCycle: "h23",
+        }).format(new Date(iso));
+      const at = (iso: string, date = "2026-11-12") =>
+        quoteIn(A.id, {
+          tripId: trip(a.reefTrips, date),
+          party: party(["adult", 1]),
+          addOns: [],
+          promotionCode: "dockdays",
+          now: new Date(iso),
+        });
+      const discountOf = async (iso: string, date?: string) => {
+        const r = await at(iso, date);
+        return r.kind === "created" ? r.quote.totals.discount : r;
+      };
+      const refused = (reason: string) => ({
+        kind: "rejected",
+        problems: [{ code: "promotion_not_applicable", reason }],
+      });
+
+      // The boundaries are the marina's midnights, 49 hours apart.
+      const opens = "2026-10-31T04:00:00.000Z";
+      const closes = "2026-11-02T05:00:00.000Z";
+      expect(wall(opens)).toBe("2026-10-31, 00:00:00.000");
+      expect(wall(closes)).toBe("2026-11-02, 00:00:00.000");
+      expect(Date.parse(closes) - Date.parse(opens)).toBe(49 * 3_600_000);
+
+      expect(await at("2026-10-31T03:59:59.999Z")).toEqual(refused("not_started"));
+      expect(await discountOf(opens)).toBe(600);
+      // UTC midnight, still the evening of November 1 at the dock.
+      expect(wall("2026-11-02T00:00:00.000Z")).toBe("2026-11-01, 19:00:00.000");
+      expect(await discountOf("2026-11-02T00:00:00.000Z")).toBe(600);
+      // The repeated 01:30 of the change day, at -04:00 and then at -05:00.
+      expect(await discountOf("2026-11-01T05:30:00.000Z")).toBe(600);
+      expect(await discountOf("2026-11-01T06:30:00.000Z")).toBe(600);
+
+      // The last millisecond of November 1 at the dock: the code applies, and
+      // the quote holds its price for 30 minutes past the window's end.
+      const last = await at("2026-11-02T04:59:59.999Z");
+      if (last.kind !== "created") throw new Error(JSON.stringify(last));
+      expect(wall(last.quote.quotedAt)).toBe("2026-11-01, 23:59:59.999");
+      expect(last.quote.totals.discount).toBe(600);
+      expect(last.quote.promotion?.code).toBe("DOCKDAYS");
+      expect(Date.parse(last.quote.expiresAt)).toBe(Date.parse(closes) + 30 * 60_000 - 1);
+      const read = await asGuest(A.id, (trx) => getQuote(trx, A.id, last.quote.quoteId));
+      expect(read).toEqual(last.quote);
+
+      expect(await at(closes)).toEqual(refused("expired"));
+      // The trip's date is not checked: a trip on November 12, after the
+      // window, takes the code; one on November 1, inside it, does not once
+      // the quote instant has passed the end.
+      expect(await discountOf(opens, "2026-11-12")).toBe(600);
+      expect(await discountOf("2026-11-01T12:00:00.000Z", "2026-11-01")).toBe(600);
+      expect(await at("2026-11-02T05:00:00.000Z", "2026-11-12")).toEqual(refused("expired"));
     });
 
     it("names why each code does not apply and keeps one code's terms to its own tenant", async () => {

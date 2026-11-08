@@ -26,7 +26,12 @@ type Capacity = {
   confirmed?: number;
 };
 type Trip = { tripId: string; localDate: string; capacity: Capacity };
-type Json = { trips?: Trip[]; error?: { code: string } };
+type Json = {
+  trips?: Trip[];
+  error?: { code: string };
+  holds?: { id: string }[];
+  nextAfter?: string | null;
+};
 
 const env = inject("integrationDb");
 const CONSOLE = "https://console.test";
@@ -281,6 +286,32 @@ describe.skipIf(!env)("capacity in the trip listings and the hold sweep", () => 
       [booked.id, "confirmed", true],
     ]);
     expect(body.holds[1]?.ownerRef).toBe(live.ownerRef);
+    expect(res.json.nextAfter).toBeNull();
+
+    // Pages with a stable cursor (W1-INV-PRICING).
+    const holdsPath = `/v1/staff/tenants/${A.id}/trips/${trip}/holds`;
+    const first = await get(`${holdsPath}?limit=2`, { as: A.ownerEmail });
+    expect(first.status).toBe(200);
+    const firstBody = first.json as unknown as typeof body & { nextAfter: string | null };
+    expect(firstBody.holds.map((h) => h.id)).toEqual([stale.id, live.id]);
+    expect(firstBody.nextAfter).toBe(live.id);
+    expect(firstBody.capacity).toEqual(body.capacity);
+    const second = await get(`${holdsPath}?limit=2&after=${live.id}`, { as: A.ownerEmail });
+    expect(second.status).toBe(200);
+    expect(second.json.holds?.map((h) => h.id)).toEqual([booked.id]);
+    expect(second.json.nextAfter).toBeNull();
+    const otherHold = await hold(A, tripsA.shared(), 1);
+    for (const [query, status, code] of [
+      [`after=${otherHold.id}`, 400, "cursor_invalid"],
+      [`after=${randomUUID()}`, 400, "cursor_invalid"],
+      ["after=not-a-cursor", 400, "validation_failed"],
+      ["limit=0", 400, "validation_failed"],
+      ["limit=201", 400, "validation_failed"],
+      ["limit=two", 400, "validation_failed"],
+    ] as const) {
+      const refused = await get(`${holdsPath}?${query}`, { as: A.ownerEmail });
+      expect([query, refused.status, refused.json.error?.code]).toEqual([query, status, code]);
+    }
 
     // Another tenant's trip, a malformed id, and another tenant's staff all answer 404.
     const tripB = tripsB.shared();

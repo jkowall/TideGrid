@@ -15,6 +15,7 @@ import {
   type PaymentProvider,
   ProviderUnavailableError,
 } from "@tidegrid/domain-payments";
+import { createPromotion, createQuote } from "@tidegrid/domain-pricing";
 import { sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
@@ -28,6 +29,7 @@ import {
   handleVerifiedEvent,
   listFinalizationExceptions,
   listTripBookings,
+  listTripBookingsPage,
   MAX_OPEN_CHECKOUTS_PER_CLIENT,
   sweepCheckouts,
 } from "./index.ts";
@@ -802,5 +804,129 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
     for (const id of [healthy.session.id, released.session.id, confirmed.session.id]) {
       expect(await stateOf(id)).toMatchObject({ session: "open", hold: "active" });
     }
+  });
+
+  // W1-INV-PRICING -------------------------------------------------------------------
+
+  it("pages a trip's bookings by confirmation with a stable cursor", async () => {
+    const tripId = tripsA.shared();
+    const book = async () => {
+      const { paymentRef } = await checkout(A, tripId, 1);
+      expect(await pay(A, paymentRef, "succeeded")).toMatchObject({ outcome: "confirmed" });
+    };
+    for (let i = 0; i < 3; i++) await book();
+    const page = (limit: number, after?: string) =>
+      asGuest(A.id, (trx) =>
+        listTripBookingsPage(trx, A.id, tripId, { limit, ...(after ? { after } : {}) }),
+      );
+    const all = await asGuest(A.id, (trx) => listTripBookings(trx, A.id, tripId));
+    expect(all).toHaveLength(3);
+    const ids = (all ?? []).map((b) => b.id);
+
+    const first = await page(2);
+    if (first?.kind !== "ok") throw new Error(JSON.stringify(first));
+    expect(first.bookings.map((b) => b.id)).toEqual(ids.slice(0, 2));
+    expect(first.nextAfter).toBe(ids[1]);
+    // Every field, as the unbounded read gives it.
+    expect(first.bookings).toEqual(all?.slice(0, 2));
+    const second = await page(2, first.nextAfter ?? "");
+    expect(second).toEqual({ kind: "ok", bookings: all?.slice(2), nextAfter: null });
+    // The same cursor gives the same page; a page exactly full has no next.
+    expect(await page(2, first.nextAfter ?? "")).toEqual(second);
+    expect(await page(3)).toEqual({ kind: "ok", bookings: all, nextAfter: null });
+
+    // A booking confirmed later lands after the cursor, never before it.
+    await book();
+    const grown = await page(2, first.nextAfter ?? "");
+    if (grown?.kind !== "ok") throw new Error(JSON.stringify(grown));
+    expect(grown.bookings.map((b) => b.id).slice(0, 1)).toEqual(ids.slice(2));
+    expect(grown.bookings).toHaveLength(2);
+    expect(grown.nextAfter).toBeNull();
+
+    // A cursor must name a booking on this trip of this tenant.
+    const otherTrip = tripsA.shared();
+    const { paymentRef: otherRef, session: otherSession } = await checkout(A, otherTrip, 1);
+    await pay(A, otherRef, "succeeded");
+    const [other] = await admin<{ id: string }[]>`
+      select id from public.bookings where checkout_session_id = ${otherSession.id}`;
+    expect(await page(2, other?.id ?? "")).toEqual({ kind: "cursor_invalid" });
+    expect(await page(2, randomUUID())).toEqual({ kind: "cursor_invalid" });
+    expect(await page(2, "not-a-cursor")).toEqual({ kind: "cursor_invalid" });
+    expect(await page(2, (ids[0] ?? "").toUpperCase())).toEqual({ kind: "cursor_invalid" });
+    // Another tenant's trip is not found, cursor or not.
+    expect(
+      await asGuest(B.id, (trx) => listTripBookingsPage(trx, B.id, tripId, { limit: 2 })),
+    ).toBeNull();
+    expect(
+      await asGuest(B.id, (trx) =>
+        listTripBookingsPage(trx, B.id, tripId, { limit: 2, after: ids[0] ?? "" }),
+      ),
+    ).toBeNull();
+    for (const limit of [0, 201, 1.5]) {
+      await expect(page(limit)).rejects.toThrow(RangeError);
+    }
+  });
+
+  it("keeps a promotion quoted inside its window when the checkout opens after the window ends (D1)", async () => {
+    // Owner decision D1 (2026-11-08): the quote instant decides, and the code
+    // holds for the quote's 30 minutes. Times come from the database clock,
+    // which checkout reads.
+    const now = await dbNow();
+    const code = `GONE${A.id.slice(0, 4).toUpperCase()}`;
+    const ctx = systemContext(A.id, "fixture");
+    const created = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      createPromotion(trx, ctx, {
+        code,
+        discount: { kind: "percent", percentOffBp: 2000 },
+        startsAt: new Date(now - 20 * 60_000),
+        endsAt: new Date(now - 2 * 60_000),
+        products: { all: true },
+        reason: "fixture",
+      }),
+    );
+    if (created.kind !== "created") throw new Error(JSON.stringify(created));
+    const tripId = tripsA.shared();
+    // Quoted ten minutes ago, inside the window; the window ended two minutes ago.
+    const quote = await quoteFor(runtime.db, A.id, tripId, 2, {
+      promotionCode: code,
+      now: new Date(now - 10 * 60_000),
+    });
+    expect(quote.promotion?.code).toBe(code);
+    expect(quote.totals.discount).toBeGreaterThan(0);
+    expect(Date.parse(quote.expiresAt)).toBeGreaterThan(now);
+    const opened = await asGuest(A.id, (trx, c) =>
+      createCheckoutSession(trx, c, {
+        quoteId: quote.quoteId,
+        acceptedPolicyVersion: quote.policy.version,
+        booker: { name: "Test Booker", email: "booker@example.test" },
+        secret: newSecret(),
+        clientAddress: null,
+        provider: "fake",
+        minimumAmount: FAKE_MINIMUM_AMOUNT,
+      }),
+    );
+    if (opened.kind !== "created") throw new Error(JSON.stringify(opened));
+    expect(opened.session.amount).toBe(quote.totals.total);
+    const [order] = await admin<{ total: number; quote: string }[]>`
+      select o.total_amount as total, s.quote_id as quote
+        from public.orders o
+        join public.checkout_sessions s on s.id = o.checkout_session_id
+       where o.checkout_session_id = ${opened.session.id}`;
+    expect(order).toEqual({ total: quote.totals.total, quote: quote.quoteId });
+    // The same code now refuses a new quote: its window has ended.
+    const ctxGuest = guestContext(A.id);
+    const late = await inTenantTransaction(runtime.db, ctxGuest, (trx) =>
+      createQuote(trx, ctxGuest, {
+        tripId,
+        party: { kind: "tickets", tickets: [{ code: "adult", quantity: 1 }] },
+        addOns: [],
+        promotionCode: code,
+        now: new Date(now),
+      }),
+    );
+    expect(late).toEqual({
+      kind: "rejected",
+      problems: [{ code: "promotion_not_applicable", reason: "expired" }],
+    });
   });
 });

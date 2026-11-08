@@ -873,6 +873,44 @@ describe("eligibility: promotion", () => {
     expect(reasonOf(at(NOW + 60_000))).toBe("expired");
   });
 
+  it("decides by the quote instant against a marina's local day, never the trip's date (D1)", () => {
+    // Owner decision D1 (2026-11-08): the quote instant decides. A window for
+    // the local day November 26, 2026 in Pacific/Honolulu (UTC-10, no daylight
+    // time) runs from 10:00Z that day to 10:00Z the next.
+    const hawaii = (ms: number) =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Pacific/Honolulu",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date(ms));
+    const startsAtMs = Date.parse("2026-11-26T00:00:00-10:00");
+    const endsAtMs = Date.parse("2026-11-27T00:00:00-10:00");
+    expect(hawaii(startsAtMs)).toBe("2026-11-26, 00:00");
+    expect(hawaii(endsAtMs)).toBe("2026-11-27, 00:00");
+    const window = promo({ startsAtMs, endsAtMs });
+    const at = (nowMs: number, localDate = "2026-12-24") =>
+      run(window, "HARBOR10", {
+        nowMs,
+        subject: { ...input().subject, localDate },
+      });
+    expect(reasonOf(at(startsAtMs - 1))).toBe("not_started");
+    expect(priced(at(startsAtMs)).discount?.amount).toBe(1150);
+    // 23:59 on November 26 at the marina is already November 27 in UTC.
+    expect(new Date(endsAtMs - 60_000).toISOString().slice(0, 10)).toBe("2026-11-27");
+    expect(at(endsAtMs - 60_000).kind).toBe("priced");
+    expect(at(endsAtMs - 1).kind).toBe("priced");
+    expect(reasonOf(at(endsAtMs))).toBe("expired");
+    // The trip's date plays no part: a trip inside the window is refused once
+    // the quote instant has passed it, and one long after takes the code.
+    expect(reasonOf(at(endsAtMs, "2026-11-26"))).toBe("expired");
+    expect(reasonOf(at(startsAtMs - 1, "2026-11-26"))).toBe("not_started");
+    expect(at(startsAtMs, "2027-05-31").kind).toBe("priced");
+  });
+
   it("reports promotion problems beside other problems", () => {
     expect(
       problems(

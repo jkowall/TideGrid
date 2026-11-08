@@ -151,7 +151,10 @@ export {
   type FinalizationExceptionView,
   listFinalizationExceptions,
   listTripBookings,
+  listTripBookingsPage,
+  MAX_TRIP_BOOKINGS_PAGE,
   type StaffBooking,
+  type TripBookingsPage,
 } from "./reads.ts";
 export {
   type BookingSearchField,

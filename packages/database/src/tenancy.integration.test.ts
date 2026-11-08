@@ -861,6 +861,37 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
       ]);
     });
 
+    it("runs the trip usage reads as their caller, STABLE, with search_path pinned (0006, 0016)", async () => {
+      const rows = await admin`
+        select p.proname, pg_get_function_identity_arguments(p.oid) as args,
+               pg_get_function_result(p.oid) as result, p.prosecdef, p.provolatile, p.proconfig,
+               has_function_privilege('tidegrid_app', p.oid, 'EXECUTE') as runtime_execute
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'app'
+           and p.proname in ('trip_capacity_usage', 'trip_capacity_usage_grouped')
+         order by p.proname`;
+      const common = {
+        prosecdef: false,
+        provolatile: "s",
+        proconfig: ["search_path=pg_catalog, pg_temp"],
+        runtime_execute: true,
+      };
+      expect(rows.map((r) => ({ ...r }))).toEqual([
+        {
+          proname: "trip_capacity_usage",
+          args: "p_tenant_id uuid, p_trip_id uuid",
+          result: "TABLE(held integer, confirmed integer)",
+          ...common,
+        },
+        {
+          proname: "trip_capacity_usage_grouped",
+          args: "p_tenant_id uuid, p_trip_ids uuid[]",
+          result: "TABLE(trip_id uuid, held integer, confirmed integer)",
+          ...common,
+        },
+      ]);
+    });
+
     it("runs with prepared transactions off, which the staff resend bound relies on (0014)", async () => {
       // PREPARE TRANSACTION would let a writer pass the commit check and then
       // wait unbounded before COMMIT PREPARED. Neon and the test images keep it

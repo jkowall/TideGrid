@@ -598,6 +598,41 @@ describe.skipIf(!env)("checkout to confirmation through the API", () => {
         payment: expect.objectContaining({ provider: "fake", state: "succeeded" }),
       }),
     ]);
+    expect(list.json.nextAfter).toBeNull();
+
+    // Pages with a stable cursor (W1-INV-PRICING): a second booking follows the first.
+    const again = await open(A, tripId, 1);
+    if (!again.json.payment) throw new Error("no payment");
+    await control(A, again.json.payment.paymentRef, again.json.payment.clientSecret, "succeed");
+    const bookingsPath = `/v1/staff/tenants/${A.id}/trips/${tripId}/bookings`;
+    const all = await request("GET", bookingsPath, { as: A.owner });
+    const ids = (all.json.bookings as { id: string }[]).map((b) => b.id);
+    expect(ids).toHaveLength(2);
+    const first = await request("GET", `${bookingsPath}?limit=1`, { as: A.owner });
+    expect(first.status).toBe(200);
+    expect(first.json.bookings).toEqual((all.json.bookings as unknown[]).slice(0, 1));
+    expect(first.json.nextAfter).toBe(ids[0]);
+    const second = await request("GET", `${bookingsPath}?limit=1&after=${ids[0]}`, {
+      as: A.owner,
+    });
+    expect(second.status).toBe(200);
+    expect(second.json.bookings).toEqual((all.json.bookings as unknown[]).slice(1));
+    expect(second.json.nextAfter).toBeNull();
+    for (const [query, status, code] of [
+      [`after=${randomUUID()}`, 400, "cursor_invalid"],
+      ["after=not-a-cursor", 400, "validation_failed"],
+      ["limit=0", 400, "validation_failed"],
+      ["limit=201", 400, "validation_failed"],
+    ] as const) {
+      const refused = await request("GET", `${bookingsPath}?${query}`, { as: A.owner });
+      expect([query, refused.status, refused.json.error?.code]).toEqual([query, status, code]);
+      expect(refused.headers.get("cache-control")).toBe("no-store");
+    }
+    // Finance still cannot read bookers' contact details, cursor or not.
+    expect(
+      (await request("GET", `${bookingsPath}?limit=1&after=${ids[0]}`, { as: A.finance })).status,
+    ).toBe(403);
+
     const cancel = await request("POST", `/v1/staff/tenants/${A.id}/trips/${tripId}/sales-state`, {
       as: A.owner,
       origin: CONSOLE,
