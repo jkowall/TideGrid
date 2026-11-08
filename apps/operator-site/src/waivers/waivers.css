@@ -127,3 +127,12 @@
     border: 1px solid #000;
   }
 }
+
+/* The QR code for a staff-assisted signing: black on white in both themes, so cameras read it. */
+.wv-qr {
+  display: block;
+  width: min(18rem, 100%);
+  height: auto;
+  margin-inline: auto;
+  border-radius: var(--radius-sm, 4px);
+}

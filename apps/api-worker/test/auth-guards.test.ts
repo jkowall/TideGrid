@@ -220,6 +220,7 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/waivers",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend",
         "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document",
+        "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing",
         // Staff-assisted booking (G2.12d).
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/offer",
         "/v1/staff/tenants/{tenantId}/quotes",

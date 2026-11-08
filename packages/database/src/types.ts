@@ -993,7 +993,9 @@ export type WaiverSessionRevokedReason =
   | "superseded"
   | "recipient_changed"
   /** Another session of the request, when the request was signed. */
-  | "completed";
+  | "completed"
+  /** Its own page ended it: the shared-device cleanup (0020). */
+  | "signed_out";
 export type WaiverDeliveryKind = "initial" | "resend";
 export type GuardianRelationship = "parent" | "legal_guardian";
 
@@ -1108,15 +1110,41 @@ export interface WaiverEvidenceTable {
   acknowledgments: Fixed<string[]>;
   consent_version: Fixed<string>;
   consent_text: Fixed<string>;
-  access_method: Fixed<"email_link">;
-  recipient_email: Fixed<string>;
-  match_method: Fixed<"signer_confirmed">;
+  access_method: Fixed<WaiverAccessMethod>;
+  /** The address an email link went to; null for a staff-assisted signing (0020). */
+  recipient_email: FixedDefault<string | null>;
+  match_method: Fixed<WaiverMatchMethod>;
+  /** The staff member who started a staff-assisted signing; null for an email link (0020). */
+  assisted_by: FixedDefault<string | null>;
   /** Stamped by the database: the signing transaction's own clock. */
   signed_at: Stamped;
   source_ip: FixedDefault<string | null>;
   user_agent: FixedDefault<string | null>;
   document: Fixed<Uint8Array>;
   document_sha256: Fixed<string>;
+}
+
+/** How a signer reached the waiver: an emailed link, or a staff-assisted start (0020). */
+export type WaiverAccessMethod = "email_link" | "staff_device" | "participant_qr";
+export type WaiverAssistedMode = Exclude<WaiverAccessMethod, "email_link">;
+/** Who confirmed the signer: the signer alone, or a staff member who checked them too (0020). */
+export type WaiverMatchMethod = "signer_confirmed" | "staff_confirmed";
+
+/** A staff-assisted signing start (0020): append-only for every role. */
+export interface WaiverAssistedLinksTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  /** The waiver link with no email that it issued (guest_access_links). */
+  access_link_id: Fixed<string>;
+  request_id: Fixed<string>;
+  booking_id: Fixed<string>;
+  participant_id: Fixed<string>;
+  mode: Fixed<WaiverAssistedMode>;
+  identity_checked: Fixed<boolean>;
+  created_at: Stamped;
+  actor_type: ColumnType<"staff", never, never>;
+  actor_id: ColumnType<string, never, never>;
+  api_request_id: ColumnType<string | null, never, never>;
 }
 
 /** Tables added by the waiver migration (G2.15), merged into Database below. */
@@ -1127,6 +1155,7 @@ interface WaiverTables {
   waiver_deliveries: WaiverDeliveriesTable;
   waiver_signing_sessions: WaiverSigningSessionsTable;
   waiver_evidence: WaiverEvidenceTable;
+  waiver_assisted_links: WaiverAssistedLinksTable;
 }
 
 /** The cron's cross-tenant sweeps that take fair turns (0013). */

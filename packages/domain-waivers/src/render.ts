@@ -45,7 +45,14 @@ export interface WaiverDocumentInput {
   evidenceId: string;
   requestId: string;
   /** The address the link went to, masked. */
-  recipientMasked: string;
+  /**
+   * How the signer reached the waiver: a single-use link emailed to an
+   * address (masked), or a staff-assisted start, on the staff device or by a
+   * QR code, by the named staff member, who checked who signs.
+   */
+  arrival:
+    | { kind: "email_link"; recipientMasked: string }
+    | { kind: "staff_device" | "participant_qr"; staff: string };
   sourceIp: string | null;
   userAgent: string | null;
 }
@@ -180,6 +187,17 @@ function capacity(input: WaiverDocumentInput): string {
   return `${relation} of ${input.participant.name}, a minor`;
 }
 
+function arrivalText(arrival: WaiverDocumentInput["arrival"]): string {
+  switch (arrival.kind) {
+    case "email_link":
+      return `A single-use link emailed to ${arrival.recipientMasked}, opened by an explicit request; the signer confirmed who they are and who they signed for`;
+    case "staff_device":
+      return "Staff-assisted on the operator's device, through a single-use 15-minute link; the staff member checked who signs, and the signer confirmed who they are and who they signed for";
+    case "participant_qr":
+      return "A single-use 15-minute QR code shown by the operator's staff, opened by an explicit request; the staff member checked who signs, and the signer confirmed who they are and who they signed for";
+  }
+}
+
 /** The PDF of one signed waiver. */
 export function renderWaiverPdf(input: WaiverDocumentInput): Uint8Array {
   const flow = new Flow();
@@ -224,10 +242,10 @@ export function renderWaiverPdf(input: WaiverDocumentInput): Uint8Array {
     ["Waiver request", input.requestId],
     ["Waiver version", `${input.title}, version ${input.version}`],
     ["Content SHA-256", input.contentSha256],
-    [
-      "How it was reached",
-      `A single-use link emailed to ${input.recipientMasked}, opened by an explicit request; the signer confirmed who they are and who they signed for`,
-    ],
+    ["How it was reached", arrivalText(input.arrival)],
+    ...(input.arrival.kind === "email_link"
+      ? []
+      : ([["Assisted by", input.arrival.staff]] as const)),
     ["Signed at (UTC)", input.signedAt.toISOString()],
     ["IP address", input.sourceIp ?? "Not recorded"],
     ["Device", input.userAgent ?? "Not recorded"],

@@ -64,6 +64,7 @@ const waivers: BookingWaivers = {
           signedAt: "2026-10-06T15:00:00.000Z",
           signerName: "Ann Adult",
           relationship: null,
+          method: "email_link",
         },
         resendAvailableAt: null,
       },
@@ -108,7 +109,9 @@ describe("a booking's waivers", () => {
     const items = screen.getAllByRole("listitem");
     const ann = within(items[0] as HTMLElement);
     expect(ann.getByText("Signed")).toBeTruthy();
-    expect(ann.getByText(/Signed .* by Ann Adult\./)).toBeTruthy();
+    expect(ann.getByText(/Signed .* by Ann Adult, from the emailed link\./)).toBeTruthy();
+    // A signed waiver offers no dockside signing; a waiting one does.
+    expect(ann.queryByRole("button", { name: /Sign here/ })).toBeNull();
     expect(ann.getByRole("link", { name: "Signed PDF for Ann Adult" }).getAttribute("href")).toBe(
       `/api/v1/staff/tenants/${tenantId}/waiver-evidence/20000000-0000-4000-8000-000000000001/document`,
     );
@@ -235,6 +238,101 @@ describe("a booking's waivers", () => {
     expect((hal as HTMLElement).querySelector(".wv-item__name")?.textContent).toBe(
       "Hal Held, Minor",
     );
+  });
+});
+
+describe("signing at the dock", () => {
+  const url = `https://demo-harbor.book.example.test/waiver#t=${"Q".repeat(43)}`;
+  const answer = (path: string) =>
+    path.endsWith("/assisted-signing")
+      ? json(201, {
+          signing: { mode: "participant_qr", url, expiresAt: "2026-10-06T16:15:00.000Z" },
+        })
+      : json(200, { waivers });
+
+  it("needs the identity check first, then shows a QR code of the single-use link", async () => {
+    const calls = stubApi(answer);
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={bookingStaff}
+        timeZone="America/New_York"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Show QR code for Ben Waiting" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show QR code" }));
+    await screen.findByText(/Check who is signing first/);
+    expect(calls.filter((c) => c.url.endsWith("/assisted-signing"))).toEqual([]);
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "I checked that the person signing is Ben Waiting." }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Show QR code" }));
+    const qr = await screen.findByRole("img", { name: "QR code to sign Ben Waiting's waiver" });
+    expect(qr.querySelector("path")?.getAttribute("d")).toMatch(/^M4 4h1v1h-1z/);
+    const start = calls.find((c) => c.url.endsWith("/assisted-signing"));
+    expect(start?.url).toBe(
+      `/api/v1/staff/tenants/${tenantId}/waiver-requests/10000000-0000-4000-8000-000000000002/assisted-signing`,
+    );
+    expect(JSON.parse(String(start?.init?.body))).toEqual({
+      mode: "participant_qr",
+      identityChecked: true,
+      participantName: "Ben Waiting",
+    });
+    // The link is drawn, never written out on the page.
+    expect(document.body.textContent).not.toContain("Q".repeat(43));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith("/waivers"))).toHaveLength(2));
+  });
+
+  it("opens the signing page in a new tab with no referrer for signing on this device", async () => {
+    stubApi(answer);
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={owner}
+        timeZone="America/New_York"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Sign here for Ben Waiting" }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Start signing" }));
+    const link = await screen.findByRole("link", {
+      name: /^Open the signing page\s*\(opens in a new tab\)$/,
+    });
+    expect(link.getAttribute("href")).toBe(url);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    // The link has focus, and Close is not the dialog's main button yet.
+    await waitFor(() => expect(document.activeElement).toBe(link));
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    // Once opened, the used link is gone, so nobody opens it twice.
+    link.addEventListener("click", (e) => e.preventDefault());
+    fireEvent.click(link);
+    expect(await screen.findByText("Opened in a new tab. The link works only once.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Open the signing page/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+  });
+
+  it("explains a refusal and keeps the dialog open", async () => {
+    stubApi((path) =>
+      path.endsWith("/assisted-signing")
+        ? json(409, { error: { code: "waiver_not_pending", message: "x", requestId: "r" } })
+        : json(200, { waivers }),
+    );
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={owner}
+        timeZone="America/New_York"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Sign here for Ben Waiting" }));
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Start signing" }));
+    await screen.findByText("This waiver no longer needs a signature.");
   });
 });
 

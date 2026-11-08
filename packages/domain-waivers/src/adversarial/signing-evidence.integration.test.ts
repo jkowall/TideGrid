@@ -734,7 +734,19 @@ describe.skipIf(!env)("G2.15 adversarial: signing and evidence", () => {
       "latin1",
     );
     const sha = createHash("sha256").update(document).digest("hex");
+    // The address the session's own link was emailed to (0020 checks it).
+    const [sent] = await world.admin<{ recipient_email: string }[]>`
+      select d.recipient_email
+        from public.waiver_signing_sessions s
+        join public.guest_access_links l on l.id = s.access_link_id
+        join public.waiver_deliveries d on d.message_id = l.message_id
+       where s.id = ${s2.session.id}`;
+    if (!sent) throw new Error("no delivery for the session");
     const evidence = {
+      recipient: sent.recipient_email,
+      access: "email_link",
+      match: "signer_confirmed",
+      assistedBy: null as string | null,
       request: r2,
       participant: p2,
       session: s2.session.id,
@@ -752,12 +764,12 @@ describe.skipIf(!env)("G2.15 adversarial: signing and evidence", () => {
           session_id, template_id, template_version, content_sha256, rendering_version,
           participant_name, participant_minor, signer_role, signer_name, guardian_relationship,
           signature_method, signature_text, acknowledgments, consent_version, consent_text,
-          access_method, recipient_email, match_method, document, document_sha256)
+          access_method, recipient_email, match_method, assisted_by, document, document_sha256)
         values (${A.id}, ${v.request}, ${booked.bookingId}, ${v.participant}, ${v.session},
                 ${facts.template_id}, ${facts.template_version}, ${v.hash}, 1, 'Forged Name',
                 ${v.minor}, ${v.role}, 'Forged Signer', ${v.relationship}, 'typed_name',
                 'Forged Signer', ${tx.array(v.acknowledgments)}, 'esign-v1', 'Synthetic consent',
-                'email_link', 'forged@example.test', 'signer_confirmed', ${v.document},
+                ${v.access}, ${v.recipient}, ${v.match}, ${v.assistedBy}, ${v.document},
                 ${v.documentSha})`;
     for (const { role, run } of roles) {
       const once = (v: Forged, then?: (tx: Sql) => Promise<unknown>) =>
@@ -789,6 +801,15 @@ describe.skipIf(!env)("G2.15 adversarial: signing and evidence", () => {
           participant: p1,
           session: s1.session.id,
         }),
+        // How the signer arrived is read from the session's own link (0020).
+        "another address": await once({ ...evidence, recipient: "forged@example.test" }),
+        "a staff method for an emailed link": await once({
+          ...evidence,
+          access: "staff_device",
+          match: "staff_confirmed",
+          recipient: null as unknown as string,
+          assistedBy: "forged-staff",
+        }),
         // Everything right, and the request signed beside it: the database accepts this,
         // which shows each refusal above is the rule it names.
         control: await once(evidence, async (tx) => {
@@ -803,6 +824,8 @@ describe.skipIf(!env)("G2.15 adversarial: signing and evidence", () => {
         "an acknowledgment missing": "23514:waiver_evidence_version",
         "a minor signed as a participant": "23514:waiver_evidence_request",
         "a request already signed": "23514:waiver_evidence_request",
+        "another address": "23514:waiver_evidence_method",
+        "a staff method for an emailed link": "23514:waiver_evidence_method",
         control: "accepted",
       });
       expect(forged["a PDF that is not its hash"], role).toMatch(/^23514/);

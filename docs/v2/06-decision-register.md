@@ -8,6 +8,19 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-G215-SIGNING, staff-assisted and QR waiver signing (owner pull-forward; coordinator defaults pending owner confirmation)
+
+The O-SCOPE entry below left items 4 to 6, waiver staff-assisted and QR signing, reminders, and guest renewal, as Core live gate work. On 2026-11-08 at 17:33 UTC the owner wrote: "Anyways, I just want all the work to be done for the next waves." The coordinator reads it as a pull-forward of those three Core live gate items into the demo, synthetic data only, each its own goal and pull request in order: W1-G215-SIGNING, W1-G215-REMINDERS, and W1-WAIVER-RENEWAL. The [demo build plan's G2.15 row](12-demo-build-plan.md#goal-sequence) now says so. This entry is the start gate for all three.
+
+W1-G215-SIGNING lets staff start a signing at the dock, on their device or as a QR code the participant scans, with migration `0020` (provisional, claimed at merge) and its service in the [waiver contract](../../packages/domain-waivers/README.md#staff-assisted-and-qr-signing-w1-g215-signing). The owner gave no answer on the goal's open decisions, so these are coordinator defaults, pending owner confirmation:
+
+- **D1: a staff-started link lives 15 minutes and is single-use.** The session it opens lasts at most 15 minutes too. A new start replaces the request's earlier unused code; the emailed link keeps working.
+- **D2: staff tick that they checked who signs, and the evidence names them.** The match method is `staff_confirmed`, the staff member is recorded in the evidence and the PDF, and the database refuses a start by anyone but staff.
+- **D3: the signing page clears itself after 2 minutes idle.** On a staff-started session the page never stores the session, ends it after 2 minutes without a tap, key, or scroll, and ends it at Done after signing. On the staff device it offers no download.
+- **D4: the QR code is drawn with no new dependency.** It carries only the guest site's address and the token in the fragment, never a name or a booking detail.
+
+Not built: the generic dock QR with staff lookup, migration suppression, R2, and field encryption. Security review under rule R9: run under the owner's standing go of 2026-11-08 (results in the [verification log](../verification-log.md#2026-11-08)). Canonical: the [database README](../../packages/database/README.md#staff-assisted-waiver-signing-0020).
+
 ### 2026-11-08: W1-0014-RESIDUALS, the 0014 resend residuals closed for direct writers (owner go; coordinator defaults pending owner confirmation)
 
 The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and email limits" on the O-SCOPE card, whose option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." The three fixes are the residuals the [verification log](../verification-log.md) recorded for `0014`, each reachable only by a writer with `tidegrid_app`'s credentials that skips the service. Migration `0019` (provisional; `0018` belongs to W1-FIN-EXC) closes them. Coordinator defaults, pending owner confirmation:
@@ -30,7 +43,6 @@ Security review under rule R9: run on 2026-11-08 under the owner's go to merge w
 - **Malware scanning: skipped for the paid pilots.** The comparison suggests Cloudmersive, starting on its free tier. In the same discussion the coordinator also suggested type and size checks alone while only the owner handles uploads during Managed Launch, with scanning added once operators upload files themselves. Both stay suggestions until the owner decides. Owner decision, 2026-11-08: asked whether to skip scanning while the owner handles all uploads, the owner wrote: "skip". So the paid pilots have no malware scanning provider. Uploads keep their type and size checks, and only the owner uploads files during Managed Launch. Scanning returns before operators upload files themselves.
 
 These decisions narrow the doc 08 Stage 0 sentence for the paid pilots only. Not done: no account, no provider call, and no configuration change.
-
 
 ### 2026-11-08: W3-OPS-1, pilot infrastructure as code, plan only (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
 

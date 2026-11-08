@@ -1,5 +1,6 @@
 export {
   endedWaiverSession,
+  endWaiverSession,
   loadWaiverSession,
   type RedeemResult,
   redeemWaiverToken,
@@ -13,6 +14,13 @@ export {
   lockBookingForWaivers,
   requiredSignerFor,
 } from "./assign.ts";
+export {
+  ASSISTED_LINK_TTL_MINUTES,
+  type AssistedLinkFacts,
+  type AssistedStartResult,
+  assistedLinkFacts,
+  startAssistedSigning,
+} from "./assisted.ts";
 export { type BookingContext, loadBookingContext, tripFacts } from "./booking.ts";
 export {
   bodyParagraphs,
