@@ -18,6 +18,51 @@ if (!url && process.env.CI) {
   throw new Error("DATABASE_URL is required in CI; the integration suite must not skip silently.");
 }
 
+/** The tag of a backend ReadyForQuery frame, "Z". */
+const readyForQuery = 0x5a;
+
+/**
+ * The complete PostgreSQL backend frames at the start of `bytes`: each is a
+ * one-byte tag, then a four-byte length that counts itself and the body. A
+ * partial frame at the end is left out until the rest arrives.
+ */
+function backendFrames(bytes: Buffer): { tag: number; end: number }[] {
+  const frames: { tag: number; end: number }[] = [];
+  let at = 0;
+  while (bytes.length - at >= 5) {
+    const end = at + 1 + bytes.readUInt32BE(at + 1);
+    if (end > bytes.length) break;
+    frames.push({ tag: bytes[at] as number, end });
+    at = end;
+  }
+  return frames;
+}
+
+describe("the connection-cut relay's frame reader", () => {
+  const frame = (tag: string, body: Buffer) => {
+    const head = Buffer.alloc(5);
+    head.write(tag, 0, "latin1");
+    head.writeUInt32BE(4 + body.length, 1);
+    return Buffer.concat([head, body]);
+  };
+  const ready = frame("Z", Buffer.from("I", "latin1"));
+  // A CommandComplete whose text holds a "Z" byte.
+  const complete = frame("C", Buffer.from("SET Z\0", "latin1"));
+
+  it("waits for the rest of a ReadyForQuery split right after its tag", () => {
+    const bytes = Buffer.concat([complete, ready]);
+    const cut = complete.length + 1;
+    expect(backendFrames(bytes.subarray(0, cut)).map((f) => f.tag)).toEqual([0x43]);
+    expect(backendFrames(bytes).map((f) => f.tag)).toEqual([0x43, readyForQuery]);
+    expect(backendFrames(bytes).at(-1)?.end).toBe(bytes.length);
+  });
+
+  it("does not read a 0x5a byte inside another frame as ReadyForQuery", () => {
+    expect(complete.includes(readyForQuery)).toBe(true);
+    expect(backendFrames(complete).map((f) => f.tag)).toEqual([0x43]);
+  });
+});
+
 describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
   it("applies every migration once, then is a no-op, and the app role can read", async () => {
     const first = await migrate(url as string);
@@ -500,21 +545,32 @@ describe.skipIf(!url)("no-transaction files on a scratch database", () => {
         tail = seen.slice(-(marker.length - 1));
         upstream.write(chunk);
       });
+      // Forward only whole backend frames, so the cut lands right after a
+      // complete ReadyForQuery and never inside a frame or on a stray 0x5a.
+      let pending = Buffer.alloc(0);
       upstream.on("data", (chunk) => {
-        // 0x5a is ReadyForQuery: the SET is done and the session is idle.
-        if (armed && cuts === 0 && chunk.includes(0x5a)) {
-          cuts++;
-          client.end(chunk);
-          upstream.destroy();
-          return;
+        pending = Buffer.concat([pending, chunk]);
+        let sent = 0;
+        for (const frame of backendFrames(pending)) {
+          // ReadyForQuery after the SET: the SET is done and the session is idle.
+          if (armed && cuts === 0 && frame.tag === readyForQuery) {
+            cuts++;
+            client.end(pending.subarray(0, frame.end));
+            upstream.destroy();
+            return;
+          }
+          sent = frame.end;
         }
-        client.write(chunk);
+        if (sent > 0) client.write(pending.subarray(0, sent));
+        pending = pending.subarray(sent);
       });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const relayed = new URL(target);
     relayed.hostname = "127.0.0.1";
     relayed.port = String((server.address() as net.AddressInfo).port);
+    // No SSLRequest: its one-byte answer is not a frame.
+    relayed.searchParams.set("sslmode", "disable");
     return {
       url: relayed.toString(),
       cuts: () => cuts,
