@@ -7425,7 +7425,7 @@
           "checkout"
         ],
         "summary": "What the guest needs to pay an open checkout, read again",
-        "description": "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token, never a URL. For an open checkout within its expiry, returns the provider payment and its client secret, so a page that reloaded, or lost the answer to opening the checkout, can still pay without sending the booker's details again. It asks the provider with the payment's own idempotency key, so it never creates a second payment, and reads the checkout again once the provider answers. Any other state answers 200 with `payment: null`, whether or not payments are configured, including a checkout that closes or lapses while it is read or while the provider answers: the body then shows the closed state. A wrong secret, another operator's checkout, and an unknown id answer the same 404, whether or not payments are configured.\n\nNever cached. Rate limited like public commands, since it may call the provider. The client secret is a capability: keep it out of URLs and logs.",
+        "description": "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token, never a URL. For an open checkout within its expiry, returns the provider payment and its client secret, so a page that reloaded, or lost the answer to opening the checkout, can still pay without sending the booker's details again. It asks the provider with the payment's own idempotency key, so it never creates a second payment, and reads the checkout again once the provider answers. Any other state answers 200 with `payment: null`, whether or not payments are configured, including a checkout that closes or lapses while it is read or while the provider answers: the body then shows the closed state. A wrong secret, another operator's checkout, and an unknown id answer the same 404, whether or not payments are configured.\n\nNever cached. Rate limited like public commands, since it may call the provider. The client secret is a capability: keep it out of URLs and logs.\n\nUnder the Stripe provider the payment also carries `stripe`: the platform's test-mode publishable key and the connected account the payment was created on, which Stripe.js needs to mount the card-only Payment Element. Only this read returns them. Without a valid test-mode publishable key in local, preview, or staging, an open checkout answers 503 `payments_unavailable` before the provider is asked.",
         "security": [
           {
             "checkoutSecret": []
@@ -7581,6 +7581,26 @@
                         "clientSecret": {
                           "type": "string",
                           "description": "What the guest's browser passes to the provider to pay. Not stored by TideGrid; keep it out of URLs and logs"
+                        },
+                        "stripe": {
+                          "type": "object",
+                          "properties": {
+                            "publishableKey": {
+                              "type": "string",
+                              "pattern": "^pk_test_[A-Za-z0-9]{24,247}$",
+                              "description": "The platform's Stripe publishable key, test mode only"
+                            },
+                            "account": {
+                              "type": "string",
+                              "pattern": "^acct_[A-Za-z0-9]{1,64}$",
+                              "description": "The operator's connected account the payment was created on"
+                            }
+                          },
+                          "required": [
+                            "publishableKey",
+                            "account"
+                          ],
+                          "description": "Present only when the provider is stripe: what the browser mounts the card form with"
                         }
                       },
                       "required": [
@@ -7703,7 +7723,7 @@
             }
           },
           "503": {
-            "description": "For an open checkout only: payments are not configured (payments_unavailable), or the provider did not answer (payment_provider_unavailable); read again later",
+            "description": "For an open checkout only: payments are not configured, or under Stripe the card form is not (payments_unavailable), or the provider did not answer (payment_provider_unavailable); read again later",
             "content": {
               "application/json": {
                 "schema": {
