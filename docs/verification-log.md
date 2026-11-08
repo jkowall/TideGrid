@@ -13,6 +13,8 @@ Owners and booking staff now see a tenant's failed email in one place: a new con
 - **Security review.** Accept, no findings: role gating, tenant isolation, no recipient exposure, and the read limits.
 - **UI review.** The ui-reviewer needs a desktop browser pane this cloud session does not have. A new console browser spec covers 375 px and 1280 px: loading, populated, error, empty, keyboard reach, and the finance refusal. Its first run is this pull request's CI.
 - **Recheck.** Accept, with this entry.
+- **Pull request CI.** The new console spec failed on its first run: each address gets five sign-in links per 15 minutes, and the spec pushed one booking staff address to eight sign-ins a run, so three tests waited for a link that never came. The spec now signs in as its own booking staff, Eve Desk, added by the console preparation step. The whole console suite went from 3 failed, 15 passed to 18 passed, locally and in a recheck. Every address now uses four of its five links a run; a future spec needs its own identity.
+- **Pull request review.** The client now refuses a negative attempt count, with a test that failed first. The route also sets no-store before its handler runs; refusals already carried it, and integration assertions show that.
 - **Telemetry.** About three hours of agent time across build, two reviews, and one fix round. Token use and cost per checkpoint: missing.
 
 ### Stage 0 commercial requirements draft (W1-COMM-REQ), written November 8, 2026

@@ -199,6 +199,7 @@ function isEmailException(e: Partial<EmailException> | null | undefined): boolea
     exceptionKinds.has(e.kind as string) &&
     exceptionStates.has(e.state as string) &&
     Number.isSafeInteger(e.attempts) &&
+    (e.attempts as number) >= 0 &&
     isString(e.failureCode) &&
     isInstant(e.failedAt) &&
     typeof e.staffResend === "boolean" &&

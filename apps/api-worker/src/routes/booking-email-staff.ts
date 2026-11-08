@@ -228,6 +228,8 @@ export function registerBookingEmailStaffRoutes(app: OpenAPIHono<AppEnv>, deps: 
  */
 function registerEmailExceptionsRoute(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
   app.use("/v1/staff/tenants/:tenantId/email-exceptions", async (c, next) => {
+    // Before and after: every answer, refusals included, is never cached.
+    c.header("Cache-Control", "no-store");
     await next();
     c.header("Cache-Control", "no-store");
   });
