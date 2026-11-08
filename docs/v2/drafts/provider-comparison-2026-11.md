@@ -42,7 +42,7 @@ Pilot scale assumed throughout: three operators, fewer than 50 staff users in to
 
 **The perimeter.** Cloudflare Access Free covers up to 50 users at $0; pay-as-you-go is $7 per user a month. Zero Trust log retention is up to 24 hours on Free and up to 30 days on pay-as-you-go ([Cloudflare Access](https://www.cloudflare.com/sase/products/access/)). Three pilot operators fit under 50 users. The short log window on Free is a reason to keep the sign-in audit in the application and the identity provider, not in Access.
 
-**Recommended default: WorkOS AuthKit behind Cloudflare Access Free, $0.** It is the only option of the three with MFA included at $0, and its free ceiling is far above pilot size. Before choosing, read the WorkOS trust center for its hosting region and deletion process. Cognito is the fallback if a US region must be guaranteed in writing, at the same $0 cost but with more setup work.
+**Recommended default: WorkOS AuthKit behind Cloudflare Access Free, $0.** WorkOS and Cognito both meet the MFA need at $0 at pilot size (Cognito's separate SNS charge applies only to SMS codes, not authenticator apps). WorkOS is preferred for its simpler hosted sign-in and its free ceiling far above pilot size; Auth0 needs a $35 plan for MFA. Before choosing, read the WorkOS trust center for its hosting region and deletion process. Cognito is the fallback if a US region must be guaranteed in writing, at the same $0 cost with authenticator-app MFA, but with more setup work.
 
 ## 2. Transactional email
 
