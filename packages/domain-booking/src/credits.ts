@@ -5,7 +5,7 @@
  * email a booking was made with, lower case, as checkout stores it: one
  * account per customer per operator.
  *
- * The ledger lives in PostgreSQL (migration 0024): every entry is checked
+ * The ledger lives in PostgreSQL (migration 0026): every entry is checked
  * against what it claims, the balance moves only through entries, under the
  * account's row lock, and never goes below zero. Every command carries an
  * idempotency key, so a repeated command finds its first entry instead of

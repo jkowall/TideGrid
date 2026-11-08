@@ -222,6 +222,18 @@ describe("tax rate and promotion validation", () => {
     expect(validateTaxRate({ name: "", ratePpm: 1, inclusive: true })).toEqual(["invalid_name"]);
   });
 
+  it("takes no location, null, or a well-formed location id (W3-G2.5-TAX)", () => {
+    const rate = { name: "City tax", ratePpm: 25_000, inclusive: false };
+    expect(validateTaxRate(rate)).toEqual([]);
+    expect(validateTaxRate({ ...rate, locationId: null })).toEqual([]);
+    expect(
+      validateTaxRate({ ...rate, locationId: "6f1c2d3e-4a5b-4c6d-8e7f-901234567890" }),
+    ).toEqual([]);
+    for (const locationId of ["", "dock-a", "6F1C2D3E-4A5B-4C6D-8E7F-901234567890"]) {
+      expect(validateTaxRate({ ...rate, locationId })).toEqual(["invalid_location"]);
+    }
+  });
+
   it("bounds a discount, orders its window, and lists real products", () => {
     const base = {
       discount: { kind: "percent" as const, percentOffBp: 1000 },

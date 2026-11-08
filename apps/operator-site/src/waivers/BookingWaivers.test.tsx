@@ -42,6 +42,7 @@ function participant(
         message: { state: "sent", at: "2026-10-06T14:00:05.000Z", failureCode: null },
       },
       resendAvailableAt: "2026-10-06T14:10:00.000Z",
+      reminders: { sent: [], next: null },
       ...overrides,
     },
   };
@@ -123,6 +124,96 @@ describe("a booking's waivers", () => {
       expect(badge.querySelector("svg")).not.toBeNull();
       expect(badge.textContent?.trim().length).toBeGreaterThan(0);
     }
+  });
+
+  it("shows the reminder sent and the next one, and nothing for a signed waiver", async () => {
+    const reminded: BookingWaivers = {
+      ...waivers,
+      participants: [
+        waivers.participants[0] as ParticipantWaiver,
+        participant(
+          "Ben Waiting",
+          "waiting",
+          {
+            reminders: {
+              sent: [
+                {
+                  slot: "72h",
+                  queuedAt: "2026-10-07T13:00:00.000Z",
+                  state: "sent",
+                  at: "2026-10-07T13:05:00.000Z",
+                },
+              ],
+              next: { slot: "24h", at: "2026-10-09T13:00:00.000Z" },
+            },
+          },
+          2,
+        ),
+      ],
+    };
+    stubApi(() => json(200, { waivers: reminded }));
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={bookingStaff}
+        timeZone="America/New_York"
+      />,
+    );
+    const ben = await screen.findByText(
+      /^Reminder emailed .* \(3 days before\)\. Next reminder .* \(1 day before\)\.$/,
+    );
+    expect(ben).toBeTruthy();
+    expect(screen.getAllByText(/Reminder/)).toHaveLength(1);
+  });
+
+  it("says no more reminders only once no email is on its way", async () => {
+    const lastSent = {
+      sent: [
+        {
+          slot: "24h" as const,
+          queuedAt: "2026-10-08T13:00:00.000Z",
+          state: "sent" as const,
+          at: "2026-10-08T13:05:00.000Z",
+        },
+      ],
+      next: null,
+    };
+    const resending = participant(
+      "Ria Resent",
+      "waiting",
+      {
+        reminders: lastSent,
+        delivery: {
+          generation: 2,
+          kind: "resend",
+          recipient: "r•••@example.test",
+          queuedAt: "2026-10-08T15:00:00.000Z",
+          sendAfter: "2026-10-08T15:00:00.000Z",
+          message: { state: "queued", at: null, failureCode: null },
+        },
+      },
+      2,
+    );
+    const settled = participant("Sol Settled", "waiting", { reminders: lastSent }, 3);
+    stubApi(() =>
+      json(200, {
+        waivers: { ...waivers, participants: [resending, settled] },
+      }),
+    );
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={bookingStaff}
+        timeZone="America/New_York"
+      />,
+    );
+    const items = await screen.findAllByRole("listitem");
+    expect(within(items[0] as HTMLElement).queryByText(/No more reminders/)).toBeNull();
+    expect(
+      within(items[1] as HTMLElement).getByText(/No more reminders before the trip/),
+    ).toBeTruthy();
   });
 
   it("sends a request again with a reason and a key, and reloads", async () => {

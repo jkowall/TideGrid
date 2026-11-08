@@ -699,6 +699,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         finalization_exception_resolutions: ["INSERT", "SELECT"],
         // Staff-assisted waiver signing (0020): append-only, no UPDATE columns.
         waiver_assisted_links: ["INSERT", "SELECT"],
+        // Waiver reminders (0025).
+        waiver_reminders: ["INSERT", "SELECT"],
         // Email events (0021, W1-EMAIL-EVENTS): the inbox is append-only; the
         // unmatched events are a platform table reached through a function.
         email_events: ["INSERT", "SELECT"],
@@ -707,7 +709,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // takes its replay reason once.
         outbox_deliveries: ["INSERT", "SELECT"],
         outbox_dead_letters: ["INSERT", "SELECT"],
-        // Refunds and credits (0024, W3-G2.9): the ledgers are append-only;
+        // Refunds and credits (0026, W3-G2.9): the ledgers are append-only;
         // a credit account's balance is kept by its definer trigger.
         credit_accounts: ["INSERT", "SELECT"],
         credit_entries: ["INSERT", "SELECT"],
@@ -770,7 +772,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // delivery columns; a replay sets its reason.
         outbox_events: ["attempts", "available_at", "delivered_at", "last_error", "published_at"],
         outbox_dead_letters: ["replay_reason"],
-        // Refunds and credits (0024): a payment cancellation records its answer once.
+        // Refunds and credits (0026): a payment cancellation records its answer once.
         payment_cancellations: ["outcome_code", "state"],
       });
       const [identity] = await admin`

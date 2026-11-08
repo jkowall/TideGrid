@@ -60,6 +60,18 @@ export {
 export { bookingParticipantDirectory, defaultWaiverDeps } from "./participants.ts";
 export type { ParticipantDirectory, WaiverDeps, WaiverParticipant } from "./ports.ts";
 export {
+  dueSlot,
+  REMINDER_CUTOFF_HOURS,
+  REMINDER_SLOTS,
+  type ReminderResult,
+  type ReminderSweepOptions,
+  type ReminderSweepReport,
+  remindWaiverRequest,
+  sweepWaiverReminders,
+  WAIVER_REMINDER_TEMPLATE,
+  WAIVER_REMINDER_VERSION,
+} from "./reminders.ts";
+export {
   maskEmail,
   RENDERING_VERSION,
   renderWaiverPdf,

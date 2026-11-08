@@ -3,7 +3,7 @@ import { createFakeHostnameProvider } from "@tidegrid/domain-hostnames";
 import { describe, expect, it, vi } from "vitest";
 import { runScheduled } from "../src/scheduled.ts";
 
-// The four sweeps report full reports with distinct counts, and each meets
+// The five sweeps report full reports with distinct counts, and each meets
 // one failed stamp, as the domain contract reports it: to onStampError, or to
 // onTenantError without it (hold, email, hostname), and as item "stamp" to the
 // checkout sweep's onError. No job touches the network.
@@ -89,6 +89,23 @@ vi.mock("@tidegrid/domain-messaging", async (importOriginal) => ({
     };
   }),
 }));
+vi.mock("@tidegrid/domain-waivers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tidegrid/domain-waivers")>()),
+  sweepWaiverReminders: vi.fn(async (_db, options) => {
+    options.onStampError?.("reminder-tenant", new Error("stamp"));
+    return {
+      tenants: 9,
+      queued: 2,
+      skipped: 1,
+      failedTenants: 0,
+      complete: false,
+      turns: 51,
+      passes: 52,
+      deferredTenants: 53,
+      stampFailures: 54,
+    };
+  }),
+}));
 vi.mock("@tidegrid/domain-hostnames", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tidegrid/domain-hostnames")>()),
   sweepHostnames: vi.fn(async (_db, options) => {
@@ -147,6 +164,7 @@ describe("sweep logs (pre-pilot hardening, Part E)", () => {
       ["checkout", "checkout-tenant"],
       ["email", "email-tenant"],
       ["hostname", "hostname-tenant"],
+      ["waiver_reminder", "reminder-tenant"],
     ]) {
       expect(line(logged, `${job}_sweep_stamp_failed`)).toMatchObject({
         level: "error",
@@ -179,6 +197,12 @@ describe("sweep logs (pre-pilot hardening, Part E)", () => {
       "tidegrid.email_sweep.deferred_tenant_count": 33,
       "tidegrid.email_sweep.stamp_failure_count": 34,
       "tidegrid.email_sweep.account_fault": false,
+    });
+    expect(line(logged, "waiver_reminder_sweep")).toMatchObject({
+      "tidegrid.waiver_reminder_sweep.turn_count": 51,
+      "tidegrid.waiver_reminder_sweep.pass_count": 52,
+      "tidegrid.waiver_reminder_sweep.deferred_tenant_count": 53,
+      "tidegrid.waiver_reminder_sweep.stamp_failure_count": 54,
     });
     expect(line(logged, "hostname_sweep")).toMatchObject({
       "tidegrid.hostname_sweep.turn_count": 41,
