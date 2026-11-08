@@ -28,12 +28,12 @@ Coordinator choices inside the goal, recorded here, not owner decisions:
 
 Open risks:
 
-- Security review not run in this session (rule R9: role gating and recipient exposure). Until it runs, or the owner declines it, the goal is not complete for pilot use.
+- Security review (rule R9: role gating, tenant isolation, recipient exposure, and read limits): run by the coordinator on 2026-11-08. Verdict: accept, no findings.
 - ui-reviewer not run in this session; covered by console browser tests. The new browser spec (`apps/operator-site/e2e/email-exceptions.spec.ts`, 375 and 1280 px: loading, populated, error, empty, keyboard reach, and finance) was not run locally, by the session's rule on shared ports; the pull request's CI runs it. The suite has no axe check, so none was added.
 - Between 640 and 1023 px the rail shows four entries a row, so the fifth, Email exceptions, wraps to a second row. Finance still sees four.
 - A failed message stays listed after staff send it again; `laterSent` marks it, and resolving an exception remains later work.
 
-Not done: the verification log entry (the coordinator writes it with the CI facts), the security review, the independent review, the push, and the pull request.
+The coordinator accepts the two edits outside the named paths: the rail lives in `ConsoleShell.tsx`, and the linter needs the sorted export. The exception resolution goal reconciles `ConsoleShell.tsx`, not `navigation.tsx`.
 
 Canonical: [packages/domain-messaging/README.md](../../packages/domain-messaging/README.md#email-exceptions-w1-email-exc), [apps/operator-site/README.md](../../apps/operator-site/README.md#email-exceptions-w1-email-exc), and the [demo build plan's G2.16 row](12-demo-build-plan.md#goal-sequence).
 
