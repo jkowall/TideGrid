@@ -224,7 +224,7 @@ nov1 smoke --profile preview --base https://api.tidegrid.us \
 
 Rules for the day apply. Run after 03:00 ET (Nov 1 is the end of US DST). Leave 61 s between suites on the same tenant: the public limiter allows 30 commands per 60 s per address per tenant (`apps/api-worker/wrangler.jsonc:66-70`). Quotes, checkouts, checkout cancels, manage commands, and fake pays all count. Every booker and participant is a synthetic `.test` address, so the P6 mail later fails as `recipient_not_allowed` with no provider call (12:199).
 
-Before steps 5 and 7, go/no-go: **D4**. Prompt: *"Add the D4 address to the Access policy for console.tidegrid.us (an account change)? Go / no-go."* Then one headed one-time-PIN sign-in as the D4 identity, saving the storage state to `$NOV1_PRIVATE_DIR/access-state.json` with mode 0600.
+Before steps 5 and 7, go/no-go: **D4**. Prompt: *"Add the D4 address to the Access policy for console.tidegrid.us (an account change)? Go / no-go."* Then one headed one-time-PIN sign-in as the D4 identity, saving the storage state to `$NOV1_PRIVATE_DIR/access-state.json` with mode 0600. Update, 2026-11-08: the console's Access application offered only Cloudflare account sign-in, not one-time PIN, and the headed `playwright open` window did not complete a sign-in. Proposed, pending the owner's confirmation: before this step the owner adds one-time PIN to the application's login methods, its own go, and signs in as the D4 address, not the owner's own, or the console suite sees two operators and fails ([verification log](../verification-log.md#o-access-the-d4-a-run-steps-5-and-7-not-shown-november-8-2026)).
 
 | Step | Command (proposed) | Pass evidence |
 |---|---|---|
@@ -375,12 +375,12 @@ None goes to an agent. The owner supplies each in the owner's own terminal or th
 | Neon allowance reset, with its UTC time | P1 | Nov 1 | unknown (update, 2026-11-08: read by the coordinator in the Neon console, with the owner signed in. The date and UTC time are not shown. The projects list says "Usage since Nov 1, 2026"; the project overview says "Since Oct 31, 2026" ([verification log](../verification-log.md#neon-consumption-read-november-8-2026))) |
 | Free-plan history window and branch limits | P2.2 | Nov 1 | unknown (update, 2026-11-08: read by the coordinator in the Neon console, with the owner signed in: a 6-hour history window (the plan offers 0, 1, 2, or 6 hours); 10 branches per project, 1 in use ([verification log](../verification-log.md#neon-consumption-read-november-8-2026))) |
 | `NEON_DATABASE_URL`, `NEON_API_KEY`, `NEON_PROJECT_ID` in the owner's shell | P2 | Nov 1 | in the env file (not read) |
-| `SEED_OWNER_EMAILS`, `SEED_SINGLE_TENANT_OWNER`, `SEED_OWNER_DISPLAY_NAME` | P2.4, D4 | Nov 1 | not supplied; the seed ran under D4(c) with none |
-| The D4 address added to the Access policy | P6 | before step 5 | account change, its own go |
+| `SEED_OWNER_EMAILS`, `SEED_SINGLE_TENANT_OWNER`, `SEED_OWNER_DISPLAY_NAME` | P2.4, D4 | Nov 1 | not supplied; the seed ran under D4(c) with none (update, 2026-11-08: the owner ran an A1 seed under D4(a) with `SEED_SINGLE_TENANT_OWNER` (demo-harbor) and `SEED_OWNER_DISPLAY_NAME` `Harbor Desk Owner`, and does not know the address used; *coordinator-reported*, output not seen) |
+| The D4 address added to the Access policy | P6 | before step 5 | account change, its own go (update, 2026-11-08: the owner's step in the D4 (a) run; not read back) |
 | `FAKE_PAYMENT_WEBHOOK_SECRET`, generated and piped | P3.3 | Nov 1 | put at P3.3; the fake was turned off after P9 (D3(a)); a new value was put on 2026-11-06 under A2 |
 | Gates A0 to A19, each at the time | each phase | Nov 1 | A0 to A5, A10 to A14, and A19 run on the coordinator's reading, ratified 2026-11-05; A19 and A2 again on 2026-11-06; A6 to A9 and A15 to A18 not run (P7 and P10) |
 | A wrangler OAuth login with Workers deploy rights | P3, P4 | Nov 1 | used for past deploys |
-| A one-time-PIN sign-in as the D4 identity, saved to `$NOV1_PRIVATE_DIR` | P6 steps 5 and 7 | Nov 1 | pending |
+| A one-time-PIN sign-in as the D4 identity, saved to `$NOV1_PRIVATE_DIR` | P6 steps 5 and 7 | Nov 1 | pending (update, 2026-11-08: not done; the console's Access login page offered no one-time PIN; the D4 (a) run closed without it, [verification log](../verification-log.md#o-access-the-d4-a-run-steps-5-and-7-not-shown-november-8-2026)) |
 | Workers Paid | P7 | before P7 | observed yes |
 | The sender address, the DMARC `rua` mailbox, the dashboard settings | P7 | before P7 | pending |
 | `EMAIL_ALLOWED_RECIPIENTS`, the exact list | P7 | before P7 | pending |
