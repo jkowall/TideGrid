@@ -31,6 +31,7 @@ A completed worksheet is a discussion aid. It is not a quote, an offer, an invoi
 | Active boats | | boats |
 | Booking Core self-setup | Yes | |
 | Managed Launch requested | | yes or no |
+| Estimated TideGrid Managed Launch labor, if requested | | hours |
 | Native add-on requested | | yes or no |
 | Estimated customer-specific Native delivery, if requested | | hours |
 | Estimated Native direct cost, if requested | | USD |
@@ -152,13 +153,15 @@ The commercial model defines the Native setup credit only against the $4,500 ban
 |---|---|---|
 | Custom quote | Any trigger in Custom work needs a custom quote: average monthly N above $100,000; five or more active boats; more than one location, brand, legal operator, or native app pair; non-US entities, currencies, taxes, or payment methods; enterprise security, procurement, support, or service-level terms; or requirements outside the published V2 product scope. Do not show this worksheet's price. | [Custom work](../v2/03-commercial-model.md#pass-through-costs-and-custom-work) |
 | Native setup band | Estimate customer-specific delivery hours and direct cost before showing a Native price. Up to 22 hours with direct cost below $500 is $4,500; 23 to 40 hours is $7,500. Above 40 hours, or a prospect expected to cross a band, needs a quote or a signed change order. Do not show this worksheet's price. The $4,500 band is provisional. | [Native setup](../v2/03-commercial-model.md#native-setup) |
+| Native setup margin | Every band targets at least 40% setup gross margin: (setup price - loaded labor - direct cost) / setup price, before any pilot credit, at the model's illustrative $100 loaded hourly cost unless a measured cost replaces it. Below 40%, refer the case to the owner before showing a price. | [Native setup](../v2/03-commercial-model.md#native-setup) |
+| Managed Launch scope | The $1,000 price covers up to eight TideGrid labor hours for one operator, one brand, and one location, with the standard contents only. Above eight hours, or with data repair, repeated imports, custom reports, on-site work, or provider remediation, it needs a written custom quote first. Five to eight hours is allowed only inside the three-customer pilot. Otherwise narrow the scope or quote it. | [Managed Launch](../v2/03-commercial-model.md#managed-launch) |
 | Direct-first share | At least 80% of trailing booking count through direct or staff-assisted channels. Use counts from Step 1, not value. | [Direct-first profile](operator-validation-guide.md#direct-first-discovery-profile) |
 | Native fit | Average monthly N of at least $25,000 for a pilot Native learning case. Standard Native sales target about $50,000 or more. | [Native pilot qualification](operator-validation-guide.md#native-pilot-qualification) |
 | Fee base explained | The prospect can restate which channels and values count, and that externally paid bookings managed in TideGrid count. | [Price reveal](operator-validation-guide.md#039-to-043-price-reveal-and-commitment-tests) |
 
 ## Example A: synthetic dive shop
 
-All values are synthetic. Trailing 12 months. Three active boats. Requests Booking Core, Native, and Managed Launch. Assumed to qualify for the Pilot Native offer. Native delivery is estimated at 18 customer-specific hours and $300 of direct cost, inside the $4,500 band.
+All values are synthetic. Trailing 12 months. Three active boats. Requests Booking Core, Native, and Managed Launch. Assumed to qualify for the Pilot Native offer. Native delivery is estimated at 18 customer-specific hours and $300 of direct cost, inside the $4,500 band. Managed Launch is estimated at six TideGrid hours.
 
 ### A1. Channel mix
 
@@ -228,11 +231,13 @@ The annual recurring price, $13,338.50, is the same with or without the pilot cr
 - Custom quote: not needed. Average monthly N is $27,916.67, below $100,000, with three active boats. Assumed: one US location and no other Custom work trigger.
 - Direct-first share by count: 3,350 / 3,950 = 84.8%. OTA is 600 / 3,950 = 15.2%. Passes the 80% rule.
 - Native setup band: 18 hours and $300 of direct cost, inside the $4,500 band.
+- Native setup margin: (4,500 - 18 x 100 - 300) / 4,500 = 2,400 / 4,500 = 53.3%, above 40%.
+- Managed Launch scope: six hours, inside the eight-hour ceiling. Five to eight hours is allowed because this is a pilot operator.
 - Native fit: average monthly N of $27,916.67 meets the $25,000 pilot learning-case floor. It is below the about-$50,000 standard Native target, so it fits only as a pilot learning case with an evidenced repeat-use reason.
 
 ## Example B: synthetic private charter
 
-All values are synthetic. Trailing 12 months, with trips in seven months. One active boat. Requests Booking Core and Managed Launch. No Native add-on.
+All values are synthetic. Trailing 12 months, with trips in seven months. One active boat. Requests Booking Core and Managed Launch, estimated at three TideGrid hours. No Native add-on.
 
 ### B1. Channel mix
 
@@ -300,6 +305,7 @@ No pilot credit applies. The Pilot Native offer requires the Native add-on, and 
 
 - Custom quote: not needed. Average monthly N is $5,833.33 with one active boat. Assumed: one US location and no other Custom work trigger.
 - Direct-first share by count: 71 / 77 = 92.2%. OTA is 6 / 77 = 7.8%. Passes the 80% rule.
+- Managed Launch scope: three hours, within four, so no pilot exception is needed.
 - Native fit: average monthly N of $5,833.33 is below the $25,000 pilot learning-case floor. Do not offer Native from this worksheet.
 
 ## Pending before use
