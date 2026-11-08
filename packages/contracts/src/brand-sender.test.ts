@@ -271,6 +271,22 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     expect(accepts({ name }), name).toBe(false);
   });
 
+  // Recheck of the pull request fix: a first word made only of digits that
+  // fold to no letter ("2", "6") is still a first word.
+  it.each([
+    "2 via Stripe",
+    "26 via PayPal",
+    "6-Via Square",
+    "(2) Via Stripe",
+    "#26 via Stripe",
+    "2 V I A Stripe",
+    "22 Via Venmo",
+  ])("refuses %s, a relay after a digit-only first word", (name) => {
+    expect(senderNameProblem(name), name).not.toBeNull();
+    expect(senderDisplayName(name), name).toBeNull();
+    expect(accepts({ name }), name).toBe(false);
+  });
+
   it("never binds a brand to a provisioned name the rule refuses (pull request review)", () => {
     expect(senderNameProblem("Billing1")).not.toBeNull();
     expect(sameSenderName("B!lling1", "Billing1")).toBe(false);

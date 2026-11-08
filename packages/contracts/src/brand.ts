@@ -738,14 +738,17 @@ interface SenderChar {
   separates: boolean;
   /** A digit, or a symbol that folds to a letter. */
   ambiguous: boolean;
+  /** An ASCII digit: word content even when it folds to no letter. */
+  digit: boolean;
 }
 
 function senderChars(name: string): SenderChar[] {
   return [...name].map((ch) => {
     const folded = foldCharacters(ch);
     const letters = /^[a-z]+$/.test(folded) ? folded : null;
-    if (/^\p{L}$/u.test(ch)) return { letters, separates: false, ambiguous: false };
-    return { letters, separates: true, ambiguous: /^[0-9]$/.test(ch) || letters !== null };
+    const digit = /^[0-9]$/.test(ch);
+    if (/^\p{L}$/u.test(ch)) return { letters, separates: false, ambiguous: false, digit };
+    return { letters, separates: true, ambiguous: digit || letters !== null, digit };
   });
 }
 
@@ -774,7 +777,9 @@ const relayWord = "via";
  */
 function namesSecondRelay(chars: SenderChar[]): boolean {
   const n = chars.length;
-  const firstLetter = chars.findIndex((c) => c.letters !== null);
+  // A digit is word content too, even one that folds to no letter ("2", "6"),
+  // so "2 via Stripe" has a first word before its relay.
+  const firstLetter = chars.findIndex((c) => c.letters !== null || c.digit);
   if (firstLetter === -1) return false;
   const maxLetters = 2 * relayWord.length;
   for (let start = firstLetter + 2; start < n; start += 1) {
