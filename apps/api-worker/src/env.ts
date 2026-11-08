@@ -104,6 +104,12 @@ export interface Bindings {
    * never returned.
    */
   STRIPE_PUBLISHABLE_KEY?: string;
+  /**
+   * The outbox queue's producer binding (W3-G2.3). Only env.test declares it
+   * today; no deployed configuration does until the queue is provisioned.
+   * Unset means the cron does not publish and events wait in PostgreSQL.
+   */
+  OUTBOX_QUEUE?: Queue;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {

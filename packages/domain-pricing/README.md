@@ -133,7 +133,7 @@ Built on 2026-11-08 under the owner's go ([decision register](../../docs/v2/06-d
 
 ## Per-location tax rates (W3-G2.5-TAX)
 
-Built on 2026-11-08 as a synthetic pull-forward, with a coordinator default in place of the CPA's answer ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w3-g25-tax-per-location-tax-rates-entered-by-each-operator-synthetic-pull-forward-coordinator-default-in-place-of-the-cpas-answer)). Not released. Migration `0023` ([database README](../database/README.md#per-location-tax-rates-0023)).
+Built on 2026-11-08 as a synthetic pull-forward, with a coordinator default in place of the CPA's answer ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w3-g25-tax-per-location-tax-rates-entered-by-each-operator-synthetic-pull-forward-coordinator-default-in-place-of-the-cpas-answer)). Not released. Migration `0024` ([database README](../database/README.md#per-location-tax-rates-0024)).
 
 - **Scope.** A tax rate version names one location (`locationId`) or none. None applies at every location, as every rate did before. A location applies the rate only to trips of products that depart there. The operator decides; TideGrid only applies what was entered.
 - **Versions.** `createTaxRate` takes an optional `locationId`. `createTaxRateVersion` restates the rate; an omitted `locationId` keeps the current version's location, `null` applies it everywhere, and another id moves it. Both refuse a malformed id, an unknown one, or another tenant's with `invalid_location`. An archived location is accepted; no trip departing it is on sale, so the rate applies to nothing until the location returns. The audit event's `after` names the location.

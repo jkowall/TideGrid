@@ -118,6 +118,29 @@
         "ALLOWED_ORIGINS": "https://guest.test,https://console.test",
         "STAFF_ORIGINS": "https://console.test",
         "PUBLIC_CORS": "dynamic"
+      },
+      // The outbox queue (W3-G2.3), local to the Workers test runtime only.
+      // No deployed configuration declares a queue until it is provisioned,
+      // so a release from main never needs one. The consumer retries up to
+      // max_retries, then the queue hands the message to its DLQ; the code
+      // records its own dead letter after five attempts (src/delivery.ts).
+      "queues": {
+        "producers": [{ "binding": "OUTBOX_QUEUE", "queue": "tidegrid-outbox-test" }],
+        "consumers": [
+          {
+            "queue": "tidegrid-outbox-test",
+            "max_batch_size": 10,
+            "max_batch_timeout": 1,
+            "max_retries": 6,
+            "dead_letter_queue": "tidegrid-outbox-test-dlq"
+          },
+          {
+            "queue": "tidegrid-outbox-test-dlq",
+            "max_batch_size": 10,
+            "max_batch_timeout": 1,
+            "max_retries": 3
+          }
+        ]
       }
     }
   }

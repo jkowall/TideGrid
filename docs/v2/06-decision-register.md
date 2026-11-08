@@ -18,7 +18,23 @@ Coordinator default, chosen by the coordinator in place of the CPA's answer, pen
 - **The location is part of the version.** Moving a rate appends a version. A version that does not name a location keeps the current one, so a scoped rate never widens to every location by accident; an explicit null applies it everywhere.
 - **One location per version.** A tax that applies at two of several docks is two rates, or one rate for every location if it applies at all of them.
 
-Migration `0023` (provisional). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0023).
+Migration `0024` (`0023` went to the delivery foundation). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0024).
+
+### 2026-11-08: Wave 3 code-only pull-forward, and W3-G2.3 delivery foundation (owner decision; coordinator defaults pending owner confirmation)
+
+The owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." This is a dated synthetic pull-forward. It waives the Validation gate and the O-VAL-2 dependency for W3-OPS-1 (plan only), W3-G2.3, W3-G2.9, W3-G2.10, and W3-G2.2b without managed OIDC and MFA. It allows no provider signup, no Cloudflare, Neon, or Stripe call, no Terraform apply, and no deploy. A new Worker binding stays out of the configuration a release deploys until its resource exists. No gate is claimed.
+
+W3-G2.3 builds the delivery foundation with migration `0023` (renumbered at merge: W1-0014-RESIDUALS took `0019`, waiver signing `0020`, and email events `0021` and `0022`) and the [database contract](../../packages/database/README.md#delivery-foundation-0023). Coordinator defaults, pending owner confirmation:
+
+- **D1: at-least-once delivery with idempotent handlers** (the goal's recommended default). A handler's outcome row commits with its writes; a duplicate skips it.
+- **D2: cleanup through an admin-owned schema app function** (the goal's recommended default). `app.delivery_cleanup` removes completed idempotency keys and unused quotes seven days past their expiry. The runtime still holds no DELETE. Quotes stay append-only for updates.
+- **D3: one Worker script, queue only in tests.** The API Worker gains a queue entry. Only `env.test` declares the queue and its DLQ. A separate async Worker deployment and the real queues wait for W3-OPS provisioning, so the next release from main deploys unchanged bindings.
+- **D4: events before 0023 are not sent.** The migration marks them published and delivered, because no consumer existed and the cron sweeps already did their work.
+- **D5: retry budget.** The consumer retries with 30 s doubling to 15 minutes and records its own dead letter on the fifth attempt. The queue's own DLQ is the backstop. A hint not delivered within 15 minutes is sent again, up to 10 accepted sends. A send the queue refused counts for nothing and waits five minutes.
+- **D6: "operator" means the TideGrid operator here.** Dead letters are visible through `outbox:dlq list` and an error log line, not in the tenant console.
+- **D7: one handler to start.** `ops_alert` logs ids for a finalization exception, a refused refund, and a failed confirmation email. New handlers come with the goals that need them.
+
+The cron sweeps stay as the backstop for the work they already do.
 
 ### 2026-11-08: W1-EMAIL-EVENTS, a local consumer for email bounces and complaints (owner pull-forward; coordinator defaults pending owner confirmation)
 

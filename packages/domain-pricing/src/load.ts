@@ -138,7 +138,7 @@ export async function loadPolicy(
  * location: the version names no location, or names this one. Ordered by
  * name and then id. Quotes keep this order for their tax lines. A rate whose
  * current version moved to another location no longer applies here, even if
- * an older version did: only the current version decides (0023).
+ * an older version did: only the current version decides (0024).
  */
 export async function loadTaxRates(
   trx: TenantTransaction,
