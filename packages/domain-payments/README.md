@@ -185,6 +185,47 @@ Recorded from the G2.7 independent review. Both are now closed by the Stripe ada
 - **Inbox provenance.** The database cannot tell where an inbox row came from; the `VerifiedProviderEvent` brand, which only an adapter's `verifyWebhook` sets, is the only guard on what reaches `recordProviderEvent`. The [checkout contract](../domain-booking/README.md#the-rule) says so too. Closed by `provenance.test.ts`: it scans `apps/`, `packages/`, and `tools/` and fails on any use of the minting function or a cast to the brand outside `adapter.ts` and the `verifyWebhook` bodies of the fake and Stripe adapters, on any relative import into this package's source from outside it, and on any runtime import of the Stripe fixture, by package path or by relative path inside the package. It also catches the cast-free forgeries the compiler allows when they name the type: an object literal, a parse, or an `any` value given the type, `satisfies`, and a function typed to return the brand that returns a literal. An unannotated spread of a real verified event keeps the brand and is not caught by a text scan; a runtime brand checked by the inbox would close it, and is a proposed follow-up. A guard inside the database would still need the signing secret there, or a separate inbox-writer role; both remain outside the demo.
 - **Stripe retries can change the body.** Stripe signs every delivery afresh, and `pending_webhooks` falls as other endpoints succeed ([the event object](https://docs.stripe.com/api/events/object)), so two deliveries of one event need not be byte for byte the same. With a raw-body hash such a retry would read as `samePayload: false` and stop at `payload_mismatch`. Closed by the canonical projection hash above (D2): a redelivery hashes the same, so the inbox records it as the same payload. Stripe also says it sometimes sends two separate events for one change; processing is already idempotent per payment (`already_succeeded`, `already_failed`), so a second event id for the same outcome changes nothing.
 
+## Stripe webhook ingress (proposed, W1-STRIPE-WEBHOOK)
+
+Coordinator defaults of 2026-11-08, pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-stripe-webhook-stripe-webhook-quick-2xx-and-source-address-list-owner-go-coordinator-defaults-pending-owner-confirmation)). They apply under `PAYMENT_PROVIDER=stripe` only, which no deployed configuration sets. For Stripe they replace two items under [Known risks](#known-risks-recorded-for-the-live-step): "Inline processing" and "Signature only". The fake's path is unchanged: no address check, and processing before the answer, so the shim replay evidence stands.
+
+The route's order of work under Stripe (`apps/api-worker/src/routes/payment-webhooks.ts`):
+
+1. A browser Origin answers 403 `origin_not_allowed`, and another provider's path 404, as before.
+2. **Source address (D2, D3).** The client address is `CF-Connecting-IP`, which Cloudflare sets at its edge and overwrites. `X-Forwarded-For`, `X-Real-IP`, and every other header are never read. An address that is not exactly on the list, or a missing one, answers 403 `source_not_allowed` before the body is read. It logs `payment_webhook_source_refused` at warn, with `error.type` `source_address_missing` or `source_address_not_listed`. The log never carries the address.
+3. The size cap and the signature, as before. A bad signature from a listed address answers 400 `signature_invalid`, and nothing is recorded.
+4. **Record.** The account is resolved, and the event is recorded in its tenant's inbox in one transaction, the same steps `handleVerifiedEvent` takes. An unknown account, a changed body, and an event already processed answer as before.
+5. **Answer (D1).** A new event, or a redelivery of one still received, answers 200 `{ received: true, duplicate, outcome: "received" }`. The log `payment_webhook_recorded` carries `duration_ms` from receipt to the answer.
+6. **Process after the answer,** through `waitUntil`, on a database connection of its own. `tryLockInboxEvent` takes the row with `skip locked`, so it never waits on a sweep or another delivery that holds it, and a row already processed is left alone. Then `processProviderEvent`, then any refund through `settleRefund`, then, for a confirmed booking, the confirmation email, with the after-commit window counted from before the answer. The `payment_webhook` log carries `duration_ms` from receipt to the processing commit: the time to confirmation.
+7. **Backstop.** A failure logs `payment_webhook_processing_failed` and leaves the event received. The checkout sweep processes it on its next run, after its 60 s grace. Stripe's next retry processes it too, because a redelivery of a received event schedules processing again. Processing is idempotent per event and per payment, so replays and duplicates confirm a booking once.
+
+### The address list
+
+`src/stripe-webhook-ips.ts` holds `STRIPE_WEBHOOK_IPS`, a frozen list of IPv4 addresses. `isStripeWebhookIp` matches exactly: no trimming, no lists, no ranges, and no IPv4-mapped IPv6. `STRIPE_WEBHOOK_IPS_VERSION` is the date the list was last compared with Stripe's file, and `STRIPE_WEBHOOK_IPS_VERIFIED` says whether that comparison ran. Nothing fetches the list at runtime.
+
+Version `2026-11-08` is **unverified**. Stripe's file (`STRIPE_WEBHOOK_IPS_SOURCE`) could not be read from the build container that day, because the network policy refused the host. The twelve addresses are the list as the coordinator knew it on that date. The owner verifies it with the check step below before any Stripe-live window.
+
+### Refreshing the list (the check step)
+
+1. Save Stripe's file outside the repository: `curl -sS https://stripe.com/files/ips/ips_webhooks.json -o <folder outside the repo>/ips_webhooks.json`. Compare it with the webhook section of [Stripe's IP addresses page](https://docs.stripe.com/ips) too.
+2. Run `STRIPE_WEBHOOK_IPS_FILE=<that file> pnpm --filter @tidegrid/domain-payments test stripe-webhook-ips`. Its last case compares the copy with the committed list and fails with `missing` (published, not committed) and `extra` (committed, no longer published). Without the variable that case is skipped.
+3. If they differ, change `STRIPE_WEBHOOK_IPS`. Either way, set `STRIPE_WEBHOOK_IPS_VERSION` to the date and `STRIPE_WEBHOOK_IPS_VERIFIED` to `true`, rerun step 2, and open a reviewed pull request with the step 2 output.
+4. Run it before each Stripe-live window, and when Stripe announces a change. A new Stripe address that is not on the list makes deliveries fail with 403. Stripe's dashboard shows them as failed, and Stripe retries them; the warn log shows `source_address_not_listed`.
+
+### Measured
+
+The integration suite's timing case, 8 deliveries in one process against the local PostgreSQL 17 container on 2026-11-08: the 200 in a median of 17.3 ms (max 20.3 ms), and every background task, confirmation included, done in a median of 106.9 ms (max 116.6 ms). The second figure includes closing the request's connection. No network, Hyperdrive, or Neon is in the path, so these are not deployed figures. Deployed timing is unmeasured while Stripe is off; the two `duration_ms` logs measure it once a window runs.
+
+### Risks and limits
+
+- **The list is unverified** until the owner runs the check step.
+- **IPv4 only.** A Stripe delivery over IPv6, or from an address Stripe adds before the list is refreshed, is refused with 403 and retried by Stripe.
+- **Local forwarding is refused.** The Stripe CLI's `stripe listen` forwards from a local address, so it gets 403 under Stripe. If the owner approves the CLI for a replay, that needs a proposed follow-up, never a bypass in the route.
+- **The `waitUntil` budget.** Processing, any refund, and the email share the 30 s after the answer. A cut transaction rolls back and the event stays received; a cut refund stays requested for the sweep; the email keeps its own deadline.
+- **Two connections** per new Stripe event: the request's, and the background task's.
+- **Duplicated steps.** The route repeats `handleVerifiedEvent`'s account, record, and duplicate steps, because `packages/domain-booking` was read-only for this goal. Splitting that function into a record step and a process step is a proposed follow-up and a contract change.
+- **Tests.** `stripe-webhook-ips.test.ts` covers the list and the check step. `apps/api-worker/test-integration/stripe-webhook.integration.test.ts` covers the answer before processing, a crash after the 200 recovered by the sweep and by a retry, concurrent and later duplicates, the address cases, a bad signature, the email, and the timing. `apps/api-worker/test/stripe-settings.test.ts` covers the 403 before any database in the Workers runtime.
+
 ## Tests
 
 - `pnpm --filter @tidegrid/domain-payments test` runs the unit tests, none of which touch a database or the network: signatures, the fake's parsing, the Stripe adapter over its fixture (`stripe.test.ts`, `stripe-webhook.test.ts`), the shared provider contract against Stripe (`stripe.contract.test.ts`), the brand and import guards (`provenance.test.ts`), and the fixture scrub guard (`stripe-fixture-hygiene.test.ts`). Every Stripe test replaces the global `fetch` with one that fails the test if it is reached.

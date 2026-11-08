@@ -8,6 +8,27 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-STRIPE-WEBHOOK, Stripe webhook quick 2xx and source address list (owner go; coordinator defaults pending owner confirmation)
+
+The demo build plan's [Stripe adapter narrowing](12-demo-build-plan.md#goal-sequence) left two proposed follow-ups before Stripe-live: a quick 2xx before processing, and an allowlist of Stripe's webhook addresses. The Nov 1 runbook's D15 (a) accepted inline, signature-only processing for the November 4 window only. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. The owner did not answer the goal's open decisions, so the three below are coordinator defaults, the goal packet's recommended options. None is an owner decision until the owner confirms it.
+
+- **D1, processing after the answer.** Under Stripe the route verifies the signature, records the event in the inbox in one transaction, answers 200 with outcome `received`, and processes it after the answer through `waitUntil`, on a connection of its own. The checkout sweep is the backstop, and Stripe's retry of a received event processes it too.
+- **D2, a committed, versioned list.** Stripe's published webhook addresses live in `packages/domain-payments/src/stripe-webhook-ips.ts`, with a version date. A change is a reviewed pull request that passes the [documented check step](../../packages/domain-payments/README.md#refreshing-the-list-the-check-step). Nothing fetches the list at runtime.
+- **D3, a mismatch refuses.** An address not on the list, or none, answers 403 `source_not_allowed` and logs `payment_webhook_source_refused` at warn, under Stripe only. The address is read from `CF-Connecting-IP` only, never from `X-Forwarded-For`, and is checked before the body is read.
+
+Coordinator choices inside those defaults, pending owner confirmation:
+
+- **The list is unverified.** Stripe's file could not be read from the build container on 2026-11-08: the network policy refused the host. Version `2026-11-08` is the twelve IPv4 addresses as the coordinator knew them that day, marked `STRIPE_WEBHOOK_IPS_VERIFIED = false`. The owner verifies it against Stripe's page with the check step before any Stripe-live window.
+- **The fake is unchanged.** No address check, and processing before the answer, so the shim replay evidence stands.
+- **No address in the logs.** The refusal log names only whether the address was missing or not listed.
+- **`packages/domain-booking` is unchanged.** The route repeats `handleVerifiedEvent`'s account, record, and duplicate steps from exported functions, so the booking contract does not change. Splitting that function is a proposed follow-up.
+- **The confirmation email** goes out in the same background task, with its after-commit window counted from before the answer, so every send still ends inside the `waitUntil` budget.
+- **Measured locally only.** In the integration suite, the 200 took a median of 17.3 ms and the background work a median of 106.9 ms, over 8 deliveries against the local PostgreSQL 17 container. Deployed timing is unmeasured while Stripe is off; the route's two `duration_ms` logs measure it during a window.
+
+Not done, and needing the owner: verifying the list against Stripe's page; any release of the API that carries this; any Stripe-live window. No Stripe call was made, no key was used, and the Stripe provider is enabled nowhere.
+
+Canonical: the [payments README](../../packages/domain-payments/README.md#stripe-webhook-ingress-proposed-w1-stripe-webhook) and the [demo build plan's Stripe adapter narrowing](12-demo-build-plan.md#goal-sequence).
+
 ### 2026-11-08: nov1 refuses a SHA without a green four-job CI run (owner request; coordinator defaults pending owner confirmation)
 
 The [2026-11-07 step 9 entry](#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-owner-decision-2026-11-08) proposed, not built, that `nov1 approve-sha` or `release` refuse a SHA without a completed green four-job run. Five SHAs on November 4, and `dd30fc8` on November 6, were released before their push runs ended, and `dd30fc8`'s push run ran only the checks job. The coordinator's roadmap prompts listed this as goal W1-CI-GATE, with three open decisions. The owner wrote, on 2026-11-08: "run W1-CI-GATE and merge when CI passes". The coordinator reads that as the go for the goal, for the security review its prompt names, and for merging on green. The same day the owner confirmed "release only after a green four-job run" and that a push or a dispatch run counts ([entry](#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions), questions a1 to a3), which this change enforces. Those answers settle D3. D1, D2, and D4 were not asked, so they stay coordinator defaults.
