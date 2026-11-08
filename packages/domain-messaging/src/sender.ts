@@ -1,5 +1,5 @@
 /**
- * Per-operator sender domains and suppression (W3-G2.16-rest, migration 0026).
+ * Per-operator sender domains and suppression (W3-G2.16-rest, migration 0027).
  *
  * Sender. An operator whose sending domain is verified sends from its own
  * address on it (`<local part>@<domain>`); the display name stays the

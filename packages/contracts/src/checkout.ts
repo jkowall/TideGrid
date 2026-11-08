@@ -330,6 +330,7 @@ export const FinalizationReason = z
     "session_failed",
     "session_canceled",
     "payment_mismatch",
+    "session_redacted",
   ])
   .describe(
     "Why a verified payment could not become a booking. payment_mismatch is not refunded automatically; investigate it at the provider",

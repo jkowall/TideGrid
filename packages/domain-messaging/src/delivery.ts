@@ -99,7 +99,7 @@ export const RESEND_LOCK_PREFIX = "tidegrid.booking_resend:";
 export const RESEND_WAIT_CODES = ["resend_interval", "resend_rate"] as const;
 /**
  * The provider's code for a sender it will not send from. From an operator's
- * own address it holds that operator's run only (0026); from the shared
+ * own address it holds that operator's run only (0027); from the shared
  * sender it is an account-level fault, as before.
  */
 export const SENDER_NOT_VERIFIED = "sender_not_verified";
@@ -137,7 +137,7 @@ export interface DeliveryOptions {
   /**
    * The shared sender address; the display name is the operator's brand
    * name. An operator with a verified sending domain sends from its own
-   * address instead (0026, see src/sender.ts).
+   * address instead (0027, see src/sender.ts).
    */
   fromAddress: string;
   /**
@@ -352,7 +352,7 @@ async function claimOne(
       trx,
     );
     if (lockRows[0]?.locked !== true) return { kind: "none" } as const;
-    // Who sends, read under the claim (0026): the operator's verified domain,
+    // Who sends, read under the claim (0027): the operator's verified domain,
     // else the shared sender, else nothing under operator_only, and the
     // tenant's mail waits for a verified domain.
     const fromAddress = await senderAddressFor(
@@ -468,7 +468,7 @@ async function claimOne(
       await fail(trx, ctx, found.id, attempt, "retries_exhausted");
       return { kind: "failed", messageId: found.id, attempt, code: "retries_exhausted" } as const;
     }
-    // This operator's suppression (0026): a complaint or hard bounce the
+    // This operator's suppression (0027): a complaint or hard bounce the
     // provider reported for the address stops its later mail, with no call.
     if (await isSuppressed(trx, ctx.tenantId, found.to_email)) {
       await fail(trx, ctx, found.id, attempt, ADDRESS_SUPPRESSED);
@@ -675,7 +675,7 @@ async function deliverWithOrigin(
         | { kind: "retry"; code: string; giveBack?: boolean }
         | { kind: "failed"; code: string };
       let accountFault = false;
-      // An account-level fault met on the operator's own sender (0026):
+      // An account-level fault met on the operator's own sender (0027):
       // only this operator's run stops. A suspended account still stops all.
       let senderFault: DeliveryHold | null = null;
       // Whether the provider was called at all: a throw before it is a known
@@ -799,7 +799,7 @@ export interface EmailSweepReport {
   /** Tenants whose stamp failed; each still took its turn. */
   stampFailures: number;
   /**
-   * Tenants whose run was held (0026): no verified sending domain under
+   * Tenants whose run was held (0027): no verified sending domain under
    * `operator_only`, or an account-level refusal of the operator's own sender.
    */
   heldTenants: number;

@@ -1,6 +1,19 @@
 import type { StaffRole } from "@tidegrid/contracts";
 
 /**
+ * Support access (W3-G2.2b): a TideGrid support agent let in by an owner's
+ * grant reads, and never writes. A masked grant reads what finance reads:
+ * the catalog, money, and the audit history, without the booker's name or
+ * email. An owner may choose to reveal personal data, which adds bookings
+ * with their bookers and the staff list. Neither reads notes, which are free
+ * text that can mention a guest.
+ */
+export type SupportRole = "support_masked" | "support_unmasked";
+
+/** A member's role, or the role a support grant stands in for. */
+export type AccessRole = StaffRole | SupportRole;
+
+/**
  * Permissions checked by the API. Each endpoint names exactly one. The matrix
  * follows the pilot product scope: owners manage staff and configuration,
  * booking staff manage bookings and messages but not people or billing, and
@@ -40,9 +53,14 @@ export type Permission =
   // Booking email (G2.16b): send a booking's confirmation or cancellation notice again.
   | "messages.resend"
   // Exception resolution (W1-FIN-EXC): mark a payment exception as followed up.
-  | "exceptions.resolve";
+  | "exceptions.resolve"
+  // Tenant access remainder (W3-G2.2b), owners only: grant TideGrid support
+  // access, export the tenant's data, and ask for the account's deletion.
+  | "support.manage"
+  | "data.export"
+  | "account.manage";
 
-const matrix: Record<StaffRole, readonly Permission[]> = {
+const matrix: Record<AccessRole, readonly Permission[]> = {
   owner: [
     "members.read",
     "members.manage",
@@ -58,6 +76,9 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "bookings.create",
     "messages.resend",
     "exceptions.resolve",
+    "support.manage",
+    "data.export",
+    "account.manage",
   ],
   booking_staff: [
     "catalog.read",
@@ -72,12 +93,20 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "exceptions.resolve",
   ],
   finance: ["audit.read", "catalog.read", "payments.read"],
+  support_masked: ["audit.read", "catalog.read", "payments.read"],
+  support_unmasked: [
+    "audit.read",
+    "catalog.read",
+    "payments.read",
+    "bookings.read",
+    "members.read",
+  ],
 };
 
-export function can(role: StaffRole, permission: Permission): boolean {
+export function can(role: AccessRole, permission: Permission): boolean {
   return matrix[role]?.includes(permission) ?? false;
 }
 
-export function permissionsFor(role: StaffRole): readonly Permission[] {
+export function permissionsFor(role: AccessRole): readonly Permission[] {
   return matrix[role] ?? [];
 }

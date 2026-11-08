@@ -118,7 +118,8 @@ export const StaffTenantParams = z.object({
   tenantId: z.string().describe("Tenant UUID; anything else answers 404"),
 });
 
-export const MembershipStatus = z.enum(["active", "disabled"]);
+/** invited until the person accepts (W3-G2.2b); only active members have access. */
+export const MembershipStatus = z.enum(["invited", "active", "disabled"]);
 
 export const Member = z.object({
   userId: Uuid,
@@ -127,6 +128,9 @@ export const Member = z.object({
   role: StaffRole,
   status: MembershipStatus,
   createdAt: Instant,
+  invitationExpiresAt: Instant.nullable().describe(
+    "When a pending invitation lapses; null once accepted",
+  ),
 });
 export type Member = z.infer<typeof Member>;
 
@@ -197,5 +201,7 @@ export * from "./references.ts";
 export * from "./self-service.ts";
 // Staff-assisted booking (G2.12d).
 export * from "./staff-booking.ts";
+// Tenant access remainder (W3-G2.2b): invitations, support access, export, deletion request.
+export * from "./tenant-access.ts";
 // Waiver evidence (G2.15).
 export * from "./waivers.ts";

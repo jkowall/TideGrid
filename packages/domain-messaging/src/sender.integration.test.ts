@@ -1,5 +1,5 @@
 /**
- * Per-operator sender domains and suppression (W3-G2.16-rest, migration 0026),
+ * Per-operator sender domains and suppression (W3-G2.16-rest, migration 0027),
  * against a throwaway PostgreSQL 17 as tidegrid_app, with the admin
  * connection only where the admin acts (adding, verifying, and retiring a
  * domain, lifting a suppression). Two tenants throughout. Messages go through

@@ -705,14 +705,19 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // unmatched events are a platform table reached through a function.
         email_events: ["INSERT", "SELECT"],
         email_events_unmatched: [],
-        // Sender domains (0026): read only; the admin connection writes them.
+        // Sender domains (0027): read only; the admin connection writes them.
         tenant_sender_domains: ["SELECT"],
-        // Suppression (0026): added by the events consumer, lifted by the admin.
+        // Suppression (0027): added by the events consumer, lifted by the admin.
         email_suppressions: ["INSERT", "SELECT"],
         // Delivery foundation (0023): outcomes are append-only; a dead letter
         // takes its replay reason once.
         outbox_deliveries: ["INSERT", "SELECT"],
         outbox_dead_letters: ["INSERT", "SELECT"],
+        // Tenant access remainder (W3-G2.2b): support agents and grants only
+        // through app functions; a deletion request moves its state only.
+        support_agents: [],
+        support_access_grants: [],
+        tenant_deletion_requests: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -769,6 +774,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // delivery columns; a replay sets its reason.
         outbox_events: ["attempts", "available_at", "delivered_at", "last_error", "published_at"],
         outbox_dead_letters: ["replay_reason"],
+        // Tenant access remainder (W3-G2.2b): withdrawn once; a trigger stamps who and when.
+        tenant_deletion_requests: ["state"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

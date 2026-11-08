@@ -282,7 +282,7 @@ describe.skipIf(!env)("adversarial staff API checks as the runtime role", () => 
       expect(me.json.principal).toMatchObject({ userId: racer.id, authMethod: "magic_link" });
     });
 
-    it("shuts a disabled account out of every credential path, and documents that re-enabling revives its sessions", async () => {
+    it("shuts a disabled account out of every credential path, and re-enabling never revives its sessions", async () => {
       const { session } = await signIn(lapsed.email);
       expect((await call("GET", "/v1/me", { session })).res.status).toBe(200);
       await admin`update public.staff_users set status = 'disabled' where id = ${lapsed.id}`;
@@ -310,8 +310,8 @@ describe.skipIf(!env)("adversarial staff API checks as the runtime role", () => 
         link: 202,
         linksSent: 0,
       });
-      // By design today: disabling does not revoke sessions, so this one comes back.
-      expect((await call("GET", "/v1/me", { session })).res.status).toBe(200);
+      // Disabling revoked the session (W3-G2.2b), so re-enabling does not bring it back.
+      expect((await call("GET", "/v1/me", { session })).res.status).toBe(401);
     });
 
     it("accepts a session only from the exact __Host- cookie, only the first of duplicates, and never a login token", async () => {
@@ -522,7 +522,8 @@ describe.skipIf(!env)("adversarial staff API checks as the runtime role", () => 
       });
       expect(created.res.status).toBe(201);
       const member = (created.json as unknown as MemberJson).member;
-      expect(member).toMatchObject({ email: smuggled.email, role: "finance", status: "active" });
+      // Invited until the person accepts (W3-G2.2b).
+      expect(member).toMatchObject({ email: smuggled.email, role: "finance", status: "invited" });
       expect(member.userId).not.toBe(ownerB.id);
       const placed = await admin`select m.tenant_id, m.status, a.actor_id
         from public.tenant_memberships m
@@ -533,7 +534,7 @@ describe.skipIf(!env)("adversarial staff API checks as the runtime role", () => 
       expect({
         placed: placed.map((r) => [r.tenant_id, r.status, r.actor_id]),
         ownerBInA: ownerBInA?.n,
-      }).toEqual({ placed: [[A.id, "active", ownerA.id]], ownerBInA: 0 });
+      }).toEqual({ placed: [[A.id, "invited", ownerA.id]], ownerBInA: 0 });
 
       const badRoles: unknown[] = [
         "admin",

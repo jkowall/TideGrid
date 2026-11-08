@@ -88,7 +88,8 @@ export interface StaffUsersTable {
   created_at: CreatedAt;
 }
 
-export type MembershipStatus = "active" | "disabled";
+/** A runtime insert is always `invited` (W3-G2.2b); only the invited person accepts. */
+export type MembershipStatus = "invited" | "active" | "disabled";
 
 export interface TenantMembershipsTable {
   tenant_id: ColumnType<string, string, never>;
@@ -99,6 +100,12 @@ export interface TenantMembershipsTable {
   display_name: string;
   created_at: CreatedAt;
   updated_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  /** Stamped by the membership trigger from the actor and the clock (W3-G2.2b). */
+  invited_by: ColumnType<string | null, never, never>;
+  invited_at: ColumnType<Date | null, never, never>;
+  invitation_expires_at: ColumnType<Date | null, never, never>;
+  /** Set only by app.auth_respond_invitation, or by a seed. */
+  accepted_at: ColumnType<Date | null, never, never>;
 }
 
 export type ActorType = "staff" | "guest" | "system" | "support";
@@ -556,7 +563,8 @@ export type FinalizationReason =
   | "party_size_out_of_range"
   | "session_failed"
   | "session_canceled"
-  | "payment_mismatch";
+  | "payment_mismatch"
+  | "session_redacted";
 type Stamp = ColumnType<Date | null, never, never>;
 type Stamped = ColumnType<Date, never, never>;
 
@@ -618,6 +626,8 @@ export interface CheckoutSessionsTable {
   expired_at: Stamp;
   canceled_at: Stamp;
   updated_at: Stamped;
+  /** Set only by the retention job (W3-G2.2b); the booker is then the fixed redaction. */
+  booker_redacted_at: ColumnType<Date | null, never, never>;
 }
 
 export interface OrdersTable {
@@ -1003,7 +1013,7 @@ export interface EmailEventsTable {
 export type SenderDomainStatus = "pending" | "verified" | "retired";
 
 /**
- * Read only for the runtime (0026, W3-G2.16-rest): the admin connection adds,
+ * Read only for the runtime (0027, W3-G2.16-rest): the admin connection adds,
  * verifies, and retires a domain through app.sender_domain_* functions.
  */
 export interface TenantSenderDomainsTable {
@@ -1021,7 +1031,7 @@ export interface TenantSenderDomainsTable {
 export type EmailSuppressionReason = "hard_bounce" | "complaint";
 
 /**
- * One operator's suppressed addresses (0026). A trigger joins each row to the
+ * One operator's suppressed addresses (0027). A trigger joins each row to the
  * tenant's own complaint or hard bounce and that message's address; only the
  * admin connection lifts one, through app.email_suppression_lift.
  */
@@ -1291,6 +1301,21 @@ export interface BookingEmailResendClaimsTable {
   claimed_at: Stamped;
 }
 
+/** An owner's request to close and delete the tenant's account (W3-G2.2b). */
+export interface TenantDeletionRequestsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  /** Inserted as requested; moves once, to withdrawn. */
+  state: ColumnType<"requested" | "withdrawn", undefined, "withdrawn">;
+  reason: ColumnType<string, string, never>;
+  /** The trigger stamps these from the transaction's actor, request, and clock. */
+  requested_by: ColumnType<string, never, never>;
+  requested_at: ColumnType<Date, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+  withdrawn_by: ColumnType<string | null, never, never>;
+  withdrawn_at: ColumnType<Date | null, never, never>;
+}
+
 export interface Database
   extends PricingTables,
     CheckoutTables,
@@ -1326,12 +1351,14 @@ export interface Database
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
   // Email bounce and complaint events (0021, W1-EMAIL-EVENTS).
   email_events: EmailEventsTable;
-  // Per-operator sender domains and suppression (0026, W3-G2.16-rest).
+  // Per-operator sender domains and suppression (0027, W3-G2.16-rest).
   tenant_sender_domains: TenantSenderDomainsTable;
   email_suppressions: EmailSuppressionsTable;
   // Delivery foundation (0023, W3-G2.3).
   outbox_deliveries: OutboxDeliveriesTable;
   outbox_dead_letters: OutboxDeadLettersTable;
+  // Tenant access remainder (W3-G2.2b).
+  tenant_deletion_requests: TenantDeletionRequestsTable;
 }
 
 /** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */

@@ -1,5 +1,5 @@
 /**
- * The email admin CLI (W3-G2.16-rest, migration 0026). It runs on the admin
+ * The email admin CLI (W3-G2.16-rest, migration 0027). It runs on the admin
  * connection, the only one that may add, verify, or retire an operator's
  * sending domain, or lift a suppression: the runtime role holds no EXECUTE on
  * those functions. Every command acts on one tenant, named by slug, inside
