@@ -30,6 +30,11 @@ resource "cloudflare_r2_bucket_lock" "this" {
       max_age_seconds = each.value.lock_days * 86400
     }
   }]
+
+  lifecycle {
+    # Removing the lock on waiver evidence needs a deliberate code change.
+    prevent_destroy = true
+  }
 }
 
 resource "cloudflare_r2_bucket_lifecycle" "this" {

@@ -1,9 +1,14 @@
-# Identifiers the Wrangler configuration for this environment needs. None of
-# these is a secret, but account and zone ids still stay out of the repository.
+# Identifiers for this environment. None of these is a secret. The zone id
+# stays out of the repository; Wrangler custom domains do not need it.
 
 output "zone_id" {
   description = "Zone id."
   value       = local.zone_id
+}
+
+output "zone_name_servers" {
+  description = "Name servers of a zone Terraform created, for delegating the domain. Null otherwise."
+  value       = one(module.zone[*].name_servers)
 }
 
 output "queue_names" {

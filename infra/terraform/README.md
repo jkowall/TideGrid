@@ -11,7 +11,7 @@ The [hosting plan](../../docs/v2/08-build-hosting-and-operations.md#infrastructu
 | Terraform, Cloudflare | Zones, stable Worker routes, queues and dead letter queues, private R2 buckets with object lock and expiry, Hyperdrive configurations, scoped account tokens, alert policies, Cloudflare for SaaS fallback origin |
 | Terraform, Neon | The project (point-in-time restore window, compute defaults), long-lived branches, their compute |
 | Wrangler | Each Worker's code, assets, compatibility settings, limits, and binding declarations, including queue consumers and their dead letter queue, and the custom domains Wrangler declares today (`api`, `console`, the tenant hosts) |
-| Migrations | Every database role and grant. `tidegrid_app` is created only by migration 0001 |
+| Migrations | Every database role and grant except the project owner role, which Neon creates with the project. `tidegrid_app` is created only by migration 0001 |
 | TideGrid's hostname tooling | Each operator's custom hostname, at onboarding |
 | The database package's `neon:branch` tool | Expiring per-pull-request Neon branches |
 
@@ -48,11 +48,11 @@ These are recorded in the register entry linked above.
 - **D3, staging reads the existing zone.** Staging uses the existing account and the `tidegrid.us` zone by id and never manages the zone. Production gets its own account and zone, created by Terraform.
 - **D4, Wrangler keeps today's custom domains.** The routes module starts empty.
 - **D5, waiver lock period has no default in production.** It is a legal retention decision. Staging locks synthetic evidence for 1 day to prove the lock works.
-- **D6, provider versions.** Cloudflare provider `~> 5.28` and the community Neon provider `kislerdm/neon` `~> 0.18`, the "pinned Neon provider" the hosting plan allows. No lock file is committed yet: the goal's container could not reach the Terraform registry. CI uploads the lock files it resolves; the first owner-run `init` commits them.
+- **D6, provider versions.** Cloudflare provider `= 5.28.1` and the community Neon provider `kislerdm/neon` `= 0.18.0`, pinned exactly, the "pinned Neon provider" the hosting plan allows. No lock file is committed yet: the goal's container could not reach the Terraform registry. CI uploads the lock files it resolves; the first owner-run `init` commits them.
 
 ## Checking it
 
-CI ([`.github/workflows/infra.yml`](../../.github/workflows/infra.yml)) runs on every change under `infra/`. It has no secrets. It checks that no state, `*.tfvars`, or `backend.hcl` is committed, that no Neon role or Worker script resource exists, then runs `terraform fmt -check` and `terraform validate` on each environment with `init -backend=false`.
+CI ([`.github/workflows/infra.yml`](../../.github/workflows/infra.yml)) runs on every change under `infra/`. It has no secrets. It checks that no state, `*.tfvars`, or `backend.hcl` is committed, that no Neon role, Worker script, custom domain, or queue consumer resource exists, then runs `terraform fmt -check` and `terraform validate` on each environment with `init -backend=false`.
 
 Locally, with Terraform 1.11 or later:
 

@@ -105,6 +105,11 @@ variable "hyperdrive_password" {
   type        = string
   default     = null
   sensitive   = true
+
+  validation {
+    condition     = !var.allow_secrets_in_state || var.hyperdrive == null || var.hyperdrive_password != null
+    error_message = "Set hyperdrive_password when Hyperdrive is managed here."
+  }
 }
 
 variable "tokens" {
@@ -145,7 +150,7 @@ variable "neon_project_id" {
 }
 
 variable "neon_project" {
-  description = "Settings for a Neon project Terraform creates. See the neon module."
+  description = "Settings for a Neon project Terraform creates. See the neon module. Used only with allow_secrets_in_state, and then only when no neon_project_id is given."
   type = object({
     name                      = string
     org_id                    = optional(string)
@@ -160,6 +165,11 @@ variable "neon_project" {
     suspend_timeout_seconds   = optional(number, 300)
   })
   default = null
+
+  validation {
+    condition     = !(var.allow_secrets_in_state && var.neon_project != null && var.neon_project_id != null)
+    error_message = "With allow_secrets_in_state, give either neon_project_id (existing project) or neon_project (create one), not both."
+  }
 }
 
 variable "neon_branches" {

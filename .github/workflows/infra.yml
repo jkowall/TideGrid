@@ -41,6 +41,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Provider binaries run during init and validate; keep the token out of .git/config.
+          persist-credentials: false
 
       - name: Install Terraform
         run: |
@@ -63,8 +66,8 @@ jobs:
           if grep -rnE 'resource +"neon_role"' infra/terraform; then
             echo "::error::Terraform must not create a Neon role"; exit 1
           fi
-          if grep -rnE 'resource +"cloudflare_(workers_script|worker_version|workers_deployment|worker)"' infra/terraform; then
-            echo "::error::Worker scripts, versions, and deployments belong to Wrangler"; exit 1
+          if grep -rnE 'resource +"cloudflare_(workers_script|worker_version|workers_deployment|worker|workers_custom_domain|queue_consumer)"' infra/terraform; then
+            echo "::error::Worker scripts, versions, deployments, custom domains, and queue consumers belong to Wrangler"; exit 1
           fi
 
       - name: terraform fmt
@@ -87,5 +90,6 @@ jobs:
         with:
           name: terraform-lock-files
           path: infra/terraform/environments/*/.terraform.lock.hcl
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

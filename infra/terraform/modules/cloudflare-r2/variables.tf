@@ -43,4 +43,14 @@ variable "buckets" {
     ])
     error_message = "expire_days must be longer than lock_days, or a lifecycle rule would fight the lock."
   }
+
+  validation {
+    condition = alltrue(flatten([
+      for bucket in values(var.buckets) : [
+        bucket.lock_days == null || try(bucket.lock_days >= 1 && floor(bucket.lock_days) == bucket.lock_days, false),
+        bucket.expire_days == null || try(bucket.expire_days >= 1 && floor(bucket.expire_days) == bucket.expire_days, false),
+      ]
+    ]))
+    error_message = "lock_days and expire_days must be whole numbers of days."
+  }
 }

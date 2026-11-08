@@ -19,7 +19,7 @@ The goal adds Terraform modules under [`infra/terraform`](../../infra/terraform/
 - **D3, staging only reads the existing `tidegrid.us` zone.** Production gets its own account and zone, created by Terraform.
 - **D4, Wrangler keeps the custom domains it declares today.** Terraform's routes start empty.
 - **D5, production's waiver evidence lock period has no default.** It is a legal retention decision. Staging locks synthetic evidence for 1 day.
-- **D6, providers:** Cloudflare `~> 5.28` and the community Neon provider `kislerdm/neon` `~> 0.18`. No lock file is committed yet, because the goal's container could not reach the Terraform registry; CI validates and uploads the lock files it resolves.
+- **D6, providers:** Cloudflare `= 5.28.1` and the community Neon provider `kislerdm/neon` `= 0.18.0`, pinned exactly. No lock file is committed yet, because the goal's container could not reach the Terraform registry; CI validates and uploads the lock files it resolves.
 
 Not done: a plan per change in CI (it needs credentials and a backend), application alerts (W3-OPS-5), backup jobs and drills (W3-OPS-6). Security review: run by the goal's session on the Terraform, the workflow, and the runbook; see the pull request.
 

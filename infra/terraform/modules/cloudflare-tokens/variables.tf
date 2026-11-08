@@ -29,6 +29,16 @@ variable "tokens" {
     condition     = alltrue([for token in values(var.tokens) : !contains(values(token.resources), "") && can(timeadd(token.expires_on, "0s"))])
     error_message = "Each token needs an RFC 3339 expires_on and non-empty resource values."
   }
+
+  validation {
+    condition = alltrue(flatten([
+      for token in values(var.tokens) : [
+        for resource in keys(token.resources) :
+        startswith(resource, "com.cloudflare.api.account.${var.account_id}") || startswith(resource, "com.cloudflare.api.account.zone.")
+      ]
+    ]))
+    error_message = "A token may reach only this account or its zones."
+  }
 }
 
 variable "name_prefix" {

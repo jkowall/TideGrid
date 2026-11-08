@@ -44,4 +44,9 @@ variable "queues" {
     ]))
     error_message = "Retention must be between 60 seconds and 14 days."
   }
+
+  validation {
+    condition     = alltrue([for queue in values(var.queues) : queue.delivery_delay_seconds >= 0 && queue.delivery_delay_seconds <= 43200])
+    error_message = "delivery_delay_seconds must be between 0 and 12 hours."
+  }
 }
