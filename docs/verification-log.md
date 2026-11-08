@@ -2,6 +2,18 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-08
+
+### G2.12 follow-ups merged in pull request 78, recorded November 8, 2026
+
+Pull request 78 (search by source, the calendar carrying the source, and the CSV guard for number-shaped references) merged on 2026-11-07 at 20:37 UTC as `7ef50cf`. No release of `7ef50cf` is recorded. This entry was written from git, the GitHub Actions API, and the pull request's reviews, except where marked.
+
+- **The pull request run.** [Run 42411375144](https://github.com/jkowall/TideGrid/actions/runs/42411375144) passed on the final head, `10dc602`.
+- **The push run on `main`.** [Run 42411943087](https://github.com/jkowall/TideGrid/actions/runs/42411943087) ran all four jobs on `7ef50cf` itself, and all passed: checks, integration, browser, and console-browser. Each job's first step after checkout, "The commit under test", ran. `git rev-parse` gives tree `ddc109b982a211e1d07f5f92f0bb0da402f46dca` for `7ef50cf`. Every merge to `main` from pull request 75 (`c1bdfe2`, which carried the CI change) on has had such a run on the merged commit itself. So step 9 for a release of this SHA needs no tree equality, under the [coordinator default](v2/06-decision-register.md#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-pending-owner-confirmation) pending owner confirmation.
+- **Local runs before the merge,** *coordinator-reported*, logs not committed. Every integration suite passed on a fresh pinned PostgreSQL 17 container on `da6d69c`: 882 tests, with only the opt-in search benchmark skipped. The search and console-completion suites passed again on `10dc602`, including the legacy number-shaped reference case.
+- **Reviews.** From the pull request's reviews: Copilot's one finding (separators before the pasted apostrophe) is fixed in `9c3059d`, and Copilot's next review reported no open issues. *Coordinator-reported:* the independent review's findings are fixed in `10dc602`, and the security review found nothing.
+- **Not verified.** No spreadsheet has opened a guarded reference: how Excel, Google Sheets, Numbers, and LibreOffice show the apostrophe is not observed.
+
 ## 2026-11-07
 
 ### Step 9 for the live API dd30fc8, November 7, 2026
