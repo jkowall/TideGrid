@@ -93,7 +93,8 @@ export function BookingScreen({
     setClosing(true);
     await endSession(endpoint, session.token);
     onEnded(session.reference);
-    onClose();
+    // Leave only if the guest is still here; they may have moved on to a checkout.
+    if (alive.current) onClose();
   };
 
   const title = `Booking ${session.reference}`;
@@ -142,9 +143,11 @@ export function BookingScreen({
           tone="warning"
           title="This booking is canceled"
           body={
-            b.refund
-              ? `${formatMoney(b.refund.amount)} ${b.refund.state === "succeeded" ? "was" : "is being"} refunded.`
-              : "No refund applies."
+            !b.refund
+              ? "No refund applies."
+              : b.refund.state === "failed"
+                ? `The refund of ${formatMoney(b.refund.amount)} hasn't gone through yet. Contact ${operator} to put it right.`
+                : `${formatMoney(b.refund.amount)} ${b.refund.state === "succeeded" ? "was" : "is being"} refunded.`
           }
         />
       ) : (

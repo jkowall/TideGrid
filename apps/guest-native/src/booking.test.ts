@@ -278,6 +278,7 @@ describe("parity with the contracts", () => {
     expect(bookerProblems(" ", "pat@example.com").name).toBeDefined();
     expect(bookerProblems("Pat\u0007", "pat@example.com").name).toBeDefined();
     expect(bookerProblems("Pat", "not an email").email).toBeDefined();
+    expect(bookerProblems("Pat", "pat@@example.com").email).toBeDefined();
     expect(bookerProblems("Pat", "pät@example.com").email).toBeDefined();
   });
 });

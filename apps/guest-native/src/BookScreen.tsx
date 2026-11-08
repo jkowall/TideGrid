@@ -347,6 +347,8 @@ export function BookScreen({
   ) =>
     exclusive(outcome, async (still) => {
       setNotice(null);
+      // Before sending: a lost or late answer may still have settled the payment.
+      paymentSent.current = true;
       const r = await settleTestPayment(endpoint, payment, outcome);
       if (!still()) return;
       if (r.kind === "network") {
@@ -357,7 +359,6 @@ export function BookScreen({
         });
         return;
       }
-      paymentSent.current = true;
       if (r.kind === "refused") {
         // Settling is idempotent by payment: a refusal may mean it already settled.
         const now = await readCheckout(endpoint, session.id, secret);
@@ -387,7 +388,7 @@ export function BookScreen({
         setNotice({
           kind: "notice",
           title: "This checkout was canceled",
-          body: `Nothing was charged, and ${isCharter(offer) ? "the boat is" : "your seats are"} released. Change your party, or continue for a new price.`,
+          body: `${paymentSent.current ? "If your test payment went through, it is refunded in full. " : "Nothing was charged. "}${isCharter(offer) ? "The boat is" : "Your seats are"} released. Change your party, or continue for a new price.`,
         });
         go({ kind: "party", offer });
         return;
@@ -732,6 +733,7 @@ export function BookScreen({
           title={title}
           session={phase.session}
           secret={phase.secret}
+          paymentTried={paymentSent.current}
           onAgain={() => {
             setNotice(null);
             go({ kind: "party", offer: phase.offer });
@@ -750,6 +752,7 @@ function Outcome({
   title,
   session,
   secret,
+  paymentTried,
   onAgain,
   onClose,
   onBooked,
@@ -760,6 +763,8 @@ function Outcome({
   title: string;
   session: CheckoutSession;
   secret: string;
+  /** A test payment was sent for this checkout, so "expired" or "canceled" may still change. */
+  paymentTried: boolean;
   onAgain: () => void;
   onClose: () => void;
   onBooked: (session: OpenedSession) => Promise<void>;
@@ -773,7 +778,7 @@ function Outcome({
     [],
   );
   const [openFailed, setOpenFailed] = useState(false);
-  const text = outcomeText(session, operator);
+  const text = outcomeText(session, operator, paymentTried);
   const confirmed = session.state === "confirmed";
   const open = async () => {
     setOpening(true);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BackHandler } from "react-native";
 import { type OpenedSession, openWithLink } from "./booking-api.ts";
 import { linkTokenFrom } from "./booking-model.ts";
@@ -26,6 +26,13 @@ export function LinkScreen({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<{ title: string; body: string } | null>(null);
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
+  const alive = useRef(true);
+  useEffect(
+    () => () => {
+      alive.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
@@ -45,6 +52,7 @@ export function LinkScreen({
     setFieldError(undefined);
     setBusy(true);
     const r = await openWithLink(endpoint, token);
+    if (!alive.current) return;
     if (r.kind === "ok") {
       setText("");
       await onOpened(r.value);

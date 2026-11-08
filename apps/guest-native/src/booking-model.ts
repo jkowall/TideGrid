@@ -1,5 +1,6 @@
 import {
   type AvailableTrip,
+  BookerDetails,
   type CheckoutSession,
   type GuestParticipantWaiver,
   type PolicyOutcome,
@@ -154,14 +155,13 @@ export function addOnHint(addOn: TripOffer["addOns"][number]): string {
  */
 export function bookerProblems(name: string, email: string): { name?: string; email?: string } {
   const problems: { name?: string; email?: string } = {};
-  const n = name.trim();
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
-  if (n.length === 0 || n.length > 120 || /[\u0000-\u001f\u007f-\u009f]/.test(n)) {
-    problems.name = "Enter the name of the person booking.";
-  }
-  const e = email.trim();
-  if (e.length > 254 || !/^[\x21-\x7e]+@[\x21-\x7e]+\.[\x21-\x7e]+$/.test(e)) {
-    problems.email = "Enter an email address, such as name@example.com.";
+  const parsed = BookerDetails.safeParse({ name, email: email.trim() });
+  if (parsed.success) return problems;
+  for (const issue of parsed.error.issues) {
+    if (issue.path[0] === "name") problems.name = "Enter the name of the person booking.";
+    if (issue.path[0] === "email") {
+      problems.email = "Enter an email address, such as name@example.com.";
+    }
   }
   return problems;
 }
@@ -481,6 +481,7 @@ export function stopText(
 export function outcomeText(
   session: CheckoutSession,
   operator: string,
+  paymentTried = false,
 ): { title: string; body: string } {
   switch (session.state) {
     case "confirmed":
@@ -496,12 +497,16 @@ export function outcomeText(
     case "expired":
       return {
         title: "Your checkout expired",
-        body: "Time ran out before a payment arrived. Nothing was charged, and the hold was released. Start over to book.",
+        body: paymentTried
+          ? "Time ran out before your payment was confirmed. If it went through, it is booked or refunded in full, and we'll email you. Check your email before booking again."
+          : "Time ran out before a payment arrived. Nothing was charged, and the hold was released. Start over to book.",
       };
     case "canceled":
       return {
         title: "This checkout was canceled",
-        body: "Nothing was charged, and the hold was released.",
+        body: paymentTried
+          ? "Your checkout was canceled, and the hold was released. If your test payment went through, it is refunded in full."
+          : "Nothing was charged, and the hold was released.",
       };
     case "unfulfilled": {
       const refund = session.refund;

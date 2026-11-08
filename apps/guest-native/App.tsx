@@ -3,7 +3,7 @@ import Constants from "expo-constants";
 import { getRandomValues } from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { isoDate, loadStart, loadTrips, type Start, type Trips } from "./src/api.ts";
@@ -109,6 +109,9 @@ function Journeys({
 }) {
   const store = useMemo(() => new SessionStore(secureStore, slug), [slug]);
   const [route, setRoute] = useState<Route>({ name: "home" });
+  /** The route on screen now, so a late answer never moves a guest who has moved on. */
+  const current = useRef(route);
+  current.current = route;
   const [sessions, setSessions] = useState<StoredSession[] | null>(null);
   const reload = useCallback(() => {
     store
@@ -128,9 +131,10 @@ function Journeys({
         expiresAt: opened.expiresAt,
         reference: opened.reference,
       };
+      const from = current.current;
       await store.add(session);
       reload();
-      setRoute({ name: "booking", session });
+      if (current.current === from) setRoute({ name: "booking", session });
     },
     [store, reload],
   );
