@@ -8,12 +8,11 @@
 
 [`.github/workflows/neon-migrate.yml`](../../.github/workflows/neon-migrate.yml), started by hand with one input, a full SHA on `main`.
 
-1. **Gate job, no secrets.** Checks that the run started from `main` and that the SHA is a full SHA on `main`. Then runs `nov1 ci-check <sha>`, the same rule `approve-sha` and `release` use: the newest `ci.yml` run on `main` for that SHA is complete and green on all four jobs. It reads GitHub with the job's read-only token through a throwaway `gh` login. A refusal ends the run before anyone is asked to approve.
+1. **Gate job, no secrets.** Checks that the run started from `main` and that the SHA is a full SHA on `main`. Then, with tooling from the workflow's own commit on `main` (so an older SHA is checked by today's rule), runs `nov1 ci-check <sha>`, the same rule `approve-sha` and `release` use: the newest `ci.yml` run on `main` for that SHA is complete and green on all four jobs. It reads GitHub with the job's read-only token through a throwaway `gh` login. A refusal ends the run before anyone is asked to approve.
 2. **Migrate job, on the `neon-main` environment.** Waits for the owner's approval. Then re-checks the SHA, installs dependencies before any secret is in the environment, and:
-   - prints `migrate:status` and refuses if a pending file sorts before an applied one;
-   - with nothing pending, stops there (no restore point, no migrate);
-   - creates a restore point: a Neon branch of main named `pre-migrate-<sha7>-r<run id>-<attempt>`, with no compute, expiring after 30 days;
-   - runs `migrate` (each file in its own transaction under the advisory lock, with the usual lock and statement timeouts);
+   - prints `migrate:status`, then reads the whole `schema_migrations` catalog with `psql` and refuses if Neon main has a migration the SHA's tree lacks (the SHA is older than the database), or if a pending file sorts before an applied one;
+   - with something pending, creates a restore point: a Neon branch of main named `pre-migrate-<sha7>-r<run id>-<attempt>`, with no compute, expiring after 30 days;
+   - runs `migrate` every time (each file in its own transaction under the advisory lock, with the usual lock and statement timeouts). With nothing pending it applies nothing, but its checksum, runtime-role, and invalid-index checks still fail the run on drift;
    - prints `migrate:status` again and fails if anything is still pending.
 3. **The record.** The run's summary names the restore point, its UTC time (the point-in-time restore anchor), and the last applied file. GitHub keeps the run, its approval, and the environment's deployment history. That replaces the local journal's `db-backup` and `db-migrate` entries for runs made this way.
 

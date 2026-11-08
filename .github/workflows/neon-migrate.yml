@@ -36,9 +36,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      # The gate's tooling (nov1 ci-check) comes from the workflow's own
+      # commit on main, not from the requested SHA, so a SHA from before
+      # ci-check existed is still checked by today's rule.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: The commit to migrate is on main
@@ -47,20 +50,20 @@ jobs:
         env:
           WANT: ${{ inputs.sha }}
         run: |
-          got=$(git rev-parse HEAD)
-          echo "commit $got tree $(git rev-parse 'HEAD^{tree}') ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA"
+          echo "requested $WANT ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA tooling $(git rev-parse HEAD)"
           if [ "$GITHUB_REF" != refs/heads/main ]; then
             echo "::error::start this workflow from main, so main's workflow runs"; exit 1
           fi
           if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
             echo "::error::give the full 40-character SHA"; exit 1
           fi
-          if [ "$got" != "$WANT" ]; then
-            echo "::error::asked for $WANT but checked out $got"; exit 1
+          if ! git cat-file -e "$WANT^{commit}" 2>/dev/null; then
+            echo "::error::$WANT is not a commit in this repository"; exit 1
           fi
           if ! git merge-base --is-ancestor "$WANT" refs/remotes/origin/main; then
             echo "::error::$WANT is not on main"; exit 1
           fi
+          echo "tree $(git rev-parse "$WANT^{tree}")"
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -114,22 +117,36 @@ jobs:
       # Dependencies install before any secret is in an environment.
       - run: pnpm install --frozen-lockfile
       - name: Status before
+        # migrate:status lists only the files in this tree, so the order check
+        # reads the whole schema_migrations catalog with psql instead: every
+        # applied name must be a file in this tree (Neon is not ahead of the
+        # SHA), and every pending file must sort after the last applied one.
         id: before
         env:
           DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
         run: |
           [ -n "$DATABASE_URL" ] || { echo "::error::NEON_DATABASE_URL is not set on the neon-main environment"; exit 1; }
           pnpm --silent --filter @tidegrid/database migrate:status | tee "$RUNNER_TEMP/before.txt"
-          pending=$(grep -c '^pending' "$RUNNER_TEMP/before.txt" || true)
-          echo "pending=$pending" >> "$GITHUB_OUTPUT"
-          if grep -q '^applied' "$RUNNER_TEMP/before.txt" && [ "$pending" -gt 0 ]; then
-            # Forward-only: every pending file must come after every applied one.
-            last_applied=$(grep '^applied' "$RUNNER_TEMP/before.txt" | tail -1 | awk '{print $2}')
-            first_pending=$(grep '^pending' "$RUNNER_TEMP/before.txt" | head -1 | awk '{print $2}')
-            if [[ "$first_pending" < "$last_applied" ]]; then
-              echo "::error::$first_pending is pending but $last_applied is applied; stop and look"; exit 1
-            fi
+          (cd packages/database/migrations && ls -1 *.sql | LC_ALL=C sort) > "$RUNNER_TEMP/tree.txt"
+          exists=$(psql "$DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "select to_regclass('public.schema_migrations') is not null")
+          if [ "$exists" = t ]; then
+            psql "$DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "select name from public.schema_migrations" | LC_ALL=C sort > "$RUNNER_TEMP/catalog.txt"
+          else
+            : > "$RUNNER_TEMP/catalog.txt"
           fi
+          ahead=$(LC_ALL=C comm -13 "$RUNNER_TEMP/tree.txt" "$RUNNER_TEMP/catalog.txt")
+          if [ -n "$ahead" ]; then
+            echo "::error::Neon main has migrations this SHA does not: $(echo $ahead). Migrate a newer SHA"; exit 1
+          fi
+          LC_ALL=C comm -23 "$RUNNER_TEMP/tree.txt" "$RUNNER_TEMP/catalog.txt" > "$RUNNER_TEMP/pending.txt"
+          pending=$(wc -l < "$RUNNER_TEMP/pending.txt" | tr -d ' ')
+          last_applied=$(tail -1 "$RUNNER_TEMP/catalog.txt")
+          first_pending=$(head -1 "$RUNNER_TEMP/pending.txt")
+          if [ -n "$last_applied" ] && [ -n "$first_pending" ] && [[ "$first_pending" < "$last_applied" ]]; then
+            echo "::error::$first_pending is pending but $last_applied is applied; stop and look"; exit 1
+          fi
+          echo "pending=$pending" >> "$GITHUB_OUTPUT"
+          echo "catalog $(wc -l < "$RUNNER_TEMP/catalog.txt" | tr -d ' ') applied, $pending pending"
       - name: Restore point (a Neon branch of main, no compute)
         if: steps.before.outputs.pending != '0'
         env:
@@ -147,7 +164,8 @@ jobs:
           echo "backup branch $name: $id at $at (UTC, the point-in-time restore anchor)"
           echo "- Restore point: \`$name\` (\`$id\`) at $at UTC, expires in 30 days" >> "$GITHUB_STEP_SUMMARY"
       - name: Migrate
-        if: steps.before.outputs.pending != '0'
+        # Runs even with nothing pending: the runner's checksum, runtime-role,
+        # and invalid-index checks fail the run on drift, and apply nothing.
         env:
           DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
         run: pnpm --silent --filter @tidegrid/database migrate
