@@ -28,8 +28,8 @@ export type GuestHostAnswer =
 /**
  * The guest host projection: `found` answers only, kept in this isolate's
  * memory for at most 10 seconds and at most 1,000 hosts, least recently used
- * out first (coordinator defaults pending owner confirmation, in the decision
- * register). One page load asks the gateway up to four times (the manifest,
+ * out first (coordinator defaults confirmed by the owner on 2026-11-08, in the
+ * decision register). One page load asks the gateway up to four times (the manifest,
  * two icons, and `/sw.js`), and before this each call opened and closed its
  * own database connection (the demo build plan's pre-release note on
  * G2.14b-live). Once a `found` answer is kept, later calls to the same

@@ -10,7 +10,8 @@ import { loadMigrations, migrate } from "./migrate.ts";
 
 /**
  * The Nov 1 upgrade path, rehearsed on a scratch database (the Nov 1 runbook,
- * P0.2; decision D12(a), a coordinator default pending owner confirmation).
+ * P0.2; decision D12(a), a coordinator default confirmed by the owner on
+ * 2026-11-08).
  * Neon main holds migrations 0001 and 0002 and a seed from the deployed build
  * b87e269. CI otherwise migrates only empty databases, so nothing else proves
  * that the later files apply over rows, or that b87e269 still works against the

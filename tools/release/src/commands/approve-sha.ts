@@ -3,10 +3,11 @@
  * journal's approved list: the frozen release SHA (--frozen), or a config
  * merge under its gate. Every live step refuses a HEAD that is not on it
  * (invariant 3), and an approval counts only from its gate's phase on
- * (approvalGatePhase, owner decision 2026-11-04). Local: git reads and the
- * journal only.
+ * (approvalGatePhase, owner decision 2026-11-04). Reads git, the journal,
+ * and, for the CI gate, GitHub through gh (src/ci-status.ts).
  */
 import { type Args, flag, onlyFlags } from "../args.ts";
+import { assertCiGreen } from "../ci-status.ts";
 import { type Deps, out, Refusal } from "../core.ts";
 import { childEnv } from "../env.ts";
 import { declaredCheck } from "../gate.ts";
@@ -42,6 +43,13 @@ export async function approveSha(deps: Deps, args: Args): Promise<number> {
   );
   if (onMain.code !== 0)
     throw new Refusal(`${sha.slice(0, 12)} is not on origin/main; approve merged commits only`);
+  // The CI gate: a completed run of ci.yml on main, green on all four jobs,
+  // tested this SHA. Checked before the owner types anything; journaled.
+  const ci = await assertCiGreen(deps, sha, {
+    phase: approvalGatePhase[gate as keyof typeof approvalGatePhase],
+    gate,
+    command: "approve-sha",
+  });
   const files = (
     await git(deps, ["ls-tree", "--name-only", sha, "packages/database/migrations/"])
   ).split("\n");
@@ -88,7 +96,7 @@ export async function approveSha(deps: Deps, args: Args): Promise<number> {
       : `it counts from ${approvalGatePhase[gate as keyof typeof approvalGatePhase].toUpperCase()} on`;
   out(
     deps,
-    `approved ${sha} (tree ${tree}, last migration ${lastMigration ?? "none"}) under ${gate}; ${counts}`,
+    `approved ${sha} (tree ${tree}, last migration ${lastMigration ?? "none"}) under ${gate}; ${counts}. CI: ${ci.url}`,
   );
   return 0;
 }

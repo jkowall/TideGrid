@@ -3,11 +3,12 @@
   "name": "tidegrid-guest",
   "main": "worker/index.ts",
   "compatibility_date": "2026-08-22",
-  // Off since the demo.tidegrid.us cutover (D9, a coordinator default pending
-  // owner confirmation; Nov 1 runbook C4).
+  // Off since the demo.tidegrid.us cutover (D9, a coordinator default
+  // confirmed by the owner on 2026-11-08; Nov 1 runbook C4).
   "workers_dev": false,
   // Preview subdomains, one Workers Custom Domain per synthetic tenant (D8(a),
-  // a coordinator default pending owner confirmation): Universal SSL covers
+  // a coordinator default confirmed by the owner on 2026-11-08): Universal SSL
+  // covers
   // only first-level subdomains, and a custom domain brings its own
   // certificate. A test keeps this list equal to previewHostnameFor(slug) for
   // every manifest in config/tenants, plus the platform name below. Deployed
