@@ -159,10 +159,13 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
   it.each([
     ["refused", "test", { kind: "renewed", generation: 3 }],
     ["whose outcome is unknown", "outcome_unknown", { kind: "skipped", reason: "still_usable" }],
+    ["retried until it gave up", "retries_exhausted", { kind: "skipped", reason: "still_usable" }],
   ] as const)(
     "after a resend the provider %s, renews only if its link cannot have arrived",
     async (label, code, expected) => {
-      const { req, token } = await invited(`Rio ${label === "refused" ? "Refused" : "Unknown"}`);
+      const { req, token } = await invited(
+        `Rio ${{ test: "Refused", outcome_unknown: "Unknown", retries_exhausted: "Exhausted" }[code]}`,
+      );
       expect((await redeem(world, A.id, token)).kind).toBe("opened");
       await ageDeliveries(world.admin, req);
       expect(await resend(A.id, req)).toMatchObject({ kind: "sent", generation: 2 });

@@ -99,7 +99,8 @@ export async function renewWaiverLink(
   // spend the guest's sends while their newest link waits in their inbox. A
   // link whose email the provider refused never reached the guest, so it
   // does not count; one whose outcome is unknown (failed as
-  // `outcome_unknown`) may have, so it still does. Once one token of a
+  // `outcome_unknown`, or `retries_exhausted` after answers that may have
+  // been lost) may have, so it still does. Once one token of a
   // message was opened, that message's other tokens never reached the
   // mailbox: a provider that deduplicates a retried send delivers only the
   // first email (domain-messaging's delivery notes), so they do not count.
@@ -109,7 +110,7 @@ export async function renewWaiverLink(
      where l.tenant_id = ${ctx.tenantId} and l.subject_ref = ${link.subject_ref}
        and l.purpose = ${WAIVER_LINK_PURPOSE}
        and l.consumed_at is null and l.revoked_at is null and l.expires_at > now()
-       and (m.state <> 'failed' or m.last_error_code = 'outcome_unknown')
+       and (m.state <> 'failed' or m.last_error_code in ('outcome_unknown', 'retries_exhausted'))
        and not exists (select 1 from guest_access_links c
                         where c.tenant_id = l.tenant_id and c.message_id = l.message_id
                           and c.consumed_at is not null)`.execute(trx);
