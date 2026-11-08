@@ -5,7 +5,7 @@
 locals {
   prefix = "tidegrid-${var.environment}"
 
-  manage_neon_project = var.allow_secrets_in_state && var.neon_project != null
+  manage_neon_project = var.allow_secrets_in_state && var.neon_project != null && var.neon_project_id == null
 }
 
 module "zone" {

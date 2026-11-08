@@ -150,7 +150,7 @@ variable "neon_project_id" {
 }
 
 variable "neon_project" {
-  description = "Settings for a Neon project Terraform creates. See the neon module. Used only with allow_secrets_in_state, and then only when no neon_project_id is given."
+  description = "Settings for a Neon project Terraform creates. See the neon module. Used only with allow_secrets_in_state and no neon_project_id: an existing project id always wins, so turning D1 on never replaces a live database."
   type = object({
     name                      = string
     org_id                    = optional(string)
@@ -165,11 +165,6 @@ variable "neon_project" {
     suspend_timeout_seconds   = optional(number, 300)
   })
   default = null
-
-  validation {
-    condition     = !(var.allow_secrets_in_state && var.neon_project != null && var.neon_project_id != null)
-    error_message = "With allow_secrets_in_state, give either neon_project_id (existing project) or neon_project (create one), not both."
-  }
 }
 
 variable "neon_branches" {
