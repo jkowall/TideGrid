@@ -8,6 +8,20 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: Neon migrations from CI (owner request; coordinator defaults pending owner decision)
+
+On 2026-11-08 the owner asked: "can we push to neon from CI instead of from laptops in the future?" Migrations to Neon main run today only from the owner's Mac (`nov1 db backup` and `nov1 db migrate`), and `nov1` refuses every live step when `CI` is set. The Mac's journal also still recorded a deleted backup branch, so `nov1 db backup` would not make a new restore point. The [hosting plan](08-build-hosting-and-operations.md#infrastructure-and-configuration-ownership) already puts migration and backup credentials in GitHub environment secrets. This change proposes a manual GitHub Actions workflow for migrations only. It has never run.
+
+Coordinator defaults, pending owner decision:
+
+- **N1, migrations only move to CI.** A new workflow, `neon-migrate.yml`, applies pending migrations to Neon main. Worker releases, secrets, and seeds stay on the Mac. `nov1`'s "live steps never run in CI" rule is unchanged; the workflow calls the database package's scripts directly, and only the read-only `nov1 ci-check`.
+- **N2, the owner approves each run.** The migrate job runs on a GitHub environment, `neon-main`, with the owner as required reviewer and `main` as its only deployment branch. Its secrets are environment secrets, so no other job can read them.
+- **N3, the same CI gate as a release.** A gate job with no secrets refuses unless the SHA is on `main` and the newest `ci.yml` run for it is green on all four jobs, by the rule of the [2026-11-08 CI gate entry](#2026-11-08-nov1-refuses-a-sha-without-a-green-four-job-ci-run-owner-request-coordinator-defaults-pending-owner-confirmation). It refuses before the owner is asked to approve.
+- **N4, a restore point before every migrating run, expiring after 30 days.** A Neon branch of main with no compute, named by SHA, run id, and attempt. The Nov 1 runbook's restore points never expire; these do, so they do not pile up against the plan's branch limit. A run with nothing pending makes none.
+- **N5, GitHub's run is the record.** The run summary, the approval, and the environment's deployment history stand in for the journal's `db-backup` and `db-migrate` entries. `nov1 release api` still checks `/v1/health` for the tree's last migration, so it needs no journal entry.
+
+Not done, and needing the owner: these decisions; creating the `neon-main` environment and its three secrets; merging. No Neon call was made. Canonical: the [Neon migrations from CI runbook](../runbooks/neon-migrate-ci.md).
+
 ### 2026-11-08: W1-PROVENANCE, runtime provenance brand checked by the inbox (owner go; coordinator defaults pending owner confirmation)
 
 The G2.7 review's [inbox provenance follow-up](../../packages/domain-payments/README.md#follow-ups-for-the-stripe-adapter) left one gap open. The `VerifiedProviderEvent` brand was checked only by a text scan, and an unannotated spread of a real verified event kept the type brand, so it could reach `recordProviderEvent` with changed fields. A runtime brand checked by the inbox was the proposed fix. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. The owner did not answer the goal's open decision at the start, so D1 below began as a coordinator default, the goal packet's recommended option. After the merge, on 2026-11-08, the owner wrote: "D1 confirmed, run W1-TOOLING next". D1 is now an owner decision.
