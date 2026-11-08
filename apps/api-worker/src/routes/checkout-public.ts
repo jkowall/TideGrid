@@ -8,7 +8,7 @@ import {
   IdempotencyKey,
   TripOfferResponse,
 } from "@tidegrid/contracts";
-import { inTenantTransaction } from "@tidegrid/database";
+import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import {
   type CheckoutSessionView,
   cancelCheckoutSession,
@@ -57,6 +57,24 @@ function checkoutSecret(c: Context<AppEnv>): string {
     );
   }
   return match[1];
+}
+
+/**
+ * The checkout read again, after the provider answered: a client secret goes
+ * out only when this read still finds the checkout open and within its expiry
+ * (the view reads an open checkout past its expiry as expired). Null when the
+ * secret no longer matches, which cannot happen to a checkout read a moment
+ * ago with the same secret.
+ */
+function readAgain(
+  c: Context<AppEnv>,
+  ctx: TenantContext,
+  sessionId: string,
+  secret: string,
+): Promise<CheckoutSessionView | null> {
+  return inTenantTransaction(getDb(c), ctx, (trx) =>
+    getCheckoutSession(trx, ctx.tenantId, { sessionId, secret }),
+  );
 }
 
 /**
@@ -223,12 +241,18 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
         );
       }
       if (ready.kind === "not_found") throw new Error("a committed checkout has no payment");
+      // It may have closed or lapsed while the provider answered: the client
+      // secret goes out only if it is still open. The body stays the snapshot.
+      const current =
+        ready.kind === "ready"
+          ? await readAgain(c, result.ctx, session.id, input.checkoutSecret)
+          : null;
       if (result.replayed) c.header("Idempotent-Replayed", "true");
       return c.json(
         {
           checkoutSession: session,
           payment:
-            ready.kind === "ready"
+            ready.kind === "ready" && current?.state === "open"
               ? {
                   provider: ready.provider,
                   paymentRef: ready.paymentRef,
@@ -280,7 +304,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
     tags: ["public", "checkout"],
     summary: "What the guest needs to pay an open checkout, read again",
     description: [
-      "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token, never a URL. For an open checkout within its expiry, returns the provider payment and its client secret, so a page that reloaded, or lost the answer to opening the checkout, can still pay without sending the booker's details again. It asks the provider with the payment's own idempotency key, so it never creates a second payment. Any other state answers 200 with `payment: null`, including a checkout that closes or lapses while it is read: the body then shows the closed state. A wrong secret, another operator's checkout, and an unknown id answer the same 404.",
+      "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token, never a URL. For an open checkout within its expiry, returns the provider payment and its client secret, so a page that reloaded, or lost the answer to opening the checkout, can still pay without sending the booker's details again. It asks the provider with the payment's own idempotency key, so it never creates a second payment, and reads the checkout again once the provider answers. Any other state answers 200 with `payment: null`, whether or not payments are configured, including a checkout that closes or lapses while it is read or while the provider answers: the body then shows the closed state. A wrong secret, another operator's checkout, and an unknown id answer the same 404, whether or not payments are configured.",
       "Never cached. Rate limited like public commands, since it may call the provider. The client secret is a capability: keep it out of URLs and logs.",
     ].join("\n\n"),
     security: bearerSecurity,
@@ -294,7 +318,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       404: errorBody("No active tenant hostname matches the origin, or no such checkout"),
       429: errorBody("Too many requests from this address for this operator (rate_limited)"),
       503: errorBody(
-        "Payments are not configured (payments_unavailable), or the provider did not answer (payment_provider_unavailable); read again later",
+        "For an open checkout only: payments are not configured (payments_unavailable), or the provider did not answer (payment_provider_unavailable); read again later",
       ),
     },
   });
@@ -302,10 +326,8 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
   app.openapi(readPaymentRoute, async (c) => {
     const { checkoutSessionId } = c.req.valid("param");
     const secret = checkoutSecret(c);
-    const provider = providerFor(c, deps);
-    if (!provider) {
-      throw new ApiError(503, "payments_unavailable", "Payments are not configured here");
-    }
+    // The secret and the checkout first, so a wrong one answers 404 and a
+    // closed one 200 whether or not payments are configured.
     const read = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const session = await getCheckoutSession(trx, ctx.tenantId, {
         sessionId: checkoutSessionId,
@@ -316,6 +338,11 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
     });
     const session = read.body.checkoutSession as CheckoutSessionView;
     if (session.state !== "open") return c.json({ checkoutSession: session, payment: null }, 200);
+    // Only an open checkout needs the provider.
+    const provider = providerFor(c, deps);
+    if (!provider) {
+      throw new ApiError(503, "payments_unavailable", "Payments are not configured here");
+    }
     // Outside any transaction, as when the checkout was opened.
     const ready = await ensureProviderPayment(getDb(c), provider, read.ctx, session.id);
     if (ready.kind === "unavailable") {
@@ -331,19 +358,20 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       );
     }
     if (ready.kind === "not_found") throw new Error("a committed checkout has no payment");
-    if (ready.kind === "not_open") {
-      // It closed or lapsed after the view was read: read the view again, so
-      // the answer never shows an open checkout with no payment.
-      const closed = await inTenantTransaction(getDb(c), read.ctx, (trx) =>
-        getCheckoutSession(trx, read.ctx.tenantId, { sessionId: session.id, secret }),
-      );
-      if (!closed) throw checkoutNotFound();
-      const state = closed.state === "open" ? ready.state : closed.state;
-      return c.json({ checkoutSession: { ...closed, state }, payment: null }, 200);
+    // It may have closed or lapsed after the view was read, before or while
+    // the provider answered: read it again, and answer a client secret only
+    // if it is still open, so the body never shows an open checkout with no
+    // payment nor a closed one with a client secret.
+    const current = await readAgain(c, read.ctx, session.id, secret);
+    if (!current) throw checkoutNotFound();
+    if (ready.kind === "not_open" || current.state !== "open") {
+      const state =
+        current.state === "open" && ready.kind === "not_open" ? ready.state : current.state;
+      return c.json({ checkoutSession: { ...current, state }, payment: null }, 200);
     }
     return c.json(
       {
-        checkoutSession: session,
+        checkoutSession: current,
         payment: {
           provider: ready.provider,
           paymentRef: ready.paymentRef,

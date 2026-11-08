@@ -11,9 +11,12 @@ import {
 } from "@tidegrid/domain-booking/testing";
 import { changeTripSalesState } from "@tidegrid/domain-catalog";
 import { systemContext, tripAllocator } from "@tidegrid/domain-inventory/testing";
+import type { PaymentProvider } from "@tidegrid/domain-payments";
 import postgres from "postgres";
 import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { createApp } from "../src/app.ts";
+import type { Bindings } from "../src/env.ts";
+import { paymentProvider } from "../src/payments.ts";
 
 /**
  * A seam for the race between the payment read's view and the provider
@@ -22,6 +25,8 @@ import { createApp } from "../src/app.ts";
  */
 const race = vi.hoisted(() => ({
   beforeEnsure: null as null | ((sessionId: string) => Promise<void>),
+  /** Runs inside the provider call, after the provider created the payment. */
+  duringCreate: null as null | ((paymentId: string) => Promise<void>),
 }));
 vi.mock("@tidegrid/domain-booking", async (importOriginal) => {
   const original = await importOriginal<typeof import("@tidegrid/domain-booking")>();
@@ -60,6 +65,8 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
   let admin: Sql;
   let runtime: ReturnType<typeof createDb>;
   let app: ReturnType<typeof createApp>;
+  /** The same app over a provider that runs `race.duringCreate` mid-call. */
+  let racing: ReturnType<typeof createApp>;
   let A: CheckoutFixture & { host: string };
   let B: CheckoutFixture & { host: string };
   let tripsA: ReturnType<typeof tripAllocator>;
@@ -67,7 +74,7 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
   /** Every log line the app wrote during the test. */
   let lines: string[] = [];
 
-  const bindings = () => ({
+  const bindings = (): Bindings => ({
     ENVIRONMENT: "local" as const,
     BUILD_ID: "integration",
     DATABASE_URL: env?.runtimeUrl ?? "",
@@ -81,15 +88,22 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
   async function request(
     method: string,
     path: string,
-    opts: { tenant: { host: string }; body?: unknown; headers?: Record<string, string> },
+    opts: {
+      tenant: { host: string };
+      body?: unknown;
+      headers?: Record<string, string>;
+      via?: ReturnType<typeof createApp> | undefined;
+      paymentsOff?: boolean;
+    },
   ) {
     const headers = new Headers(opts.headers);
     headers.set("origin", `https://${opts.tenant.host}`);
     if (opts.body !== undefined) headers.set("content-type", "application/json");
-    const res = await app.request(
+    const { PAYMENT_PROVIDER: _off, ...withoutPayments } = bindings();
+    const res = await (opts.via ?? app).request(
       `http://localhost${path}`,
       { method, headers, body: opts.body === undefined ? null : JSON.stringify(opts.body) },
-      bindings(),
+      opts.paymentsOff ? withoutPayments : bindings(),
       executionCtx,
     );
     return { status: res.status, headers: res.headers, json: (await res.json()) as Json };
@@ -97,11 +111,18 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
 
   const bearer = (secret: string) => ({ authorization: `Bearer ${secret}` });
 
-  async function open(tenant: typeof A, tripId: string, party: number, charter = false) {
+  async function open(
+    tenant: typeof A,
+    tripId: string,
+    party: number,
+    charter = false,
+    via?: ReturnType<typeof createApp>,
+  ) {
     const q = await quoteFor(runtime.db, tenant.id, tripId, party, { charter });
     const secret = newSecret();
     const res = await request("POST", "/v1/public/checkout-sessions", {
       tenant,
+      via,
       body: {
         quoteId: q.quoteId,
         acceptedPolicyVersion: q.policy.version,
@@ -128,11 +149,32 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
     addOns: [],
     ...extra,
   });
-  const paymentRead = (tenant: typeof A, id: string, secret: string) =>
+  const paymentRead = (
+    tenant: typeof A,
+    id: string,
+    secret: string,
+    opts: { via?: ReturnType<typeof createApp>; paymentsOff?: boolean } = {},
+  ) =>
     request("GET", `/v1/public/checkout-sessions/${id}/payment`, {
       tenant,
       headers: bearer(secret),
+      ...opts,
     });
+  const pay = (tenant: typeof A, payment: { paymentRef: string; clientSecret: string }) =>
+    request("POST", `/v1/fake-provider/payments/${payment.paymentRef}/succeed`, {
+      tenant,
+      headers: bearer(payment.clientSecret),
+    });
+  /** The checkout whose payment row the provider was asked about. */
+  async function checkoutOfPayment(paymentId: string): Promise<string> {
+    const [row] = await admin<{ id: string }[]>`
+      select checkout_session_id as id from public.payments where id = ${paymentId}`;
+    if (!row) throw new Error("no such payment");
+    return row.id;
+  }
+  const lapse = (sessionId: string) =>
+    admin`update public.checkout_sessions set expires_at = now() - interval '1 second'
+      where id = ${sessionId}`;
   const ownOffer = (tenant: typeof A, id: string, secret: string) =>
     request("GET", `/v1/public/checkout-sessions/${id}/offer`, { tenant, headers: bearer(secret) });
   const publicOffer = (tenant: typeof A, tripId: string) =>
@@ -172,6 +214,27 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
     tripsA = tripAllocator(A);
     tripsB = tripAllocator(B);
     app = createApp();
+    racing = createApp({
+      paymentProvider: (db, env): PaymentProvider => {
+        const real = paymentProvider(env, db);
+        if (!real) throw new Error("the fake provider is not configured");
+        return {
+          name: real.name,
+          signatureHeader: real.signatureHeader,
+          minimumAmount: (currency) => real.minimumAmount(currency),
+          createPayment: async (input) => {
+            const created = await real.createPayment(input);
+            const hook = race.duringCreate;
+            race.duringCreate = null;
+            if (hook) await hook(input.clientReference);
+            return created;
+          },
+          retrievePayment: (input) => real.retrievePayment(input),
+          refundPayment: (input) => real.refundPayment(input),
+          verifyWebhook: (input) => real.verifyWebhook(input),
+        };
+      },
+    });
   });
 
   afterAll(async () => {
@@ -181,6 +244,7 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
 
   afterEach(() => {
     race.beforeEnsure = null;
+    race.duringCreate = null;
     vi.restoreAllMocks();
     lines = [];
   });
@@ -249,6 +313,115 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
         id: lapsing.session.id,
         state: "expired",
       });
+    });
+
+    it("never answers a client secret when the checkout closes during the provider call", async () => {
+      // Canceled by the guest in another tab while the provider answers.
+      const canceling = await opened(A, tripsA.shared(), 1);
+      race.duringCreate = async (paymentId) => {
+        const id = await checkoutOfPayment(paymentId);
+        expect((await cancel(A, id, canceling.secret)).status).toBe(200);
+      };
+      const canceled = await paymentRead(A, canceling.session.id, canceling.secret, {
+        via: racing,
+      });
+      expect(race.duringCreate).toBeNull();
+      expect(canceled.status).toBe(200);
+      expect(JSON.stringify(canceled.json)).not.toContain(canceling.payment.clientSecret);
+      expect(canceled.json.payment).toBeNull();
+      expect(canceled.json.checkoutSession).toMatchObject({
+        id: canceling.session.id,
+        state: "canceled",
+      });
+
+      // Confirmed by the provider's success event while it answers.
+      const paying = await opened(A, tripsA.shared(), 1);
+      race.duringCreate = async () => {
+        const paid = await pay(A, paying.payment);
+        expect(paid.json).toMatchObject({ delivery: { outcome: "confirmed" } });
+      };
+      const confirmed = await paymentRead(A, paying.session.id, paying.secret, { via: racing });
+      expect(race.duringCreate).toBeNull();
+      expect(confirmed.status).toBe(200);
+      expect(JSON.stringify(confirmed.json)).not.toContain(paying.payment.clientSecret);
+      expect(confirmed.json.payment).toBeNull();
+      expect(confirmed.json.checkoutSession).toMatchObject({
+        id: paying.session.id,
+        state: "confirmed",
+      });
+
+      // Past its expiry by the time the provider answers.
+      const lapsing = await opened(A, tripsA.shared(), 1);
+      race.duringCreate = async (paymentId) => {
+        await lapse(await checkoutOfPayment(paymentId));
+      };
+      const expired = await paymentRead(A, lapsing.session.id, lapsing.secret, { via: racing });
+      expect(race.duringCreate).toBeNull();
+      expect(expired.status).toBe(200);
+      expect(JSON.stringify(expired.json)).not.toContain(lapsing.payment.clientSecret);
+      expect(expired.json.payment).toBeNull();
+      expect(expired.json.checkoutSession).toMatchObject({
+        id: lapsing.session.id,
+        state: "expired",
+      });
+
+      // One that stays open still gets its client secret through the same app.
+      const staying = await opened(A, tripsA.shared(), 1);
+      const open = await paymentRead(A, staying.session.id, staying.secret, { via: racing });
+      expect(open.json.payment).toEqual(staying.payment);
+    });
+
+    it("never answers a client secret when the checkout lapses while it is opened", async () => {
+      race.duringCreate = async (paymentId) => {
+        await lapse(await checkoutOfPayment(paymentId));
+      };
+      const res = await open(A, tripsA.shared(), 1, false, racing);
+      expect(race.duringCreate).toBeNull();
+      expect(res.status).toBe(201);
+      expect(res.json.payment).toBeNull();
+      // The create answer is the checkout as it was opened (its contract).
+      expect(res.json.checkoutSession?.state).toBe("open");
+    });
+
+    it("with payments off, answers every wrong secret 404 and a closed checkout 200", async () => {
+      const off = { paymentsOff: true };
+      const one = await opened(A, tripsA.shared(), 1);
+      const two = await opened(A, tripsA.shared(), 1);
+      const theirs = await opened(B, tripsB.shared(), 1);
+      for (const [tenant, id, secret] of [
+        [A, one.session.id, newSecret()],
+        [A, one.session.id, two.secret],
+        [A, randomUUID(), one.secret],
+        [B, one.session.id, one.secret],
+        [A, theirs.session.id, theirs.secret],
+      ] as const) {
+        const res = await paymentRead(tenant, id, secret, off);
+        expect({ status: res.status, code: res.json.error?.code }).toEqual({
+          status: 404,
+          code: "checkout_not_found",
+        });
+      }
+      // Open: only now is the provider needed.
+      const needs = await paymentRead(A, one.session.id, one.secret, off);
+      expect(needs.status).toBe(503);
+      expect(needs.json.error?.code).toBe("payments_unavailable");
+
+      expect((await cancel(A, one.session.id, one.secret)).status).toBe(200);
+      const paid = await pay(A, two.payment);
+      expect(paid.json).toMatchObject({ delivery: { outcome: "confirmed" } });
+      const lapsing = await opened(A, tripsA.shared(), 1);
+      await lapse(lapsing.session.id);
+      for (const [o, state] of [
+        [one, "canceled"],
+        [two, "confirmed"],
+        [lapsing, "expired"],
+      ] as const) {
+        const res = await paymentRead(A, o.session.id, o.secret, off);
+        expect(res.status).toBe(200);
+        expect(res.headers.get("cache-control")).toBe("no-store");
+        expect(res.json.payment).toBeNull();
+        expect(res.json.checkoutSession).toMatchObject({ id: o.session.id, state });
+      }
     });
 
     it("answers a wrong secret, another checkout's secret, or no secret as nothing", async () => {
