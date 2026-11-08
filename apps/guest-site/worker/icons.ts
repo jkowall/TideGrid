@@ -1,8 +1,8 @@
 import { type PublicBrand, primaryInk, svgLogoProblem } from "@tidegrid/contracts";
 
 /**
- * The tenant's app icons (G2.14b, D3(a), a coordinator default pending owner
- * confirmation). One build serves every tenant, so the Worker composes each
+ * The tenant's app icons (G2.14b, D3(a), a coordinator default confirmed by
+ * the owner on 2026-11-08). One build serves every tenant, so the Worker composes each
  * icon from the published brand: a square of the brand's primary color with
  * the brand's validated SVG mark centered on it. The composed document goes
  * back through the logo validator before it is served. A brand with no logo,

@@ -77,8 +77,8 @@ import { fillLinkSlot } from "./render.ts";
 export const MAX_DELIVERY_ATTEMPTS = 6;
 /**
  * Seconds before a message retries after an account-level fault gave its
- * attempt back (coordinator default, 2026-11-07, pending owner
- * confirmation). Under the 15-minute cron, so each cron run checks once
+ * attempt back (coordinator default, 2026-11-07, confirmed by the owner on
+ * 2026-11-08). Under the 15-minute cron, so each cron run checks once
  * whether the account recovered; the database refuses anything under 60 s.
  */
 export const ACCOUNT_FAULT_RETRY_SECONDS = 600;

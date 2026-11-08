@@ -1,6 +1,8 @@
 /**
  * The Stripe payment adapter (standing goal item 3, proposed; coordinator
- * default of 2026-10-28, pending the owner). Stripe Connect direct charges:
+ * defaults of 2026-10-28. The owner confirmed D1 to D12 on 2026-11-08. The
+ * refund error-code rule and this package as the adapter's home were not
+ * asked and stay coordinator defaults). Stripe Connect direct charges:
  * every call runs on the operator's connected account through the
  * `Stripe-Account` header, the operator is merchant of record, and TideGrid
  * adds no application fee. It speaks to Stripe's REST API over fetch, runs in

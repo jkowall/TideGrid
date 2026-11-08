@@ -144,7 +144,8 @@ jobs:
         run: tools/local-db/local-db.sh logs
 
   # Browser journeys and the installability check (G2.14b; D5(a), a
-  # coordinator default pending owner confirmation). The built guest site runs
+  # coordinator default confirmed by the owner on 2026-11-08). The built guest
+  # site runs
   # under its Worker in `wrangler dev`, first with a stub GuestGateway and no
   # database (part A), then bound to the API's GuestGateway, with the API in
   # `wrangler dev` on a disposable PostgreSQL 17 seeded with *.book.localhost
@@ -241,8 +242,8 @@ jobs:
           path: apps/guest-site/test-results
           retention-days: 7
 
-  # Console browser journeys (G2.12d; D10(A), a coordinator default pending
-  # owner confirmation). The built console runs under its Worker in
+  # Console browser journeys (G2.12d; D10(A), a coordinator default confirmed
+  # by the owner on 2026-11-08). The built console runs under its Worker in
   # `wrangler dev`, so public/_headers and its CSP apply, bound to the API's
   # ConsoleGateway, with the API in `wrangler dev` on a disposable PostgreSQL
   # 17 seeded with the synthetic operators. Booking staff at both operators
