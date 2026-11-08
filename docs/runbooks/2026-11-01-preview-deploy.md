@@ -8,6 +8,18 @@
 
 **Line references.** `12:N` is `docs/v2/12-demo-build-plan.md` line N, `08:N` is the hosting plan, and `cli.js:N` is `node_modules/.pnpm/wrangler@4.135.0_@types+node@24.13.6/node_modules/wrangler/wrangler-dist/cli.js` line N, read locally on 2026-10-28.
 
+**Update notes, 2026-11-08: wrangler 4.152.0 (W1-TOOLING).** The three apps now pin wrangler 4.152.0, and the Workers test pool resolves the same version ([decision register](../v2/06-decision-register.md#2026-11-08-w1-tooling-wrangler-41520-and-the-workers-test-pool-owner-go-start-gate-waived-by-the-owner-coordinator-defaults-pending-owner-confirmation)). Nothing was released: the deployed Workers stay built with 4.135.0 until the next release. The `cli.js:N` references in the steps below stay 4.135.0 lines; they are not renumbered. Each was re-read in `node_modules/.pnpm/wrangler@4.152.0_@types+node@24.13.6/node_modules/wrangler/wrangler-dist/cli.js` on 2026-11-08. Every reading the steps rely on holds. One detail changed, in the safer direction: a declined 10220 prompt no longer prints the success line. Details: the [release tool's re-verification](../../tools/release/README.md#wrangler-41520-re-verification-w1-tooling-2026-11-08).
+
+| Reading | 4.135.0 | 4.152.0 | Status |
+|---|---|---|---|
+| A non-TTY stdout sets `override_existing_origin` and `override_existing_dns_record` with no prompt | 153833-153836 | 164530-164533 | held; `publishCustomDomains` is identical apart from one renamed variable |
+| "Custom Domains already exist ... Update them to point to this script instead?" asks `confirm`, which is `confirm2`, whose `defaultValue` is `true` | 153836-153853, 61292-61302, 134354-134360, 133743 | 164533-164550, 67686-67695, 140297-140306, 139679 | held: Enter alone still moves the name |
+| The new version is deployed before the custom domains step, so only that step fails on `n` | 170147 (deployment), 170388 (triggers) | 181403, 181659 | held |
+| A secret put after a code rollback fails with 10215 | 299076, 299143-299147 | 311623, 311510-311521, 311696 | held for put; 4.152.0 also maps 10214 to the same message. Neither version maps 10215 for `secret delete`, so the source does not show whether a delete fails after a rollback. `nov1` still refuses both put and delete after a recorded API rollback |
+| `wrangler rollback` leaves bound resources unchanged | 349363 | 361316 | held |
+| Declining the changed-secrets prompt (10220) aborts the rollback and exits 0 | 349296, 349393-349415 | 361248, 361351-361371 | held for the abort and exit 0; 4.135.0 then printed its success line, 4.152.0 returns without it. `nov1` still counts a rollback done only when the anchor alone is live |
+| Deploy and rollback send a Durable Objects code-update strategy, `deferred` with a 300 s delay by default | not sent: 157424-157440, 349377-349405 | 168444-168461, 181401-181410, 220730-220745, 361331-361342, 361356-361367 | new; no step relies on it. No Worker here binds a Durable Object, and `nov1` passes no `--durable-objects-code-update-mode`. Its effect on a rollback is unverified without a live call; `nov1` counts a rollback done only when the anchor alone is live |
+
 ## Owner calls before anything else
 
 Two decisions shape the whole day. Answer them before Oct 31.

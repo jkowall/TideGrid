@@ -53,6 +53,27 @@ The owner allows scripted type-backs when the owner directs an unattended run, w
 - **Not covered.** `src/redact.ts` has no rule for GitHub token shapes (`ghp_`, `github_pat_`, and the like). No path in `nov1` reads one today; a rule is a proposed follow-up from the security review. A dispatch head on `main` is trusted to carry a guarded workflow; three older `ci.yml` versions on `main` have a weaker guard that still checks the checked-out commit, so a run from them still tested the SHA.
 - **Tests.** `test/ci-gate.test.ts`, with `test/ci-fixtures.ts`: the recorded runs of `7ef50cf` (passes) and `dd30fc8` (refused), the recorded shape of the 2026-11-08 dispatches with a cancelled duplicate, and every refusal for both commands. The shared fake answers `gh` with a green push run, so the earlier suites test what they tested before.
 
+## Wrangler 4.152.0 re-verification (W1-TOOLING, 2026-11-08)
+
+The three apps pin wrangler 4.152.0 exactly, and the Workers test pool resolves the same version through `pnpm.overrides` ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-tooling-wrangler-41520-and-the-workers-test-pool-owner-go-start-gate-waived-by-the-owner-coordinator-defaults-pending-owner-confirmation); the owner confirmed the versions on 2026-11-08). The pin is exact so that the line references below cannot drift with a lockfile refresh. Nothing was released or deployed.
+
+`nov1` relies on wrangler behavior it cannot test, since the unit tests mock wrangler. Each reading was re-read in `node_modules/.pnpm/wrangler@4.152.0_@types+node@24.13.6/node_modules/wrangler/wrangler-dist/cli.js` and compared with the 4.135.0 file. The sections above keep their 4.135.0 line numbers; the comments and refusal texts in `src` now cite 4.152.0 lines.
+
+| Reading | 4.135.0 | 4.152.0 | Status |
+|---|---|---|---|
+| Non-TTY stdout overrides DNS records and custom-domain origins | 153833-153836 | 164530-164533 | held (`publishCustomDomains` identical but for one renamed variable) |
+| A confirmation without a TTY on stdin and stdout takes its fallback, yes (`confirm2`, `isNonInteractiveOrCI`) | 133743-133751, 29138-29153 | 139679-139688, 35198-35213 | held; `secrets --delete` relies on it for the declared name |
+| `secret delete` asks through `confirm2` | 299224-299226 | 311775-311777 | held |
+| `secret put` reads stdin when stdin is not a TTY | 299125 | 311678-311680 | held; `--from-file` relies on it |
+| `secret list` prints JSON by default | 299246 | 311797-311813 | held |
+| A secret put after a code rollback fails with 10215 | 299076, 299143-299147 | 311623, 311510-311521 | held; 10214 now gets the same message |
+| `wrangler rollback` asks for a message, a 100% deploy, and, after secrets changed, whether to go on | 349347, 349368, 349393 | 361300, 361321, 361351 | held, so a rollback stays typed |
+| Declining the 10220 prompt exits 0 | 349407-349415 | 361368-361371 | held for exit 0. 4.135.0 then printed its success line; 4.152.0 returns without it. The postcondition (the anchor alone is live) is still required |
+| A rollback leaves bound resources unchanged | 349363 | 361316 | held |
+| `deployments list` sorts oldest first and carries author emails | 349050, 348974, 349090 | 361001, 360925, 361041 | held; only ids are parsed |
+
+Also changed, and relied on by nothing here: `wrangler deploy` now always keeps secret bindings (`keepSecrets: true`, 181291; 4.135.0 kept them only with `--keep-vars` or `--secrets-file`, 170042). No `nov1` step relies on a deploy removing a secret; secrets are removed only by `secrets --delete`, so no step changes. `wrangler deploy` and `wrangler rollback` now also send a Durable Objects code-update strategy in every deployment request, `deferred` with a 300 s delay by default (`createDeployment` 168444-168461, deploy 181401-181410, rollback 361331-361342 and 361356-361367, default 220730-220745). 4.135.0 sent no such field (`createDeployment` 157424-157440, rollback 349377-349405), and rollback gains a `--durable-objects-code-update-mode` argument (361251) that `nov1` does not pass. No Worker here binds a Durable Object. Whether the deployments API accepts the field for such a Worker on a rollback is unverified, since checking it needs a live call. A refusal would fail the step before traffic moves, and `nov1` counts a rollback done only when the anchor alone is live. The prototype's `npx wrangler@4.125.0` pin in the root scripts is untouched until the prototype is retired.
+
 ## Commands
 
 | Command | Purpose |

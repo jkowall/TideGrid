@@ -86,10 +86,10 @@ export function releasePlan(worker: Worker, phase: Phase, rollback: boolean): Pl
               : ["the earlier build serves"],
           rollback: [`nov1 release ${worker} (forward again)`],
           cannotRestore: [
-            "bound resources: custom domains stay attached (cli.js:349363)",
+            "bound resources: custom domains stay attached (cli.js:361316)",
             "the schema: migrations are forward-only",
             "whether a rollback changes crons or secrets is not documented (unverified)",
-            "after a rollback, secret put fails with 10215: use wrangler versions secret put, then versions deploy (cli.js:299145)",
+            "after a rollback, secret put fails with 10215: use wrangler versions secret put, then versions deploy (cli.js:311510-311521)",
           ],
         },
       ],
@@ -497,8 +497,8 @@ async function doRollback(
   const code = await wranglerOnTerminal(deps, worker, ["rollback", anchor]);
   const readAfter = () => deployedVersions(deps, worker).catch(() => null);
   let after = await readAfter();
-  // wrangler 4.135.0 exits 0 when the owner declines its changed-secrets
-  // prompt (10220; cli.js:349407-349415), so exit 0 alone proves nothing:
+  // wrangler 4.152.0 exits 0 when the owner declines its changed-secrets
+  // prompt (10220; cli.js:361368-361371), so exit 0 alone proves nothing:
   // the rollback is done only when exactly the anchor is live afterwards.
   const anchorAlone = (ids: string[] | null) => ids !== null && sameIds(ids, [anchor]);
   if (code === 0 && !anchorAlone(after)) {

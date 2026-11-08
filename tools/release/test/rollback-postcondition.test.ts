@@ -1,8 +1,9 @@
 /**
  * A rollback is done only when exactly the anchor is live afterwards.
- * wrangler 4.135.0 exits 0 when the owner declines its changed-secrets
- * prompt (code 10220): it prints "Aborting rollback...", then falls through
- * to its success line (cli.js:349407-349415). Runbook Rule 6 deletes a
+ * wrangler 4.152.0 exits 0 when the owner declines its changed-secrets
+ * prompt (code 10220): it prints "Aborting rollback..." and returns, with no
+ * error (cli.js:361368-361371). 4.135.0 also fell through to its success
+ * line (cli.js:349407-349415); 4.152.0 does not. Runbook Rule 6 deletes a
  * secret before a rollback, so that prompt is likely on the day.
  */
 import { describe, expect, it } from "vitest";
