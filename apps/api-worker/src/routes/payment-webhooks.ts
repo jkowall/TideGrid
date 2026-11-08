@@ -64,6 +64,26 @@ export const MAX_WEBHOOK_BYTES = 64 * 1024;
  *   not send the event again unless a person resends it. Processing is
  *   idempotent per event.
  */
+/** The Stripe webhook's own path: the one the source check guards. */
+export const STRIPE_WEBHOOK_PATH = "/v1/webhooks/payments/stripe";
+
+/**
+ * Under Stripe, refuse a client address not on the committed list (D2, D3).
+ * Cloudflare sets CF-Connecting-IP at its edge and overwrites a client's own;
+ * X-Forwarded-For is client-controlled and is never read. The body cap calls
+ * this before it reads a byte, so an unlisted sender costs no upload, and the
+ * route calls it again.
+ */
+export function refuseUnlistedStripeSource(c: Context<AppEnv>): void {
+  const address = c.req.header("cf-connecting-ip") ?? null;
+  if (isStripeWebhookIp(address)) return;
+  c.get("log").warn("payment_webhook_source_refused", {
+    "event.name": "payment_webhook_source_refused",
+    "error.type": address === null ? "source_address_missing" : "source_address_not_listed",
+  });
+  throw new ApiError(403, "source_not_allowed", "Provider callbacks come from the provider");
+}
+
 export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
   const webhookRoute = createRoute({
     method: "post",
@@ -99,18 +119,10 @@ export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: App
     if (!provider || provider.name !== name) {
       throw new ApiError(404, "not_found", "No such route");
     }
-    if (provider.name === "stripe") {
-      // Cloudflare sets CF-Connecting-IP at its edge and overwrites a client's
-      // own. X-Forwarded-For is client-controlled and is never read here.
-      const address = c.req.header("cf-connecting-ip") ?? null;
-      if (!isStripeWebhookIp(address)) {
-        c.get("log").warn("payment_webhook_source_refused", {
-          "event.name": "payment_webhook_source_refused",
-          "error.type": address === null ? "source_address_missing" : "source_address_not_listed",
-        });
-        throw new ApiError(403, "source_not_allowed", "Provider callbacks come from the provider");
-      }
-    }
+    // The body cap (src/body-limit.ts) already ran this check for a configured
+    // Stripe provider, before reading any byte; it runs again here for a
+    // provider a test injects.
+    if (provider.name === "stripe") refuseUnlistedStripeSource(c);
     const declared = Number(c.req.header("content-length") ?? "0");
     if (Number.isFinite(declared) && declared > MAX_WEBHOOK_BYTES) {
       throw new ApiError(413, "payload_too_large", "The event is too large");

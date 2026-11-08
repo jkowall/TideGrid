@@ -247,6 +247,42 @@ describe("routes under PAYMENT_PROVIDER=stripe", () => {
     ]) {
       expect(await post(body, headers)).toEqual({ status: 403, code: "source_not_allowed" });
     }
+    // The body cap refuses an unlisted sender before it reads a byte or judges
+    // a size: a stream that is never pulled, and an oversize declared length.
+    let pulled = false;
+    // highWaterMark 0: the stream pulls only when something reads it.
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull() {
+          pulled = true;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    expect(
+      await call(
+        "/v1/webhooks/payments/stripe",
+        {
+          method: "POST",
+          headers: { "cf-connecting-ip": "203.0.113.63", "stripe-signature": signed },
+          body: stream,
+          duplex: "half",
+        } as RequestInit,
+        stripeEnv(),
+      ),
+    ).toEqual({ status: 403, code: "source_not_allowed" });
+    expect(pulled).toBe(false);
+    expect(
+      await post("x".repeat(70 * 1024), {
+        "stripe-signature": signed,
+        "cf-connecting-ip": "203.0.113.64",
+      }),
+    ).toEqual({ status: 403, code: "source_not_allowed" });
+    // A listed sender's oversize body still meets the cap.
+    expect(await post("x".repeat(70 * 1024), { "stripe-signature": signed })).toEqual({
+      status: 413,
+      code: "payload_too_large",
+    });
     // A verified event goes on to the database, which this suite leaves unconfigured.
     expect(await post(body, { "stripe-signature": signed })).toEqual({
       status: 503,
