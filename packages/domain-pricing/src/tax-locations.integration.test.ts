@@ -332,7 +332,11 @@ describe.skipIf(!env)("per-location tax rates against a real database", () => {
       }),
     );
     if (north.kind !== "created") throw new Error("fixture");
-    const code = await pgCode(
+    // The insert itself must fail: the deferred totals check would also
+    // refuse this quote at commit, with the same code, so a refusal only at
+    // commit would not prove the location guard.
+    let insertError: { code?: string; message?: string } | null = null;
+    await pgCode(
       asGuest(A.id, async (trx) => {
         const r = await createQuote(trx, guest(A.id), {
           tripId: a.southTrip,
@@ -353,9 +357,17 @@ describe.skipIf(!env)("per-location tax rates against a real database", () => {
             taxable_amount: 4500,
             amount: 45,
           })
-          .execute();
+          .execute()
+          .catch((err: unknown) => {
+            insertError = err as { code?: string; message?: string };
+            throw err;
+          });
+        throw new Error("the forged quote line tax was accepted at insert");
       }),
     );
-    expect(code).toBe("23514");
+    expect(insertError).toMatchObject({
+      code: "23514",
+      message: expect.stringContaining("does not apply at this quote's location"),
+    });
   });
 });
