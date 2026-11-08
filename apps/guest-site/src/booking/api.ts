@@ -1,11 +1,14 @@
 import {
   type AvailableTrip,
   type CheckoutPayment,
+  CheckoutPaymentResponse,
   type CheckoutSession,
   CheckoutSessionCreateResponse,
   CheckoutSessionResponse,
   ErrorResponse,
   FakePaymentControlResponse,
+  type Problem,
+  ProblemResponse,
   type Quote,
   type QuoteCreateRequest,
   QuoteResponse,
@@ -32,8 +35,19 @@ export type Failure =
   | { kind: "network" }
   /** A success answer that breaks the contract. */
   | { kind: "unreadable" }
-  /** The API's own refusal, or a server error, with its code. */
-  | { kind: "refused"; status: number; code: string; message: string };
+  /**
+   * The API's own refusal, or a server error, with its code. A guest
+   * command's 409 or 422 also lists every problem by code and subject, and a
+   * capacity refusal says how many seats are left on the trip (W1-GUEST-API).
+   */
+  | {
+      kind: "refused";
+      status: number;
+      code: string;
+      message: string;
+      problems?: readonly Problem[];
+      remaining?: number;
+    };
 
 export type Result<T> = { kind: "ok"; value: T; replayed: boolean } | Failure;
 
@@ -103,6 +117,19 @@ export async function call<S extends z.ZodType>(
     });
     const json: unknown = await res.json().catch(() => undefined);
     if (!res.ok) {
+      // Problem details first: the same envelope, with the problems listed.
+      const problem = ProblemResponse.safeParse(json);
+      if (problem.success) {
+        const { error: envelope, problems, remaining } = problem.data;
+        return {
+          kind: "refused",
+          status: res.status,
+          code: envelope.code,
+          message: envelope.message,
+          problems,
+          ...(remaining === undefined ? {} : { remaining }),
+        };
+      }
       const error = ErrorResponse.safeParse(json);
       return {
         kind: "refused",
@@ -227,6 +254,44 @@ export async function readCheckout(
     signal,
   });
   return mapOk(result, (r) => r.checkoutSession);
+}
+
+/**
+ * The offer of an open checkout's trip with the guest's own hold set aside, so
+ * a reload during a checkout whose hold took the last seats, or the whole
+ * boat, still reads its trip's options (W1-GUEST-API). The checkout secret
+ * travels only as `Authorization: Bearer`.
+ */
+export async function getCheckoutOffer(
+  sessionId: string,
+  secret: string,
+  signal?: AbortSignal,
+): Promise<Result<TripOffer>> {
+  const result = await call(`/v1/public/checkout-sessions/${encodeURIComponent(sessionId)}/offer`, {
+    bearer: secret,
+    schema: TripOfferResponse,
+    signal,
+  });
+  return mapOk(result, (r) => r.offer);
+}
+
+/**
+ * What an open checkout pays with, read again with the checkout secret as a
+ * bearer token (W1-GUEST-API): the provider payment and its client secret,
+ * or null once the checkout is not open. For the provider's payment element
+ * after a reload. The client secret stays in memory: never stored, and never
+ * in an address.
+ */
+export async function readCheckoutPayment(
+  sessionId: string,
+  secret: string,
+  signal?: AbortSignal,
+): Promise<Result<OpenedCheckout>> {
+  const result = await call(
+    `/v1/public/checkout-sessions/${encodeURIComponent(sessionId)}/payment`,
+    { bearer: secret, schema: CheckoutPaymentResponse, signal, timeoutMs: commandTimeoutMs },
+  );
+  return mapOk(result, (r) => ({ session: r.checkoutSession, payment: r.payment }));
 }
 
 /**

@@ -556,6 +556,29 @@ export interface Trouble {
 const problemCodes: ReadonlySet<string> = new Set(QuoteProblemCode.options);
 
 /**
+ * The problems a refused quote lists. The API sends them by code and subject
+ * (W1-GUEST-API); only the contract's problem codes count. An answer without
+ * the list, from an API that predates it, is read from the message.
+ */
+export function failureProblems(
+  failure: Extract<Failure, { kind: "refused" }>,
+): { code: string; subject: string | null }[] {
+  if (failure.problems) {
+    const known = failure.problems
+      .filter((p) => problemCodes.has(p.code))
+      .map((p) => ({ code: p.code, subject: p.subject }));
+    if (known.length > 0) return known;
+    return problemCodes.has(failure.code) ? [{ code: failure.code, subject: null }] : [];
+  }
+  return quoteProblems(failure.message, failure.code);
+}
+
+/** "Only 3 seats are left now. Choose fewer guests." */
+function fewerSeats(seats: number): string {
+  return `Only ${seats} ${seats === 1 ? "seat is" : "seats are"} left now. Choose fewer guests.`;
+}
+
+/**
  * The problems a 422 lists: "This quote cannot be priced:
  * add_on_quantity_exceeded (drinks), promotion_not_applicable". Only the
  * contract's problem codes count, so no word of other prose is taken for one.
@@ -612,26 +635,31 @@ function capacityTrouble(charter: boolean, seatsLeft: number | null, party: stri
 export function quoteTrouble(failure: Failure, offer: TripOffer, limits: PartyLimits): Trouble {
   const common = commonTrouble(failure);
   if (common || failure.kind !== "refused") return common ?? { notice: serverNotice };
-  const { status, code, message } = failure;
-  const fewer = "There aren't enough seats left for this party. Choose fewer guests.";
+  const { status, code } = failure;
+  // The API's count, for this trip, when it sends one; else the listing's.
+  const seatsLeft = failure.remaining ?? limits.seatsLeft;
+  const fewer =
+    failure.remaining === undefined
+      ? "There aren't enough seats left for this party. Choose fewer guests."
+      : fewerSeats(failure.remaining);
   if (status === 404) return { stop: "not_found" };
   if (code === "trip_not_bookable") return { stop: "not_bookable" };
   if (code === "pricing_unavailable") return { stop: "pricing" };
   if (code === "insufficient_capacity") {
-    return capacityTrouble(isCharter(offer), limits.seatsLeft, fewer);
+    return capacityTrouble(isCharter(offer), seatsLeft, fewer);
   }
   if (status !== 422) return { notice: serverNotice };
   // The page always sends a fresh key with a new body, so a reused key is ours
   // to fix, not the guest's. Its message is prose, not a problem list.
   if (code === "idempotency_key_reused") return { notice: serverNotice };
   const trouble: Trouble = {};
-  for (const problem of quoteProblems(message, code)) {
+  for (const problem of failureProblems(failure)) {
     const addOn = offer.addOns.find((a) => a.code === problem.subject);
     switch (problem.code) {
       case "pricing_unavailable":
         return { stop: "pricing" };
       case "insufficient_capacity": {
-        const found = capacityTrouble(isCharter(offer), limits.seatsLeft, fewer);
+        const found = capacityTrouble(isCharter(offer), seatsLeft, fewer);
         if (found.stop) return found;
         trouble.party = fewer;
         break;
@@ -696,12 +724,14 @@ export function checkoutTrouble(failure: Failure, operator: string, charter = fa
     case "payments_unavailable":
       return { stop: "payments" };
     case "insufficient_capacity": {
-      const seats = /Only (\d+) seat/.exec(message)?.[1];
+      // The count the API sends; an API that predates it says it in words.
+      const worded = /Only (\d+) seat/.exec(message)?.[1];
+      const seats = failure.remaining ?? (worded === undefined ? null : Number(worded));
       return capacityTrouble(
         charter,
-        seats === undefined ? null : Number(seats),
+        seats,
         seats
-          ? `Only ${seats} ${seats === "1" ? "seat is" : "seats are"} left now. Choose fewer guests.`
+          ? fewerSeats(seats)
           : "There aren't enough seats left for this party now. Choose fewer guests.",
       );
     }

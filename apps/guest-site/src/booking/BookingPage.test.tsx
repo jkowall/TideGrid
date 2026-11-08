@@ -23,6 +23,7 @@ import {
   listing,
   offer,
   offline,
+  problem,
   refusal,
   sharedQuote,
   stubApi,
@@ -515,6 +516,47 @@ describe("the price", () => {
     expect(drinks.getAttribute("aria-invalid")).toBe("true");
   });
 
+  it("reads the problems the API lists, not its message", async () => {
+    stubApi({
+      createQuote: () =>
+        problem(422, [
+          { code: "add_on_unavailable", subject: "photo" },
+          { code: "promotion_not_applicable" },
+        ]),
+    });
+    renderPage("?t.adult=2&a.photo=1");
+    await heading("Who's coming");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("Souvenir photo isn't offered on this date.")).toBeTruthy();
+    expect(
+      screen.getByRole("spinbutton", { name: "Souvenir photo" }).getAttribute("aria-invalid"),
+    ).toBe("true");
+  });
+
+  it("says how many seats are left when a price is refused for too few", async () => {
+    stubApi({
+      createQuote: () => problem(409, [{ code: "insufficient_capacity" }], { remaining: 3 }),
+    });
+    renderPage("?t.adult=5");
+    await heading("Who's coming");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() =>
+      expect(partyError()).toBe("Only 3 seats are left now. Choose fewer guests."),
+    );
+    // The party stays as the guest chose it.
+    expect((screen.getByRole("spinbutton", { name: "Adult" }) as HTMLInputElement).value).toBe("5");
+  });
+
+  it("stops plainly when the count left is none", async () => {
+    stubApi({
+      createQuote: () => problem(409, [{ code: "insufficient_capacity" }], { remaining: 0 }),
+    });
+    renderPage("?t.adult=2");
+    await heading("Who's coming");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await heading("This trip isn't taking bookings now")).toBeTruthy();
+  });
+
   it("offers the current options when the trip's options changed", async () => {
     const calls = stubApi({
       createQuote: () =>
@@ -727,6 +769,31 @@ describe("opening the checkout", () => {
     expect(partyError()).toBe("Only 1 seat is left now. Choose fewer guests.");
     // The guest's own count stays beside the error.
     expect((screen.getByRole("spinbutton", { name: "Adult" }) as HTMLInputElement).value).toBe("2");
+  });
+
+  it("goes back to the party with the count the API sends, whatever the message says", async () => {
+    stubApi({
+      openCheckout: () =>
+        problem(409, [{ code: "insufficient_capacity" }], { remaining: 2, message: "No room" }),
+    });
+    renderPage("?t.adult=4");
+    await toDetails();
+    fillDetails();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
+    expect(await heading("Who's coming")).toBeTruthy();
+    expect(partyError()).toBe("Only 2 seats are left now. Choose fewer guests.");
+  });
+
+  it("asks for a new price on a policy refusal in the new shape", async () => {
+    const calls = stubApi({
+      openCheckout: inOrder(() => problem(422, [{ code: "policy_not_accepted" }])),
+    });
+    renderPage("?t.adult=1");
+    await toDetails();
+    fillDetails();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to payment" }));
+    expect(await screen.findByText("Your price was updated")).toBeTruthy();
+    expect(callsTo(calls, "createQuote")).toHaveLength(2);
   });
 
   it.each([
@@ -1043,15 +1110,35 @@ describe("a reload during a checkout", () => {
     expect(await heading("Who's coming")).toBeTruthy();
   });
 
-  it("shows the checkout from its quote when its own hold took the trip off sale", async () => {
+  it("reads its trip's offer without its own hold when that hold took the trip off sale", async () => {
+    record({ paymentSent: false, paymentTried: false });
+    const calls = stubApi({ offer: () => refusal(409, "trip_not_bookable") });
+    renderPage("?t.adult=1&step=pay");
+    expect(await heading("Your checkout was interrupted")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Sunset Harbor Cruise" })).toBeTruthy();
+    const [own] = callsTo(calls, "checkoutOffer");
+    expect(own?.path).toBe(
+      "/v1/public/checkout-sessions/5d0c4a1e-2b3c-4d5e-8f60-000000000000/offer",
+    );
+    expect(own?.headers.get("authorization")).toBe(`Bearer ${"A".repeat(43)}`);
+    expect(own?.url).not.toContain("A".repeat(43));
+    // The offer came back, so the page loads as on any reload, listing included,
+    // rather than from the stored quote alone.
+    expect(callsTo(calls, "listing")).toHaveLength(1);
+  });
+
+  it("shows the checkout from its quote when even its own offer is refused", async () => {
     record({ paymentSent: false, paymentTried: false });
     const quote = sharedQuote({ quoteId: "0b7f3a52-9c1e-4d2a-8f6b-000000000000" });
     const calls = stubApi({
       offer: () => refusal(409, "trip_not_bookable"),
+      checkoutOffer: () => refusal(409, "trip_not_bookable"),
       getQuote: () => json({ quote }),
     });
     const { navigate } = renderPage("?t.adult=1&step=pay");
     expect(await heading("Your checkout was interrupted")).toBeTruthy();
+    expect(callsTo(calls, "checkoutOffer")).toHaveLength(1);
+    expect(callsTo(calls, "listing")).toHaveLength(0);
     expect(screen.getByRole("heading", { level: 1, name: "Sunset Harbor Cruise" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Start over" }));
     const dialog = await screen.findByRole("dialog", { name: "Release and start over?" });
@@ -1667,6 +1754,7 @@ describe("a stored quote in a zone the page doesn't know", () => {
     const quote = sharedQuote({ quoteId: "0b7f3a52-9c1e-4d2a-8f6b-000000000000" });
     stubApi({
       offer: () => refusal(409, "trip_not_bookable"),
+      checkoutOffer: () => refusal(409, "trip_not_bookable"),
       getQuote: () => json({ quote: { ...quote, trip: { ...quote.trip, timeZone: "Mars/Base" } } }),
     });
     renderPage("?t.adult=1&step=pay");

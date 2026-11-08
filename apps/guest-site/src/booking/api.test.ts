@@ -9,6 +9,7 @@ import {
   commandTimeoutMs,
   createQuote,
   type Failure,
+  getCheckoutOffer,
   getListing,
   getOffer,
   getQuote,
@@ -19,6 +20,7 @@ import {
   type QuoteBody,
   type Result,
   readCheckout,
+  readCheckoutPayment,
   readTimeoutMs,
   settleTestPayment,
 } from "./api.ts";
@@ -28,6 +30,7 @@ import {
   json,
   listing,
   offer,
+  problem,
   refusal,
   routeOf,
   sharedQuote,
@@ -321,6 +324,59 @@ describe("readCheckout", () => {
   });
 });
 
+describe("getCheckoutOffer (W1-GUEST-API)", () => {
+  it("reads the checkout trip's offer with the secret as a bearer token, never in the URL", async () => {
+    const sent = stubFetch(() => json({ offer }));
+    expect(await getCheckoutOffer(sessionId, secret)).toEqual({
+      kind: "ok",
+      value: offer,
+      replayed: false,
+    });
+    const call = only(sent);
+    expect(call.url).toBe(`${apiBase}/v1/public/checkout-sessions/${sessionId}/offer`);
+    expect(call.init.method).toBe("GET");
+    expect(call.init.body).toBeUndefined();
+    expectGuarded(call);
+    expect(call.headers.get("authorization")).toBe(`Bearer ${secret}`);
+    expect(call.url).not.toContain(secret);
+  });
+
+  it("encodes the checkout id into one path segment", async () => {
+    const sent = stubFetch(() => json({ offer }));
+    await getCheckoutOffer("a/b?c", secret);
+    expect(only(sent).url).toBe(`${apiBase}/v1/public/checkout-sessions/a%2Fb%3Fc/offer`);
+  });
+});
+
+describe("readCheckoutPayment (W1-GUEST-API)", () => {
+  it("reads what an open checkout pays with, the secret only as a bearer token", async () => {
+    const session = checkout("open", { id: sessionId });
+    const sent = stubFetch(() => json({ checkoutSession: session, payment }));
+    expect(await readCheckoutPayment(sessionId, secret)).toEqual({
+      kind: "ok",
+      value: { session, payment },
+      replayed: false,
+    });
+    const call = only(sent);
+    expect(call.url).toBe(`${apiBase}/v1/public/checkout-sessions/${sessionId}/payment`);
+    expect(call.init.method).toBe("GET");
+    expectGuarded(call);
+    expect(call.headers.get("authorization")).toBe(`Bearer ${secret}`);
+    expect(call.url).not.toContain(secret);
+    expect(call.url).not.toContain(payment.clientSecret);
+  });
+
+  it("reads no payment once the checkout is closed", async () => {
+    const session = checkout("expired", { id: sessionId });
+    stubFetch(() => json({ checkoutSession: session, payment: null }));
+    expect(await readCheckoutPayment(sessionId, secret)).toEqual({
+      kind: "ok",
+      value: { session, payment: null },
+      replayed: false,
+    });
+  });
+});
+
 describe("cancelCheckout", () => {
   it("posts to cancel with the secret as a bearer token, and no body or key", async () => {
     const session = checkout("canceled", { id: sessionId });
@@ -390,7 +446,9 @@ describe("what the requests carry", () => {
     await cancelCheckout(sessionId, secret);
     await settleTestPayment(payment, "succeed");
     await settleTestPayment(payment, "fail");
-    expect(calls).toHaveLength(9);
+    await getCheckoutOffer(sessionId, secret);
+    await readCheckoutPayment(sessionId, secret);
+    expect(calls).toHaveLength(11);
     const hidden = [secret, payment.clientSecret, "Ava", "ava@example.test", "example"];
     for (const call of calls) {
       for (const text of hidden) expect(call.url).not.toContain(text);
@@ -408,8 +466,16 @@ describe("what the requests carry", () => {
     await readCheckout(sessionId, secret);
     await cancelCheckout(sessionId, secret);
     await settleTestPayment(payment, "succeed");
+    await getCheckoutOffer(sessionId, secret);
+    await readCheckoutPayment(sessionId, secret);
     const authorized = calls.filter((c) => c.headers.has("authorization"));
-    expect(authorized.map(routeOf)).toEqual(["readCheckout", "cancel", "succeed"]);
+    expect(authorized.map(routeOf)).toEqual([
+      "readCheckout",
+      "cancel",
+      "succeed",
+      "checkoutOffer",
+      "readPayment",
+    ]);
     // The booker's details and the checkout secret travel in the opening POST's body only.
     const inBody = (text: string) =>
       calls.filter((c) => JSON.stringify(c.body ?? "").includes(text)).map(routeOf);
@@ -439,6 +505,8 @@ const requests: Array<[string, () => Promise<Result<unknown>>]> = [
   ["readCheckout", () => readCheckout(sessionId, secret)],
   ["cancelCheckout", () => cancelCheckout(sessionId, secret)],
   ["settleTestPayment", () => settleTestPayment(payment, "succeed")],
+  ["getCheckoutOffer", () => getCheckoutOffer(sessionId, secret)],
+  ["readCheckoutPayment", () => readCheckoutPayment(sessionId, secret)],
 ];
 
 describe("failures, for every request", () => {
@@ -464,6 +532,53 @@ describe("failures, for every request", () => {
       expect(await send()).toEqual({ kind: "unreadable" });
     },
   );
+});
+
+describe("problem details (W1-GUEST-API)", () => {
+  it("keeps the code and message, and adds every problem and the seats left", async () => {
+    stubFetch(() =>
+      problem(
+        422,
+        [{ code: "add_on_unavailable", subject: "photo" }, { code: "insufficient_capacity" }],
+        { remaining: 2, message: "This quote cannot be priced" },
+      ),
+    );
+    expect(await createQuote(quoteRequest, newIdempotencyKey())).toEqual({
+      kind: "refused",
+      status: 422,
+      code: "add_on_unavailable",
+      message: "This quote cannot be priced",
+      problems: [
+        { code: "add_on_unavailable", subject: "photo" },
+        { code: "insufficient_capacity", subject: null },
+      ],
+      remaining: 2,
+    });
+  });
+
+  it("reads a problem body with no count as one without it", async () => {
+    stubFetch(() => problem(409, [{ code: "trip_not_bookable" }], { message: "Not on sale" }));
+    const result = await openCheckout(checkoutRequest, newIdempotencyKey());
+    expect(result).toEqual({
+      kind: "refused",
+      status: 409,
+      code: "trip_not_bookable",
+      message: "Not on sale",
+      problems: [{ code: "trip_not_bookable", subject: null }],
+    });
+  });
+
+  it("reads a body that only looks like one as the plain envelope", async () => {
+    stubFetch(() =>
+      json({ error: { code: "x", message: "y", requestId: "r" }, problems: "not a list" }, 422),
+    );
+    expect(await getOffer(tripId)).toEqual({
+      kind: "refused",
+      status: 422,
+      code: "x",
+      message: "y",
+    });
+  });
 });
 
 describe("error bodies", () => {
