@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### W1-FIN-EXC: staff resolve finalization exceptions, built November 8, 2026
+
+Staff mark a payment exception as followed up, with migration `0017` (provisional), inside the G2.12 row by the owner's O-SCOPE decision ([decision register](v2/06-decision-register.md#2026-11-08-w1-fin-exc-staff-resolve-finalization-exceptions-owner-go-coordinator-defaults-pending-owner-confirmation)). Built on `claude/project-thread-kwapj1` from `main` at `f8044a9`. Not merged, not released, and `0017` is not on Neon main.
+
+- **Checks.** `pnpm check` passed: typecheck, lint, doc links, and every unit suite (operator-site 1,147, api-worker 242, contracts 257).
+- **Integration.** `pnpm test:integration` passed on the pinned PostgreSQL 17 container with `TIDEGRID_EPHEMERAL_DB=1`: every package, 990 tests and 2 skipped. The catalog suite pins the new table's grants at SELECT and INSERT, with forced row-level security. Eight new API tests cover resolve and replay, finance refused, the note kept out of the answer, the audit row, and the idempotency store, money and bookings unchanged, open and resolved lists and their paging, refund still requested refused, two tenants on resolve, list, history, and cursor, three staff at once (one 201, two 409), and in the database: no UPDATE or DELETE, the author and time stamped from the transaction, the system actor refused, and another tenant's exception refused.
+- **Console browser.** `pnpm test:local-db console` passed, 20 of 20 at 375 and 1280 px, including the new journey: by keyboard, mark one as followed up, focus moves on, then find it under Followed up, with no page-wide horizontal scroll and no CSP violation. This container ran Playwright 1.64 against its preinstalled Chromium build, not Google Chrome.
+- **Review.** An independent reviewer found no defects and three low findings, all fixed: the note CHECK now uses escapes as `0008` does, the console counts visible characters with the contract's set, and a raw cross-tenant insert test was added. The exceptions list now defaults to open; a console build from before this change, during a rolling release, would no longer show resolved exceptions.
+- **Not run.** The security review, pending the owner's go (rule R9).
+
 ### O-P7: G2.16-live, email switched on, A9 and steps 3 and 8 not shown, November 8, 2026
 
 The owner ran the [November 1 runbook](runbooks/2026-11-01-preview-deploy.md)'s P7 in the owner's own terminal on the owner's work Mac, on the commands the coordinator gave, from about 13:10 to 14:31 UTC on November 8 ([decision register](v2/06-decision-register.md#2026-11-08-o-p7-g216-live-email-switched-on-a9-and-steps-3-and-8-not-shown-owner-decisions)). Live steps ran without `--confirm`. The owner closed P7 at 14:32 UTC with A9 and demo steps 3 and 8 not shown. The results below are the owner's pasted terminal output unless marked *coordinator-reported*; no log file was saved.

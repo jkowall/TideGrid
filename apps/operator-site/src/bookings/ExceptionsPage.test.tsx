@@ -5,10 +5,11 @@ process.env.TZ = "Asia/Tokyo";
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { FinalizationException, StaffRole } from "@tidegrid/contracts";
+import { invisibleCharacters as contractInvisible } from "@tidegrid/contracts";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NavigationProvider } from "../navigation.tsx";
-import { ExceptionsPage } from "./ExceptionsPage.tsx";
+import { ExceptionsPage, invisibleCharacters } from "./ExceptionsPage.tsx";
 import {
   api,
   apiError,
@@ -707,6 +708,10 @@ describe("following an exception up (W1-FIN-EXC)", () => {
     );
   });
 
+  it("counts visible characters as the contract does", () => {
+    expect(invisibleCharacters).toBe(contractInvisible);
+  });
+
   it("asks for a reason, and for a note with other, before sending anything", async () => {
     api({ [route.exceptions()]: () => json(body([noCapacity])) });
     renderPage();
@@ -717,7 +722,7 @@ describe("following an exception up (W1-FIN-EXC)", () => {
     expect(text(item.querySelector(".tg-field__error"))).toBe("Choose how you followed it up.");
     fireEvent.change(reasonField(), { target: { value: "other" } });
     expect(screen.getByLabelText("Note")).toBeTruthy();
-    fireEvent.change(noteField(), { target: { value: " \u200b " } });
+    fireEvent.change(noteField(), { target: { value: " \u200b\u3164 " } });
     save(item);
     expect(text(item.querySelector(".tg-field__error"))).toBe("Add a note to say what happened.");
     expect(sent()).toHaveLength(0);

@@ -345,6 +345,9 @@ cmd_prepare() {
     # minutes (0002, app.auth_issue_login_token), and the suite runs every
     # spec at two widths, so a spec that shared Ben Desk took his sixth link.
     cmd_psql -c "begin; select set_config('app.tenant_id', (select id::text from public.tenants where slug = 'demo-harbor'), true); insert into public.tenant_memberships (tenant_id, user_id, role, display_name) select t.id, app.ensure_staff_user('eve.desk@demo-harbor.test', 'ci-console-browser'), 'booking_staff', 'Eve Desk' from public.tenants t where t.slug = 'demo-harbor' on conflict do nothing; commit;"
+    # A third, for the payment exception follow-up journey alone (W1-FIN-EXC),
+    # for the same reason.
+    cmd_psql -c "begin; select set_config('app.tenant_id', (select id::text from public.tenants where slug = 'demo-harbor'), true); insert into public.tenant_memberships (tenant_id, user_id, role, display_name) select t.id, app.ensure_staff_user('finn.desk@demo-harbor.test', 'ci-console-browser'), 'booking_staff', 'Finn Desk' from public.tenants t where t.slug = 'demo-harbor' on conflict do nothing; commit;"
     runtime_role_and_dev_vars
     ;;
   *) die "prepare needs one of: integration, guest-e2e, console-e2e" ;;

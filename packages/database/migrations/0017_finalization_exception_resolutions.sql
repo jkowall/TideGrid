@@ -49,7 +49,7 @@ CREATE TABLE public.finalization_exception_resolutions (
     CHECK (note IS NULL
            OR (char_length(note) BETWEEN 1 AND 500
                AND note !~ '[\x01-\x09\x0b-\x1f\x7f-\x9f]'
-               AND note ~ '[^[:space:]\x01-\x1f\x7f-\x9f ­ᅟᅠ ᠎ -‏ -  -⁤⁪-⁯　ㅤ︀-️﻿ﾠ]')),
+               AND note ~ '[^[:space:]\x01-\x1f\x7f-\x9f\u00a0\u00ad\u115f\u1160\u1680\u180e\u2000-\u200f\u2028-\u202f\u205f-\u2064\u206a-\u206f\u3000\u3164\ufe00-\ufe0f\ufeff\uffa0]')),
   -- The staff member who resolved it: the transaction's actor, set by the trigger.
   resolved_by_user_id uuid NOT NULL,
   request_id text,

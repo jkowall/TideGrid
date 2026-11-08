@@ -2551,6 +2551,16 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
         (err: { code?: string }) => err.code ?? "error",
       ),
     ).toBe("42501");
+    // A's context cannot name B's exception: the composite key and the
+    // policy's WITH CHECK both refuse it, whatever tenant the row claims.
+    for (const tenantId of [A.id, B.id]) {
+      expect(
+        await attempt((trx) =>
+          sql`insert into finalization_exception_resolutions (tenant_id, exception_id, reason_code)
+              values (${tenantId}, ${fx.bExceptionIds.canceled}, 'no_action_needed')`.execute(trx),
+        ),
+      ).toMatch(/^(23503|42501)$/);
+    }
     // Row-level security: A's context reads none of B's resolutions.
     const seen = await inTenantTransaction(runtime.db, staffCtx, (trx) =>
       sql<{ n: number }>`select count(*)::int as n from finalization_exception_resolutions

@@ -403,6 +403,16 @@ function ResolutionFacts({
 
 export const resolutionNoteLimit = 500;
 
+/**
+ * One character outside the contract's invisibleCharacters (white space, C0
+ * and C1 controls, and the Unicode spaces, joiners, marks, fillers, and
+ * variation selectors), the set migrations 0008 and 0017 check too. Kept
+ * here, as the console imports only types from the contracts package.
+ */
+export const invisibleCharacters =
+  "\\s\\u0000-\\u001f\\u007f-\\u009f\\u00a0\\u00ad\\u115f\\u1160\\u1680\\u180e\\u2000-\\u200f\\u2028-\\u202f\\u205f-\\u2064\\u206a-\\u206f\\u3000\\u3164\\ufe00-\\ufe0f\\ufeff\\uffa0";
+const visibleCharacter = new RegExp(`[^${invisibleCharacters}]`, "u");
+
 const resolveProblems: Record<ResolveFailure, string> = {
   signed_out: "You're signed out. Sign in again, then mark it as followed up.",
   forbidden: "Your role can't mark exceptions as followed up. Owners and booking staff can.",
@@ -466,7 +476,7 @@ function ResolveForm({
   const left = resolutionNoteLimit - length;
   const needsNote = reason === "other";
   /** The API wants one character that shows, as a booking note does. */
-  const visible = /[^\s\p{Cc}\p{Cf}\p{Z}\p{M}]/u.test(trimmed);
+  const visible = visibleCharacter.test(trimmed);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
