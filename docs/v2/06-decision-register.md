@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: O-SCOPE, Wave 1p scope (owner decision)
+
+The plan's O-SCOPE step asks which work the demo plan does not clearly cover should run now. On a decision card that asked "Which extra pieces should we build into the demo now?", the owner chose "Booking fixes and email limits" at 14:55 UTC. The option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." The card recommended that option. The coordinator reads it as the plan's recommended answers to O-SCOPE items 1 to 7:
+
+- **Item 1, finalization exception resolution (W1-FIN-EXC): inside the demo plan, in the G2.12 row.** The [demo build plan's G2.12 row](12-demo-build-plan.md#goal-sequence) now says so. Synthetic data only.
+- **Item 2, the staff resend bound at the delivery claim (W1-RESEND-CLAIM): pulled forward now as pre-pilot hardening.** Migration `0014` calls it "a possible pre-pilot follow-up". No doc 12 row covers it, so this entry is its scope record.
+- **Item 3, the `0014` residuals (W1-0014-RESIDUALS): pulled forward with item 2.** D4 C (the template keys are not pinned), D5 A (eligibility lives only in the service), and D6 (the waiver `send_after` hole), from the [verification log](../verification-log.md).
+- **Items 4 to 6, waiver staff-assisted and QR signing, reminders, and guest renewal: later.** They stay Core live gate work.
+- **Item 7, a local email events consumer (W1-EMAIL-EVENTS): later.** It also needs the O-P7 `messageId` comparison, which was not shown.
+
+Each goal still needs the owner's go, its own branch, and a security reviewer under rule R9. Merging stays the owner's action. Migration numbers are reserved so the parallel goals do not collide: `0017` for W1-FIN-EXC, `0018` for W1-RESEND-CLAIM, and `0019` for W1-0014-RESIDUALS. W1-RESEND-CLAIM merges before W1-0014-RESIDUALS.
+
 ### 2026-11-08: O-P7, G2.16-live email switched on, A9 and steps 3 and 8 not shown (owner decisions)
 
 The owner handed Wave 0 to a coordinator session and ran P7's live steps in the owner's own terminal. The owner's decisions and words:
