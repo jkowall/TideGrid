@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: Demo guest app pulled forward into the demo (owner decision)
+
+On 2026-11-08 the owner wrote: "My customers really want mobile native apps. Is that in the plan, or do we need to modify the waves?" Native guest apps were already planned as the Native add-on, built in the G4 series under the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate), Native build work starts only after the Validation gate, and an operator's apps go live only after it passes the Core live gate and its own Native pilot gate. A native app for operator staff is out of scope ([product scope](02-product-scope.md)). On a decision card that asked "Which mobile app change do you want in the plan?", the owner chose "Demo guest app now" at 17:45 UTC. The option read: "Add a small wave to build a branded guest app on test data for TestFlight and Android testing to use in sales; full store launch stays in Wave 5." The other options were "Keep plan as is" and "Also add a staff app".
+
+- **What is pulled forward.** A thin, demo-grade version of the G0.2 native factory dry run and of G4.1 and G4.2: one React Native and Expo app at `apps/guest-native`, branded from the tenant configuration for the two synthetic tenants, with the guest journeys the demo API already serves. It is a native app, not a WebView of the PWA, as the [native app factory plan](09-native-app-factory-and-store-submission.md) requires. The [demo build plan](12-demo-build-plan.md#goal-sequence) records the change in its deferred list.
+- **Distribution.** TestFlight internal testing and Google Play internal testing only, on synthetic data, for sales demos and the Validation gate interviews. No public store submission. A production native app still waits for the company readiness rules in [company formation](07-company-formation-and-costs.md) and for the Native pilot gate.
+- **What stays in Wave 5.** Operator-owned store accounts, the release factories (G4.4 and G4.5), push, deep links, account deletion, second-brand reproduction, and public store approval. The Native add-on's price and gates are unchanged.
+- **No staff app.** The operator console stays a responsive web app.
+- **Owner inputs, needed before distribution.** Apple Developer Program ($99 a year) and Google Play developer registration ($25 once) for a TideGrid-owned test account; the account holder's identity; go for each goal. Expo and its packages are new npm dependencies, so the first goal's packet names them for the owner's go under the shared rules.
+
+Not done: no code, no account, and no build. The goals are W1N-APP, W1N-JOURNEYS, and W1N-TESTFLIGHT in the roadmap tracker.
+
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
 The owner placed finalization exception resolution in the G2.12 row with the O-SCOPE choice "Booking fixes and email limits". The goal's start gate is that entry. Staff now mark a payment exception as followed up, with migration `0018` (provisional, claimed at merge) and its service in the [booking contract](../../packages/domain-booking/README.md#exception-resolution-w1-fin-exc). The owner gave no answer on who may resolve or what reason is required, so these are coordinator defaults, pending owner confirmation:
