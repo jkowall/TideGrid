@@ -542,7 +542,7 @@ export type CheckoutSessionState =
 export type OrderStatus = "pending" | "paid" | "void";
 export type OrderLineKind = "service" | "add_on" | "fee" | "tax" | "discount";
 export type PaymentState = "pending" | "succeeded" | "failed";
-/** pending: the provider accepted the refund and has not finished it (0028, W3-G2.9). */
+/** pending: the provider accepted the refund and has not finished it (0029, W3-G2.9). */
 export type RefundState = "requested" | "pending" | "succeeded" | "failed";
 export type RefundReason = "unfulfilled_payment" | "booking_canceled";
 export type BookingState = "confirmed" | "canceled";
@@ -557,10 +557,10 @@ export type BookingChannel = "phone" | "email" | "walk_up";
 export type ProviderEventType =
   | "payment.succeeded"
   | "payment.failed"
-  /** A refund the provider reports on (0028, W3-G2.9). */
+  /** A refund the provider reports on (0029, W3-G2.9). */
   | "refund.updated"
   | "other";
-/** A refund's status as a provider event reports it (0028). */
+/** A refund's status as a provider event reports it (0029). */
 export type ProviderRefundStatus = "pending" | "succeeded" | "failed";
 export type InboxProcessingState = "received" | "processed";
 export type FinalizationReason =
@@ -603,7 +603,7 @@ export interface ProviderEventsTable {
   processing_state: ColumnType<InboxProcessingState, "received" | undefined, InboxProcessingState>;
   outcome: ColumnType<string | null, never, string | null>;
   processed_at: Stamp;
-  // Refund events (0028, W3-G2.9).
+  // Refund events (0029, W3-G2.9).
   refund_ref: FixedDefault<string | null>;
   refund_status: FixedDefault<ProviderRefundStatus | null>;
   refund_key: FixedDefault<string | null>;
@@ -723,7 +723,7 @@ export interface PaymentRefundsTable {
   created_at: Stamped;
   settled_at: Stamp;
   updated_at: Stamped;
-  /** The last time the provider gave no final answer (0028); stamped by the database. */
+  /** The last time the provider gave no final answer (0029); stamped by the database. */
   checked_at: ColumnType<Date | null, never, Date | string>;
 }
 
@@ -844,10 +844,10 @@ export interface BookingCancellationsTable {
   refund_amount: Fixed<number>;
   currency: FixedDefault<"USD">;
   refund_id: FixedDefault<string | null>;
-  // Credit, staff choice, and override (0028, W3-G2.9).
+  // Credit, staff choice, and override (0029, W3-G2.9).
   credit_amount: FixedDefault<number>;
   credit_entry_id: FixedDefault<string | null>;
-  /** Stamped by the trigger: the remedy the policy gave. Null before 0028. */
+  /** Stamped by the trigger: the remedy the policy gave. Null before 0029. */
   policy_remedy: ColumnType<PolicyRemedy | null, never, never>;
   policy_refund_bp: ColumnType<number | null, never, never>;
   override_reason: FixedDefault<string | null>;
@@ -1393,7 +1393,7 @@ export interface Database
   // Delivery foundation (0023, W3-G2.3).
   outbox_deliveries: OutboxDeliveriesTable;
   outbox_dead_letters: OutboxDeadLettersTable;
-  // Refunds, credits, and fee reversal (0028, W3-G2.9).
+  // Refunds, credits, and fee reversal (0029, W3-G2.9).
   credit_accounts: CreditAccountsTable;
   credit_entries: CreditEntriesTable;
   fee_ledger_entries: FeeLedgerEntriesTable;
@@ -1435,7 +1435,7 @@ export interface OutboxDeadLettersTable {
   replay_reason: ColumnType<string | null, never, string>;
 }
 
-/** A named customer's USD booking credit (0028, W3-G2.9). The balance moves only through entries. */
+/** A named customer's USD booking credit (0029, W3-G2.9). The balance moves only through entries. */
 export interface CreditAccountsTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
@@ -1450,7 +1450,7 @@ export interface CreditAccountsTable {
 
 export type CreditEntryKind = "issue" | "redeem" | "reinstate" | "adjust";
 
-/** One change to a credit balance (0028). Append-only; the trigger keeps the balance. */
+/** One change to a credit balance (0029). Append-only; the trigger keeps the balance. */
 export interface CreditEntriesTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
@@ -1473,7 +1473,7 @@ export interface CreditEntriesTable {
   request_id: ColumnType<string | null, never, never>;
 }
 
-/** TideGrid's managed-booking fee ledger (0028). Append-only. */
+/** TideGrid's managed-booking fee ledger (0029). Append-only. */
 export interface FeeLedgerEntriesTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
@@ -1499,7 +1499,7 @@ export type RefundExceptionReason =
   | "failed_after_success"
   | "succeeded_after_failure";
 
-/** A refund that needs a person (0028). One per refund and reason, append-only. */
+/** A refund that needs a person (0029). One per refund and reason, append-only. */
 export interface RefundExceptionsTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
@@ -1512,7 +1512,7 @@ export interface RefundExceptionsTable {
 
 export type PaymentCancellationState = "requested" | "canceled" | "too_late" | "refused";
 
-/** An expired or canceled checkout's payment, canceled at the provider (0028). */
+/** An expired or canceled checkout's payment, canceled at the provider (0029). */
 export interface PaymentCancellationsTable {
   id: Generated<string>;
   tenant_id: TenantColumn;

@@ -49,7 +49,7 @@ The Stage 0 provider choice (below) picked Cloudflare-only staff sign-in with Go
 
 Under the same owner decision as W3-G2.3 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
 
-W3-G2.9 lands as migrations `0028` and `0029` and the [database contract](../../packages/database/README.md#refunds-and-credits-0028-and-0029). What it adds:
+W3-G2.9 lands as migrations `0029` and `0030` and the [database contract](../../packages/database/README.md#refunds-and-credits-0029-and-0030). What it adds:
 
 - **A pending refund state.** A refund the provider accepted and has not finished is `pending`, with its provider id, instead of staying `requested` (this closes the D3 (a) deferral above). The provider's own refund events settle it through the inbox (`refund.updated`, matched by TideGrid's key and checked against the refund's payment, amount, account, and provider id), and the sweep asks about it again once an hour.
 - **Refund exceptions after 24 hours.** A refund still requested or pending 24 hours after it was requested, or whose lookup the provider keeps refusing, is raised once for staff, as is a failure reported after a success. Staff read them at `GET /v1/staff/tenants/{tenantId}/refund-exceptions`.
