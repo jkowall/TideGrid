@@ -723,72 +723,75 @@ function lettersFold(text: string): boolean {
 }
 
 /**
- * The words of a name. A word is a run of characters that fold to a letter or
- * digit, so "!" read as "i" stays inside its word: "B!lling" is one word, not
- * "B" and "lling" (recheck N2). Folding happens before splitting.
+ * How one character of a name may be read. A Latin letter reads only as the
+ * letters it folds to. A space or a punctuation mark that folds to no letter
+ * is a hard separator. A digit, or a symbol that folds to a letter such as
+ * "!", is ambiguous: it may read as its letter, stay a digit, or separate
+ * words (pull request review fix). A digit kept as a digit counts as a
+ * separator here, since a word of digits names nothing and a digit inside a
+ * word only stops it matching a word.
  */
-function foldedWords(name: string): string[] {
-  const words: string[] = [];
-  let word = "";
-  for (const ch of name) {
-    if (/^[a-z0-9]+$/.test(foldCharacters(ch))) {
-      word += ch;
-    } else if (word.length > 0) {
-      words.push(word);
-      word = "";
-    }
-  }
-  if (word.length > 0) words.push(word);
-  return words;
+interface SenderChar {
+  /** The letters it reads as, or null when it never reads as one. */
+  letters: string | null;
+  /** Whether it may separate words. */
+  separates: boolean;
+  /** A digit, or a symbol that folds to a letter. */
+  ambiguous: boolean;
 }
 
-/** A symbol that folds to a letter, such as "!" read as "i". */
-const symbolLetter = (ch: string) =>
-  !letterOrNumber.test(ch) && /^[a-z]+$/.test(foldCharacters(ch));
-
-/** A word with the symbols that fold to letters trimmed from both ends: "Support!" as "Support". */
-function trimSymbolLetters(word: string): string {
-  const chars = [...word];
-  let start = 0;
-  let end = chars.length;
-  while (start < end && symbolLetter(chars[start] as string)) start += 1;
-  while (end > start && symbolLetter(chars[end - 1] as string)) end -= 1;
-  return chars.slice(start, end).join("");
+function senderChars(name: string): SenderChar[] {
+  return [...name].map((ch) => {
+    const folded = foldCharacters(ch);
+    const letters = /^[a-z]+$/.test(folded) ? folded : null;
+    if (/^\p{L}$/u.test(ch)) return { letters, separates: false, ambiguous: false };
+    return { letters, separates: true, ambiguous: /^[0-9]$/.test(ch) || letters !== null };
+  });
 }
 
 /**
- * Four readings of a name's words, for the checks on whole words. A symbol
- * that folds to a letter may stand for that letter or be punctuation, so each
- * check runs on every reading and refuses if any fires (recheck R1):
- * - the folded split, where "!" stays inside its word ("B!lling", "v!a");
- * - the folded split with such symbols trimmed from each end ("Support!",
- *   "!Billing", "V!A!" read as "Support", "Billing", "V!A");
- * - the plain split on letters and digits, where "!" separates
- *   ("No!Reply", "via!Stripe" read as "No Reply", "via Stripe");
- * - the split on letters only, where a digit separates too ("Support1",
- *   "Security24", "via1" read as "Support", "Security", "via"), since a
- *   digit such as "1" folds to a letter and would hide a staff word.
+ * Most digits and letter-like symbols a sender name may carry. The checks
+ * below are polynomial, so this bound is not for speed. It keeps every name
+ * small enough that all of its readings, at most 3^12 (about 531,000), can be
+ * enumerated to cross-check the model. A real operator name needs fewer:
+ * "Pier 39 Charters" has two, and a founding year with a seven-digit phone
+ * number has eleven.
  */
-function senderWordReadings(name: string): string[][] {
-  const folded = foldedWords(name);
-  const trimmed = folded.map(trimSymbolLetters).filter((word) => word.length > 0);
-  const plain = name.match(/[\p{L}\p{N}]+/gu) ?? [];
-  const lettersOnly = name.match(/\p{L}+/gu) ?? [];
-  return [folded, trimmed, plain, lettersOnly];
-}
+export const maxSenderAmbiguousCharacters = 12;
+
+/** The readAs form of the one relay word a name may not repeat. */
+const relayWord = "via";
 
 /**
- * Whether some run of whole words after the first reads as "via", with the
- * separators between them dropped: "via", "v!a", "v.i.a", "V-I-A", "V I A",
- * and "Vi A" all do (recheck N2). A longer word that only contains it, such
- * as "Trivia" or "Avian", does not.
+ * Whether some reading of the name names a second relay: a run of characters
+ * after word content, starting right after a separator and ending at the end
+ * or right before one, that reads exactly "via" once the separators inside it
+ * are dropped. "v!a", "v.i.a", "V I A", "Vi A", "via1", and "V!A!" all do. A
+ * run must start after a separator, so "Trivia" and "Avian" do not, and must
+ * end before one, so "Viaduct" does not. Each start is walked forward with
+ * the set of letter strings its readings could spell so far, which stays
+ * small: "via" has three letters, and no readAs pair folds to v, i, or a.
  */
-function namesSecondRelay(words: string[]): boolean {
-  for (let start = 1; start < words.length; start += 1) {
-    for (let end = start + 1; end <= words.length; end += 1) {
-      const read = senderSkeleton(words.slice(start, end).join(""));
-      if (read === "via") return true;
-      if (read.length >= "via".length) break;
+function namesSecondRelay(chars: SenderChar[]): boolean {
+  const n = chars.length;
+  const firstLetter = chars.findIndex((c) => c.letters !== null);
+  if (firstLetter === -1) return false;
+  const maxLetters = 2 * relayWord.length;
+  for (let start = firstLetter + 2; start < n; start += 1) {
+    if (!(chars[start - 1] as SenderChar).separates) continue;
+    let spelled = new Set([""]);
+    for (let j = start; j < n && spelled.size > 0; j += 1) {
+      const c = chars[j] as SenderChar;
+      const next = new Set<string>();
+      for (const so of spelled) {
+        if (c.separates) next.add(so);
+        if (c.letters !== null && so.length + c.letters.length <= maxLetters) {
+          next.add(so + c.letters);
+        }
+      }
+      spelled = next;
+      const atEnd = j + 1 === n || (chars[j + 1] as SenderChar).separates;
+      if (atEnd && [...spelled].some((so) => readAs(so) === relayWord)) return true;
     }
   }
   return false;
@@ -891,19 +894,45 @@ const staffWords = new Set(
   ].map(senderSkeleton),
 );
 
-/**
- * A word that names nothing on its own: all digits, or one letter or none
- * once folded. It neither makes a name staff-only nor rescues one ("Support
- * Team 2", "Security Team 1").
- */
-function neutralWord(word: string): boolean {
-  return /^[0-9]+$/.test(word) || senderSkeleton(word).length <= 1;
-}
+/** Longest run of folded letters that can still read as a staff word. */
+const maxStaffLetters = 2 * Math.max(...[...staffWords].map((word) => word.length));
 
-/** Whether the words that name something are all staff, mailbox, or filler words. */
-function onlyStaffWords(words: string[]): boolean {
-  const naming = words.filter((word) => !neutralWord(word)).map(senderSkeleton);
-  return naming.length > 0 && naming.every((word) => staffWords.has(word));
+/**
+ * Whether some reading of the name splits it into words that are all staff,
+ * mailbox, department, or filler words, or words that name nothing on their
+ * own (digits, or one letter once folded), with at least one staff word.
+ * "Support", "Support Team 2", "B!lling Team", "Support!", "No!Reply",
+ * "Support1", and "B!lling1" all do. A word break over the characters decides
+ * it without listing readings: `reach[i]` says a word may start at position i
+ * (bit 1: no staff word yet; bit 2: one seen). From there the character may
+ * separate, or a word may run to some j where the name ends or a character
+ * may separate. Every character inside a word reads as its letters.
+ */
+function readsAsOnlyStaffWords(chars: SenderChar[]): boolean {
+  const n = chars.length;
+  const reach = new Uint8Array(n + 1);
+  reach[0] = 1;
+  for (let i = 0; i < n; i += 1) {
+    const here = reach[i] as number;
+    if (here === 0) continue;
+    if ((chars[i] as SenderChar).separates) reach[i + 1] = (reach[i + 1] as number) | here;
+    let letters = "";
+    for (let j = i; j < n; j += 1) {
+      const piece = (chars[j] as SenderChar).letters;
+      if (piece === null) break;
+      letters += piece;
+      if (letters.length > maxStaffLetters) break;
+      const word = readAs(letters);
+      const staff = staffWords.has(word);
+      if (!staff && word.length > 1) continue;
+      const after = staff ? 2 : here;
+      if (j + 1 === n) reach[n] = (reach[n] as number) | after;
+      else if ((chars[j + 1] as SenderChar).separates) {
+        reach[j + 2] = (reach[j + 2] as number) | after;
+      }
+    }
+  }
+  return ((reach[n] as number) & 2) !== 0;
 }
 
 /**
@@ -930,13 +959,15 @@ const domainLike = /[\p{L}\p{N}]\.\p{L}{2,}/u;
  * - a Latin letter that does not fold to a to z ("ɨ", "ɖ", an unmapped small
  *   capital), so no letter is invisible to the checks below;
  * - a name that reads as TideGrid in any spelling its skeleton folds;
- * - a name made only of staff, mailbox, and filler words, ignoring digits and
- *   single letters, also with "!" at a word's end or between words
- *   ("Support!", "No!Reply");
+ * - a domain-like word, such as "tidegrid.us" or "paypal.com";
+ * - more than `maxSenderAmbiguousCharacters` digits and exclamation marks.
+ * Each digit or "!" may read as its letter, stay a digit, or separate words,
+ * and the two checks below refuse a name if any reading fires:
  * - "via" after the first word, which would name a second relay, also when
  *   spelled with lookalikes or split by separators ("v!a", "v.i.a", "V I A",
- *   "via!Stripe", "V!A!");
- * - a domain-like word, such as "tidegrid.us" or "paypal.com".
+ *   "via1", "V!A!Stripe");
+ * - a name made only of staff, mailbox, and filler words, ignoring digits and
+ *   single letters ("Support!", "No!Reply", "Support1", "B!lling1").
  */
 export function senderNameProblem(name: string): string | null {
   if (typeof name !== "string" || name.length === 0 || name.length > maxSenderNameLength) {
@@ -962,11 +993,14 @@ export function senderNameProblem(name: string): string | null {
     return "A sender name may not use or imitate the TideGrid name";
   }
   if (domainLike.test(name)) return "A sender name may not contain a domain name";
-  const readings = senderWordReadings(name);
-  if (readings.some(namesSecondRelay)) {
+  const chars = senderChars(name);
+  if (chars.filter((c) => c.ambiguous).length > maxSenderAmbiguousCharacters) {
+    return `A sender name may use at most ${maxSenderAmbiguousCharacters} digits and exclamation marks`;
+  }
+  if (namesSecondRelay(chars)) {
     return 'A sender name may not use "via" after its first word';
   }
-  if (staffWords.has(skeleton) || readings.some(onlyStaffWords)) {
+  if (staffWords.has(skeleton) || readsAsOnlyStaffWords(chars)) {
     return "A sender name may not be only staff or mailbox words";
   }
   return null;
@@ -988,15 +1022,15 @@ export function senderDisplayName(name: string): string | null {
 /**
  * Whether two operator names read as the same name. Email binds a brand's
  * name to the tenant's provisioned name with this: a brand that reads as
- * another name is not used as the sender. Every letter must fold to a to z,
- * and digits count, so text that the skeleton would drop cannot be appended
+ * another name is not used as the sender. Both names must pass the sender
+ * name rule, so a brand never binds to a provisioned name that the rule
+ * refuses ("B!lling1" to "Billing1", pull request review fix), and every
+ * letter therefore folds to a to z. Digits count, so text cannot be appended
  * to a provisioned name (review S1). Spaces, case, accents, and punctuation
  * that reads as no letter do not count.
  */
 export function sameSenderName(a: string, b: string): boolean {
-  if (typeof a !== "string" || typeof b !== "string" || !lettersFold(a) || !lettersFold(b)) {
-    return false;
-  }
+  if (senderNameProblem(a) !== null || senderNameProblem(b) !== null) return false;
   const key = (text: string) => readAs(foldCharacters(text).replace(/[^a-z0-9]/g, ""));
   const ka = key(a);
   return /[a-z]/.test(ka) && ka === key(b);

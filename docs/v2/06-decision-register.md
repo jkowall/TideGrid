@@ -33,6 +33,8 @@ Second recheck fix, 2026-11-08: splitting after folding kept a "!" at a word's e
 
 Third recheck fix, 2026-11-08: a digit that folds to a letter, glued to a staff word or to "via", hid it in every reading that keeps digits ("Support1", "Security24", "Harbor via1 Stripe"). A fourth reading splits on letters only. "Harbor V!A!Stripe" still passes and is a README residual.
 
+Pull request review fix, 2026-11-08: the four readings still let "B!lling1", "B!lling!Team", and "Harbor v!a1 Stripe" pass, since no reading took a "!" and a digit with different meanings together, and "B!lling1" bound to a provisioned "Billing1". That was the fifth narrower bypass of one rule, so the readings are replaced by one model. Each digit or "!" may read as its letter, stay a digit, or separate words, and a name is refused if any reading is only staff words (decided by a word break over the characters) or has a run reading "via" after the first word. A name may carry at most 12 digits and "!" marks, so every reading can still be enumerated as a cross-check. "Harbor V!A!Stripe" is now refused, and its residual is gone. `sameSenderName` now requires both names to pass the rule. Every earlier refusal and accepted name still holds.
+
 Canonical: the [messaging README](../../packages/domain-messaging/README.md#sender-identity-w1-sender-guard) and the [brand contract](../../packages/contracts/src/brand.ts).
 
 ### 2026-11-08: W1-SAAS-PREP, pre-SaaS hostname items and the D-E11 and D-E12 sweep follow-ups (owner go; coordinator defaults pending owner confirmation)

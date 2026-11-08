@@ -203,8 +203,7 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
   });
 
   // Recheck R1: "!" folds to "i", so the folded split read "Support!" as
-  // "supporti" and "via!" as "viai". Each check now runs on the folded split,
-  // the folded split with such symbols trimmed, and the plain split.
+  // "supporti" and "via!" as "viai". A "!" may also be read as a separator.
   it.each([
     "Support!",
     "Billing!",
@@ -233,8 +232,8 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
   });
 
   // Recheck F2: a digit such as "1" folds to a letter, so "Support1" read as
-  // "supporti" in every split that keeps digits. The letters-only split reads
-  // it as "Support".
+  // "supporti" in every split that keeps digits. A digit may also be read as a
+  // separator, which reads it as "Support".
   it.each([
     "Support1",
     "Security1",
@@ -252,6 +251,56 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     expect(senderNameProblem(name), name).not.toBeNull();
     expect(senderDisplayName(name), name).toBeNull();
     expect(accepts({ name }), name).toBe(false);
+  });
+
+  // Pull request review fix: fixed readings never read a "!" and a digit with
+  // different meanings together. Each digit or "!" may now read as its letter,
+  // stay a digit, or separate, and a name is refused if any reading fires.
+  it.each([
+    "B!lling1",
+    "B!lling!Team",
+    "Harbor v!a1 Stripe",
+    "Harbor V!A!Stripe",
+    "1B!lling",
+    "Supp0rt!Team",
+    "N0!Reply1",
+    "Harbor 4v!a Stripe",
+  ])("refuses %s, with mixed readings of digits and symbols (pull request review)", (name) => {
+    expect(senderNameProblem(name), name).not.toBeNull();
+    expect(senderDisplayName(name), name).toBeNull();
+    expect(accepts({ name }), name).toBe(false);
+  });
+
+  it("never binds a brand to a provisioned name the rule refuses (pull request review)", () => {
+    expect(senderNameProblem("Billing1")).not.toBeNull();
+    expect(sameSenderName("B!lling1", "Billing1")).toBe(false);
+    expect(sameSenderName("Billing1", "Billing1")).toBe(false);
+    expect(sameSenderName("BillingTeam", "Billing Team")).toBe(false);
+    expect(sameSenderName("Pier 39 Charters", "PIER 39 CHARTERS")).toBe(true);
+  });
+
+  it("refuses staff words and via under every placement of a digit or symbol (pull request review)", () => {
+    const ambiguous = ["!", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    const refused: string[] = [];
+    for (const d of ambiguous) {
+      for (const word of ["Support", "Billing", "NoReply", "Help", "Security"]) {
+        refused.push(`${word}${d}`, `${d}${word}`, `${word}${d}Team`, `${d}${word}${d}`);
+      }
+      refused.push(`Harbor via${d}Stripe`, `Harbor ${d}via Stripe`, `Harbor via${d}`);
+      for (const i of ["!", "1"]) {
+        refused.push(`Harbor v${i}a${d}Stripe`, `B${i}lling${d}`, `B${i}lling${d}Team`);
+      }
+    }
+    for (const name of refused) {
+      expect(senderNameProblem(name), name).not.toBeNull();
+    }
+  });
+
+  it("caps the digits and exclamation marks in a name (pull request review)", () => {
+    expect(senderNameProblem("Harbor 1987 Tours 305 55501")).toBeNull();
+    expect(senderNameProblem("Harbor 1987 Tours 305 555012")).not.toBeNull();
+    expect(senderNameProblem(`Harbor${"!".repeat(12)} Tours`)).toBeNull();
+    expect(senderNameProblem(`Harbor${"!".repeat(13)} Tours`)).not.toBeNull();
   });
 
   it("still accepts operator names with digits (recheck F2)", () => {
