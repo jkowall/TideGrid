@@ -17,7 +17,7 @@ Cloudflare renames dashboard items often. The names below follow Cloudflare's do
 
 1. **Add the login methods.** Zero Trust, then Integrations, then Identity providers, then Add new identity provider:
    - Google (personal Gmail accounts), or Google Workspace for staff on a company Workspace.
-   - Microsoft Entra ID.
+   - Microsoft Entra ID, set up for one Microsoft tenant (the operator's own), not "any Microsoft account". A login method open to every Microsoft tenant lets someone else's tenant claim an address, and TideGrid matches staff by email. An operator on another Microsoft tenant gets its own Entra ID login method.
    - Follow each provider's page from that screen. They involve creating an app on the Google or Microsoft side and pasting its client ID and secret into Cloudflare. Keep those secrets in the dashboard only, never in the repository or a chat.
 2. **Turn on Cloudflare's second step for the organization.** Zero Trust, then Access controls, then Access settings, then "Allow multi-factor authentication (MFA)":
    - Allow "Authenticator application" and "Security key". Leave "Biometrics" on as well if staff use Touch ID, Face ID, or Windows Hello.
@@ -27,16 +27,21 @@ Cloudflare renames dashboard items often. The names below follow Cloudflare's do
 3. **Make the console application require it.** Zero Trust, then Access controls, then Applications, then the console application (console.tidegrid.us), then Edit:
    - Authentication, then the MFA tab: choose "Respect global enforcement setting" (or "Custom MFA settings" with the same methods). Do not choose "Disable MFA".
    - Login methods: allow Google and Microsoft Entra ID only. Turn off One-time PIN for this application: a PIN by email is one factor, and staff should not be offered it.
-   - The application's policy: Allow, including the staff email addresses (or the operator's email domain). If the policy has its own MFA setting, it wins over the application's, so set it the same way or leave it on the application's setting.
+   - The application's policy: one Allow policy covering the whole hostname (including `/api`), listing each staff member's exact email address. Do not include a whole domain, and never `gmail.com`. Add no Bypass or Service Auth policy to this application. If the policy has its own MFA setting, it wins over the application's, so set it the same way or leave it on the application's setting.
 4. **Check it.** In a private browser window, open the console:
    - Sign in with a Google account that is a staff member. Cloudflare must ask for the second step before the console opens. If it does not, stop and recheck step 3.
    - Do the same with a Microsoft account.
    - Sign in with an address that is not staff. The console must say it has no access.
+   - With a staff account that already has an authenticator, try adding a second one at the AddMfaDevice page. Cloudflare must ask for the existing one first.
    - This check is the evidence the [security controls](../v2/08-build-hosting-and-operations.md#security-controls) ask for before an operator's first live booking: a sign-in without a second step is refused, for every provider that operator's staff may use.
 
 ## How staff add their second step
 
-The first time, Cloudflare offers it during sign-in. To add another device later, staff go to `https://<team name>.cloudflareaccess.com/AddMfaDevice` (the team name is the first part of the Access team domain), sign in, and add the device under Account, then MFA devices. Cloudflare's App Launcher does not ask for the second step, so staff can always reach it to enroll.
+The first time, Cloudflare offers it during sign-in. Cloudflare's documentation says the first device needs no second step to add (whoever signs in first sets it up), and every later device must be confirmed with one already added. So:
+
+- Ask each new staff member to sign in and add their authenticator the same day you add them, and add their address to the Access policy only then.
+- To add another device later, staff go to `https://<team name>.cloudflareaccess.com/AddMfaDevice` (the team name is the first part of the Access team domain), sign in, and add it under Account, then MFA devices, confirming with their existing device.
+- Cloudflare's App Launcher does not ask for the second step, so staff can reach it to enroll. It shows only the application tiles, not console data.
 
 ## What the code does and does not check
 

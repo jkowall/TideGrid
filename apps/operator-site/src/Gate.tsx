@@ -205,7 +205,6 @@ export function SignIn({ notice }: { notice?: GateNotice | undefined }) {
  */
 export function AccessSignIn({ notice }: { notice?: GateNotice | undefined }) {
   const noticeId = useId();
-  const here = `${window.location.pathname}${window.location.search}`;
   return (
     <GateFrame title="Sign in">
       <GateTitle describedBy={notice ? noticeId : undefined}>Sign in</GateTitle>
@@ -214,9 +213,11 @@ export function AccessSignIn({ notice }: { notice?: GateNotice | undefined }) {
         step: your authenticator app or security key.
       </p>
       {notice && <Notice id={noticeId} tone={notice.tone} title={notice.title} announce="none" />}
-      <ButtonLink variant="primary" href={here} block>
+      {/* A reload, not a link built from the address: a path like //host would
+          otherwise point off the console. */}
+      <Button variant="primary" block onClick={() => window.location.reload()}>
         Continue to sign in
-      </ButtonLink>
+      </Button>
     </GateFrame>
   );
 }

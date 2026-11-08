@@ -283,8 +283,7 @@ describe("Cloudflare Access sign-in", () => {
     await focusLandsOn("Sign in");
     expect(screen.queryByLabelText("Work email")).toBeNull();
     expect(screen.getByText(/authenticator app or security key/)).toBeTruthy();
-    const go = screen.getByRole("link", { name: "Continue to sign in" });
-    expect(go.getAttribute("href")).toBe("/bookings?date=2026-10-06");
+    expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeTruthy();
   });
 
   it("keeps the email form where the email link is on", async () => {
@@ -293,7 +292,7 @@ describe("Cloudflare Access sign-in", () => {
     render(<App />);
     await focusLandsOn("Sign in");
     expect(screen.getByLabelText("Work email")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Continue to sign in" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Continue to sign in" })).toBeNull();
   });
 });
 
