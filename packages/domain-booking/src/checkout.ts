@@ -33,6 +33,7 @@ import {
   ProviderUnavailableError,
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
+import { requestPaymentCancellation } from "./payment-cancel.ts";
 import { checkoutSecretPattern, clientKeyFor, hashCheckoutSecret } from "./secrets.ts";
 import { type CheckoutSessionView, loadSessionView, record } from "./views.ts";
 
@@ -380,8 +381,17 @@ export async function ensureProviderPayment(
       return { kind: "unavailable", reason: "unavailable" };
     throw err;
   }
+  let closedAs: CheckoutSessionState | null = null;
   if (row.provider_payment_id === null) {
     await inTenantTransaction(db, ctx, async (trx) => {
+      // The checkout may have closed while the provider answered. Its row is
+      // read under a share lock, so a closing transaction either committed
+      // first (seen here) or waits and then sees the provider id (W3-G2.9).
+      const { rows: sessions } = await sql<{ state: CheckoutSessionState }>`
+        select state from checkout_sessions
+         where tenant_id = ${ctx.tenantId} and id = ${sessionId}
+           for share`.execute(trx);
+      const sessionState = sessions[0]?.state ?? null;
       const recorded = await trx
         .updateTable("payments")
         .set({ provider_payment_id: created.paymentRef })
@@ -397,6 +407,12 @@ export async function ensureProviderPayment(
           before: { providerPaymentId: null },
           after: { providerPaymentId: created.paymentRef },
         });
+        if (sessionState !== null && sessionState !== "open") {
+          // Closed without a provider id to cancel: cancel it now, so the
+          // guest cannot pay a checkout that is gone. The sweep sends it.
+          await requestPaymentCancellation(trx, ctx, sessionId);
+          closedAs = sessionState;
+        }
         return;
       }
       // A webhook recorded it first; it must be the same payment.
@@ -413,6 +429,7 @@ export async function ensureProviderPayment(
   } else if (row.provider_payment_id !== created.paymentRef) {
     throw new Error("the provider returned another payment for the same idempotency key");
   }
+  if (closedAs !== null) return { kind: "not_open", state: closedAs };
   return {
     kind: "ready",
     provider: provider.name,
@@ -434,7 +451,8 @@ export async function getCheckoutSession(
 }
 
 export type CancelCheckoutResult =
-  | { kind: "canceled"; session: CheckoutSessionView }
+  /** paymentCancellationId: the provider payment to cancel after commit (W3-G2.9), if any. */
+  | { kind: "canceled"; session: CheckoutSessionView; paymentCancellationId: string | null }
   /** Already canceled; nothing changed. */
   | { kind: "unchanged"; session: CheckoutSessionView }
   /** Confirmed, failed, expired, or unfulfilled; it cannot be canceled. */
@@ -517,7 +535,10 @@ export async function cancelLockedSession(
     topic: "checkout.session.canceled",
     payload: { checkoutSessionId: session.id },
   });
-  return { kind: "canceled", session: await current() };
+  // The payment may still be open at the provider: cancel it after commit, so
+  // the guest cannot pay it and then be refunded (W3-G2.9).
+  const paymentCancellationId = await requestPaymentCancellation(trx, ctx, session.id);
+  return { kind: "canceled", session: await current(), paymentCancellationId };
 }
 
 export { ownerRefFor };

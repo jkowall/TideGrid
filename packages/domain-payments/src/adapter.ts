@@ -50,19 +50,41 @@ export interface RefundPaymentInput {
 
 export interface ProviderRefund {
   refundRef: string;
-  status: "succeeded" | "failed";
+  /**
+   * pending: the provider accepted the refund and has not finished it (W3-G2.9).
+   * Not an unknown outcome: the refund exists and has an id; its result
+   * arrives as a refund event, or on a later lookup.
+   */
+  status: "pending" | "succeeded" | "failed";
   /** Present when the provider refused the refund. */
   failureCode?: string;
 }
+
+export interface CancelPaymentInput {
+  accountRef: string;
+  paymentRef: string;
+  /** The same key always names the same cancellation. */
+  idempotencyKey: string;
+}
+
+/**
+ * What canceling an unpaid payment found (W3-G2.9). `canceled`: the guest can
+ * no longer pay it, and the provider sends its own event saying so.
+ * `succeeded`: it was paid first, so the late-success refund takes over.
+ */
+export type CanceledPayment =
+  | { status: "canceled"; paymentRef: string }
+  | { status: "succeeded"; paymentRef: string };
 
 /**
  * The provider-neutral kinds of event. `payment.failed` means the provider
  * will not complete this payment: it is final. A provider that lets a guest
  * retry after a declined attempt (Stripe's `payment_intent.payment_failed`)
- * must not report that attempt as `payment.failed`. Every other event is
- * `other`, recorded and ignored.
+ * must not report that attempt as `payment.failed`. `refund.updated` reports
+ * the status of a refund TideGrid created, which carries its idempotency key
+ * (W3-G2.9). Every other event is `other`, recorded and ignored.
  */
-export type ProviderEventType = "payment.succeeded" | "payment.failed" | "other";
+export type ProviderEventType = "payment.succeeded" | "payment.failed" | "refund.updated" | "other";
 
 declare const verified: unique symbol;
 
@@ -85,6 +107,17 @@ export interface VerifiedProviderEvent {
     readonly amount: number;
     readonly currency: string;
     readonly clientReference: string | null;
+  } | null;
+  /**
+   * Present for refund events: the provider's refund id, its status, the
+   * idempotency key TideGrid gave it, and a failure code when it failed. Never
+   * the provider's whole refund object.
+   */
+  readonly refund: {
+    readonly ref: string;
+    readonly status: "pending" | "succeeded" | "failed";
+    readonly key: string;
+    readonly failureCode: string | null;
   } | null;
   /**
    * SHA-256, hex, of the raw body for the fake; for Stripe, a canonical
@@ -127,6 +160,14 @@ export interface PaymentProvider {
   }): Promise<ProviderPayment | null>;
   /** Idempotent by key. Throws ProviderUnavailableError when the outcome is unknown. */
   refundPayment(input: RefundPaymentInput): Promise<ProviderRefund>;
+  /**
+   * Cancel a payment nobody has paid, so an expired or canceled checkout is
+   * never charged and then refunded (W3-G2.9). Idempotent by key; a payment
+   * already canceled answers canceled. Throws ProviderUnavailableError when
+   * the outcome is unknown and ProviderRejectedError when the provider will
+   * never cancel it.
+   */
+  cancelPayment(input: CancelPaymentInput): Promise<CanceledPayment>;
   verifyWebhook(input: VerifyWebhookInput): Promise<WebhookVerification>;
 }
 
@@ -198,6 +239,7 @@ export function isVerifiedProviderEvent(value: unknown): value is VerifiedProvid
 export function verifiedEvent(fields: ProviderEventFields): VerifiedProviderEvent {
   const at = fields.occurredAt === null ? null : timeOf(fields.occurredAt);
   const payment = fields.payment === null ? null : freeze({ ...fields.payment });
+  const refund = fields.refund === null ? null : freeze({ ...fields.refund });
   const event = freeze({
     provider: fields.provider,
     eventId: fields.eventId,
@@ -208,6 +250,7 @@ export function verifiedEvent(fields: ProviderEventFields): VerifiedProviderEven
       return at === null ? null : new DateAtLoad(at);
     },
     payment,
+    refund,
     payloadSha256: fields.payloadSha256,
   }) as VerifiedProviderEvent;
   mark(event);

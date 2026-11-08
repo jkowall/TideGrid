@@ -27,7 +27,7 @@ import type { Context } from "hono";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
-import { providerFor } from "../payments.ts";
+import { cancelPaymentAfterCommit, providerFor } from "../payments.ts";
 import { withPublicTenant } from "../public-tenant.ts";
 import { ProblemError, problemAnswer, withProblems } from "./problems.ts";
 import { errorBody } from "./responses.ts";
@@ -544,6 +544,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
   app.openapi(cancelSessionRoute, async (c) => {
     const { checkoutSessionId } = c.req.valid("param");
     const secret = checkoutSecret(c);
+    let toCancel: { ctx: TenantContext; id: string | null } | null = null;
     const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const canceled = await cancelCheckoutSession(trx, ctx, {
         sessionId: checkoutSessionId,
@@ -551,6 +552,8 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       });
       switch (canceled.kind) {
         case "canceled":
+          toCancel = { ctx, id: canceled.paymentCancellationId };
+          return { checkoutSession: { ...canceled.session } };
         case "unchanged":
           return { checkoutSession: { ...canceled.session } };
         case "not_cancelable":
@@ -563,6 +566,9 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
           throw checkoutNotFound();
       }
     });
+    // Committed: the payment may still be open at the provider (W3-G2.9).
+    const pending = toCancel as { ctx: TenantContext; id: string | null } | null;
+    if (pending) await cancelPaymentAfterCommit(c, deps, pending.ctx, pending.id);
     return c.json(body as { checkoutSession: CheckoutSessionView }, 200);
   });
 }

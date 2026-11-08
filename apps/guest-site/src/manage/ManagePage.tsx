@@ -622,6 +622,15 @@ function BookingView({
               <span>{refundStateText(booking.refund)}</span>
             </p>
           )}
+          {booking.cancellation && booking.cancellation.creditAmount > 0 && (
+            <p className="manage-refund">
+              <Icon name="receipt" />
+              <span>
+                {formatMoney(booking.cancellation.creditAmount)} booking credit, held for you by the
+                operator under the email you booked with
+              </span>
+            </p>
+          )}
         </section>
 
         <CancelSection

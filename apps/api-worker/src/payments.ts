@@ -1,4 +1,5 @@
-import type { Database } from "@tidegrid/database";
+import type { Database, TenantContext } from "@tidegrid/database";
+import { settlePaymentCancellation } from "@tidegrid/domain-booking";
 import {
   checkStripeConfig,
   createFakePaymentProvider,
@@ -127,4 +128,29 @@ export function providerOver(
 /** The configured fake provider for its demo controls, or null. */
 export function fakeProviderFor(c: Context<AppEnv>): FakePaymentProvider | null {
   return fakeProvider(c.env, () => getDb(c));
+}
+
+/**
+ * After a checkout closed, cancel its payment at the provider (W3-G2.9), best
+ * effort: an unknown outcome stays requested for the checkout sweep, and a
+ * failure here never changes the answer the guest or staff already have.
+ */
+export async function cancelPaymentAfterCommit(
+  c: Context<AppEnv>,
+  deps: AppDeps,
+  ctx: TenantContext,
+  cancellationId: string | null,
+): Promise<void> {
+  if (!cancellationId || deps.cancelPaymentAfterCommit === false) return;
+  const provider = providerFor(c, deps);
+  if (!provider) return;
+  try {
+    await settlePaymentCancellation(getDb(c), provider, ctx, cancellationId);
+  } catch (error) {
+    c.get("log").warn("payment_cancel_pending", {
+      "event.name": "payment_cancel_pending",
+      "tidegrid.tenant_id": ctx.tenantId,
+      "error.type": error instanceof Error ? error.name : "unknown",
+    });
+  }
 }

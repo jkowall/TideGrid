@@ -41,6 +41,12 @@ export interface AppDeps {
   /** False keeps committed mail queued for the test to deliver; default true. */
   deliverEmailAfterCommit?: boolean;
   /**
+   * False leaves a closed checkout's payment cancellation requested instead
+   * of sending it after commit (W3-G2.9), so a test can pay the payment
+   * late, as when the cancel loses the race at the provider; default true.
+   */
+  cancelPaymentAfterCommit?: boolean;
+  /**
    * The clock after-commit email delivery reads for its window, in epoch ms;
    * tests script it. Apart from `now`, which pins sales cutoffs.
    */

@@ -608,6 +608,38 @@ export function createStripeFixture(options: StripeFixtureOptions = {}): StripeF
       return json(200, renderIntent(intent, url.searchParams.has("expand[]")));
     }
 
+    // https://docs.stripe.com/api/payment_intents/cancel: only an intent not yet
+    // succeeded, processing, or canceled can be canceled (W3-G2.9).
+    const cancelPath = /^\/v1\/payment_intents\/([^/]+)\/cancel$/.exec(path);
+    if (method === "POST" && cancelPath?.[1]) {
+      const read = readForm(form);
+      if (!read) return duplicate();
+      for (const name of read.fields.keys()) {
+        if (name !== "cancellation_reason") return unknownParameter(name);
+      }
+      for (const name of read.lists.keys()) return unknownParameter(`${name}[]`);
+      const id = decodeURIComponent(cancelPath[1]);
+      const intent = intents.get(id);
+      if (!intent || intent.account !== account) return missing("payment_intent", id, "intent");
+      if (
+        intent.status === "succeeded" ||
+        intent.status === "canceled" ||
+        intent.status === "processing"
+      ) {
+        return json(
+          400,
+          errorBody(
+            "invalid_request_error",
+            "payment_intent_unexpected_state",
+            `You cannot cancel this PaymentIntent because it has a status of ${intent.status}.`,
+          ),
+        );
+      }
+      intent.status = "canceled";
+      intent.canceledAt = seconds();
+      return json(200, renderIntent(intent));
+    }
+
     if (method === "POST" && path === "/v1/refunds") {
       const read = readForm(form);
       if (!read) return duplicate();

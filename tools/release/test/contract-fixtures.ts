@@ -386,6 +386,8 @@ export function cancelBookingResponse(
         remedy: t.remedy,
         refundBp: t.refundBp,
         refundAmount: t.refundAmount,
+        creditAmount: 0,
+        overridden: false,
         paidAmount: t.paidAmount,
         cutoffAt: t.cutoffAt,
         beforeCutoff: t.beforeCutoff,

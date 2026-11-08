@@ -10,7 +10,10 @@
  *    (the request that recorded them failed) are processed;
  * 3. refunds requested at least the grace period ago and never settled (the
  *    provider did not answer, or the Worker stopped) are sent again with their
- *    keys.
+ *    keys, and pending refunds not checked for an hour are asked about again
+ *    (W3-G2.9); one unsettled after 24 hours becomes a refund exception;
+ * 4. payment cancellations for expired or canceled checkouts (W3-G2.9),
+ *    requested at least the grace period ago, are sent again with their keys.
  *
  * The tenant list comes from app.checkout_sweep_tenants, which returns tenant
  * ids only, least recently served first (0013); every read and write then runs
@@ -46,10 +49,20 @@ import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
 import { processProviderEvent, type SettleRefundResult, settleRefund } from "./finalize.ts";
 import type { BookingHooks } from "./hooks.ts";
+import {
+  requestPaymentCancellation,
+  type SettleCancellationResult,
+  settlePaymentCancellation,
+} from "./payment-cancel.ts";
 import { record } from "./views.ts";
 
 /** What failed: a step, one item in it, or the stamp that keeps the tenant's place. */
-export type CheckoutSweepItem = "checkouts" | "inbox_event" | "refund" | "stamp";
+export type CheckoutSweepItem =
+  | "checkouts"
+  | "inbox_event"
+  | "refund"
+  | "payment_cancellation"
+  | "stamp";
 
 export interface CheckoutSweepOptions {
   /** Correlates this run's audit rows and events, like a request id. */
@@ -106,11 +119,18 @@ export interface CheckoutSweepReport {
   deferredTenants: number;
   /** Tenants whose stamp failed (each reported once as item "stamp"); each still took its turn. */
   stampFailures: number;
+  /** Payment cancellations settled at the provider this run (W3-G2.9). */
+  cancellationsSettled: number;
+  /** Payment cancellations read this run that are still requested after it. Each once. */
+  cancellationsPending: number;
+  failedCancellations: number;
 }
 
 export const DEFAULT_CHECKOUT_SWEEP_BATCH = 100;
 export const DEFAULT_CHECKOUT_SWEEP_GRACE_SECONDS = 60;
 export const DEFAULT_CHECKOUT_SWEEP_TURN_ITEMS = 10;
+/** A pending refund is asked about again after this long (W3-G2.9); app.checkout_sweep_tenants agrees. */
+export const PENDING_REFUND_CHECK_SECONDS = 3600;
 
 /**
  * An open checkout the sweep cannot expire because of its hold: missing or
@@ -200,6 +220,8 @@ export async function expireCheckoutSessions(
       topic: "checkout.session.expired",
       payload: { checkoutSessionId: session.id },
     });
+    // Its payment may still be open at the provider; step 4 cancels it (W3-G2.9).
+    await requestPaymentCancellation(trx, ctx, session.id);
     expired.push(session.id);
   }
   return { expired, skipped, inconsistent };
@@ -232,9 +254,15 @@ export interface CheckoutSweepStore {
   expire(ctx: TenantContext, limit: number): Promise<ExpireCheckoutsResult>;
   receivedEvents(ctx: TenantContext, query: WindowQuery): Promise<string[]>;
   processEvent(ctx: TenantContext, inboxId: string): Promise<{ refundId: string | null } | null>;
+  /** Requested refunds past the grace, and pending ones not checked for an hour. */
   requestedRefunds(ctx: TenantContext, query: WindowQuery): Promise<string[]>;
   /** Null without a provider: refunds are then read once and left requested. */
   settleRefund: ((ctx: TenantContext, refundId: string) => Promise<SettleRefundResult>) | null;
+  requestedCancellations(ctx: TenantContext, query: WindowQuery): Promise<string[]>;
+  /** Null without a provider, as for refunds. */
+  settleCancellation:
+    | ((ctx: TenantContext, cancellationId: string) => Promise<SettleCancellationResult>)
+    | null;
 }
 
 /** The store `sweepCheckouts` uses, over the database as the runtime role. */
@@ -270,7 +298,25 @@ export function checkoutSweepStore(
     requestedRefunds: (ctx, query) =>
       inTenantTransaction(db, ctx, async (trx) => {
         const { rows } = await sql<{ id: string }>`
-          select id from payment_refunds
+          select id from (
+            select id, created_at from payment_refunds
+             where tenant_id = ${ctx.tenantId} and state = 'requested'
+               and created_at <= now() - make_interval(secs => ${query.graceSeconds})
+            union all
+            select id, created_at from payment_refunds
+             where tenant_id = ${ctx.tenantId} and state = 'pending'
+               and checked_at <= now() - make_interval(secs => ${PENDING_REFUND_CHECK_SECONDS})
+          ) due
+           where id <> all(${[...query.excluding]}::uuid[])
+           order by created_at, id
+           limit ${query.limit}`.execute(trx);
+        return rows.map((r) => r.id);
+      }),
+    settleRefund: provider ? (ctx, refundId) => settleRefund(db, provider, ctx, refundId) : null,
+    requestedCancellations: (ctx, query) =>
+      inTenantTransaction(db, ctx, async (trx) => {
+        const { rows } = await sql<{ id: string }>`
+          select id from payment_cancellations
            where tenant_id = ${ctx.tenantId} and state = 'requested'
              and created_at <= now() - make_interval(secs => ${query.graceSeconds})
              and id <> all(${[...query.excluding]}::uuid[])
@@ -278,7 +324,9 @@ export function checkoutSweepStore(
            limit ${query.limit}`.execute(trx);
         return rows.map((r) => r.id);
       }),
-    settleRefund: provider ? (ctx, refundId) => settleRefund(db, provider, ctx, refundId) : null,
+    settleCancellation: provider
+      ? (ctx, id) => settlePaymentCancellation(db, provider, ctx, id)
+      : null,
   };
 }
 
@@ -310,6 +358,11 @@ interface TenantRun {
   /** Succeeded or failed at the provider, or no longer requested. */
   refundsClosed: Set<string>;
   refundsReadFailed: boolean;
+  cancellations: Step;
+  cancellationsSeen: Set<string>;
+  cancellationsAttempted: Set<string>;
+  cancellationsClosed: Set<string>;
+  cancellationsReadFailed: boolean;
 }
 
 /**
@@ -348,6 +401,9 @@ export async function runCheckoutSweep(
     passes: 0,
     deferredTenants: 0,
     stampFailures: 0,
+    cancellationsSettled: 0,
+    cancellationsPending: 0,
+    failedCancellations: 0,
   };
   let failures = false;
   const onError: NonNullable<CheckoutSweepOptions["onError"]> = (tenantId, item, error, id) => {
@@ -376,6 +432,11 @@ export async function runCheckoutSweep(
         refundsAttempted: new Set(),
         refundsClosed: new Set(),
         refundsReadFailed: false,
+        cancellations: "todo",
+        cancellationsSeen: new Set(),
+        cancellationsAttempted: new Set(),
+        cancellationsClosed: new Set(),
+        cancellationsReadFailed: false,
       };
       runs.set(tenantId, run);
     }
@@ -512,6 +573,51 @@ export async function runCheckoutSweep(
     return attempted;
   };
 
+  /** 4. Up to turnItems payment cancellations whose outcome is unknown, sent again with their keys. */
+  const cancellations = async (run: TenantRun): Promise<number> => {
+    const { tenantId } = run.ctx;
+    const settle = store.settleCancellation;
+    let window: string[] = [];
+    if (!run.cancellationsReadFailed && (settle || run.cancellations === "todo")) {
+      try {
+        window = await store.requestedCancellations(run.ctx, {
+          limit: batchSize,
+          graceSeconds: grace,
+          excluding: [...run.cancellationsAttempted],
+        });
+      } catch (error) {
+        report.failedCancellations += 1;
+        run.cancellationsReadFailed = true;
+        onError(tenantId, "payment_cancellation", error);
+      }
+    }
+    for (const id of window) run.cancellationsSeen.add(id);
+    if (!settle) {
+      run.cancellations = "done";
+      return 0;
+    }
+    const candidates = window.filter((id) => !run.cancellationsAttempted.has(id));
+    let attempted = 0;
+    for (const id of candidates) {
+      if (attempted >= turnItems || overBudget()) break;
+      run.cancellationsAttempted.add(id);
+      attempted += 1;
+      try {
+        const settled = await settle(run.ctx, id);
+        if (settled.kind !== "unknown") {
+          if (settled.kind !== "not_pending") report.cancellationsSettled += 1;
+          run.cancellationsClosed.add(id);
+        }
+      } catch (error) {
+        report.failedCancellations += 1;
+        onError(tenantId, "payment_cancellation", error, id);
+      }
+    }
+    run.cancellations =
+      attempted < candidates.length || window.length >= batchSize ? "more" : "done";
+    return attempted;
+  };
+
   const fair = await runFairSweep({
     listTenants: () => store.listTenants(tenantLimit, grace),
     tenantLimit,
@@ -519,10 +625,19 @@ export async function runCheckoutSweep(
     turn: async (tenantId) => {
       const run = runOf(tenantId);
       let units = 0;
+      const expiredBefore = run.expired.size;
       if (run.expiry !== "done") units += await expiry(run);
+      // Expiry writes the cancellations this step sends: new expiries reopen it,
+      // even when the cancellation step had finished earlier in the run.
+      if (run.expired.size > expiredBefore) run.cancellations = "todo";
       if (run.inbox !== "done") units += await inbox(run);
       if (run.refunds !== "done") units += await refunds(run);
-      const more = run.expiry === "more" || run.inbox === "more" || run.refunds === "more";
+      if (run.cancellations !== "done") units += await cancellations(run);
+      const more =
+        run.expiry === "more" ||
+        run.inbox === "more" ||
+        run.refunds === "more" ||
+        run.cancellations === "more";
       return { units, more };
     },
     budgetMs,
@@ -538,6 +653,9 @@ export async function runCheckoutSweep(
   for (const run of runs.values()) {
     for (const id of run.skipped) if (!run.expired.has(id)) report.skipped += 1;
     for (const id of run.refundsSeen) if (!run.refundsClosed.has(id)) report.refundsPending += 1;
+    for (const id of run.cancellationsSeen) {
+      if (!run.cancellationsClosed.has(id)) report.cancellationsPending += 1;
+    }
   }
   report.tenants = fair.tenants;
   report.turns = fair.turns;

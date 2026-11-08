@@ -29,6 +29,8 @@
  * Webhooks: https://docs.stripe.com/webhooks and https://docs.stripe.com/connect/webhooks
  */
 import {
+  type CanceledPayment,
+  type CancelPaymentInput,
   type CreatedPayment,
   type CreatePaymentInput,
   type PaymentCurrency,
@@ -80,6 +82,13 @@ const idempotencyKeyPattern = /^[A-Za-z0-9_:-]{8,255}$/;
 /** The shape TideGrid stores a failure or refusal code in (0007). */
 const codePattern = /^[a-z][a-z0-9_]{0,63}$/;
 const eventTypePattern = /^[a-z][a-z0-9_.]{0,99}$/;
+/** The Stripe event types that report a refund's status (W3-G2.9). */
+const refundEventTypes = new Set([
+  "refund.created",
+  "refund.updated",
+  "refund.failed",
+  "charge.refund.updated",
+]);
 
 /**
  * Stripe error codes about the key, the platform, or the connected account,
@@ -315,7 +324,28 @@ function parseRefund(value: unknown): StripeRefund {
   };
 }
 
-/** A refund Stripe holds, as the port reports it. Pending is an unknown outcome (D3). */
+/**
+ * Stripe's refund statuses as the port's: pending and requires_action are a
+ * refund that exists and has not finished (W3-G2.9, which replaces the
+ * adapter's earlier "pending is unknown" rule); canceled is a failure. Null
+ * for a status this code does not know.
+ */
+function refundStatusOf(status: string): "pending" | "succeeded" | "failed" | null {
+  switch (status) {
+    case "succeeded":
+      return "succeeded";
+    case "failed":
+    case "canceled":
+      return "failed";
+    case "pending":
+    case "requires_action":
+      return "pending";
+    default:
+      return null;
+  }
+}
+
+/** A refund Stripe holds, as the port reports it. */
 function refundOutcome(refund: StripeRefund): ProviderRefund {
   switch (refund.status) {
     case "succeeded":
@@ -334,7 +364,7 @@ function refundOutcome(refund: StripeRefund): ProviderRefund {
       };
     case "pending":
     case "requires_action":
-      throw unavailable("stripe_refund_pending");
+      return { refundRef: refund.id, status: "pending" };
     default:
       throw unavailable("stripe_refund_status_unknown");
   }
@@ -407,6 +437,50 @@ function parseStripeEvent(
 
   let kind: VerifiedProviderEvent["type"] = "other";
   let payment: VerifiedProviderEvent["payment"] = null;
+  let refund: VerifiedProviderEvent["refund"] = null;
+  // A refund TideGrid created carries its idempotency key (W3-G2.9). Any
+  // other refund on the account is recorded as other.
+  const refundObject = intent.object === "refund" ? intent : null;
+  const refundKey =
+    refundObject && isRecord(refundObject.metadata)
+      ? refundObject.metadata[STRIPE_REFUND_METADATA_KEY]
+      : undefined;
+  if (
+    refundObject &&
+    refundEventTypes.has(type) &&
+    typeof refundKey === "string" &&
+    idempotencyKeyPattern.test(refundKey)
+  ) {
+    const { id: ref, status, amount, currency, payment_intent, failure_reason } = refundObject;
+    const mapped = typeof status === "string" ? refundStatusOf(status) : null;
+    if (
+      typeof ref !== "string" ||
+      !stripeRefundPattern.test(ref) ||
+      mapped === null ||
+      !isAmount(amount) ||
+      amount < 1 ||
+      currency !== "usd" ||
+      typeof payment_intent !== "string" ||
+      !stripePaymentIntentPattern.test(payment_intent)
+    ) {
+      // An anomaly on a refund TideGrid made: refused so Stripe retries and
+      // the webhook alarm fires, never recorded as other and ignored.
+      return null;
+    }
+    kind = "refund.updated";
+    payment = { ref: payment_intent, amount, currency: "USD", clientReference: null };
+    refund = {
+      ref,
+      status: mapped,
+      key: refundKey,
+      // Only Stripe's code, never its words or the rest of the object.
+      failureCode:
+        mapped === "failed"
+          ? (safeCode(failure_reason) ??
+            (status === "canceled" ? "refund_canceled" : "refund_failed"))
+          : null,
+    };
+  }
   if (ours && (type === "payment_intent.succeeded" || type === "payment_intent.canceled")) {
     const succeeded = type === "payment_intent.succeeded";
     const ref = intent.id;
@@ -446,6 +520,7 @@ function parseStripeEvent(
       accountRef: account,
       occurredAt: new Date(created * 1000),
       payment,
+      refund,
     },
     projection,
   };
@@ -686,6 +761,52 @@ export class StripePaymentProvider implements PaymentProvider {
       throw malformed();
     }
     return refundOutcome(refund);
+  }
+
+  /**
+   * Cancels an intent nobody has paid (W3-G2.9), so an expired or canceled
+   * checkout is never charged and then refunded. An intent that already
+   * succeeded answers succeeded; the late-success refund takes over. One
+   * still processing a payment is an unknown outcome, tried again later.
+   */
+  async cancelPayment(input: CancelPaymentInput): Promise<CanceledPayment> {
+    this.#checkKey(input.idempotencyKey);
+    if (
+      typeof input.paymentRef !== "string" ||
+      !stripePaymentIntentPattern.test(input.paymentRef)
+    ) {
+      throw new ProviderRejectedError("payment_ref_invalid", "Malformed Stripe payment id");
+    }
+    const account = this.#checkAccount(input.accountRef);
+    const form = new URLSearchParams();
+    form.set("cancellation_reason", "abandoned");
+    const sent = await this.#send(
+      "POST",
+      `/v1/payment_intents/${input.paymentRef}/cancel`,
+      account,
+      form,
+      { idempotencyKey: input.idempotencyKey },
+    );
+    if (sent.ok) {
+      const intent = parseIntent(sent.body);
+      if (intent.id !== input.paymentRef || intent.status !== "canceled") throw malformed();
+      return { status: "canceled", paymentRef: intent.id };
+    }
+    if (sent.refusal.code === "payment_intent_unexpected_state") {
+      // Already canceled, already paid, or mid-payment: read which.
+      const current = await this.retrievePayment({
+        accountRef: account,
+        paymentRef: input.paymentRef,
+      });
+      if (current === null) throw unavailable("stripe_cancel_unreconciled");
+      if (current.status === "failed")
+        return { status: "canceled", paymentRef: current.paymentRef };
+      if (current.status === "succeeded") {
+        return { status: "succeeded", paymentRef: current.paymentRef };
+      }
+      throw unavailable("stripe_cancel_in_progress");
+    }
+    throw rejected(sent.refusal);
   }
 
   async verifyWebhook(input: VerifyWebhookInput): Promise<WebhookVerification> {

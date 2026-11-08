@@ -713,6 +713,13 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // takes its replay reason once.
         outbox_deliveries: ["INSERT", "SELECT"],
         outbox_dead_letters: ["INSERT", "SELECT"],
+        // Refunds and credits (0029, W3-G2.9): the ledgers are append-only;
+        // a credit account's balance is kept by its definer trigger.
+        credit_accounts: ["INSERT", "SELECT"],
+        credit_entries: ["INSERT", "SELECT"],
+        fee_ledger_entries: ["INSERT", "SELECT"],
+        refund_exceptions: ["INSERT", "SELECT"],
+        payment_cancellations: ["INSERT", "SELECT"],
         // Tenant access remainder (W3-G2.2b): support agents and grants only
         // through app functions; a deletion request moves its state only.
         support_agents: [],
@@ -748,7 +755,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         checkout_sessions: ["state"],
         orders: ["status"],
         payments: ["failed_event_id", "provider_payment_id", "state", "succeeded_event_id"],
-        payment_refunds: ["failure_code", "provider_refund_id", "state"],
+        payment_refunds: ["checked_at", "failure_code", "provider_refund_id", "state"],
         provider_events: ["outcome", "processing_state"],
         // Guest self-service (lane 1, G2.11c): a participant's details may be
         // corrected, and a booking may move to canceled with its cancellation.
@@ -776,6 +783,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // delivery columns; a replay sets its reason.
         outbox_events: ["attempts", "available_at", "delivered_at", "last_error", "published_at"],
         outbox_dead_letters: ["replay_reason"],
+        // Refunds and credits (0029): a payment cancellation records its answer once.
+        payment_cancellations: ["outcome_code", "state"],
         // Tenant access remainder (W3-G2.2b): withdrawn once; a trigger stamps who and when.
         tenant_deletion_requests: ["state"],
       });

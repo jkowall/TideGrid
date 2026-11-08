@@ -55,6 +55,7 @@ function refundsUnanswered(real: FakePaymentProvider): PaymentProvider {
     minimumAmount: (currency) => real.minimumAmount(currency),
     createPayment: (input) => real.createPayment(input),
     retrievePayment: (input) => real.retrievePayment(input),
+    cancelPayment: (input) => real.cancelPayment(input),
     refundPayment: async () => {
       throw new ProviderUnavailableError("simulated outage: the refund call timed out");
     },

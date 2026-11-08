@@ -19,7 +19,9 @@ interface PaymentProvider {
     Promise<{ paymentRef, status, amount, currency, amountRefunded, clientSecret }>;
   retrievePayment({ accountRef, paymentRef }): Promise<ProviderPayment | null>;
   refundPayment({ accountRef, paymentRef, amount, currency, idempotencyKey }):
-    Promise<{ refundRef, status: "succeeded" | "failed", failureCode? }>;
+    Promise<{ refundRef, status: "succeeded" | "pending" | "failed", failureCode? }>;
+  cancelPayment({ accountRef, paymentRef, idempotencyKey }):   // W3-G2.9
+    Promise<{ paymentRef, status: "canceled" | "succeeded" }>;
   verifyWebhook({ rawBody, signatureHeader, nowMs }):
     Promise<{ kind: "verified"; event: VerifiedProviderEvent } | { kind: "rejected"; reason }>;
 }
@@ -30,7 +32,8 @@ interface PaymentProvider {
 - **Errors.** `ProviderUnavailableError` means the outcome is unknown: retry with the same key, and never start a new attempt until the old one is reconciled. `ProviderRejectedError` carries the provider's code and means the request will not succeed as sent.
 - **No method runs inside a database transaction.** Callers commit their intent first, call the provider, then record the answer.
 - **Client reference.** TideGrid passes its own payment id; the provider echoes it on every event about the payment, so a webhook that arrives before TideGrid records the provider's payment id still finds the payment.
-- **Neutral events.** `payment.succeeded` (the money was captured), `payment.failed` (the provider will not complete this payment; final), and `other` (recorded, ignored). A provider that lets a guest retry after a declined attempt must not report that attempt as `payment.failed`; the Stripe adapter decides its mapping.
+- **Neutral events.** `payment.succeeded` (the money was captured), `payment.failed` (the provider will not complete this payment; final), `refund.updated` (W3-G2.9: a refund TideGrid asked for is pending, succeeded, or failed; it carries the refund's id, status, TideGrid's key, and any failure code), and `other` (recorded, ignored).
+- **Pending refunds and canceled payments (W3-G2.9).** `pending` means the provider accepted the refund and has not finished it; TideGrid records it and waits for the refund's event or asks again later. `cancelPayment` cancels a payment that was never paid, idempotently; a payment that was paid first answers `succeeded`, and the caller's late-success refund takes over. A provider that lets a guest retry after a declined attempt must not report that attempt as `payment.failed`; the Stripe adapter decides its mapping.
 - **Verified events.** `VerifiedProviderEvent` carries a type brand that only an adapter's `verifyWebhook` sets, frozen, with a SHA-256 for redelivery checks: the raw body for the fake; for Stripe, a canonical projection that leaves out per-delivery fields. The inbox accepts nothing else.
 
 ## Webhook signatures
@@ -63,6 +66,7 @@ Stripe's scheme: a header `t=<unix seconds>,v1=<hex>`, where v1 is HMAC-SHA256 o
 - **Creating** is idempotent by key per tenant. The client secret is derived, `<paymentRef>_secret_<HMAC>`, never stored, and checked in constant time.
 - **Settling** (the demo's pay page) moves a pending payment to succeeded or failed, once; a second attempt keeps the first outcome. Its event is stored first, then delivered, or held back for a later, late, duplicate, or reordered delivery.
 - **Refunding** is idempotent by key, refuses an unpaid payment and more than was paid, and succeeds at once.
+- **Canceling** (W3-G2.9) settles a pending payment as failed with its stored `payment.failed` event, as a canceled Stripe intent does; a paid payment answers `succeeded`. Tests and the demo may also deliver a signed `refund.updated` event in the fake's envelope, with a `data.object` of `object: "refund"`; the fake itself never sends one.
 - **Delivery** signs the stored body afresh and posts it to the real webhook route through the whole application, as the provider would. Redelivery is byte for byte the same event.
 - **Minimum charge** is 50 cents, Stripe's USD floor, so the demo meets the real provider's.
 
@@ -106,7 +110,8 @@ createStripePaymentProvider({
 |---|---|---|
 | `createPayment` | `POST /v1/payment_intents`: `amount`, `currency=usd`, `allowed_payment_method_types[]=card` (D5; `2026-09-30.endive` refuses `payment_method_types` with a 400), `metadata[tidegrid_payment_id]` | `succeeded` is succeeded, `canceled` is failed, anything else pending. An answer for another payment, amount, or currency is refused as `malformed_response`. An intent whose `payment_method_types` is not exactly `["card"]` is `stripe_malformed_response`, an unknown outcome (D5, checked on the answer). No `application_fee_amount`, ever. |
 | `retrievePayment` | `GET /v1/payment_intents/{id}?expand[]=latest_charge` | The same status map; `amountRefunded` from the expanded charge. A 404 `resource_missing` is null. An intent that is not card only is `stripe_malformed_response`. |
-| `refundPayment` | `GET /v1/refunds?payment_intent=&limit=100`, up to 5 pages, then `POST /v1/refunds` with `metadata[tidegrid_refund_key]` | `succeeded` is succeeded; `failed` and `canceled` are failed with Stripe's `failure_reason`. `pending` and `requires_action` are an unknown outcome (D3). |
+| `refundPayment` | `GET /v1/refunds?payment_intent=&limit=100`, up to 5 pages, then `POST /v1/refunds` with `metadata[tidegrid_refund_key]` | `succeeded` is succeeded; `failed` and `canceled` are failed with Stripe's `failure_reason`. `pending` and `requires_action` are pending (W3-G2.9; before it they were an unknown outcome, D3). |
+| `cancelPayment` | `POST /v1/payment_intents/{id}/cancel` with `cancellation_reason=abandoned` (W3-G2.9) | `canceled` is canceled. On `payment_intent_unexpected_state` the adapter retrieves the intent: canceled answers canceled, succeeded answers succeeded, and anything else (such as processing) is an unknown outcome (`stripe_cancel_in_progress`). |
 | `verifyWebhook` | none | Below. |
 
 ### Refunds are never issued twice
@@ -149,7 +154,8 @@ Mapping:
 - `payment_intent.succeeded` is `payment.succeeded`, with `amount_received`.
 - `payment_intent.canceled` is `payment.failed`, with the intent's `amount`, which is what the payment row holds.
 - `payment_intent.payment_failed`, `.processing`, and `.requires_action` are `other`: a declined card can be retried and must not release the hold.
-- Charges, refunds, disputes, accounts, and unknown types are `other`. An unknown type still verifies and is recorded, so Stripe does not retry it for days.
+- `refund.created`, `refund.updated`, `refund.failed`, and `charge.refund.updated` about a refund that carries `metadata.tidegrid_refund_key` are `refund.updated` (W3-G2.9), with the refund's payment, amount, status, and failure reason. `pending` and `requires_action` are pending, `succeeded` succeeded, and `failed` and `canceled` failed. A refund event with an unknown status or a malformed field is `payload_invalid`; one without TideGrid's key stays `other`.
+- Charges, disputes, accounts, refunds TideGrid did not make, and unknown types are `other`. An unknown type still verifies and is recorded, so Stripe does not retry it for days.
 
 **Dedupe hash.** For Stripe, `payloadSha256` is the SHA-256 of `{id, type, account, livemode, created, api_version, data}` as JSON with keys sorted at every level. `pending_webhooks` and `request` change between deliveries and are left out. The inbox and `handleVerifiedEvent` are unchanged, and the fake keeps raw-body hashing.
 
@@ -157,13 +163,13 @@ Mapping:
 
 - **Create replay after pruning.** `ensureProviderPayment` calls `createPayment` on every replay. After Stripe forgets the key, a replay could create a second intent. The 15-minute hold makes that unlikely, and checkout fails closed on a different payment id.
 - **A cached 500.** Stripe replays a saved 500 for up to 24 hours. For refunds the lookup makes that safe. For a create it costs a 503 until the hold expires.
-- **Pending refunds and refused lookups can starve the sweep.** The sweep takes requested refunds oldest first in batches, and a refund stuck pending only counts as pending. A refund whose lookup is refused for good (an account or payment id that no longer matches) stays requested the same way, forever, with no word to the guest or the operator. A pending state, or an exception after some hours that covers both cases, is a proposed G2.9 follow-up, with fair ordering.
+- **Pending refunds and refused lookups can starve the sweep.** Closed by W3-G2.9: a pending refund is recorded as pending and asked about once an hour, and a refund still unsettled after 24 hours, or whose lookup keeps being refused, is raised once as a refund exception for staff.
 - **Inline processing.** The webhook route records and processes inline. Stripe advises a quick 2xx first. The inbox and the sweep make Stripe's retry safe. Update, 2026-11-08: under Stripe the route now answers first and processes after the answer; see [Stripe webhook ingress](#stripe-webhook-ingress-proposed-w1-stripe-webhook).
 - **Signature only.** The route trusts the signature alone. Allowlisting Stripe's webhook IPs is a proposed follow-up. Update, 2026-11-08: under Stripe the route now also refuses addresses not on a committed list; see [Stripe webhook ingress](#stripe-webhook-ingress-proposed-w1-stripe-webhook).
 - **Restricted keys.** Whether an `rk_test_` key needs extra permission to act through `Stripe-Account` is unconfirmed. If it does, the 403 is unknown, so refunds wait rather than fail.
 - **Metadata cleared in the Dashboard.** An intent without TideGrid's payment id is recorded as `other`, so if the account's owner clears that metadata, a late success is ignored rather than refunded. G2.10 reconciliation, reading pending payments past their hold through `retrievePayment`, is the recovery.
 - **The card-only webhook check reads a field no live webhook has shown yet.** A TideGrid success without `data.object.payment_method_types` is refused. Only the create answer under `2026-09-30.endive` has been seen live, and a resent event in the Nov 1 run was stamped with the account's default version, `2026-08-26.dahlia` ([A14](../../docs/verification-log.md)). If any version an event is rendered in leaves the field out, every Stripe payment answers 400: the guest is charged, the booking is not confirmed, and nothing refunds. Before the next live window is accepted, check live that a delivered and a resent `payment_intent.succeeded` carry `payment_method_types: ["card"]`.
-- **No logger.** The adapter adds no log site. Operator-visible logs for `refund.failed` and disputes are a G2.9 and G2.10 follow-up, and such a log never carries `data.object`.
+- **No logger.** The adapter adds no log site. Since W3-G2.9 the webhook route logs a refund event's outcome name only (a failed refund, a failure after success, a mismatch), never `data.object`. Disputes are a G2.10 follow-up.
 
 ### The fixture and its capture rules
 

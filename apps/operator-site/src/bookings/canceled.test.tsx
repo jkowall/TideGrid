@@ -44,6 +44,8 @@ const applied: BookingCancellation = {
   remedy: "full_refund",
   refundBp: 10_000,
   refundAmount: 13_109,
+  creditAmount: 0,
+  overridden: false,
   paidAmount: 13_109,
   // 6:00 PM on Tue, Nov 3: 24 hours before the 6:00 PM trip on Wed, Nov 4.
   cutoffAt: "2026-11-03T23:00:00.000Z",

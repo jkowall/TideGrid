@@ -6953,10 +6953,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -7327,10 +7328,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -7548,10 +7550,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -8441,10 +8444,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -10219,10 +10223,11 @@
                                 "type": "string",
                                 "enum": [
                                   "requested",
+                                  "pending",
                                   "succeeded",
                                   "failed"
                                 ],
-                                "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                                "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                               },
                               "amount": {
                                 "type": "integer",
@@ -11019,10 +11024,11 @@
                                     "type": "string",
                                     "enum": [
                                       "requested",
+                                      "pending",
                                       "succeeded",
                                       "failed"
                                     ],
-                                    "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                                    "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                                   },
                                   "amount": {
                                     "type": "integer",
@@ -11369,26 +11375,35 @@
                                 "system",
                                 "support"
                               ],
-                              "description": "Who canceled: the guest, today"
+                              "description": "Who canceled: the guest or staff"
                             },
                             "remedy": {
                               "type": "string",
                               "enum": [
                                 "full_refund",
                                 "percent_refund",
+                                "credit",
                                 "none"
                               ],
-                              "description": "What the booking's policy version gave on the side of its cutoff it fell"
+                              "description": "What the cancellation applied: the policy's remedy, the policy's refund value taken as credit (staff), or an override (staff, with a reason)"
                             },
                             "refundBp": {
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Basis points of what was paid: 10000 for a full refund, 0 for none"
+                              "description": "Basis points of what was paid, returned as a refund or as credit: 10000 for all of it, 0 for none"
                             },
                             "refundAmount": {
                               "type": "integer",
                               "description": "Integer US cents"
+                            },
+                            "creditAmount": {
+                              "type": "integer",
+                              "description": "Booking credit issued to the booker instead of a refund"
+                            },
+                            "overridden": {
+                              "type": "boolean",
+                              "description": "Staff applied a remedy the policy does not give, with a reason (kept in the audit history)"
                             },
                             "paidAmount": {
                               "type": "integer",
@@ -11413,6 +11428,8 @@
                             "remedy",
                             "refundBp",
                             "refundAmount",
+                            "creditAmount",
+                            "overridden",
                             "paidAmount",
                             "cutoffAt",
                             "beforeCutoff",
@@ -11853,10 +11870,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -12637,10 +12655,11 @@
                                         "type": "string",
                                         "enum": [
                                           "requested",
+                                          "pending",
                                           "succeeded",
                                           "failed"
                                         ],
-                                        "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                                        "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                                       },
                                       "amount": {
                                         "type": "integer",
@@ -14593,10 +14612,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -14646,26 +14666,35 @@
                                 "system",
                                 "support"
                               ],
-                              "description": "Who canceled: the guest, today"
+                              "description": "Who canceled: the guest or staff"
                             },
                             "remedy": {
                               "type": "string",
                               "enum": [
                                 "full_refund",
                                 "percent_refund",
+                                "credit",
                                 "none"
                               ],
-                              "description": "What the booking's policy version gave on the side of its cutoff it fell"
+                              "description": "What the cancellation applied: the policy's remedy, the policy's refund value taken as credit (staff), or an override (staff, with a reason)"
                             },
                             "refundBp": {
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Basis points of what was paid: 10000 for a full refund, 0 for none"
+                              "description": "Basis points of what was paid, returned as a refund or as credit: 10000 for all of it, 0 for none"
                             },
                             "refundAmount": {
                               "type": "integer",
                               "description": "Integer US cents"
+                            },
+                            "creditAmount": {
+                              "type": "integer",
+                              "description": "Booking credit issued to the booker instead of a refund"
+                            },
+                            "overridden": {
+                              "type": "boolean",
+                              "description": "Staff applied a remedy the policy does not give, with a reason (kept in the audit history)"
                             },
                             "paidAmount": {
                               "type": "integer",
@@ -14690,6 +14719,8 @@
                             "remedy",
                             "refundBp",
                             "refundAmount",
+                            "creditAmount",
+                            "overridden",
                             "paidAmount",
                             "cutoffAt",
                             "beforeCutoff",
@@ -16098,10 +16129,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -16151,26 +16183,35 @@
                                 "system",
                                 "support"
                               ],
-                              "description": "Who canceled: the guest, today"
+                              "description": "Who canceled: the guest or staff"
                             },
                             "remedy": {
                               "type": "string",
                               "enum": [
                                 "full_refund",
                                 "percent_refund",
+                                "credit",
                                 "none"
                               ],
-                              "description": "What the booking's policy version gave on the side of its cutoff it fell"
+                              "description": "What the cancellation applied: the policy's remedy, the policy's refund value taken as credit (staff), or an override (staff, with a reason)"
                             },
                             "refundBp": {
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 10000,
-                              "description": "Basis points of what was paid: 10000 for a full refund, 0 for none"
+                              "description": "Basis points of what was paid, returned as a refund or as credit: 10000 for all of it, 0 for none"
                             },
                             "refundAmount": {
                               "type": "integer",
                               "description": "Integer US cents"
+                            },
+                            "creditAmount": {
+                              "type": "integer",
+                              "description": "Booking credit issued to the booker instead of a refund"
+                            },
+                            "overridden": {
+                              "type": "boolean",
+                              "description": "Staff applied a remedy the policy does not give, with a reason (kept in the audit history)"
                             },
                             "paidAmount": {
                               "type": "integer",
@@ -16195,6 +16236,8 @@
                             "remedy",
                             "refundBp",
                             "refundAmount",
+                            "creditAmount",
+                            "overridden",
                             "paidAmount",
                             "cutoffAt",
                             "beforeCutoff",
@@ -17147,10 +17190,11 @@
                                     "type": "string",
                                     "enum": [
                                       "requested",
+                                      "pending",
                                       "succeeded",
                                       "failed"
                                     ],
-                                    "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                                    "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                                   },
                                   "amount": {
                                     "type": "integer",
@@ -25069,10 +25113,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -25594,10 +25639,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -25955,10 +26001,11 @@
                               "type": "string",
                               "enum": [
                                 "requested",
+                                "pending",
                                 "succeeded",
                                 "failed"
                               ],
-                              "description": "requested until the provider confirms it; a failed refund is an operator exception"
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
                             },
                             "amount": {
                               "type": "integer",
@@ -27240,6 +27287,1780 @@
                   },
                   "required": [
                     "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/cancellation": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "What staff canceling this booking now would do",
+        "description": "Owners and booking staff (bookings.cancel). The policy's terms now, its value, the refund with the TideGrid fee it would reverse, and the booking credit alternative with the booker's resulting balance. Read-only; show it before confirming.\n\nOrder: authentication (401), membership (404), permission (403), then the booking (404).",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "preview": {
+                      "type": "object",
+                      "properties": {
+                        "terms": {
+                          "type": "object",
+                          "properties": {
+                            "cancelable": {
+                              "type": "boolean",
+                              "description": "True when the guest can cancel now, with exactly these terms"
+                            },
+                            "refusal": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "enum": [
+                                "already_canceled",
+                                "trip_departed",
+                                "remedy_requires_operator",
+                                null
+                              ],
+                              "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues"
+                            },
+                            "remedy": {
+                              "type": "string",
+                              "enum": [
+                                "full_refund",
+                                "percent_refund",
+                                "credit",
+                                "none"
+                              ]
+                            },
+                            "refundBp": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10000,
+                              "description": "Basis points of what was paid: 10000 for a full refund"
+                            },
+                            "paidAmount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "refundAmount": {
+                              "type": "integer",
+                              "description": "Rounded half up to the cent. Send it back to cancel"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "departsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "cutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "Departure minus the policy's change cutoff"
+                            },
+                            "beforeCutoff": {
+                              "type": "boolean"
+                            },
+                            "policyVersion": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "asOf": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The server's clock when these terms were computed"
+                            }
+                          },
+                          "required": [
+                            "cancelable",
+                            "refusal",
+                            "remedy",
+                            "refundBp",
+                            "paidAmount",
+                            "refundAmount",
+                            "currency",
+                            "departsAt",
+                            "cutoffAt",
+                            "beforeCutoff",
+                            "policyVersion",
+                            "asOf"
+                          ],
+                          "description": "The policy's terms now, as the guest would see them; staff may also cancel where the guest may not (a credit policy)"
+                        },
+                        "refusal": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "already_canceled",
+                            "trip_departed",
+                            null
+                          ],
+                          "description": "Why staff cannot cancel now, or null"
+                        },
+                        "policyValue": {
+                          "type": "integer",
+                          "description": "What the policy returns, in cents: its refund, or the whole payment when its remedy is credit"
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "amount": {
+                              "type": "integer",
+                              "description": "The policy's refund to the original payment method"
+                            },
+                            "feeReversal": {
+                              "type": "integer",
+                              "description": "TideGrid's fee reversed when this refund succeeds; negative or 0. Not the guest's money"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "feeReversal"
+                          ],
+                          "description": "Taking the policy's remedy as a refund. Null when the policy gives credit"
+                        },
+                        "credit": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "balanceAfter": {
+                              "type": "integer",
+                              "description": "The booker's credit balance after this credit"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "balanceAfter"
+                          ],
+                          "description": "Taking the policy's value as booking credit instead. Null when the policy gives nothing"
+                        },
+                        "creditBalance": {
+                          "type": "integer",
+                          "description": "The booker's credit balance with this operator now"
+                        }
+                      },
+                      "required": [
+                        "terms",
+                        "refusal",
+                        "policyValue",
+                        "refund",
+                        "credit",
+                        "creditBalance"
+                      ],
+                      "description": "What staff canceling now would do, with the credit alternative beside the refund"
+                    }
+                  },
+                  "required": [
+                    "preview"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Cancel a confirmed booking",
+        "description": "Owners and booking staff (bookings.cancel). One transaction: the cancellation with its terms, the booking canceled, the seats released, the refund requested or the booking credit issued to the booker, and the cancellation email queued. A refund is then sent through the payment provider; its state comes back in refund.\n\nchoice.kind policy applies the policy's own remedy; credit applies the policy's value as booking credit instead; override applies any remedy at any basis points with a reason, and needs bookings.override (owners).\n\nOnce per booking: a repeat, with any key, answers 200 with the first cancellation. If canceling now gives another value than expectedAmount, nothing changes and the answer is 409 cancellation_terms_changed. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "choice": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "policy"
+                            ]
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": [
+                              "full_refund",
+                              "percent_refund",
+                              "credit",
+                              "none"
+                            ],
+                            "description": "The policy's remedy staff were shown (the preview's terms.remedy). If the policy now gives another, nothing changes (409 cancellation_terms_changed)"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "remedy"
+                        ],
+                        "description": "The policy's own remedy"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "credit"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "description": "The policy's value as booking credit instead of a refund; no reason needed"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "override"
+                            ]
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": [
+                              "full_refund",
+                              "percent_refund",
+                              "credit",
+                              "none"
+                            ]
+                          },
+                          "refundBp": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10000,
+                            "description": "Basis points of what was paid: 10000 for a full refund, 1 to 9999 for a percentage, 1 to 10000 for credit, 0 for none"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500,
+                            "description": "Why the policy is set aside; kept in the audit history"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "remedy",
+                          "refundBp",
+                          "reason"
+                        ],
+                        "description": "A remedy the policy does not give. Owners only (bookings.override)"
+                      }
+                    ],
+                    "description": "What the cancellation applies"
+                  },
+                  "expectedAmount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "The value staff were shown, refund plus credit, in cents. If canceling now gives another, nothing changes (409 cancellation_terms_changed)"
+                  }
+                },
+                "required": [
+                  "choice",
+                  "expectedAmount"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The canceled booking's terms and refund",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cancellation": {
+                      "type": "object",
+                      "properties": {
+                        "canceledAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "by": {
+                          "type": "string",
+                          "enum": [
+                            "guest",
+                            "staff",
+                            "system",
+                            "support"
+                          ],
+                          "description": "Who canceled: the guest or staff"
+                        },
+                        "remedy": {
+                          "type": "string",
+                          "enum": [
+                            "full_refund",
+                            "percent_refund",
+                            "credit",
+                            "none"
+                          ],
+                          "description": "What the cancellation applied: the policy's remedy, the policy's refund value taken as credit (staff), or an override (staff, with a reason)"
+                        },
+                        "refundBp": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 10000,
+                          "description": "Basis points of what was paid, returned as a refund or as credit: 10000 for all of it, 0 for none"
+                        },
+                        "refundAmount": {
+                          "type": "integer",
+                          "description": "Integer US cents"
+                        },
+                        "creditAmount": {
+                          "type": "integer",
+                          "description": "Booking credit issued to the booker instead of a refund"
+                        },
+                        "overridden": {
+                          "type": "boolean",
+                          "description": "Staff applied a remedy the policy does not give, with a reason (kept in the audit history)"
+                        },
+                        "paidAmount": {
+                          "type": "integer",
+                          "description": "Integer US cents"
+                        },
+                        "cutoffAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The policy's change cutoff for this trip"
+                        },
+                        "beforeCutoff": {
+                          "type": "boolean"
+                        },
+                        "policyVersion": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      },
+                      "required": [
+                        "canceledAt",
+                        "by",
+                        "remedy",
+                        "refundBp",
+                        "refundAmount",
+                        "creditAmount",
+                        "overridden",
+                        "paidAmount",
+                        "cutoffAt",
+                        "beforeCutoff",
+                        "policyVersion"
+                      ],
+                      "description": "The terms the cancellation applied; the refund's state is in refund"
+                    },
+                    "refund": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "requested",
+                            "pending",
+                            "succeeded",
+                            "failed"
+                          ],
+                          "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "Integer US cents"
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "amount"
+                      ],
+                      "description": "The refund, as it stands after the provider's answer; null when there is none"
+                    }
+                  },
+                  "required": [
+                    "cancellation",
+                    "refund"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or an override's remedy and basis points do not fit (override_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this (an override needs bookings.override)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The terms changed (cancellation_terms_changed), the trip has departed (trip_departed), or the policy gives nothing to credit (nothing_to_credit)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/credit": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "The booker's booking credit",
+        "description": "Owners and booking staff (bookings.read). The credit balance and whole ledger of the customer who made this booking, under the email they booked with; null when they have never had credit. Never expires during the pilot.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "balance": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Integer US cents"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "issue",
+                                  "redeem",
+                                  "reinstate",
+                                  "adjust"
+                                ],
+                                "description": "issue: from a canceled booking. redeem: used toward a booking. reinstate: a redemption returned because its booking was canceled. adjust: staff's correction"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Positive adds to the balance, negative takes from it"
+                              },
+                              "balanceAfter": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "bookingId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "uuid"
+                              },
+                              "reason": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "An adjustment's reason"
+                              },
+                              "by": {
+                                "type": "string",
+                                "enum": [
+                                  "staff",
+                                  "guest",
+                                  "system",
+                                  "support"
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "amount",
+                              "balanceAfter",
+                              "bookingId",
+                              "reason",
+                              "by",
+                              "createdAt"
+                            ]
+                          },
+                          "description": "The whole ledger, oldest first"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "balance",
+                        "currency",
+                        "entries"
+                      ],
+                      "description": "Null when the booker has never had credit"
+                    }
+                  },
+                  "required": [
+                    "account"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/credit/adjustments": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Adjust the booker's booking credit",
+        "description": "Owners (credits.adjust). Adds to or takes from the booker's credit balance, with a reason kept on the ledger and in the audit history. The balance never goes below zero: a larger decrease answers 409 credit_insufficient. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "integer",
+                    "minimum": -100000000,
+                    "maximum": 100000000,
+                    "description": "Cents to add (positive) or take away (negative)"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "Why; kept on the ledger and in the audit history"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The account after the adjustment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "account": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "balance": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Integer US cents"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "issue",
+                                  "redeem",
+                                  "reinstate",
+                                  "adjust"
+                                ],
+                                "description": "issue: from a canceled booking. redeem: used toward a booking. reinstate: a redemption returned because its booking was canceled. adjust: staff's correction"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Positive adds to the balance, negative takes from it"
+                              },
+                              "balanceAfter": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "bookingId": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "uuid"
+                              },
+                              "reason": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "An adjustment's reason"
+                              },
+                              "by": {
+                                "type": "string",
+                                "enum": [
+                                  "staff",
+                                  "guest",
+                                  "system",
+                                  "support"
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "kind",
+                              "amount",
+                              "balanceAfter",
+                              "bookingId",
+                              "reason",
+                              "by",
+                              "createdAt"
+                            ]
+                          },
+                          "description": "The whole ledger, oldest first"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "balance",
+                        "currency",
+                        "entries"
+                      ],
+                      "description": "Null when the booker has never had credit"
+                    }
+                  },
+                  "required": [
+                    "account"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The balance is smaller than the decrease (credit_insufficient)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/refund-exceptions": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Refunds that need a person",
+        "description": "Every role that reads payments (payments.read). The operator's refund exceptions, newest first, at most 100: a refund with no final answer 24 hours after it was requested, one whose lookup the provider keeps refusing, or one the provider reported failed after it had succeeded. Each says whether it is still open, its refund, its booking, and what to do next. Nothing of the provider's own refund object.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The exceptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exceptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "unsettled",
+                              "lookup_refused",
+                              "failed_after_success",
+                              "succeeded_after_failure"
+                            ],
+                            "description": "unsettled: no final answer 24 hours after it was requested. lookup_refused: the payment provider keeps refusing to say what happened to it. failed_after_success: the provider reported it failed after it had succeeded. succeeded_after_failure: the provider reported it succeeded after TideGrid recorded it failed"
+                          },
+                          "errorCode": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "raisedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "open": {
+                            "type": "boolean",
+                            "description": "Still needs a person: the refund is still unsettled, or (failed_after_success, succeeded_after_failure) always until followed up outside TideGrid"
+                          },
+                          "refund": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "requested",
+                                  "pending",
+                                  "succeeded",
+                                  "failed"
+                                ],
+                                "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "requestedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "state",
+                              "amount",
+                              "requestedAt"
+                            ]
+                          },
+                          "booking": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "reference": {
+                                "type": "string",
+                                "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                                "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reference"
+                            ],
+                            "description": "Null for a refund of a payment that never became a booking"
+                          },
+                          "nextStep": {
+                            "type": "string",
+                            "description": "What to do, in words"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason",
+                          "errorCode",
+                          "raisedAt",
+                          "open",
+                          "refund",
+                          "booking",
+                          "nextStep"
+                        ],
+                        "description": "A refund that needs a person"
+                      }
+                    }
+                  },
+                  "required": [
+                    "exceptions"
                   ]
                 }
               }

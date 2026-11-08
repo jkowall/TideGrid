@@ -432,7 +432,8 @@ export function Unfulfilled({
       <p>
         Your payment arrived after this checkout could no longer become a booking, so no booking was
         made. {refund === "succeeded" && `It has been refunded in full: ${amount}.`}
-        {refund === "requested" && `It is being refunded in full: ${amount}.`}
+        {(refund === "requested" || refund === "pending") &&
+          `It is being refunded in full: ${amount}.`}
         {refund === "failed" &&
           `The refund of ${amount} hasn't gone through yet. Contact ${brand.name} to put it right.`}
       </p>
