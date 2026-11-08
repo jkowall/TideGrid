@@ -90,7 +90,7 @@ export async function getTripOffer(
   if (!priceList || !policy || priceList.productKind !== trip.productKind) {
     return { kind: "pricing_unavailable" };
   }
-  const taxRates = await loadTaxRates(trx, tenantId);
+  const taxRates = await loadTaxRates(trx, tenantId, trip.locationId);
   return {
     kind: "offer",
     offer: {
@@ -183,7 +183,7 @@ export async function createQuote(
   if (!priceList || !policy) {
     return { kind: "rejected", problems: [{ code: "pricing_unavailable" }] };
   }
-  const taxRates = await loadTaxRates(trx, ctx.tenantId);
+  const taxRates = await loadTaxRates(trx, ctx.tenantId, trip.locationId);
   const promotion =
     input.promotionCode === null
       ? null

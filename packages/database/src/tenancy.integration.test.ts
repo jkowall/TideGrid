@@ -699,7 +699,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         finalization_exception_resolutions: ["INSERT", "SELECT"],
         // Staff-assisted waiver signing (0020): append-only, no UPDATE columns.
         waiver_assisted_links: ["INSERT", "SELECT"],
-        // Waiver reminders (0024).
+        // Waiver reminders (0025).
         waiver_reminders: ["INSERT", "SELECT"],
         // Email events (0021, W1-EMAIL-EVENTS): the inbox is append-only; the
         // unmatched events are a platform table reached through a function.

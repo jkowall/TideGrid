@@ -25,6 +25,7 @@ export type TermsProblem =
   | "invalid_discount"
   | "invalid_window"
   | "invalid_products"
+  | "invalid_location"
   | "invalid_reason";
 
 const ITEM_CODE = /^[a-z][a-z0-9_]{0,31}$/;
@@ -248,6 +249,11 @@ export interface TaxRateInput {
   name: string;
   ratePpm: number;
   inclusive: boolean;
+  /**
+   * The one location whose departures it applies to. Omitted or null, it
+   * applies at every location. The operator decides; TideGrid only applies it.
+   */
+  locationId?: string | null;
 }
 
 export function validateTaxRate(input: TaxRateInput): TermsProblem[] {
@@ -260,6 +266,7 @@ export function validateTaxRate(input: TaxRateInput): TermsProblem[] {
   ) {
     problems.push("invalid_rate");
   }
+  if (input.locationId != null && !UUID.test(input.locationId)) problems.push("invalid_location");
   return problems;
 }
 

@@ -381,6 +381,8 @@ export interface TaxRateVersionsTable extends TermsAuthor {
   inclusive: Insert<boolean>;
   active: Insert<boolean>;
   reason: Insert<string>;
+  /** The location whose departures this version applies to; null for every location (0024). */
+  location_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
 export interface PromotionsTable {
@@ -1174,7 +1176,7 @@ export interface WaiverAssistedLinksTable {
 
 export type WaiverReminderSlot = "72h" | "24h";
 
-/** A reminder email for an unsigned waiver (0024, W1-G215-REMINDERS). Append-only. */
+/** A reminder email for an unsigned waiver (0025, W1-G215-REMINDERS). Append-only. */
 export interface WaiverRemindersTable {
   id: Generated<string>;
   tenant_id: TenantColumn;

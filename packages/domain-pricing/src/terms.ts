@@ -63,6 +63,12 @@ export interface TaxRate {
   ratePpm: number;
   /** Prices already include it; otherwise it is added on top. */
   inclusive: boolean;
+  /**
+   * The one location it applies at, or null for every location. Loaded rates
+   * always carry it; pricing itself never reads it, because the loader has
+   * already kept only the rates that apply at the trip's location.
+   */
+  locationId?: string | null;
 }
 
 export type Discount =

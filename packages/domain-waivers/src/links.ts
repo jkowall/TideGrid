@@ -44,7 +44,7 @@ export async function cancelQueuedMessages(
     code: "resent",
   },
 ): Promise<void> {
-  // The request's emails: each generation's, then each reminder's (0024).
+  // The request's emails: each generation's, then each reminder's (0025).
   const { rows } = await sql<{ message_id: string }>`
     select message_id from (
       select message_id, 0 as k, generation as n, null::timestamptz as at from waiver_deliveries

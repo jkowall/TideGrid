@@ -1,6 +1,6 @@
 /**
  * W1-G215-REMINDERS adversarial: reminders up to a completion cutoff
- * (migration 0024), against the waiver contract
+ * (migration 0025), against the waiver contract
  * (packages/domain-waivers/README.md, "Reminders").
  *
  * - The schedule (D1): one reminder from 72 hours before departure, one from
