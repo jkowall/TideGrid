@@ -11,6 +11,7 @@ A proposed Stage 0 [pricing worksheet draft](customer/pricing-worksheet-draft.md
 - **Checks.** `pnpm check` passed on the second run. The first run failed one timing-dependent test outside this goal (`packages/domain-messaging/src/cloudflare.test.ts`).
 - **Independent review.** Accept with listed fixes, three findings, all fixed. The Managed Launch credit now applies only when Managed Launch is in the full price. Step 1 counts dollar card redemptions only from purchased lots, as the fee base defines. The custom-quote check lists all six triggers from the commercial model.
 - **Two rechecks.** The first asked for a rebase onto main. The second: accept. It re-derived every number in both examples against the commercial model and found no errors.
+- **Pull request review.** Three findings, all fixed: only the covered trip entitlement of a trip-count redemption stays out of the fee base, line C does not re-count value already assessed, and Native setup follows the delivery bands. Example A's numbers are unchanged.
 - **Telemetry.** About one hour of agent time across draft, review, and two fix rounds. Token use and cost per checkpoint: missing.
 
 ### A no-transaction runner mode for CREATE INDEX CONCURRENTLY (W1-MIG-CONC), built November 8, 2026

@@ -32,18 +32,20 @@ A completed worksheet is a discussion aid. It is not a quote, an offer, an invoi
 | Booking Core self-setup | Yes | |
 | Managed Launch requested | | yes or no |
 | Native add-on requested | | yes or no |
+| Estimated customer-specific Native delivery, if requested | | hours |
+| Estimated Native direct cost, if requested | | USD |
 | Pilot Native offer applies (first three qualified pilot operators only) | | yes or no |
 
 ## Step 1: Channel mix
 
 List every booking channel. A channel counts toward the fee base when the booking is managed in TideGrid. Payment rail and import origin do not change fee treatment.
 
-Enter each channel's eligible booking value for trips completed in the period: trip fares and private-charter value, mandatory operator fees, and eligible booking-linked add-ons and equipment rentals. Enter it before discounts and refunds, which Step 2 subtracts. Exclude taxes and tips. Count each booking once, never its deposit and balance separately. A cancelled or no-show booking enters only Step 2 line C, for the amount retained; a fully refunded cancellation enters nowhere.
+Enter each channel's eligible booking value for trips completed in the period: trip fares and private-charter value, mandatory operator fees, and eligible booking-linked add-ons and equipment rentals. Enter it before discounts and refunds, which Step 2 subtracts. Exclude taxes and tips. Count each booking once, never its deposit and balance separately. A cancelled or no-show booking enters only Step 2 line C, for the amount retained; a fully refunded cancellation enters nowhere. Line C also leaves out any part of a retained amount that trip-count units or a value-preserving credit paid, because that value was already counted.
 
 Dollar card redemptions from a purchased lot enter here, inside the booking lines they paid for. Promotional credit stays inside the booking line, and Step 2 line F subtracts it. Leave these out of the channel values, and record them in Step 3:
 
 - complimentary value;
-- trips redeemed against a trip-count card, because Step 2 line B already counted the card sale;
+- the trip entitlement that trip-count card units cover, because Step 2 line B already counted the card sale. Only the covered entitlement stays out: mandatory fees, add-ons, equipment rentals, and uncovered party members paid separately on the same booking stay in the channel values;
 - the part of a booking paid from a credit that preserves value already counted on an earlier booking, in this period or an earlier one. A cancellation-credit lot is the usual case: its value was already counted, for example in line C.
 
 | Channel | Bookings (count) | Eligible booking value (USD) | In fee base |
@@ -65,7 +67,7 @@ The calculation follows [Net managed booking value](../v2/03-commercial-model.md
 |---|:---:|---:|
 | A. Included channels subtotal (fares, charter value, mandatory fees, eligible add-ons and rentals) | + | |
 | B. Trip-count card sales (assessed at sale) | + | |
-| C. Retained cancellation and no-show amounts | + | |
+| C. Retained cancellation and no-show amounts, less any part paid by trip-count units or value-preserving credits | + | |
 | D. Discounts | minus | |
 | E. Refunded or charged-back eligible value | minus | |
 | F. Promotional credit applied | minus | |
@@ -81,7 +83,7 @@ Record these so the prospect can see what was left out. None of them enters N.
 | Taxes | | Excluded from the fee base |
 | Tips | | Operator-settled and excluded |
 | Complimentary value | | Contributes zero |
-| Trip-count card redemptions | | The card sale was already counted in B |
+| Trip-count card redemptions (the covered trip entitlement only) | | The card sale was already counted in B |
 | Redemptions of value-preserving credits (cancellation-credit lots) | | Value already counted on the original booking |
 | Dollar card purchases at issue | | Prepaid value; its purchased-lot redemption counts in Step 1 |
 | Imported OTA reservation value | | Excluded during the pilot |
@@ -100,7 +102,9 @@ Core minimum shortfall        = Core annual charge - ($1,788 + 1.5% x N)
 Extra-boat fees               = $75 x 12 x max(active boats - 2, 0)
 Native recurring (if chosen)  = ($399 x 12) + (0.25% x N) = $4,788 + (0.25% x N)
 Annual recurring              = Core annual charge + extra-boat fees + Native recurring
-Native setup (if chosen)      = $4,500
+Native setup (if chosen)      = the delivery band's price:
+                                $4,500 for up to 22 hours and direct cost below $500,
+                                $7,500 for 23 to 40 hours
 Managed Launch (if chosen)    = $1,000
 Year-one full price           = annual recurring + Native setup + Managed Launch
 ```
@@ -127,7 +131,7 @@ Not included in any line: Stripe processing, app-store memberships, domains, mes
 Show this step only after Step 4. The credit applies only under the Pilot Native offer: the first three qualified pilot operators, with Booking Core and Native both signed. Recurring prices are never discounted. See [Pilot Native offer controls](../v2/03-commercial-model.md#pilot-native-offer-controls).
 
 ```text
-Native setup credit    = $4,500 - $2,250 = $2,250
+Native setup credit    = $4,500 - $2,250 = $2,250 (the $4,500 band only)
 Managed Launch credit  = $1,000 if Managed Launch appears in Step 4, else $0
 Pilot credit           = Native setup credit + Managed Launch credit (at most $3,250)
 Year-one pilot price   = year-one full price - pilot credit
@@ -140,20 +144,21 @@ Year-one pilot price   = year-one full price - pilot credit
 | Pilot credit: Managed Launch | |
 | **Year-one pilot price** | |
 
-The Managed Launch credit only offsets a Managed Launch charge that Step 4 shows. When the offer applies but the operator does not take Managed Launch, the Managed Launch credit is $0. When the Pilot Native offer does not apply, enter $0 for both credit lines and say why.
+The commercial model defines the Native setup credit only against the $4,500 band. If a pilot prospect's estimate falls in a higher band, do not show a pilot price; that case goes to the owner (see Pending before use). The Managed Launch credit only offsets a Managed Launch charge that Step 4 shows. When the offer applies but the operator does not take Managed Launch, the Managed Launch credit is $0. When the Pilot Native offer does not apply, enter $0 for both credit lines and say why.
 
 ## Step 6: Checks before showing the worksheet (proposed)
 
 | Check | Rule | Source |
 |---|---|---|
 | Custom quote | Any trigger in Custom work needs a custom quote: average monthly N above $100,000; five or more active boats; more than one location, brand, legal operator, or native app pair; non-US entities, currencies, taxes, or payment methods; enterprise security, procurement, support, or service-level terms; or requirements outside the published V2 product scope. Do not show this worksheet's price. | [Custom work](../v2/03-commercial-model.md#pass-through-costs-and-custom-work) |
+| Native setup band | Estimate customer-specific delivery hours and direct cost before showing a Native price. Up to 22 hours with direct cost below $500 is $4,500; 23 to 40 hours is $7,500. Above 40 hours, or a prospect expected to cross a band, needs a quote or a signed change order. Do not show this worksheet's price. The $4,500 band is provisional. | [Native setup](../v2/03-commercial-model.md#native-setup) |
 | Direct-first share | At least 80% of trailing booking count through direct or staff-assisted channels. Use counts from Step 1, not value. | [Direct-first profile](operator-validation-guide.md#direct-first-discovery-profile) |
 | Native fit | Average monthly N of at least $25,000 for a pilot Native learning case. Standard Native sales target about $50,000 or more. | [Native pilot qualification](operator-validation-guide.md#native-pilot-qualification) |
 | Fee base explained | The prospect can restate which channels and values count, and that externally paid bookings managed in TideGrid count. | [Price reveal](operator-validation-guide.md#039-to-043-price-reveal-and-commitment-tests) |
 
 ## Example A: synthetic dive shop
 
-All values are synthetic. Trailing 12 months. Three active boats. Requests Booking Core, Native, and Managed Launch. Assumed to qualify for the Pilot Native offer.
+All values are synthetic. Trailing 12 months. Three active boats. Requests Booking Core, Native, and Managed Launch. Assumed to qualify for the Pilot Native offer. Native delivery is estimated at 18 customer-specific hours and $300 of direct cost, inside the $4,500 band.
 
 ### A1. Channel mix
 
@@ -166,7 +171,7 @@ All values are synthetic. Trailing 12 months. Three active boats. Requests Booki
 | Imported OTA reservation | 600 | 60,000 | No |
 | **Included channels subtotal (A)** | 3,350 | **330,000** | |
 
-The channel values leave out the 15,000 of trips redeemed against trip-count cards (see A3). This example has no cancellation-credit redemptions.
+The channel values leave out the 15,000 of trip entitlement that trip-count card units covered (see A3). Fees and rentals paid separately on those bookings are inside the channel values. This example has no cancellation-credit redemptions, and no retained amount was paid by card units or credits.
 
 ### A2. Net managed booking value
 
@@ -187,7 +192,7 @@ The channel values leave out the 15,000 of trips redeemed against trip-count car
 |---|---:|
 | Taxes | 21,000 |
 | Tips | 7,800 |
-| Trip-count card redemptions | 15,000 |
+| Trip-count card redemptions (covered trip entitlement) | 15,000 |
 | Dollar card purchases at issue | 3,000 |
 | Imported OTA reservation value | 60,000 |
 | Unrelated retail sales | 12,000 |
@@ -222,6 +227,7 @@ The annual recurring price, $13,338.50, is the same with or without the pilot cr
 
 - Custom quote: not needed. Average monthly N is $27,916.67, below $100,000, with three active boats. Assumed: one US location and no other Custom work trigger.
 - Direct-first share by count: 3,350 / 3,950 = 84.8%. OTA is 600 / 3,950 = 15.2%. Passes the 80% rule.
+- Native setup band: 18 hours and $300 of direct cost, inside the $4,500 band.
 - Native fit: average monthly N of $27,916.67 meets the $25,000 pilot learning-case floor. It is below the about-$50,000 standard Native target, so it fits only as a pilot learning case with an evidenced repeat-use reason.
 
 ## Example B: synthetic private charter
@@ -299,5 +305,6 @@ No pilot credit applies. The Pilot Native offer requires the Native add-on, and 
 ## Pending before use
 
 - The owner approves or replaces the formula layout and the full-price-then-pilot-credit presentation.
+- The owner decides how the pilot Native setup credit applies to a pilot prospect whose Native estimate falls above the $4,500 band. The commercial model defines the credit only against that band.
 - The owner decides whether [Stage 0](../v2/05-roadmap-validation.md#stage-0-validation-materials-and-bare-bones-company) links to this draft.
 - A fresh reviewer re-derives every number in both examples against the [commercial model](../v2/03-commercial-model.md).

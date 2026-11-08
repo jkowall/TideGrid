@@ -18,6 +18,7 @@ On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: 
 - **No commercial change.** The worksheet restates the adopted prices, the $3,000 Core minimum, the fee base, and the Pilot Native credit. It changes none of them. The proposed Core pilot gate stays proposed, so the worksheet offers no Core-only pilot credit.
 - **Not done.** No link from Stage 0 to the draft. The goal adds that line only if the owner agrees, and the owner has not been asked.
 - **Synthetic only.** Every value in the examples is invented. No prospect, operator, or customer value is in the repository.
+- **Pull request review fixes, 2026-11-08.** Only the trip entitlement that trip-count units cover stays out of the fee base; separately paid fees, rentals, and uncovered party members stay in. Line C leaves out any retained amount paid by trip-count units or a value-preserving credit. Native setup follows the delivery bands of the commercial model ($4,500 or $7,500, a quote above 40 hours). How the pilot setup credit applies above the $4,500 band is an open question for the owner.
 
 Canonical: the [commercial model](03-commercial-model.md) for prices and the fee base. The worksheet has no authority until the owner approves it.
 
