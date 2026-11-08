@@ -156,6 +156,8 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           limit,
           ...(before === undefined ? {} : { before }),
           withBooker: seesBooker(ctx),
+          // Support access sees the booker when unmasked, never a note.
+          withNote: seesBooker(ctx) && can(ctx.access.role, "notes.read"),
         });
         if (page.kind === "cursor_invalid") throw cursorInvalid();
         return {

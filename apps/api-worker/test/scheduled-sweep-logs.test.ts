@@ -106,6 +106,11 @@ vi.mock("@tidegrid/domain-waivers", async (importOriginal) => ({
     };
   }),
 }));
+// Retention (W3-G2.2b) runs last and touches no network here.
+vi.mock("@tidegrid/domain-identity", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tidegrid/domain-identity")>()),
+  redactAbandonedCheckouts: vi.fn(async () => ({ tenants: 0, redacted: 0, complete: true })),
+}));
 vi.mock("@tidegrid/domain-hostnames", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tidegrid/domain-hostnames")>()),
   sweepHostnames: vi.fn(async (_db, options) => {

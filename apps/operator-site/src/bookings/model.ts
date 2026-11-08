@@ -353,6 +353,8 @@ export function exceptionTitle(reason: FinalizationException["reason"]): string 
       return "Paid after the guest canceled the checkout";
     case "payment_mismatch":
       return "A payment that didn't match its checkout";
+    case "session_redacted":
+      return "Paid long after the checkout ran out of time, once the guest's details were cleared";
   }
 }
 

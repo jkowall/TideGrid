@@ -8,6 +8,7 @@ import {
   type FailureReason,
   type GateNotice,
   NotProvisioned,
+  PendingInvitations,
   SignIn,
   SignOutControl,
 } from "./Gate.tsx";
@@ -203,6 +204,7 @@ export function App() {
       return (
         <NotProvisioned
           message={state.message}
+          invitations={state.me ? <PendingInvitations onAccepted={() => refresh(true)} /> : null}
           signOut={
             <SignOutControl
               method={state.me?.principal.authMethod ?? "access"}
