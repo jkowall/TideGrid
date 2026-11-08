@@ -46,6 +46,9 @@ const env = inject("integrationDb");
 
 // Synthetic, built at run time: never a real key.
 const publishableKey = `pk_test_${"E".repeat(32)}`;
+// Synthetic accounts of this suite's own: account refs are unique per provider
+// across the shared test database, and the webhook suite uses the fixture's.
+const accounts = { a: "acct_1TestElementA000", b: "acct_1TestElementB000" } as const;
 
 interface Tenant extends CheckoutFixture {
   host: string;
@@ -140,11 +143,21 @@ describe.skipIf(!env)("the Stripe card form's configuration through the API", ()
     if (!env) return;
     admin = postgres(env.adminUrl, { max: 3, onnotice: () => {} });
     runtime = createDb(env.runtimeUrl, { max: 8 });
-    fixture = createStripeFixture();
-    // Counts every call the adapter makes to the fixture's server.
-    const counted: typeof fetch = (input, init) => {
+    fixture = createStripeFixture({ accounts: Object.values(accounts) });
+    // Counts every call the adapter makes to the fixture's server. Each
+    // fixture numbers its intents from 1, and the webhook suite's fixture
+    // shares this database, where (provider, provider_payment_id) is unique:
+    // so this suite's intent ids read pi_TestFixture9..., never ...0..., on
+    // the way out, and back again on the way in.
+    const ours = "pi_TestFixture9";
+    const theirs = "pi_TestFixture0";
+    const counted: typeof fetch = async (input, init) => {
       stripeCalls += 1;
-      return fixture.fetch(input, init);
+      const url = (input instanceof Request ? input.url : String(input)).replaceAll(ours, theirs);
+      const body = typeof init?.body === "string" ? init.body.replaceAll(ours, theirs) : init?.body;
+      const res = await fixture.fetch(url, { ...init, body: body ?? null });
+      const text = (await res.text()).replaceAll(theirs, ours);
+      return new Response(text, { status: res.status, headers: res.headers });
     };
     stripe = createStripePaymentProvider({
       secretKey: fixture.secretKey,
@@ -154,8 +167,8 @@ describe.skipIf(!env)("the Stripe card form's configuration through the API", ()
     });
     const made: Tenant[] = [];
     for (const [label, account] of [
-      ["element-a", fixture.syntheticAccounts.harbor],
-      ["element-b", fixture.syntheticAccounts.reef],
+      ["element-a", accounts.a],
+      ["element-b", accounts.b],
     ] as const) {
       const tenant = await createCheckoutFixture(admin, runtime.db, label, { days: 30 });
       const host = `${tenant.slug}.book.example.test`;

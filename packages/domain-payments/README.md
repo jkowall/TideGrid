@@ -228,6 +228,38 @@ The integration suite's timing case, 8 deliveries in one process against the loc
 - **Duplicated steps.** The route repeats `handleVerifiedEvent`'s account, record, and duplicate steps, because `packages/domain-booking` was read-only for this goal. Splitting that function into a record step and a process step is a proposed follow-up and a contract change.
 - **Tests.** `stripe-webhook-ips.test.ts` covers the list and the check step. `apps/api-worker/test-integration/stripe-webhook.integration.test.ts` covers the answer before processing, a crash after the 200 recovered by the sweep and by a manual resend, concurrent and later duplicates, the address cases, a bad signature, the email, and the timing. `apps/api-worker/test/stripe-settings.test.ts` covers the 403 before any database in the Workers runtime.
 
+## The guest card form (proposed, W1-STRIPE-ELEMENT)
+
+Coordinator defaults of 2026-11-08, pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-stripe-element-the-stripe-card-form-in-guest-checkout-owner-go-coordinator-defaults-pending-owner-confirmation)). They apply under `PAYMENT_PROVIDER=stripe` only, which no deployed configuration sets. The fake provider's path is unchanged. The page side is in the [guest site README](../../apps/guest-site/README.md#the-stripe-card-form-w1-stripe-element).
+
+- **Card only (D1).** The guest site mounts Stripe's Payment Element. The intent allows `card` and nothing else (D5 above), and the page turns wallets off. No other method can appear.
+- **The publishable key (D2).** An API Worker secret, `STRIPE_PUBLISHABLE_KEY`, set by the owner with `wrangler secret put`, and locally in `.dev.vars`. Never in `wrangler.jsonc` or any committed file. The API accepts only `pk_test_` and 24 to 247 letters or digits, and only when `ENVIRONMENT` is `local`, `preview`, or `staging`; a live key, any other shape, or any other environment reads as no key.
+- **Only the Bearer read carries it.** `GET /v1/public/checkout-sessions/{id}/payment`, with the checkout secret as the bearer token, adds `payment.stripe`: the publishable key and the connected account the payment was created on, read from the payment row under the tenant's row-level security. Stripe.js needs that account for a direct charge. Opening the checkout and reading its state never carry either. Without a valid key, an open checkout answers 503 `payments_unavailable` before Stripe is asked.
+- **Confirmation is unchanged.** The browser asks Stripe to confirm the card. The booking confirms only when a verified `payment_intent.succeeded` reaches the webhook, as above. A decline is `payment_intent.payment_failed`, which is `other`, so the hold stays and the guest can try another card.
+
+### Owner check list for the Stripe window
+
+Each item needs the owner's go for real test-mode calls. Nothing here runs in CI.
+
+1. Set `STRIPE_PUBLISHABLE_KEY` on the API Worker with `wrangler secret put`, from the same Stripe test account as `STRIPE_SECRET_KEY`. Confirm it starts `pk_test_`. The release tool's secret list does not name it yet.
+2. Run the checks above first: the webhook address list check step, and the live check that a delivered and a resent `payment_intent.succeeded` carry `payment_method_types: ["card"]`.
+3. On the preview, as demo-harbor, open a checkout and check that the card form loads at 375 and desktop widths, with no CSP violation and no other error in the browser console.
+4. Pay with `4242 4242 4242 4242`. The page says it is confirming, then shows the booking only once the webhook confirms it.
+5. Pay with `4000 0000 0000 0002` (declined), then with `4242 4242 4242 4242` on the same checkout. The decline shows on the payment step, and the second card books once.
+6. Pay with `4000 0025 0000 3155` (3D Secure). Stripe's check opens in its own frame, and the booking confirms after it.
+7. Let a checkout's hold run out on the card form. The page shows the expired checkout.
+8. Compare the guest CSP with the Content Security Policy section of [Stripe's security guide](https://docs.stripe.com/security/guide). If Stripe now lists an origin or a style hash the card form needs, record it and ask the owner before changing the policy. The origins were written from the coordinator's knowledge on 2026-11-08, because the build container could not read Stripe's pages that day.
+9. Check that Stripe.js works under the site's `Referrer-Policy: no-referrer` and `Permissions-Policy: payment=()`. If either blocks the card form, record it; changing a header is a proposed follow-up for the owner.
+10. Check that `https://js.stripe.com/v3/` is still the address Stripe documents. A versioned Stripe.js address, if Stripe now requires one, is a one-line change in `apps/guest-site/src/booking/stripe-js.ts`.
+11. Close the window as the runbook does: revert the provider, delete the Stripe secrets, `STRIPE_PUBLISHABLE_KEY` included, and disable the webhook endpoint.
+
+### Card form risks and limits
+
+- **The CSP origins are unverified against Stripe's page** until item 8 runs. The browser tests serve a double at Stripe.js's address, so they prove the policy admits that script, not that real Stripe.js needs nothing more.
+- **A reload cannot pay yet.** After a reload the page still offers to start over, as under the fake. Paying after a reload through the Bearer read is a proposed follow-up.
+- **The account goes to the browser.** Stripe.js needs the connected account id for a direct charge. It reaches only the checkout's holder, beside the client secret.
+- **Staff checkout stays on the shim** (D9 above).
+
 ## Tests
 
 - `pnpm --filter @tidegrid/domain-payments test` runs the unit tests, none of which touch a database or the network: signatures, the fake's parsing, the Stripe adapter over its fixture (`stripe.test.ts`, `stripe-webhook.test.ts`), the shared provider contract against Stripe (`stripe.contract.test.ts`), the brand and import guards (`provenance.test.ts`), and the fixture scrub guard (`stripe-fixture-hygiene.test.ts`). Every Stripe test replaces the global `fetch` with one that fails the test if it is reached.
