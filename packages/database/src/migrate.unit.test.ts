@@ -191,6 +191,19 @@ describe("no-transaction files (D6 A: CREATE INDEX CONCURRENTLY)", () => {
     }
   });
 
+  it("refuse a backslash inside a string, whatever standard_conforming_strings is", () => {
+    for (const sql of [
+      "CREATE INDEX CONCURRENTLY i ON t (x) WHERE y = 'a\\'b';",
+      "CREATE INDEX CONCURRENTLY i ON t (x) WHERE y = 'a\\' -- c\nb';",
+    ]) {
+      expect(() => plan(marked(sql)), sql).toThrow(/may not use a backslash inside a string/);
+    }
+    // A doubled quote is still fine.
+    expect(plan(marked("CREATE INDEX CONCURRENTLY i ON t (x) WHERE y = 'it''s';"))).toMatchObject({
+      mode: "no-transaction",
+    });
+  });
+
   it("end a line comment at a bare carriage return, as PostgreSQL does", () => {
     expect(plan(marked("CREATE INDEX CONCURRENTLY i ON t (x) -- note\rWHERE x > 0;"))).toEqual({
       mode: "no-transaction",

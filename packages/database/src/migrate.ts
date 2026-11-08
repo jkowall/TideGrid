@@ -216,6 +216,10 @@ function singleStatement(name: string, text: string): string {
       i++;
       for (;;) {
         if (i >= text.length) refuse("has an unterminated quote");
+        // With standard_conforming_strings off, a backslash escapes a quote,
+        // and this scanner would misread the literal. Refuse it rather than
+        // depend on that session setting.
+        if (c === "'" && text[i] === "\\") refuse("may not use a backslash inside a string");
         if (text[i] === c) {
           if (text[i + 1] === c) {
             i += 2;

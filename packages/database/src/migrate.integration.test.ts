@@ -435,8 +435,21 @@ describe.skipIf(!url)("no-transaction files on a scratch database", () => {
       await migrate(scratchUrl, pick(files, 1));
       const run = pick(files, 1, 3);
       const first = migrate(scratchUrl, run, defaultMigrationTimeouts);
+      // A failure before the build starts must end the wait, not hang it.
+      let firstSettled = false;
+      first.then(
+        () => {
+          firstSettled = true;
+        },
+        () => {
+          firstSettled = true;
+        },
+      );
       // Start the second runner once the first holds the lock and is building.
+      const deadline = Date.now() + 30_000;
       for (;;) {
+        if (firstSettled) await first;
+        if (Date.now() > deadline) throw new Error("the first runner never started its build");
         const [row] = await scratch<{ building: boolean }[]>`
           SELECT EXISTS (SELECT 1 FROM pg_stat_activity
                           WHERE datname = current_database()
@@ -470,6 +483,10 @@ describe.skipIf(!url)("no-transaction files on a scratch database", () => {
     const server = net.createServer((client) => {
       const upstream = net.connect({ port: Number(target.port || 5432), host: target.hostname });
       let armed = false;
+      // TCP does not keep message boundaries: keep a short tail so a marker
+      // split across two chunks still matches.
+      let tail = "";
+      const marker = "SET statement_timeout";
       for (const s of [client, upstream]) {
         sockets.add(s);
         s.on("error", () => {});
@@ -478,7 +495,9 @@ describe.skipIf(!url)("no-transaction files on a scratch database", () => {
       client.on("close", () => upstream.destroy());
       upstream.on("close", () => client.destroy());
       client.on("data", (chunk) => {
-        if (chunk.toString("utf8").includes("SET statement_timeout")) armed = true;
+        const seen = tail + chunk.toString("latin1");
+        if (seen.includes(marker)) armed = true;
+        tail = seen.slice(-(marker.length - 1));
         upstream.write(chunk);
       });
       upstream.on("data", (chunk) => {
