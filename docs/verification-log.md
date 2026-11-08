@@ -4,6 +4,37 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Step 9 for 91a4faa by dispatch, November 8, 2026
+
+This records demo acceptance step 9 for `91a4faa`, the merge of pull request 59 (C7), released on November 4 as guest site `27a56c8e`. Its pull request merged after `main` had moved past the base its run tested, so tree equality could not show it (the November 4 entry below). The coordinator dispatched `ci.yml` from `main` with `sha=91a4faaa14ae01838e6aeb5df33f1f466722f790`, on the owner's checklist of 2026-11-08. This entry was written from git and the GitHub Actions API.
+
+- **The run.** [Run 42432174275](https://github.com/jkowall/TideGrid/actions/runs/42432174275), "ci on 91a4faaa14ae01838e6aeb5df33f1f466722f790", event `workflow_dispatch`, head `f72b1bd` on `main`. It ran from 00:58 to 01:02 UTC on November 8.
+- **The commit under test.** In each of the four jobs, the step "The commit under test" printed commit `91a4faaa14ae01838e6aeb5df33f1f466722f790`, tree `0d228fed48469c00420278cdfc0d3e23457b762c`, ref `refs/heads/main`, and workflow `f72b1bd3f3bd177be7bfcd59643aefea7853bb45`. `git rev-parse` gives the same tree for `91a4faa`.
+- **Result.** All four jobs succeeded: checks, integration, browser, and console-browser. No job logged an error.
+- **Why a dispatch counts.** `ci.yml` at `91a4faa` equals `ci.yml` before `3bd529b`. The only `ci.yml` commits since are the three step 9 commits of pull request 75, and `f72b1bd`'s `ci.yml` equals `cdc7bb2`'s. That is the condition the [coordinator default](v2/06-decision-register.md#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-pending-owner-confirmation) sets, pending owner confirmation.
+- **Not evidence.** A second dispatch on this SHA, [run 42432268632](https://github.com/jkowall/TideGrid/actions/runs/42432268632), started at 00:59:51 UTC under the owner's account and was canceled at 01:00:19. The coordinator did not start it.
+
+### Step 9 for 1f39feb by dispatch, November 8, 2026
+
+This records demo acceptance step 9 for `1f39feb`, the merge of pull request 62 (the C5 revert), released to the API on November 4. It was dispatched and read the same way as the `91a4faa` entry above, with `sha=1f39febf90fdd8e9ba691cb9d262c4b79ceeea10`.
+
+- **The run.** [Run 42432176209](https://github.com/jkowall/TideGrid/actions/runs/42432176209), "ci on 1f39febf90fdd8e9ba691cb9d262c4b79ceeea10", event `workflow_dispatch`, head `f72b1bd` on `main`. It ran from 00:58 to 01:03 UTC on November 8.
+- **The commit under test.** In each of the four jobs, "The commit under test" printed commit `1f39febf90fdd8e9ba691cb9d262c4b79ceeea10`, tree `c0cea555601299b0205d6203d62aa2e963662703`, ref `refs/heads/main`, and workflow `f72b1bd3f3bd177be7bfcd59643aefea7853bb45`. `git rev-parse` gives the same tree for `1f39feb`.
+- **Result.** All four jobs succeeded: checks, integration, browser, and console-browser. No job logged an error.
+- **Why a dispatch counts.** `ci.yml` at `1f39feb` equals `ci.yml` before `3bd529b`, as for `91a4faa` above.
+- **Not evidence.** A second dispatch on this SHA, [run 42432270747](https://github.com/jkowall/TideGrid/actions/runs/42432270747), started at 00:59:53 UTC under the owner's account and was canceled at 01:00:20. The coordinator did not start it.
+
+### Step 9 for 9086a18 by dispatch, November 8, 2026
+
+This records demo acceptance step 9 for `9086a18`, the merge of pull request 60 (C6), released to the API on November 4 as `99464dec`. It was dispatched and read the same way as the `91a4faa` entry above, with `sha=9086a1812ee943d6056a3bfccb206bba3fbbc85d`.
+
+- **The run.** [Run 42432178347](https://github.com/jkowall/TideGrid/actions/runs/42432178347), "ci on 9086a1812ee943d6056a3bfccb206bba3fbbc85d", event `workflow_dispatch`, head `f72b1bd` on `main`. It ran from 00:58 to 01:01 UTC on November 8.
+- **The commit under test.** In each of the four jobs, "The commit under test" printed commit `9086a1812ee943d6056a3bfccb206bba3fbbc85d`, tree `21f44d164d100c56173ef41aefaf76aba64911e9`, ref `refs/heads/main`, and workflow `f72b1bd3f3bd177be7bfcd59643aefea7853bb45`. `git rev-parse` gives the same tree for `9086a18`.
+- **Result.** All four jobs succeeded: checks, integration, browser, and console-browser. No job logged an error.
+- **Why a dispatch counts.** `ci.yml` at `9086a18` equals `ci.yml` before `3bd529b`, as for `91a4faa` above.
+- **Not evidence.** A second dispatch on this SHA, [run 42432272795](https://github.com/jkowall/TideGrid/actions/runs/42432272795), started at 00:59:55 UTC under the owner's account and was canceled at 01:00:21. The coordinator did not start it.
+- **Step 9 now.** With these three entries, step 9 is shown for all seven SHAs released so far: `e111043`, `cca8880`, and `c62acb7` (November 4, tree equality), `dd30fc8` (November 7, tree equality), and `91a4faa`, `1f39feb`, and `9086a18` (these entries, dispatch). Per those entries, not read live, the three Workers run shown SHAs: the API `dd30fc8`, the console `e111043`, and the guest site `91a4faa`. Each later release records step 9 for its own SHA in its own closeout.
+
 ### G2.12 follow-ups merged in pull request 78, recorded November 8, 2026
 
 Pull request 78 (search by source, the calendar carrying the source, and the CSV guard for number-shaped references) merged on 2026-11-07 at 20:37 UTC as `7ef50cf`. No release of `7ef50cf` is recorded. This entry was written from git, the GitHub Actions API, and the pull request's reviews, except where marked.
