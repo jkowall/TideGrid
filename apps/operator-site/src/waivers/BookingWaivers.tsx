@@ -19,6 +19,7 @@ import {
   loadBookingWaivers,
   newResendKey,
   resendWaiver,
+  resetWaiverSends,
   startAssistedSigning,
 } from "./api.ts";
 import {
@@ -31,6 +32,7 @@ import {
   reminderText,
   resendFailureText,
   resendState,
+  resetFailureText,
   signerText,
   waiverStatuses,
 } from "./model.ts";
@@ -73,6 +75,8 @@ export function BookingWaiversCard({
     mode: AssistedMode;
   } | null>(null);
   const [sent, setSent] = useState<{ participantId: string; recipient: string } | null>(null);
+  const [resetting, setResetting] = useState<ParticipantWaiver | null>(null);
+  const [resetFor, setResetFor] = useState<string | null>(null);
 
   useEffect(() => {
     void attempt;
@@ -89,6 +93,17 @@ export function BookingWaiversCard({
   }, [tenantId, bookingId, attempt]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
+
+  // After "Allow 5 more", the button that opened the dialog goes away, so
+  // focus moves to the row's notice rather than dropping to the page.
+  const focusReset = useRef(false);
+  useEffect(() => {
+    if (!focusReset.current || !resetFor) return;
+    const notice = document.getElementById(`wv-reset-done-${resetFor}`);
+    if (!notice) return;
+    focusReset.current = false;
+    notice.focus();
+  }, [resetFor, load]);
 
   // After a resend, read again once the delivery job has had a moment, so the
   // row says the email went out rather than that it is queued.
@@ -135,9 +150,16 @@ export function BookingWaiversCard({
           role={role}
           timeZone={timeZone}
           sent={sent}
+          resetFor={resetFor}
           onResend={(p) => {
             setSent(null);
+            setResetFor(null);
             setResending(p);
+          }}
+          onReset={(p) => {
+            setSent(null);
+            setResetFor(null);
+            setResetting(p);
           }}
           onAssist={(participant, mode) => {
             setSent(null);
@@ -153,6 +175,19 @@ export function BookingWaiversCard({
           timeZone={timeZone}
           onClose={() => {
             setAssisting(null);
+            reload();
+          }}
+        />
+      )}
+      {resetting?.request && (
+        <ResetDialog
+          tenantId={tenantId}
+          participant={resetting}
+          onClose={() => setResetting(null)}
+          onReset={() => {
+            focusReset.current = true;
+            setResetFor(resetting.participantId);
+            setResetting(null);
             reload();
           }}
         />
@@ -183,6 +218,8 @@ function WaiverList({
   timeZone,
   sent,
   onResend,
+  onReset,
+  resetFor,
   onAssist,
 }: {
   waivers: BookingWaivers;
@@ -192,6 +229,9 @@ function WaiverList({
   /** The person just sent again, for a notice under their row. */
   sent: { participantId: string; recipient: string } | null;
   onResend: (participant: ParticipantWaiver) => void;
+  onReset: (participant: ParticipantWaiver) => void;
+  /** The participant whose send count was just reset, for a confirmation. */
+  resetFor: string | null;
   onAssist: (participant: ParticipantWaiver, mode: AssistedMode) => void;
 }) {
   const signed = waivers.participants.filter((p) => p.status === "signed").length;
@@ -248,6 +288,17 @@ function WaiverList({
                 )}
                 {!signedBy && delivery && <p className="wv-item__line wv-muted">{delivery}</p>}
                 {reminder && <p className="wv-item__line wv-muted">{reminder}</p>}
+                {p.request?.sharedAddress && (
+                  <Notice tone="warning" title="Shared email address" announce="none">
+                    The guardian email for {p.name} is also another guest's own email on this
+                    booking, so someone else may open the link. Check who signs at the dock.
+                  </Notice>
+                )}
+                {p.request?.canResetSends && (
+                  <p className="wv-item__line wv-muted">
+                    All 5 sends used. Check the address with the guest before allowing more.
+                  </p>
+                )}
                 {p.status === "email_held" && (
                   <p className="wv-item__line wv-muted">
                     The booking's current address has no working link yet: a sending limit held it,
@@ -263,7 +314,8 @@ function WaiverList({
                 )}
                 {(signedBy ||
                   canStartAssisted(p, role) ||
-                  (canSendWaivers(role) && resend.kind !== "none")) && (
+                  (canSendWaivers(role) &&
+                    (resend.kind !== "none" || p.request?.canResetSends === true))) && (
                   <div className="wv-item__actions">
                     {signedBy && (
                       <ButtonLink
@@ -277,6 +329,11 @@ function WaiverList({
                     {canSendWaivers(role) && resend.kind === "ready" && (
                       <Button icon="mail" onClick={() => onResend(p)}>
                         Send again <VisuallyHidden>to {p.name}</VisuallyHidden>
+                      </Button>
+                    )}
+                    {canSendWaivers(role) && p.request?.canResetSends && (
+                      <Button icon="refresh" onClick={() => onReset(p)}>
+                        Allow 5 more sends <VisuallyHidden>for {p.name}</VisuallyHidden>
                       </Button>
                     )}
                     {canStartAssisted(p, role) && (
@@ -294,6 +351,13 @@ function WaiverList({
                         Can be sent again from {instantText(resend.at, timeZone)}.
                       </p>
                     )}
+                  </div>
+                )}
+                {resetFor === p.participantId && (
+                  <div id={`wv-reset-done-${p.participantId}`} tabIndex={-1}>
+                    <Notice tone="success" title="5 more sends allowed">
+                      You can send {p.name}'s waiver again now.
+                    </Notice>
                   </div>
                 )}
                 {sent?.participantId === p.participantId && (
@@ -375,7 +439,8 @@ function ResendDialog({
         <p>
           A new email with a new link goes to the address the booking has now
           {participant.request?.delivery ? ` (${participant.request.delivery.recipient})` : ""}. The
-          earlier link stops working. A waiver can be sent five times in all.
+          earlier link stops working. A waiver can be sent five times, then five more each time
+          staff allow it.
         </p>
         <TextField
           ref={input}
@@ -388,6 +453,85 @@ function ResendDialog({
         />
         {error && (
           <Notice tone="error" title="It wasn't sent">
+            {error}
+          </Notice>
+        )}
+      </form>
+    </Dialog>
+  );
+}
+
+/** Allow five more sends, with a reason the history keeps (W1-WAIVER-RENEWAL). */
+function ResetDialog({
+  tenantId,
+  participant,
+  onClose,
+  onReset,
+}: {
+  tenantId: string;
+  participant: ParticipantWaiver;
+  onClose: () => void;
+  onReset: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldError, setFieldError] = useState<string | undefined>();
+  const input = useRef<HTMLInputElement>(null);
+  const requestId = participant.request?.id ?? "";
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    const trimmed = reason.trim();
+    if (!trimmed) {
+      setFieldError("Say why more sends are needed; the history records it");
+      input.current?.focus();
+      return;
+    }
+    setFieldError(undefined);
+    setError(null);
+    setBusy(true);
+    const result = await resetWaiverSends(tenantId, requestId, trimmed);
+    setBusy(false);
+    if (result.kind === "reset") onReset();
+    else setError(resetFailureText(result.reason));
+  };
+
+  return (
+    <Dialog
+      title={`Allow 5 more sends of ${participant.name}'s waiver`}
+      onClose={onClose}
+      dismissible={!busy}
+      initialFocus={input}
+      footer={
+        <>
+          <Button variant="primary" type="submit" form="wv-reset" busy={busy} busyLabel="Saving…">
+            Allow 5 more
+          </Button>
+          <Button onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+        </>
+      }
+    >
+      <form id="wv-reset" className="wv-resend" noValidate onSubmit={(e) => void submit(e)}>
+        <p>
+          This waiver has been sent 5 times. Before sending more, check the address with the guest:
+          the same address each time usually means the email is going somewhere they don't look.
+          Nothing is sent until you choose Send again.
+        </p>
+        <TextField
+          ref={input}
+          label="Reason"
+          hint="Kept in the waiver's audit record"
+          maxLength={500}
+          value={reason}
+          error={fieldError}
+          onChange={(e) => setReason(e.currentTarget.value)}
+        />
+        {error && (
+          <Notice tone="error" title="It wasn't changed">
             {error}
           </Notice>
         )}

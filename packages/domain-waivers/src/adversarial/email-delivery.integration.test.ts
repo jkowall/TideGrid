@@ -236,13 +236,14 @@ describe.skipIf(!env)("G2.15 adversarial: email and delivery", () => {
     expect(await attempt(asOwner, 3, a2)).toBe("23514:waiver_deliveries_sequence");
     expect(await attempt(asOwner, 2, a2, a3)).toBe("23514:waiver_deliveries_message");
 
-    // Four corrections later the request has five generations, the most there are.
+    // Four corrections later the request has five generations, the most there
+    // are until staff allow more (W1-WAIVER-RENEWAL's reset).
     for (const to of addresses.slice(1, 5)) {
       await name(world, A.id, booked.bookingId, 1, adult("Rae Rate", to), hooks);
     }
     expect((await requestRow(r)).generations).toBe(5);
-    expect(await attempt(asOwner, 6, a6)).toBe("23514:waiver_deliveries_generation_check");
-    expect(await attempt(asRuntime, 6, a6)).toBe("23514:waiver_deliveries_generation_check");
+    expect(await attempt(asOwner, 6, a6)).toBe("23514:waiver_deliveries_generations");
+    expect(await attempt(asRuntime, 6, a6)).toBe("23514:waiver_deliveries_generations");
     await ageDeliveries(world.admin, r);
     expect(await staffResend(r)).toEqual({ kind: "limit_reached" });
 

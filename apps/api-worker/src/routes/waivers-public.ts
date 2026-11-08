@@ -2,6 +2,8 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   ManageWaiversResponse,
   WaiverLinkRedeemRequest,
+  WaiverLinkRenewalRequest,
+  WaiverLinkRenewalResponse,
   WaiverSessionOpenResponse,
   WaiverSessionResponse,
   type WaiverSigning,
@@ -20,6 +22,7 @@ import {
   loadWaiverSession,
   type RedeemResult,
   redeemWaiverToken,
+  renewWaiverLink,
   type SigningView,
   signWaiver,
   type WaiverSession,
@@ -27,6 +30,7 @@ import {
 } from "@tidegrid/domain-waivers";
 import type { Context } from "hono";
 import type { AppDeps, AppEnv } from "../context.ts";
+import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
 import { withPublicTenant } from "../public-tenant.ts";
 import { pdfResponse, waiverDeps } from "../waivers.ts";
@@ -38,6 +42,8 @@ const signaturePath = "/v1/public/waiver-sessions/current/signature";
 const documentPath = "/v1/public/waiver-sessions/current/document";
 /** The booker's view, in lane 1's booking session; the path sits beside lane 1's manage routes. */
 const manageWaiversPath = "/v1/public/manage/waivers";
+/** A guest's own new link for a spent, lapsed, or replaced one (W1-WAIVER-RENEWAL). */
+const renewalPath = "/v1/public/waiver-links/renewal";
 
 const bearerSecurity = [{ waiverSession: [] }];
 
@@ -174,7 +180,12 @@ function closedRefusal(state: string): ApiError {
  * /v1/public/trips does, so another operator's token or session finds nothing.
  */
 export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
-  for (const path of [sessionsPath, "/v1/public/waiver-sessions/*", manageWaiversPath]) {
+  for (const path of [
+    sessionsPath,
+    "/v1/public/waiver-sessions/*",
+    manageWaiversPath,
+    renewalPath,
+  ]) {
     app.use(path, async (c, next) => {
       await next();
       c.header("Cache-Control", "no-store");
@@ -228,6 +239,46 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       return { sessionSecret: opened.secret, waiver: signingJson(view) } as JsonObject;
     });
     return c.json(body as WaiverSessionOpenResponse, 201);
+  });
+
+  const renewalRoute = createRoute({
+    method: "post",
+    path: renewalPath,
+    tags: ["public", "waivers"],
+    summary: "Ask for a new waiver link in place of a spent, lapsed, or replaced one",
+    description: [
+      "Resolves the browser Origin as /v1/public/trips does. Takes the old emailed link's token, in the body. When its waiver still waits for a signature and the link no longer works, a new email goes to the address the latest one went to, never anywhere else, at most 3 a day for the participant, and within the usual sending limits. A staff-assisted code is not renewed.",
+      "The answer is the same 202 whatever happened, including an unknown token, so it says nothing about an address, a booking, or whether a link exists. Rate limited per client address and operator like other public commands.",
+    ].join("\n\n"),
+    request: {
+      body: {
+        required: true,
+        content: { "application/json": { schema: WaiverLinkRenewalRequest } },
+      },
+    },
+    responses: {
+      202: {
+        content: { "application/json": { schema: WaiverLinkRenewalResponse } },
+        description: "Taken; a new link is emailed when the waiver still needs one",
+      },
+      400: errorBody("Request did not match the contract"),
+      404: errorBody("No operator at this address"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+    },
+  });
+
+  app.openapi(renewalRoute, async (c) => {
+    const { token } = c.req.valid("json");
+    const wdeps = waiverDeps(deps);
+    let renewedFor: string | null = null;
+    await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
+      const renewed = await renewWaiverLink(trx, ctx, wdeps, { token });
+      if (renewed.kind === "renewed") renewedFor = ctx.tenantId;
+      return {};
+    });
+    // After the response, so the answer takes the same time either way.
+    if (renewedFor) deliverAfterCommit(c, deps, renewedFor);
+    return c.json({ accepted: true } satisfies WaiverLinkRenewalResponse, 202);
   });
 
   /**

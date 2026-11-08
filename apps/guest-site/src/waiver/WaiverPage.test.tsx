@@ -242,6 +242,49 @@ describe("the waiver page", () => {
     await screen.findByRole("heading", { name: title });
   });
 
+  it("asks for a new link by email for a spent link, with the token in the body only", async () => {
+    let renewals = 0;
+    const calls = stubApi((call) => {
+      if (call.url.endsWith("/waiver-links/renewal")) {
+        renewals += 1;
+        return renewals === 1
+          ? json(503, { error: { code: "unavailable", message: "x", requestId: "r" } })
+          : json(202, { accepted: true });
+      }
+      return refusal(409, "waiver_link_expired");
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+    await screen.findByRole("heading", { name: "This link has expired" });
+    fireEvent.click(screen.getByRole("button", { name: "Email me a new link" }));
+    await screen.findByText("That didn't go through");
+    fireEvent.click(screen.getByRole("button", { name: "Email me a new link" }));
+    await screen.findByRole("heading", { name: "Check your email" });
+    expect(screen.queryByRole("button", { name: "Email me a new link" })).toBeNull();
+    const asked = calls.filter((c) => c.url.endsWith("/waiver-links/renewal"));
+    expect(asked).toHaveLength(2);
+    for (const c of asked) expect(c).toMatchObject({ method: "POST", body: { token } });
+    for (const c of calls) expect(c.url).not.toContain(token);
+  });
+
+  it("puts the newest email first for a replaced link, with a new link as the second choice", async () => {
+    stubApi(() => refusal(409, "waiver_link_replaced"));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+    await screen.findByRole("heading", { name: "There's a newer link" });
+    expect(screen.getByText(/^Open the newest email from/)).toBeTruthy();
+    const ask = screen.getByRole("button", { name: "Email me a new link" });
+    expect(ask.className).toContain("tg-button--secondary");
+  });
+
+  it("offers no new link where one would not help", async () => {
+    stubApi(() => refusal(404, "waiver_link_invalid"));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+    await screen.findByRole("heading", { name: "This waiver link doesn't work here" });
+    expect(screen.queryByRole("button", { name: "Email me a new link" })).toBeNull();
+  });
+
   it("keeps the token when the network fails, so the guest can tap again", async () => {
     let first = true;
     stubApi(() => {

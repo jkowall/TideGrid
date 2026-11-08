@@ -1097,6 +1097,8 @@ export interface WaiverDeliveriesTable {
   actor_id: ColumnType<string | null, never, never>;
   api_request_id: ColumnType<string | null, never, never>;
   reason: FixedDefault<string | null>;
+  /** A generation the guest asked for themselves (0026, W1-WAIVER-RENEWAL D1). */
+  guest_renewal: FixedDefault<boolean>;
 }
 
 export interface WaiverSigningSessionsTable {
@@ -1189,6 +1191,17 @@ export interface WaiverRemindersTable {
   created_at: Stamped;
 }
 
+/** A staff reset of a waiver request's five sends (0026): five more may follow. */
+export interface WaiverSendResetsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  request_id: Fixed<string>;
+  after_generation: Fixed<number>;
+  actor_id: Fixed<string>;
+  reason: Fixed<string>;
+  created_at: Stamped;
+}
+
 /** Tables added by the waiver migration (G2.15), merged into Database below. */
 interface WaiverTables {
   waiver_templates: WaiverTemplatesTable;
@@ -1199,6 +1212,7 @@ interface WaiverTables {
   waiver_evidence: WaiverEvidenceTable;
   waiver_assisted_links: WaiverAssistedLinksTable;
   waiver_reminders: WaiverRemindersTable;
+  waiver_send_resets: WaiverSendResetsTable;
 }
 
 /** The cron's cross-tenant sweeps that take fair turns (0013). */

@@ -751,4 +751,63 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     const emailed = await openSession(A, p.kitToken);
     expect((emailed.waiver as unknown as { access: string }).access).toBe("email_link");
   });
+
+  it("renews a spent link with one generic answer, and lets staff allow five more sends", async () => {
+    // The other operator, whose address limits earlier cases have not used.
+    const p = await party(B);
+    const renew = (token: string, t: Tenant = B) =>
+      request("POST", "/v1/public/waiver-links/renewal", { origin: guestOf(t), body: { token } });
+    // Malformed is a contract error; anything well formed answers the same.
+    expect((await renew("short")).status).toBe(400);
+    const unknown = await renew("A".repeat(43));
+    expect([unknown.status, unknown.json]).toEqual([202, { accepted: true }]);
+    expect(unknown.headers.get("cache-control")).toBe("no-store");
+    // A link that still works, and another operator's site: the same answer, nothing sent.
+    expect((await renew(p.annToken)).json).toEqual({ accepted: true });
+    expect((await renew(p.annToken, A)).json).toEqual({ accepted: true });
+    const count = async () =>
+      (
+        await admin<{ n: number }[]>`
+          select count(*)::int as n from public.waiver_deliveries where request_id = ${p.annRequest}`
+      )[0]?.n;
+    expect(await count()).toBe(1);
+    // Spent, and ten minutes on: a new generation goes out as the guest's renewal.
+    await openSession(B, p.annToken);
+    await admin.begin(async (tx) => {
+      await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
+      await tx`update public.waiver_deliveries
+                  set created_at = created_at - interval '11 minutes',
+                      send_after = send_after - interval '11 minutes'
+                where request_id = ${p.annRequest}`;
+      await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
+    });
+    expect((await renew(p.annToken)).status).toBe(202);
+    const [latest] = await admin<{ generation: number; guest_renewal: boolean }[]>`
+      select generation, guest_renewal from public.waiver_deliveries
+       where request_id = ${p.annRequest} order by generation desc limit 1`;
+    expect(latest).toEqual({ generation: 2, guest_renewal: true });
+
+    // The reset: owners and booking staff, only once five are used.
+    const reset = (as: string, tenantId = B.id, id = p.annRequest, reason = "Checked by phone") =>
+      request("POST", `${staffBase(tenantId)}/waiver-requests/${id}/send-count-reset`, {
+        as,
+        origin: CONSOLE,
+        body: { reason },
+      });
+    expect((await reset(B.finance)).status).toBe(403);
+    expect((await reset(A.owner, A.id)).json.error?.code).toBe("waiver_request_not_found");
+    expect((await reset(B.staff, B.id, p.annRequest, "")).status).toBe(400);
+    const early = await reset(B.staff);
+    expect([early.status, early.json.error?.code]).toEqual([409, "waiver_reset_not_needed"]);
+    const read = await request("GET", `${staffBase(B.id)}/bookings/${p.booked.bookingId}/waivers`, {
+      as: B.staff,
+      origin: CONSOLE,
+    });
+    const ann = (
+      read.json.waivers as {
+        participants: { request: { sendsLeft: number; canResetSends: boolean } }[];
+      }
+    ).participants[0];
+    expect(ann?.request).toMatchObject({ sendsLeft: 3, canResetSends: false });
+  });
 });

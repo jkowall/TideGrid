@@ -184,6 +184,39 @@ export async function resendWaiver(
   }
 }
 
+export type SendResetResult = { kind: "reset" } | { kind: "failed"; reason: string };
+
+/**
+ * Allow five more sends of a waiver whose five are used (W1-WAIVER-RENEWAL,
+ * D2), with the reason the audit history records. A second reset of the same
+ * sends is refused, so a retry is safe. Never throws.
+ */
+export async function resetWaiverSends(
+  tenantId: string,
+  requestId: string,
+  reason: string,
+): Promise<SendResetResult> {
+  try {
+    const res = await call(
+      `${tenantPath(tenantId)}/waiver-requests/${encodeURIComponent(requestId)}/send-count-reset`,
+      {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ reason }),
+      },
+    );
+    if (res.ok) return { kind: "reset" };
+    const code = await errorCode(res);
+    if (code === "waiver_reset_not_needed") return { kind: "failed", reason: "reset_not_needed" };
+    if (code === "waiver_not_pending") return { kind: "failed", reason: "not_pending" };
+    if (res.status === 401) return { kind: "failed", reason: "signed_out" };
+    if (res.status === 403) return { kind: "failed", reason: "forbidden" };
+    return { kind: "failed", reason: "unavailable" };
+  } catch {
+    return { kind: "failed", reason: "unreachable" };
+  }
+}
+
 /** A new idempotency key: a UUID, which the API's key pattern accepts. */
 export function newResendKey(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();

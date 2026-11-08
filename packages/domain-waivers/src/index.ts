@@ -34,12 +34,15 @@ export {
   waiverContentSha256,
 } from "./content.ts";
 export {
+  GUEST_RENEWALS_PER_DAY,
   LINK_TTL_DAYS,
   lockRequest,
+  MAX_ALL_GENERATIONS,
   MAX_GENERATIONS,
   RESEND_INTERVAL_MINUTES,
   type SendInput,
   type SendResult,
+  sendsUsed,
   sendWaiverRequest,
 } from "./delivery.ts";
 export {
@@ -77,6 +80,13 @@ export {
   renderWaiverPdf,
   type WaiverDocumentInput,
 } from "./render.ts";
+export {
+  GUEST_RENEWAL_REASON,
+  type RenewalResult,
+  renewWaiverLink,
+  resetWaiverSendCount,
+  type SendResetResult,
+} from "./renewal.ts";
 export { type RevokeResult, revokeBookingWaivers, revokeParticipantWaivers } from "./revoke.ts";
 export { hashWaiverSession, newWaiverSecret, waiverSecretPattern } from "./secrets.ts";
 export {

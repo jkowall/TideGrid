@@ -12,6 +12,8 @@ import {
   WaiverRequestParams,
   WaiverResendRequest,
   WaiverResendResponse,
+  WaiverSendResetRequest,
+  WaiverSendResetResponse,
 } from "@tidegrid/contracts";
 import { isUuid } from "@tidegrid/database";
 import { guestOriginFor } from "@tidegrid/domain-messaging";
@@ -20,6 +22,7 @@ import {
   listBookingWaivers,
   listTripWaivers,
   loadEvidenceDocument,
+  resetWaiverSendCount,
   sendWaiverRequest,
   startAssistedSigning,
 } from "@tidegrid/domain-waivers";
@@ -35,6 +38,7 @@ const tripWaiversPath = "/v1/staff/tenants/{tenantId}/trips/{tripId}/waivers";
 const resendPath = "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend";
 const documentPath = "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document";
 const assistedPath = "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing";
+const sendResetPath = "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/send-count-reset";
 
 const iso = (d: Date) => d.toISOString();
 
@@ -91,6 +95,9 @@ export function bookingWaiversJson(b: BookingWaivers): BookingWaiversJson {
             resendAvailableAt: p.request.resendAvailableAt
               ? iso(p.request.resendAvailableAt)
               : null,
+            sendsLeft: p.request.sendsLeft,
+            canResetSends: p.request.canResetSends,
+            sharedAddress: p.request.sharedAddress,
             reminders: {
               sent: p.request.reminders.sent.map((r) => ({
                 slot: r.slot,
@@ -122,6 +129,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     "/v1/staff/tenants/:tenantId/waiver-requests/:requestId/resend",
     "/v1/staff/tenants/:tenantId/waiver-evidence/:evidenceId/document",
     "/v1/staff/tenants/:tenantId/waiver-requests/:requestId/assisted-signing",
+    "/v1/staff/tenants/:tenantId/waiver-requests/:requestId/send-count-reset",
   ]) {
     app.use(path, async (c, next) => {
       await next();
@@ -298,7 +306,14 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
               `It was sent to this address less than 10 minutes ago; try after ${sent.retryAfter.toISOString()}`,
             );
           case "limit_reached":
-            return refuse("waiver_resend_limit", "It has been sent 5 times already");
+            return refuse(
+              "waiver_resend_limit",
+              "It has been sent 5 times already; reset the send count to send again",
+            );
+          case "not_renewable":
+          case "renewal_limit":
+            // Only a guest's own renewal answers these.
+            throw new Error(`a staff resend answered ${sent.kind}`);
           case "rate_limited":
             return refuse(
               "waiver_resend_rate_limited",
@@ -478,5 +493,82 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     });
     if (!issued) throw new Error("the assisted start produced nothing");
     return c.json({ signing: issued } satisfies WaiverAssistedStartResponse, 201);
+  });
+
+  const sendResetRoute = createRoute({
+    method: "post",
+    path: sendResetPath,
+    tags: ["staff", "waivers"],
+    summary: "Allow five more sends of a waiver email",
+    description: [
+      "Owners and booking staff. A waiver request is sent at most 5 times; once it has been, this allows 5 more, with a reason recorded in the audit history and on the reset itself. Only a pending request whose 5 sends are used may be reset, up to 20 sends in all.",
+      "A second reset for the same sends answers 409 waiver_reset_not_needed, so a retry is safe without an Idempotency-Key.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: WaiverRequestParams,
+      body: {
+        required: true,
+        content: { "application/json": { schema: WaiverSendResetRequest } },
+      },
+    },
+    responses: {
+      201: {
+        content: { "application/json": { schema: WaiverSendResetResponse } },
+        description: "The count is reset",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant or waiver request (waiver_request_not_found)"),
+      409: errorBody(
+        "The waiver is not waiting for a signature (waiver_not_pending); or it still has sends left, or has reached 20 in all (waiver_reset_not_needed)",
+      ),
+    },
+  });
+
+  app.openapi(sendResetRoute, async (c) => {
+    const { tenantId, requestId } = c.req.valid("param");
+    const { reason } = c.req.valid("json");
+    const { body } = await withStaffTenant(
+      c,
+      deps,
+      { tenantId, permission: "waivers.manage" },
+      async (trx, ctx) => {
+        if (!isUuid(requestId)) {
+          throw new ApiError(
+            404,
+            "waiver_request_not_found",
+            "No such waiver request for this tenant",
+          );
+        }
+        const reset = await resetWaiverSendCount(trx, ctx, { requestId, reason });
+        switch (reset.kind) {
+          case "reset":
+            return {
+              reset: { afterGeneration: reset.afterGeneration, sendsLeft: reset.sendsAllowed },
+            };
+          case "not_found":
+            throw new ApiError(
+              404,
+              "waiver_request_not_found",
+              "No such waiver request for this tenant",
+            );
+          case "not_pending":
+            throw new ApiError(
+              409,
+              "waiver_not_pending",
+              "This waiver is not waiting for a signature",
+            );
+          case "not_needed":
+            throw new ApiError(
+              409,
+              "waiver_reset_not_needed",
+              "This waiver still has sends left, or has been sent 20 times in all",
+            );
+        }
+      },
+    );
+    return c.json(body satisfies WaiverSendResetResponse, 201);
   });
 }

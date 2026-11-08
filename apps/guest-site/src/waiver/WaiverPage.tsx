@@ -22,7 +22,7 @@ import {
 import { ContactActions } from "../Contact.tsx";
 import { useLinkClick } from "../navigation.tsx";
 import { useTitle } from "../States.tsx";
-import { downloadDocument, endSession, openSession, readSession, sign } from "./api.ts";
+import { downloadDocument, endSession, openSession, readSession, renewLink, sign } from "./api.ts";
 import { clearStoredSession, loadStoredSession, storeSession, takeLinkToken } from "./session.ts";
 import "./waiver.css";
 
@@ -56,7 +56,15 @@ type Phase =
   | { kind: "loading" }
   | { kind: "review"; secret: string; waiver: WaiverSigning }
   | { kind: "signed"; secret: string; waiver: WaiverSigning }
-  | { kind: "stopped"; code: string };
+  /**
+   * `renewal`: an emailed link that no longer works may ask for a new one
+   * (W1-WAIVER-RENEWAL), with the token kept in memory only.
+   */
+  | {
+      kind: "stopped";
+      code: string;
+      renewal?: { token: string; state: "idle" | "sending" | "failed" };
+    };
 
 const sharedAccess = (waiver: WaiverSigning) => waiver.access !== "email_link";
 
@@ -95,21 +103,28 @@ const stops: Record<string, Stop> = {
     tone: "warning",
     title: "This link was already opened",
     body: (op) =>
-      `For your security, each waiver link opens once. If you didn't finish signing, ask ${op} to send you a new link.`,
+      `For your security, each waiver link opens once. If you didn't finish signing, ask for a new link below, or ask ${op}.`,
   },
   waiver_link_expired: {
     icon: "hourglass",
     tone: "warning",
     title: "This link has expired",
     body: (op) =>
-      `Waiver links last a few days, and a code from the crew lasts 15 minutes. Ask ${op} for a new one.`,
+      `Waiver links last a few days, and a code from the crew lasts 15 minutes. Ask for a new link below, or ask ${op}.`,
   },
   waiver_link_replaced: {
     icon: "mail",
     tone: "neutral",
     title: "There's a newer link",
     body: (op) =>
-      `${op} sent a newer link for this waiver. Use the latest email, or ask the crew for a new code.`,
+      `Open the newest email from ${op} and use the link in it. Can't find it? Ask for a new link below, or ask the crew at the dock.`,
+  },
+  renewal_sent: {
+    icon: "mail",
+    tone: "ready",
+    title: "Check your email",
+    body: () =>
+      "If this waiver still needs signing, we're emailing a new link to the address we used before. Open the newest email. Nothing after 10 minutes? Call us, or ask the crew at the dock.",
   },
   waiver_signed: {
     icon: "check-circle",
@@ -192,6 +207,9 @@ const stops: Record<string, Stop> = {
   },
   unavailable,
 };
+
+/** A link that no longer works, whose guest may ask for a new one by email. */
+const renewable = new Set(["waiver_link_used", "waiver_link_expired", "waiver_link_replaced"]);
 
 /** Codes after which the stored session has nothing more to show. */
 const doneCodes = new Set([
@@ -848,6 +866,8 @@ export function WaiverPage({
         opening: false,
         failed: result.status === 429 ? "rate_limited" : "network",
       });
+    } else if (result.kind === "refused" && renewable.has(result.code)) {
+      go({ kind: "stopped", code: result.code, renewal: { token, state: "idle" } });
     } else if (result.kind === "refused") {
       stop(result.code);
     } else {
@@ -949,6 +969,49 @@ export function WaiverPage({
     case "stopped": {
       const info = stopFor(phase.code);
       const canRetry = phase.code === "unavailable" || phase.code === "rate_limited";
+      const renewal = phase.renewal;
+      if (renewal) {
+        const ask = async () => {
+          go({ ...phase, renewal: { ...renewal, state: "sending" } });
+          const result = await renewLink(renewal.token);
+          // The token is forgotten once the API has taken it.
+          if (result.kind === "ok") go({ kind: "stopped", code: "renewal_sent" });
+          else go({ ...phase, renewal: { ...renewal, state: "failed" } });
+        };
+        return (
+          <div className="guest-container guest-content">
+            <Panel
+              icon={info.icon}
+              tone={info.tone}
+              title={info.title}
+              headingRef={heading}
+              actions={
+                <>
+                  <Button
+                    // A newer link is already in the guest's inbox: asking again
+                    // would replace it, so the button steps back.
+                    variant={phase.code === "waiver_link_replaced" ? "secondary" : "primary"}
+                    icon="mail"
+                    busy={renewal.state === "sending"}
+                    busyLabel="Sending…"
+                    onClick={() => void ask()}
+                  >
+                    Email me a new link
+                  </Button>
+                  <ContactActions brand={brand} primary={false} />
+                </>
+              }
+            >
+              <p>{info.body(brand.name)}</p>
+              {renewal.state === "failed" && (
+                <Notice tone="error" title="That didn't go through">
+                  Check your connection, wait a minute, then try again.
+                </Notice>
+              )}
+            </Panel>
+          </div>
+        );
+      }
       return (
         <div className="guest-container guest-content">
           <Panel

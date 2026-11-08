@@ -42,6 +42,9 @@ function participant(
         message: { state: "sent", at: "2026-10-06T14:00:05.000Z", failureCode: null },
       },
       resendAvailableAt: "2026-10-06T14:10:00.000Z",
+      sendsLeft: 4,
+      canResetSends: false,
+      sharedAddress: false,
       reminders: { sent: [], next: null },
       ...overrides,
     },
@@ -244,6 +247,103 @@ describe("a booking's waivers", () => {
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith("/waivers"))).toHaveLength(2));
   });
 
+  it("allows 5 more sends with a reason, once 5 are used, and flags a shared address", async () => {
+    const used: BookingWaivers = {
+      ...waivers,
+      participants: [
+        participant(
+          "Cal Capped",
+          "waiting",
+          { resendAvailableAt: null, sendsLeft: 0, canResetSends: true },
+          1,
+        ),
+        {
+          ...participant(
+            "Kit Kid",
+            "waiting",
+            { requiredSigner: "guardian", sharedAddress: true },
+            2,
+          ),
+          minor: true,
+        },
+      ],
+    };
+    const calls = stubApi((url) =>
+      url.endsWith("/send-count-reset")
+        ? json(201, { reset: { afterGeneration: 5, sendsLeft: 5 } })
+        : json(200, { waivers: used }),
+    );
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={bookingStaff}
+        timeZone="America/New_York"
+      />,
+    );
+    const items = await screen.findAllByRole("listitem");
+    const cal = within(items[0] as HTMLElement);
+    expect(cal.queryByRole("button", { name: /Send again/ })).toBeNull();
+    expect(cal.getByText(/All 5 sends used/)).toBeTruthy();
+    const kit = within(items[1] as HTMLElement);
+    expect(kit.getByText("Shared email address")).toBeTruthy();
+    expect(kit.queryByRole("button", { name: /Allow 5 more sends/ })).toBeNull();
+
+    fireEvent.click(cal.getByRole("button", { name: "Allow 5 more sends for Cal Capped" }));
+    // A reason first.
+    fireEvent.click(screen.getByRole("button", { name: "Allow 5 more" }));
+    await screen.findByText("Say why more sends are needed; the history records it");
+    fireEvent.change(screen.getByLabelText("Reason"), {
+      target: { value: "Guest checked the address by phone" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow 5 more" }));
+    await screen.findByText("5 more sends allowed");
+    // The opener is gone once the row reloads; focus lands on the row's notice.
+    await waitFor(() => expect(document.activeElement?.id).toMatch(/^wv-reset-done-/));
+    expect(document.activeElement?.textContent).toContain("5 more sends allowed");
+    const reset = calls.find((c) => c.url.endsWith("/send-count-reset"));
+    expect(reset?.url).toBe(
+      `/api/v1/staff/tenants/${tenantId}/waiver-requests/10000000-0000-4000-8000-000000000001/send-count-reset`,
+    );
+    expect(JSON.parse(String(reset?.init?.body))).toEqual({
+      reason: "Guest checked the address by phone",
+    });
+  });
+
+  it("explains a refused reset in words about saving, not sending", async () => {
+    stubApi((url) =>
+      url.endsWith("/send-count-reset")
+        ? json(503, { error: { code: "unavailable", message: "x", requestId: "r" } })
+        : json(200, {
+            waivers: {
+              ...waivers,
+              participants: [
+                participant(
+                  "Cal Capped",
+                  "waiting",
+                  { resendAvailableAt: null, sendsLeft: 0, canResetSends: true },
+                  1,
+                ),
+              ],
+            },
+          }),
+    );
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={owner}
+        timeZone="America/New_York"
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Allow 5 more sends for Cal Capped" }),
+    );
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Checked" } });
+    fireEvent.click(screen.getByRole("button", { name: "Allow 5 more" }));
+    await screen.findByText("TideGrid didn't save it. Try again in a moment.");
+  });
+
   it("explains a refused resend in the dialog and keeps it open", async () => {
     stubApi((url) =>
       url.endsWith("/resend")
@@ -260,7 +360,7 @@ describe("a booking's waivers", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Send again to Ben Waiting" }));
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
-    await screen.findByText("It has been sent 5 times, the most a waiver request can be.");
+    await screen.findByText("It has been sent 5 times. Allow 5 more sends first, with a reason.");
   });
 
   it("sends a refused resend's next try with a new key, and a lost answer's with the same", async () => {

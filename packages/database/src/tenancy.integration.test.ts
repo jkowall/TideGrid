@@ -709,6 +709,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // takes its replay reason once.
         outbox_deliveries: ["INSERT", "SELECT"],
         outbox_dead_letters: ["INSERT", "SELECT"],
+        // Waiver send-count resets (0026).
+        waiver_send_resets: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

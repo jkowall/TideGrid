@@ -248,6 +248,20 @@ export const ParticipantWaiver = z.object({
       resendAvailableAt: Instant.nullable().describe(
         "When staff may send it again; null when it cannot be sent again",
       ),
+      sendsLeft: z
+        .number()
+        .int()
+        .min(0)
+        .max(5)
+        .describe("Sends left before staff must reset the count; 0 when not pending"),
+      canResetSends: z
+        .boolean()
+        .describe("Whether staff may reset the send count now: five used, and under 20 in all"),
+      sharedAddress: z
+        .boolean()
+        .describe(
+          "A guardian's address that is also a participant's own address on the booking: check who signs",
+        ),
       reminders: z
         .object({
           sent: z
@@ -404,3 +418,37 @@ export const ManageWaiversResponse = z.object({
   }),
 });
 export type ManageWaiversResponse = z.infer<typeof ManageWaiversResponse>;
+
+export const WaiverLinkRenewalRequest = z.object({
+  token: Secret.describe("The spent, lapsed, or replaced emailed link's token, from its fragment"),
+});
+export type WaiverLinkRenewalRequest = z.infer<typeof WaiverLinkRenewalRequest>;
+
+export const WaiverLinkRenewalResponse = z.object({
+  accepted: z
+    .literal(true)
+    .describe(
+      "Always true: when the waiver still needs a signature, a new link goes to the address the last one went to",
+    ),
+});
+export type WaiverLinkRenewalResponse = z.infer<typeof WaiverLinkRenewalResponse>;
+
+export const WaiverSendResetRequest = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+    .regex(/^[^\u0000-\u001f\u007f-\u009f]*$/, "Control characters are not allowed")
+    .describe("Why five more sends are needed; recorded in the audit history"),
+});
+export type WaiverSendResetRequest = z.infer<typeof WaiverSendResetRequest>;
+
+export const WaiverSendResetResponse = z.object({
+  reset: z.object({
+    afterGeneration: z.number().int().min(5),
+    sendsLeft: z.number().int().min(1).max(5),
+  }),
+});
+export type WaiverSendResetResponse = z.infer<typeof WaiverSendResetResponse>;
