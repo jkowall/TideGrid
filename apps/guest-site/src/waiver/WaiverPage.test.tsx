@@ -464,6 +464,23 @@ describe("the waiver page", () => {
       await screen.findByRole("heading", { name: "All done" });
     });
 
+    it("forgets an earlier session this tab kept when a staff-assisted one opens", async () => {
+      window.sessionStorage.setItem(
+        "tidegrid.waiver.session",
+        JSON.stringify({
+          secret: "earlier",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      );
+      stubApi(() =>
+        json(201, { sessionSecret: secret, waiver: waiver({ access: "staff_device" }) }),
+      );
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+      await screen.findByText("Boating has risks.");
+      expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+    });
+
     it("never clears an emailed link's page by itself", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       try {

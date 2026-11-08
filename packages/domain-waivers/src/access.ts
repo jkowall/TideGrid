@@ -214,6 +214,9 @@ export async function endWaiverSession(
   ctx: TenantContext,
   session: WaiverSession,
 ): Promise<boolean> {
+  // The request first, as signing takes it, so a signature and a sign-out
+  // never interleave: one commits, then the other sees it.
+  await lockRequest(trx, ctx.tenantId, session.requestId);
   const { rows } = await sql<{ id: string }>`
     update waiver_signing_sessions set revoked_at = now(), revoked_reason = 'signed_out'
      where tenant_id = ${ctx.tenantId} and id = ${session.id} and revoked_at is null

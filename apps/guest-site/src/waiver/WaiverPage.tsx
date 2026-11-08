@@ -803,7 +803,7 @@ export function WaiverPage({
     };
   }, [shared, clear]);
   const idleNotice = (
-    <div role="status" aria-live="polite">
+    <div className="waiver-idle-warning" role="status" aria-live="polite">
       {shared && idleWarning && (
         <Notice tone="warning" title="Still there?">
           This page clears itself in 20 seconds to keep the waiver private. Tap anywhere to keep
@@ -817,8 +817,12 @@ export function WaiverPage({
     setPhase({ kind: "start", token, opening: true, failed: false });
     const result = await openSession(token);
     if (result.kind === "ok") {
-      // A staff-assisted session may be on a shared device: memory only.
-      if (!sharedAccess(result.value.waiver)) {
+      // A staff-assisted session may be on a shared device: memory only, and
+      // any earlier session this tab kept is forgotten, so a reload never
+      // brings back another person's waiver.
+      if (sharedAccess(result.value.waiver)) {
+        clearStoredSession();
+      } else {
         storeSession({
           secret: result.value.secret,
           expiresAt: result.value.waiver.sessionExpiresAt,
