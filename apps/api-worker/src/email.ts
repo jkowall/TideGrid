@@ -10,7 +10,9 @@ import {
   isEmailAddress,
   normalizeRecipient,
   type RecipientPolicy,
+  SENDER_POLICIES,
   type SendEmailBinding,
+  type SenderPolicy,
 } from "@tidegrid/domain-messaging";
 import { createLogger, type Logger } from "@tidegrid/observability";
 import type { Context } from "hono";
@@ -53,6 +55,7 @@ export type EmailSettings =
         | "fake_with_binding"
         | "allowlist_invalid"
         | "from_address_invalid"
+        | "sender_policy_invalid"
         | "unknown_provider";
     };
 
@@ -113,6 +116,19 @@ function senderIsValid(env: Bindings): boolean {
   return isEmailAddress(env.EMAIL_FROM_ADDRESS || DEFAULT_FROM_ADDRESS);
 }
 
+/**
+ * Whether an operator without a verified sending domain may use the shared
+ * sender (W3-G2.16-rest, 0027). EMAIL_SENDER_POLICY names it; unset, it is
+ * `operator_only` in production, where the Core live gate asks each operator
+ * to send from its own authenticated domain, and `shared` elsewhere. Null
+ * when the value is not a policy, which refuses email.
+ */
+export function senderPolicy(env: Bindings): SenderPolicy | null {
+  const value = env.EMAIL_SENDER_POLICY?.trim();
+  if (!value) return env.ENVIRONMENT === "production" ? "operator_only" : "shared";
+  return (SENDER_POLICIES as readonly string[]).includes(value) ? (value as SenderPolicy) : null;
+}
+
 function origins(env: Bindings) {
   return {
     fromAddress: env.EMAIL_FROM_ADDRESS || DEFAULT_FROM_ADDRESS,
@@ -127,6 +143,7 @@ export function emailSettings(env: Bindings): EmailSettings {
     if (env.EMAIL) return { kind: "refused", reason: "fake_with_binding" };
     if (env.ENVIRONMENT !== "local") return { kind: "refused", reason: "fake_outside_local" };
     if (!senderIsValid(env)) return { kind: "refused", reason: "from_address_invalid" };
+    if (!senderPolicy(env)) return { kind: "refused", reason: "sender_policy_invalid" };
     return { kind: "fake", ...origins(env) };
   }
   if (name === "cloudflare") {
@@ -137,6 +154,7 @@ export function emailSettings(env: Bindings): EmailSettings {
       return { kind: "off", reason: "allowlist_missing" };
     }
     if (!senderIsValid(env)) return { kind: "refused", reason: "from_address_invalid" };
+    if (!senderPolicy(env)) return { kind: "refused", reason: "sender_policy_invalid" };
     return {
       kind: "cloudflare",
       ...origins(env),
@@ -200,13 +218,19 @@ export function deliverySettings(env: Bindings): {
   fromAddress: string;
   guestLinkOrigin: string;
   environment: Bindings["ENVIRONMENT"];
+  senderPolicy: SenderPolicy;
 } {
   const settings = emailSettings(env);
   const chosen =
     settings.kind === "fake" || settings.kind === "cloudflare"
       ? { fromAddress: settings.fromAddress, guestLinkOrigin: settings.guestLinkOrigin }
       : origins(env);
-  return { ...chosen, environment: env.ENVIRONMENT };
+  // An invalid policy has already refused email; nothing sends under it.
+  return {
+    ...chosen,
+    environment: env.ENVIRONMENT,
+    senderPolicy: senderPolicy(env) ?? "operator_only",
+  };
 }
 
 function errorType(error: unknown): string {
@@ -303,6 +327,7 @@ export function deliverAfterCommit(c: Context<AppEnv>, deps: AppDeps, tenantId: 
           "tidegrid.email.failed_count": report.failed,
           "tidegrid.email.canceled_count": report.canceled,
           ...(report.stopped ? { "tidegrid.email.stopped": report.stopped } : {}),
+          ...(report.held ? { "tidegrid.email.held": report.held } : {}),
         });
       } catch (error) {
         log.error("email_delivery_failed", {
