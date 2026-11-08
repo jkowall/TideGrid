@@ -110,6 +110,20 @@ export function providerFor(c: Context<AppEnv>, deps: AppDeps): PaymentProvider 
   return paymentProvider(c.env, () => getDb(c));
 }
 
+/**
+ * The provider over a database the caller owns: a test's override, or the
+ * configured one. For work that runs after the response, on a connection of
+ * its own, when the request's connection is already closing.
+ */
+export function providerOver(
+  db: Kysely<Database>,
+  env: Bindings,
+  deps: AppDeps,
+): PaymentProvider | null {
+  if (deps.paymentProvider) return deps.paymentProvider(db, env);
+  return paymentProvider(env, db);
+}
+
 /** The configured fake provider for its demo controls, or null. */
 export function fakeProviderFor(c: Context<AppEnv>): FakePaymentProvider | null {
   return fakeProvider(c.env, () => getDb(c));

@@ -1,5 +1,9 @@
 import { createExecutionContext, env } from "cloudflare:test";
-import { StripePaymentProvider, signatureHeaderValue } from "@tidegrid/domain-payments";
+import {
+  STRIPE_WEBHOOK_IPS,
+  StripePaymentProvider,
+  signatureHeaderValue,
+} from "@tidegrid/domain-payments";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import example from "../.dev.vars.example?raw";
 import { createApp } from "../src/app.ts";
@@ -203,8 +207,14 @@ describe("routes under PAYMENT_PROVIDER=stripe", () => {
       request: { id: null, idempotency_key: null },
       type: "charge.succeeded",
     };
+    // From Stripe's first listed address unless a case names another (W1-STRIPE-WEBHOOK).
+    const stripeAddress = STRIPE_WEBHOOK_IPS[0] ?? "";
     const post = async (body: string, headers: Record<string, string>, provider = "stripe") =>
-      call(`/v1/webhooks/payments/${provider}`, { method: "POST", headers, body }, stripeEnv());
+      call(
+        `/v1/webhooks/payments/${provider}`,
+        { method: "POST", headers: { "cf-connecting-ip": stripeAddress, ...headers }, body },
+        stripeEnv(),
+      );
     const body = JSON.stringify(event);
     const signed = await signatureHeaderValue(webhookSecret, now, body);
     // The fake's route does not exist here.
@@ -224,6 +234,55 @@ describe("routes under PAYMENT_PROVIDER=stripe", () => {
         "stripe-signature": await signatureHeaderValue(webhookSecret, now, live),
       }),
     ).toEqual({ status: 400, code: "payload_invalid" });
+    // An address not on Stripe's list is refused first, whatever the signature,
+    // and X-Forwarded-For is never read.
+    for (const headers of [
+      { "stripe-signature": signed, "cf-connecting-ip": "203.0.113.60" },
+      {
+        "stripe-signature": signed,
+        "cf-connecting-ip": "203.0.113.61",
+        "x-forwarded-for": stripeAddress,
+      },
+      { "cf-connecting-ip": "203.0.113.62" },
+    ]) {
+      expect(await post(body, headers)).toEqual({ status: 403, code: "source_not_allowed" });
+    }
+    // The body cap refuses an unlisted sender before it reads a byte or judges
+    // a size: a stream that is never pulled, and an oversize declared length.
+    let pulled = false;
+    // highWaterMark 0: the stream pulls only when something reads it.
+    const stream = new ReadableStream<Uint8Array>(
+      {
+        pull() {
+          pulled = true;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    expect(
+      await call(
+        "/v1/webhooks/payments/stripe",
+        {
+          method: "POST",
+          headers: { "cf-connecting-ip": "203.0.113.63", "stripe-signature": signed },
+          body: stream,
+          duplex: "half",
+        } as RequestInit,
+        stripeEnv(),
+      ),
+    ).toEqual({ status: 403, code: "source_not_allowed" });
+    expect(pulled).toBe(false);
+    expect(
+      await post("x".repeat(70 * 1024), {
+        "stripe-signature": signed,
+        "cf-connecting-ip": "203.0.113.64",
+      }),
+    ).toEqual({ status: 403, code: "source_not_allowed" });
+    // A listed sender's oversize body still meets the cap.
+    expect(await post("x".repeat(70 * 1024), { "stripe-signature": signed })).toEqual({
+      status: 413,
+      code: "payload_too_large",
+    });
     // A verified event goes on to the database, which this suite leaves unconfigured.
     expect(await post(body, { "stripe-signature": signed })).toEqual({
       status: 503,

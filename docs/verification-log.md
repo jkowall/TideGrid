@@ -4,6 +4,19 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Stripe webhook quick 2xx and source address list (W1-STRIPE-WEBHOOK), built November 8, 2026
+
+Under `PAYMENT_PROVIDER=stripe` only, the webhook route now refuses a client address that is not on a committed list of Stripe's webhook addresses (403), records the event, answers 200, and processes it after the answer, with the checkout sweep as the backstop ([decision register](v2/06-decision-register.md#2026-11-08-w1-stripe-webhook-stripe-webhook-quick-2xx-and-source-address-list-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). The fake provider's path is unchanged. No deployed configuration sets the Stripe provider, nothing was released, no Stripe API was called, and no gate is claimed. The local runs and the reviews below are coordinator-reported.
+
+- **Unit tests.** `pnpm check` passed on the final code after the rebase onto `main`: api-worker 188 of 188, domain-payments 88 passed and 1 skipped (the opt-in list check step, which runs only with `STRIPE_WEBHOOK_IPS_FILE` set), and every other package green.
+- **Integration tests.** `pnpm test:integration` on a throwaway PostgreSQL 17 container: 891 passed and 2 skipped across 80 files, with the focused Stripe webhook suite at 15 of 15, 8 of them new. The guest and console browser suites run in the pull request's CI.
+- **Time to confirmation, local only.** Over 8 deliveries in one process on local PostgreSQL: the 200 at a median of about 16 ms, and the processing commit at a median of about 101 ms. No deployed measurement exists, because Stripe is off.
+- **The address list is unverified.** Stripe's published file could not be read from the build container, so the twelve IPv4 addresses are recorded as known on 2026-11-08 with `STRIPE_WEBHOOK_IPS_VERIFIED=false`. The owner runs the README's check step against Stripe's file before any Stripe-live window.
+- **Independent review.** It ran with the reviewer override that the [build execution and agent plan](v2/10-build-execution-and-agent-plan.md) names for G2.7. Verdict: accept with listed fixes. Fixed: Stripe's own retry was wrongly named as a second backstop after a 200, since Stripe retries only on a non-2xx answer; the cron's checkout sweep is the only automatic one, about 16 minutes at worst. Deferred to the coordinator and applied in the pull request: this log entry, and dated Update notes on the payments README's two older risk bullets.
+- **Security review.** Accept with listed fixes. The client address comes from `CF-Connecting-IP` only, matched exactly, and `X-Forwarded-For` is never read; a bad signature from a listed address still gets 400 and records nothing. Fixed: the same backstop wording. Open, recorded in the README: the list's protection depends on Cloudflare setting `CF-Connecting-IP` for every request, and the signature stays the credential.
+- **Recheck on the final code.** Accept with listed fixes; the remaining items were this entry, the README notes, and an unsourced "retry within minutes" phrase, all fixed before the pull request.
+- **Telemetry.** About two hours of agent time across build, two reviews, one fix round, and a recheck. Token use and cost per checkpoint: missing.
+
 ### The release tool's CI gate (W1-CI-GATE), built November 8, 2026
 
 `nov1 approve-sha` and `nov1 release` now refuse a SHA unless the newest run of `ci.yml` on `main` that tested it completed with all four jobs green ([decision register](v2/06-decision-register.md#2026-11-08-nov1-refuses-a-sha-without-a-green-four-job-ci-run-owner-request-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). Built on the owner's go of 2026-11-08. No release ran, no workflow was triggered, and no gate is claimed. The local runs and the reviews below are coordinator-reported.

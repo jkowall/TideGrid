@@ -3,7 +3,11 @@ import type { Context, Next } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { AppEnv } from "./context.ts";
 import { ApiError } from "./errors.ts";
-import { MAX_WEBHOOK_BYTES } from "./routes/payment-webhooks.ts";
+import {
+  MAX_WEBHOOK_BYTES,
+  refuseUnlistedStripeSource,
+  STRIPE_WEBHOOK_PATH,
+} from "./routes/payment-webhooks.ts";
 import { errorBody } from "./routes/responses.ts";
 
 /**
@@ -71,6 +75,23 @@ export async function capRequestBody(c: Context<AppEnv>, next: Next): Promise<vo
   if (raw.method === "GET" || raw.method === "HEAD") return next();
   const body = raw.body;
   if (!body) return next();
+
+  // Under the Stripe provider, an unlisted sender is refused before a byte is
+  // read or a size is judged (W1-STRIPE-WEBHOOK). A browser's request is left
+  // to the route, which answers origin_not_allowed first.
+  if (
+    c.req.path === STRIPE_WEBHOOK_PATH &&
+    c.env.PAYMENT_PROVIDER === "stripe" &&
+    raw.headers.get("origin") === null
+  ) {
+    try {
+      refuseUnlistedStripeSource(c);
+    } catch (refusal) {
+      body.cancel().catch(() => undefined);
+      markRefusal(c);
+      throw refusal;
+    }
+  }
 
   const limit = bodyLimitFor(c.req.path);
   const declared = raw.headers.get("content-length");
