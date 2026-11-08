@@ -346,6 +346,12 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
     // Outside any transaction, as when the checkout was opened.
     const ready = await ensureProviderPayment(getDb(c), provider, read.ctx, session.id);
     if (ready.kind === "unavailable") {
+      // It may have closed or lapsed while the provider was asked: then its
+      // state answers, not the provider's failure.
+      const after = await readAgain(c, read.ctx, session.id, secret);
+      if (after && after.state !== "open") {
+        return c.json({ checkoutSession: after, payment: null }, 200);
+      }
       c.get("log").warn("payment_provider_unavailable", {
         "event.name": "payment_provider_unavailable",
         "tidegrid.tenant_id": read.ctx.tenantId,

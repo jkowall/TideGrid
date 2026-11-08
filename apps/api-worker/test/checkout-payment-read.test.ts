@@ -26,6 +26,8 @@ const state = vi.hoisted(() => ({
   checkouts: new Map<string, Stored>(),
   /** Runs inside the provider call, after the provider created the payment. */
   duringCreate: null as null | (() => void),
+  /** The provider throws after `duringCreate`, so the payment is unavailable. */
+  failCreate: false,
   log: [] as string[],
 }));
 
@@ -117,13 +119,18 @@ vi.mock("@tidegrid/domain-booking", async (importOriginal) => {
       if (s.state !== "open" || s.lapsed) {
         return { kind: "not_open", state: s.state === "open" ? "expired" : s.state };
       }
-      const created = await provider.createPayment({
-        accountRef: "acct_fake_unit",
-        amount: 9000,
-        currency: "USD",
-        idempotencyKey: `pay-${sessionId}`,
-        clientReference: sessionId,
-      });
+      let created: Awaited<ReturnType<PaymentProvider["createPayment"]>>;
+      try {
+        created = await provider.createPayment({
+          accountRef: "acct_fake_unit",
+          amount: 9000,
+          currency: "USD",
+          idempotencyKey: `pay-${sessionId}`,
+          clientReference: sessionId,
+        });
+      } catch {
+        return { kind: "unavailable", reason: "provider_error" };
+      }
       return {
         kind: "ready",
         provider: provider.name,
@@ -146,6 +153,7 @@ const provider = {
     const hook = state.duringCreate;
     state.duringCreate = null;
     hook?.();
+    if (state.failCreate) throw new Error("provider timed out");
     return { paymentRef: "fpay_UNITPAYMENT00000000000", clientSecret };
   },
   retrievePayment: async () => null,
@@ -199,6 +207,7 @@ function reset(stateA: string, lapsed = false) {
   state.checkouts.set(sessionA, { tenantId: A, secret: secretA, state: stateA, lapsed });
   state.checkouts.set(sessionB, { tenantId: B, secret: secretB, state: "open", lapsed: false });
   state.duringCreate = null;
+  state.failCreate = false;
   state.log = [];
 }
 
@@ -226,6 +235,34 @@ describe("a checkout that closes or lapses while the provider is asked", () => {
       expect(state.log).toEqual(["limit", "read", "ensure", "provider", "reread"]);
     });
   }
+
+  for (const [label, close] of [
+    ["canceled", (s: Stored) => Object.assign(s, { state: "canceled" })],
+    ["expired", (s: Stored) => Object.assign(s, { lapsed: true })],
+  ] as const) {
+    it(`answers it ${label} when the provider then fails, not 503`, async () => {
+      reset("open");
+      state.failCreate = true;
+      state.duringCreate = () => {
+        const s = state.checkouts.get(sessionA);
+        if (s) close(s);
+      };
+      const res = await readPayment(withPayments, sessionA, secretA);
+      expect(res.status).toBe(200);
+      expect(res.json.payment).toBeNull();
+      expect(res.json.checkoutSession).toMatchObject({ id: sessionA, state: label });
+      expect(state.log).toEqual(["limit", "read", "ensure", "provider", "reread"]);
+    });
+  }
+
+  it("answers 503 when the provider fails and the checkout is still open", async () => {
+    reset("open");
+    state.failCreate = true;
+    const res = await readPayment(withPayments, sessionA, secretA);
+    expect(res.status).toBe(503);
+    expect(res.json.error?.code).toBe("payment_provider_unavailable");
+    expect(res.text).not.toContain(clientSecret);
+  });
 
   it("answers an open checkout that stays open with its client secret", async () => {
     reset("open");
