@@ -6,6 +6,7 @@ import {
   CheckoutSessionParams,
   CheckoutSessionResponse,
   IdempotencyKey,
+  StripeElementConfig,
   TripOfferResponse,
 } from "@tidegrid/contracts";
 import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
@@ -20,6 +21,7 @@ import {
   ownerRefFor,
 } from "@tidegrid/domain-booking";
 import { getTripSale } from "@tidegrid/domain-inventory";
+import { isTestPaymentEnvironment } from "@tidegrid/domain-payments";
 import { getTripOffer } from "@tidegrid/domain-pricing";
 import type { Context } from "hono";
 import type { AppDeps, AppEnv } from "../context.ts";
@@ -75,6 +77,50 @@ function readAgain(
   return inTenantTransaction(getDb(c), ctx, (trx) =>
     getCheckoutSession(trx, ctx.tenantId, { sessionId, secret }),
   );
+}
+
+/**
+ * The platform's Stripe publishable key for the guest's card form
+ * (W1-STRIPE-ELEMENT D2): an API Worker secret, test mode only. A live key,
+ * a malformed one, or any environment but local, preview, and staging reads
+ * as none, so it is never returned.
+ */
+export function stripePublishableKey(env: AppEnv["Bindings"]): string | null {
+  const key = env.STRIPE_PUBLISHABLE_KEY;
+  if (!key || !isTestPaymentEnvironment(env.ENVIRONMENT)) return null;
+  return StripeElementConfig.shape.publishableKey.safeParse(key).success ? key : null;
+}
+
+const cardFormUnavailable = () =>
+  new ApiError(503, "payments_unavailable", "The card form is not configured here");
+
+/**
+ * What Stripe.js mounts the card form with: the publishable key and the
+ * connected account this checkout's payment was created on, read from the
+ * payment row under the tenant's row-level security. A direct charge lives on
+ * that account, so the browser must name it. Anything that fails the shape
+ * answers 503 rather than a half-configured form.
+ */
+async function stripeElementFor(
+  c: Context<AppEnv>,
+  ctx: TenantContext,
+  sessionId: string,
+  publishableKey: string,
+): Promise<StripeElementConfig | null> {
+  const row = await inTenantTransaction(getDb(c), ctx, (trx) =>
+    trx
+      .selectFrom("payments")
+      .select("account_ref")
+      .where("tenant_id", "=", ctx.tenantId)
+      .where("checkout_session_id", "=", sessionId)
+      .where("provider", "=", "stripe")
+      .executeTakeFirst(),
+  );
+  // Null when the row or its account does not make a valid card form. The
+  // caller decides after reading the checkout again, so a closed checkout
+  // still answers its closed state.
+  const parsed = StripeElementConfig.safeParse({ publishableKey, account: row?.account_ref });
+  return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -304,8 +350,9 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
     tags: ["public", "checkout"],
     summary: "What the guest needs to pay an open checkout, read again",
     description: [
-      "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token, never a URL. For an open checkout within its expiry, returns the provider payment and its client secret, so a page that reloaded, or lost the answer to opening the checkout, can still pay without sending the booker's details again. It asks the provider with the payment's own idempotency key, so it never creates a second payment, and reads the checkout again once the provider answers. Any other state answers 200 with `payment: null`, whether or not payments are configured, including a checkout that closes or lapses while it is read or while the provider answers: the body then shows the closed state. A wrong secret, another operator's checkout, and an unknown id answer the same 404, whether or not payments are configured.",
+      "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token, never a URL. For an open checkout within its expiry, returns the provider payment and its client secret, so a page that reloaded, or lost the answer to opening the checkout, can still pay without sending the booker's details again. It asks the provider with the payment's own idempotency key, so it never creates a second payment, and reads the checkout again once the provider answers. Any other state answers 200 with `payment: null`, whether or not payments are configured, including a checkout that closes or lapses while it is read, while the provider answers, or while the card form's account is read: the body then shows the closed state. A wrong secret, another operator's checkout, and an unknown id answer the same 404, whether or not payments are configured.",
       "Never cached. Rate limited like public commands, since it may call the provider. The client secret is a capability: keep it out of URLs and logs.",
+      "Under the Stripe provider the payment also carries `stripe`: the platform's test-mode publishable key and the connected account the payment was created on, which Stripe.js needs to mount the card-only Payment Element. Only this read returns them. Without a valid test-mode publishable key in local, preview, or staging, an open checkout answers 503 `payments_unavailable` before the provider is asked.",
     ].join("\n\n"),
     security: bearerSecurity,
     request: { params: CheckoutSessionParams },
@@ -318,7 +365,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       404: errorBody("No active tenant hostname matches the origin, or no such checkout"),
       429: errorBody("Too many requests from this address for this operator (rate_limited)"),
       503: errorBody(
-        "For an open checkout only: payments are not configured (payments_unavailable), or the provider did not answer (payment_provider_unavailable); read again later",
+        "For an open checkout only: payments are not configured, or under Stripe the card form is not (payments_unavailable), or the provider did not answer (payment_provider_unavailable); read again later",
       ),
     },
   });
@@ -343,6 +390,10 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
     if (!provider) {
       throw new ApiError(503, "payments_unavailable", "Payments are not configured here");
     }
+    // Under Stripe the guest pays in the card form, which needs the
+    // publishable key: without one, nothing is asked of the provider.
+    const publishableKey = provider.name === "stripe" ? stripePublishableKey(c.env) : null;
+    if (provider.name === "stripe" && !publishableKey) throw cardFormUnavailable();
     // Outside any transaction, as when the checkout was opened.
     const ready = await ensureProviderPayment(getDb(c), provider, read.ctx, session.id);
     if (ready.kind === "unavailable") {
@@ -364,10 +415,20 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       );
     }
     if (ready.kind === "not_found") throw new Error("a committed checkout has no payment");
+    // Stripe only: the key and the account, to the holder of this checkout's
+    // secret, beside the client secret (W1-STRIPE-ELEMENT D2). Looked up
+    // before the last read of the checkout, so nothing awaited after that
+    // read can let a checkout close while its client secret goes out.
+    const stripeCard = ready.kind === "ready" && ready.provider === "stripe";
+    const stripe =
+      stripeCard && publishableKey
+        ? await stripeElementFor(c, read.ctx, session.id, publishableKey)
+        : null;
     // It may have closed or lapsed after the view was read, before or while
-    // the provider answered: read it again, and answer a client secret only
-    // if it is still open, so the body never shows an open checkout with no
-    // payment nor a closed one with a client secret.
+    // the provider answered or the account was read: read it again, and
+    // answer a client secret only if it is still open, so the body never
+    // shows an open checkout with no payment nor a closed one with a client
+    // secret. Nothing is awaited between this read and the answer.
     const current = await readAgain(c, read.ctx, session.id, secret);
     if (!current) throw checkoutNotFound();
     if (ready.kind === "not_open" || current.state !== "open") {
@@ -375,6 +436,8 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
         current.state === "open" && ready.kind === "not_open" ? ready.state : current.state;
       return c.json({ checkoutSession: { ...current, state }, payment: null }, 200);
     }
+    // Still open, but the card form cannot be mounted: no client secret.
+    if (stripeCard && !stripe) throw cardFormUnavailable();
     return c.json(
       {
         checkoutSession: current,
@@ -382,6 +445,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
           provider: ready.provider,
           paymentRef: ready.paymentRef,
           clientSecret: ready.clientSecret,
+          ...(stripe ? { stripe } : {}),
         },
       },
       200,
