@@ -1,3 +1,4 @@
+import postgres from "postgres";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   connectionHosts,
@@ -269,5 +270,75 @@ describe("connectionHosts with an odd PGHOST", () => {
     expect(
       neonMainRefusal("postgresql:///db", "tests", source({ PGHOST: "two words" })),
     ).toBeNull();
+  });
+});
+
+// Review finding: the guard once parsed the authority differently from
+// postgres.js (last '@' against first, '#' as a delimiter, no percent
+// decoding), so these URLs passed the guard while postgres.js reached main.
+describe("connectionHosts matches postgres.js on crafted URLs", () => {
+  const encodedMain = mainHost.replace(".", "%2E");
+  const crafted = [
+    `postgresql://u:p@${mainHost}%2C127.0.0.1/db`,
+    `postgresql://u:p@127.0.0.1#,${mainHost}/db`,
+    `postgresql://u:p@${mainHost},z@127.0.0.1/db`,
+    `postgresql://u:p@${encodedMain},localhost/db?sslmode=require`,
+    `postgresql://u:p@x.invalid#,${mainHost}/db`,
+  ];
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("includes every host postgres.js 3.4.9 would try", async () => {
+    vi.stubEnv("PGHOST", "");
+    for (const url of [...crafted, local, onMain, onMainPooled, "postgresql:///db"]) {
+      const sql = postgres(url, { max: 1 });
+      const clientHosts = sql.options.host.map((h) => h.toLowerCase());
+      await sql.end({ timeout: 0 });
+      const guardHosts = connectionHosts(url, {});
+      expect(guardHosts).not.toBeNull();
+      for (const h of clientHosts) {
+        // Pooled endpoints fold onto the direct one; compare after folding.
+        expect(guardHosts).toContain(h.replace("-pooler.", "."));
+      }
+    }
+  });
+
+  it("refuses each crafted URL for integration suites with main recorded", () => {
+    for (const url of crafted) {
+      const refusal = neonMainRefusal(
+        url,
+        "tests",
+        source({ NEON_MAIN_HOST: mainHost, TIDEGRID_EPHEMERAL_DB: "1" }),
+      );
+      expect(refusal).toMatch(/recorded in NEON_MAIN_HOST/);
+      expectNoEcho(refusal);
+    }
+  });
+
+  it("refuses each crafted URL with no main recorded, and with only the branch flag", () => {
+    for (const url of crafted) {
+      expect(neonMainRefusal(url, "tests", source())).toMatch(/NEON_MAIN_HOST is not recorded/);
+      expect(
+        neonMainRefusal(
+          url,
+          "tests",
+          source({ NEON_MAIN_HOST: mainHost, TIDEGRID_NEON_BRANCH: "1" }),
+        ),
+      ).toMatch(/recorded in NEON_MAIN_HOST/);
+    }
+  });
+
+  it("refuses each crafted URL for app-role without --neon-main", () => {
+    for (const url of crafted) {
+      expect(
+        neonMainRefusal(
+          url,
+          { appRole: { neonMain: false } },
+          source({ NEON_MAIN_HOST: mainHost }),
+        ),
+      ).toMatch(/Pass --neon-main/);
+    }
   });
 });

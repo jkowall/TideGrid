@@ -6,7 +6,7 @@
  *   DATABASE_URL=... TIDEGRID_APP_PASSWORD=... tsx src/app-role.ts [--neon-main]
  *
  * It refuses Neon main unless --neon-main is given: a new password breaks
- * Hyperdrive until its config and the DATABASE_URL secret carry it (release
+ * Hyperdrive until its config and the DATABASE_URL secret carry it (Nov 1
  * runbook rule 4). See the Neon main guard in the package README.
  */
 import { fileURLToPath } from "node:url";

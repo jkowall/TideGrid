@@ -71,7 +71,7 @@ export function isNeonHost(url: string): boolean {
 // Neon main guard.
 //
 // Integration suites and app-role:password both rotate tidegrid_app's
-// password. On Neon main that breaks Hyperdrive (release runbook rule 4). The
+// password. On Neon main that breaks Hyperdrive (Nov 1 runbook rule 4). The
 // guard refuses a connection whose host is the recorded main host, and, while
 // no main host is recorded, any Neon host not marked as a throwaway branch.
 // Its messages name the rule and the flag; they never echo a host or a URL.
@@ -154,11 +154,26 @@ export function recordedNeonMainHost(source: NeonGuardSource = defaultSource()):
  * (postgres.js accepts a comma-separated list), or PGHOST, or localhost when
  * the URL names none. Null when the URL does not parse. The error a failed
  * parse throws carries the URL itself, so it is never rethrown.
+ *
+ * Two parses are joined: a WHATWG one, and a copy of postgres.js 3.4.9's own
+ * (parseUrl and parseOptions), which cuts at the first '@', does not treat '#'
+ * as a delimiter, and percent-decodes the host list. A host either parse finds
+ * counts, so a crafted URL cannot hide a host from the guard that postgres.js
+ * would still try. A unit test compares the copy with the installed client.
  */
 export function connectionHosts(
   url: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string[] | null {
+  const whatwg = whatwgHosts(url);
+  const client = postgresJsHosts(url, env);
+  if (whatwg === null || client === null) return null;
+  const hosts = whatwg.length > 0 ? whatwg : envHosts(env);
+  return [...new Set([...hosts, ...client].map(normalizeHost))];
+}
+
+/** The URL's own hosts by a WHATWG parse, [] when it names none, null when it does not parse. */
+function whatwgHosts(url: string): string[] | null {
   const schemeEnd = url.indexOf("://");
   if (schemeEnd === -1) return null;
   let authority = url.slice(schemeEnd + 3).split(/[?/#]/)[0] ?? "";
@@ -178,16 +193,34 @@ export function connectionHosts(
   } catch {
     return null;
   }
-  if (hosts.length > 0) return hosts.map(normalizeHost);
+  return hosts;
+}
+
+/** PGHOST's hosts, or localhost. */
+function envHosts(env: NodeJS.ProcessEnv): string[] {
   const pgHost = env.PGHOST?.trim();
-  if (pgHost) return pgHost.split(",").map((h) => normalizeHost(h.split(":")[0] ?? ""));
+  if (pgHost) return pgHost.split(",").map((h) => h.split(":")[0] ?? "");
   return ["localhost"];
+}
+
+/** The host list postgres.js 3.4.9 builds for a URL with no options, or null when it would throw. */
+function postgresJsHosts(url: string, env: NodeJS.ProcessEnv): string[] | null {
+  try {
+    let host = url.slice(url.indexOf("://") + 3).split(/[?/]/)[0] ?? "";
+    host = decodeURIComponent(host.slice(host.indexOf("@") + 1));
+    const parsed = new URL(url.replace(host, host.split(",")[0] ?? ""));
+    const multihost = host.includes(",") ? host : "";
+    const list = multihost || parsed.hostname || env.PGHOST || "localhost";
+    return list.split(",").map((x) => x.split(":")[0] ?? "");
+  } catch {
+    return null;
+  }
 }
 
 export type NeonGuardMode = "tests" | { appRole: { neonMain: boolean } };
 
 const rule4 =
-  "It rotates tidegrid_app's password, which breaks Hyperdrive on Neon main (release runbook rule 4)";
+  "It rotates tidegrid_app's password, which breaks Hyperdrive on Neon main (Nov 1 runbook rule 4)";
 const recordHint =
   "Record the main branch's host as NEON_MAIN_HOST in the repository root .env.local (gitignored) or the environment";
 
@@ -230,13 +263,16 @@ export function neonMainRefusal(
 
   const { neonMain } = mode.appRole;
   if (neonMain) {
+    if (recorded.kind === "missing" && !neon) {
+      return "Refused: --neon-main was given, but DATABASE_URL is not a Neon host. Drop --neon-main for any other database.";
+    }
     if (!neon || isMain === false) {
       return "Refused: --neon-main was given, but DATABASE_URL is not the Neon main host recorded in NEON_MAIN_HOST. Check both; drop --neon-main for any other database.";
     }
     return null;
   }
   if (isMain) {
-    return `Refused: DATABASE_URL is the Neon main host recorded in NEON_MAIN_HOST. A new password there breaks Hyperdrive until its config and the DATABASE_URL secret carry it (release runbook rule 4). Pass --neon-main to do this on purpose.`;
+    return `Refused: DATABASE_URL is the Neon main host recorded in NEON_MAIN_HOST. A new password there breaks Hyperdrive until its config and the DATABASE_URL secret carry it (Nov 1 runbook rule 4). Pass --neon-main to do this on purpose.`;
   }
   if (recorded.kind === "missing" && neon && !branchFlag) {
     return `Refused: DATABASE_URL is a Neon host and NEON_MAIN_HOST is not recorded, so it could be Neon main. ${rule4}. Pass --neon-main to do this on main on purpose, or set TIDEGRID_NEON_BRANCH=1 for a throwaway branch. ${recordHint}.`;
@@ -256,6 +292,8 @@ export function assertNotNeonMain(
 
 /** isNeonHost() for a bare host name. False, never a throw, for one that does not parse. */
 function isNeonHostName(host: string): boolean {
+  const h = host.toLowerCase();
+  if (h === "neon.tech" || h.endsWith(".neon.tech")) return true;
   try {
     return isNeonHost(`postgresql://${host}`);
   } catch {

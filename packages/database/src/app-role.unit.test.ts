@@ -84,3 +84,24 @@ describe("neonMainRefusal for app-role:password", () => {
     expectNoEcho(badUrl);
   });
 });
+
+describe("app-role refusal wording", () => {
+  it("names the Nov 1 runbook, not a release runbook", () => {
+    const s = source({ NEON_MAIN_HOST: mainHost });
+    for (const refusal of [
+      neonMainRefusal(onMain, plain, s),
+      neonMainRefusal(onMain, plain, source()),
+    ]) {
+      expect(refusal).toMatch(/Nov 1 runbook rule 4/);
+      expect(refusal).not.toMatch(/release runbook/);
+    }
+  });
+
+  it("does not mention a recorded host for --neon-main when none is recorded", () => {
+    const refusal = neonMainRefusal(local, optIn, source());
+    expect(refusal).toMatch(/--neon-main was given/);
+    expect(refusal).toMatch(/not a Neon host/);
+    expect(refusal).not.toMatch(/recorded in NEON_MAIN_HOST/);
+    expectNoEcho(refusal);
+  });
+});
