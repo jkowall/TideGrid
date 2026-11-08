@@ -1,0 +1,95 @@
+name: infra
+# Proposed 2026-11-08 (W3-OPS-1, plan only). Checks the Terraform under
+# infra/terraform: formatting, the repository guards below, and
+# terraform validate for each environment. It never plans, applies, or reads
+# state, and it has no secrets: init runs with -backend=false, and validate
+# needs no provider credentials. See infra/terraform/README.md.
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Pinned, and checked against HashiCorp's published SHA256 sum below.
+  TERRAFORM_VERSION: 1.13.5
+  TERRAFORM_SHA256: 0dbe3fcc268eb670801af6a6456799d1ae26e72e73797f6c6167e18aafd1fd9a
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
+
+jobs:
+  terraform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Provider binaries run during init and validate; keep the token out of .git/config.
+          persist-credentials: false
+
+      - name: Install Terraform
+        run: |
+          zip="terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -fsSLo "$RUNNER_TEMP/$zip" "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/${zip}"
+          echo "${TERRAFORM_SHA256}  $RUNNER_TEMP/$zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/$zip" -d "$RUNNER_TEMP/terraform"
+          echo "$RUNNER_TEMP/terraform" >> "$GITHUB_PATH"
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - name: Repository guards
+        # State, backend settings, and variable files can hold secrets or
+        # account ids, so none may be committed. tidegrid_app comes only from
+        # migration 0001, so no Terraform may create a Neon role.
+        run: |
+          bad=$(git ls-files infra | grep -E '(\.tfstate(\..*)?|\.tfvars(\.json)?|backend\.hcl|\.terraform/)' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::committed state, tfvars, or backend settings: $bad"; exit 1
+          fi
+          if grep -rnE 'resource +"neon_role"' infra/terraform; then
+            echo "::error::Terraform must not create a Neon role"; exit 1
+          fi
+          if grep -rnE 'resource +"cloudflare_(workers_script|worker_version|workers_deployment|worker|workers_custom_domain|queue_consumer)"' infra/terraform; then
+            echo "::error::Worker scripts, versions, deployments, custom domains, and queue consumers belong to Wrangler"; exit 1
+          fi
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff infra/terraform
+
+      - name: terraform validate
+        run: |
+          for root in infra/terraform/environments/*/; do
+            echo "::group::validate $root"
+            terraform -chdir="$root" init -backend=false
+            terraform -chdir="$root" validate
+            echo "::endgroup::"
+          done
+
+      - name: Keep the provider lock files
+        # No lock file is committed yet (the goal's container could not reach
+        # the registry). This keeps the ones CI resolved, for the owner's first
+        # init to compare against.
+        uses: actions/upload-artifact@v7
+        with:
+          name: terraform-lock-files
+          path: infra/terraform/environments/*/.terraform.lock.hcl
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
