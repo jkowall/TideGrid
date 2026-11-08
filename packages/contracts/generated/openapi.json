@@ -19203,7 +19203,197 @@
             }
           },
           "409": {
-            "description": "The link expired (waiver_link_expired), was already opened (waiver_link_used), or a newer email replaced it (waiver_link_replaced); or the waiver was signed (waiver_signed), replaced by a newer version (waiver_superseded), or is no longer needed (waiver_not_needed)",
+            "description": "The link expired (waiver_link_expired), was already opened (waiver_link_used), or a newer email replaced it (waiver_link_replaced), or a crew signing code no longer works (waiver_code_ended); or the waiver was signed (waiver_signed), replaced by a newer version (waiver_superseded), or is no longer needed (waiver_not_needed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address for this operator (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/waiver-links/renewal": {
+      "post": {
+        "tags": [
+          "public",
+          "waivers"
+        ],
+        "summary": "Ask for a new waiver link in place of a spent, lapsed, or replaced one",
+        "description": "Resolves the browser Origin as /v1/public/trips does. Takes the old emailed link's token, in the body. When its waiver still waits for a signature and the link no longer works, a new email goes to the address the latest one went to, never anywhere else, at most 3 a day for the participant, and within the usual sending limits. A staff-assisted code is not renewed.\n\nThe answer is the same 202 whatever happened, including an unknown token, so it says nothing about an address, a booking, or whether a link exists. Rate limited per client address and operator like other public commands.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$",
+                    "description": "The spent, lapsed, or replaced emailed link's token, from its fragment"
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Taken; a new link is emailed when the waiver still needs one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ],
+                      "description": "Always true: when the waiver still needs a signature, a new link goes to the address the last one went to"
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No operator at this address",
             "content": {
               "application/json": {
                 "schema": {
@@ -21154,6 +21344,20 @@
                                     "format": "date-time",
                                     "description": "When staff may send it again; null when it cannot be sent again"
                                   },
+                                  "sendsLeft": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 5,
+                                    "description": "Sends left before staff must reset the count; 0 when not pending"
+                                  },
+                                  "canResetSends": {
+                                    "type": "boolean",
+                                    "description": "Whether staff may reset the send count now: five used, and under 20 in all"
+                                  },
+                                  "sharedAddress": {
+                                    "type": "boolean",
+                                    "description": "A guardian's address that is also a participant's own address on the booking: check who signs"
+                                  },
                                   "reminders": {
                                     "type": "object",
                                     "properties": {
@@ -21243,6 +21447,9 @@
                                   "signed",
                                   "delivery",
                                   "resendAvailableAt",
+                                  "sendsLeft",
+                                  "canResetSends",
+                                  "sharedAddress",
                                   "reminders"
                                 ]
                               }
@@ -21673,6 +21880,20 @@
                                       "format": "date-time",
                                       "description": "When staff may send it again; null when it cannot be sent again"
                                     },
+                                    "sendsLeft": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 5,
+                                      "description": "Sends left before staff must reset the count; 0 when not pending"
+                                    },
+                                    "canResetSends": {
+                                      "type": "boolean",
+                                      "description": "Whether staff may reset the send count now: five used, and under 20 in all"
+                                    },
+                                    "sharedAddress": {
+                                      "type": "boolean",
+                                      "description": "A guardian's address that is also a participant's own address on the booking: check who signs"
+                                    },
                                     "reminders": {
                                       "type": "object",
                                       "properties": {
@@ -21762,6 +21983,9 @@
                                     "signed",
                                     "delivery",
                                     "resendAvailableAt",
+                                    "sendsLeft",
+                                    "canResetSends",
+                                    "sharedAddress",
                                     "reminders"
                                   ]
                                 }
@@ -22694,6 +22918,305 @@
           },
           "409": {
             "description": "The waiver is not waiting for a signature (waiver_not_pending); the trip has ended (waiver_trip_over); the participant's details changed who signs (waiver_participant_changed); or the operator has no working guest site address for the link (waiver_guest_site_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/send-count-reset": {
+      "post": {
+        "tags": [
+          "staff",
+          "waivers"
+        ],
+        "summary": "Allow five more sends of a waiver email",
+        "description": "Owners and booking staff. A waiver request is sent at most 5 times; once it has been, this allows 5 more, with a reason recorded in the audit history and on the reset itself. Only a pending request whose 5 sends are used may be reset, up to 20 sends in all.\n\nA second reset for the same sends answers 409 waiver_reset_not_needed, so a retry is safe without an Idempotency-Key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Waiver request UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Waiver request UUID; anything else answers 404",
+            "name": "requestId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$",
+                    "description": "Why five more sends are needed; recorded in the audit history"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The count is reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "reset": {
+                      "type": "object",
+                      "properties": {
+                        "afterGeneration": {
+                          "type": "integer",
+                          "minimum": 5
+                        },
+                        "sendsLeft": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 5
+                        }
+                      },
+                      "required": [
+                        "afterGeneration",
+                        "sendsLeft"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "reset"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or waiver request (waiver_request_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The waiver is not waiting for a signature (waiver_not_pending); or it still has sends left, or has reached 20 in all (waiver_reset_not_needed)",
             "content": {
               "application/json": {
                 "schema": {

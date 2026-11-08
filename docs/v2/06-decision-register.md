@@ -8,6 +8,16 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-WAIVER-RENEWAL, guest link renewal, a staff reset of the five sends, and a shared-address flag (coordinator defaults pending owner confirmation)
+
+The third of the three waiver goals the owner pulled into the demo on 2026-11-08, under the [W1-G215-SIGNING entry](#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation), where the owner wrote: "Anyways, I just want all the work to be done for the next waves." The owner did not answer the three open choices, so the coordinator's recommended defaults apply until the owner confirms them:
+
+- **D1: a guest asks for a new link themselves, at most 3 a day per participant.** A spent, lapsed, or replaced emailed link offers "Email me a new link". The new email goes only to the address the latest one went to, within the usual sending limits, and the answer is the same whatever happened, so it reveals no address or booking. Staff-assisted codes are not renewed. The database holds the daily cap and the address for every writer.
+- **D2: staff can allow five more sends, with a reason, audited.** Once a waiver has been sent 5 times, owners and booking staff may reset the count from the console's Waivers card, up to 20 sends in all. Each reset is its own append-only row, and the audit history records the reason and the staff member.
+- **D3: a shared family address is flagged to staff, not blocked.** When a minor's parent or guardian has the same address as a participant's own address on the booking, the console says so and asks staff to check who signs at the dock. A family of minors sharing one guardian is not flagged.
+
+Migration `0028` (provisional, claimed at merge) and the service are in the [waiver contract](../../packages/domain-waivers/README.md#renewal-and-the-send-count-w1-waiver-renewal). Not built: verifying a mailbox beyond the link itself, bounce handling, the generic dock QR, R2, and field encryption. Security review under rule R9: run under the owner's standing go of 2026-11-08 (results in the [verification log](../verification-log.md#2026-11-08)).
+
 ### 2026-11-08: W3-G2.16-rest, per-operator sender domains and suppression, code only (synthetic pull-forward; coordinator defaults pending owner confirmation)
 
 On 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." The coordinator queued W3-G2.16-rest under that card, with the provider the owner chose on 2026-11-08 (Cloudflare Email, [Stage 0 providers](#2026-11-08-stage-0-providers-for-the-paid-pilots-owner-decisions)). The Validation gate and its dependency are waived as a synthetic pull-forward; nothing here passes the Core live gate. No DNS change, no domain onboarding with the provider, no send beyond the recipient allowlist, no deploy.
