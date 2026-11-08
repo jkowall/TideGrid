@@ -193,6 +193,21 @@ async function releaseUnderGuard(
 
   const found = await provider.findByHostname(hostname);
   const resume = async (lines: string[]) => {
+    // The claim may have ended, or the name been disabled, while the provider
+    // was asked: read the row again under the guard and apply the same rule
+    // before requesting another record (pull request review).
+    const fresh = await inTenantTransaction(
+      guard.db,
+      cliContext(input.tenantId, input.actor),
+      async (trx) => {
+        await assertHostnameGuardHeld(trx, hostname);
+        return readReservation(trx, input);
+      },
+    );
+    const whyFresh = notReleasable(fresh, provider.name);
+    if (whyFresh || !fresh) return [...lines, `not resumed: ${whyFresh ?? "the row is gone"}`];
+    const stopFresh = noResume(fresh);
+    if (stopFresh) return [...lines, ...stopFresh.lines];
     const outcome = await requestCustomHostname(
       guard.db,
       provider,

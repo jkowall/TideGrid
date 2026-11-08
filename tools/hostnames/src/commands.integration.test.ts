@@ -728,6 +728,56 @@ describe.skipIf(!env)("hostname CLI on a throwaway database", () => {
     }
   });
 
+  it("never resumes a claim that ends while the provider is asked (pull request review)", async () => {
+    const backdate = (hostname: string) =>
+      handle.sql.begin(async (tx) => {
+        await tx`set local session_replication_role = replica`;
+        await tx`update public.tenant_hostname_provisioning
+                    set claim_expires_at = now() - interval '1 second'
+                  where hostname = ${hostname}`;
+      });
+    for (const during of ["lookup", "delete"] as const) {
+      const { hostname, orphan, release } = await interrupted(`claim-ends-${during}`);
+      if (during === "lookup") await fake.remove(orphan);
+      let ended = false;
+      const provider: CustomHostnameProvider = {
+        ...fake,
+        findByHostname: async (h) => {
+          if (during === "lookup" && !ended) {
+            ended = true;
+            await backdate(h);
+          }
+          return fake.findByHostname(h);
+        },
+        remove: async (id) => {
+          if (during === "delete" && !ended) {
+            ended = true;
+            await backdate(hostname);
+          }
+          await fake.remove(id);
+        },
+      };
+      // Release pins its own connection for the guard; the backdate needs another.
+      const other = createDb(env?.adminUrl ?? "", { max: 1 });
+      let lines: string[];
+      try {
+        lines = await runCommand(
+          other.db,
+          release(true, during === "lookup" ? null : orphan),
+          {},
+          { provider },
+        );
+      } finally {
+        await other.end();
+      }
+      expect(ended).toBe(true);
+      expect(lines.at(-2)).toMatch(/^not resumed: the seven-day claim ended at /);
+      expect(lines.join("\n")).not.toContain(`${hostname}: requested`);
+      expect(await fake.findByHostname(hostname)).toBeNull();
+      expect(await storedId(hostname)).toBeNull();
+    }
+  });
+
   it("deletes but never resumes when the name is disabled during release (recheck Q1)", async () => {
     const { tenantSlug, hostname, orphan, release } = await interrupted("guard-disable");
     const looked = gate();
