@@ -35,7 +35,7 @@ import {
   type WaiverReminderSlot,
 } from "@tidegrid/database";
 import { enqueueMessage } from "@tidegrid/domain-messaging";
-import { type Kysely, sql } from "kysely";
+import { type Kysely, type RawBuilder, sql } from "kysely";
 import { loadBookingContext, tripFacts } from "./booking.ts";
 import { LINK_TTL_DAYS, lockRequest, sendingRefusal } from "./delivery.ts";
 import { waiverRequestEmail } from "./email.ts";
@@ -90,6 +90,47 @@ const slotHours = (slot: WaiverReminderSlot) =>
   REMINDER_SLOTS.find((s) => s.slot === slot)?.hours ?? 24;
 
 /**
+ * When the request's latest waiver email reached the guest: each invitation
+ * or reminder counts from when it was sent (or last tried), not when it was
+ * queued, so a delayed first email still gets its grace. One not yet tried
+ * counts from when it may go. Shared with the staff read.
+ */
+export function latestEmailAt(tenantId: string, requestId: string | RawBuilder<string>) {
+  return sql<Date | null>`greatest(
+    (select max(coalesce(m.sent_at, m.last_attempt_at, d.send_after))
+       from waiver_deliveries d
+       join email_messages m on m.tenant_id = d.tenant_id and m.id = d.message_id
+      where d.tenant_id = ${tenantId} and d.request_id = ${requestId}),
+    (select max(coalesce(m.sent_at, m.last_attempt_at, w.created_at))
+       from waiver_reminders w
+       join email_messages m on m.tenant_id = w.tenant_id and m.id = w.message_id
+      where w.tenant_id = ${tenantId} and w.request_id = ${requestId}))`;
+}
+
+/**
+ * Whether anything emailed since the request's latest invitation (it, or a
+ * reminder after it) was closed because the address changed: the guest then
+ * holds no working link to that address until staff send a new invitation.
+ * Shared with the staff read; the reminder trigger holds the same rule.
+ */
+export function closedSinceInvitation(tenantId: string, requestId: string | RawBuilder<string>) {
+  return sql<boolean>`coalesce((
+    select exists (
+      select 1 from email_messages m
+       where m.tenant_id = ${tenantId}
+         and m.subject_ref = 'waiver_request:' || (${requestId})::text
+         and m.created_at >= lm.created_at
+         and ((m.state = 'canceled' and m.last_error_code = 'recipient_changed')
+              or exists (select 1 from guest_access_links l
+                          where l.tenant_id = m.tenant_id and l.message_id = m.id
+                            and l.revoked_reason = 'recipient_changed')))
+      from waiver_deliveries ld
+      join email_messages lm on lm.tenant_id = ld.tenant_id and lm.id = ld.message_id
+     where ld.tenant_id = ${tenantId} and ld.request_id = ${requestId}
+     order by ld.generation desc limit 1), false)`;
+}
+
+/**
  * Queue the due reminder for one request, if it should have one now, in the
  * caller's transaction (a system actor's). Locks the request first.
  */
@@ -119,18 +160,9 @@ export async function remindWaiverRequest(
     select now() as now,
            (select array_agg(w.slot) from waiver_reminders w
              where w.tenant_id = ${ctx.tenantId} and w.request_id = ${request.id}) as reminded,
-           greatest(
-             (select max(d.send_after) from waiver_deliveries d
-               where d.tenant_id = ${ctx.tenantId} and d.request_id = ${request.id}),
-             (select max(w.created_at) from waiver_reminders w
-               where w.tenant_id = ${ctx.tenantId} and w.request_id = ${request.id})) as latest_at,
+           ${latestEmailAt(ctx.tenantId, request.id)} as latest_at,
            d.recipient_email as latest_recipient,
-           (exists (select 1 from email_messages m
-                     where m.tenant_id = d.tenant_id and m.id = d.message_id
-                       and m.state = 'canceled' and m.last_error_code = 'recipient_changed')
-            or exists (select 1 from guest_access_links l
-                        where l.tenant_id = d.tenant_id and l.message_id = d.message_id
-                          and l.revoked_reason = 'recipient_changed')) as latest_closed,
+           ${closedSinceInvitation(ctx.tenantId, request.id)} as latest_closed,
            exists (select 1 from email_messages m
                     where m.tenant_id = ${ctx.tenantId}
                       and m.subject_ref = ${waiverSubject(request.id)}
@@ -138,7 +170,7 @@ export async function remindWaiverRequest(
                       and m.state in ('queued', 'sending')) as pending_email
       from (select 1) one
       left join lateral (
-        select tenant_id, recipient_email, message_id from waiver_deliveries
+        select recipient_email from waiver_deliveries
          where tenant_id = ${ctx.tenantId} and request_id = ${request.id}
          order by generation desc limit 1) d on true`.execute(trx);
   const f = facts[0];
@@ -306,8 +338,10 @@ export async function sweepWaiverReminders(
            where r.tenant_id = ${tenantId} and r.state = 'pending'
              and t.starts_at > now() + make_interval(hours => ${REMINDER_CUTOFF_HOURS})
              and t.starts_at <= now() + make_interval(hours => ${REMINDER_SLOTS[0]?.hours ?? 72})
-           order by t.starts_at, r.id`.execute(trx);
-        return rows.map((r) => r.id).filter((id) => !seen.has(id));
+             and not (r.id = any(${[...seen]}::uuid[]))
+           order by t.starts_at, r.id
+           limit ${limit + 1}`.execute(trx);
+        return rows.map((r) => r.id);
       });
       const batch = candidates.slice(0, limit);
       for (const id of batch) {

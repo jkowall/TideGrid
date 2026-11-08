@@ -105,6 +105,13 @@ describe.skipIf(!env)("W1-G215-REMINDERS adversarial: waiver reminders", () => {
                   set created_at = created_at - make_interval(days => ${days})
                 where request_id = ${requestId}`;
       await tx`alter table public.waiver_reminders enable trigger waiver_reminders_append_only`;
+      // Sent then, too: the grace counts from when an email went out.
+      await tx`alter table public.email_messages disable trigger email_messages_rules`;
+      await tx`update public.email_messages
+                  set sent_at = sent_at - make_interval(days => ${days}),
+                      last_attempt_at = last_attempt_at - make_interval(days => ${days})
+                where subject_ref = ${`waiver_request:${requestId}`}`;
+      await tx`alter table public.email_messages enable trigger email_messages_rules`;
     });
   }
 
@@ -218,16 +225,23 @@ describe.skipIf(!env)("W1-G215-REMINDERS adversarial: waiver reminders", () => {
     const req = (await liveRequest(world.admin, booked.bookingId, pid)).id;
     expect(await remind(A.id, req)).toEqual({ kind: "skipped", reason: "email_since" });
 
-    // An email an hour before the 24 hour slot opened covers it too.
+    // An email that went out an hour before the 24 hour slot opened covers it
+    // too, counted from when it was sent, though it was queued days earlier.
     const early = await waiting(23, "Eli Early");
     await world.admin.begin(async (tx) => {
-      await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
-      await tx`update public.waiver_deliveries
-                  set created_at = now() - interval '2 hours', send_after = now() - interval '2 hours'
-                where request_id = ${early.req}`;
-      await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
+      await tx`alter table public.email_messages disable trigger email_messages_rules`;
+      await tx`update public.email_messages
+                  set sent_at = now() - interval '2 hours',
+                      last_attempt_at = now() - interval '2 hours'
+                where subject_ref = ${`waiver_request:${early.req}`}`;
+      await tx`alter table public.email_messages enable trigger email_messages_rules`;
     });
     expect(await remind(A.id, early.req)).toEqual({ kind: "skipped", reason: "email_since" });
+    // The staff read agrees: no reminder is next for that slot.
+    const earlyRead = await inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
+      listBookingWaivers(trx, A.id, early.booked.bookingId),
+    );
+    expect(earlyRead?.participants[0]?.request?.reminders?.next ?? null).toBeNull();
 
     // A participant named with no address was never emailed: no reminder.
     const quiet = await name(world, A.id, booked.bookingId, 2, adult("Nell None", null), hooks);
@@ -239,6 +253,53 @@ describe.skipIf(!env)("W1-G215-REMINDERS adversarial: waiver reminders", () => {
     await world.admin`update public.booking_participants set email = 'ivo.new@example.test'
                        where id = ${moved.pid}`;
     expect(await remind(A.id, moved.req)).toEqual({ kind: "skipped", reason: "address_changed" });
+  }, 120_000);
+
+  it("sends no later reminder once a reminder's own link was closed by an address change", async () => {
+    // The 72 hour reminder replaced the invitation's link; then the address
+    // was removed and put back, which closed the reminder's link. With no new
+    // invitation since, the 24 hour slot sends nothing, and the database
+    // refuses one too.
+    const { tripId, booked, pid, req } = await waiting(58, "Rae Restored");
+    expect(await remind(A.id, req)).toMatchObject({ kind: "queued", slot: "72h" });
+    await deliverWith(world.db, A.id, fakeMail(world.db));
+    const [first] = await remindersOf(req);
+    await world.admin`update public.guest_access_links
+                         set revoked_at = now(), revoked_reason = 'recipient_changed'
+                       where message_id = ${first?.message_id ?? ""}`;
+    await ageEmails(req, 2);
+    await departIn(tripId, 20);
+    expect(await remind(A.id, req)).toEqual({ kind: "skipped", reason: "address_changed" });
+    const read = await inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
+      listBookingWaivers(trx, A.id, booked.bookingId),
+    );
+    expect(read?.participants[0]?.status).toBe("email_held");
+    expect(read?.participants[0]?.request?.reminders?.next ?? null).toBeNull();
+    const [latest] = await world.admin<{ recipient_email: string }[]>`
+      select recipient_email from public.waiver_deliveries
+       where request_id = ${req} order by generation desc limit 1`;
+    const to = latest?.recipient_email ?? "";
+    const direct = await refusal(
+      asApp(world, A.id, async (tx) => {
+        const [m] = await tx<{ id: string }[]>`
+          insert into public.email_messages
+            (dedupe_key, template, template_version, booking_id, participant_id, subject_ref,
+             to_email, from_name, subject, html_body, text_body, link_purpose, link_path,
+             link_ttl_seconds, link_slot)
+          select ${`waiver.reminder:${req}:24h`}, template, template_version, booking_id,
+                 participant_id, subject_ref, ${to}, from_name, subject,
+                 html_body, text_body, link_purpose, link_path, link_ttl_seconds,
+                 md5(random()::text)
+            from public.email_messages
+           where subject_ref = ${`waiver_request:${req}`}
+           limit 1
+          returning id`;
+        await tx`insert into public.waiver_reminders
+                   (request_id, booking_id, participant_id, slot, message_id, recipient_email)
+                 values (${req}, ${booked.bookingId}, ${pid}, '24h', ${m?.id ?? ""}, ${to})`;
+      }),
+    );
+    expect(direct).toMatch(/waiver_reminders_recipient/);
   }, 120_000);
 
   it("stops at a signature, a revocation, or a participant change", async () => {

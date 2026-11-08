@@ -63,7 +63,11 @@ BEGIN
     JOIN public.scheduled_trips t ON t.tenant_id = b.tenant_id AND t.id = b.trip_id
    WHERE r.tenant_id = NEW.tenant_id AND r.id = NEW.request_id
      AND r.booking_id = NEW.booking_id AND r.participant_id = NEW.participant_id
-     AND r.state = 'pending';
+     AND r.state = 'pending'
+     -- Serialized with signing, revocation and staff sends, as
+     -- app.check_waiver_delivery is, so a reminder cannot commit after the
+     -- request stopped waiting.
+     FOR NO KEY UPDATE OF r;
   IF starts IS NULL
      OR NEW.created_at < starts - pg_catalog.make_interval(hours => hours)
      OR NEW.created_at >= starts - interval '2 hours' THEN
@@ -83,21 +87,26 @@ BEGIN
     RAISE EXCEPTION 'a waiver reminder names the reminder email this transaction queued for its request'
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_reminders_message';
   END IF;
-  -- Only to the address the latest invitation went to, and only while that
-  -- invitation was not closed because the address changed. Signing evidence
-  -- reads the address from this row, so it must not be free to choose.
-  SELECT d.recipient_email, d.message_id INTO latest
+  -- Only to the address the latest invitation went to, and only while
+  -- nothing since that invitation (it, or a reminder after it) was closed
+  -- because the address changed. Signing evidence reads the address from this
+  -- row, so it must not be free to choose.
+  SELECT d.recipient_email, m.created_at AS sent_from INTO latest
     FROM public.waiver_deliveries d
+    JOIN public.email_messages m ON m.tenant_id = d.tenant_id AND m.id = d.message_id
    WHERE d.tenant_id = NEW.tenant_id AND d.request_id = NEW.request_id
    ORDER BY d.generation DESC LIMIT 1;
   IF latest.recipient_email IS NULL
      OR latest.recipient_email IS DISTINCT FROM NEW.recipient_email
      OR EXISTS (SELECT 1 FROM public.email_messages m
-                 WHERE m.tenant_id = NEW.tenant_id AND m.id = latest.message_id
-                   AND m.state = 'canceled' AND m.last_error_code = 'recipient_changed')
-     OR EXISTS (SELECT 1 FROM public.guest_access_links l
-                 WHERE l.tenant_id = NEW.tenant_id AND l.message_id = latest.message_id
-                   AND l.revoked_reason = 'recipient_changed') THEN
+                 WHERE m.tenant_id = NEW.tenant_id
+                   AND m.subject_ref = 'waiver_request:' || NEW.request_id::text
+                   AND m.id <> NEW.message_id
+                   AND m.created_at >= latest.sent_from
+                   AND ((m.state = 'canceled' AND m.last_error_code = 'recipient_changed')
+                        OR EXISTS (SELECT 1 FROM public.guest_access_links l
+                                    WHERE l.tenant_id = m.tenant_id AND l.message_id = m.id
+                                      AND l.revoked_reason = 'recipient_changed'))) THEN
     RAISE EXCEPTION 'a waiver reminder goes only to the address its latest invitation went to'
       USING ERRCODE = '23514', CONSTRAINT = 'waiver_reminders_recipient';
   END IF;

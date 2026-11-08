@@ -21,7 +21,13 @@ import {
 } from "@tidegrid/database";
 import { sql } from "kysely";
 import { MAX_GENERATIONS } from "./delivery.ts";
-import { REMINDER_CUTOFF_HOURS, REMINDER_GRACE_HOURS, REMINDER_SLOTS } from "./reminders.ts";
+import {
+  closedSinceInvitation,
+  latestEmailAt,
+  REMINDER_CUTOFF_HOURS,
+  REMINDER_GRACE_HOURS,
+  REMINDER_SLOTS,
+} from "./reminders.ts";
 import { maskEmail } from "./render.ts";
 import { findApplicableVersion } from "./templates.ts";
 
@@ -147,6 +153,7 @@ interface Row {
   send_after: Date | null;
   /** The latest email's access was closed for a recipient change. */
   latest_closed: boolean | null;
+  latest_email_at: Date | null;
   /** The address the booking has now for the request's signer; null when it has none. */
   current_recipient: string | null;
   /** When the sending limits next allow a send to that address; null when they allow it now. */
@@ -178,10 +185,8 @@ async function rows(
            m.state as message_state,
            coalesce(m.sent_at, m.failed_at, m.canceled_at, m.last_attempt_at) as message_at,
            m.last_error_code as message_error,
-           (m.state = 'canceled' and m.last_error_code = 'recipient_changed')
-             or exists (select 1 from guest_access_links l
-                         where l.tenant_id = b.tenant_id and l.message_id = d.message_id
-                           and l.revoked_reason = 'recipient_changed') as latest_closed,
+           ${closedSinceInvitation(tenantId, sql<string>`r.id`)} as latest_closed,
+           ${latestEmailAt(tenantId, sql<string>`r.id`)} as latest_email_at,
            cr.address as current_recipient, f.retry_after as refusal_retry_after,
            st.starts_at,
            (select json_agg(json_build_object('slot', w.slot, 'queued_at', w.created_at,
@@ -255,7 +260,8 @@ function remindersOf(row: Row, status: WaiverStatusCode): ParticipantWaiverRemin
     state: r.state,
   }));
   if (status !== "waiting" && status !== "email_failed") return { sent, next: null };
-  const latest = Math.max(row.send_after?.getTime() ?? 0, ...sent.map((r) => r.queuedAt.getTime()));
+  // As the sweep counts it: from when each email was sent, not queued.
+  const latest = row.latest_email_at?.getTime() ?? 0;
   const starts = new Date(row.starts_at).getTime();
   const cutoff = starts - REMINDER_CUTOFF_HOURS * 3_600_000;
   if (row.now.getTime() >= cutoff) return { sent, next: null };
