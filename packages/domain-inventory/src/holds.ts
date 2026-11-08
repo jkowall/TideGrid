@@ -249,19 +249,23 @@ async function lockTrip(trx: TenantTransaction, tenantId: string, tripId: string
  * Whether the trip is on sale now, by the same rules as availability: a
  * published trip of a published product at an active location on an active
  * boat, before the booking cutoff, clear of blackouts. Read after the trip
- * lock, in its own statement, so it sees every committed change.
+ * lock, in its own statement, so it sees every committed change. Commands
+ * judge the cutoff by the database clock; a read may name its own instant,
+ * as availability does.
  */
 async function loadTripSale(
   trx: TenantTransaction,
   tenantId: string,
   tripId: string,
+  at?: Date,
 ): Promise<TripSaleRow | undefined> {
+  const instant = at === undefined ? sql`now()` : sql`${at}::timestamptz`;
   const { rows } = await sql<TripSaleRow>`
     select t.id as trip_id, t.sales_state, t.seat_capacity,
            p.kind as product_kind, p.sales_status as product_status,
            p.min_party_size, p.max_party_size,
            l.status as location_status, b.status as boat_status,
-           now() < t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as sales_open,
+           ${instant} < t.starts_at - make_interval(mins => p.booking_cutoff_minutes) as sales_open,
            exists (
              select 1 from blackouts x
               where x.tenant_id = t.tenant_id
@@ -760,6 +764,55 @@ export async function getTripCapacity(
     confirmed: row.confirmed,
     remaining,
     soldOut: remaining === 0,
+  };
+}
+
+/** A trip's sale state for one party, see getTripSale. */
+export interface TripSaleView {
+  tripId: string;
+  kind: HoldKind;
+  /** Why a hold for this party would be refused before capacity is counted, or null. */
+  notBookable: NotBookableReason | null;
+  /** Seats left, every live hold counted except the excepted owner's. */
+  remaining: number;
+}
+
+/**
+ * One trip's sale state for a party of `partySize`, as a guest who already
+ * holds seats on it sees it (W1-GUEST-API): the hold rules that acquisition
+ * applies (published trip and product, active location and boat, before the
+ * booking cutoff, clear of blackouts, the party within the product's limits),
+ * and the seats left with every live hold counted except `exceptOwnerRef`'s
+ * own. Live means confirmed, or active and before its expiry by the database
+ * clock, as app.trip_capacity_usage counts. The cutoff is judged at `at`
+ * (default: the database clock). Advisory, like availability: only
+ * acquisition decides. Takes no lock and writes nothing.
+ */
+export async function getTripSale(
+  trx: TenantTransaction,
+  tenantId: string,
+  tripId: string,
+  input: { partySize: number; at?: Date; exceptOwnerRef?: string },
+): Promise<TripSaleView | null> {
+  // The same guard as acquisition, so this read never calls a party bookable
+  // that a hold would refuse.
+  requirePartySize(input.partySize);
+  if (!isUuid(tripId)) return null;
+  if (input.exceptOwnerRef !== undefined) requireOwnerRef(input.exceptOwnerRef);
+  const trip = await loadTripSale(trx, tenantId, tripId, input.at);
+  if (!trip) return null;
+  const except = input.exceptOwnerRef ?? null;
+  const { rows } = await sql<{ taken: number }>`
+    select coalesce(sum(seats), 0)::int as taken from capacity_holds
+     where tenant_id = ${tenantId} and trip_id = ${tripId}
+       and (state = 'confirmed' or (state = 'active' and expires_at > now()))
+       and (${except}::text is null or owner_ref <> ${except}::text)`.execute(trx);
+  const taken = rows[0]?.taken ?? 0;
+  return {
+    tripId: trip.trip_id,
+    kind: holdShape(trip, 1).kind,
+    notBookable: notBookable(trip, input.partySize),
+    remaining: Math.max(0, trip.seat_capacity - taken),
   };
 }
 

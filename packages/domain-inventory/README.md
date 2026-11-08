@@ -153,6 +153,20 @@ The sweep is housekeeping and events, not correctness. Fifteen minutes keeps the
 - The staff listing shows every trip with `soldOut`, `held`, and `confirmed`.
 - The new fields are optional in the contract only so earlier clients and test fixtures keep validating; the API always sends them.
 
+## A trip's sale state without the guest's own hold (W1-GUEST-API)
+
+Built on 2026-11-08 under coordinator defaults pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-guest-api-guest-site-api-follow-ups-owner-go-coordinator-defaults-pending-owner-confirmation)). Not released.
+
+```ts
+getTripSale(trx, tenantId, tripId, { partySize, at?, exceptOwnerRef? })
+  // { tripId, kind, notBookable: NotBookableReason | null, remaining } or null
+```
+
+- A read for the checkout offer route: whether a hold for `partySize` would pass the rules acquisition applies before it counts capacity (`notBookable`, the same function), and the seats left with every live hold counted except `exceptOwnerRef`'s own. Live means confirmed, or active and before its expiry by the database clock, as `app.trip_capacity_usage` counts.
+- The booking cutoff is judged at `at` when given, as availability judges it at the request's instant; acquisition still uses the database clock. `loadTripSale` takes the instant as an optional argument for this.
+- It takes no lock and writes nothing, so it is advisory, like availability: only acquisition decides. Another tenant's trip, or a malformed id, reads as null. A malformed owner reference throws.
+- Tests: `src/trip-sale.integration.test.ts`.
+
 ## Not in this goal
 
 - No public or staff endpoint acquires, confirms, or releases a hold directly. Since G2.7, [checkout](../domain-booking/README.md) does: opening a checkout acquires, a verified payment confirms (reacquiring after expiry), and a failure or a guest's cancellation releases.

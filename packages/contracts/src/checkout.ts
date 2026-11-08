@@ -132,6 +132,18 @@ export type CheckoutSessionCreateResponse = z.infer<typeof CheckoutSessionCreate
 export const CheckoutSessionResponse = z.object({ checkoutSession: CheckoutSession });
 export type CheckoutSessionResponse = z.infer<typeof CheckoutSessionResponse>;
 
+export const CheckoutPaymentResponse = z
+  .object({
+    checkoutSession: CheckoutSession.describe("The checkout's current state"),
+    payment: CheckoutPayment.nullable().describe(
+      "Null unless the checkout is open and within its expiry",
+    ),
+  })
+  .describe(
+    "What the guest needs to pay an open checkout, read again with the checkout's secret. Never cached; keep the client secret out of URLs and logs",
+  );
+export type CheckoutPaymentResponse = z.infer<typeof CheckoutPaymentResponse>;
+
 export const CheckoutSessionParams = z.object({
   checkoutSessionId: z.string().describe("Checkout session UUID; anything else answers 404"),
 });

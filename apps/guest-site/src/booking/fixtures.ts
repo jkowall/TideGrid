@@ -443,6 +443,34 @@ export const json = (body: unknown, status = 200) =>
 export const refusal = (status: number, code: string, message = "Refused") =>
   json({ error: { code, message, requestId: "req_test" } }, status);
 
+/**
+ * A guest command's 409 or 422 as the API sends it since W1-GUEST-API: the
+ * same envelope, with the RFC 9457 members, every problem by code and
+ * subject, and for too few seats, the count left. The message here is plain
+ * prose, so a page that still read the message would find nothing in it.
+ */
+export const problem = (
+  status: 409 | 422,
+  problems: { code: string; subject?: string | null }[],
+  extra: { remaining?: number; message?: string } = {},
+) => {
+  const code = problems[0]?.code ?? "unknown";
+  const message = extra.message ?? "Refused";
+  return json(
+    {
+      error: { code, message, requestId: "req_test" },
+      type: "about:blank",
+      title: status === 409 ? "Conflict" : "Unprocessable Content",
+      status,
+      detail: message,
+      code,
+      problems: problems.map((p) => ({ code: p.code, subject: p.subject ?? null })),
+      ...(extra.remaining === undefined ? {} : { remaining: extra.remaining }),
+    },
+    status,
+  );
+};
+
 /** One call the page made, as the API saw it. */
 export interface Call {
   method: string;
@@ -462,6 +490,8 @@ export type Route =
   | "getQuote"
   | "openCheckout"
   | "readCheckout"
+  | "checkoutOffer"
+  | "readPayment"
   | "cancel"
   | "succeed"
   | "fail";
@@ -474,6 +504,12 @@ export function routeOf(call: Pick<Call, "method" | "path">): Route {
   if (method === "GET" && path.startsWith("/v1/public/quotes/")) return "getQuote";
   if (method === "POST" && path === "/v1/public/checkout-sessions") return "openCheckout";
   if (method === "POST" && path.endsWith("/cancel")) return "cancel";
+  if (method === "GET" && /^\/v1\/public\/checkout-sessions\/[^/]+\/offer$/.test(path)) {
+    return "checkoutOffer";
+  }
+  if (method === "GET" && /^\/v1\/public\/checkout-sessions\/[^/]+\/payment$/.test(path)) {
+    return "readPayment";
+  }
   if (method === "GET" && path.startsWith("/v1/public/checkout-sessions/")) return "readCheckout";
   if (method === "POST" && path.endsWith("/succeed")) return "succeed";
   if (method === "POST" && path.endsWith("/fail")) return "fail";
@@ -539,6 +575,16 @@ export function stubApi(routes: Partial<Record<Route, Answer>> = {}): Call[] {
       );
     },
     readCheckout: () => json({ checkoutSession: checkout("open") }),
+    checkoutOffer: () => json({ offer }),
+    readPayment: () =>
+      json({
+        checkoutSession: checkout("open"),
+        payment: {
+          provider: "fake",
+          paymentRef: "fpay_test_1",
+          clientSecret: "fpay_test_1_secret_abc123",
+        },
+      }),
     cancel: () => json({ checkoutSession: checkout("canceled") }),
     succeed: () =>
       json({

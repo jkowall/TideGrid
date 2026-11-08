@@ -4,6 +4,17 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Guest site API follow-ups (W1-GUEST-API), built November 8, 2026
+
+The two guest commands now answer their 409 and 422 refusals with RFC 9457 problem details beside the unchanged error envelope, and a capacity refusal carries the seats left ([decision register](v2/06-decision-register.md#2026-11-08-w1-guest-api-guest-site-api-follow-ups-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). Two new reads under a checkout take its secret as a bearer token: the payment, and an offer that the guest's own hold does not refuse. The guest page reads the problems and uses the own-hold offer on a reload. It does not use the payment read yet; W1-STRIPE-ELEMENT adopts it. No migration. Nothing was released. The local runs and the reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed. Every integration suite passed on a fresh throwaway local PostgreSQL 17: 912 tests passed and 2 skipped, including the new follow-ups suite and the inventory trip-sale suite. The guest and console browser parts ran in CI.
+- **Independent review**, under the payments reviewer override. Accept with listed fixes. The payment read now re-reads the checkout inside the tenant transaction, so a checkout that closes during the read answers closed, with a test that failed before the fix. The own-hold wording now says it applies only when that hold takes the trip off sale. Two files outside the literal owned list are recorded in the register as coordinator choices.
+- **Security review.** Accept, no findings. It checked the bearer secret (never in a URL, a log, or a cache), the same 404 for every wrong secret, checkout, or tenant, and that the seat count shows nothing about another booking.
+- **Recheck.** Accept, once the branch is rebased onto main and this entry is written.
+- **Open risks.** The payment read can call the provider on a GET, idempotently and rate limited. The own-hold offer has no rate limit, like the public offer. The staff quote route keeps the plain envelope until a follow-up.
+- **Telemetry.** About two and a half hours of agent time across build, two reviews, and one fix round. Token use and cost per checkpoint: missing.
+
 ### GuestGateway miss budget before Cloudflare for SaaS (W1-GW-MISS), built November 8, 2026
 
 GuestGateway now budgets lookups of unknown hostnames at 20 per 10 seconds per isolate, and caps reads of each recently found host at 20 under way per isolate ([decision register](v2/06-decision-register.md#2026-11-08-guestgateway-miss-budget-before-cloudflare-for-saas-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). A refused lookup answers `limited`, which the guest Worker serves as 503. No binding and no `wrangler.jsonc` change. Nothing was released. The local runs and the reviews below are coordinator-reported.

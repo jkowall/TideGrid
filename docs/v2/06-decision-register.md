@@ -8,6 +8,28 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-GUEST-API, guest site API follow-ups (owner go; coordinator defaults pending owner confirmation)
+
+The guest site's README ranked four API follow-ups from building the checkout (G2.11b on G2.7's API): a Bearer read of the payment's client secret, structured 422 problems, an offer that the guest's own hold does not refuse, and the seats left on a capacity refusal. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. The owner did not answer the goal's open decisions, so the two below are coordinator defaults, the goal packet's recommended options. Neither is an owner decision until the owner confirms it.
+
+- **D1, RFC 9457 problem details with a stable code.** The 409 and 422 answers of `POST /v1/public/quotes` and `POST /v1/public/checkout-sessions` keep the shared error envelope unchanged (`error.code`, `error.message`, `error.requestId`) and add, beside it, `type` (`about:blank`), `title`, `status`, `detail`, a stable `code` equal to `error.code`, and `problems`, every problem as `{ code, subject }`. One schema, `ProblemResponse`, listed as an OpenAPI component. Every client that reads the envelope reads it as before, so this is not a contract change.
+- **D2, remaining capacity is a count only.** A 409 `insufficient_capacity` from either command adds `remaining`: the seats left on the trip the request asked about. No held or confirmed split, and nothing about another trip.
+
+Coordinator choices inside those defaults, pending owner confirmation:
+
+- **The media type stays `application/json`**, not `application/problem+json`, so no client that checks the type sees a change. Switching is a proposed follow-up.
+- **Scope of the shape.** Only the two guest commands' 409 and 422 answers. Their 404, 429, and 503, every read, the staff quote and checkout routes (G2.12d), and the waiver signing route keep their current shapes. The staff routes adopting it is a proposed follow-up.
+- **Two new Bearer reads under the checkout, not a header on the public offer.** `GET /v1/public/checkout-sessions/{id}/payment` and `GET /v1/public/checkout-sessions/{id}/offer`, each with the checkout secret as the bearer token and the same 404 for a wrong secret, another checkout, another operator, or an unknown id. The public offer route is unchanged.
+- **The payment read may call the provider**, with the payment row's own idempotency key, so it returns the same payment and never a second. It is rate limited like public commands for that reason, never cached, and logs neither secret.
+- **The own-hold offer applies only while the checkout is open and within its expiry.** Every other sale rule still applies. It reuses inventory's hold rules through a new read, `getTripSale`, and the catalog's staff calendar for the trip's times, so the catalog package is unchanged and pricing gains no package dependency.
+- **The guest page reads the problems and the count, and uses the own-hold offer on a reload.** It does not use the payment read yet: a reload still cannot pay until the payment element (W1-STRIPE-ELEMENT) adopts it. An answer without the new members, from an API that predates them, is read as before.
+- **No migration.**
+- **Two files outside the literal owned list, both inside the four behaviors.** `apps/api-worker/src/routes/problems.ts` is the routes' one helper for the problem shape. The trip lookup in `packages/domain-pricing/src/load.ts` (`findTripForSale`) is where the quote and the offer decide a trip is on sale, so the own-hold option lives there. Nothing else outside the list changed. The branch is `goal/guest-api`, the name the coordinator gave it, not the goal packet's `build/guest-api-followups`.
+
+Not done, and needing the owner: confirming D1, D2, and the choices above; any release of the API or the guest site that carries this.
+
+Canonical: the [booking README](../../packages/domain-booking/README.md#guest-api-follow-ups-w1-guest-api), the [pricing README](../../packages/domain-pricing/README.md#guest-api-follow-ups-w1-guest-api), the [inventory README](../../packages/domain-inventory/README.md#a-trips-sale-state-without-the-guests-own-hold-w1-guest-api), and the [guest site README](../../apps/guest-site/README.md#api-follow-ups).
+
 ### 2026-11-08: GuestGateway miss budget before Cloudflare for SaaS (owner go; coordinator defaults, pending owner confirmation)
 
 The [2026-11-07 cache entry](#2026-11-07-guestgateway-keeps-found-answers-for-10-seconds-owner-request-coordinator-defaults-owner-decision-2026-11-08) left misses uncached and unlimited, and said "a limit on misses belongs to G2.14b-live". Under Cloudflare for SaaS a fallback origin could send any hostname, and each would open a database connection. This goal (W1-GW-MISS) is G2.14b-live preparation inside the [demo build plan](12-demo-build-plan.md), needed before the runbook's P10.

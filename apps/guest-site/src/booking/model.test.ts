@@ -36,6 +36,7 @@ import {
   describeExtras,
   describeParty,
   eachPrice,
+  failureProblems,
   feeText,
   fitAddOns,
   guests as guestWords,
@@ -1117,6 +1118,125 @@ describe("quoteTrouble", () => {
     expect(quoteTrouble(cannotPrice("insufficient_capacity"), charterOffer, boat)).toEqual({
       stop: "not_bookable",
     });
+  });
+});
+
+// Problem details (W1-GUEST-API) ------------------------------------------------------------
+
+/** A refusal as the API sends it since W1-GUEST-API: the problems listed, the message prose. */
+const listed = (
+  status: number,
+  problems: { code: string; subject?: string | null }[],
+  remaining?: number,
+): Extract<Failure, { kind: "refused" }> => ({
+  kind: "refused",
+  status,
+  code: problems[0]?.code ?? "unknown",
+  message: "Refused",
+  problems: problems.map((p) => ({ code: p.code, subject: p.subject ?? null })),
+  ...(remaining === undefined ? {} : { remaining }),
+});
+
+describe("failureProblems", () => {
+  const asRefused = (f: Failure) => f as Extract<Failure, { kind: "refused" }>;
+
+  it("reads the listed problems, not the message", () => {
+    const failure = {
+      ...asRefused(listed(422, [{ code: "add_on_unavailable", subject: "photo" }])),
+      message: "This quote cannot be priced: promotion_not_applicable",
+    };
+    expect(failureProblems(failure)).toEqual([{ code: "add_on_unavailable", subject: "photo" }]);
+  });
+
+  it("keeps only the contract's problem codes, and falls back to the error's own code", () => {
+    expect(
+      failureProblems(
+        asRefused(
+          listed(422, [{ code: "something_new" }, { code: "unknown_add_on", subject: "x" }]),
+        ),
+      ),
+    ).toEqual([{ code: "unknown_add_on", subject: "x" }]);
+    expect(failureProblems(asRefused(listed(422, [{ code: "idempotency_key_reused" }])))).toEqual(
+      [],
+    );
+  });
+
+  it("reads an answer without the list from its message, as before", () => {
+    expect(failureProblems(asRefused(cannotPrice("add_on_unavailable (photo)")))).toEqual([
+      { code: "add_on_unavailable", subject: "photo" },
+    ]);
+  });
+});
+
+describe("quoteTrouble and checkoutTrouble with problem details", () => {
+  it.each<[string, Failure, Trouble]>([
+    [
+      "422 listing an add-on and a code",
+      listed(422, [
+        { code: "add_on_unavailable", subject: "photo" },
+        { code: "promotion_not_applicable" },
+      ]),
+      {
+        addOns: { photo: "Souvenir photo isn't offered on this date." },
+        promo: "This code can't be used for this trip. Check it, or book without it.",
+      },
+    ],
+    [
+      "409 insufficient_capacity with 3 left",
+      listed(409, [{ code: "insufficient_capacity" }], 3),
+      { party: "Only 3 seats are left now. Choose fewer guests." },
+    ],
+    [
+      "409 insufficient_capacity with 1 left",
+      listed(409, [{ code: "insufficient_capacity" }], 1),
+      { party: "Only 1 seat is left now. Choose fewer guests." },
+    ],
+    [
+      "409 insufficient_capacity with none left",
+      listed(409, [{ code: "insufficient_capacity" }], 0),
+      { stop: "not_bookable" },
+    ],
+    [
+      "422 with insufficient_capacity listed second, 2 left",
+      listed(422, [{ code: "promotion_not_applicable" }, { code: "insufficient_capacity" }], 2),
+      {
+        promo: "This code can't be used for this trip. Check it, or book without it.",
+        party: "Only 2 seats are left now. Choose fewer guests.",
+      },
+    ],
+    ["422 idempotency_key_reused", listed(422, [{ code: "idempotency_key_reused" }]), serverSide],
+  ])("a quote: %s", (_name, failure, expected) => {
+    expect(quoteTrouble(failure, offer, harbor)).toEqual(expected);
+  });
+
+  it("a quote's count beats the listing's, which may be out of date", () => {
+    const stale: PartyLimits = { min: 1, max: 10, seatsLeft: 9 };
+    expect(quoteTrouble(listed(409, [{ code: "insufficient_capacity" }], 0), offer, stale)).toEqual(
+      { stop: "not_bookable" },
+    );
+  });
+
+  it.each<[string, Failure, Trouble]>([
+    [
+      "the count, whatever the message",
+      { ...listed(409, [{ code: "insufficient_capacity" }], 2), message: "Only 9 seat(s) left" },
+      { party: "Only 2 seats are left now. Choose fewer guests." },
+    ],
+    ["no seat left", listed(409, [{ code: "insufficient_capacity" }], 0), { stop: "not_bookable" }],
+    ["422 policy_not_accepted", listed(422, [{ code: "policy_not_accepted" }]), { requote: true }],
+    ["409 quote_expired", listed(409, [{ code: "quote_expired" }]), { requote: true }],
+  ])("a checkout: %s", (_name, failure, expected) => {
+    expect(checkoutTrouble(failure, "Demo Harbor Charters")).toEqual(expected);
+  });
+
+  it("a charter whose boat was taken stops, whatever the count", () => {
+    expect(
+      checkoutTrouble(
+        listed(409, [{ code: "insufficient_capacity" }], 4),
+        "Demo Harbor Charters",
+        true,
+      ),
+    ).toEqual({ stop: "not_bookable" });
   });
 });
 

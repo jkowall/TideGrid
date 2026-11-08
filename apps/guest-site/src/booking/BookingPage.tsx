@@ -28,6 +28,7 @@ import {
   cancelCheckout,
   createQuote,
   type Failure,
+  getCheckoutOffer,
   getListing,
   getOffer,
   getQuote,
@@ -467,7 +468,9 @@ export function BookingPage({
       if (controller.signal.aborted) return;
       if (result.kind !== "ok") {
         // A checkout outlives its trip's sale: its own hold can take the last
-        // seats. A reload during one shows the checkout from its quote.
+        // seats or the whole boat. A reload during one reads the trip's offer
+        // with that hold set aside, or, failing that, shows the checkout from
+        // its quote.
         const resuming =
           !initialized.current &&
           (address.step === "pay" || address.step === "status") &&
@@ -477,6 +480,22 @@ export function BookingPage({
           const record = readResume(tripId);
           if (!record) {
             setLoad({ kind: "gone" });
+            return;
+          }
+          const own = await getCheckoutOffer(record.sessionId, record.secret, controller.signal);
+          if (controller.signal.aborted) return;
+          if (
+            own.kind === "ok" &&
+            own.value.tripId === tripId &&
+            isKnownZone(own.value.trip.timeZone)
+          ) {
+            const listing = await getListing(own.value, controller.signal);
+            if (controller.signal.aborted) return;
+            setLoad({
+              kind: "ready",
+              offer: own.value,
+              listing: listing.kind === "ok" ? listing.value : null,
+            });
             return;
           }
           const stored = await getQuote(record.quoteId, controller.signal);

@@ -18,6 +18,7 @@ import {
 } from "./compute.ts";
 import {
   dateOnly,
+  type FindTripOptions,
   findPromotion,
   findTripForSale,
   loadPolicy,
@@ -78,8 +79,9 @@ export async function getTripOffer(
   tenantId: string,
   tripId: string,
   now: Date,
+  options: FindTripOptions = {},
 ): Promise<TripOfferResult> {
-  const found = await findTripForSale(trx, tenantId, tripId, now);
+  const found = await findTripForSale(trx, tenantId, tripId, now, options);
   if (found.kind === "not_found") return { kind: "trip_not_found" };
   if (found.kind === "not_on_sale") return { kind: "trip_not_on_sale" };
   const trip = found.trip;
@@ -154,7 +156,12 @@ export type CreateQuoteResult =
   | { kind: "created"; quote: Quote }
   | { kind: "trip_not_found" }
   | { kind: "trip_not_on_sale" }
-  | { kind: "rejected"; problems: QuoteProblem[] };
+  /**
+   * capacityRemaining: the seats left on this trip, present exactly when a
+   * problem is insufficient_capacity, so a refusal can say how many (D2: a
+   * count only, for the trip asked about).
+   */
+  | { kind: "rejected"; problems: QuoteProblem[]; capacityRemaining?: number };
 
 /**
  * Prices a party on a bookable trip under the current versions and stores the
@@ -197,7 +204,11 @@ export async function createQuote(
     promotion,
     selection: { party: input.party, addOns: input.addOns, promotionCode: input.promotionCode },
   });
-  if (outcome.kind === "rejected") return { kind: "rejected", problems: outcome.problems };
+  if (outcome.kind === "rejected") {
+    return outcome.problems.some((p) => p.code === "insufficient_capacity")
+      ? { kind: "rejected", problems: outcome.problems, capacityRemaining: trip.capacityRemaining }
+      : { kind: "rejected", problems: outcome.problems };
+  }
   const priced = outcome.quote;
   const discount: PricedDiscount | null = priced.discount;
 

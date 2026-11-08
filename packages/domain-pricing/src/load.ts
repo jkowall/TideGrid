@@ -1,5 +1,5 @@
 import { isUuid, type TenantTransaction } from "@tidegrid/database";
-import { findAvailableTrips } from "@tidegrid/domain-catalog";
+import { findAvailableTrips, listTrips } from "@tidegrid/domain-catalog";
 import type {
   AddOnItem,
   ChargeBasis,
@@ -242,6 +242,24 @@ export type TripForSale =
   | { kind: "not_on_sale" };
 
 /**
+ * Seats left on the trip for a guest who already holds some of them, with
+ * that guest's own hold not counted, when the trip passes every other rule a
+ * hold for `minPartySize` must pass; null when it does not. The caller owns
+ * the hold and answers from the inventory module (getTripSale), so pricing
+ * does not depend on it.
+ */
+export type OwnHoldSale = (minPartySize: number) => Promise<number | null>;
+
+export interface FindTripOptions {
+  /**
+   * Set only for a guest whose own open checkout holds seats on this trip
+   * (W1-GUEST-API). When the listing leaves the trip out, this decides
+   * instead, so the guest's own hold never takes the trip off sale for them.
+   */
+  ownHold?: OwnHoldSale;
+}
+
+/**
  * A trip a guest may book now. Bookability is the catalog's: the trip is on
  * sale exactly when the public availability query lists it for the smallest
  * party the product allows. So quotes follow the catalog's rules (published
@@ -253,6 +271,7 @@ export async function findTripForSale(
   tenantId: string,
   tripId: string,
   now: Date,
+  options: FindTripOptions = {},
 ): Promise<TripForSale> {
   if (!isUuid(tripId)) return { kind: "not_found" };
   const row = await trx
@@ -266,6 +285,7 @@ export async function findTripForSale(
       "t.local_start_time",
       "t.start_utc_offset_minutes",
       "p.min_party_size",
+      "p.max_party_size",
     ])
     .where("t.tenant_id", "=", tenantId)
     .where("t.id", "=", tripId)
@@ -280,7 +300,38 @@ export async function findTripForSale(
     now,
   });
   const trip = listed.find((t) => t.tripId === tripId);
-  if (!trip) return { kind: "not_on_sale" };
+  if (!trip) {
+    if (!options.ownHold) return { kind: "not_on_sale" };
+    // The listing counts the guest's own hold. Without it, the trip may still
+    // have room for the smallest party: a held charter, or the last seats.
+    const remaining = await options.ownHold(row.min_party_size);
+    if (remaining === null || remaining < row.min_party_size) return { kind: "not_on_sale" };
+    // The staff calendar lists every trip in any state, timed exactly as the
+    // availability listing times it; the sale rules were just checked.
+    const staff = (await listTrips(trx, tenantId, { from: localDate, to: localDate })).find(
+      (t) => t.tripId === tripId,
+    );
+    if (!staff) return { kind: "not_on_sale" };
+    return {
+      kind: "on_sale",
+      trip: {
+        tripId,
+        productId: staff.productId,
+        productKind: staff.productKind,
+        productName: staff.productName,
+        minPartySize: row.min_party_size,
+        maxPartySize: row.max_party_size,
+        capacityRemaining: remaining,
+        timeZone: staff.timeZone,
+        localDate: staff.localDate,
+        localStartTime: staff.localStartTime,
+        exactLocalStartTime: row.local_start_time,
+        startsAt: staff.startsAt,
+        startsAtLocal: staff.startsAtLocal,
+        startOffsetMinutes: row.start_utc_offset_minutes,
+      },
+    };
+  }
   return {
     kind: "on_sale",
     trip: {

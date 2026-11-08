@@ -51,7 +51,7 @@ With `VITE_DEMO_MAILBOX=1` the confirmation and the management page link to the 
 - **The management link's token** arrives in the URL's fragment, which the browser never sends to a server, and is removed from the address and the tab's history before any request. It stays in memory until the guest asks to open the booking, and travels only in that POST's body.
 - **sessionStorage, a third record**, in `src/manage/session.ts`: the booking session's token, its expiry, and the reference, so a reload keeps the guest in for the session's hour. It also keeps the used link's token, which opens nothing but can ask for a new link to the booker's own address. One record for the tab, which another booking replaces; gone when the tab closes, the session ends, or the API says it has. The session token travels only as `Authorization: Bearer`.
 - **The address** carries only the trip, the party (`t.<code>`, `guests`, `a.<code>`), the step, and on the details step the quote id, which is not authority and holds no personal data. Never a secret, the promotion code, the booker, or the checkout's id.
-- A reload during a checkout whose own hold took the trip off sale (a charter's whole boat, or the last seats) reads the trip from the checkout's quote, since the offer then answers 409.
+- A reload during a checkout whose own hold took the trip off sale (a charter's whole boat, or the last seats) reads the trip's offer through the checkout, with the checkout secret as the bearer token and its own hold set aside, since the public offer then answers 409. If that read fails too, the page reads the trip from the checkout's quote.
 
 ## Content security policy
 
@@ -70,12 +70,12 @@ The site is still one assets-only SPA for every operator. An edge Worker (`worke
 
 ## API follow-ups
 
-Found while building the checkout, ranked by the code review. None blocks the demo; the page works around each one. The API is unchanged here; each is a proposal for the goal that owns the API.
+Found while building the checkout, ranked by the code review. None blocked the demo; the page worked around each one. All four are built in the API as of 2026-11-08 (W1-GUEST-API, not released), under coordinator defaults pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-guest-api-guest-site-api-follow-ups-owner-go-coordinator-defaults-pending-owner-confirmation)); the contracts are in the [booking](../../packages/domain-booking/README.md#guest-api-follow-ups-w1-guest-api) and [pricing](../../packages/domain-pricing/README.md#guest-api-follow-ups-w1-guest-api) READMEs.
 
-1. **A Bearer-authorized read of the payment's client secret** while a checkout is open, with the checkout secret. Today a reload cannot pay, and a lost answer to opening a checkout can be recovered only by resending the same body, which needs the booker's details in memory.
-2. **Structured 422 problems**, such as `problems: [{ code, subject }]`. Today the page parses the problem codes and their subjects out of the message text, and falls back to the error's code.
-3. **The offer answering 409 because of the guest's own hold.** When a checkout's own hold takes the last seats or the whole boat, the offer refuses the trip, so a reload shows the checkout from its quote instead.
-4. **A `remaining` field** on a capacity refusal. A quote's 409 `insufficient_capacity` gives no count, and a checkout's gives it only in the message.
+1. **Done: a Bearer-authorized read of the payment's client secret.** `GET /v1/public/checkout-sessions/{id}/payment`, with the checkout secret as the bearer token, answers the provider payment and its client secret while the checkout is open. `readCheckoutPayment` in `src/booking/api.ts` calls it, and its tests check that neither secret reaches a URL. The page does not use it yet: a reload still cannot pay, by design, until the payment element (W1-STRIPE-ELEMENT) adopts it. Proposed for that goal: the client secret stays in memory only, never in sessionStorage.
+2. **Done: structured problems.** A quote's or a checkout's 409 and 422 keep the error envelope and add `problems: [{ code, subject }]`, with the RFC 9457 members (D1). The page reads the list (`failureProblems` in `src/booking/model.ts`); an answer without it, from an API that predates it, is still read from the message.
+3. **Done: the offer without the guest's own hold.** `GET /v1/public/checkout-sessions/{id}/offer` sets the checkout's own hold aside. A reload during a checkout whose hold took the last seats or the whole boat reads the trip through it, as on any reload; only when that read fails does the page show the checkout from its quote.
+4. **Done: a `remaining` field** on a capacity refusal, a count for the trip asked about only (D2), on a quote's and a checkout's 409 `insufficient_capacity`. The party step says it: "Only 3 seats are left now. Choose fewer guests." None left stops the booking, as before.
 
 ## Local development
 
