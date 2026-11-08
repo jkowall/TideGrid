@@ -283,9 +283,18 @@ describe.skipIf(!env)("adversarial: staff resend limits held at the delivery cla
     expect(await claimsOf(lag?.id ?? "")).toBe(1);
 
     const next = await serviceResend(A, b.bookingId, "confirmation");
+    // Other mail queued behind the waiting resend, due after it.
+    const other = await book(world, A, tripsA.shared(), 1);
+    const [behind] = await world.admin<{ id: string; first: boolean }[]>`
+      select o.id, r.next_attempt_at <= o.next_attempt_at as first
+        from public.email_messages o, public.email_messages r
+       where o.booking_id = ${other.bookingId} and r.id = ${next}`;
+    expect(behind?.first).toBe(true);
     // The claim waits: 10 minutes from the late resend's claim, not its stamp.
+    // The same run still sends the mail behind it.
     const held = await deliverMail(world, A.id);
     expect(held.items.map((i) => i.messageId)).not.toContain(next);
+    expect(held.items.map((i) => [i.messageId, i.outcome])).toContainEqual([behind?.id, "sent"]);
     expect(await stateOf(next)).toMatchObject({ state: "queued", attempts: 0 });
     const [wait] = await refusalOf(A, next);
     expect(wait?.code).toBe("resend_interval");
