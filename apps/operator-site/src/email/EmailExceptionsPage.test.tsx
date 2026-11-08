@@ -214,6 +214,13 @@ describe("the operator's email exceptions (W1-EMAIL-EXC)", () => {
     expect(items()).toEqual([]);
   });
 
+  it("treats a cursor that is not a message id as an answer it cannot read", async () => {
+    stubApi(() => json(200, { exceptions: [emailException()], nextBefore: "not-a-cursor" }));
+    renderPage();
+    await screen.findByText("Email exceptions couldn't be shown");
+    expect(items()).toEqual([]);
+  });
+
   it("treats a negative attempt count as an answer it cannot read", async () => {
     stubApi(() => json(200, { exceptions: [emailException({ attempts: -1 })], nextBefore: null }));
     renderPage();

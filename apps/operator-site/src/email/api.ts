@@ -7,6 +7,7 @@ import type {
   EmailExceptionsResponse,
   MessageStatus,
 } from "@tidegrid/contracts";
+import { isUuid } from "../bookings/model.ts";
 import { call, errorCode, failureOf, type ReadFailure, tenantPath } from "../http.ts";
 
 /**
@@ -233,7 +234,7 @@ export function loadEmailExceptions(
         !!body &&
         Array.isArray(body.exceptions) &&
         body.exceptions.every(isEmailException) &&
-        (body.nextBefore === null || isString(body.nextBefore));
+        (body.nextBefore === null || (isString(body.nextBefore) && isUuid(body.nextBefore)));
       return ok
         ? {
             kind: "ok",
