@@ -7,6 +7,7 @@ import {
   expireDueHolds,
   getHold,
   getTripCapacity,
+  getTripSale,
   isOwnerRef,
   listTripHolds,
   MAX_HOLD_TTL_SECONDS,
@@ -87,6 +88,14 @@ describe("input checks run before the database", () => {
     await expect(acquire({ ttlSeconds: 59 })).rejects.toThrow(RangeError);
     await expect(acquire({ ttlSeconds: 3601 })).rejects.toThrow(RangeError);
     await expect(acquire({ ttlSeconds: 120.5 })).rejects.toThrow(RangeError);
+  });
+
+  it("refuses a party size that acquisition would refuse, in the sale read too", async () => {
+    for (const partySize of [1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(getTripSale(untouchable, ctx.tenantId, tripId, { partySize })).rejects.toThrow(
+        TypeError,
+      );
+    }
   });
 
   it("answers trip_not_found for a malformed trip id", async () => {

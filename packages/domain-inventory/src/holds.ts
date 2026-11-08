@@ -794,6 +794,9 @@ export async function getTripSale(
   tripId: string,
   input: { partySize: number; at?: Date; exceptOwnerRef?: string },
 ): Promise<TripSaleView | null> {
+  // The same guard as acquisition, so this read never calls a party bookable
+  // that a hold would refuse.
+  requirePartySize(input.partySize);
   if (!isUuid(tripId)) return null;
   if (input.exceptOwnerRef !== undefined) requireOwnerRef(input.exceptOwnerRef);
   const trip = await loadTripSale(trx, tenantId, tripId, input.at);
