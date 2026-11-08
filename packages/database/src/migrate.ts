@@ -310,6 +310,12 @@ async function applyWithoutTransaction(
   timeouts: MigrationTimeouts,
 ): Promise<void> {
   try {
+    // Await nothing here but these queries. postgres.js reconnects silently
+    // when a connection closes while idle, and a build sent on that new
+    // session would run without the timeouts or the runners' lock. Chained
+    // directly, the build is handed to the connection in the same turn the
+    // last SET returns, so a close there fails it instead. The integration
+    // suite cuts the connection at this point.
     for (const set of sessionTimeoutStatements(timeouts)) await sql.unsafe(set);
     await sql.unsafe(statement);
     await sql`INSERT INTO schema_migrations (name, checksum) VALUES (${m.name}, ${m.checksum})`;

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import net from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
@@ -453,4 +454,116 @@ describe.skipIf(!url)("no-transaction files on a scratch database", () => {
       expect(await indexState(scratch, "fixture_items_slow")).toBe(true);
     });
   }, 60_000);
+
+  /**
+   * A TCP relay that cuts the runner's connection the instant the server
+   * answers its session `SET statement_timeout`: the reply and the close go
+   * out together. postgres.js reconnects silently when a connection closes
+   * while idle, and a build sent on that new session would run with no
+   * timeouts and without the runners' lock. The runner never idles there: the
+   * build is handed to the connection in the same turn the reply arrives, so
+   * the close fails the build instead. This guards that ordering.
+   */
+  async function cutAfterSessionTimeouts(target: URL) {
+    let cuts = 0;
+    const sockets = new Set<net.Socket>();
+    const server = net.createServer((client) => {
+      const upstream = net.connect({ port: Number(target.port || 5432), host: target.hostname });
+      let armed = false;
+      for (const s of [client, upstream]) {
+        sockets.add(s);
+        s.on("error", () => {});
+        s.on("close", () => sockets.delete(s));
+      }
+      client.on("close", () => upstream.destroy());
+      upstream.on("close", () => client.destroy());
+      client.on("data", (chunk) => {
+        if (chunk.toString("utf8").includes("SET statement_timeout")) armed = true;
+        upstream.write(chunk);
+      });
+      upstream.on("data", (chunk) => {
+        // 0x5a is ReadyForQuery: the SET is done and the session is idle.
+        if (armed && cuts === 0 && chunk.includes(0x5a)) {
+          cuts++;
+          client.end(chunk);
+          upstream.destroy();
+          return;
+        }
+        client.write(chunk);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const relayed = new URL(target);
+    relayed.hostname = "127.0.0.1";
+    relayed.port = String((server.address() as net.AddressInfo).port);
+    return {
+      url: relayed.toString(),
+      cuts: () => cuts,
+      close: async () => {
+        for (const s of sockets) s.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      },
+    };
+  }
+
+  // The relay rewrites the host, so TLS with SNI (Neon) cannot pass through it.
+  const local = url ? ["127.0.0.1", "localhost"].includes(new URL(url).hostname) : false;
+
+  it.skipIf(!local)(
+    "fails a marked file whose connection drops after its session timeouts, and never sends the build on a new session",
+    async () => {
+      await onScratch(async (scratchUrl, scratch, files) => {
+        await migrate(scratchUrl, pick(files, 1));
+        // A writer holds the table, so a build on a session without
+        // lock_timeout would wait for it with no limit.
+        const writer = postgres(scratchUrl, { max: 1, onnotice: () => {} });
+        const relay = await cutAfterSessionTimeouts(new URL(scratchUrl));
+        try {
+          let release: () => void = () => {};
+          const held = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          let ready: () => void = () => {};
+          const writing = new Promise<void>((resolve) => {
+            ready = resolve;
+          });
+          const tx = writer.begin(async (t) => {
+            await t`INSERT INTO public.fixture_items (id, code) VALUES (3001, 'code-3001')`;
+            ready();
+            await held;
+            throw new Error("roll back");
+          });
+          await writing;
+          const timeouts = { lockTimeoutMs: 300, statementTimeoutMs: 60_000 };
+          const outcome = await Promise.race([
+            migrate(relay.url, pick(files, 1, 2), timeouts).then(
+              () => "applied",
+              (err: Error) => err.message,
+            ),
+            new Promise<string>((resolve) =>
+              setTimeout(() => resolve("still running after 10 s"), 10_000),
+            ),
+          ]);
+          release();
+          await expect(tx).rejects.toThrow("roll back");
+          expect(relay.cuts()).toBe(1);
+          expect(outcome).toMatch(
+            /^Migration 0002_fixture_items_code_key\.sql failed: .*CONNECTION_CLOSED/,
+          );
+        } finally {
+          await relay.close();
+          await writer.end({ timeout: 5 });
+        }
+        // The build never ran anywhere: no index, no record, no lock left.
+        expect(await indexState(scratch, "fixture_items_code_key")).toBeNull();
+        expect(await recorded(scratch)).toEqual(["0001_fixture_items.sql"]);
+        const [locks] = await scratch<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory'`;
+        expect(locks?.n).toBe(0);
+        const rerun = await migrate(scratchUrl, pick(files, 1, 2));
+        expect(rerun.applied).toEqual(["0002_fixture_items_code_key.sql"]);
+      });
+    },
+    60_000,
+  );
 });
