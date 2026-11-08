@@ -19,6 +19,7 @@ export {
   type DeliveryMessage,
   type DeliverySender,
   deliveryErrorCode,
+  getOpenDeadLetter,
   listDeadLetters,
   type PublishOptions,
   type PublishReport,

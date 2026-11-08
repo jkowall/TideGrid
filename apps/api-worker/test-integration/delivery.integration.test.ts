@@ -358,6 +358,24 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
         source: "queue",
       }),
     ).toBe("already_open");
+    // A hint with the wrong topic is not about this event and records nothing.
+    expect(
+      await recordDeadLetter(
+        runtime.db,
+        { ...(body as DeliveryMessage), topic: "test.delivery.other" },
+        { errorCode: "queue_retries_exhausted", attempts: 7, source: "queue" },
+      ),
+    ).toBe("missing");
+
+    // A late or duplicate hint runs nothing while the dead letter is open,
+    // even once the handler would pass: only a reviewed replay reopens it.
+    poisoned = false;
+    expect(await consumeDelivery(runtime.db, body as DeliveryMessage, handlers)).toEqual({
+      kind: "parked",
+    });
+    expect(await deliveries(A.id, id)).toEqual(["good"]);
+    expect((await eventRow(A.id, id)).delivered_at).toBeNull();
+    poisoned = true;
 
     const letterId = letters[0]?.id as string;
     const operator: TenantContext = {
@@ -413,6 +431,21 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
     expect(goodRuns).toBe(1);
     expect(await deliveries(A.id, id)).toEqual(["good", "poison"]);
     expect((await eventRow(A.id, id)).delivered_at).not.toBeNull();
+  });
+
+  it("completes an event whose hint arrives before the publisher marks it published", async () => {
+    const id = await enqueue(B.id, "test.delivery.early");
+    const outcome = await consumeDelivery(
+      runtime.db,
+      { v: 1, tenantId: B.id, outboxId: id, topic: "test.delivery.early" },
+      [{ name: "early", topics: ["test.delivery.early"], handle: async () => {} }],
+    );
+    expect(outcome).toEqual({ kind: "delivered", ran: ["early"] });
+    const row = await eventRow(B.id, id);
+    expect(row.published_at).not.toBeNull();
+    expect(row.delivered_at).not.toBeNull();
+    // Delivered, so the publisher never sends it.
+    expect((await publishOnly(new Set([id]))).sent).toEqual([]);
   });
 
   it("refuses to change a dead letter or an event's content, and nobody deletes either", async () => {

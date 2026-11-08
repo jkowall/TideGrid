@@ -239,7 +239,7 @@ CREATE FUNCTION app.outbox_publish_tenants(p_limit integer, p_lost_seconds integ
   SET search_path = pg_catalog, pg_temp
   AS $$
     SELECT x.tenant_id FROM (
-      SELECT o.tenant_id FROM public.outbox_events o
+      SELECT DISTINCT o.tenant_id FROM public.outbox_events o
        WHERE o.available_at <= pg_catalog.now()
          AND (o.published_at IS NULL
               OR (o.delivered_at IS NULL

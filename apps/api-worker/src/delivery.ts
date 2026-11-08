@@ -157,6 +157,10 @@ export async function handleDeliveryBatch(
       const outcome = await deps.consume(message, runId);
       if (outcome.kind === "missing") {
         log.warn("outbox_event_missing", messageAttributes(message));
+      } else if (outcome.kind === "parked") {
+        // A late or duplicate hint for a dead-lettered event: the replay
+        // command is the only way it runs again.
+        log.warn("outbox_event_parked", messageAttributes(message));
       } else if (outcome.ran.length > 0) {
         log.info("outbox_delivered", {
           ...messageAttributes(message),

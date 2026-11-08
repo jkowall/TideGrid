@@ -13,7 +13,12 @@
  * reason (an audit row records it) and makes the event due again, so only the
  * handlers with no outcome run. Review the failing handler's fix before --go.
  */
-import { listDeadLetters, ReplayRefusedError, replayDeadLetter } from "./delivery.ts";
+import {
+  getOpenDeadLetter,
+  listDeadLetters,
+  ReplayRefusedError,
+  replayDeadLetter,
+} from "./delivery.ts";
 import { createDb } from "./index.ts";
 import { isUuid } from "./tenant.ts";
 
@@ -52,9 +57,13 @@ export async function main(argv: readonly string[], out: (line: string) => void 
         );
         return 2;
       }
-      const open = (await listDeadLetters(handle.db, { tenantLimit: 1000, perTenant: 1000 })).find(
-        (r) => r.tenantId === tenantId && r.id === id,
-      );
+      const ctx = {
+        tenantId,
+        actorType: "support" as const,
+        actorId: operator,
+        requestId: `outbox-replay-${Date.now()}`,
+      };
+      const open = await getOpenDeadLetter(handle.db, ctx, id);
       if (!open) {
         out(JSON.stringify({ refused: "not_found_or_already_replayed" }));
         return 1;
@@ -69,16 +78,7 @@ export async function main(argv: readonly string[], out: (line: string) => void 
         return 0;
       }
       try {
-        const done = await replayDeadLetter(
-          handle.db,
-          {
-            tenantId,
-            actorType: "support",
-            actorId: operator,
-            requestId: `outbox-replay-${Date.now()}`,
-          },
-          { deadLetterId: id, reason },
-        );
+        const done = await replayDeadLetter(handle.db, ctx, { deadLetterId: id, reason });
         out(JSON.stringify({ replayed: true, ...done }));
         return 0;
       } catch (error) {

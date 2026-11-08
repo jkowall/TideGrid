@@ -18,7 +18,7 @@
  * instead. The cron's other sweeps stay as the backstop for the work they
  * already do, so a stopped queue delays only the new handlers.
  */
-import { type Kysely, sql } from "kysely";
+import { type Kysely, sql, type Transaction } from "kysely";
 import { recordAudit } from "./audit.ts";
 import { recordSweepTurn, runFairSweep } from "./fair-sweep.ts";
 import {
@@ -107,7 +107,9 @@ export type ConsumeOutcome =
   /** Every matching handler has an outcome now; `ran` lists the ones that ran this time. */
   | { kind: "delivered"; ran: string[] }
   /** No event with that id in that tenant (or a topic that does not match). */
-  | { kind: "missing" };
+  | { kind: "missing" }
+  /** The event has an open dead letter: nothing runs until someone replays it. */
+  | { kind: "parked" };
 
 function validateHandlers(handlers: readonly DeliveryHandler[]): void {
   const seen = new Set<string>();
@@ -119,6 +121,32 @@ function validateHandlers(handlers: readonly DeliveryHandler[]): void {
 }
 
 const lockKey = (tenantId: string, outboxId: string) => `tidegrid.outbox:${tenantId}:${outboxId}`;
+
+/**
+ * The per-event lock. Handler runs, completion, dead letter recording, and
+ * replay all take it first, before any row lock, so they serialize on one
+ * event and always lock in the same order.
+ */
+async function lockEvent(trx: Transaction<Database>, tenantId: string, outboxId: string) {
+  await sql`select pg_advisory_xact_lock(hashtextextended(${lockKey(tenantId, outboxId)}, 0))`.execute(
+    trx,
+  );
+}
+
+async function hasOpenDeadLetter(
+  trx: Transaction<Database>,
+  tenantId: string,
+  outboxId: string,
+): Promise<boolean> {
+  const row = await trx
+    .selectFrom("outbox_dead_letters")
+    .select("id")
+    .where("tenant_id", "=", tenantId)
+    .where("outbox_event_id", "=", outboxId)
+    .where("replayed_at", "is", null)
+    .executeTakeFirst();
+  return row !== undefined;
+}
 
 /**
  * Consume one message. Each matching handler without an outcome runs in its
@@ -167,9 +195,10 @@ export async function consumeDelivery(
   for (const handler of matching) {
     try {
       const didRun = await inTenantTransaction(db, ctx, async (trx) => {
-        await sql`select pg_advisory_xact_lock(hashtextextended(${lockKey(ctx.tenantId, event.outboxId)}, 0))`.execute(
-          trx,
-        );
+        await lockEvent(trx, ctx.tenantId, event.outboxId);
+        // A parked event runs nothing until a person replays it, so a late or
+        // duplicate hint never bypasses the reviewed replay.
+        if (await hasOpenDeadLetter(trx, ctx.tenantId, event.outboxId)) return "parked" as const;
         const done = await trx
           .selectFrom("outbox_deliveries")
           .select("handler")
@@ -177,7 +206,7 @@ export async function consumeDelivery(
           .where("outbox_event_id", "=", event.outboxId)
           .where("handler", "=", handler.name)
           .executeTakeFirst();
-        if (done) return false;
+        if (done) return "done" as const;
         await handler.handle(trx, ctx, event);
         await trx
           .insertInto("outbox_deliveries")
@@ -188,24 +217,36 @@ export async function consumeDelivery(
             request_id: ctx.requestId ?? null,
           })
           .execute();
-        return true;
+        return "ran" as const;
       });
-      if (didRun) ran.push(handler.name);
+      if (didRun === "parked") return { kind: "parked" };
+      if (didRun === "ran") ran.push(handler.name);
     } catch (error) {
       failure ??= new DeliveryHandlerError(handler.name, deliveryErrorCode(error));
     }
   }
   if (failure) throw failure;
-  await inTenantTransaction(db, ctx, (trx) =>
-    trx
+  // Completion takes the same lock as dead letter recording and replay, so an
+  // event is never both delivered and parked. A hint can arrive before the
+  // publisher commits published_at; the update then waits on the publisher's
+  // row lock, and coalesce satisfies the delivered-after-published CHECK.
+  const parked = await inTenantTransaction(db, ctx, async (trx) => {
+    await lockEvent(trx, ctx.tenantId, event.outboxId);
+    if (await hasOpenDeadLetter(trx, ctx.tenantId, event.outboxId)) return true;
+    await trx
       .updateTable("outbox_events")
-      .set({ delivered_at: sql<Date>`clock_timestamp()`, last_error: null })
+      .set({
+        published_at: sql<Date>`coalesce(published_at, clock_timestamp())`,
+        delivered_at: sql<Date>`clock_timestamp()`,
+        last_error: null,
+      })
       .where("tenant_id", "=", ctx.tenantId)
       .where("id", "=", event.outboxId)
       .where("delivered_at", "is", null)
-      .where("published_at", "is not", null)
-      .execute(),
-  );
+      .execute();
+    return false;
+  });
+  if (parked) return { kind: "parked" };
   return { kind: "delivered", ran };
 }
 
@@ -236,14 +277,20 @@ export async function recordDeadLetter(
   };
   const handler = input.handler && handlerPattern.test(input.handler) ? input.handler : null;
   const errorCode = errorCodePattern.test(input.errorCode) ? input.errorCode : "unknown";
+  if (!outboxIdPattern.test(message.outboxId)) return "missing";
   return inTenantTransaction(db, ctx, async (trx) => {
+    // Under the event lock, so a delivery finishing at the same moment is
+    // either seen here as delivered or waits and then finds the dead letter.
+    await lockEvent(trx, ctx.tenantId, message.outboxId);
     const row = await trx
       .selectFrom("outbox_events")
       .select(["topic", "delivered_at"])
       .where("tenant_id", "=", ctx.tenantId)
       .where("id", "=", message.outboxId)
       .executeTakeFirst();
-    if (!row) return "missing";
+    // The same rule as consumption: a hint whose topic does not match is
+    // not about this event, so it parks nothing.
+    if (!row || row.topic !== message.topic) return "missing";
     // A late copy of an event already delivered needs nobody's attention.
     if (row.delivered_at !== null) return "delivered";
     const inserted = await sql<{ id: string }>`
@@ -273,6 +320,45 @@ export interface DeadLetterRow {
   attempts: number;
   source: DeadLetterSource;
   deadLetteredAt: Date;
+}
+
+/** One open dead letter in one tenant, or null when there is none with that id. */
+export async function getOpenDeadLetter(
+  db: Kysely<Database>,
+  ctx: TenantContext,
+  id: string,
+): Promise<DeadLetterRow | null> {
+  if (!outboxIdPattern.test(id)) return null;
+  const r = await inTenantTransaction(db, ctx, (trx) =>
+    trx
+      .selectFrom("outbox_dead_letters")
+      .select([
+        "id",
+        "outbox_event_id",
+        "topic",
+        "handler",
+        "error_code",
+        "attempts",
+        "source",
+        "dead_lettered_at",
+      ])
+      .where("tenant_id", "=", ctx.tenantId)
+      .where("id", "=", id)
+      .where("replayed_at", "is", null)
+      .executeTakeFirst(),
+  );
+  if (!r) return null;
+  return {
+    tenantId: ctx.tenantId,
+    id: String(r.id),
+    outboxId: String(r.outbox_event_id),
+    topic: r.topic,
+    handler: r.handler,
+    errorCode: r.error_code,
+    attempts: r.attempts,
+    source: r.source,
+    deadLetteredAt: new Date(r.dead_lettered_at),
+  };
 }
 
 /** Open dead letters across tenants, oldest first within each tenant. */
@@ -358,6 +444,15 @@ export async function replayDeadLetter(
   // A person replays, never a job: the trigger refuses it too.
   if (ctx.actorType === "system" || !ctx.actorId) throw new ReplayRefusedError("bad_actor");
   return inTenantTransaction(db, ctx, async (trx) => {
+    const target = await trx
+      .selectFrom("outbox_dead_letters")
+      .select("outbox_event_id")
+      .where("tenant_id", "=", ctx.tenantId)
+      .where("id", "=", input.deadLetterId)
+      .executeTakeFirst();
+    if (!target) throw new ReplayRefusedError("not_found");
+    // The event lock first, as everywhere else, then the dead letter row.
+    await lockEvent(trx, ctx.tenantId, String(target.outbox_event_id));
     const letter = await trx
       .selectFrom("outbox_dead_letters")
       .select(["id", "outbox_event_id", "topic", "handler", "error_code", "replayed_at"])
