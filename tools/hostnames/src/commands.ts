@@ -11,8 +11,9 @@
  * recorded check, and disable.
  */
 import { randomUUID } from "node:crypto";
-import type { Database } from "@tidegrid/database";
+import { type Database, inTenantTransaction } from "@tidegrid/database";
 import {
+  type AdminActor,
   activateCustomHostname,
   type CustomHostnameProvider,
   createCloudflareHostnameProvider,
@@ -25,7 +26,7 @@ import {
 import { customHostnameProblem, slugPattern } from "@tidegrid/tenant-config";
 import { type Kysely, sql } from "kysely";
 import { requestLines } from "./format.ts";
-import { releaseInterruptedRequest } from "./release.ts";
+import { cliContext, releaseInterruptedRequest } from "./release.ts";
 import {
   applyRoutePlan,
   createWorkersRoutesClient,
@@ -51,8 +52,9 @@ export const usage = `Usage:
 
 Environment: DATABASE_URL (admin connection). Cloudflare commands also need
 CF_SAAS_ZONE_ID, CF_SAAS_API_TOKEN, and optionally CF_SAAS_ROUTING_TARGET
-(default customers.tidegrid.us). route --apply needs the token's Workers Routes
-Write permission, and optionally CF_SAAS_ROUTE_SCRIPT (default tidegrid-guest).
+(default customers.tidegrid.us). route --apply needs the admin token's Workers
+Routes Write permission (never the API Worker's secret), and optionally
+CF_SAAS_ROUTE_SCRIPT (default tidegrid-guest).
 fake-lifecycle needs TIDEGRID_EPHEMERAL_DB=1.`;
 
 export type Command =
@@ -191,6 +193,10 @@ export function cloudflareProvider(env: CliEnv): CustomHostnameProvider {
   });
 }
 
+function cliActor(): AdminActor {
+  return { actorId: "hostname-cli", requestId: `cli-${randomUUID()}` };
+}
+
 async function tenantIdFor(db: Kysely<Database>, slug: string): Promise<string> {
   const { rows } = await sql<{ id: string }>`
     select id from public.tenants where slug = ${slug}`.execute(db);
@@ -199,21 +205,28 @@ async function tenantIdFor(db: Kysely<Database>, slug: string): Promise<string> 
   return id;
 }
 
-async function status(db: Kysely<Database>, tenantId: string): Promise<string[]> {
-  const { rows } = await sql<{
-    hostname: string;
-    kind: string;
-    status: string;
-    hostname_state: string | null;
-    certificate_state: string | null;
-    last_error_code: string | null;
-  }>`
+async function status(
+  db: Kysely<Database>,
+  tenantId: string,
+  actor: AdminActor,
+): Promise<string[]> {
+  const rows = await inTenantTransaction(db, cliContext(tenantId, actor), async (trx) => {
+    const result = await sql<{
+      hostname: string;
+      kind: string;
+      status: string;
+      hostname_state: string | null;
+      certificate_state: string | null;
+      last_error_code: string | null;
+    }>`
     select h.hostname, h.kind, h.status, p.hostname_state, p.certificate_state, p.last_error_code
       from public.tenant_hostnames h
       left join public.tenant_hostname_provisioning p
         on p.hostname = h.hostname and p.tenant_id = h.tenant_id
      where h.tenant_id = ${tenantId}
-     order by h.kind, h.hostname`.execute(db);
+     order by h.kind, h.hostname`.execute(trx);
+    return result.rows;
+  });
   return rows.map((r) =>
     [
       r.hostname,
@@ -228,12 +241,23 @@ async function status(db: Kysely<Database>, tenantId: string): Promise<string[]>
   );
 }
 
-/** This tenant's own row for a custom hostname, or null. */
-async function customRow(db: Kysely<Database>, tenantId: string, hostname: string) {
-  const { rows } = await sql<{ kind: string; status: string }>`
-    select kind, status from public.tenant_hostnames
-     where tenant_id = ${tenantId} and hostname = ${hostname}`.execute(db);
-  return rows[0] ?? null;
+/**
+ * This tenant's own row for a hostname, or null. The read runs inside a
+ * tenant transaction, as the tenant contract requires, so it does not depend
+ * on the admin role bypassing row-level security.
+ */
+export async function customHostnameRow(
+  db: Kysely<Database>,
+  tenantId: string,
+  hostname: string,
+  actor: AdminActor = cliActor(),
+) {
+  return inTenantTransaction(db, cliContext(tenantId, actor), async (trx) => {
+    const { rows } = await sql<{ kind: string; status: string }>`
+      select kind, status from public.tenant_hostnames
+       where tenant_id = ${tenantId} and hostname = ${hostname}`.execute(trx);
+    return rows[0] ?? null;
+  });
 }
 
 /**
@@ -248,10 +272,11 @@ async function route(
   command: Extract<Command, { kind: "route" }>,
   env: CliEnv,
   routes: WorkersRoutesClient | undefined,
+  actor: AdminActor,
 ): Promise<string[]> {
   const problem = customHostnameProblem(command.hostname);
   if (problem) throw new UsageError(`that name cannot be a custom hostname: ${problem}`);
-  const row = await customRow(db, tenantId, command.hostname);
+  const row = await customHostnameRow(db, tenantId, command.hostname, actor);
   if (row?.kind !== "custom") {
     return [`${command.hostname}: refused: not a custom hostname of ${command.slug}`];
   }
@@ -275,11 +300,11 @@ export async function runCommand(
   deps: CliDeps = {},
 ): Promise<string[]> {
   const tenantId = await tenantIdFor(db, command.slug);
-  const actor = { actorId: "hostname-cli", requestId: `cli-${randomUUID()}` };
+  const actor = cliActor();
   const provider = deps.provider;
   switch (command.kind) {
     case "status":
-      return status(db, tenantId);
+      return status(db, tenantId, actor);
     case "request": {
       const outcome = await requestCustomHostname(db, provider ?? cloudflareProvider(env), {
         tenantId,
@@ -289,7 +314,7 @@ export async function runCommand(
       return requestLines(command.hostname, outcome);
     }
     case "route":
-      return route(db, tenantId, command, env, deps.routes);
+      return route(db, tenantId, command, env, deps.routes, actor);
     case "release":
       return releaseInterruptedRequest(db, provider ?? cloudflareProvider(env), {
         tenantId,
@@ -358,8 +383,10 @@ async function fakeLifecycle(
   lines.push(`activate after validation: ${activated.kind}`);
   lines.push(`resolves when active: ${(await resolvedTenant(db, hostname)) === tenantId}`);
   fake.advance(hostname, { hostnameState: "moved" });
-  await sql`update public.tenant_hostname_provisioning set next_check_at = now()
-             where tenant_id = ${tenantId} and hostname = ${hostname}`.execute(db);
+  await inTenantTransaction(db, cliContext(tenantId, actor), async (trx) => {
+    await sql`update public.tenant_hostname_provisioning set next_check_at = now()
+               where tenant_id = ${tenantId} and hostname = ${hostname}`.execute(trx);
+  });
   const report = await sweepHostnames(db, {
     provider: fake,
     runId: actor.requestId,

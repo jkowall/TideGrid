@@ -62,7 +62,7 @@ Record the dates of H1 to H5, the checks' output with hosts masked, and the owne
 
 ## A request interrupted before its id was stored
 
-Not a removal. A row that is pending with no provider id is recovered with `hostnames release`, or turned off with `hostnames disable` and then removed from H3 on ([tools/hostnames README](../../tools/hostnames/README.md#recovering-an-interrupted-request-release-proposed-w1-saas-prep)).
+Not a removal. A row that is pending with no provider id is recovered with `hostnames release` while its seven-day claim lasts, or turned off with `hostnames disable` and then removed from H3 on ([tools/hostnames README](../../tools/hostnames/README.md#recovering-an-interrupted-request-release-proposed-w1-saas-prep)).
 
 ## Reuse of a removed name (not possible today)
 

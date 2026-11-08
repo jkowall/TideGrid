@@ -5,9 +5,12 @@ import {
   type CustomHostnameProvider,
   createFakeHostnameProvider,
   type FakeHostnameProvider,
+  HostnameProviderUnavailableError,
+  type ProviderHostname,
 } from "@tidegrid/domain-hostnames";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { runCommand, UsageError } from "./commands.ts";
+import { customHostnameRow, runCommand, UsageError } from "./commands.ts";
+import { releaseInterruptedRequest } from "./release.ts";
 import type { WorkerRoute, WorkersRoutesClient } from "./routes.ts";
 
 const env = inject("integrationDb");
@@ -366,5 +369,160 @@ describe.skipIf(!env)("hostname CLI on a throwaway database", () => {
     expect(await runCommand(handle.db, release(tenantSlug, true), {}, deps)).toEqual([
       `${hostname}: nothing to release: disabled, not pending`,
     ]);
+  });
+
+  // W1-SAAS-PREP review fixes ------------------------------------------------------
+
+  /** An interrupted request of a new tenant: the record exists, its id is not stored. */
+  async function interrupted(label: string) {
+    const tenantSlug = await newTenant(label);
+    const hostname = `${label}-${run}.example.com`;
+    await expect(
+      runCommand(
+        handle.db,
+        { kind: "request", slug: tenantSlug, hostname },
+        {},
+        { provider: dyingAfterCreate(fake) },
+      ),
+    ).rejects.toThrow("the process died");
+    const orphan = (await fake.findByHostname(hostname))?.providerId ?? "";
+    expect(orphan).not.toBe("");
+    const release = (apply: boolean, providerId: string | null) => ({
+      kind: "release" as const,
+      slug: tenantSlug,
+      hostname,
+      apply,
+      providerId,
+    });
+    return { tenantSlug, hostname, orphan, release };
+  }
+
+  async function releaseAudits(hostname: string) {
+    return handle.sql<{ action: string; after: { provider_hostname_id: string } | null }[]>`
+      select action, after_state as after from public.audit_events
+       where subject_type = 'tenant_hostname' and subject_id = ${hostname}
+         and action like 'hostname.provider_release%'
+       order by id`;
+  }
+
+  /** The fake, whose exact-name lookup after a delete misbehaves as `after` says. */
+  function afterDelete(after: "throws" | "lags"): CustomHostnameProvider {
+    let lastSeen: ProviderHostname | null = null;
+    let removed = false;
+    return {
+      ...dyingAfterCreate(fake),
+      create: (input) => fake.create(input),
+      remove: async (id) => {
+        await fake.remove(id);
+        removed = true;
+      },
+      findByHostname: async (h) => {
+        if (!removed) {
+          lastSeen = await fake.findByHostname(h);
+          return lastSeen;
+        }
+        removed = false;
+        if (after === "throws") throw new HostnameProviderUnavailableError(null);
+        // A lagging read still shows the deleted record once.
+        return lastSeen;
+      },
+    };
+  }
+
+  it("audits the delete before the follow-up lookup, whatever that lookup does (review R2, S2)", async () => {
+    for (const after of ["throws", "lags"] as const) {
+      const { hostname, orphan, release } = await interrupted(`release-${after}`);
+      const provider = afterDelete(after);
+      if (after === "throws") {
+        await expect(
+          runCommand(handle.db, release(true, orphan), {}, { provider }),
+        ).rejects.toBeInstanceOf(HostnameProviderUnavailableError);
+      } else {
+        const lines = await runCommand(handle.db, release(true, orphan), {}, { provider });
+        expect(lines.at(-1)).toBe(
+          "refused: a record still holds this name after the delete; nothing resumed",
+        );
+      }
+      expect(await fake.findByHostname(hostname)).toBeNull();
+      expect(await storedId(hostname)).toBeNull();
+      expect(await releaseAudits(hostname)).toEqual([
+        { action: "hostname.provider_release_started", after: { provider_hostname_id: orphan } },
+        { action: "hostname.provider_released", after: { provider_hostname_id: orphan } },
+      ]);
+    }
+  });
+
+  it("never resumes a reservation whose seven-day claim has ended (review S1)", async () => {
+    const { tenantSlug, hostname, orphan, release } = await interrupted("release-stale");
+    // The claim is immutable; backdate it with triggers off, as an interruption
+    // more than seven days old would leave it.
+    await handle.sql.begin(async (tx) => {
+      await tx`set local session_replication_role = replica`;
+      await tx`update public.tenant_hostname_provisioning
+                  set claim_expires_at = now() - interval '1 day'
+                where hostname = ${hostname}`;
+    });
+    const deps = { provider: fake };
+    const dry = await runCommand(handle.db, release(false, null), {}, deps);
+    expect(dry[0]).toContain(`provider record ${orphan}`);
+    expect(dry[0]).toContain("claim ended at");
+    expect(dry.join("\n")).toContain("--apply deletes this record and does not resume");
+
+    const applied = await runCommand(handle.db, release(true, orphan), {}, deps);
+    expect(applied).toContain(`deleted provider record ${orphan}`);
+    expect(applied.at(-2)).toMatch(/^not resumed: the seven-day claim ended at /);
+    expect(applied).not.toContain(`${hostname}: requested`);
+    expect(await fake.findByHostname(hostname)).toBeNull();
+    expect(await storedId(hostname)).toBeNull();
+    expect((await releaseAudits(hostname)).map((a) => a.action)).toEqual([
+      "hostname.provider_release_started",
+      "hostname.provider_released",
+    ]);
+
+    // With no record left, release still refuses to resume, dry run or not.
+    for (const apply of [false, true]) {
+      const lines = await runCommand(handle.db, release(apply, null), {}, deps);
+      expect(lines[0]).toMatch(new RegExp(`^${hostname}: no provider record holds this name`));
+      expect(lines.at(-2)).toMatch(/^not resumed: the seven-day claim ended at /);
+    }
+    expect(await storedId(hostname)).toBeNull();
+    expect(await fake.findByHostname(hostname)).toBeNull();
+    expect(await runCommand(handle.db, { kind: "status", slug: tenantSlug }, {})).toEqual([
+      `${hostname}  custom  pending  hostname pending  certificate pending`,
+    ]);
+  });
+
+  it("reads this tenant's rows inside a tenant transaction (review R3)", async () => {
+    const owner = await newTenant("rls-owner");
+    const active = `rls-${run}.example.com`;
+    await activeHost(owner, active);
+    const { hostname, orphan } = await interrupted("rls-release");
+    const [owners] = await handle.sql<{ id: string }[]>`
+      select id from public.tenants where slug = ${owner}`;
+    const [releasers] = await handle.sql<{ id: string }[]>`
+      select t.id from public.tenants t
+        join public.tenant_hostnames h on h.tenant_id = t.id
+       where h.hostname = ${hostname}`;
+    // A role that does not bypass row-level security sees no tenant row
+    // outside a tenant transaction.
+    const restricted = createDb(env?.adminUrl ?? "", { max: 1 });
+    try {
+      await restricted.sql`set role tidegrid_app`;
+      expect(await customHostnameRow(restricted.db, owners?.id ?? "", active)).toEqual({
+        kind: "custom",
+        status: "active",
+      });
+      const lines = await releaseInterruptedRequest(restricted.db, fake, {
+        tenantId: releasers?.id ?? "",
+        slug: "rls-release",
+        hostname,
+        apply: false,
+        providerId: null,
+        actor: { actorId: "hostname-cli", requestId: `cli-${randomUUID()}` },
+      });
+      expect(lines[0]).toContain(`provider record ${orphan}`);
+    } finally {
+      await restricted.end();
+    }
   });
 });
