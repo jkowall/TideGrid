@@ -26,6 +26,8 @@ Coordinator defaults for search by source, not put as questions:
 - **It filters on the booking's source only,** never the checkout, so finance's search never joins the checkout. Results show a "Staff booking" badge for every role.
 - **No new index.** The predicate only narrows the search's one matching step, so the plan keeps its shape (the plan test runs source queries too); the benchmark stays optional.
 
+Status, 2026-11-08: merged in pull request 78 as `7ef50cf` on 2026-11-07; not released ([verification log](../verification-log.md#g212-follow-ups-merged-in-pull-request-78-recorded-november-8-2026)).
+
 Canonical: the [operator console README](../../apps/operator-site/README.md) and the [booking contract](../../packages/domain-booking/README.md).
 
 ### 2026-11-07: G2.16-live code prep (owner decisions; coordinator defaults pending owner confirmation)
