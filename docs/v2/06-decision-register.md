@@ -147,6 +147,8 @@ Coordinator readings, pending owner confirmation:
 - **Releases.** A ruleset gates merges, not releases. It would not make `release` wait for the push run on `main`. That follow-up stays proposed and not built.
 - **Older SHAs.** The three SHAs without step 9 are unchanged. A green dispatch on each is still their route. Update, 2026-11-08: a green four-job dispatch run on each SHA now shows step 9 for all three ([verification log](../verification-log.md#step-9-for-91a4faa-by-dispatch-november-8-2026)).
 
+Update, 2026-11-08, after pull request 80 merged: the owner reported "ruleset is active now, items 3 and 4 both set". GitHub does not show it in force. At 00:48 UTC the repository listed no rulesets. At 01:28, 02:30, and 03:24 UTC the GitHub API read `main` as `protected: false`, and no rules applied to it. Pull requests 85 to 92 merged in that time without GitHub blocking any of them. Asked how to record this, the owner chose "Rewrite it as not enforced" (2026-11-08, 03:23 UTC). So this register records the ruleset as not enforced. Until a read shows the four required checks and "up to date" in force, the runbook's merge rule stays a manual rule: merge only when the four jobs are green on a run against current `main`.
+
 Canonical: the [runbook's P0.1 merge rule](../runbooks/2026-11-01-preview-deploy.md#p0-prep-oct-29-to-31-no-live-calls) and the repository's rulesets in GitHub.
 
 ### 2026-11-07: G2.12 follow-ups, search and calendar by source and number-shaped references (owner decisions; coordinator defaults, owner decision 2026-11-08)
