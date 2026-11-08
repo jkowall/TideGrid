@@ -27,9 +27,11 @@ Review fixes, 2026-11-08: the independent review found that the skeleton silentl
 
 Recheck fixes, 2026-11-08: seven Latin Roman numerals (U+2180 to U+2182, U+2185 to U+2188) have no NFKC decomposition and are not letters, so they passed and vanished from the skeleton ("TideGriↁ"). A Latin character in a sender name must now be a letter. The rule also split words before folding, so "!" read as "i" broke a word: "Harbor v!a Stripe" and "B!lling Team" passed. Words are now split after folding, and a run of whole words that reads as "via" once joined ("v.i.a", "V I A") is refused.
 
-Open: a security review of the spoofing cases (R9), run by the lead. Two tenants provisioned with confusable names, an unverified reply-to, the hand-written lookalike and staff-word lists, and the tightened name rule withholding a whole guest site for a stored brand that now fails are recorded as residuals in the README. Proposed, for the owner: run every active brand through the new rule before any non-synthetic brand is stored.
+Security review (R9): run by the lead on the spoofing cases. Its one finding, unfoldable Latin letters dropped from the skeleton, is the first review fix above. Two tenants provisioned with confusable names, an unverified reply-to, the hand-written lookalike and staff-word lists, and the tightened name rule withholding a whole guest site for a stored brand that now fails are recorded as residuals in the README. Proposed, for the owner: run every active brand through the new rule before any non-synthetic brand is stored.
 
 Second recheck fix, 2026-11-08: splitting after folding kept a "!" at a word's edge inside the word, so "Support!" read as "supporti" and "Harbor via! Stripe" as "viai". Both passed, though the review fix had refused them. The staff-word and "via" checks now run on three readings of the words (the folded split, the same with "!" trimmed from each end, and a plain split on letters and digits) and refuse if any fires. Every earlier refusal and accepted name still holds.
+
+Third recheck fix, 2026-11-08: a digit that folds to a letter, glued to a staff word or to "via", hid it in every reading that keeps digits ("Support1", "Security24", "Harbor via1 Stripe"). A fourth reading splits on letters only. "Harbor V!A!Stripe" still passes and is a README residual.
 
 Canonical: the [messaging README](../../packages/domain-messaging/README.md#sender-identity-w1-sender-guard) and the [brand contract](../../packages/contracts/src/brand.ts).
 

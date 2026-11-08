@@ -232,6 +232,39 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     expect(accepts({ name }), name).toBe(false);
   });
 
+  // Recheck F2: a digit such as "1" folds to a letter, so "Support1" read as
+  // "supporti" in every split that keeps digits. The letters-only split reads
+  // it as "Support".
+  it.each([
+    "Support1",
+    "Security1",
+    "Billing1",
+    "Help0",
+    "NoReply1",
+    "Payments4",
+    "Support7",
+    "Support24",
+    "Support1!",
+    "24 Support",
+    "Harbor via1 Stripe",
+    "Harbor 1via Stripe",
+  ])("refuses %s with a digit glued to a staff word or via (recheck F2)", (name) => {
+    expect(senderNameProblem(name), name).not.toBeNull();
+    expect(senderDisplayName(name), name).toBeNull();
+    expect(accepts({ name }), name).toBe(false);
+  });
+
+  it("still accepts operator names with digits (recheck F2)", () => {
+    for (const name of [
+      "Harbor Tours 24",
+      "Dive 4 Fun",
+      "Boats4Support Harbor",
+      "Pier 39 Charters",
+    ]) {
+      expect(senderNameProblem(name), name).toBeNull();
+    }
+  });
+
   it("still accepts operator names with an exclamation mark (recheck R1)", () => {
     for (const name of ["Harbor Tours!", "Dive In! Charters", "Yahoo! Boats", "Support Boats!"]) {
       expect(senderNameProblem(name), name).toBeNull();

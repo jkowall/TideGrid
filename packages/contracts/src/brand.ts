@@ -757,20 +757,24 @@ function trimSymbolLetters(word: string): string {
 }
 
 /**
- * Three readings of a name's words, for the checks on whole words. A symbol
+ * Four readings of a name's words, for the checks on whole words. A symbol
  * that folds to a letter may stand for that letter or be punctuation, so each
  * check runs on every reading and refuses if any fires (recheck R1):
  * - the folded split, where "!" stays inside its word ("B!lling", "v!a");
  * - the folded split with such symbols trimmed from each end ("Support!",
  *   "!Billing", "V!A!" read as "Support", "Billing", "V!A");
  * - the plain split on letters and digits, where "!" separates
- *   ("No!Reply", "via!Stripe" read as "No Reply", "via Stripe").
+ *   ("No!Reply", "via!Stripe" read as "No Reply", "via Stripe");
+ * - the split on letters only, where a digit separates too ("Support1",
+ *   "Security24", "via1" read as "Support", "Security", "via"), since a
+ *   digit such as "1" folds to a letter and would hide a staff word.
  */
 function senderWordReadings(name: string): string[][] {
   const folded = foldedWords(name);
   const trimmed = folded.map(trimSymbolLetters).filter((word) => word.length > 0);
   const plain = name.match(/[\p{L}\p{N}]+/gu) ?? [];
-  return [folded, trimmed, plain];
+  const lettersOnly = name.match(/\p{L}+/gu) ?? [];
+  return [folded, trimmed, plain, lettersOnly];
 }
 
 /**
