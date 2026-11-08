@@ -18,6 +18,7 @@ import {
   guestKnownReads,
   guestLimitedTally,
   guestMissBudget,
+  KeyedLookupBudget,
   LookupBudget,
   RefusalTally,
   resolveGuestHost,
@@ -443,6 +444,7 @@ describe("the guest miss budget (G2.14b-live, D1 to D3)", () => {
     expect(GUEST_KNOWN_READS).toBe(20);
     expect(guestKnownReads.capacity).toBe(GUEST_KNOWN_READS);
     expect(guestKnownReads.windowMs).toBe(GUEST_MISS_WINDOW_MS);
+    expect(guestKnownReads.maxKeys).toBe(GUEST_KNOWN_MAX_ENTRIES);
     // The cache defaults the owner confirmed are unchanged.
     expect(GUEST_HOST_TTL_MS).toBe(10_000);
     expect(GUEST_HOST_MAX_ENTRIES).toBe(1_000);
@@ -695,8 +697,8 @@ describe("the guest miss budget under review findings (W1-GW-MISS)", () => {
     const answers = await Promise.all(
       Array.from({ length: 500 }, () => resolveGuestHost(withDb, live, db.lookup)),
     );
-    expect(db.stats.peak).toBeLessThanOrEqual(GUEST_MISS_BUDGET);
-    expect(db.stats.reads).toBeLessThanOrEqual(GUEST_MISS_BUDGET);
+    expect(db.stats.peak).toBeLessThanOrEqual(GUEST_KNOWN_READS);
+    expect(db.stats.reads).toBeLessThanOrEqual(GUEST_KNOWN_READS);
     const kinds = answers.map((a) => a.kind);
     // Never a miss: a refused read is `limited`, the 503.
     expect(kinds.filter((k) => k === "miss")).toHaveLength(0);
@@ -710,10 +712,50 @@ describe("the guest miss budget under review findings (W1-GW-MISS)", () => {
     const db = slowDb([live]);
     await resolveGuestHost(withDb, live, db.lookup);
     guestHostProjection.clear();
-    for (let i = 0; i < GUEST_MISS_BUDGET; i++) void resolveGuestHost(withDb, live, hang);
+    for (let i = 0; i < GUEST_KNOWN_READS; i++) void resolveGuestHost(withDb, live, hang);
     expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
     at(GUEST_MISS_WINDOW_MS);
     expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "found", experience });
+  });
+
+  it("caps known reads per host, so one tenant's burst never limits another tenant's known host", async () => {
+    const at = clock();
+    const other = "other-harbor.book.tidegrid.us";
+    const db = slowDb([live, other]);
+    expect((await resolveGuestHost(withDb, live, db.lookup)).kind).toBe("found");
+    expect((await resolveGuestHost(withDb, other, db.lookup)).kind).toBe("found");
+    // Both kept answers expire; tenant A's reads hang and hold all its slots.
+    at(GUEST_HOST_TTL_MS);
+    for (let i = 0; i < GUEST_KNOWN_READS; i++) void resolveGuestHost(withDb, live, hang);
+    expect(guestKnownReads.available(`${withDb.ENVIRONMENT ?? ""}|${live}`, Date.now())).toBe(0);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    // Tenant B's known host in the same isolate still reads and is found.
+    expect(await resolveGuestHost(withDb, other, db.lookup)).toEqual({ kind: "found", experience });
+    // Neither touched the miss budget.
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+  });
+
+  it("keeps the per-host read slots bounded: settled hosts leave, and a full map refuses a new host", () => {
+    const keyed = new KeyedLookupBudget(2, 10_000, 2);
+    const a1 = keyed.take("a", 0);
+    const a2 = keyed.take("a", 0);
+    expect(a1 && a2).toBeTruthy();
+    expect(keyed.take("a", 0)).toBeUndefined();
+    const b = keyed.take("b", 0);
+    expect(b).toBeTruthy();
+    expect(keyed.size).toBe(2);
+    // Every key holds a token: a third host is refused, never let through.
+    expect(keyed.take("c", 0)).toBeUndefined();
+    // A key whose last token is released has no entry.
+    if (b) keyed.release("b", b, 1);
+    expect(keyed.size).toBe(1);
+    expect(keyed.take("c", 1)).toBeTruthy();
+    // Tokens that never come back expire, and a new key sweeps their entry.
+    expect(keyed.take("d", 9_999)).toBeUndefined();
+    expect(keyed.take("d", 10_001)).toBeTruthy();
+    // Both "a" and "c" held only expired tokens, so the sweep dropped both.
+    expect(keyed.size).toBe(1);
+    expect(keyed.available("a", 10_001)).toBe(2);
   });
 
   it("refuses a live host a cold isolate has not found while a flood holds the budget (open risk for P10)", async () => {

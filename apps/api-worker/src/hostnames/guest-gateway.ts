@@ -160,16 +160,83 @@ export const GUEST_KNOWN_MAX_ENTRIES = 1_000;
 export const guestKnownHosts = new TtlProjection<true>(GUEST_KNOWN_MAX_ENTRIES, GUEST_KNOWN_TTL_MS);
 
 /**
+ * A `LookupBudget` per key, for at most `maxKeys` keys at once. A key with
+ * no token out has no entry: it is dropped when its last token is released,
+ * and a key whose tokens all expired is swept when a new key needs room. With
+ * every key holding a token, a new key is refused.
+ */
+export class KeyedLookupBudget {
+  readonly #budgets = new Map<string, LookupBudget>();
+
+  constructor(
+    readonly capacity: number,
+    readonly windowMs: number,
+    readonly maxKeys: number,
+  ) {}
+
+  /** Takes a token for `key` for a lookup starting at `now`, or answers undefined. */
+  take(key: string, now: number): LookupHold | undefined {
+    let budget = this.#budgets.get(key);
+    if (!budget) {
+      if (this.#budgets.size >= this.maxKeys) this.#sweep(now);
+      if (this.#budgets.size >= this.maxKeys) return undefined;
+      budget = new LookupBudget(this.capacity, this.windowMs);
+      this.#budgets.set(key, budget);
+    }
+    return budget.take(now);
+  }
+
+  /** Gives a token back at once, and drops the key once it holds none. */
+  release(key: string, hold: LookupHold, now: number): void {
+    const budget = this.#budgets.get(key);
+    if (!budget) return;
+    budget.release(hold);
+    if (budget.available(now) === this.capacity) this.#budgets.delete(key);
+  }
+
+  /** Tokens free for `key` at `now`. */
+  available(key: string, now: number): number {
+    return this.#budgets.get(key)?.available(now) ?? this.capacity;
+  }
+
+  /** Keys with an entry. */
+  get size(): number {
+    return this.#budgets.size;
+  }
+
+  clear(): void {
+    this.#budgets.clear();
+  }
+
+  #sweep(now: number): void {
+    for (const [key, budget] of this.#budgets) {
+      if (budget.available(now) === this.capacity) this.#budgets.delete(key);
+    }
+  }
+}
+
+/**
  * Reads of known hosts under way (D8, a coordinator default pending owner
- * confirmation): at most 20 per isolate at once. Each read holds a slot until
- * it settles, whatever its answer, and at most 10 seconds if it never
- * settles. Past the cap the answer is `limited`, never a miss. Reads in flight
- * are not shared between requests (see the projection above), so this cap is
- * what bounds a burst of calls for a live host when its kept answer expires,
- * or while the database is slow.
+ * confirmation): at most 20 per host per isolate at once. Each read holds a
+ * slot of its own host until it settles, whatever its answer, and at most 10
+ * seconds if it never settles. Past the cap the answer is `limited`, never a
+ * miss. Reads in flight are not shared between requests (see the projection
+ * above), so this cap is what bounds a burst of calls for a live host when
+ * its kept answer expires, or while the database is slow.
+ *
+ * The cap is per host, so a burst for one tenant's host never limits another
+ * tenant's host. The cost: reads of known hosts under way in one isolate are
+ * bounded by 20 times the hosts it has found, not by 20. Only a database
+ * `found` answer makes a host known, so a caller cannot add hosts to that
+ * count. At most 1,000 hosts hold slots at once; with every one of them
+ * reading, another known host answers `limited`.
  */
 export const GUEST_KNOWN_READS = 20;
-export const guestKnownReads = new LookupBudget(GUEST_KNOWN_READS, GUEST_MISS_WINDOW_MS);
+export const guestKnownReads = new KeyedLookupBudget(
+  GUEST_KNOWN_READS,
+  GUEST_MISS_WINDOW_MS,
+  GUEST_KNOWN_MAX_ENTRIES,
+);
 
 /**
  * Refused lookups, counted per 10-second window (D7). The first refusal of a
@@ -246,7 +313,7 @@ const lookupPublicExperience: GuestHostLookup = async (env, host) => {
  * and outside local development no loopback-only name), because it never
  * trusts its caller's parsing. A `found` answer may come from the guest host
  * projection above. Otherwise a host this isolate has recently found takes
- * one of the known-host read slots, and any other host takes a token from
+ * one of its own known-host read slots, and any other host takes a token from
  * the miss budget; with neither, the answer is `limited`. Each read opens its
  * own connection and closes it. `lookup` is replaceable only so unit tests
  * can count reads.
@@ -265,7 +332,7 @@ export async function resolveGuestHost(
   if (cached) return { kind: "found", experience: structuredClone(cached) };
   if (!databaseUrl(env)) throw new Error("database_unconfigured");
   const known = guestKnownHosts.get(key, now) !== undefined;
-  const hold = known ? guestKnownReads.take(now) : guestMissBudget.take(now);
+  const hold = known ? guestKnownReads.take(key, now) : guestMissBudget.take(now);
   if (!hold) return refuseLookup(env, now);
   let found: PublicExperience;
   try {
@@ -273,12 +340,12 @@ export async function resolveGuestHost(
   } catch (error) {
     // A failed read of an unknown host keeps its token for the window.
     if (known) {
-      guestKnownReads.release(hold);
+      guestKnownReads.release(key, hold, Date.now());
       guestKnownHosts.delete(key);
     }
     throw error;
   }
-  if (known) guestKnownReads.release(hold);
+  if (known) guestKnownReads.release(key, hold, Date.now());
   else if (found.kind === "found") guestMissBudget.release(hold);
   if (found.kind === "miss") {
     guestKnownHosts.delete(key);
