@@ -19,7 +19,8 @@ export interface WaiverEmailInput {
   trip: ReturnType<typeof tripFacts>;
   /** How long the link lasts once sent, in days, rounded down; at least 1. */
   linkDays: number;
-  kind: "initial" | "resend";
+  /** A reminder (W1-G215-REMINDERS) leads with the trip being close. */
+  kind: "initial" | "resend" | "reminder";
 }
 
 /**
@@ -48,14 +49,26 @@ export function waiverRequestEmail(input: WaiverEmailInput): EmailContent {
       ? `${input.linkDays} day${input.linkDays === 1 ? "" : "s"}`
       : "a short time before the trip";
   return {
-    subject: guardian ? `Sign the waiver for ${who}: ${trip}` : `Sign your waiver for ${trip}`,
+    subject:
+      input.kind === "reminder"
+        ? guardian
+          ? `Reminder: sign the waiver for ${who}: ${trip}`
+          : `Reminder: sign your waiver for ${trip}`
+        : guardian
+          ? `Sign the waiver for ${who}: ${trip}`
+          : `Sign your waiver for ${trip}`,
     preview: `${operator} needs a signed waiver before ${elide(input.trip.when, 80)}.`,
     blocks: [
       {
         kind: "heading",
-        text: guardian
-          ? `A waiver for ${elide(input.participantName, 120)}`
-          : "Your waiver is ready to sign",
+        text:
+          input.kind === "reminder"
+            ? guardian
+              ? `${elide(input.participantName, 120)}'s waiver is not signed yet`
+              : "Your waiver is not signed yet"
+            : guardian
+              ? `A waiver for ${elide(input.participantName, 120)}`
+              : "Your waiver is ready to sign",
       },
       {
         kind: "paragraph",
@@ -76,7 +89,7 @@ export function waiverRequestEmail(input: WaiverEmailInput): EmailContent {
       { kind: "action", label: "Review and sign", href: "access_link" },
       {
         kind: "note",
-        text: `The link works once and lasts ${lasts}. If it has stopped working, ask ${input.operatorName} to send a new one.${input.kind === "resend" ? " This email replaces any earlier waiver link." : ""}`,
+        text: `The link works once and lasts ${lasts}. If it has stopped working, ask ${input.operatorName} to send a new one.${input.kind === "initial" ? "" : " This email replaces any earlier waiver link."}`,
       },
     ],
   };

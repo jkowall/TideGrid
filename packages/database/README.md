@@ -238,6 +238,16 @@ Migration `0020_waiver_staff_assisted.sql` (W1-G215-SIGNING; provisional number,
 - **Evidence.** `access_method` gains `staff_device` and `participant_qr`, `match_method` gains `staff_confirmed`, `recipient_email` may be null, and a new `assisted_by` names the staff member; `waiver_evidence_method_shape` pairs them. An insert trigger (`app.check_waiver_evidence_method`) holds each to the session's link: an emailed link's evidence records `email_link`, `signer_confirmed`, and its delivery's address; an assisted link's records its mode, `staff_confirmed`, and its staff member. Evidence stays append-only for every role.
 - The three trigger functions are invokers with `search_path` pinned and EXECUTE revoked from PUBLIC. No new index: the table's unique keys are its indexes (rule R4).
 
+## Waiver reminders (0025)
+
+Migration `0025_waiver_reminders.sql` (W1-G215-REMINDERS) adds reminder emails for unsigned waivers. The service is in the [waiver contract](../domain-waivers/README.md#reminders-w1-g215-reminders).
+
+- **`waiver_reminders`**, tenant-owned, under rules 1 to 10: one row per reminder, with its request, booking, participant, slot (`72h` or `24h`), message, and address. Forced row-level security with the `tenant_isolation` policy; composite foreign keys to its request and its message. The runtime keeps the default SELECT and INSERT; UPDATE, DELETE, and TRUNCATE raise for every role (`app.reject_mutation`). One per request and slot (`waiver_reminders_once`) and one per message.
+- **Its insert trigger** (`app.check_waiver_reminder`, an invoker with `search_path` pinned, EXECUTE revoked from PUBLIC) stamps `created_at`, requires a pending request whose trip leaves within the slot's hours and more than 2 hours from now (`waiver_reminders_window`), and requires the message queued in this same transaction under `waiver.reminder:<request>:<slot>` for the request's booking, participant, subject, and address (`waiver_reminders_message`).
+- **`app.waiver_reminder_tenants(limit)`**, SECURITY DEFINER with `search_path` pinned, EXECUTE for `tidegrid_app` only: the tenant ids with a pending waiver whose trip leaves within 72 hours and not within 2, least recently served first. `sweep_turns` accepts the sweep name `waiver_reminder`.
+- **Not counted by the sending limits.** `app.waiver_send_refusal` counts `waiver_deliveries` only, so reminders never hold a staff resend.
+- No new index: the table's unique keys are its indexes (rule R4).
+
 ## Staff resend residuals (0019)
 
 Migration `0019_resend_residuals.sql` (W1-0014-RESIDUALS; provisional number, claimed at merge, `0018` belongs to another goal) closes the three residuals the 0014 section above lists under "Not held here", for a writer with `tidegrid_app`'s credentials that skips the service. The owner pulled the goal forward on 2026-11-08 (O-SCOPE item 3 in the [decision register](../../docs/v2/06-decision-register.md)). Closing all three (D1), and running the rules in the existing triggers through an invoker function (D2), are coordinator defaults, pending owner confirmation.

@@ -382,7 +382,7 @@ export async function signWaiver(
 
   // How the signer arrived, from the session's own link: the address its
   // email went to (the link names its message, and the message its delivery
-  // generation), or the staff member who started an assisted signing.
+  // generation or its reminder), or the staff member who started an assisted signing.
   const { rows } = await sql<{
     now: Date;
     recipient_email: string | null;
@@ -390,12 +390,15 @@ export async function signWaiver(
     staff_id: string | null;
     staff_name: string | null;
   }>`
-    select now() as now, d.recipient_email, a.mode, a.actor_id as staff_id,
+    select now() as now, coalesce(d.recipient_email, w.recipient_email) as recipient_email,
+           a.mode, a.actor_id as staff_id,
            m.display_name as staff_name
       from waiver_signing_sessions s
       join guest_access_links l on l.tenant_id = s.tenant_id and l.id = s.access_link_id
       left join waiver_deliveries d
         on d.tenant_id = s.tenant_id and l.message_id is not null and d.message_id = l.message_id
+      left join waiver_reminders w
+        on w.tenant_id = s.tenant_id and l.message_id is not null and w.message_id = l.message_id
       left join waiver_assisted_links a
         on a.tenant_id = s.tenant_id and l.message_id is null and a.access_link_id = l.id
       left join tenant_memberships m
