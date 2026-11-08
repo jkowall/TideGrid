@@ -144,6 +144,12 @@ export function BookScreen({
    * checkout never moves the screen once the guest has moved on.
    */
   const epoch = useRef(0);
+  /**
+   * Changes with every new polling loop, so only the newest loop reads. Kept
+   * apart from `epoch`: a loop starting when the hold runs out must not drop
+   * the answer of a payment still in flight for the same checkout.
+   */
+  const polls = useRef(0);
   /** One command at a time: a double tap sends nothing twice. */
   const lock = useRef(false);
   useEffect(
@@ -155,6 +161,7 @@ export function BookScreen({
 
   const go = useCallback((next: Phase) => {
     epoch.current += 1;
+    polls.current += 1;
     setBusy(null);
     setWaiting(null);
     setStalled(false);
@@ -251,10 +258,10 @@ export function BookScreen({
     secret: string,
     label = "checking",
   ) => {
-    epoch.current += 1;
-    const mine = epoch.current;
-    const still = () => alive.current && epoch.current === mine;
-    setBusy(null);
+    polls.current += 1;
+    const step = epoch.current;
+    const mine = polls.current;
+    const still = () => alive.current && epoch.current === step && polls.current === mine;
     setStalled(false);
     setWaiting(label);
     void (async () => {
@@ -267,6 +274,8 @@ export function BookScreen({
         if (r.kind === "ok" && finalStates.has(r.value.state)) {
           // A payment whose event never arrived can still book or refund once resent: keep the page.
           if (r.value.state === "expired" && undelivered.current) {
+            // Stop reading and free the pay buttons, so the payment can be sent again.
+            setWaiting(null);
             setStalled(true);
             return;
           }
@@ -398,6 +407,9 @@ export function BookScreen({
       setMustResend(failedDelivery);
       if (failedDelivery) {
         // Settled, but its event didn't reach the booking: sending again redelivers it.
+        // Stop any read started when the hold ran out, and free the pay buttons.
+        polls.current += 1;
+        setWaiting(null);
         setNotice({
           kind: "notice",
           title: "The test payment hasn't reached your booking yet",
