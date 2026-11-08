@@ -28,6 +28,7 @@ import {
   deliveryText,
   methodText,
   relationshipText,
+  reminderText,
   resendFailureText,
   resendState,
   signerText,
@@ -215,6 +216,7 @@ function WaiverList({
             const status = waiverStatuses[p.status];
             const delivery = deliveryText(p, (iso) => instantText(iso, timeZone), now);
             const resend = resendState(p, now);
+            const reminder = reminderText(p, (iso) => instantText(iso, timeZone));
             const signedBy = p.request?.signed;
             return (
               <li key={p.participantId} className="wv-item">
@@ -245,6 +247,7 @@ function WaiverList({
                   </p>
                 )}
                 {!signedBy && delivery && <p className="wv-item__line wv-muted">{delivery}</p>}
+                {reminder && <p className="wv-item__line wv-muted">{reminder}</p>}
                 {p.status === "email_held" && (
                   <p className="wv-item__line wv-muted">
                     The booking's current address has no working link yet: a sending limit held it,

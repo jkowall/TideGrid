@@ -699,13 +699,15 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         finalization_exception_resolutions: ["INSERT", "SELECT"],
         // Staff-assisted waiver signing (0020): append-only, no UPDATE columns.
         waiver_assisted_links: ["INSERT", "SELECT"],
+        // Waiver reminders (0025).
+        waiver_reminders: ["INSERT", "SELECT"],
         // Email events (0021, W1-EMAIL-EVENTS): the inbox is append-only; the
         // unmatched events are a platform table reached through a function.
         email_events: ["INSERT", "SELECT"],
         email_events_unmatched: [],
-        // Sender domains (0024): read only; the admin connection writes them.
+        // Sender domains (0026): read only; the admin connection writes them.
         tenant_sender_domains: ["SELECT"],
-        // Suppression (0024): added by the events consumer, lifted by the admin.
+        // Suppression (0026): added by the events consumer, lifted by the admin.
         email_suppressions: ["INSERT", "SELECT"],
         // Delivery foundation (0023): outcomes are append-only; a dead letter
         // takes its replay reason once.

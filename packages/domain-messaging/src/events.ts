@@ -9,7 +9,7 @@
  * 1. The event parses to the documented envelope (schema version 1).
  * 2. Its `metadata.accountId` is this deployment's account, and its
  *    `source.domain` is this deployment's shared sending domain or an
- *    operator's verified sending domain (0024): for an event that joins a
+ *    operator's verified sending domain (0026): for an event that joins a
  *    message, that message's own operator's; for one that joins nothing, any
  *    operator's (`app.email_sender_domain_known`). Anything else is refused
  *    and recorded nowhere.
@@ -30,7 +30,7 @@
  * that joins no sent message is recorded once in a platform table, joined to
  * nothing.
  *
- * Suppression (0024). A complaint, or a hard bounce, newly recorded for a
+ * Suppression (0026). A complaint, or a hard bounce, newly recorded for a
  * message also suppresses its address for that message's operator only, in
  * the same transaction; delivery then fails that operator's later mail to it
  * as `address_suppressed`. A soft bounce suppresses nothing.
@@ -211,7 +211,7 @@ export interface IngestResult {
   /** Set when the event joined a message. */
   tenantId?: string;
   messageId?: string;
-  /** The event newly suppressed its message's address for that operator (0024). */
+  /** The event newly suppressed its message's address for that operator (0026). */
   suppressed?: boolean;
 }
 

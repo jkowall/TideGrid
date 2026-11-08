@@ -14,12 +14,20 @@ import {
   type TenantTransaction,
   type WaiverAccessMethod,
   type WaiverDeliveryKind,
+  type WaiverReminderSlot,
   type WaiverRequestState,
   type WaiverRevokedReason,
   type WaiverSignerRole,
 } from "@tidegrid/database";
 import { sql } from "kysely";
 import { MAX_GENERATIONS } from "./delivery.ts";
+import {
+  closedSinceInvitation,
+  latestEmailAt,
+  REMINDER_CUTOFF_HOURS,
+  REMINDER_GRACE_HOURS,
+  REMINDER_SLOTS,
+} from "./reminders.ts";
 import { maskEmail } from "./render.ts";
 import { findApplicableVersion } from "./templates.ts";
 
@@ -90,7 +98,15 @@ export interface ParticipantWaiver {
     };
     /** When staff may send it again; null when it cannot be sent again. */
     resendAvailableAt: Date | null;
+    /** Reminder emails before departure (W1-G215-REMINDERS). */
+    reminders: ParticipantWaiverReminders;
   };
+}
+
+export interface ParticipantWaiverReminders {
+  sent: { slot: WaiverReminderSlot; queuedAt: Date; state: MessageState; at: Date }[];
+  /** The next reminder while nothing changes; null when none will go. */
+  next: null | { slot: WaiverReminderSlot; at: Date };
 }
 
 export interface BookingWaivers {
@@ -137,10 +153,19 @@ interface Row {
   send_after: Date | null;
   /** The latest email's access was closed for a recipient change. */
   latest_closed: boolean | null;
+  latest_email_at: Date | null;
   /** The address the booking has now for the request's signer; null when it has none. */
   current_recipient: string | null;
   /** When the sending limits next allow a send to that address; null when they allow it now. */
   refusal_retry_after: Date | null;
+  /** When the booking's trip leaves. */
+  starts_at: Date;
+  /** The request's reminders (0025), oldest first. */
+  reminders:
+    | { slot: WaiverReminderSlot; queued_at: string; state: MessageState; at: string }[]
+    | null;
+  /** The state of a reminder sent after the latest invitation, the newest; null when none. */
+  reminder_after_state: MessageState | null;
   now: Date;
 }
 
@@ -164,14 +189,26 @@ async function rows(
            m.state as message_state,
            coalesce(m.sent_at, m.failed_at, m.canceled_at, m.last_attempt_at) as message_at,
            m.last_error_code as message_error,
-           (m.state = 'canceled' and m.last_error_code = 'recipient_changed')
-             or exists (select 1 from guest_access_links l
-                         where l.tenant_id = b.tenant_id and l.message_id = d.message_id
-                           and l.revoked_reason = 'recipient_changed') as latest_closed,
+           ${closedSinceInvitation(tenantId, sql<string>`r.id`)} as latest_closed,
+           ${latestEmailAt(tenantId, sql<string>`r.id`)} as latest_email_at,
            cr.address as current_recipient, f.retry_after as refusal_retry_after,
+           st.starts_at,
+           (select json_agg(json_build_object(
+                     'slot', w.slot, 'queued_at', w.created_at, 'state', wm.state,
+                     'at', coalesce(wm.sent_at, wm.failed_at, wm.canceled_at, w.created_at))
+                     order by w.created_at)
+              from waiver_reminders w
+              join email_messages wm on wm.tenant_id = w.tenant_id and wm.id = w.message_id
+             where w.tenant_id = b.tenant_id and w.request_id = r.id) as reminders,
+           (select wm.state from waiver_reminders w
+              join email_messages wm on wm.tenant_id = w.tenant_id and wm.id = w.message_id
+             where w.tenant_id = b.tenant_id and w.request_id = r.id
+               and w.created_at > d.created_at and wm.state <> 'canceled'
+             order by w.created_at desc limit 1) as reminder_after_state,
            now() as now
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
+      join scheduled_trips st on st.tenant_id = b.tenant_id and st.id = b.trip_id
       left join booking_participants p on p.tenant_id = b.tenant_id and p.booking_id = b.id
       left join lateral (
         select x.id, x.state, x.revoked_reason, x.required_signer, x.template_id,
@@ -217,8 +254,45 @@ function statusOf(row: Row, required: boolean): WaiverStatusCode {
   ) {
     return "email_held";
   }
-  if (row.message_state === "failed") return "email_failed";
+  // The newest email the guest should have: a reminder after the latest
+  // invitation, when there is one, else that invitation.
+  if ((row.reminder_after_state ?? row.message_state) === "failed") return "email_failed";
   return "waiting";
+}
+
+/**
+ * The reminders sent, and the next one the sweep would queue while nothing
+ * changes: the first slot not yet reminded that opens after the latest email
+ * and before the cutoff. Null while the waiver is not waiting on a working
+ * email.
+ */
+function remindersOf(row: Row, status: WaiverStatusCode): ParticipantWaiverReminders {
+  const sent = (row.reminders ?? []).map((r) => ({
+    slot: r.slot,
+    queuedAt: new Date(r.queued_at),
+    state: r.state,
+    at: new Date(r.at),
+  }));
+  if (status !== "waiting" && status !== "email_failed") return { sent, next: null };
+  // While an email is still on its way the sweep waits for it, and once sent
+  // it may cover a slot already open: only slots still to open are forecast.
+  const isPending = (state: MessageState | null) => state === "queued" || state === "sending";
+  const pending = isPending(row.message_state) || sent.some((r) => isPending(r.state));
+  // As the sweep counts it: from when each email was sent, not queued.
+  const latest = row.latest_email_at?.getTime() ?? 0;
+  const starts = new Date(row.starts_at).getTime();
+  const cutoff = starts - REMINDER_CUTOFF_HOURS * 3_600_000;
+  if (row.now.getTime() >= cutoff) return { sent, next: null };
+  // As the sweep decides: the latest slot already open, else the next to open.
+  let next: ParticipantWaiverReminders["next"] = null;
+  for (const s of REMINDER_SLOTS) {
+    if (sent.some((r) => r.slot === s.slot)) continue;
+    const opens = starts - s.hours * 3_600_000;
+    if (opens - REMINDER_GRACE_HOURS * 3_600_000 <= latest) continue;
+    if (opens <= row.now.getTime()) next = pending ? null : { slot: s.slot, at: row.now };
+    else if (!next) next = { slot: s.slot, at: new Date(opens) };
+  }
+  return { sent, next };
 }
 
 function resendAt(row: Row): Date | null {
@@ -304,6 +378,7 @@ async function assemble(
                     }
                   : null,
               resendAvailableAt: resendAt(row),
+              reminders: remindersOf(row, statusOf(row, booking.required)),
             }
           : null,
     });

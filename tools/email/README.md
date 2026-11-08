@@ -1,6 +1,6 @@
 # @tidegrid/email-cli
 
-The admin CLI for operators' sending domains and suppressed addresses (W3-G2.16-rest, migration `0024`). It runs on the admin connection, the only one that may add, verify, or retire a sending domain, or lift a suppression: the runtime role holds no EXECUTE on those functions (see the [database README](../../packages/database/README.md#sender-domains-and-suppression-0024)). Every command names one tenant by slug and runs in that tenant's transaction; the audit rows say actor `support` / `email-cli`.
+The admin CLI for operators' sending domains and suppressed addresses (W3-G2.16-rest, migration `0026`). It runs on the admin connection, the only one that may add, verify, or retire a sending domain, or lift a suppression: the runtime role holds no EXECUTE on those functions (see the [database README](../../packages/database/README.md#sender-domains-and-suppression-0026)). Every command names one tenant by slug and runs in that tenant's transaction; the audit rows say actor `support` / `email-cli`.
 
 ```sh
 DATABASE_URL=<admin url> pnpm --filter @tidegrid/email-cli email domain-status demo-harbor

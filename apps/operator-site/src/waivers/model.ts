@@ -51,6 +51,55 @@ export function deliveryText(
   return `${state ?? "Email queued"} to ${delivery.recipient}${nth}`;
 }
 
+const slotWords: Record<string, string> = {
+  "72h": "3 days before",
+  "24h": "1 day before",
+};
+
+/**
+ * The reminder emails before departure (W1-G215-REMINDERS), in words: the
+ * latest one sent, and the next one while nothing changes. Null for a signed
+ * waiver, or when there is nothing to say (or the API predates reminders).
+ */
+export function reminderText(
+  waiver: ParticipantWaiver,
+  when: (iso: string) => string,
+): string | null {
+  const reminders = waiver.request?.reminders;
+  if (waiver.request?.state !== "pending" || !reminders) return null;
+  const parts: string[] = [];
+  const last = reminders.sent.at(-1);
+  if (last) {
+    const what =
+      last.state === "failed"
+        ? "Reminder failed"
+        : last.state === "canceled"
+          ? "Reminder canceled"
+          : last.state === "sent"
+            ? "Reminder emailed"
+            : "Reminder queued";
+    parts.push(`${what} ${when(last.at ?? last.queuedAt)} (${slotWords[last.slot] ?? last.slot})`);
+  }
+  if (reminders.next) {
+    parts.push(
+      `Next reminder ${when(reminders.next.at)} (${slotWords[reminders.next.slot] ?? reminders.next.slot})`,
+    );
+  } else if (last && !emailOnItsWay(waiver)) {
+    // While an email is on its way a reminder may still follow it, so this
+    // is said only once nothing is pending.
+    parts.push("No more reminders before the trip");
+  }
+  return parts.length ? `${parts.join(". ")}.` : null;
+}
+
+function emailOnItsWay(waiver: ParticipantWaiver): boolean {
+  const pending = (state: string | undefined) => state === "queued" || state === "sending";
+  return (
+    pending(waiver.request?.delivery?.message?.state) ||
+    (waiver.request?.reminders?.sent ?? []).some((r) => pending(r.state))
+  );
+}
+
 /** Who signs: the participant, or a minor's parent or guardian. */
 export function signerText(waiver: ParticipantWaiver): string {
   if (waiver.request?.requiredSigner === "guardian") return "A parent or guardian signs";

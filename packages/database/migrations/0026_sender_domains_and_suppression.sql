@@ -1,4 +1,4 @@
--- 0024 per-operator sender domains and per-operator suppression (W3-G2.16-rest)
+-- 0026 per-operator sender domains and per-operator suppression (W3-G2.16-rest)
 --
 -- Pulled forward as code only by the owner on 2026-11-08
 -- (docs/v2/06-decision-register.md, "Code-only pilot pieces now"). Nothing
@@ -57,7 +57,7 @@
 DO $$
 BEGIN
   IF NOT (SELECT rolbypassrls OR rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user) THEN
-    RAISE EXCEPTION '0024 runs as the migration role, which bypasses row-level security';
+    RAISE EXCEPTION '0026 runs as the migration role, which bypasses row-level security';
   END IF;
 END;
 $$;

@@ -381,6 +381,8 @@ export interface TaxRateVersionsTable extends TermsAuthor {
   inclusive: Insert<boolean>;
   active: Insert<boolean>;
   reason: Insert<string>;
+  /** The location whose departures this version applies to; null for every location (0024). */
+  location_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
 export interface PromotionsTable {
@@ -1001,7 +1003,7 @@ export interface EmailEventsTable {
 export type SenderDomainStatus = "pending" | "verified" | "retired";
 
 /**
- * Read only for the runtime (0024, W3-G2.16-rest): the admin connection adds,
+ * Read only for the runtime (0026, W3-G2.16-rest): the admin connection adds,
  * verifies, and retires a domain through app.sender_domain_* functions.
  */
 export interface TenantSenderDomainsTable {
@@ -1019,7 +1021,7 @@ export interface TenantSenderDomainsTable {
 export type EmailSuppressionReason = "hard_bounce" | "complaint";
 
 /**
- * One operator's suppressed addresses (0024). A trigger joins each row to the
+ * One operator's suppressed addresses (0026). A trigger joins each row to the
  * tenant's own complaint or hard bounce and that message's address; only the
  * admin connection lifts one, through app.email_suppression_lift.
  */
@@ -1208,6 +1210,21 @@ export interface WaiverAssistedLinksTable {
   api_request_id: ColumnType<string | null, never, never>;
 }
 
+export type WaiverReminderSlot = "72h" | "24h";
+
+/** A reminder email for an unsigned waiver (0025, W1-G215-REMINDERS). Append-only. */
+export interface WaiverRemindersTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  request_id: Fixed<string>;
+  booking_id: Fixed<string>;
+  participant_id: Fixed<string>;
+  slot: Fixed<WaiverReminderSlot>;
+  message_id: Fixed<string>;
+  recipient_email: Fixed<string>;
+  created_at: Stamped;
+}
+
 /** Tables added by the waiver migration (G2.15), merged into Database below. */
 interface WaiverTables {
   waiver_templates: WaiverTemplatesTable;
@@ -1217,10 +1234,11 @@ interface WaiverTables {
   waiver_signing_sessions: WaiverSigningSessionsTable;
   waiver_evidence: WaiverEvidenceTable;
   waiver_assisted_links: WaiverAssistedLinksTable;
+  waiver_reminders: WaiverRemindersTable;
 }
 
 /** The cron's cross-tenant sweeps that take fair turns (0013). */
-export type SweepName = "hold" | "checkout" | "email" | "hostname" | "outbox";
+export type SweepName = "hold" | "checkout" | "email" | "hostname" | "outbox" | "waiver_reminder";
 
 /**
  * When a sweep last started a turn for a tenant (0013, pre-pilot hardening).
@@ -1308,7 +1326,7 @@ export interface Database
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
   // Email bounce and complaint events (0021, W1-EMAIL-EVENTS).
   email_events: EmailEventsTable;
-  // Per-operator sender domains and suppression (0024, W3-G2.16-rest).
+  // Per-operator sender domains and suppression (0026, W3-G2.16-rest).
   tenant_sender_domains: TenantSenderDomainsTable;
   email_suppressions: EmailSuppressionsTable;
   // Delivery foundation (0023, W3-G2.3).

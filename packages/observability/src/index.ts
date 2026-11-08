@@ -130,6 +130,16 @@ export interface RequestAttributes {
   "tidegrid.outbox_publish.complete"?: boolean;
   "tidegrid.delivery_cleanup.idempotency_keys_deleted"?: number;
   "tidegrid.delivery_cleanup.quotes_deleted"?: number;
+  /** Waiver reminder sweep (W1-G215-REMINDERS). Counts only. */
+  "tidegrid.waiver_reminder_sweep.tenant_count"?: number;
+  "tidegrid.waiver_reminder_sweep.queued_count"?: number;
+  "tidegrid.waiver_reminder_sweep.skipped_count"?: number;
+  "tidegrid.waiver_reminder_sweep.failed_tenant_count"?: number;
+  "tidegrid.waiver_reminder_sweep.complete"?: boolean;
+  "tidegrid.waiver_reminder_sweep.turn_count"?: number;
+  "tidegrid.waiver_reminder_sweep.pass_count"?: number;
+  "tidegrid.waiver_reminder_sweep.deferred_tenant_count"?: number;
+  "tidegrid.waiver_reminder_sweep.stamp_failure_count"?: number;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -248,6 +258,16 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.outbox_publish.complete",
   "tidegrid.delivery_cleanup.idempotency_keys_deleted",
   "tidegrid.delivery_cleanup.quotes_deleted",
+  // Waiver reminder sweep (W1-G215-REMINDERS).
+  "tidegrid.waiver_reminder_sweep.tenant_count",
+  "tidegrid.waiver_reminder_sweep.queued_count",
+  "tidegrid.waiver_reminder_sweep.skipped_count",
+  "tidegrid.waiver_reminder_sweep.failed_tenant_count",
+  "tidegrid.waiver_reminder_sweep.complete",
+  "tidegrid.waiver_reminder_sweep.turn_count",
+  "tidegrid.waiver_reminder_sweep.pass_count",
+  "tidegrid.waiver_reminder_sweep.deferred_tenant_count",
+  "tidegrid.waiver_reminder_sweep.stamp_failure_count",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

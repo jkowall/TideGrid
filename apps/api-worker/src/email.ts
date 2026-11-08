@@ -118,7 +118,7 @@ function senderIsValid(env: Bindings): boolean {
 
 /**
  * Whether an operator without a verified sending domain may use the shared
- * sender (W3-G2.16-rest, 0024). EMAIL_SENDER_POLICY names it; unset, it is
+ * sender (W3-G2.16-rest, 0026). EMAIL_SENDER_POLICY names it; unset, it is
  * `operator_only` in production, where the Core live gate asks each operator
  * to send from its own authenticated domain, and `shared` elsewhere. Null
  * when the value is not a policy, which refuses email.

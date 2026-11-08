@@ -21132,6 +21132,83 @@
                                     ],
                                     "format": "date-time",
                                     "description": "When staff may send it again; null when it cannot be sent again"
+                                  },
+                                  "reminders": {
+                                    "type": "object",
+                                    "properties": {
+                                      "sent": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "slot": {
+                                              "type": "string",
+                                              "enum": [
+                                                "72h",
+                                                "24h"
+                                              ],
+                                              "description": "Which reminder: from 72 or from 24 hours before departure"
+                                            },
+                                            "queuedAt": {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            },
+                                            "state": {
+                                              "type": "string",
+                                              "enum": [
+                                                "queued",
+                                                "sending",
+                                                "sent",
+                                                "failed",
+                                                "canceled"
+                                              ]
+                                            },
+                                            "at": {
+                                              "type": "string",
+                                              "format": "date-time",
+                                              "description": "When the email was sent, failed, or was canceled; its queue time while it waits"
+                                            }
+                                          },
+                                          "required": [
+                                            "slot",
+                                            "queuedAt",
+                                            "state",
+                                            "at"
+                                          ]
+                                        },
+                                        "description": "Reminder emails queued for this request, oldest first"
+                                      },
+                                      "next": {
+                                        "type": [
+                                          "object",
+                                          "null"
+                                        ],
+                                        "properties": {
+                                          "slot": {
+                                            "type": "string",
+                                            "enum": [
+                                              "72h",
+                                              "24h"
+                                            ],
+                                            "description": "Which reminder: from 72 or from 24 hours before departure"
+                                          },
+                                          "at": {
+                                            "type": "string",
+                                            "format": "date-time"
+                                          }
+                                        },
+                                        "required": [
+                                          "slot",
+                                          "at"
+                                        ],
+                                        "description": "The next reminder while nothing changes; null when none will go"
+                                      }
+                                    },
+                                    "required": [
+                                      "sent",
+                                      "next"
+                                    ],
+                                    "description": "Reminder emails before departure: 72 and 24 hours before, none within 2 hours"
                                   }
                                 },
                                 "required": [
@@ -21144,7 +21221,8 @@
                                   "assignedAt",
                                   "signed",
                                   "delivery",
-                                  "resendAvailableAt"
+                                  "resendAvailableAt",
+                                  "reminders"
                                 ]
                               }
                             },
@@ -21573,6 +21651,83 @@
                                       ],
                                       "format": "date-time",
                                       "description": "When staff may send it again; null when it cannot be sent again"
+                                    },
+                                    "reminders": {
+                                      "type": "object",
+                                      "properties": {
+                                        "sent": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "slot": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "72h",
+                                                  "24h"
+                                                ],
+                                                "description": "Which reminder: from 72 or from 24 hours before departure"
+                                              },
+                                              "queuedAt": {
+                                                "type": "string",
+                                                "format": "date-time"
+                                              },
+                                              "state": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "queued",
+                                                  "sending",
+                                                  "sent",
+                                                  "failed",
+                                                  "canceled"
+                                                ]
+                                              },
+                                              "at": {
+                                                "type": "string",
+                                                "format": "date-time",
+                                                "description": "When the email was sent, failed, or was canceled; its queue time while it waits"
+                                              }
+                                            },
+                                            "required": [
+                                              "slot",
+                                              "queuedAt",
+                                              "state",
+                                              "at"
+                                            ]
+                                          },
+                                          "description": "Reminder emails queued for this request, oldest first"
+                                        },
+                                        "next": {
+                                          "type": [
+                                            "object",
+                                            "null"
+                                          ],
+                                          "properties": {
+                                            "slot": {
+                                              "type": "string",
+                                              "enum": [
+                                                "72h",
+                                                "24h"
+                                              ],
+                                              "description": "Which reminder: from 72 or from 24 hours before departure"
+                                            },
+                                            "at": {
+                                              "type": "string",
+                                              "format": "date-time"
+                                            }
+                                          },
+                                          "required": [
+                                            "slot",
+                                            "at"
+                                          ],
+                                          "description": "The next reminder while nothing changes; null when none will go"
+                                        }
+                                      },
+                                      "required": [
+                                        "sent",
+                                        "next"
+                                      ],
+                                      "description": "Reminder emails before departure: 72 and 24 hours before, none within 2 hours"
                                     }
                                   },
                                   "required": [
@@ -21585,7 +21740,8 @@
                                     "assignedAt",
                                     "signed",
                                     "delivery",
-                                    "resendAvailableAt"
+                                    "resendAvailableAt",
+                                    "reminders"
                                   ]
                                 }
                               },

@@ -25,7 +25,27 @@ Coordinator defaults, pending owner confirmation:
 
 Security review under rule R9, run under the owner's go to merge without asking him: no critical or high finding. Fixed: any account-level fault on an operator's own sender except a suspended account now holds that operator only (M2); a domain may not be a parent or subdomain of another operator's live domain; the known-domain check answers only for domains verified now; the CLI refuses an address in audited text. Recorded: whether Cloudflare suppresses per account or per sending domain decides whether one operator's complaint still blocks another's mail at Cloudflare (M1, an owner question); a writer with the runtime's credentials can still record a made-up complaint for its own tenant, and so suppress within its own tenant (0021's residual); the message does not store which domain sent it.
 
-Owner steps before any operator sends from its own domain: onboard the domain in Cloudflare Email Sending; have the operator publish the records Cloudflare lists; allow the address on the API Worker's `send_email` binding (or remove its `allowed_sender_addresses` list); release the API; then run `email domain-verify`. Migration `0024` (provisional) goes on Neon with the next release. Canonical: the [database README](../../packages/database/README.md#sender-domains-and-suppression-0024), the [messaging README](../../packages/domain-messaging/README.md#sender-domains-and-suppression-w3-g216-rest), and the [email CLI README](../../tools/email/README.md).
+Owner steps before any operator sends from its own domain: onboard the domain in Cloudflare Email Sending; have the operator publish the records Cloudflare lists; allow the address on the API Worker's `send_email` binding (or remove its `allowed_sender_addresses` list); release the API; then run `email domain-verify`. Migration `0026` (provisional) goes on Neon with the next release. Canonical: the [database README](../../packages/database/README.md#sender-domains-and-suppression-0026), the [messaging README](../../packages/domain-messaging/README.md#sender-domains-and-suppression-w3-g216-rest), and the [email CLI README](../../tools/email/README.md).
+
+### 2026-11-08: W1-G215-REMINDERS, waiver reminders up to a completion cutoff (coordinator defaults pending owner confirmation)
+
+The second of the three waiver goals the owner pulled into the demo on 2026-11-08, under the [W1-G215-SIGNING entry](#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation), which quotes the owner. The goal's two open questions are owner decisions. The owner's message asked for the work to be done and did not answer them, so the coordinator's suggestions apply as defaults, pending owner confirmation:
+
+- **D1: two reminders, 72 and 24 hours before departure, none within 2 hours.** A slot is skipped when an email went out after it opened or in the 12 hours before, so no guest gets a reminder right after their first email.
+- **D2: reminders do not count against the staff resend limits.** They are not delivery generations, so they never use up the five sends or hold a staff resend, and the limits never count them. A reminder still waits 10 minutes after the participant's last delivery generation to the same address.
+
+Migration `0025` and the service are in the [waiver contract](../../packages/domain-waivers/README.md#reminders-w1-g215-reminders). A new cron step queues due reminders before the email sweep, and is skipped while email is off. No SMS, no change to staff resends. Canonical: the [database README](../../packages/database/README.md#waiver-reminders-0025).
+### 2026-11-08: W3-G2.5-TAX, per-location tax rates entered by each operator (synthetic pull-forward; coordinator default in place of the CPA's answer)
+
+The tracker held this goal until the Validation gate passed and the register recorded a CPA's per-location tax answer. At 17:35 UTC on 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That waives the Validation gate and the O-VAL-2 dependency as a synthetic pull-forward. About the open pilot questions, the owner then wrote on 2026-11-08 at 19:58 UTC: "I already gave answers to this one, so nothing is needed for the pilot." The owner has no accountant, so there is no CPA step.
+
+Coordinator default, chosen by the coordinator in place of the CPA's answer, pending owner confirmation:
+
+- **Each operator enters its own tax rates, per location.** A tax rate version applies at every location, as before, or at the one location it names. TideGrid calculates and displays the rates; it decides nothing about what is owed. That stays the operator's responsibility, as the [pricing README](../../packages/domain-pricing/README.md#terms) already says.
+- **The location is part of the version.** Moving a rate appends a version. A version that does not name a location keeps the current one, so a scoped rate never widens to every location by accident; an explicit null applies it everywhere.
+- **One location per version.** A tax that applies at two of several docks is two rates, or one rate for every location if it applies at all of them.
+
+Migration `0024` (`0023` went to the delivery foundation). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0024).
 
 ### 2026-11-08: Wave 3 code-only pull-forward, and W3-G2.3 delivery foundation (owner decision; coordinator defaults pending owner confirmation)
 
@@ -122,6 +142,8 @@ On 2026-11-08 the owner wrote: "My customers really want mobile native apps. Is 
 - **Owner inputs, needed before distribution.** Apple Developer Program ($99 a year) and Google Play developer registration ($25 once) for a TideGrid-owned test account; the account holder's identity; go for each goal. Expo and its packages are new npm dependencies, so the first goal's packet names them for the owner's go under the shared rules.
 
 Not done: no code, no account, and no build. The goals are W1N-APP, W1N-JOURNEYS, and W1N-TESTFLIGHT in the roadmap tracker.
+
+Status 2026-11-08: W1N-APP is built on branch `claude/project-thread-bqlorn` under the owner's go of 20:03 UTC: `apps/guest-native`, Expo SDK 58 and React Native 0.88, two variants, no API change. The app presents its variant's guest origin, because the API picks the operator from the Origin header, and it refuses any answer for another operator. The owner chose on 2026-11-08 to build on his own Mac with Xcode and Android Studio rather than Expo's cloud service. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
 
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
