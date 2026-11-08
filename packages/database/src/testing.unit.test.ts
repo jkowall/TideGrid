@@ -1,3 +1,4 @@
+import { domainToASCII } from "node:url";
 import postgres from "postgres";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -327,6 +328,43 @@ describe("connectionHosts returns every host postgres.js lists, on nine fixed UR
           source({ NEON_MAIN_HOST: mainHost, TIDEGRID_NEON_BRANCH: "1" }),
         ),
       ).toMatch(/recorded in NEON_MAIN_HOST/);
+    }
+  });
+
+  it("treats Unicode spellings of the main host as main, as the resolver does", () => {
+    // Node's resolver applies IDNA mapping: an ideographic full stop, a
+    // fullwidth dot, or fullwidth letters reach the same host.
+    const aliases = [
+      mainHost.replaceAll(".", "\u3002"),
+      mainHost.replace(".", "\uFF0E"),
+      `\uFF45\uFF50${mainHost.slice(2)}`,
+      mainHost.replaceAll(".", "%E3%80%82"),
+    ];
+    for (const alias of aliases) {
+      expect(domainToASCII(decodeURIComponent(alias))).toBe(mainHost);
+      for (const url of [
+        `postgresql://u:p@${alias}/db`,
+        `postgresql://u:p@${alias},127.0.0.1/db`,
+      ]) {
+        const tests = neonMainRefusal(url, "tests", source({ NEON_MAIN_HOST: mainHost }));
+        expect(tests).toMatch(/recorded in NEON_MAIN_HOST/);
+        expectNoEcho(tests);
+        expect(
+          neonMainRefusal(
+            url,
+            { appRole: { neonMain: false } },
+            source({ NEON_MAIN_HOST: mainHost }),
+          ),
+        ).toMatch(/Pass --neon-main/);
+      }
+      // The opt-in takes only the plain spelling: an alias refuses, fail closed.
+      expect(
+        neonMainRefusal(
+          `postgresql://u:p@${alias}/db`,
+          { appRole: { neonMain: true } },
+          source({ NEON_MAIN_HOST: mainHost }),
+        ),
+      ).toMatch(/not only the Neon main host/);
     }
   });
 

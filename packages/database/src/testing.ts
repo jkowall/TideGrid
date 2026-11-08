@@ -8,7 +8,7 @@
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { domainToASCII, fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import postgres from "postgres";
 import { migrate } from "./migrate.ts";
@@ -103,12 +103,27 @@ const hostNamePattern =
   /^(?=.{1,253}\.?$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?$/i;
 
 /**
+ * A DNS name as the resolver will look it up. Node's resolver applies IDNA
+ * mapping, so `ep-main。region.aws.neon.tech` (an ideographic full stop, or a
+ * fullwidth letter) reaches the same host as its ASCII spelling; comparing the
+ * raw text would let such an alias past the main-host check. A socket path or
+ * a value IDNA rejects is left as it is.
+ */
+function canonicalDns(host: string): string {
+  // ASCII names pass through untouched, exactly as postgres.js lists them.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the ASCII range is the point
+  if (/^[\x00-\x7f]*$/.test(host) || host.startsWith("/") || host.startsWith("[")) return host;
+  const ascii = domainToASCII(host);
+  return ascii === "" ? host : ascii;
+}
+
+/**
  * Lowercase, no trailing dot, and a Neon pooled endpoint folded onto its
  * direct endpoint (ep-x-pooler.region.aws.neon.tech and ep-x.region.aws.neon.tech
  * reach the same compute).
  */
 function normalizeHost(host: string): string {
-  let h = host.trim().toLowerCase().replace(/\.$/, "");
+  let h = canonicalDns(host.trim()).toLowerCase().replace(/\.$/, "");
   if (isNeonHostName(h)) {
     const dot = h.indexOf(".");
     const first = dot === -1 ? h : h.slice(0, dot);
@@ -171,7 +186,18 @@ export function connectionHosts(
   const client = postgresJsHosts(url, env);
   if (whatwg === null || client === null) return null;
   const hosts = whatwg.length > 0 ? whatwg : envHosts(env);
-  return [...new Set([...hosts, ...client].map(normalizeHost))];
+  // Each host as written, and as a resolver could read it once
+  // percent-decoded and IDNA-mapped. Matching either form refuses.
+  return [...new Set([...hosts, ...client].flatMap((h) => [h, decodedHost(h)]).map(normalizeHost))];
+}
+
+/** A host with its percent escapes decoded, or as it is when they do not decode. */
+function decodedHost(host: string): string {
+  try {
+    return decodeURIComponent(host);
+  } catch {
+    return host;
+  }
 }
 
 /** The URL's own hosts by a WHATWG parse, [] when it names none, null when it does not parse. */
