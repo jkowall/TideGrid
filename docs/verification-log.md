@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Demo guest app shell (W1N-APP), built November 8, 2026
+
+Goal branch `claude/project-thread-bqlorn`, from `main` at `ddc7d6d`, under the owner's go of 20:03 UTC and his decision of 17:45 UTC ([decision register](v2/06-decision-register.md#2026-11-08-demo-guest-app-pulled-forward-into-the-demo-owner-decision)). No migration, no API change.
+
+- **Built.** `apps/guest-native`: one Expo SDK 58 and React Native 0.88 app, built per variant from `variants/` through `TIDEGRID_VARIANT`. It loads the brand and the next four weeks of trips through the existing public routes and `@tidegrid/contracts`, and fails closed on an answer for another operator. Strict `atob` and `TextDecoder` stand-ins load first, only where Hermes lacks them, for the brand contract's logo check.
+- **Checks.** Unit tests in Node (variants, the endpoint guard, the loaders, the stand-ins against Node's own). `pnpm --filter @tidegrid/guest-native bundle:check` built the iOS and Android bundles for both variants with Metro. `expo prebuild` for Demo Harbor produced the bundle id and application id from the variant file; the generated projects were deleted.
+- **Against a local API.** On the pinned PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`, `local-db.sh prepare guest-e2e`, the API in `wrangler dev`), the app's loaders, run in Node, returned each operator's brand and trips (42 for Demo Harbor, 45 for Demo Reef), `wrong-tenant` for a Harbor build given Reef's origin, and `not-published` for an unknown host.
+- **Independent review:** accept with fixes, no tenant isolation finding. Fixed: the `atob` and `TextDecoder` stand-ins now follow the WHATWG algorithms in full (default and replacement decoding, the utf-8 labels, the exact `atob` refusals), and the app tests the engine's own versions at start instead of only checking that they exist, since Expo's fetch also decodes with `TextDecoder`; the API override must be https unless the build presents its own local origin, and `TIDEGRID_RELEASE=1` refuses any override; text on the brand color uses the contract's own ink color; the loaders' promises end on the failed screen if they ever reject; the trip list clears the home indicator; the slug-mismatch branch has a test. Recorded: the lockfile adds only the app's packages; vite and vitest snapshots in other packages now name `terser` as a peer, with no resolved version changed.
+- **Not shown.** No simulator or phone run: this container has no Xcode or Android emulator. Whether Hermes keeps its own `atob` and `TextDecoder`, and whether React Native's fetch sends the `origin` header as set, are for W1N-TESTFLIGHT on the owner's Mac. The logo and brand fonts are not drawn yet.
+
 ### W1-G215-REMINDERS: waiver reminders before departure, built November 8, 2026
 
 Two automatic reminder emails, 72 and 24 hours before departure, for a waiver still waiting for a signature, with migration `0025` ([decision register](v2/06-decision-register.md#2026-11-08-w1-g215-reminders-waiver-reminders-up-to-a-completion-cutoff-coordinator-defaults-pending-owner-confirmation)). Built on `claude/project-thread-p7r7vu` from `main` at `ba9b6de` (W1-G215-SIGNING's `0020`). Not released, and `0021` is not on Neon main.

@@ -124,6 +124,8 @@ On 2026-11-08 the owner wrote: "My customers really want mobile native apps. Is 
 
 Not done: no code, no account, and no build. The goals are W1N-APP, W1N-JOURNEYS, and W1N-TESTFLIGHT in the roadmap tracker.
 
+Status 2026-11-08: W1N-APP is built on branch `claude/project-thread-bqlorn` under the owner's go of 20:03 UTC: `apps/guest-native`, Expo SDK 58 and React Native 0.88, two variants, no API change. The app presents its variant's guest origin, because the API picks the operator from the Origin header, and it refuses any answer for another operator. The owner chose on 2026-11-08 to build on his own Mac with Xcode and Android Studio rather than Expo's cloud service. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
+
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
