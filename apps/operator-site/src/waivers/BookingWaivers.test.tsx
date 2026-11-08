@@ -277,6 +277,7 @@ describe("signing at the dock", () => {
     expect(JSON.parse(String(start?.init?.body))).toEqual({
       mode: "participant_qr",
       identityChecked: true,
+      participantName: "Ben Waiting",
     });
     // The link is drawn, never written out on the page.
     expect(document.body.textContent).not.toContain("Q".repeat(43));

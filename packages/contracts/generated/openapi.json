@@ -22271,11 +22271,18 @@
                       true
                     ],
                     "description": "The staff member checked who signs: the participant, or for a minor, their parent or legal guardian. Recorded with the evidence"
+                  },
+                  "participantName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "The participant's name as the console showed it when staff checked: refused with waiver_participant_changed when the booking names someone else now"
                   }
                 },
                 "required": [
                   "mode",
-                  "identityChecked"
+                  "identityChecked",
+                  "participantName"
                 ]
               }
             }

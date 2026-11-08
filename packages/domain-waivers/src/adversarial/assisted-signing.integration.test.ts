@@ -55,6 +55,8 @@ import {
   asApp,
   book,
   closeWorld,
+  deliverWith,
+  fakeMail,
   guestCtx,
   liveRequest,
   name,
@@ -144,7 +146,7 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
     world = openWorld(env, 12);
     deps = fixtureDeps();
     hooks = fixtureHooks();
-    A = await createWaiverFixture(world.admin, world.db, "wvsa", { days: 10 });
+    A = await createWaiverFixture(world.admin, world.db, "wvsa", { days: 12 });
     B = await createWaiverFixture(world.admin, world.db, "wvsb", { days: 2 });
     nextTrip = trips(A);
     staffA = await addStaff(A, "Dana Dock");
@@ -426,6 +428,31 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
     const rcode = await issued(A.id, staffA, rreq, "staff_device");
     await name(world, A.id, renamed.bookingId, 1, adult("Ro Again", ro), hooks);
     expect(await redeem(world, A.id, rcode.token)).not.toMatchObject({ kind: "opened" });
+    // A console that still shows the old name cannot vouch for the new one.
+    const stale = staffCtx(A.id, staffA);
+    expect(
+      await inTenantTransaction(world.db, stale, (trx) =>
+        startAssistedSigning(trx, stale, deps, {
+          requestId: rreq,
+          mode: "staff_device",
+          identityChecked: true,
+          participantName: "Ro After",
+        }),
+      ),
+    ).toEqual({ kind: "participant_changed" });
+
+    // A rename while the first email still waits to go out leaves it waiting.
+    const queued = await book(world, A, nextTrip(), 1, hooks);
+    const qp = await name(world, A.id, queued.bookingId, 1, adult("Quin First", ro), hooks);
+    const qreq = (await liveRequest(world.admin, queued.bookingId, qp)).id;
+    await issued(A.id, staffA, qreq, "staff_device");
+    await name(world, A.id, queued.bookingId, 1, adult("Quin Second", ro), hooks);
+    await deliverWith(world.db, A.id, fakeMail(world.db));
+    const [waiting] = await world.admin<{ state: string }[]>`
+      select m.state from public.waiver_deliveries d
+        join public.email_messages m on m.id = d.message_id
+       where d.request_id = ${qreq}`;
+    expect(waiting?.state).toBe("sent");
 
     // The guardian's new name does the same for a minor's request.
     const kid = await book(world, A, nextTrip(), 1, hooks);

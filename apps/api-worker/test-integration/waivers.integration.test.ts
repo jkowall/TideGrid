@@ -648,7 +648,7 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
         as,
         body,
       });
-    const qr = { mode: "participant_qr", identityChecked: true };
+    const qr = { mode: "participant_qr", identityChecked: true, participantName: "Ann Adult" };
     // Finance cannot start one; the other operator finds no such request.
     expect((await start(A.finance, p.annRequest, qr)).status).toBe(403);
     expect((await start(B.owner, p.annRequest, qr, B.id)).json.error?.code).toBe(
@@ -656,8 +656,24 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     );
     // The identity box is not optional.
     expect(
-      (await start(A.staff, p.annRequest, { mode: "staff_device", identityChecked: false })).status,
+      (
+        await start(A.staff, p.annRequest, {
+          mode: "staff_device",
+          identityChecked: false,
+          participantName: "Ann Adult",
+        })
+      ).status,
     ).toBe(400);
+    // A name the booking no longer has: the console showed someone else.
+    expect(
+      (
+        await start(A.staff, p.annRequest, {
+          mode: "staff_device",
+          identityChecked: true,
+          participantName: "Someone Else",
+        })
+      ).json.error?.code,
+    ).toBe("waiver_participant_changed");
     expect((await start(A.staff, p.annRequest, { mode: "staff_device" })).status).toBe(400);
 
     const first = await start(A.staff, p.annRequest, qr);
@@ -682,6 +698,7 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     const second = await start(A.owner, p.annRequest, {
       mode: "staff_device",
       identityChecked: true,
+      participantName: "Ann Adult",
     });
     expect(second.status).toBe(201);
     const secondToken = (second.json.signing as { url: string }).url.split("#t=")[1] ?? "";

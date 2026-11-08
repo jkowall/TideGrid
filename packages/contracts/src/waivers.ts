@@ -323,6 +323,14 @@ export const WaiverAssistedStartRequest = z.object({
     .describe(
       "The staff member checked who signs: the participant, or for a minor, their parent or legal guardian. Recorded with the evidence",
     ),
+  participantName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .describe(
+      "The participant's name as the console showed it when staff checked: refused with waiver_participant_changed when the booking names someone else now",
+    ),
 });
 export type WaiverAssistedStartRequest = z.infer<typeof WaiverAssistedStartRequest>;
 

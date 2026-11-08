@@ -442,7 +442,12 @@ function AssistedDialog({
     setFieldError(undefined);
     setError(null);
     setBusy(true);
-    const result = await startAssistedSigning(tenantId, participant.request?.id ?? "", mode);
+    const result = await startAssistedSigning(
+      tenantId,
+      participant.request?.id ?? "",
+      mode,
+      participant.name,
+    );
     setBusy(false);
     if (result.kind === "issued") setIssued({ url: result.url, expiresAt: result.expiresAt });
     else setError(assistedFailureText(result.reason));

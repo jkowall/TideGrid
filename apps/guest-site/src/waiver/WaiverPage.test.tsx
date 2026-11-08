@@ -496,6 +496,41 @@ describe("the waiver page", () => {
       }
     });
 
+    it("drops a signed copy still downloading when Done clears the page", async () => {
+      let finish: () => void = () => {};
+      const createObjectURL = vi.fn(() => "blob:waiver");
+      vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+      stubApi((call) => {
+        if (call.url.endsWith("/waiver-sessions")) {
+          return json(201, { sessionSecret: secret, waiver: waiver({ access: "participant_qr" }) });
+        }
+        if (call.method === "DELETE") return new Response(null, { status: 204 });
+        if (call.url.endsWith("/document")) {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              finish = () => {
+                controller.enqueue(new TextEncoder().encode("%PDF-1.7"));
+                controller.close();
+              };
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "content-type": "application/pdf" },
+          });
+        }
+        return json(201, { waiver: { ...signedWaiver(), access: "participant_qr" } });
+      });
+      renderPage();
+      await signFlow();
+      fireEvent.click(screen.getByRole("button", { name: "Download your signed copy" }));
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await screen.findByRole("heading", { name: "All done" });
+      finish();
+      await new Promise((r) => setTimeout(r, 200));
+      expect(createObjectURL).not.toHaveBeenCalled();
+    });
+
     it("after Done on the guest's own phone, says all done without asking to hand it back", async () => {
       stubApi((call) => {
         if (call.url.endsWith("/waiver-sessions")) {

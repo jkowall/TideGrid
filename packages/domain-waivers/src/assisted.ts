@@ -31,6 +31,7 @@ import { hashLinkToken, newAccessToken } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { tripIsOver } from "./booking.ts";
 import { lockRequest } from "./delivery.ts";
+import { comparableName } from "./format.ts";
 import { WAIVER_LINK_PATH, WAIVER_LINK_PURPOSE, waiverSubject } from "./links.ts";
 import type { WaiverDeps } from "./ports.ts";
 
@@ -59,6 +60,9 @@ export type AssistedStartResult =
 /**
  * End a request's staff-assisted access: its unused assisted links, and the
  * open sessions those links started. The emailed link and its session stay.
+ * The links end as `superseded`, never `withdrawn`: the messaging module
+ * cancels a waiting email when a later link of its subject was withdrawn,
+ * and a waiting invitation must still go out.
  * Used when a new code replaces the old one, and when the signer's name
  * changes, since the staff member confirmed the person by the old name.
  */
@@ -66,11 +70,11 @@ export async function endAssistedAccess(
   trx: TenantTransaction,
   tenantId: string,
   request: { id: string; booking_id: string; participant_id: string },
-  reasons: { link: "superseded" | "withdrawn"; session: "superseded" | "participant_changed" },
+  sessionReason: "superseded" | "participant_changed",
 ): Promise<void> {
   await sql`
     update guest_access_links l
-       set revoked_at = now(), revoked_reason = ${reasons.link}
+       set revoked_at = now(), revoked_reason = 'superseded'
      where l.tenant_id = ${tenantId} and l.booking_id = ${request.booking_id}
        and l.purpose = ${WAIVER_LINK_PURPOSE}
        and l.participant_id = ${request.participant_id}
@@ -79,7 +83,7 @@ export async function endAssistedAccess(
        and l.consumed_at is null and l.revoked_at is null`.execute(trx);
   await sql`
     update waiver_signing_sessions s
-       set revoked_at = now(), revoked_reason = ${reasons.session}
+       set revoked_at = now(), revoked_reason = ${sessionReason}
       from waiver_assisted_links a
      where s.tenant_id = ${tenantId} and s.request_id = ${request.id}
        and s.revoked_at is null
@@ -94,7 +98,17 @@ export async function startAssistedSigning(
   trx: TenantTransaction,
   ctx: TenantContext,
   deps: WaiverDeps,
-  input: { requestId: string; mode: WaiverAssistedMode; identityChecked: boolean },
+  input: {
+    requestId: string;
+    mode: WaiverAssistedMode;
+    identityChecked: boolean;
+    /**
+     * The participant's name as staff saw it when they checked. A booking
+     * that names someone else now is refused, so a dialog left open across a
+     * rename never vouches for a person nobody checked.
+     */
+    participantName?: string;
+  },
 ): Promise<AssistedStartResult> {
   if (!isUuid(input.requestId)) return { kind: "not_found" };
   if (input.identityChecked !== true) return { kind: "identity_unchecked" };
@@ -110,14 +124,17 @@ export async function startAssistedSigning(
   if (!participant || (request.required_signer === "guardian") !== participant.minor) {
     return { kind: "participant_changed" };
   }
+  if (
+    input.participantName !== undefined &&
+    comparableName(input.participantName) !== comparableName(participant.name)
+  ) {
+    return { kind: "participant_changed" };
+  }
   const subject = waiverSubject(request.id);
   // One working code per request: the earlier unused assisted link ends, and
   // so does a session an earlier code already opened, so one phone at most
   // holds it. A session from the emailed link stays open.
-  await endAssistedAccess(trx, ctx.tenantId, request, {
-    link: "superseded",
-    session: "superseded",
-  });
+  await endAssistedAccess(trx, ctx.tenantId, request, "superseded");
   const token = newAccessToken();
   const { rows } = await sql<{ id: string; expires_at: Date }>`
     insert into guest_access_links (tenant_id, booking_id, participant_id, purpose, subject_ref,

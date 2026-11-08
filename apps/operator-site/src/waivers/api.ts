@@ -211,6 +211,7 @@ export async function startAssistedSigning(
   tenantId: string,
   requestId: string,
   mode: AssistedMode,
+  participantName: string,
 ): Promise<AssistedResult> {
   try {
     const res = await call(
@@ -218,7 +219,7 @@ export async function startAssistedSigning(
       {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ mode, identityChecked: true }),
+        body: JSON.stringify({ mode, identityChecked: true, participantName }),
       },
     );
     if (res.ok) {

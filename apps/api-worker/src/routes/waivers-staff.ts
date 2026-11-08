@@ -422,6 +422,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
         requestId,
         mode: input.mode,
         identityChecked: input.identityChecked,
+        participantName: input.participantName,
       });
       switch (started.kind) {
         case "issued":

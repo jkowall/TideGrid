@@ -188,7 +188,7 @@ const stops: Record<string, Stop> = {
     tone: "neutral",
     title: "This page was cleared",
     body: (op) =>
-      `Nobody used it for 2 minutes, so it forgot the waiver for privacy. Nothing more was signed. Ask the ${op} crew to start it again.`,
+      `Nobody used it for 2 minutes, so it forgot the waiver for privacy. If you had just tapped Sign, ask the ${op} crew to check whether it went through before starting again.`,
   },
   unavailable,
 };
@@ -588,10 +588,20 @@ function SignedView({
   const [downloading, setDownloading] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
   const signed = waiver.signed;
+  // Once this view is gone (Done, or the idle clear), a download still on its
+  // way is dropped: the page has said it forgot the waiver.
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
   const download = async () => {
     setDownloading(true);
     setDownloadFailed(false);
     const result = await downloadDocument(secret);
+    if (!live.current) return;
     setDownloading(false);
     if (result.kind !== "ok") {
       setDownloadFailed(true);

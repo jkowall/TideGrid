@@ -85,7 +85,7 @@ export async function onParticipantUpdated(
       trx,
       ctx.tenantId,
       { id: live.id, booking_id: event.bookingId, participant_id: event.participantId },
-      { link: "withdrawn", session: "participant_changed" },
+      "participant_changed",
     );
   }
   const addressField = participant.minor ? "guardianEmail" : "email";
