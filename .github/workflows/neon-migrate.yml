@@ -1,0 +1,195 @@
+name: neon-migrate
+# Proposed 2026-11-08: apply the tree's pending migrations to the Neon main
+# branch from CI instead of from an owner laptop. See
+# docs/runbooks/neon-migrate-ci.md. Nothing here deploys a Worker.
+run-name: ${{ format('neon migrate {0}', inputs.sha) }}
+
+# Manual only. The owner (or an agent the owner directs) dispatches it from
+# main with a full SHA already on main, and the migrate job then waits for the
+# owner's approval on the neon-main environment.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full 40-character commit SHA on main whose migrations to apply
+        required: true
+
+permissions:
+  contents: read
+  # The CI gate reads ci.yml's runs and jobs.
+  actions: read
+
+# One migration run at a time against Neon main, and never cancelled midway:
+# a cancelled run could stop between two files.
+concurrency:
+  group: neon-main-migrate
+  cancel-in-progress: false
+
+# bash -eo pipefail, so a failed command before a pipe fails the step.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # No secrets in this job. It refuses before anyone is asked to approve.
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # The gate's tooling (nov1 ci-check) comes from the workflow's own
+      # commit on main, not from the requested SHA, so a SHA from before
+      # ci-check existed is still checked by today's rule.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The commit to migrate is on main
+        # The same rules as ci.yml's dispatch guard. The input is read from
+        # the environment, never interpolated into the script.
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          echo "requested $WANT ref $GITHUB_REF workflow $GITHUB_WORKFLOW_SHA tooling $(git rev-parse HEAD)"
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::start this workflow from main, so main's workflow runs"; exit 1
+          fi
+          if ! printf '%s' "$WANT" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "::error::give the full 40-character SHA"; exit 1
+          fi
+          if ! git cat-file -e "$WANT^{commit}" 2>/dev/null; then
+            echo "::error::$WANT is not a commit in this repository"; exit 1
+          fi
+          if ! git merge-base --is-ancestor "$WANT" refs/remotes/origin/main; then
+            echo "::error::$WANT is not on main"; exit 1
+          fi
+          echo "tree $(git rev-parse "$WANT^{tree}")"
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: ci.yml is green on all four jobs for this SHA
+        # nov1 ci-check is the gate approve-sha and release use. It reads
+        # GitHub through gh's own login and never takes a token from the
+        # environment, so the job's read-only token is written to a throwaway
+        # gh config directory and removed afterwards.
+        env:
+          SHA: ${{ inputs.sha }}
+          TOKEN: ${{ github.token }}
+        run: |
+          export GH_CONFIG_DIR="$RUNNER_TEMP/gh"
+          trap 'rm -rf "$GH_CONFIG_DIR"' EXIT
+          printf '%s' "$TOKEN" | gh auth login --hostname github.com --with-token
+          unset TOKEN
+          pnpm --silent --filter @tidegrid/release nov1 ci-check "$SHA"
+
+  migrate:
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Required reviewer: the owner. Deployment branches: main only. The
+    # environment holds NEON_DATABASE_URL (the admin URL of Neon main),
+    # NEON_API_KEY, and NEON_PROJECT_ID. Set up in the repository settings;
+    # see the runbook.
+    environment: neon-main
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Still the approved commit, still on main
+        env:
+          WANT: ${{ inputs.sha }}
+        run: |
+          got=$(git rev-parse HEAD)
+          [ "$got" = "$WANT" ] || { echo "::error::asked for $WANT but checked out $got"; exit 1; }
+          git merge-base --is-ancestor "$WANT" refs/remotes/origin/main \
+            || { echo "::error::$WANT is not on main"; exit 1; }
+          echo "migrations in the tree: $(ls packages/database/migrations/*.sql | wc -l), last $(ls packages/database/migrations/*.sql | tail -1 | xargs basename)"
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      # Dependencies install before any secret is in an environment.
+      - run: pnpm install --frozen-lockfile
+      - name: Status before
+        # migrate:status lists only the files in this tree, so the order check
+        # reads the whole schema_migrations catalog with psql instead: every
+        # applied name must be a file in this tree (Neon is not ahead of the
+        # SHA), and every pending file must sort after the last applied one.
+        id: before
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          [ -n "$DATABASE_URL" ] || { echo "::error::NEON_DATABASE_URL is not set on the neon-main environment"; exit 1; }
+          pnpm --silent --filter @tidegrid/database migrate:status | tee "$RUNNER_TEMP/before.txt"
+          (cd packages/database/migrations && ls -1 *.sql | LC_ALL=C sort) > "$RUNNER_TEMP/tree.txt"
+          exists=$(psql "$DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "select to_regclass('public.schema_migrations') is not null")
+          if [ "$exists" = t ]; then
+            psql "$DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "select name from public.schema_migrations" | LC_ALL=C sort > "$RUNNER_TEMP/catalog.txt"
+          else
+            : > "$RUNNER_TEMP/catalog.txt"
+          fi
+          ahead=$(LC_ALL=C comm -13 "$RUNNER_TEMP/tree.txt" "$RUNNER_TEMP/catalog.txt")
+          if [ -n "$ahead" ]; then
+            echo "::error::Neon main has migrations this SHA does not: $(echo $ahead). Migrate a newer SHA"; exit 1
+          fi
+          LC_ALL=C comm -23 "$RUNNER_TEMP/tree.txt" "$RUNNER_TEMP/catalog.txt" > "$RUNNER_TEMP/pending.txt"
+          pending=$(wc -l < "$RUNNER_TEMP/pending.txt" | tr -d ' ')
+          last_applied=$(tail -1 "$RUNNER_TEMP/catalog.txt")
+          first_pending=$(head -1 "$RUNNER_TEMP/pending.txt")
+          if [ -n "$last_applied" ] && [ -n "$first_pending" ] && [[ "$first_pending" < "$last_applied" ]]; then
+            echo "::error::$first_pending is pending but $last_applied is applied; stop and look"; exit 1
+          fi
+          echo "pending=$pending" >> "$GITHUB_OUTPUT"
+          echo "catalog $(wc -l < "$RUNNER_TEMP/catalog.txt" | tr -d ' ') applied, $pending pending"
+      - name: Restore point (a Neon branch of main, no compute)
+        if: steps.before.outputs.pending != '0'
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          name="pre-migrate-${SHA:0:7}-r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # Expires after 7 days (owner, 2026-11-08: keep Neon cheap), so restore points do not
+          # pile up against the plan's branch limit.
+          out=$(pnpm --silent --filter @tidegrid/database neon:branch create "$name" --ttl 168 --no-endpoint)
+          id=$(printf '%s' "$out" | grep -Eo '"branchId":"[a-z0-9-]+"' | cut -d'"' -f4)
+          [ -n "$id" ] || { echo "::error::backup branch create failed"; exit 1; }
+          at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "backup branch $name: $id at $at (UTC, the point-in-time restore anchor)"
+          echo "- Restore point: \`$name\` (\`$id\`) at $at UTC, expires in 7 days" >> "$GITHUB_STEP_SUMMARY"
+      - name: Migrate
+        # Runs even with nothing pending: the runner's checksum, runtime-role,
+        # and invalid-index checks fail the run on drift, and apply nothing.
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: pnpm --silent --filter @tidegrid/database migrate
+      - name: Status after
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          pnpm --silent --filter @tidegrid/database migrate:status | tee "$RUNNER_TEMP/after.txt"
+          # The before check ran outside the migrator's advisory lock, so a
+          # runner elsewhere (the Mac fallback) could have applied a newer
+          # file since. Read the whole catalog again: success means Neon main
+          # holds exactly this tree's migrations.
+          psql "$DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "select name from public.schema_migrations" | LC_ALL=C sort > "$RUNNER_TEMP/catalog-after.txt"
+          ahead=$(LC_ALL=C comm -13 "$RUNNER_TEMP/tree.txt" "$RUNNER_TEMP/catalog-after.txt")
+          if [ -n "$ahead" ]; then
+            echo "::error::Neon main now has migrations this SHA does not: $(echo $ahead). Another runner migrated during this run; do not release the API from this SHA"; exit 1
+          fi
+          applied=$(grep -c '^applied' "$RUNNER_TEMP/after.txt" || true)
+          pending=$(grep -c '^pending' "$RUNNER_TEMP/after.txt" || true)
+          last=$(grep '^applied' "$RUNNER_TEMP/after.txt" | tail -1 | awk '{print $2}')
+          {
+            echo "## Neon main migrated to ${SHA:0:12}"
+            echo "- Applied $applied, pending $pending, last applied \`$last\`"
+            echo "- Approved by the neon-main environment reviewer; see this run's deployment"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$pending" = 0 ] || { echo "::error::$pending migration(s) still pending; do not release the API"; exit 1; }

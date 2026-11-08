@@ -8,6 +8,32 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-RESEND-CLAIM, staff resend limits held at the delivery claim (owner go; coordinator defaults pending owner confirmation)
+
+The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and email limits" on the O-SCOPE card, whose option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." Migration `0014` calls bounding sends at the delivery claim "a possible pre-pilot follow-up": its limits are decided on the ledger's stamps, and a writer with `tidegrid_app`'s credentials that waits after its commit check commits a resend with an old stamp, whose email then goes out beside resends stamped later. Migration `0017` (provisional; `0018` reserved) holds the limits again at every claim of a `booking.resend:` message. Coordinator defaults, pending owner confirmation:
+
+- **D1, a check in the claim's guard, not a new trigger on `email_messages`.** `app.check_email_message()` is replaced in place, as `0015` did, with one new step in its claim branch. The goal's recommended default.
+- **D2, claim times, at the clock.** Each claim is decided at `clock_timestamp()` once the tenant's resend lock is held, and logged in a new append-only table, `booking_email_resend_claims`. The limits on claims: 5 deliverable per booking (`0014`'s count), 10 minutes after another resend of the booking was claimed, 50 other resends of the operator claimed per hour. A message's own earlier claims never bar it.
+- **D3, wait rather than cancel when a limit lifts with time.** The delivery job leaves such a resend in the queue and claims it at a later run. It cancels only a resend that can never go (`resend_limit`, `resend_unrecorded`).
+- **D4, a backlog is paced.** In normal operation a resend goes out as before. After an outage or a missed run, or when the booking's previous resend was retried less than 10 minutes before, a resend now waits until real sends fit the limits.
+- **D5, recorded, not closed here.** A writer that forges the `0015` give-back after a send can make the delivery job send the same message again. That is the at-most-once rule for every message, not only resends.
+
+Security review under rule R9: asked of the owner on 2026-11-08, answer pending. Canonical: the [database README](../../packages/database/README.md#staff-resend-claims-0017) and the [verification log](../verification-log.md).
+
+### 2026-11-08: Neon migrations from CI (owner request; owner decision 2026-11-08)
+
+On 2026-11-08 the owner asked: "can we push to neon from CI instead of from laptops in the future?" Migrations to Neon main run today only from the owner's Mac (`nov1 db backup` and `nov1 db migrate`), and `nov1` refuses every live step when `CI` is set. The Mac's journal also still recorded a deleted backup branch, so `nov1 db backup` would not make a new restore point. The [hosting plan](08-build-hosting-and-operations.md#infrastructure-and-configuration-ownership) already puts migration and backup credentials in GitHub environment secrets. This change proposes a manual GitHub Actions workflow for migrations only. It has never run.
+
+Coordinator defaults, confirmed by the owner on 2026-11-08 ("n1 to n5 ok"):
+
+- **N1, migrations only move to CI.** A new workflow, `neon-migrate.yml`, applies pending migrations to Neon main. Worker releases, secrets, and seeds stay on the Mac. `nov1`'s "live steps never run in CI" rule is unchanged; the workflow calls the database package's scripts directly, and only the read-only `nov1 ci-check`.
+- **N2, the owner approves each run.** The migrate job runs on a GitHub environment, `neon-main`, with the owner as required reviewer and `main` as its only deployment branch. Its secrets are environment secrets, so no other job can read them.
+- **N3, the same CI gate as a release.** A gate job with no secrets refuses unless the SHA is on `main` and the newest `ci.yml` run for it is green on all four jobs, by the rule of the [2026-11-08 CI gate entry](#2026-11-08-nov1-refuses-a-sha-without-a-green-four-job-ci-run-owner-request-coordinator-defaults-pending-owner-confirmation). It refuses before the owner is asked to approve.
+- **N4, a restore point before every migrating run, expiring after 7 days.** The owner shortened it from 30 days on 2026-11-08: "keep neon cheap, if we discard branches sooner to save money, cool." A Neon branch of main with no compute, named by SHA, run id, and attempt. The Nov 1 runbook's restore points never expire; these do, so they do not pile up against the plan's branch limit. A run with nothing pending makes none, but still runs the migrator so its checksum, role, and index checks catch drift. A SHA older than what Neon main already has is refused.
+- **N5, GitHub's run is the record.** The run summary, the approval, and the environment's deployment history stand in for the journal's `db-backup` and `db-migrate` entries. `nov1 release api` still checks `/v1/health` for the tree's last migration, so it needs no journal entry.
+
+Not done, and needing the owner: creating the `neon-main` environment and its three secrets; merging. No Neon call was made. Canonical: the [Neon migrations from CI runbook](../runbooks/neon-migrate-ci.md).
+
 ### 2026-11-08: O-SCOPE, Wave 1p scope (owner decision)
 
 The plan's O-SCOPE step asks which work the demo plan does not clearly cover should run now. On a decision card that asked "Which extra pieces should we build into the demo now?", the owner chose "Booking fixes and email limits" at 14:55 UTC. The option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." The card recommended that option. The coordinator reads it as the plan's recommended answers to O-SCOPE items 1 to 7:
@@ -18,7 +44,7 @@ The plan's O-SCOPE step asks which work the demo plan does not clearly cover sho
 - **Items 4 to 6, waiver staff-assisted and QR signing, reminders, and guest renewal: later.** They stay Core live gate work.
 - **Item 7, a local email events consumer (W1-EMAIL-EVENTS): later.** It also needs the O-P7 `messageId` comparison, which was not shown.
 
-Each goal still needs the owner's go, its own branch, and a security reviewer under rule R9. Merging stays the owner's action. Migration numbers are reserved so the parallel goals do not collide: `0017` for W1-FIN-EXC, `0018` for W1-RESEND-CLAIM, and `0019` for W1-0014-RESIDUALS. W1-RESEND-CLAIM merges before W1-0014-RESIDUALS.
+Each goal still needs the owner's go, its own branch, and a security reviewer under rule R9. Merging stays the owner's action. Migration numbers were first reserved as `0017` for W1-FIN-EXC, `0018` for W1-RESEND-CLAIM, and `0019` for W1-0014-RESIDUALS. W1-RESEND-CLAIM merged first and took `0017` under rule R3, so W1-FIN-EXC uses `0018`. W1-0014-RESIDUALS keeps `0019` and merges after W1-RESEND-CLAIM.
 
 ### 2026-11-08: O-P7, G2.16-live email switched on, A9 and steps 3 and 8 not shown (owner decisions)
 
