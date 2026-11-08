@@ -158,6 +158,7 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
   async function publishOnly(
     ids: Set<string>,
     sender?: (m: readonly DeliveryMessage[]) => Promise<void>,
+    batchSize?: number,
   ) {
     const sent: DeliveryMessage[] = [];
     const report = await publishOutbox(runtime.db, {
@@ -168,6 +169,7 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
         }),
       runId: `pub-${randomUUID()}`,
       lostAfterSeconds: 60,
+      ...(batchSize ? { batchSize } : {}),
     });
     return { sent, report };
   }
@@ -505,6 +507,51 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
     expect(letter).toEqual({ source: "publisher", error_code: "publish_attempts_exhausted" });
   });
 
+  it("never lets parked dead letters hold back a tenant's newer events", async () => {
+    const parked: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const id = await enqueue(B.id, "test.delivery.parked");
+      await recordDeadLetter(
+        runtime.db,
+        { v: 1, tenantId: B.id, outboxId: id, topic: "test.delivery.parked" },
+        { errorCode: "Error", attempts: 5, source: "consumer" },
+      );
+      parked.push(id);
+    }
+    const fresh = await enqueue(B.id, "test.delivery.parked");
+    const { sent } = await publishOnly(new Set([...parked, fresh]), undefined, 2);
+    expect(sent.map((m) => m.outboxId)).toEqual([fresh]);
+  });
+
+  it("refuses a replay by a system job, and records nothing for an event already delivered", async () => {
+    const id = await enqueue(A.id, "test.delivery.late");
+    const message: DeliveryMessage = {
+      v: 1,
+      tenantId: A.id,
+      outboxId: id,
+      topic: "test.delivery.late",
+    };
+    await recordDeadLetter(runtime.db, message, {
+      errorCode: "Error",
+      attempts: 5,
+      source: "consumer",
+    });
+    const [letter] = await admin<{ id: string }[]>`
+      select id::text from public.outbox_dead_letters where tenant_id = ${A.id} and outbox_event_id = ${id}`;
+    await expect(
+      replayDeadLetter(runtime.db, sys(A.id), { deadLetterId: letter?.id ?? "", reason: "job" }),
+    ).rejects.toMatchObject({ code: "bad_actor" });
+
+    const other = await enqueue(A.id, "test.delivery.late");
+    const late: DeliveryMessage = { ...message, outboxId: other };
+    const { sent } = await publishOnly(new Set([other]));
+    expect(sent).toHaveLength(1);
+    expect(await consumeDelivery(runtime.db, late, [])).toEqual({ kind: "delivered", ran: [] });
+    expect(
+      await recordDeadLetter(runtime.db, late, { errorCode: "x", attempts: 7, source: "queue" }),
+    ).toBe("delivered");
+  });
+
   it("keeps an event unpublished and waits when the queue refuses a send", async () => {
     const id = await enqueue(A.id, "test.delivery.refused");
     const before = Date.now();
@@ -515,7 +562,8 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
     expect(report.stopped).toBe(true);
     const row = await eventRow(A.id, id);
     expect(row.published_at).toBeNull();
-    expect(row.attempts).toBe(1);
+    // A refused send is not an attempt: an outage never makes dead letters.
+    expect(row.attempts).toBe(0);
     expect(row.last_error).toBe("send_failed:TypeError");
     expect(new Date(row.available_at).getTime()).toBeGreaterThan(before + 20_000);
     // Not due yet, so the next run leaves it alone.

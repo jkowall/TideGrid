@@ -23,12 +23,12 @@ export {
   type PublishOptions,
   type PublishReport,
   parseDeliveryMessage,
-  publishBackoffSeconds,
   publishOutbox,
   ReplayRefusedError,
   recordDeadLetter,
   replayDeadLetter,
   runDeliveryCleanup,
+  SEND_RETRY_SECONDS,
 } from "./delivery.ts";
 export {
   DEFAULT_FAIR_SWEEP_MAX_PASSES,

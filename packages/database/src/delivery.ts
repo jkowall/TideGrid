@@ -219,14 +219,15 @@ export interface DeadLetterInput {
 /**
  * Record a dead letter for one message, in its tenant's transaction. At most
  * one is open per event: a second report while one is open changes nothing.
- * Returns "recorded", "already_open", or "missing" (no such event).
+ * Returns "recorded", "already_open", "missing" (no such event), or
+ * "delivered" (every handler already has an outcome; nothing is recorded).
  */
 export async function recordDeadLetter(
   db: Kysely<Database>,
   message: DeliveryMessage,
   input: DeadLetterInput,
   options: { runId?: string | null } = {},
-): Promise<"recorded" | "already_open" | "missing"> {
+): Promise<"recorded" | "already_open" | "missing" | "delivered"> {
   const ctx: TenantContext = {
     tenantId: message.tenantId,
     actorType: "system",
@@ -238,11 +239,13 @@ export async function recordDeadLetter(
   return inTenantTransaction(db, ctx, async (trx) => {
     const row = await trx
       .selectFrom("outbox_events")
-      .select(["topic"])
+      .select(["topic", "delivered_at"])
       .where("tenant_id", "=", ctx.tenantId)
       .where("id", "=", message.outboxId)
       .executeTakeFirst();
     if (!row) return "missing";
+    // A late copy of an event already delivered needs nobody's attention.
+    if (row.delivered_at !== null) return "delivered";
     const inserted = await sql<{ id: string }>`
       insert into outbox_dead_letters
         (tenant_id, outbox_event_id, topic, handler, error_code, attempts, source)
@@ -326,8 +329,8 @@ export async function listDeadLetters(
 
 /** The replay was refused; `code` says why. */
 export class ReplayRefusedError extends Error {
-  readonly code: "not_found" | "already_replayed" | "bad_reason";
-  constructor(code: "not_found" | "already_replayed" | "bad_reason") {
+  readonly code: "not_found" | "already_replayed" | "bad_reason" | "bad_actor";
+  constructor(code: "not_found" | "already_replayed" | "bad_reason" | "bad_actor") {
     super(`replay refused: ${code}`);
     this.name = "ReplayRefusedError";
     this.code = code;
@@ -338,7 +341,7 @@ export class ReplayRefusedError extends Error {
  * Replay one open dead letter: close it with the reason (the trigger stamps
  * who and when), write an audit row, and make its event due for publication
  * again. Only handlers with no outcome run when it is delivered. The caller's
- * context names the actor; it must not be the consumer itself.
+ * context names a person (staff or support), never a system job.
  */
 export async function replayDeadLetter(
   db: Kysely<Database>,
@@ -352,6 +355,8 @@ export async function replayDeadLetter(
     throw new ReplayRefusedError("bad_reason");
   }
   if (!outboxIdPattern.test(input.deadLetterId)) throw new ReplayRefusedError("not_found");
+  // A person replays, never a job: the trigger refuses it too.
+  if (ctx.actorType === "system" || !ctx.actorId) throw new ReplayRefusedError("bad_actor");
   return inTenantTransaction(db, ctx, async (trx) => {
     const letter = await trx
       .selectFrom("outbox_dead_letters")
@@ -410,7 +415,7 @@ export interface PublishOptions {
   clock?: () => number;
   /** A published event is a lost hint after this many seconds. Default 900. */
   lostAfterSeconds?: number;
-  /** Sends before an undelivered event becomes a dead letter. Default 10. */
+  /** Accepted sends before an undelivered event becomes a dead letter. Default 10. */
   maxPublishAttempts?: number;
   onTenantError?: (tenantId: string, error: unknown) => void;
   onStampError?: (tenantId: string, error: unknown) => void;
@@ -437,10 +442,8 @@ export const DEFAULT_PUBLISH_BATCH_SIZE = 100;
 export const DEFAULT_LOST_AFTER_SECONDS = 900;
 export const DEFAULT_MAX_PUBLISH_ATTEMPTS = 10;
 
-/** Seconds to wait after the queue refused a send: 30 s doubling to 15 minutes. */
-export function publishBackoffSeconds(attempts: number): number {
-  return Math.min(900, 30 * 2 ** Math.max(0, Math.min(attempts, 10) - 1));
-}
+/** Seconds a batch waits after the queue refused it. The cron runs every 15 minutes. */
+export const SEND_RETRY_SECONDS = 300;
 
 /**
  * Publish due outbox events across tenants, one tenant transaction per batch,
@@ -490,21 +493,23 @@ export async function publishOutbox(
           topic: string;
           attempts: number;
           resend: boolean;
-          open_letter: boolean;
         }>`
-          select o.id::text as id, o.topic, o.attempts, (o.published_at is not null) as resend,
-                 exists (select 1 from outbox_dead_letters d
-                          where d.tenant_id = o.tenant_id and d.outbox_event_id = o.id
-                            and d.replayed_at is null) as open_letter
+          select o.id::text as id, o.topic, o.attempts, (o.published_at is not null) as resend
             from outbox_events o
            where o.tenant_id = ${tenantId}
-             and ((o.published_at is null and o.available_at <= now())
-                  or (o.published_at is not null and o.delivered_at is null
+             and o.available_at <= now()
+             and (o.published_at is null
+                  or (o.delivered_at is null
                       and o.published_at <= now() - make_interval(secs => ${lostAfter})))
+             and not exists (select 1 from outbox_dead_letters d
+                              where d.tenant_id = o.tenant_id and d.outbox_event_id = o.id
+                                and d.replayed_at is null)
            order by o.id
            limit ${batchSize}
              for update skip locked`.execute(trx);
-        const due = rows.filter((r) => !r.open_letter);
+        // Events with an open dead letter are left out in SQL, so a tenant's
+        // parked events never fill the batch ahead of newer ones.
+        const due = rows;
         if (due.length === 0) return { units: 0, more: false };
         // An event sent too often without a delivery stops being sent: the
         // consumer never saw it, or never finished, and someone must look.
@@ -538,16 +543,14 @@ export async function publishOutbox(
         } catch (error) {
           sendFailures += 1;
           const code = `send_failed:${deliveryErrorCode(error)}`.slice(0, 120);
-          // Not published: wait, then try again. Lost-hint rows keep their
-          // published time, so they are due again at the same moment.
-          for (const r of sendable) {
-            const wait = publishBackoffSeconds(r.attempts + 1);
-            await sql`
-              update outbox_events
-                 set attempts = attempts + 1, last_error = ${code},
-                     available_at = now() + make_interval(secs => ${wait})
-               where tenant_id = ${tenantId} and id = ${r.id}`.execute(trx);
-          }
+          // The queue refused: nothing was sent, so attempts stay as they
+          // are (an outage never turns events into dead letters). Every row
+          // in the batch, new or lost hint, waits before it is tried again.
+          await sql`
+            update outbox_events
+               set last_error = ${code},
+                   available_at = now() + make_interval(secs => ${SEND_RETRY_SECONDS})
+             where tenant_id = ${tenantId} and id = any(${ids}::bigint[])`.execute(trx);
           return { units: sendable.length, more: false, stop: true };
         }
         await sql`

@@ -82,7 +82,7 @@ export interface QueueDeps {
       source: "consumer" | "queue";
     },
     runId: string,
-  ) => Promise<"recorded" | "already_open" | "missing">;
+  ) => Promise<"recorded" | "already_open" | "missing" | "delivered">;
 }
 
 /** One queue message, as much of Cloudflare's Message as this code uses. */

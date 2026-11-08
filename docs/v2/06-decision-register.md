@@ -18,7 +18,7 @@ W3-G2.3 builds the delivery foundation with migration `0019` (provisional, claim
 - **D2: cleanup through an admin-owned schema app function** (the goal's recommended default). `app.delivery_cleanup` removes completed idempotency keys and unused quotes seven days past their expiry. The runtime still holds no DELETE. Quotes stay append-only for updates.
 - **D3: one Worker script, queue only in tests.** The API Worker gains a queue entry. Only `env.test` declares the queue and its DLQ. A separate async Worker deployment and the real queues wait for W3-OPS provisioning, so the next release from main deploys unchanged bindings.
 - **D4: events before 0019 are not sent.** The migration marks them published and delivered, because no consumer existed and the cron sweeps already did their work.
-- **D5: retry budget.** The consumer retries with 30 s doubling to 15 minutes and records its own dead letter on the fifth attempt. The queue's own DLQ is the backstop. A hint not delivered within 15 minutes is sent again, up to 10 sends.
+- **D5: retry budget.** The consumer retries with 30 s doubling to 15 minutes and records its own dead letter on the fifth attempt. The queue's own DLQ is the backstop. A hint not delivered within 15 minutes is sent again, up to 10 accepted sends. A send the queue refused counts for nothing and waits five minutes.
 - **D6: "operator" means the TideGrid operator here.** Dead letters are visible through `outbox:dlq list` and an error log line, not in the tenant console.
 - **D7: one handler to start.** `ops_alert` logs ids for a finalization exception, a refused refund, and a failed confirmation email. New handlers come with the goals that need them.
 

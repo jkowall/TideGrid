@@ -196,8 +196,10 @@ BEGIN
      OR NEW.replay_reason IS NULL THEN
     RAISE EXCEPTION 'a replay sets its reason and nothing else' USING ERRCODE = '55000';
   END IF;
-  IF v_actor IS NULL THEN
-    RAISE EXCEPTION 'a replay names its actor' USING ERRCODE = '42501';
+  IF v_actor IS NULL OR app.setting_or_null('app.actor_type') IS NULL
+     OR app.setting_or_null('app.actor_type') = 'system' THEN
+    RAISE EXCEPTION 'a replay names its actor, and a system job never replays'
+      USING ERRCODE = '42501';
   END IF;
   NEW.replayed_at := clock_timestamp();
   NEW.replayed_by := left(app.setting_or_null('app.actor_type') || ':' || v_actor, 200);
@@ -227,8 +229,9 @@ ALTER TABLE public.sweep_turns ADD CONSTRAINT sweep_turns_sweep_check
   CHECK (sweep IN ('hold', 'checkout', 'email', 'hostname', 'outbox'));
 
 -- Tenants with an event due for publication, or a published event whose hint
--- looks lost (published at least p_lost_seconds ago, 60 to 86,400, not
--- delivered, and no open dead letter). Tenant ids only, at most 1,000, least
+-- looks lost (published at least p_lost_seconds ago, 60 to 86,400, and not
+-- delivered). Either way the event is past its available_at and has no open
+-- dead letter, so parked events never keep a tenant listed. Tenant ids only, at most 1,000, least
 -- recently served first, for the reasons 0013 gives.
 CREATE FUNCTION app.outbox_publish_tenants(p_limit integer, p_lost_seconds integer)
   RETURNS TABLE (tenant_id uuid)
@@ -237,12 +240,11 @@ CREATE FUNCTION app.outbox_publish_tenants(p_limit integer, p_lost_seconds integ
   AS $$
     SELECT x.tenant_id FROM (
       SELECT o.tenant_id FROM public.outbox_events o
-       WHERE o.published_at IS NULL AND o.available_at <= pg_catalog.now()
-      UNION
-      SELECT o.tenant_id FROM public.outbox_events o
-       WHERE o.published_at IS NOT NULL AND o.delivered_at IS NULL
-         AND o.published_at <= pg_catalog.now() - pg_catalog.make_interval(
-               secs => greatest(60, least(coalesce(p_lost_seconds, 900), 86400)))
+       WHERE o.available_at <= pg_catalog.now()
+         AND (o.published_at IS NULL
+              OR (o.delivered_at IS NULL
+                  AND o.published_at <= pg_catalog.now() - pg_catalog.make_interval(
+                        secs => greatest(60, least(coalesce(p_lost_seconds, 900), 86400)))))
          AND NOT EXISTS (
            SELECT 1 FROM public.outbox_dead_letters d
             WHERE d.tenant_id = o.tenant_id AND d.outbox_event_id = o.id
