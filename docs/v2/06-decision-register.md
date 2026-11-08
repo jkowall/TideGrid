@@ -8,6 +8,34 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-EMAIL-EXC, tenant-wide staff email exceptions list (owner go; coordinator defaults pending owner confirmation)
+
+G2.16b D9 A kept email failures on booking detail and named a tenant-wide email exceptions list as a proposed follow-up. Today staff see failures one booking at a time. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed", and: "keep going until wave 1 is complete". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. The owner did not answer the goal's open decisions, so D1 to D3 are the goal packet's recommended options, as coordinator defaults. None is an owner decision until the owner confirms it.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1 A. Waiver email is included,** labeled by kind. A waiver request shows as "Waiver request" and links to its booking, where the Waivers card shows and sends it again (G2.16b D11). The booking's own email links to the booking's Email card.
+- **D2 A. Owners and booking staff only.** The read needs `bookings.read`, as the booking's messages read does. Finance gets no navigation entry and no request; the API answers finance 403. This matches the Email card (G2.16b D7 A).
+- **D3 A. No index at demo size.** The read scans the tenant's messages. Rule R4 holds: no index on `email_messages` until the `CREATE INDEX CONCURRENTLY` runner is on `main`. No migration.
+
+Coordinator choices inside the goal, recorded here, not owner decisions:
+
+- **What is listed.** Every message in the `failed` delivery state, split by the last error into `failed`, `outcome_unknown`, and `delivery_failed`. No new message state. Newest first by when delivery stopped, 50 a page, with a message id as the cursor. A cursor that names no failed message of the tenant answers 400 `cursor_invalid`.
+- **What a row carries.** Kind, template, state, attempts, the last error's code, when it stopped, whether staff sent it, and the booking's id, reference, and trip time zone. Never a recipient, a name, a subject, or a body. An extra field, `laterSent`, says a later message of the same template for the same booking, participant, and subject was sent; the row still lists, in the info tone. A message about no booking lists with no link; none exists today.
+- **Where it lives.** `GET /v1/staff/tenants/{tenantId}/email-exceptions` in `apps/api-worker/src/routes/booking-email-staff.ts`, the read in a new file, `packages/domain-messaging/src/exceptions.ts`, and the contract in a new file, `packages/contracts/src/email-exceptions.ts`, so the later rebase on W1-SENDER-GUARD stays mechanical. `brand.ts` is untouched.
+- **Outside the named paths.** The console's navigation entries and routes live in `apps/operator-site/src/ConsoleShell.tsx`, not `navigation.tsx`, so this goal adds its one entry, route, and page there and leaves `navigation.tsx` unchanged. The entry carries a role rule, so the shell now filters entries by role. The contracts index export sits in sorted order, because the linter refuses an appended one.
+- **Arriving at the card.** A row's link ends in `#email`. The Email card then takes focus from the page's heading once its first read ends, once, and never from where the person moved focus.
+
+Open risks:
+
+- ui-reviewer not run in this session; covered by console browser tests. The new browser spec (`apps/operator-site/e2e/email-exceptions.spec.ts`, 375 and 1280 px: loading, populated, error, empty, keyboard reach, and finance) was not run locally, by the session's rule on shared ports; the pull request's CI runs it. The suite has no axe check, so none was added.
+- Between 640 and 1023 px the rail shows four entries a row, so the fifth, Email exceptions, wraps to a second row. Finance still sees four.
+- A failed message stays listed after staff send it again; `laterSent` marks it, and resolving an exception remains later work.
+
+Not done: the verification log entry (the coordinator writes it with the CI facts), the security review, the independent review, the push, and the pull request.
+
+Canonical: [packages/domain-messaging/README.md](../../packages/domain-messaging/README.md#email-exceptions-w1-email-exc), [apps/operator-site/README.md](../../apps/operator-site/README.md#email-exceptions-w1-email-exc), and the [demo build plan's G2.16 row](12-demo-build-plan.md#goal-sequence).
+
 ### 2026-11-08: W1-COMM-REQ, Stage 0 commercial requirements draft (proposed, pending owner approval)
 
 The roadmap's Stage 0 asks to "Record the required pilot agreement, data, service, payment, and app-store terms." On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed", and later: "keep going until wave 1 is complete". The coordinator read that as the owner's go for this docs goal and for local commits. It is not an approval of the draft's content. No token budget was set.

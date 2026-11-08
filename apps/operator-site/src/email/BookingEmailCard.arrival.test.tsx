@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import type { StaffRole } from "@tidegrid/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BookingEmailCard } from "./BookingEmailCard.tsx";
 import { bookerEmail, bookingId, json, messagesBody, stubApi, tenantId } from "./fixtures.ts";
@@ -10,6 +11,8 @@ import { bookerEmail, bookingId, json, messagesBody, stubApi, tenantId } from ".
  * #email, and the card takes focus from the page's heading once it has read.
  */
 
+const owner: StaffRole = "owner";
+
 function renderOnPage() {
   render(
     <>
@@ -18,7 +21,7 @@ function renderOnPage() {
       <BookingEmailCard
         tenantId={tenantId}
         bookingId={bookingId}
-        role="owner"
+        role={owner}
         timeZone="America/New_York"
         bookerEmail={bookerEmail}
       />

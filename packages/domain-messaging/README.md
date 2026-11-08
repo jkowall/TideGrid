@@ -110,6 +110,33 @@ interface MessageStatus {
 
 Status reads carry no recipient or content. Provider acceptance is not proof that a guest read a message or used its link.
 
+## Email exceptions (W1-EMAIL-EXC)
+
+```ts
+listEmailExceptions(trx, tenantId, { limit: 1..100; before?: messageId }): Promise<
+  | { kind: "page"; exceptions: EmailExceptionView[]; nextBefore: string | null }
+  | { kind: "cursor_invalid" }>
+
+interface EmailExceptionView {
+  id; template;
+  kind: "booking" | "waiver";                               // waiver_* templates are waiver
+  state: "failed" | "outcome_unknown" | "delivery_failed";  // by the last error code
+  attempts; failureCode; failedAt; staffResend;
+  laterSent;  // a later message of the same template, booking, participant, and subject was sent
+  booking: { id; reference; timeZone } | null;              // the trip's zone, for times
+}
+```
+
+The tenant-wide read behind the console's email exceptions list (`src/exceptions.ts`), a follow-up to G2.16b D9 A. It lists every message of one tenant in the `failed` state, newest first by `failed_at`, then by id, a page at a time. `state` splits `failed` by the last error: `outcome_unknown` and `delivery_failed` are their own states, and every other code is `failed`. No new message state exists. `before` is the last id of the previous page; one that is malformed, unknown, another tenant's, or names a message that is not failed answers `cursor_invalid`. A failed message never changes again (the 0009 trigger), so a cursor keeps naming the same place.
+
+- **Tenancy.** The caller runs it in `inTenantTransaction`, so row-level security limits every table to the tenant, and the query also filters each one by `tenant_id`. Under another tenant's transaction, a tenant's id lists nothing, and its message ids are `cursor_invalid`.
+- **No personal data.** It selects no recipient, name, subject, or body: only the template, the delivery facts, and the booking's id, reference, and trip zone.
+- **Who calls it.** `GET /v1/staff/tenants/{tenantId}/email-exceptions` in `apps/api-worker/src/routes/booking-email-staff.ts`, for roles that hold `bookings.read` (owners and booking staff, D2). Finance is refused there (403). The contract is `packages/contracts/src/email-exceptions.ts`.
+- **No index (D3).** At demo size the tenant's messages are read in full; the `laterSent` check uses `email_messages_booking_idx`. An index on `email_messages` waits for the `CREATE INDEX CONCURRENTLY` runner (rule R4) and a measured need.
+- **Coordinator defaults, pending owner confirmation.** D1: waiver requests are included, labeled by kind. D2: owners and booking staff only. D3: no index.
+
+Tests: `src/exceptions.test.ts` (the state and kind rules and the guards) and `src/exceptions.integration.test.ts` (the order, paging, cursors, and two tenants under row-level security).
+
 ## Delivery
 
 A delivery job sends due messages after commit and records each outcome. It runs from the API Worker's cron, after the checkout sweep, and right after a request commits a message (in the background, so the guest sees the email at once). Correctness never waits for it.
