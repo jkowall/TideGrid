@@ -24,7 +24,7 @@ describe.skipIf(!env)("email admin CLI on a throwaway database (W3-G2.16-rest)",
 
   it("adds, verifies, and retires a domain, and reports each state", async () => {
     expect(await runCommand(handle.db, { kind: "domain-status", slug })).toEqual([
-      `${slug}: no sending domain; mail uses the shared sender`,
+      `${slug}: no sending domain (the Worker's EMAIL_SENDER_POLICY decides whether its mail uses the shared sender or waits)`,
     ]);
     const added = await runCommand(handle.db, {
       kind: "domain-add",

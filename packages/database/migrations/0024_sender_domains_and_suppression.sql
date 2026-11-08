@@ -164,6 +164,9 @@ CREATE FUNCTION app.sender_domain_add(p_tenant_id uuid, p_domain text, p_local_p
 DECLARE
   v_id uuid;
 BEGIN
+  -- One add at a time, so two overlapping domains for different operators
+  -- cannot both pass the check below before either commits.
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tidegrid.sender_domain_add', 0));
   IF EXISTS (
     SELECT 1 FROM public.tenant_sender_domains d
      WHERE d.status <> 'retired' AND d.tenant_id <> p_tenant_id
@@ -314,9 +317,11 @@ BEGIN
     FROM public.email_events ev
     JOIN public.email_messages m ON m.tenant_id = ev.tenant_id AND m.id = ev.message_id
    WHERE ev.tenant_id = NEW.tenant_id AND ev.id = NEW.event_id;
+  -- IS NOT TRUE: a bounce with no recorded kind is not a hard bounce.
   IF NOT FOUND
-     OR NOT ((e.event_type = 'complained' AND NEW.reason = 'complaint')
-             OR (e.event_type = 'bounced' AND e.bounce_type = 'hard' AND NEW.reason = 'hard_bounce'))
+     OR ((e.event_type = 'complained' AND NEW.reason = 'complaint')
+         OR (e.event_type = 'bounced' AND e.bounce_type = 'hard' AND NEW.reason = 'hard_bounce'))
+        IS NOT TRUE
      OR e.to_email IS DISTINCT FROM NEW.address THEN
     RAISE EXCEPTION 'a suppression names its tenant''s complaint or hard bounce and that message''s address'
       USING ERRCODE = '23514', CONSTRAINT = 'email_suppressions_event';

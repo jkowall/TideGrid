@@ -522,6 +522,60 @@ describe.skipIf(!env)("per-operator sender domains and suppression (W3-G2.16-res
     expect(seen.rows[0]?.n).toBe(0);
   });
 
+  it("S10b a bounce with no recorded kind cannot back a hard-bounce suppression", async () => {
+    const T = await newTenant("s10b");
+    const m = await sentMessage(T, "s10b");
+    const body = cloudflareEmailEvent("bounced", {
+      messageId: m.providerId,
+      eventId: `s10b-${run}`,
+    });
+    delete (body.payload as { bounce?: unknown }).bounce;
+    expect(await ingestEmailEvent(runtime.db, config, body)).toMatchObject({ outcome: "applied" });
+    expect(await suppressions(T)).toEqual([]);
+    const [ev] = await admin<{ id: string; bounce_type: string | null }[]>`
+      select id, bounce_type from public.email_events where message_id = ${m.id}`;
+    expect(ev?.bounce_type).toBeNull();
+    expect(
+      await asWriter(T, (trx) =>
+        sql`insert into email_suppressions (tenant_id, address, reason, event_id)
+            values (${T}, ${addr("s10b")}, 'hard_bounce', ${ev?.id})`.execute(trx),
+      ),
+    ).toEqual({ code: "23514", constraint: "email_suppressions_event" });
+  });
+
+  it("S6b two overlapping adds for different operators at once: the second waits, then is refused", async () => {
+    const A = await newTenant("s6b-a");
+    const B = await newTenant("s6b-b");
+    const parent = domainOf("s6b");
+    const other = postgres(env?.adminUrl ?? "", { max: 1, onnotice: () => {} });
+    try {
+      let releaseFirst: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const first = admin.begin(async (tx) => {
+        await tx`select app.sender_domain_add(${A}::uuid, ${parent}, 'bookings')`;
+        await held;
+      });
+      // Let the first take the lock before the second starts.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const second = other
+        .begin(async (tx) => {
+          await tx`select app.sender_domain_add(${B}::uuid, ${`mail.${parent}`}, 'bookings')`;
+        })
+        .then(
+          () => null,
+          (e: { constraint_name?: string }) => e.constraint_name,
+        );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      releaseFirst();
+      await first;
+      expect(await second).toBe("tenant_sender_domains_overlap");
+    } finally {
+      await other.end({ timeout: 5 });
+    }
+  });
+
   it("S11 the consumer accepts an operator's verified domain and refuses one it never verified", async () => {
     const A = await newTenant("s11a");
     const B = await newTenant("s11b");

@@ -190,7 +190,9 @@ export async function runCommand(
            where tenant_id = ${tenantId}
            order by created_at, id`.execute(trx);
         if (rows.length === 0)
-          return [`${command.slug}: no sending domain; mail uses the shared sender`];
+          return [
+            `${command.slug}: no sending domain (the Worker's EMAIL_SENDER_POLICY decides whether its mail uses the shared sender or waits)`,
+          ];
         return rows.map((r) =>
           [
             `${r.local_part}@${r.domain}`,
