@@ -62,7 +62,7 @@ Feasibility-spike gate (needs the direct-first gate first)
   Operator types among them:                                        ____  (needs 2 or more)
   Passes: yes / no
 
-Conditional-demand gate
+Conditional-demand gate (fill only after the commercial follow-ups conclude)
   Qualified Native operators with a written commitment:             ____  (needs 3 or more)
   Operator types among them:                                        ____  (needs 2 or more)
   All from one operator type: yes / no  (yes means the gate fails)
@@ -73,9 +73,11 @@ OTA check
   5 or more means: evaluate a one-way intake adapter first.
 
 Change or stop check (any yes means change or stop)
-  Fewer than 5 of 12 meet the direct-first profile: yes / no
-  Fewer than 3 qualified written commitments: yes / no
-  Qualified commitments all from one operator type: yes / no
+  After interview 12:
+    Fewer than 5 of 12 meet the direct-first profile: yes / no
+  Only after the commercial follow-ups conclude:
+    Fewer than 3 qualified written commitments: yes / no
+    Qualified commitments all from one operator type: yes / no
 ```
 
 Passing these counts does not authorize spending, contracts, deposits, or the production build. The later steps of the [validation gate](../v2/05-roadmap-validation.md#validation-gate) still apply.
