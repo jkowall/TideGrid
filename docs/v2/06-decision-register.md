@@ -64,7 +64,7 @@ Canonical: the sections updated with this entry, and the status lines of the [de
 
 ### 2026-11-08: W0-CLOSEOUT, a ruleset on main for the four CI checks (owner action pending confirmation)
 
-Pull requests 59, 60, and 62 merged after `main` had moved past the base their runs tested, so their released SHAs `91a4faa`, `9086a18`, and `1f39feb` have no step 9 ([verification log](../verification-log.md#step-9-for-the-live-api-dd30fc8-november-7-2026)). `main` had no branch protection. The [2026-11-07 entry](#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-owner-decision-2026-11-08) proposed a ruleset requiring the four checks, as the owner's GitHub setting.
+Pull requests 59, 60, and 62 merged after `main` had moved past the base their runs tested, so their released SHAs `91a4faa`, `9086a18`, and `1f39feb` have no step 9 ([verification log](../verification-log.md#step-9-for-the-live-api-dd30fc8-november-7-2026)). `main` had no branch protection. The [2026-11-07 entry](#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-owner-decision-2026-11-08) proposed a ruleset requiring the four checks, as the owner's GitHub setting. Update, 2026-11-08: step 9 is now shown for all three, each by a green four-job dispatch run on the SHA ([`91a4faa`](../verification-log.md#step-9-for-91a4faa-by-dispatch-november-8-2026), [`1f39feb`](../verification-log.md#step-9-for-1f39feb-by-dispatch-november-8-2026), and [`9086a18`](../verification-log.md#step-9-for-9086a18-by-dispatch-november-8-2026)).
 
 On 2026-11-08 the coordinator gave the owner a checklist. Its items, summarized:
 
@@ -239,7 +239,7 @@ The coordinator reads these as the owner's go for every runbook gate it could ru
   - The P5 body cap POST was sent under A0, which the runbook had left to the owner.
   - P8 step 3 used the Workers Domains API, not the dashboard.
   - For P9 inputs, the coordinator chose the sandbox's one compliant connected account for demo-harbor. It created the webhook endpoint through Stripe's API in test mode, then disabled it in P9.6. demo-reef has no Stripe account.
-  - Pull requests 59, 60, and 62 merged after `main` had moved past the base their CI tested. Five SHAs were released before their push run on `main` finished. Step 9 is therefore shown for three of six SHAs (see the verification log).
+  - Pull requests 59, 60, and 62 merged after `main` had moved past the base their CI tested. Five SHAs were released before their push run on `main` finished. Step 9 is therefore shown for three of six SHAs (see the verification log). Update, 2026-11-08: the other three are now shown by dispatch ([`91a4faa`](../verification-log.md#step-9-for-91a4faa-by-dispatch-november-8-2026), [`1f39feb`](../verification-log.md#step-9-for-1f39feb-by-dispatch-november-8-2026), and [`9086a18`](../verification-log.md#step-9-for-9086a18-by-dispatch-november-8-2026)).
 - **Not run, and the restore branch deleted.**
   - P7 was not run. It needs the sender domain onboarding, the recipient allowlist, and a phone.
   - The restore branch `pre-nov1-e111043` was kept through the run, because deleting it takes its own approval. Update, 2026-11-05: the owner asked for it to be deleted ("delete the restore branch"), and the coordinator deleted `br-weathered-dew-b4gd9p8v` through Neon's API. Neon then listed only `main`, so no restore branch from the run remains. Whether Neon's own history window still reaches the run is unknown (the runbook's owner inputs list it as unknown).
