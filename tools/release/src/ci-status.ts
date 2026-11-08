@@ -304,43 +304,24 @@ async function onMain(deps: Deps, commit: string): Promise<boolean> {
 }
 
 /**
- * The earliest time a dispatch could have tested `sha`: a day before its
- * committer date, for clock skew. It bounds the dispatch query, so old
- * dispatches never fill GitHub's 1,000-run cap (security recheck).
- */
-async function dispatchWindow(deps: Deps, sha: string): Promise<string> {
-  const r = await deps.exec("git", ["show", "-s", "--format=%ct", sha], {
-    cwd: deps.repoRoot,
-    env: childEnv(deps),
-    stdio: "pipe",
-  });
-  const seconds = Number.parseInt(r.stdout.trim(), 10);
-  if (r.code !== 0 || !Number.isFinite(seconds)) {
-    throw new Refusal(
-      `git could not read ${sha.slice(0, 12)}'s commit date: git fetch origin, then retry`,
-    );
-  }
-  return new Date((seconds - 86_400) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
-}
-
-/**
  * Read GitHub and decide. Returns the passing run, or throws a Refusal that
  * names the run and what is missing. Read-only: nothing is triggered.
  */
 export async function ciStatus(deps: Deps, sha: string): Promise<CiPass> {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Refusal(`the CI gate needs a full SHA, not ${sha}`);
-  const byHead = await allRuns(deps, { head_sha: sha });
-  // A dispatch for an older SHA has main's head at the time, so its name is what links it.
-  const dispatches = await allRuns(deps, {
-    event: "workflow_dispatch",
-    branch: "main",
-    created: `>=${await dispatchWindow(deps, sha)}`,
-  });
-  const parsed = [...byHead, ...dispatches].map(asRun);
+  const byHeadRows = await allRuns(deps, { head_sha: sha });
+  const headRuns = byHeadRows.map(asRun);
   // A row that cannot be read might be the newest word on the SHA, so it refuses.
-  if (parsed.some((r) => r === null)) {
-    throw new Refusal(`GitHub's runs list includes a run nov1 cannot read. ${noOverride}`);
-  }
+  const unreadable = () =>
+    new Refusal(`GitHub's runs list includes a run nov1 cannot read. ${noOverride}`);
+  if (headRuns.some((r) => r === null)) throw unreadable();
+  // A dispatch for an older SHA has main's head at the time, so its name is
+  // what links it. The whole dispatch history is read: no date bound is safe,
+  // since a committer date can lie and a run can be re-run long after it was
+  // created. More than 1,000 dispatches on main would refuse every SHA.
+  const dispatchRows = await allRuns(deps, { event: "workflow_dispatch", branch: "main" });
+  const parsed = [...headRuns, ...dispatchRows.map(asRun)];
+  if (parsed.some((r) => r === null)) throw unreadable();
   // One entry per run: its highest attempt, the later observation on a tie.
   const byId = new Map<number, CiRun>();
   for (const r of parsed as CiRun[]) {
@@ -367,7 +348,9 @@ export async function ciStatus(deps: Deps, sha: string): Promise<CiPass> {
     }
     const jobs =
       run.conclusion === "success" || run.conclusion === "cancelled" ? await jobsOf(deps, run) : [];
-    if (run.conclusion === "cancelled" && jobs.length === 0) continue;
+    // Only a first attempt with no jobs never started. A retry cancelled before
+    // it started hides how the earlier attempt ended, so it refuses below.
+    if (run.conclusion === "cancelled" && jobs.length === 0 && run.run_attempt === 1) continue;
     if (run.conclusion !== "success") {
       const said =
         run.conclusion && knownConclusion.has(run.conclusion) ? run.conclusion : "nothing known";

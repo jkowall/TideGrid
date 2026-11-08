@@ -192,8 +192,7 @@ export function ghFrom(world: GhWorld) {
         (r) =>
           (!q.head_sha || r.head_sha === q.head_sha) &&
           (!q.event || r.event === q.event) &&
-          (!q.branch || r.head_branch === q.branch) &&
-          (!q.created || r.created_at >= q.created.replace(/^>=/, "")),
+          (!q.branch || r.head_branch === q.branch),
       );
       // GitHub pages the list: per_page rows from page (1-based), with the full count.
       const per = Number(q.per_page ?? 30);

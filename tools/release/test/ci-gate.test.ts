@@ -707,30 +707,6 @@ describe("review fixes", () => {
     }
   });
 
-  it("asks GitHub only for dispatches from a day before the SHA's commit date on", async () => {
-    const old = dispatchOf(headSha, older, {
-      id: 7,
-      conclusion: "failure",
-      created_at: "2026-10-01T00:00:00Z",
-    });
-    const world = greenWorld(headSha);
-    const { deps, execs } = withWorld({ runs: [...world.runs, old], jobs: world.jobs });
-    expect(await main(approveArgv, deps)).toBe(0);
-    const query = ghCalls(execs).find((c) => c.args.includes("event=workflow_dispatch"));
-    expect(query?.args).toContain("created=>=2026-10-25T07:33:20Z");
-  });
-
-  it("refuses when git cannot date the SHA, so the dispatch window is unknown", async () => {
-    const { deps, printed } = withWorld(greenWorld(headSha), {
-      exec: (c) =>
-        c.cmd === "git" && c.args[0] === "show" && c.args[1] === "-s"
-          ? { code: 128, stdout: "" }
-          : undefined,
-    });
-    expect(await main(approveArgv, deps)).toBe(3);
-    expect(printed.join("\n")).toMatch(/could not read aaaaaaaaaaaa's commit date/);
-  });
-
   it("refuses the guest kill-switch release when GitHub cannot be read: it deploys the tree", async () => {
     const { deps, execs, printed } = withWorld(
       { runs: [], jobs: {}, missing: true },
@@ -824,5 +800,44 @@ describe("review fixes", () => {
     );
     expect(await main(approveArgv, deps)).toBe(3);
     expect(printed.join("\n")).toMatch(/concluded failure: .*\/runs\/5$/m);
+  });
+
+  it("reads dispatches with no date bound, so a commit dated in the future cannot hide a newer failure", async () => {
+    const green = runOf({ head_sha: headSha, id: 1, created_at: "2026-11-08T09:00:00Z" });
+    const failed = dispatchOf(headSha, older, {
+      id: 2,
+      conclusion: "failure",
+      created_at: "2026-11-08T10:00:00Z",
+    });
+    const { deps, printed, execs } = withWorld(
+      { runs: [green, failed], jobs: { 1: jobsOf(green), 2: jobsOf(failed) } },
+      {
+        // Committed "on" 2026-11-10, after both runs.
+        exec: (c) =>
+          c.cmd === "git" && c.args[0] === "show" && c.args[1] === "-s"
+            ? { code: 0, stdout: "1794268800\n" }
+            : undefined,
+      },
+    );
+    expect(await main(approveArgv, deps)).toBe(3);
+    expect(printed.join("\n")).toMatch(/concluded failure: .*\/runs\/2$/m);
+    expect(ghCalls(execs).some((c) => c.args.some((a) => a.startsWith("created=")))).toBe(false);
+  });
+
+  it("refuses a retry cancelled before it started: the earlier attempt's result is hidden", async () => {
+    const green = runOf({ head_sha: headSha, id: 1, created_at: "2026-11-08T09:00:00Z" });
+    const retried = dispatchOf(headSha, older, {
+      id: 2,
+      conclusion: "cancelled",
+      run_attempt: 2,
+      created_at: "2026-11-08T10:00:00Z",
+      run_started_at: "2026-11-08T11:00:00Z",
+    });
+    const { deps, printed } = withWorld({
+      runs: [green, retried],
+      jobs: { 1: jobsOf(green), 2: [] },
+    });
+    expect(await main(approveArgv, deps)).toBe(3);
+    expect(printed.join("\n")).toMatch(/concluded cancelled: .*\/runs\/2$/m);
   });
 });
