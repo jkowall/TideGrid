@@ -119,14 +119,23 @@ Returning-customer base: pass / fail / unknown
 Multi-tool reconciliation problem: pass / fail / unknown
 Can supply required policy, business, and clean-data inputs: pass / fail / unknown
 No dependence on excluded capability: pass / fail / unknown
-Blocked only by OTA dependency: yes / no
 Direct-first profile result: qualified / not qualified / provisional
-  Qualified only when every line above is pass.
+  Qualified only when each of the eight lines above is pass, or custom quote
+  for exactly five active boats (the guide allows five with a custom quote).
+Blocked only by OTA dependency (diagnostic, not a profile check): yes / no
 
 At least 25,000 average monthly managed value: pass / fail / forecast only
 Specific evidenced Native repeat-use case: pass / fail
+One legal operator, one brand, one location, one iOS and Android pair, no fork: pass / fail / unknown
+Accepts full recurring price, external-booking fee, pass-through charges,
+  12-month term, customer-owned store accounts, weekly design reviews,
+  and acceptance testing: pass / fail / unresolved
+Can supply branding, waiver language, legal pages, business records, clean data,
+  provider accounts, and approvals on schedule: pass / fail / unknown
+Authorized decision-maker prepared to sign and fund after paid-pilot readiness: pass / fail / unknown
 Native pilot result: qualified / not qualified / provisional
-  Qualified only when the direct-first result is qualified and both lines above pass.
+  Qualified only when the direct-first result is qualified and all six lines above pass.
+  Provisional when none fails but some are still unknown, unresolved, or forecast only.
 Reason:
 
 TOP EVIDENCE

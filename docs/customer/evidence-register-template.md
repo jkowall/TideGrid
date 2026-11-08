@@ -27,7 +27,7 @@ One row per operator. Several people from one business count as one operator.
 | OP-11 | | | | | | | | | | | | | |
 | OP-12 | | | | | | | | | | | | | |
 
-Allowed values. Category: dive, fishing, sightseeing, or private charter. Results: qualified, not qualified, or provisional. Follow-up accepted, written commitment, and blocked only by OTA: yes or no. Count a follow-up or commitment only once it is complete.
+Allowed values. Category: dive, fishing, sightseeing, or private charter. Results: qualified, not qualified, or provisional. Follow-up accepted, written commitment, and blocked only by OTA: yes or no. Follow-up accepted is yes once the participant has agreed to the commercial follow-up meeting; the meeting itself comes later. Written commitment is yes only once the dated written record that meets the guide's [written conditional commitment](operator-validation-guide.md#written-conditional-commitment) rules has been received.
 
 ## 2. Per-operator record
 
@@ -47,7 +47,7 @@ Product result and remaining risk:
 
 ## 3. Gate tally
 
-Fill this in only after all 12 interviews are complete. Count only qualified results. Provisional results do not count.
+Fill this in only after all 12 interviews are complete. The direct-first and conditional-demand counts take only qualified results. The feasibility-spike count is the one exception: it takes provisionally Native-qualified prospects, as step 3 of the validation gate says.
 
 ```text
 Completed interviews with distinct operators (needs 12):            ____
@@ -58,7 +58,7 @@ Direct-first gate
   Passes: yes / no
 
 Feasibility-spike gate (needs the direct-first gate first)
-  Native provisionally qualified AND follow-up accepted:            ____  (needs 3 or more)
+  Native qualified or provisional AND follow-up accepted:           ____  (needs 3 or more)
   Operator types among them:                                        ____  (needs 2 or more)
   Passes: yes / no
 
