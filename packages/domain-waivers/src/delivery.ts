@@ -42,6 +42,15 @@ import type { WaiverDeps, WaiverParticipant } from "./ports.ts";
 
 export const RESEND_INTERVAL_MINUTES = 10;
 export const MAX_GENERATIONS = 5;
+/** A guest may ask for this many new links a day, per participant (D1). */
+export const GUEST_RENEWALS_PER_DAY = 3;
+/** Generations a staff reset allows in all: four rounds of five (D2). */
+export const MAX_ALL_GENERATIONS = 20;
+
+/** Sends counted against MAX_GENERATIONS: those since the last staff reset. */
+export function sendsUsed(latestGeneration: number | null, resetAt: number | null): number {
+  return (latestGeneration ?? 0) - (resetAt ?? 0);
+}
 /** An emailed link lasts 7 days once sent, never past its trip's end. */
 export const LINK_TTL_DAYS = 7;
 /** A link with less time than this left before its trip ends is not worth sending. */
@@ -94,8 +103,12 @@ export type SendResult =
   | { kind: "no_address" }
   /** This participant's waiver went to this address less than the interval ago. */
   | { kind: "too_soon"; retryAfter: Date }
-  /** This request has had MAX_GENERATIONS sends. */
+  /** This request has had MAX_GENERATIONS sends since its last reset. */
   | { kind: "limit_reached" }
+  /** A guest's renewal: the address changed since the last email, or none went out. */
+  | { kind: "not_renewable" }
+  /** A guest's renewal: three today for this participant already. */
+  | { kind: "renewal_limit" }
   /** A sending cap across requests: per participant, address, booking, or operator. */
   | { kind: "rate_limited"; scope: RateScope; retryAfter: Date }
   /** The trip ends too soon for a link to be of use. */
@@ -116,6 +129,11 @@ export interface SendInput {
    * answering too_soon.
    */
   whenAllowed?: boolean;
+  /**
+   * The guest asked for a new link (D1): only to the address the latest
+   * generation went to, never closing anything, at most three a day.
+   */
+  guestRenewal?: boolean;
 }
 
 /** Who the email greets: the participant, or a minor's parent or guardian. */
@@ -142,11 +160,16 @@ export async function sendingRefusal(
 }
 
 /** A sending limit the delivery trigger raised, if that is what this error is. */
-function triggerRefusal(error: unknown): "interval" | "limit" | null {
+function triggerRefusal(
+  error: unknown,
+): "interval" | "limit" | "generations" | "guest" | "guest_limit" | null {
   const e = error as { code?: unknown; constraint_name?: unknown } | null;
   if (e?.code !== "23514") return null;
   if (e.constraint_name === "waiver_deliveries_rate") return "interval";
   if (e.constraint_name === "waiver_deliveries_limit") return "limit";
+  if (e.constraint_name === "waiver_deliveries_generations") return "generations";
+  if (e.constraint_name === "waiver_deliveries_guest") return "guest";
+  if (e.constraint_name === "waiver_deliveries_guest_limit") return "guest_limit";
   return null;
 }
 
@@ -184,8 +207,18 @@ export async function sendWaiverRequest(
     latest_generation: number | null;
     latest_recipient: string | null;
     latest_closed: boolean | null;
+    reset_at: number | null;
+    guest_today: number;
   }>`
     select now() as now, d.generation as latest_generation,
+           (select max(x.after_generation) from waiver_send_resets x
+             where x.tenant_id = ${ctx.tenantId} and x.request_id = ${request.id}) as reset_at,
+           (select count(*)::int from waiver_deliveries g
+              join waiver_requests r on r.tenant_id = g.tenant_id and r.id = g.request_id
+             where g.tenant_id = ${ctx.tenantId} and r.booking_id = ${request.booking_id}
+               and r.participant_id = ${request.participant_id}
+               and g.guest_renewal
+               and g.created_at > now() - interval '24 hours') as guest_today,
            d.recipient_email as latest_recipient,
            (exists (select 1 from email_messages m
                      where m.tenant_id = d.tenant_id and m.id = d.message_id
@@ -205,6 +238,18 @@ export async function sendWaiverRequest(
       link: "recipient_changed",
       session: "recipient_changed",
     });
+  if (input.guestRenewal) {
+    // A guest never changes where the email goes, and never closes anything.
+    if (
+      !recipient ||
+      facts.latest_generation === null ||
+      facts.latest_recipient !== recipient ||
+      facts.latest_closed === true
+    ) {
+      return { kind: "not_renewable" };
+    }
+    if (facts.guest_today >= GUEST_RENEWALS_PER_DAY) return { kind: "renewal_limit" };
+  }
   if (!recipient) {
     // The address removed from the booking is no longer this participant's:
     // its unsent email is canceled and its links and sessions end.
@@ -218,7 +263,7 @@ export async function sendWaiverRequest(
   const recipientChanged =
     facts.latest_recipient !== null &&
     (facts.latest_recipient !== recipient || facts.latest_closed === true);
-  if (kind === "resend" && (facts.latest_generation ?? 0) >= MAX_GENERATIONS) {
+  if (kind === "resend" && sendsUsed(facts.latest_generation, facts.reset_at) >= MAX_GENERATIONS) {
     // Nothing more goes out, but an address that is no longer this
     // participant's loses its links and sessions all the same.
     if (recipientChanged) await closeOldAddress();
@@ -301,6 +346,7 @@ export async function sendWaiverRequest(
         message_id: enqueued.messageId,
         send_after: sendAfter,
         reason: input.reason,
+        guest_renewal: input.guestRenewal === true,
       })
       .returning("id")
       .executeTakeFirstOrThrow();
@@ -312,6 +358,9 @@ export async function sendWaiverRequest(
     await sql`rollback to savepoint waiver_send`.execute(trx);
     await sql`release savepoint waiver_send`.execute(trx);
     if (error instanceof TypeError) return { kind: "email_invalid" };
+    if (limit === "generations") return { kind: "limit_reached" };
+    if (limit === "guest") return { kind: "not_renewable" };
+    if (limit === "guest_limit") return { kind: "renewal_limit" };
     // Another send got in first, such as a concurrent booking's to this
     // address: read the limits again for the answer.
     const again = await sendingRefusal(trx, ctx.tenantId, request, recipient, sendAfter);
@@ -333,7 +382,12 @@ export async function sendWaiverRequest(
     sendAfter: sendAfter.toISOString(),
   };
   await recordAudit(trx, ctx, {
-    action: kind === "initial" ? "waiver_request.sent" : "waiver_request.resent",
+    action:
+      kind === "initial"
+        ? "waiver_request.sent"
+        : input.guestRenewal
+          ? "waiver_request.renewed"
+          : "waiver_request.resent",
     subjectType: "waiver_request",
     subjectId: request.id,
     reason: input.reason,

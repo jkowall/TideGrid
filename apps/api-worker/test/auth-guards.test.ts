@@ -224,6 +224,9 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend",
         "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing",
+        // Waiver link renewal and the send-count reset (W1-WAIVER-RENEWAL).
+        "/v1/public/waiver-links/renewal",
+        "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/send-count-reset",
         // Staff-assisted booking (G2.12d).
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/offer",
         "/v1/staff/tenants/{tenantId}/quotes",
