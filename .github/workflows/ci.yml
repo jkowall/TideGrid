@@ -33,7 +33,7 @@ jobs:
   checks:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha }}
       - name: The commit under test
@@ -66,8 +66,8 @@ jobs:
               echo "::error::$want is not on main"; exit 1
             fi
           fi
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -94,7 +94,7 @@ jobs:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha }}
       - name: The commit under test
@@ -127,8 +127,8 @@ jobs:
               echo "::error::$want is not on main"; exit 1
             fi
           fi
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -157,7 +157,7 @@ jobs:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha }}
       - name: The commit under test
@@ -190,8 +190,8 @@ jobs:
               echo "::error::$want is not on main"; exit 1
             fi
           fi
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -235,7 +235,7 @@ jobs:
       - name: PostgreSQL log
         if: always()
         run: tools/local-db/local-db.sh logs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-traces
@@ -256,7 +256,7 @@ jobs:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.sha }}
       - name: The commit under test
@@ -289,8 +289,8 @@ jobs:
               echo "::error::$want is not on main"; exit 1
             fi
           fi
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -328,7 +328,7 @@ jobs:
       - name: PostgreSQL log
         if: always()
         run: tools/local-db/local-db.sh logs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: console-playwright-traces
