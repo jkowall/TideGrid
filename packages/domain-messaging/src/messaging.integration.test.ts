@@ -113,11 +113,13 @@ describe.skipIf(!env)(
       fake = new FakeEmailProvider({ db: runtime.db, environment: "local" });
       A = randomUUID();
       B = randomUUID();
-      for (const [id, slug] of [
-        [A, `msg-a-${A.slice(0, 8)}`],
-        [B, `msg-b-${B.slice(0, 8)}`],
+      // A's provisioned name reads as its brand's name, so email uses the
+      // brand's name (W1-SENDER-GUARD binds the two).
+      for (const [id, slug, name] of [
+        [A, `msg-a-${A.slice(0, 8)}`, "MSG HARBOR"],
+        [B, `msg-b-${B.slice(0, 8)}`, `Messaging msg-b-${B.slice(0, 8)}`],
       ] as const) {
-        await admin`insert into public.tenants (id, slug, display_name) values (${id}, ${slug}, ${`Messaging ${slug}`})`;
+        await admin`insert into public.tenants (id, slug, display_name) values (${id}, ${slug}, ${name})`;
       }
       // Tenant A publishes a brand; B has none and gets the neutral one.
       await admin`insert into public.brand_config_versions (tenant_id, version, schema_version, config)

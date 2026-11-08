@@ -13,7 +13,13 @@
  * naming a random slot; the delivery job issues the token at send time and
  * replaces the marker with the URL (`fillLinkSlot`).
  */
-import { guestSurface, primaryInk } from "@tidegrid/contracts";
+import {
+  fallbackSenderName,
+  guestSurface,
+  primaryInk,
+  senderNameProblem,
+  senderNameSuffix,
+} from "@tidegrid/contracts";
 
 /** What a message says, as blocks; never markup. */
 export type EmailBlock =
@@ -37,7 +43,11 @@ export interface EmailContent {
 }
 
 export interface EmailBrand {
-  /** The operator's guest-facing name. */
+  /**
+   * The operator's guest-facing name. Rendering shows it only when it passes
+   * the sender name rule (`emailOperatorName`); `loadEmailBrand` also binds
+   * it to the tenant's provisioned name.
+   */
   name: string;
   /** Six-digit lowercase hex, contrast-checked against the guest page. */
   primary: string;
@@ -48,6 +58,8 @@ export interface EmailBrand {
 }
 
 export interface RenderedEmail {
+  /** The sender display name: the operator's name and " via TideGrid". */
+  fromName: string;
   subject: string;
   html: string;
   text: string;
@@ -222,6 +234,21 @@ function textBlock(block: EmailBlock, link: string | null): string {
 }
 
 /**
+ * The operator's name as an email shows it: the brand's name when it passes
+ * the sender name rule (`senderNameProblem` in `@tidegrid/contracts`), and
+ * otherwise "Your trip operator". Brand validation refuses such a name
+ * already; this is the same guard at rendering, for any caller.
+ */
+export function emailOperatorName(brand: Pick<EmailBrand, "name">): string {
+  return senderNameProblem(brand.name) === null ? brand.name : fallbackSenderName;
+}
+
+/** The sender display name for a brand: "Demo Harbor Charters via TideGrid". */
+export function emailSenderName(brand: Pick<EmailBrand, "name">): string {
+  return `${emailOperatorName(brand)}${senderNameSuffix}`;
+}
+
+/**
  * A phone number as a guest reads it: a North American one as (305) 555-0142,
  * as the booking site shows it; any other as stored, in E.164.
  */
@@ -230,14 +257,14 @@ export function displayPhone(e164: string): string {
   return us ? `(${us[1]}) ${us[2]}-${us[3]}` : e164;
 }
 
-function footerParts(brand: EmailBrand): string[] {
+function footerParts(brand: EmailBrand, name: string): string[] {
   const contact = [
     brand.contactEmail,
     brand.contactPhone ? displayPhone(brand.contactPhone) : null,
   ].filter((v): v is string => !!v);
   return [
-    contact.length ? `Questions? Contact ${brand.name}: ${contact.join(", ")}.` : null,
-    `Sent by TideGrid for ${brand.name}. TideGrid demo build: the operator and its trips are synthetic, and no real booking or payment is made.`,
+    contact.length ? `Questions? Contact ${name}: ${contact.join(", ")}.` : null,
+    `Sent by TideGrid for ${name}. TideGrid demo build: the operator and its trips are synthetic, and no real booking or payment is made.`,
   ].filter((v): v is string => v !== null);
 }
 
@@ -255,12 +282,13 @@ export function renderEmail(
   if (usesAccessLink(content) && !link) {
     throw new TypeError("content with an access-link action needs a link slot");
   }
+  const name = emailOperatorName(brand);
   const onPrimary = primaryInk(brand.primary);
   const preview = content.preview
     ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${escapeHtml(content.preview)}</div>`
     : "";
   const body = content.blocks.map((b) => htmlBlock(b, brand, link)).join("");
-  const footer = footerParts(brand)
+  const footer = footerParts(brand, name)
     .map((p) => `<p style="margin:0 0 8px;">${escapeHtml(p)}</p>`)
     .join("");
   const html = [
@@ -274,20 +302,20 @@ export function renderEmail(
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${page};">`,
     '<tr><td align="center" style="padding:24px 12px;">',
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border:1px solid ${mist};border-radius:12px;">`,
-    `<tr><td style="background:${brand.primary};padding:20px 24px;border-radius:12px 12px 0 0;font-family:${font};font-size:20px;line-height:1.3;font-weight:700;color:${onPrimary};">${escapeHtml(brand.name)}</td></tr>`,
+    `<tr><td style="background:${brand.primary};padding:20px 24px;border-radius:12px 12px 0 0;font-family:${font};font-size:20px;line-height:1.3;font-weight:700;color:${onPrimary};">${escapeHtml(name)}</td></tr>`,
     `<tr><td style="padding:24px;font-family:${font};font-size:16px;line-height:1.5;color:${ink};">${body}</td></tr>`,
     `<tr><td style="padding:16px 24px 24px;border-top:1px solid ${mist};font-family:${font};font-size:13px;line-height:1.5;color:${muted};">${footer}</td></tr>`,
     "</table></td></tr></table></body></html>",
   ].join("");
   const text = [
-    brand.name,
+    name,
     "",
     ...content.blocks.flatMap((b) => [textBlock(b, link), ""]),
     "--",
-    ...footerParts(brand),
+    ...footerParts(brand, name),
     "",
   ].join("\n");
-  return { subject: content.subject, html, text };
+  return { fromName: `${name}${senderNameSuffix}`, subject: content.subject, html, text };
 }
 
 /** Replace a slot's marker with the access link's URL, everywhere it appears. */

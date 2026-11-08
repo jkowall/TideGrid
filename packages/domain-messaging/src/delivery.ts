@@ -67,6 +67,7 @@ import {
   EmailProviderUnavailableError,
   givesAttemptBack,
 } from "./adapter.ts";
+import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
 import { fillLinkSlot } from "./render.ts";
 
@@ -351,12 +352,23 @@ async function claimOne(
       returning attempts`.execute(trx);
     const attempt = claimed[0]?.attempts;
     if (attempt === undefined) throw new Error("a locked message did not claim");
-    const row = { ...found, attempts: attempt };
     if (attempt > MAX_DELIVERY_ATTEMPTS) {
       // Attempts that crashed after claiming count too; stop somewhere.
-      await fail(trx, ctx, row.id, attempt, "retries_exhausted");
-      return { kind: "failed", messageId: row.id, attempt, code: "retries_exhausted" } as const;
+      await fail(trx, ctx, found.id, attempt, "retries_exhausted");
+      return { kind: "failed", messageId: found.id, attempt, code: "retries_exhausted" } as const;
     }
+    // The stored sender is checked again against the tenant's current brand,
+    // never trusted as written (W1-SENDER-GUARD, pull request review fix G1).
+    const sender = deliverySender(
+      { fromName: found.from_name, replyTo: found.reply_to },
+      await loadEmailBrand(trx, ctx.tenantId),
+    );
+    const row = {
+      ...found,
+      attempts: attempt,
+      from_name: sender.fromName,
+      reply_to: sender.replyTo,
+    };
     if (row.link_purpose === null || row.link_path === null || row.link_ttl_seconds === null) {
       return { kind: "ready", row, url: null } as const;
     }
