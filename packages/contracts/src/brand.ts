@@ -1054,7 +1054,7 @@ export function senderNameProblem(name: string): string | null {
     return "A sender name uses plain composed characters";
   }
   if (!senderNameCharacters.test(name)) {
-    return "A sender name uses Latin letters, digits, spaces, and & ' . , ! ( ) / + # - only";
+    return "A sender name uses Latin letters, digits, spaces, and & ' ’ . , ! ( ) / + # - only";
   }
   if (![...name].some((ch) => latinLetter.test(ch))) {
     return "A sender name needs a letter";

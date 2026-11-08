@@ -287,6 +287,15 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     expect(accepts({ name }), name).toBe(false);
   });
 
+  it("lists every punctuation mark the character rule allows in its message", () => {
+    const problem = senderNameProblem("Harbor @ Tours");
+    expect(problem).not.toBeNull();
+    for (const mark of ["&", "'", "’", ".", ",", "!", "(", ")", "/", "+", "#", "-"]) {
+      expect(problem, mark).toContain(` ${mark}`);
+      expect(senderNameProblem(`Harbor ${mark}Tours`), mark).not.toBe(problem);
+    }
+  });
+
   it("never binds a brand to a provisioned name the rule refuses (pull request review)", () => {
     expect(senderNameProblem("Billing1")).not.toBeNull();
     expect(sameSenderName("B!lling1", "Billing1")).toBe(false);
