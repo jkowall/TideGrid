@@ -88,7 +88,7 @@ import {
   Waiting,
 } from "./Outcomes.tsx";
 import { PartyStep, partyFieldId } from "./PartyStep.tsx";
-import { type PayBusy, PayStep } from "./PayStep.tsx";
+import { type CardWiring, type PayBusy, PayStep } from "./PayStep.tsx";
 import {
   type BookedRecord,
   clearBooked,
@@ -99,6 +99,7 @@ import {
   saveBooked,
   saveResume,
 } from "./resume.ts";
+import { type CardOutcome, loadStripeJs, type StripeLoader } from "./stripe-js.ts";
 import { BookedHeader, TripFacts, TripHeader, tripWhen } from "./TripHeader.tsx";
 
 /**
@@ -273,11 +274,14 @@ export function BookingPage({
   brand,
   tripId,
   focusOnArrival,
+  stripeLoader = loadStripeJs,
 }: {
   brand: PublicBrand;
   tripId: string;
   /** Arrived from another page of the site: move focus to this page's heading once it loads. */
   focusOnArrival: boolean;
+  /** Gives the Stripe card form Stripe.js; tests pass a double (W1-STRIPE-ELEMENT). */
+  stripeLoader?: StripeLoader;
 }) {
   const [address] = useState(() => readAddress(tripId, window.location.search));
   const [arrivalUrl] = useState(() => `${window.location.pathname}${window.location.search}`);
@@ -1241,6 +1245,68 @@ export function BookingPage({
   });
 
   /**
+   * Pay by card under Stripe (W1-STRIPE-ELEMENT), under the same one-command
+   * lock as the test payment. From the moment Stripe is asked, the payment
+   * may go through, as with the test payment. `confirm` asks Stripe; a sent
+   * payment moves the page on to wait for the checkout's own state, which
+   * only a verified webhook confirms. A decline stays on the payment step,
+   * where the card form says why and nothing was charged. Null when another
+   * command was working.
+   */
+  async function payByCard(confirm: () => Promise<CardOutcome>): Promise<CardOutcome | null> {
+    if (lock.current) return null;
+    lock.current = true;
+    try {
+      const current = liveRef.current;
+      if (!current || stageRef.current.kind !== "pay") return null;
+      const { sessionId } = current;
+      setTrouble(null);
+      setBusy("card");
+      const tried: Live = { ...current, paymentTried: true };
+      setLive(tried);
+      saveResume(recordOf(tried, false));
+      const outcome = await confirm();
+      if (!alive()) return outcome;
+      setBusy(null);
+      const still = () =>
+        stageRef.current.kind === "pay" && liveRef.current?.sessionId === sessionId;
+      if (!still()) return outcome;
+      if (outcome.kind === "sent") {
+        // A reload from here waits for the outcome instead of offering to pay.
+        saveResume(recordOf(tried, true));
+        go({ kind: "waiting" });
+        focusStep();
+        return outcome;
+      }
+      if (outcome.kind === "unknown") {
+        // Stripe did not say. The checkout's own state may: read it once.
+        const read = await readCheckout(sessionId, tried.secret, signal());
+        if (alive() && still() && read.kind === "ok" && isFinal(read.value)) finish(read.value);
+      }
+      return outcome;
+    } finally {
+      lock.current = false;
+    }
+  }
+
+  /** The card form found the checkout not open, or not this guest's: show what it is. */
+  async function cardEnded() {
+    const open = liveRef.current;
+    if (!open || stageRef.current.kind !== "pay") return;
+    const result = await readCheckout(open.sessionId, open.secret, signal());
+    if (!alive() || stageRef.current.kind !== "pay") return;
+    if (result.kind === "ok" && isFinal(result.value)) {
+      finish(result.value);
+      return;
+    }
+    if (result.kind === "refused" && (result.status === 401 || result.status === 404)) {
+      clearResume();
+      go({ kind: "gone" });
+      focusStep();
+    }
+  }
+
+  /**
    * Cancel the open checkout. "canceled": released. "ended": it had ended
    * first, and the page now shows how. "limited" or "failed": still open.
    * "gone": the page went meanwhile.
@@ -1564,6 +1630,13 @@ export function BookingPage({
 
   // Render ---------------------------------------------------------------------------
 
+  const card = (secret: string): CardWiring => ({
+    secret,
+    loader: stripeLoader,
+    onPay: payByCard,
+    onEnded: () => void cardEnded(),
+  });
+
   const announcer = (
     <p className="tg-visually-hidden" role="status">
       {load.kind === "loading" ? "Loading the trip…" : announcement}
@@ -1730,10 +1803,16 @@ export function BookingPage({
           {stage.kind === "pay" && live?.session && (
             <PayStep
               session={live.session}
+              payment={live.payment}
+              card={card(live.secret)}
               timeZone={trip.trip.timeZone}
               charter={trip.charter}
               now={now}
-              busy={busy === "succeed" || busy === "fail" || busy === "cancel" ? busy : null}
+              busy={
+                busy === "succeed" || busy === "fail" || busy === "cancel" || busy === "card"
+                  ? busy
+                  : null
+              }
               trouble={trouble}
               priceChange={priceChange}
               onPay={(outcome) => void pay(outcome)}

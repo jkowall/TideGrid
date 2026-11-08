@@ -42,7 +42,7 @@ describe("static files", () => {
     expect(contact).toContain('Call <span className="guest-phone">{formatPhone(phone)}</span>');
   });
 
-  it("keeps the guest policy strict: no inline script or style, and the API as the only connection", () => {
+  it("keeps the guest policy strict: no inline script or style, and the API and Stripe as the only connections", () => {
     const headers = readFileSync(new URL("../public/_headers", import.meta.url), "utf8");
     const policy = /Content-Security-Policy: (.+)/.exec(headers)?.[1] ?? "";
     const directives = new Map(
@@ -51,16 +51,31 @@ describe("static files", () => {
         return [name, values.join(" ")];
       }),
     );
-    expect(policy).not.toMatch(/unsafe-inline|unsafe-eval|unsafe-hashes|\*/);
+    expect(policy).not.toMatch(/unsafe-inline|unsafe-eval|unsafe-hashes/);
+    // One wildcard only: Stripe.js's own subdomains, as Stripe documents them.
+    expect(policy.replaceAll("https://*.js.stripe.com", "")).not.toContain("*");
     expect(directives.get("style-src")).toBe("'self'");
-    expect(directives.get("script-src")).toBe("'self' https://static.cloudflareinsights.com");
+    // W1-STRIPE-ELEMENT D3 (pending owner approval): Stripe.js from
+    // js.stripe.com for the card form, and nothing else from Stripe.
+    expect(directives.get("script-src")).toBe(
+      "'self' https://static.cloudflareinsights.com https://js.stripe.com https://*.js.stripe.com",
+    );
     // The page fetches only from the API. 'self' is for Cloudflare Web Analytics:
     // its automatically injected beacon reports to this site's own /cdn-cgi/rum,
     // as https://developers.cloudflare.com/web-analytics/faq/ says;
     // cloudflareinsights.com takes the manually added beacon's reports.
+    // api.stripe.com is Stripe.js's own API, for the card form.
     expect(directives.get("connect-src")).toBe(
-      "'self' https://api.tidegrid.us https://cloudflareinsights.com",
+      "'self' https://api.tidegrid.us https://cloudflareinsights.com https://api.stripe.com",
     );
+    // Stripe's card form and its 3D Secure check run in Stripe's frames only.
+    expect(directives.get("frame-src")).toBe(
+      "https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com",
+    );
+    // Card only: nothing for Stripe's address autocomplete, and the Payment
+    // Request API stays off.
+    expect(policy).not.toContain("maps.googleapis.com");
+    expect(headers).toContain("payment=()");
     expect(directives.get("form-action")).toBe("'self'");
     expect(directives.get("frame-ancestors")).toBe("'none'");
     // G2.14b: explicit, so neither falls back to script-src and admits the
