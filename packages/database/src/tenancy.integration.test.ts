@@ -695,6 +695,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         booking_email_resends: ["INSERT", "SELECT"],
         // Staff resend claims (0017): append-only, no UPDATE columns.
         booking_email_resend_claims: ["INSERT", "SELECT"],
+        // Finalization exception resolutions (0018): append-only, no UPDATE columns.
+        finalization_exception_resolutions: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

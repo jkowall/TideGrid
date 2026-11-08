@@ -430,6 +430,7 @@ export function finalizationException(
       reportedCurrency: "USD",
     },
     booker: { name: bookers.maya.name, email: bookers.maya.email },
+    resolution: null,
     ...over,
   };
 }
@@ -531,7 +532,14 @@ export function staffTrip(over: Partial<StaffTrip> = {}): StaffTrip {
  */
 export function asSeenBy<T>(role: StaffRole, body: T): T {
   if (role !== "finance") return body;
-  return JSON.parse(JSON.stringify(body, (key, value) => (key === "booker" ? undefined : value)));
+  // A resolution's note (W1-FIN-EXC) is text a person typed: finance gets none.
+  return JSON.parse(
+    JSON.stringify(body, function (this: Record<string, unknown>, key, value) {
+      if (key === "booker") return undefined;
+      if (key === "note" && "resolvedBy" in this) return undefined;
+      return value;
+    }),
+  );
 }
 
 // Responses and the fetch stub ---------------------------------------------------------------
@@ -600,6 +608,9 @@ export const route = {
     `GET ${base(tenant)}/booking-references/${reference}`,
   roster: (id: string, tenant?: string) => `GET ${base(tenant)}/trips/${id}/roster`,
   exceptions: (tenant?: string) => `GET ${base(tenant)}/finalization-exceptions`,
+  // Exception resolution (W1-FIN-EXC).
+  resolveException: (id: string, tenant?: string) =>
+    `POST ${base(tenant)}/finalization-exceptions/${id}/resolution`,
   trips: (tenant?: string) => `GET ${base(tenant)}/trips`,
   // Console completion (G2.12c).
   notes: (id: string, tenant?: string) => `GET ${base(tenant)}/bookings/${id}/notes`,

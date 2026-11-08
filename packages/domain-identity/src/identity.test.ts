@@ -33,6 +33,7 @@ describe("role permissions", () => {
       "waivers.manage",
       "bookings.create",
       "messages.resend",
+      "exceptions.resolve",
     ]);
     expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read", "payments.read"]);
   });
@@ -69,6 +70,13 @@ describe("role permissions", () => {
 
   it("lets owners and booking staff create staff-assisted bookings, never finance (G2.12d)", () => {
     expect(StaffRole.options.filter((r) => can(r, "bookings.create"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
+  });
+
+  it("lets owners and booking staff resolve a payment exception, never finance (W1-FIN-EXC)", () => {
+    expect(StaffRole.options.filter((r) => can(r, "exceptions.resolve"))).toEqual([
       "owner",
       "booking_staff",
     ]);

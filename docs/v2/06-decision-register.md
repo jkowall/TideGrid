@@ -8,6 +8,20 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
+
+The owner placed finalization exception resolution in the G2.12 row with the O-SCOPE choice "Booking fixes and email limits". The goal's start gate is that entry. Staff now mark a payment exception as followed up, with migration `0018` (provisional, claimed at merge) and its service in the [booking contract](../../packages/domain-booking/README.md#exception-resolution-w1-fin-exc). The owner gave no answer on who may resolve or what reason is required, so these are coordinator defaults, pending owner confirmation:
+
+- **D1 A: an append-only resolution table.** One resolution per exception, never edited or removed, for any role. The exception itself is not changed; the open list is the exceptions without a resolution. The database stamps who resolved it, the request, and the time.
+- **D2: owners and booking staff resolve; finance reads.** A new permission, `exceptions.resolve`.
+- **D3: four reason codes.** Contacted the guest, refunded outside TideGrid, no action needed, and other, which requires a note. The note is optional otherwise, and follows a booking note's rules.
+- **D4: the note goes where the booker goes.** Finance sees the reason, who, and when, but not the note, since a note can name a guest (as with booking notes, owner decision of 2026-10-19). The note never enters the audit row, an event, or a log, and the idempotency store keeps only a hash of the request, never its text.
+- **D5: no resolve while the automatic refund is still requested.** Its outcome is not known yet, and a refund that then failed would leave the open list unseen. A refund the provider refused can be resolved, for example as refunded outside TideGrid.
+
+Resolving changes no money, booking, payment, refund, or checkout. Retries and refunds from the console, email exceptions, overrides, and staff cancel stay out of scope.
+
+Security review under rule R9: the owner said yes on 2026-11-08, and it found no defects. Canonical: the [database README](../../packages/database/README.md#finalization-exception-resolutions-0018) and the [verification log](../verification-log.md#2026-11-08).
+
 ### 2026-11-08: W1-RESEND-CLAIM, staff resend limits held at the delivery claim (owner go; coordinator defaults pending owner confirmation)
 
 The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and email limits" on the O-SCOPE card, whose option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." Migration `0014` calls bounding sends at the delivery claim "a possible pre-pilot follow-up": its limits are decided on the ledger's stamps, and a writer with `tidegrid_app`'s credentials that waits after its commit check commits a resend with an old stamp, whose email then goes out beside resends stamped later. Migration `0017` (provisional; `0018` reserved) holds the limits again at every claim of a `booking.resend:` message. Coordinator defaults, pending owner confirmation:

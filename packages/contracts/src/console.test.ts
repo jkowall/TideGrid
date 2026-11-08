@@ -3,6 +3,7 @@ import {
   BookingNoteCreatedResponse,
   BookingNoteCreateRequest,
   bookingDayExportColumns,
+  FinalizationExceptionResolveRequest,
 } from "./console.ts";
 import { bookingReferencePrefix, normalizeBookingReference } from "./references.ts";
 
@@ -98,5 +99,32 @@ describe("the day's export columns (G2.12c)", () => {
     expect(bookingDayExportColumns).toHaveLength(27);
     expect(bookingDayExportColumns.at(-2)).toBe("Generated at (UTC)");
     expect(bookingDayExportColumns.at(-1)).toBe("Source");
+  });
+});
+
+describe("resolving a finalization exception (W1-FIN-EXC)", () => {
+  const parse = (body: unknown) => FinalizationExceptionResolveRequest.safeParse(body);
+
+  it("takes a reason code alone, except other", () => {
+    for (const reasonCode of ["contacted_guest", "refunded_outside", "no_action_needed"]) {
+      expect(parse({ reasonCode }).success).toBe(true);
+    }
+    expect(parse({ reasonCode: "other" }).success).toBe(false);
+    expect(parse({ reasonCode: "other", note: "Guest rebooked by phone." }).success).toBe(true);
+  });
+
+  it("refuses an unknown reason and a note that shows nothing", () => {
+    expect(parse({ reasonCode: "refunded" }).success).toBe(false);
+    expect(parse({ reasonCode: "other", note: "  ​ " }).success).toBe(false);
+    expect(parse({ reasonCode: "contacted_guest", note: "x".repeat(501) }).success).toBe(false);
+    expect(parse({ reasonCode: "contacted_guest", note: "tab\there" }).success).toBe(false);
+  });
+
+  it("trims the note as a booking note is trimmed", () => {
+    const parsed = FinalizationExceptionResolveRequest.parse({
+      reasonCode: "contacted_guest",
+      note: "  Called back.\n ",
+    });
+    expect(parsed.note).toBe("Called back.");
   });
 });

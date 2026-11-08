@@ -9,6 +9,8 @@ import type {
   BookingPaymentStatus,
   BookingReferenceResponse,
   FinalizationException,
+  FinalizationExceptionResolution,
+  FinalizationExceptionStatus,
   FinalizationExceptionsResponse,
   TripRoster,
   TripRosterResponse,
@@ -389,7 +391,29 @@ function isException(e: Partial<FinalizationException> | null | undefined): bool
     isStringOrNull(e.payment?.providerReference) &&
     (e.payment?.reportedAmount === null || isInt(e.payment?.reportedAmount)) &&
     isStringOrNull(e.payment?.reportedCurrency) &&
-    isBooker(e.booker, true)
+    isBooker(e.booker, true) &&
+    isResolution(e.resolution)
+  );
+}
+
+const resolutionReasons = new Set([
+  "contacted_guest",
+  "refunded_outside",
+  "no_action_needed",
+  "other",
+]);
+
+/** A resolution (W1-FIN-EXC), or null while open. The note goes only to roles that see guests. */
+function isResolution(r: unknown): boolean {
+  if (r === null) return true;
+  const v = r as Partial<FinalizationExceptionResolution> | undefined;
+  return (
+    isString(v?.id) &&
+    resolutionReasons.has(v.reasonCode as string) &&
+    (v.note === undefined || isStringOrNull(v.note)) &&
+    isString(v.resolvedBy?.userId) &&
+    isString(v.resolvedBy?.name) &&
+    isInstant(v.resolvedAt)
   );
 }
 
@@ -400,10 +424,10 @@ export interface ExceptionsPage {
 
 export function loadExceptions(
   tenantId: string,
-  query: { before?: string | undefined },
+  query: { status: FinalizationExceptionStatus; before?: string | undefined },
   signal?: AbortSignal,
 ): Promise<Read<ExceptionsPage>> {
-  const params = new URLSearchParams({ limit: "50" });
+  const params = new URLSearchParams({ status: query.status, limit: "50" });
   if (query.before) params.set("before", query.before);
   return read(
     `${tenantPath(tenantId)}/finalization-exceptions?${params}`,

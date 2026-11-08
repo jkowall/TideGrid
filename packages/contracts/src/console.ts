@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { BookingPaymentStatus, BookingReference, BookingState } from "./bookings.ts";
 import { TripSummary } from "./catalog.ts";
-import { BookingSource } from "./checkout.ts";
+import {
+  BookingSource,
+  ExceptionResolutionReason,
+  FinalizationExceptionResolution,
+} from "./checkout.ts";
 
 /**
  * Console completion (G2.12c): booking search, a day's control totals and its
@@ -260,3 +264,38 @@ export type BookingNoteCreated = z.infer<typeof BookingNoteCreated>;
 
 export const BookingNoteCreatedResponse = z.object({ note: BookingNoteCreated });
 export type BookingNoteCreatedResponse = z.infer<typeof BookingNoteCreatedResponse>;
+
+// Exception resolution (W1-FIN-EXC) ---------------------------------------------------
+
+export const FinalizationExceptionParams = z.object({
+  tenantId: z.string(),
+  exceptionId: z.string().describe("Exception UUID; anything else answers 404"),
+});
+
+export const FinalizationExceptionResolveRequest = z
+  .object({
+    reasonCode: ExceptionResolutionReason,
+    note: BookingNoteBody.optional().describe(
+      "Up to 500 characters with at least one visible one, as a booking note. Required for other. Seen by owners and booking staff only",
+    ),
+  })
+  .refine((r) => r.reasonCode !== "other" || r.note !== undefined, {
+    message: "A note is required when the reason is other",
+    path: ["note"],
+  });
+export type FinalizationExceptionResolveRequest = z.infer<
+  typeof FinalizationExceptionResolveRequest
+>;
+
+/**
+ * What resolving answers: the resolution without its note. The answer is
+ * kept for replaying the idempotency key, so the note, which can name a
+ * guest, is never copied there. The writer already holds the note it sent.
+ */
+export const FinalizationExceptionResolvedResponse = z.object({
+  exceptionId: z.uuid(),
+  resolution: FinalizationExceptionResolution.omit({ note: true }),
+});
+export type FinalizationExceptionResolvedResponse = z.infer<
+  typeof FinalizationExceptionResolvedResponse
+>;

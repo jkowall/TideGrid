@@ -8,6 +8,9 @@ import {
   BookingParams,
   BookingSearchRequest,
   BookingSearchResponse,
+  FinalizationExceptionParams,
+  FinalizationExceptionResolvedResponse,
+  FinalizationExceptionResolveRequest,
   IdempotencyKey,
   StaffTenantParams,
 } from "@tidegrid/contracts";
@@ -19,6 +22,7 @@ import {
   dayExportFileName,
   listBookingNotes,
   renderDayExport,
+  resolveFinalizationException,
   searchBookings,
 } from "@tidegrid/domain-booking";
 import { can } from "@tidegrid/domain-identity";
@@ -31,11 +35,15 @@ const searchPath = "/v1/staff/tenants/{tenantId}/booking-searches";
 const totalsPath = "/v1/staff/tenants/{tenantId}/booking-day-totals";
 const exportPath = "/v1/staff/tenants/{tenantId}/booking-day-export";
 const notesPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes";
+const resolutionPath =
+  "/v1/staff/tenants/{tenantId}/finalization-exceptions/{exceptionId}/resolution";
 
 const idempotencyHeader = z.object({ "idempotency-key": IdempotencyKey });
 
 const bookingNotFound = () =>
   new ApiError(404, "booking_not_found", "No such booking for this tenant");
+const exceptionNotFound = () =>
+  new ApiError(404, "exception_not_found", "No such payment exception for this tenant");
 const cursorInvalid = () =>
   new ApiError(400, "cursor_invalid", "The cursor names nothing this search finds");
 const dayTooLarge = () =>
@@ -59,7 +67,8 @@ function report(outcome: DayReportOutcome) {
 
 /**
  * Console completion (G2.12c): booking search, a day's control totals, the
- * day's CSV export, and internal booking notes. Every answer carries
+ * day's CSV export, and internal booking notes. W1-FIN-EXC adds resolving a
+ * payment exception. Every answer carries
  * personal data or money, so no cache keeps any, refusals included: app.ts
  * marks every staff answer no-store, before the guards run.
  */
@@ -324,6 +333,94 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         // the note and leaves its text, which can mention a guest, out.
         const { id, author, createdAt } = added.note;
         return { note: { id, author: { ...author }, createdAt } };
+      },
+    );
+    if (result.replayed) c.header("Idempotent-Replayed", "true");
+    if (result.status !== 201) throw new Error(`unexpected stored status ${result.status}`);
+    return c.json(result.body, 201);
+  });
+
+  // Exception resolution (W1-FIN-EXC) -----------------------------------------------------
+
+  const resolveRoute = createRoute({
+    method: "post",
+    path: resolutionPath,
+    tags: ["staff", "bookings"],
+    summary: "Mark a payment exception as followed up",
+    description:
+      "Owners and booking staff; finance reads resolutions and resolves none. Records how staff followed the exception up: a reason code and, when they choose, a note (required for other). Once per exception, never edited or removed. It changes no money, booking, payment, or refund. Refused while the automatic refund is still requested. The resolver is the signed-in staff member and the time is the database's. Recorded in the audit history by the resolution's id and reason code; the note never enters the audit history or the answer. Idempotent by key: a replay answers the first result.",
+    security: staffSecurity,
+    request: {
+      params: FinalizationExceptionParams,
+      headers: idempotencyHeader,
+      body: {
+        required: true,
+        content: { "application/json": { schema: FinalizationExceptionResolveRequest } },
+      },
+    },
+    responses: {
+      201: {
+        content: { "application/json": { schema: FinalizationExceptionResolvedResponse } },
+        description: "The resolution, without its note",
+      },
+      400: errorBody("Invalid request: an unknown reason, a bad note, or other without a note"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role or origin does not allow this"),
+      404: errorBody("No such tenant, or no such exception for it (exception_not_found)"),
+      409: errorBody(
+        "Already followed up (exception_already_resolved), or the automatic refund is still in progress (exception_refund_pending)",
+      ),
+      422: errorBody("Idempotency key reused with a different request"),
+    },
+  });
+
+  app.openapi(resolveRoute, async (c) => {
+    const { tenantId, exceptionId } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const key = c.req.valid("header")["idempotency-key"];
+    const result = await withStaffTenant(
+      c,
+      deps,
+      {
+        tenantId,
+        permission: "exceptions.resolve",
+        idempotency: {
+          scope: "finalization_exceptions.resolve",
+          key,
+          route: resolutionPath,
+          params: { exceptionId },
+          body: input,
+          successStatus: 201,
+        },
+      },
+      async (trx, ctx) => {
+        const resolved = await resolveFinalizationException(trx, ctx, {
+          exceptionId,
+          reasonCode: input.reasonCode,
+          note: input.note ?? null,
+        });
+        if (resolved.kind === "exception_not_found") throw exceptionNotFound();
+        if (resolved.kind === "already_resolved") {
+          throw new ApiError(
+            409,
+            "exception_already_resolved",
+            "This payment exception has already been followed up",
+          );
+        }
+        if (resolved.kind === "refund_pending") {
+          throw new ApiError(
+            409,
+            "exception_refund_pending",
+            "The automatic refund is still in progress; resolve it once the refund settles",
+          );
+        }
+        // This answer is also the one kept for replaying the key, so it
+        // leaves the note, which can name a guest, out.
+        const { resolution } = resolved;
+        return {
+          exceptionId,
+          resolution: { ...resolution, resolvedBy: { ...resolution.resolvedBy } },
+        };
       },
     );
     if (result.replayed) c.header("Idempotent-Replayed", "true");

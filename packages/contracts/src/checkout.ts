@@ -335,6 +335,39 @@ export const FinalizationReason = z
     "Why a verified payment could not become a booking. payment_mismatch is not refunded automatically; investigate it at the provider",
   );
 
+// Exception resolution (W1-FIN-EXC) ---------------------------------------------------
+
+export const ExceptionResolutionReason = z
+  .enum(["contacted_guest", "refunded_outside", "no_action_needed", "other"])
+  .describe(
+    "How staff followed the exception up: contacted the guest, refunded outside TideGrid, no action needed, or other (a note is then required)",
+  );
+export type ExceptionResolutionReason = z.infer<typeof ExceptionResolutionReason>;
+
+export const FinalizationExceptionResolution = z
+  .object({
+    id: Uuid,
+    reasonCode: ExceptionResolutionReason,
+    note: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "What the staff member wrote, or null when they wrote nothing. Text a person typed that can name a guest: present only for roles that hold bookings.read (owners and booking staff); absent otherwise",
+      ),
+    resolvedBy: z
+      .object({
+        userId: Uuid,
+        name: z.string().describe("How this operator names the staff member"),
+      })
+      .describe("Who resolved it: the signed-in staff member, never a value the request named"),
+    resolvedAt: Instant.describe("When it was resolved, on the database's clock"),
+  })
+  .describe(
+    "Staff marked the exception as followed up. Once per exception, never edited or removed. It changes no money, booking, payment, or refund",
+  );
+export type FinalizationExceptionResolution = z.infer<typeof FinalizationExceptionResolution>;
+
 export const FinalizationException = z.object({
   id: Uuid,
   reason: FinalizationReason,
@@ -377,10 +410,22 @@ export const FinalizationException = z.object({
     .describe(
       "Personal data, for following up with the guest. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise",
     ),
+  // W1-FIN-EXC.
+  resolution: FinalizationExceptionResolution.nullable().describe(
+    "How staff followed it up; null while it is open",
+  ),
 });
 export type FinalizationException = z.infer<typeof FinalizationException>;
 
+export const FinalizationExceptionStatus = z
+  .enum(["open", "resolved"])
+  .describe("open: not yet followed up. resolved: followed up, the history (W1-FIN-EXC)");
+export type FinalizationExceptionStatus = z.infer<typeof FinalizationExceptionStatus>;
+
 export const FinalizationExceptionQuery = z.object({
+  status: FinalizationExceptionStatus.default("open").describe(
+    "Which exceptions to list; open when absent (W1-FIN-EXC). Both lists are newest first by when the exception arose",
+  ),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   before: Uuid.optional().describe(
     "Cursor: the last exception id of the previous page (nextBefore). One that names no exception of this operator answers 400 cursor_invalid",

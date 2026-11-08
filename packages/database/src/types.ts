@@ -948,6 +948,31 @@ export interface BookingNotesTable {
   created_at: CreatedAt;
 }
 
+// Finalization exception resolutions (0018, W1-FIN-EXC) ----------------------------
+
+export type ExceptionResolutionReason =
+  | "contacted_guest"
+  | "refunded_outside"
+  | "no_action_needed"
+  | "other";
+
+/**
+ * Staff marked a finalization exception as followed up. One per exception,
+ * append-only for every role; a trigger sets who resolved it, the request,
+ * and the time from the transaction, so an insert names only the tenant, the
+ * exception, the reason code, and the note.
+ */
+export interface FinalizationExceptionResolutionsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  exception_id: Fixed<string>;
+  reason_code: Fixed<ExceptionResolutionReason>;
+  note: ColumnType<string | null, string | null | undefined, never>;
+  resolved_by_user_id: ColumnType<string, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+  created_at: CreatedAt;
+}
+
 /** Tables added by the console completion migration (G2.12c), merged into Database below. */
 interface ConsoleTables {
   booking_notes: BookingNotesTable;
@@ -1189,6 +1214,8 @@ export interface Database
   // Staff resend ledger (0014).
   booking_email_resends: BookingEmailResendsTable;
   booking_email_resend_claims: BookingEmailResendClaimsTable;
+  // Finalization exception resolutions (0018, W1-FIN-EXC).
+  finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
 }
 
 export type { Generated, GeneratedAlways };

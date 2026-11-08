@@ -652,7 +652,7 @@ describe("the other booking reads keep their own checks (G2.12e)", () => {
     });
     expect((await loadBooking(tenantId, bookingIds.maya)).kind).toBe("ok");
     expect((await loadRoster(tenantId, tripIds.sunset)).kind).toBe("ok");
-    expect((await loadExceptions(tenantId, {})).kind).toBe("ok");
+    expect((await loadExceptions(tenantId, { status: "open" })).kind).toBe("ok");
     expect((await searchBookings(tenantId, { q: "maya" })).kind).toBe("ok");
   });
 
