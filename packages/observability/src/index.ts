@@ -72,12 +72,14 @@ export interface RequestAttributes {
   "tidegrid.email_sweep.pass_count"?: number;
   "tidegrid.email_sweep.deferred_tenant_count"?: number;
   "tidegrid.email_sweep.stamp_failure_count"?: number;
+  "tidegrid.email_sweep.held_tenant_count"?: number;
   /** The provider refused for the whole account and the run stopped. */
   "tidegrid.email_sweep.account_fault"?: boolean;
   // Email events consumer (W1-EMAIL-EVENTS): the outcome and the event's
   // type only; never an address, a subject, or the provider's text.
   "tidegrid.email_event.outcome"?: string;
   "tidegrid.email_event.type"?: string;
+  "tidegrid.email_event.suppressed"?: boolean;
   "tidegrid.email_events.count"?: number;
   "tidegrid.email_events.attempts"?: number;
   /** Custom hostname sweep (G2.14b). Provider ids are opaque; no hostname or personal data. */
@@ -164,10 +166,12 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.email_sweep.pass_count",
   "tidegrid.email_sweep.deferred_tenant_count",
   "tidegrid.email_sweep.stamp_failure_count",
+  "tidegrid.email_sweep.held_tenant_count",
   "tidegrid.email_sweep.account_fault",
   // Email events consumer (W1-EMAIL-EVENTS).
   "tidegrid.email_event.outcome",
   "tidegrid.email_event.type",
+  "tidegrid.email_event.suppressed",
   "tidegrid.email_events.count",
   "tidegrid.email_events.attempts",
   // Custom hostname sweep (G2.14b).

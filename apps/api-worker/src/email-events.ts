@@ -16,8 +16,9 @@ import { type Bindings, databaseUrl } from "./env.ts";
  * left to the Worker's other consumers (see src/index.ts).
  *
  * Whose events: EMAIL_EVENTS_ACCOUNT_ID (the account's id, a secret so it
- * never enters the repository) and the sending domain, the domain of
- * EMAIL_FROM_ADDRESS. An event from another account or domain is refused,
+ * never enters the repository) and the sending domain: the domain of
+ * EMAIL_FROM_ADDRESS, or an operator's verified sending domain (0023, checked
+ * in the database). An event from another account or domain is refused,
  * recorded nowhere, and retried, so a wrong setting sends real events to the
  * queue's dead-letter queue instead of dropping them. These checks are claims
  * in the event's body, not authentication: the queue's producers are the
@@ -115,6 +116,7 @@ export async function consumeEmailEvents(
         ...(result.reason ? { "error.type": result.reason } : {}),
         ...(result.tenantId ? { "tidegrid.tenant_id": result.tenantId } : {}),
         ...(result.messageId ? { "tidegrid.email.message_id": result.messageId } : {}),
+        ...(result.suppressed ? { "tidegrid.email_event.suppressed": true } : {}),
       };
       if (result.outcome === "refused_account" || result.outcome === "refused_domain") {
         // Retried, not acknowledged: until the live payload is confirmed

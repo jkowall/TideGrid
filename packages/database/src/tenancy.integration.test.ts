@@ -703,6 +703,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // unmatched events are a platform table reached through a function.
         email_events: ["INSERT", "SELECT"],
         email_events_unmatched: [],
+        // Sender domains (0023): read only; the admin connection writes them.
+        tenant_sender_domains: ["SELECT"],
+        // Suppression (0023): added by the events consumer, lifted by the admin.
+        email_suppressions: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

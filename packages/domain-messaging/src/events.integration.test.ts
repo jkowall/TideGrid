@@ -149,6 +149,8 @@ describe.skipIf(!env)("email bounce and complaint events (W1-EMAIL-EVENTS)", () 
       eventType: "bounced",
       tenantId: A,
       messageId: m.id,
+      // A hard bounce also suppresses the address for this operator (0023).
+      suppressed: true,
     });
     const status = await inTenant(A, (trx) => getMessageStatus(trx, A, m.id));
     expect(status).toMatchObject({
