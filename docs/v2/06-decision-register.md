@@ -24,6 +24,17 @@ W3-G2.3 builds the delivery foundation with migration `0019` (provisional, claim
 
 The cron sweeps stay as the backstop for the work they already do.
 
+### 2026-11-08: Stage 0 providers for the paid pilots (owner decisions)
+
+[Build, hosting, and operations](08-build-hosting-and-operations.md#security-controls) says Stage 0 must choose the managed OIDC, transactional email, malware scanning, paging, and long-retention telemetry providers. A read-only [provider comparison](drafts/provider-comparison-2026-11.md) was drafted on 2026-11-08. On reading it, the owner wrote: "what do I actually need before we launch versus nice to haves? Monitoring isn;t needed for the paid pilots for example." Then: "cloudflare email is good". Asked why WorkOS was suggested over Cloudflare, and told that Cloudflare Access relies on an outside identity provider for the second login step, the owner wrote: "cloudflare only seems fine for the pilot".
+
+- **Staff sign-in: Cloudflare only.** Operator staff and the owner sign in to the console through Cloudflare Access with a Google or Microsoft identity that has two-step login turned on. No separate identity vendor for the paid pilots. Access's one-time PIN alone is one factor, so it does not meet the MFA requirement. The MFA requirement in the [security controls](08-build-hosting-and-operations.md#security-controls) is unchanged: before an operator's first live booking, it must be shown that the console refuses a sign-in without a second step for every identity provider that operator's staff may use, for example through an Access policy that requires a multifactor authentication method. Asking operators to keep two-step login on is not enough on its own. If that cannot be shown for a provider, that provider is not allowed, and the choice returns to the owner.
+- **Transactional email: Cloudflare Email Service**, the adapter already live behind the recipient allowlist. Before the first operator launches, the account's daily sending quota is raised.
+- **Paging and long-retention telemetry: not needed for the paid pilots.** Workers Logs' seven days and the business audit records in PostgreSQL cover the pilots. The owner may add a free uptime alert. Both slots return before the pilots end.
+- **Malware scanning: not decided.** The comparison suggests Cloudmersive, starting on its free tier. In the same discussion the coordinator also suggested type and size checks alone while only the owner handles uploads during Managed Launch, with scanning added once operators upload files themselves. Both stay suggestions until the owner decides.
+
+These decisions narrow the doc 08 Stage 0 sentence for the paid pilots only. Not done: no account, no provider call, and no configuration change.
+
 ### 2026-11-08: W3-OPS-1, pilot infrastructure as code, plan only (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
 
 At 17:35 UTC on 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That waives the Validation gate and the O-VAL-2 dependency for this goal as a synthetic pull-forward. It allows Terraform written and checked with `terraform fmt` and `terraform validate` only: no plan against a real account, no state backend, no apply, no provider call.
