@@ -6,7 +6,11 @@
 import { createDb } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import { tripAllocator } from "@tidegrid/domain-inventory/testing";
-import { enqueueMessage, FakeEmailProvider } from "@tidegrid/domain-messaging";
+import {
+  EmailProviderUnavailableError,
+  enqueueMessage,
+  FakeEmailProvider,
+} from "@tidegrid/domain-messaging";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { cancelBooking, previewCancellation } from "../index.ts";
@@ -25,6 +29,7 @@ import {
   messageOf,
   redeem,
   type SelfServiceWorld,
+  tokenIn,
 } from "./self-service-harness.ts";
 
 const env = inject("integrationDb");
@@ -194,21 +199,34 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
     expect(links?.n).toBe(0);
   });
 
-  it("ends a lapsed reminder attempt near departure as it ends any lapsed attempt, and keeps its link", async () => {
+  it("ends a lapsed reminder attempt near departure as it ends any lapsed attempt, and its link keeps working", async () => {
     for (const deduplicates of [false, true]) {
       const tripId = trips.shared();
       const b = await book(world, A, tripId, 1);
       const [reminder] = await reminderOf(b.bookingId);
       if (!reminder) throw new Error("setup: no reminder");
       await deliverMail(world, A.id);
-      // The reminder was claimed and its attempt crashed, maybe after the
-      // provider accepted it; by the next run the trip leaves within two hours.
       await makeDue(world.admin, reminder.id);
-      await world.admin`update public.email_messages
-                           set state = 'sending', attempts = 1, provider = 'fake',
-                               lease_expires_at = now() + interval '1 second'
-                         where id = ${reminder.id}`;
+      // A real claim issues the reminder's link, and its attempt never
+      // finishes: the provider may have accepted the email with that link.
+      let release: (() => void) | undefined;
+      let sentHtml = "";
+      const hanging = {
+        name: "fake" as const,
+        deduplicates,
+        send: (email: { html: string }) =>
+          new Promise<never>((_, reject) => {
+            sentHtml = email.html;
+            release = () => reject(new EmailProviderUnavailableError("provider_unavailable"));
+          }),
+      };
+      const stuck = deliverMail(world, A.id, hanging as never, { leaseSeconds: 1 });
+      for (let n = 0; n < 50 && !release; n++) await new Promise((r) => setTimeout(r, 50));
+      if (!release) throw new Error("setup: the reminder was not claimed");
+      const token = tokenIn(sentHtml);
+      if (!token) throw new Error("setup: no link in the attempt");
       await new Promise((r) => setTimeout(r, 1200));
+      // By the next run the trip leaves within two hours.
       await departBetween(tripId, -12 * 60, 115);
       const provider = {
         name: "fake" as const,
@@ -222,11 +240,42 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
           : { state: "failed", last_error_code: "outcome_unknown" },
       );
       expect(await acceptedFor(world.admin, reminder.id)).toBeNull();
-      const [revoked] = await world.admin<{ n: number }[]>`
-        select count(*)::int as n from public.guest_access_links
-         where booking_id = ${b.bookingId} and revoked_reason = 'withdrawn'`;
-      expect(revoked?.n).toBe(0);
+      // The link the guest may hold is not revoked.
+      const links = await world.admin<{ revoked_reason: string | null }[]>`
+        select revoked_reason from public.guest_access_links where message_id = ${reminder.id}`;
+      expect(links, String(deduplicates)).toEqual([{ revoked_reason: null }]);
+      release();
+      await stuck.catch(() => undefined);
     }
+  });
+
+  it("passes over a reminder whose booking is being changed, and sends the operator's other mail", async () => {
+    const b = await book(world, A, trips.shared(), 1);
+    const [reminder] = await reminderOf(b.bookingId);
+    if (!reminder) throw new Error("setup: no reminder");
+    await deliverMail(world, A.id);
+    // The reminder is the oldest due message; another booking's confirmation waits behind it.
+    await world.admin`update public.email_messages set next_attempt_at = now() - interval '1 hour'
+                       where id = ${reminder.id}`;
+    const other = await book(world, A, trips.shared(), 1);
+    const lock = await world.admin.reserve();
+    try {
+      await lock`begin`;
+      await lock`select id from public.bookings where id = ${b.bookingId} for no key update`;
+      const report = await deliverMail(world, A.id);
+      expect(report.items.map((i) => i.messageId)).not.toContain(reminder.id);
+      const [confirmation] = await world.admin<{ state: string }[]>`
+        select state from public.email_messages
+         where booking_id = ${other.bookingId} and template = 'booking_confirmation'`;
+      expect(confirmation?.state).toBe("sent");
+      expect((await messageOf(world.admin, reminder.id)).state).toBe("queued");
+    } finally {
+      await lock`rollback`;
+      lock.release();
+    }
+    // Once the booking is free, the reminder goes out.
+    await deliverMail(world, A.id);
+    expect((await messageOf(world.admin, reminder.id)).state).toBe("sent");
   });
 
   it("cancels at claim a reminder written for a booking already canceled", async () => {

@@ -247,6 +247,7 @@ interface ClaimedRow {
 type Claimed =
   | { kind: "none" }
   | { kind: "held"; reason: DeliveryHold }
+  | { kind: "passed"; messageId: string }
   | { kind: "ready"; row: ClaimedRow; url: string | null }
   | { kind: "failed"; messageId: string; attempt: number; code: string }
   | { kind: "canceled"; messageId: string; attempt: number; code: string };
@@ -340,8 +341,14 @@ async function claimOne(
   ctx: TenantContext,
   options: DeliveryOptions,
   origin: string | null,
+  /** Messages this run passed over (a reminder whose booking was busy); never selected again. */
+  passed: ReadonlySet<string> = new Set(),
 ): Promise<Claimed> {
   const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
+  const notPassed =
+    passed.size === 0
+      ? sql``
+      : sql`and m.id not in (${sql.join([...passed].map((id) => sql`${id}::uuid`))})`;
   return inTenantTransaction(db, ctx, async (trx) => {
     // The tenant's resend lock first, before any message lock, as a staff
     // resend takes it (0014), so a claim and a resend never deadlock and the
@@ -402,6 +409,7 @@ async function claimOne(
                     select 1 from app.booking_resend_claim_refusal(m.tenant_id, m.id, clock_timestamp()) r
                      where r.code in (${RESEND_WAIT_CODES[0]}, ${RESEND_WAIT_CODES[1]}))
                   else true end
+         ${notPassed}
        order by next_attempt_at, id
        limit 1
        for update skip locked`.execute(trx);
@@ -462,8 +470,9 @@ async function claimOne(
     // none, and a lapsed one's link, if its email arrived, keeps working.
     if (found.template === TRIP_REMINDER_TEMPLATE) {
       const timing = await tripReminderTiming(trx, ctx.tenantId, found.booking_id);
-      // The booking is being changed (a cancellation, say): leave the reminder for a later run.
-      if (timing === "busy") return { kind: "none" } as const;
+      // The booking is being changed (a cancellation, say): pass the reminder
+      // over in this run, and go on to the operator's other mail.
+      if (timing === "busy") return { kind: "passed", messageId: found.id } as const;
       if (timing === "too_late") {
         await sql`
           update email_messages set state = 'canceled', last_error_code = ${REMINDER_TOO_LATE}
@@ -666,13 +675,18 @@ async function deliverWithOrigin(
   };
   const clock = options.clock ?? Date.now;
   const reserve = (options.provider.sendTimeoutMs ?? 0) + DEADLINE_MARGIN_MS;
+  const passed = new Set<string>();
   for (let i = 0; i < limit; i++) {
     if (options.deadline !== undefined && clock() + reserve >= options.deadline) {
       report.stopped = "deadline";
       break;
     }
-    const claimed = await claimOne(db, ctx, options, origin);
+    const claimed = await claimOne(db, ctx, options, origin, passed);
     if (claimed.kind === "none") break;
+    if (claimed.kind === "passed") {
+      passed.add(claimed.messageId);
+      continue;
+    }
     if (claimed.kind === "held") {
       report.held = claimed.reason;
       break;

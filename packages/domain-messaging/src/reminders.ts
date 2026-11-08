@@ -9,7 +9,7 @@
  * retry backoff for hours: a reminder whose booking was canceled, or whose
  * trip leaves within the cutoff, is canceled as `reminder_too_late` with no
  * provider call. The booking is read FOR SHARE, so a cancellation in
- * progress makes the claim wait for a later run instead of racing it.
+ * progress makes the run pass the reminder over instead of racing it.
  */
 import type { TenantTransaction } from "@tidegrid/database";
 import { sql } from "kysely";
@@ -29,8 +29,8 @@ export const REMINDER_TOO_LATE = "reminder_too_late";
  * Whether a trip reminder for this booking may go out now: `too_late` when
  * the booking was canceled, its trip was canceled or leaves within the
  * cutoff, or the booking is gone; `busy` when another transaction is changing
- * the booking (a cancellation holds it), so the claim leaves the reminder for
- * a later run rather than send it while the cancellation commits.
+ * the booking (a cancellation holds it), so the run passes the reminder over
+ * rather than send it while the cancellation commits.
  */
 export async function tripReminderTiming(
   trx: TenantTransaction,
