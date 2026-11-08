@@ -153,6 +153,13 @@ export async function settleRefund(
     if (!locked || (locked.state !== "requested" && locked.state !== "pending")) {
       return { kind: "not_pending" as const };
     }
+    if (outcome.state === "failed" && outcome.ref === null && locked.provider_refund_id !== null) {
+      // A rejection, but the provider accepted this refund meanwhile (an
+      // event or another call recorded it pending): no answer about it.
+      await stampChecked(trx, ctx.tenantId, locked.id);
+      await raiseRefundException(trx, ctx, locked.id, "unsettled", safeCode(outcome.code));
+      return { kind: "unknown" as const };
+    }
     if (outcome.state === "pending") {
       if (locked.state === "requested") {
         await markPending(trx, ctx, locked, outcome.ref);
