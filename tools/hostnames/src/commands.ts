@@ -205,6 +205,14 @@ async function tenantIdFor(db: Kysely<Database>, slug: string): Promise<string> 
   return id;
 }
 
+/**
+ * One line per hostname of the tenant. A custom row also shows its stored
+ * provider id, or the reservation time when none is stored, so the removal
+ * runbook's H5 can check a record against it (recheck Q3). A disabled row
+ * shows when and how it was disabled, from its latest audit row, so the
+ * runbook can tell whether the kill switch's 24-hour window (H2) has passed
+ * (recheck Q2).
+ */
 async function status(
   db: Kysely<Database>,
   tenantId: string,
@@ -218,11 +226,25 @@ async function status(
       hostname_state: string | null;
       certificate_state: string | null;
       last_error_code: string | null;
+      provisioned: boolean;
+      provider_hostname_id: string | null;
+      reserved_at: Date | null;
+      disabled_at: Date | null;
+      disabled_by: string | null;
     }>`
-    select h.hostname, h.kind, h.status, p.hostname_state, p.certificate_state, p.last_error_code
+    select h.hostname, h.kind, h.status, p.hostname_state, p.certificate_state, p.last_error_code,
+           p.hostname is not null as provisioned, p.provider_hostname_id,
+           p.created_at as reserved_at, d.occurred_at as disabled_at, d.action as disabled_by
       from public.tenant_hostnames h
       left join public.tenant_hostname_provisioning p
         on p.hostname = h.hostname and p.tenant_id = h.tenant_id
+      left join lateral (
+        select a.occurred_at, a.action from public.audit_events a
+         where h.status = 'disabled'
+           and a.tenant_id = h.tenant_id and a.subject_type = 'tenant_hostname'
+           and a.subject_id = h.hostname and a.after_state ->> 'status' = 'disabled'
+         order by a.occurred_at desc, a.id desc
+         limit 1) d on true
      where h.tenant_id = ${tenantId}
      order by h.kind, h.hostname`.execute(trx);
     return result.rows;
@@ -235,6 +257,16 @@ async function status(
       r.hostname_state ? `hostname ${r.hostname_state}` : "",
       r.certificate_state ? `certificate ${r.certificate_state}` : "",
       r.last_error_code ? `error ${r.last_error_code}` : "",
+      !r.provisioned
+        ? ""
+        : r.provider_hostname_id
+          ? `provider id ${r.provider_hostname_id}`
+          : `no provider id, reserved at ${r.reserved_at ? r.reserved_at.toISOString() : "unknown"}`,
+      r.status !== "disabled"
+        ? ""
+        : r.disabled_at
+          ? `disabled at ${r.disabled_at.toISOString()} (${r.disabled_by})`
+          : "disabled at unknown",
     ]
       .filter(Boolean)
       .join("  "),

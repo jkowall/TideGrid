@@ -8,7 +8,7 @@
 
 - Every live step needs the owner's go at the time: a provider call, a DNS change, a route change, a deploy. An agent message is never consent.
 - Secrets come from the environment only. No token, zone id, account id, or operator domain goes into the repository, the journal, or the verification log. Synthetic names in examples only.
-- The commands are the admin CLI's ([tools/hostnames](../../tools/hostnames/README.md)), on the admin connection. `route` and `release` are proposed and dry-run by default.
+- The commands are the admin CLI's ([tools/hostnames](../../tools/hostnames/README.md)), on a direct admin connection, never a pooled one: `request` and `release` hold a per-hostname guard that a transaction-mode pooler cannot keep. `route` and `release` are proposed and dry-run by default.
 - A disabled name stays disabled. Nothing in this runbook re-enables one, and no database function can.
 
 ## Decisions (coordinator defaults, pending owner confirmation)
@@ -16,7 +16,7 @@
 | Id | Question | Default |
 |---|---|---|
 | R1 | How long is "one recheck interval" for the kill switch? | 24 hours from the disable. A browser checks a registered service worker for an update on each navigation to its site, and never serves `sw.js` from its HTTP cache when the last check is more than 24 hours old. So an installed client that opens the site in that window gets the kill switch. |
-| R2 | Who deletes the provider record? | The owner, in the Cloudflare dashboard or by the API, by its exact name, after checking its id against `hostnames status` and the database. A CLI `remove` command is a proposed follow-up, not built. |
+| R2 | Who deletes the provider record? | For a stored provider id: the owner, in the Cloudflare dashboard or by the API, by its exact name, after checking its id against the `provider id` that `hostnames status` prints (H5a). For no stored id: `hostnames release`, which audits the delete (H5b). A CLI `remove` command for stored ids is a proposed follow-up, not built. |
 | R3 | Route before or after the provider record? | The route first, then the provider record, each after the operator deleted the CNAME. |
 
 ## Removal
@@ -24,8 +24,9 @@
 ### H0. Prep (no live call)
 
 1. Name the tenant slug and the custom hostname, and why it goes (the operator left, the name is wrong, a security reason). Get the owner's go.
-2. `hostnames status <slug>`: the name is `custom` and `active` or `pending`. A `disabled` name skips to H3.
-3. Tell the operator the order: TideGrid turns the name off now, the CNAME stays in place for 24 hours so installed copies of the site clean themselves, then the operator deletes the CNAME and the TXT records.
+2. `hostnames status <slug>`: the name is `custom`. An `active` or `pending` name goes on to H1.
+3. A `disabled` name skips H1 only. Its status line ends `disabled at <time> (<action>)`, read from the audit row that disabled it (`hostname.disabled`, `hostname.demoted`, or `hostname.expired`). A disabled status alone does not prove H2's window has passed: the name may have been disabled a minute ago. Go straight to H3 only if 24 hours have passed since that time. Otherwise go to H2 and wait until 24 hours after it. If the line says `disabled at unknown`, take the window as starting now and complete H2.
+4. Tell the operator the order: TideGrid turns the name off now, the CNAME stays in place for 24 hours so installed copies of the site clean themselves, then the operator deletes the CNAME and the TXT records.
 
 ### H1. Disable: the kill switch goes on
 
@@ -37,7 +38,7 @@ If a security reason demands it, the owner can skip H2's wait. The cost: install
 
 ### H2. Keep the host reachable for one recheck interval (R1)
 
-1. Leave the route, the provider record, and the operator's CNAME in place for 24 hours from H1. The host keeps reaching the guest Worker, which keeps serving the kill switch.
+1. Leave the route, the provider record, and the operator's CNAME in place until 24 hours after the `disabled at` time that `hostnames status <slug>` prints. The host keeps reaching the guest Worker, which keeps serving the kill switch.
 2. The sweep never reads a disabled row, so nothing changes in the database meanwhile. The provider keeps the certificate.
 
 ### H3. The operator deletes the CNAME
@@ -52,9 +53,30 @@ If a security reason demands it, the owner can skip H2's wait. The cost: install
 
 ### H5. Delete the provider record (R2)
 
-1. Find the custom hostname by its exact name in the dashboard. Its id must equal the provider id the database holds for the name.
+`hostnames status <slug>` shows which branch applies. A disabled name cannot get a record attached meanwhile: attaching needs a pending row.
+
+#### H5a. A stored provider id
+
+The status line shows `provider id <id>`.
+
+1. Find the custom hostname by its exact name in the dashboard. Its id must equal that stored id. If it does not, stop and ask the owner.
 2. With the owner's go, delete it.
 3. The database row stays `disabled` and the name stays reserved. Nothing re-requests it: `request` refuses a name any tenant holds, in any status.
+
+#### H5b. No stored provider id
+
+The status line shows `no provider id, reserved at <time>`. This is a request interrupted before its id was stored, then disabled, or expired by the sweep. The stored-id check of H5a cannot succeed here, so do not use it. Run `hostnames release <slug> <hostname>`, a dry run, which looks the name up at the provider by exact match and changes nothing.
+
+- **No provider record.** The dry run prints `no provider record holds this name`. There is nothing to delete. An earlier `release` may have deleted it, for example one that ran after the claim ended: its `hostname.provider_released` audit row names the id. Record the dry run's output and go to H6.
+- **An orphan record.** The dry run prints the record's id and states and the reservation time. Before any delete, verify it independently against the original reservation:
+  1. The dashboard shows a custom hostname with exactly this name and this id.
+  2. The dashboard's creation time for it is after the reservation time, and close to it: the interrupted run made it.
+
+  No other row can hold a record of this name: the name is reserved to this tenant, and its row stores no id.
+
+  If any check fails, stop and ask the owner: the record may not be TideGrid's. Otherwise, with the owner's go, run `hostnames release <slug> <hostname> --apply --provider-id <id>`. It holds the per-hostname guard, checks the row again under it, writes a `hostname.provider_release_started` audit row, deletes exactly that record, and writes a `hostname.provider_released` audit row. It never resumes a disabled name. A started row with no released row after it means the delete may or may not have happened: run the dry run again.
+
+The database row stays `disabled` and the name stays reserved, as in H5a.
 
 ### H6. Record
 
@@ -62,7 +84,7 @@ Record the dates of H1 to H5, the checks' output with hosts masked, and the owne
 
 ## A request interrupted before its id was stored
 
-Not a removal. A row that is pending with no provider id is recovered with `hostnames release` while its seven-day claim lasts, or turned off with `hostnames disable` and then removed from H3 on ([tools/hostnames README](../../tools/hostnames/README.md#recovering-an-interrupted-request-release-proposed-w1-saas-prep)).
+Not a removal. A row that is pending with no provider id is recovered with `hostnames release` while its seven-day claim lasts ([tools/hostnames README](../../tools/hostnames/README.md#recovering-an-interrupted-request-release-proposed-w1-saas-prep)). Otherwise turn it off with `hostnames disable` and remove it from H0. Its provider record, if any, goes by H5b, not H5a. After a claim ended, `release --apply` may already have deleted the record; H5b then finds none.
 
 ## Reuse of a removed name (not possible today)
 

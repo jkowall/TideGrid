@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type { Database } from "@tidegrid/database";
 import { createDb } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
+import { type Kysely, sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createCloudflareHostnameProvider } from "./cloudflare.ts";
@@ -12,10 +14,14 @@ import {
 import { createFakeHostnameProvider } from "./fake.ts";
 import {
   activateCustomHostname,
+  assertHostnameGuardHeld,
   disableHostname,
+  HostnameGuardBusyError,
+  HostnameGuardLostError,
   HostnameNameRefusedError,
   requestCustomHostname,
   sweepHostnames,
+  withHostnameGuard,
 } from "./lifecycle.ts";
 import {
   type CustomHostnameProvider,
@@ -1334,5 +1340,97 @@ describe.skipIf(!env)("custom hostname lifecycle (0011)", () => {
     expect(rows.length).toBeLessThanOrEqual(1);
     const many = await runtime`select * from app.hostname_sweep_tenants(1000000)`;
     expect(many.length).toBeLessThanOrEqual(1000);
+  });
+
+  // The per-hostname guard (recheck Q1, W1-SAAS-PREP) -------------------------------
+
+  it("holds one guard per hostname, whatever the tenant, and refuses a write without it", async () => {
+    const host = name("guarded");
+    const second = createDb(env?.adminUrl ?? "", { max: 1 });
+    try {
+      await withHostnameGuard(adminDb.db, host, async (guard) => {
+        await guard.db.transaction().execute((trx) => assertHostnameGuardHeld(trx, host));
+        // The same name waits and then gives up; another name does not wait.
+        await expect(
+          withHostnameGuard(second.db, host, async () => "entered", { waitMs: 300 }),
+        ).rejects.toBeInstanceOf(HostnameGuardBusyError);
+        expect(await withHostnameGuard(second.db, name("other"), async () => "entered")).toBe(
+          "entered",
+        );
+        // Another session does not hold it.
+        await expect(
+          second.db.transaction().execute((trx) => assertHostnameGuardHeld(trx, host)),
+        ).rejects.toBeInstanceOf(HostnameGuardLostError);
+      });
+      // Released when the guarded work ends, and after it throws.
+      await expect(
+        withHostnameGuard(second.db, host, async () => {
+          throw new Error("guarded work failed");
+        }),
+      ).rejects.toThrow("guarded work failed");
+      expect(await withHostnameGuard(adminDb.db, host, async () => "again", { waitMs: 300 })).toBe(
+        "again",
+      );
+
+      // A request handed a guard its session does not hold calls no provider.
+      const provider = createFakeHostnameProvider({ idPrefix: `guard-${run}` });
+      await expect(
+        requestCustomHostname(
+          adminDb.db,
+          provider,
+          { tenantId: A.id, hostname: host, actor },
+          { guard: { db: second.db, hostname: host } },
+        ),
+      ).rejects.toBeInstanceOf(HostnameGuardLostError);
+      expect(await provider.findByHostname(host)).toBeNull();
+      expect(
+        await admin`select 1 from public.tenant_hostnames where hostname = ${host}`,
+      ).toHaveLength(0);
+      // A guard lost after the create attaches nothing: the record stays an
+      // orphan for release, and the id is never stored.
+      let adminGuardDb: Kysely<Database> | undefined;
+      const losing: CustomHostnameProvider = {
+        name: provider.name,
+        routingTarget: () => provider.routingTarget(),
+        create: async (input) => {
+          const reading = await provider.create(input);
+          await adminGuardDb?.executeQuery(
+            sql`select pg_catalog.pg_advisory_unlock_all()`.compile(adminGuardDb),
+          );
+          return reading;
+        },
+        get: (id, h) => provider.get(id, h),
+        findByHostname: (h) => provider.findByHostname(h),
+        refreshValidation: (id, h) => provider.refreshValidation(id, h),
+        remove: (id) => provider.remove(id),
+      };
+      await expect(
+        withHostnameGuard(adminDb.db, host, (guard) => {
+          adminGuardDb = guard.db;
+          return requestCustomHostname(
+            adminDb.db,
+            losing,
+            { tenantId: A.id, hostname: host, actor },
+            { guard },
+          );
+        }),
+      ).rejects.toBeInstanceOf(HostnameGuardLostError);
+      expect(await provider.findByHostname(host)).not.toBeNull();
+      const [row] = await admin<{ id: string | null }[]>`
+        select provider_hostname_id as id from public.tenant_hostname_provisioning
+         where hostname = ${host}`;
+      expect(row).toEqual({ id: null });
+      // A guard for another name is refused before anything runs.
+      await expect(
+        requestCustomHostname(
+          adminDb.db,
+          provider,
+          { tenantId: A.id, hostname: name("guarded-other"), actor },
+          { guard: { db: second.db, hostname: host } },
+        ),
+      ).rejects.toThrow("the hostname guard names another hostname");
+    } finally {
+      await second.end();
+    }
   });
 });

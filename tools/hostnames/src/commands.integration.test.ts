@@ -48,7 +48,12 @@ describe.skipIf(!env)("hostname CLI on a throwaway database", () => {
       "disable: already disabled",
     ]);
     const status = await runCommand(handle.db, { kind: "status", slug }, {});
-    expect(status).toEqual([`${host}  custom  disabled  hostname moved  certificate active`]);
+    expect(status).toHaveLength(1);
+    expect(status[0]).toMatch(
+      new RegExp(
+        `^${host.replaceAll(".", "\\.")}  custom  disabled  hostname moved  certificate active  provider id fake-cli-\\S+  disabled at \\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z \\(hostname\\.demoted\\)$`,
+      ),
+    );
   });
 
   it("refuses the fake outside a throwaway database and an unknown tenant", async () => {
@@ -367,7 +372,7 @@ describe.skipIf(!env)("hostname CLI on a throwaway database", () => {
       {},
     );
     expect(await runCommand(handle.db, release(tenantSlug, true), {}, deps)).toEqual([
-      `${hostname}: nothing to release: disabled, not pending`,
+      `${hostname}: nothing to release: disabled, not pending, and its provider id is stored: delete its record by H5 of docs/runbooks/hostname-removal.md`,
     ]);
   });
 
@@ -487,9 +492,12 @@ describe.skipIf(!env)("hostname CLI on a throwaway database", () => {
     }
     expect(await storedId(hostname)).toBeNull();
     expect(await fake.findByHostname(hostname)).toBeNull();
-    expect(await runCommand(handle.db, { kind: "status", slug: tenantSlug }, {})).toEqual([
-      `${hostname}  custom  pending  hostname pending  certificate pending`,
-    ]);
+    const [line] = await runCommand(handle.db, { kind: "status", slug: tenantSlug }, {});
+    expect(line).toMatch(
+      new RegExp(
+        `^${hostname}  custom  pending  hostname pending  certificate pending  no provider id, reserved at \\d{4}-[\\d:.T-]+Z$`,
+      ),
+    );
   });
 
   it("reads this tenant's rows inside a tenant transaction (review R3)", async () => {
@@ -524,5 +532,317 @@ describe.skipIf(!env)("hostname CLI on a throwaway database", () => {
     } finally {
       await restricted.end();
     }
+  });
+
+  // Recheck Q1: release and request serialize on the per-hostname guard -----------
+
+  /** A promise and the function that settles it. */
+  function gate() {
+    let open!: () => void;
+    const opened = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { opened, open };
+  }
+
+  /** True once `p` settles within `ms`, false otherwise. */
+  async function settlesWithin(p: Promise<unknown>, ms: number): Promise<boolean> {
+    let settled = false;
+    void p.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    return settled;
+  }
+
+  /** The fake, whose exact-name lookup signals `looked` and then waits for `resume`. */
+  function pausingLookup(looked: () => void, resume: Promise<void>): CustomHostnameProvider {
+    return {
+      ...dyingAfterCreate(fake),
+      create: (input) => fake.create(input),
+      findByHostname: async (h) => {
+        const found = await fake.findByHostname(h);
+        looked();
+        await resume;
+        return found;
+      },
+    };
+  }
+
+  it("never deletes a record a request attaches while release runs (recheck Q1)", async () => {
+    const tenantSlug = await newTenant("guard-attach");
+    const hostname = `guard-attach-${run}.example.com`;
+    const created = gate();
+    const attach = gate();
+    const looked = gate();
+    const lookup = gate();
+    let lookedBeforeAttach = false;
+    // A request in flight: its record exists, and it pauses before storing the id.
+    const inFlight: CustomHostnameProvider = {
+      ...dyingAfterCreate(fake),
+      create: async (input) => {
+        const reading = await fake.create(input);
+        created.open();
+        await attach.opened;
+        return reading;
+      },
+    };
+    const other = createDb(env?.adminUrl ?? "", { max: 1 });
+    try {
+      const requesting = runCommand(
+        other.db,
+        { kind: "request", slug: tenantSlug, hostname },
+        {},
+        { provider: inFlight },
+      );
+      await created.opened;
+      const recordId = (await fake.findByHostname(hostname))?.providerId ?? "";
+      expect(recordId).not.toBe("");
+      // The admin applies release with that id while the request is in flight.
+      const releasing = runCommand(
+        handle.db,
+        { kind: "release", slug: tenantSlug, hostname, apply: true, providerId: recordId },
+        {},
+        { provider: pausingLookup(looked.open, lookup.opened) },
+      );
+      // Unguarded, release passes its reservation check and reaches the lookup
+      // now. Guarded, it waits for the request and reads nothing.
+      lookedBeforeAttach = await settlesWithin(looked.opened, 600);
+      attach.open();
+      const requested = await Promise.allSettled([requesting]);
+      lookup.open();
+      const [released] = await Promise.allSettled([releasing]);
+
+      // No attached record is ever deleted.
+      expect(await storedId(hostname)).toBe(recordId);
+      expect((await fake.findByHostname(hostname))?.providerId).toBe(recordId);
+      expect(await releaseAudits(hostname)).toEqual([]);
+      expect(requested[0]).toMatchObject({ status: "fulfilled" });
+      expect((requested[0] as PromiseFulfilledResult<string[]>).value[0]).toBe(
+        `${hostname}: requested`,
+      );
+      // Release waited for the attach, then refused under the guard.
+      expect(lookedBeforeAttach).toBe(false);
+      expect(released).toEqual({
+        status: "fulfilled",
+        value: [
+          `${hostname}: nothing to release: its provider id is stored, so the request was not interrupted`,
+        ],
+      });
+    } finally {
+      attach.open();
+      lookup.open();
+      await other.end();
+    }
+  });
+
+  it("makes a request wait while release holds the name (recheck Q1)", async () => {
+    const { tenantSlug, hostname, orphan, release } = await interrupted("guard-wait");
+    const looked = gate();
+    const lookup = gate();
+    let creates = 0;
+    const counting: CustomHostnameProvider = {
+      ...dyingAfterCreate(fake),
+      create: async (input) => {
+        creates += 1;
+        return fake.create(input);
+      },
+    };
+    const other = createDb(env?.adminUrl ?? "", { max: 1 });
+    try {
+      const releasing = runCommand(
+        handle.db,
+        release(true, orphan),
+        {},
+        { provider: pausingLookup(looked.open, lookup.opened) },
+      );
+      await looked.opened;
+      // Release holds the guard and has found the orphan. A request now waits.
+      const requesting = runCommand(
+        other.db,
+        { kind: "request", slug: tenantSlug, hostname },
+        {},
+        { provider: counting },
+      );
+      expect(await settlesWithin(requesting, 600)).toBe(false);
+      expect(creates).toBe(0);
+      lookup.open();
+      const lines = await releasing;
+      expect(lines[1]).toBe(`deleted provider record ${orphan}`);
+      expect(lines[2]).toBe(`${hostname}: requested`);
+      const fresh = await storedId(hostname);
+      expect(fresh).not.toBeNull();
+      expect(fresh).not.toBe(orphan);
+      // The waiting request then finds the name attached and creates nothing.
+      await expect(requesting).rejects.toThrow();
+      expect(creates).toBe(0);
+      expect(await storedId(hostname)).toBe(fresh);
+      expect((await fake.findByHostname(hostname))?.providerId).toBe(fresh);
+    } finally {
+      lookup.open();
+      await other.end();
+    }
+  });
+
+  async function tenantIdOf(tenantSlug: string): Promise<string> {
+    const [row] = await handle.sql<{ id: string }[]>`
+      select id from public.tenants where slug = ${tenantSlug}`;
+    return row?.id ?? "";
+  }
+
+  it("checks the row again right before the delete, under the guard (recheck Q1)", async () => {
+    const { tenantSlug, hostname, orphan, release } = await interrupted("guard-recheck");
+    const tenantId = await tenantIdOf(tenantSlug);
+    const looked = gate();
+    const lookup = gate();
+    const other = createDb(env?.adminUrl ?? "", { max: 1 });
+    try {
+      const releasing = runCommand(
+        other.db,
+        release(true, orphan),
+        {},
+        { provider: pausingLookup(looked.open, lookup.opened) },
+      );
+      await looked.opened;
+      // A writer that skips the guard attaches the record while release looks.
+      await handle.sql.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
+        await tx`select app.hostname_attach_provider(${tenantId}::uuid, ${hostname}, ${orphan}, '[]'::jsonb)`;
+      });
+      lookup.open();
+      const lines = await releasing;
+      expect(lines.at(-1)).toBe(
+        "refused: its provider id is stored, so the request was not interrupted; nothing deleted",
+      );
+      expect((await fake.findByHostname(hostname))?.providerId).toBe(orphan);
+      expect(await storedId(hostname)).toBe(orphan);
+      expect(await releaseAudits(hostname)).toEqual([]);
+    } finally {
+      lookup.open();
+      await other.end();
+    }
+  });
+
+  it("deletes but never resumes when the name is disabled during release (recheck Q1)", async () => {
+    const { tenantSlug, hostname, orphan, release } = await interrupted("guard-disable");
+    const looked = gate();
+    const lookup = gate();
+    const other = createDb(env?.adminUrl ?? "", { max: 1 });
+    try {
+      const releasing = runCommand(
+        other.db,
+        release(true, orphan),
+        {},
+        { provider: pausingLookup(looked.open, lookup.opened) },
+      );
+      await looked.opened;
+      expect(
+        await runCommand(
+          handle.db,
+          { kind: "disable", slug: tenantSlug, hostname, reason: "Disabled during release" },
+          {},
+        ),
+      ).toEqual([`${hostname}: disabled`]);
+      lookup.open();
+      const lines = await releasing;
+      expect(lines).toContain(`deleted provider record ${orphan}`);
+      expect(lines.at(-2)).toBe(
+        "not resumed: the name is disabled, and a disabled name stays disabled.",
+      );
+      expect(await fake.findByHostname(hostname)).toBeNull();
+      expect(await storedId(hostname)).toBeNull();
+    } finally {
+      lookup.open();
+      await other.end();
+    }
+  });
+
+  // Recheck Q2 and Q3: what the removal runbook reads from the CLI ------------------
+
+  it("shows when and how a name was disabled (recheck Q2)", async () => {
+    const tenantSlug = await newTenant("disabled-at");
+    const hostname = `disabled-at-${run}.example.com`;
+    await activeHost(tenantSlug, hostname);
+    const [active] = await runCommand(handle.db, { kind: "status", slug: tenantSlug }, {});
+    expect(active).toMatch(
+      new RegExp(
+        `^${hostname}  custom  active  hostname active  certificate active  provider id \\S+$`,
+      ),
+    );
+    const before = Date.now();
+    await runCommand(
+      handle.db,
+      { kind: "disable", slug: tenantSlug, hostname, reason: "Removal test" },
+      {},
+    );
+    const [line] = await runCommand(handle.db, { kind: "status", slug: tenantSlug }, {});
+    const match = / {2}disabled at (\S+) \(hostname\.disabled\)$/.exec(line ?? "");
+    expect(match).not.toBeNull();
+    const at = Date.parse(match?.[1] ?? "");
+    expect(at).toBeGreaterThanOrEqual(before - 5_000);
+    expect(at).toBeLessThanOrEqual(Date.now() + 5_000);
+    // A second disable changes nothing, so the time stays the first one.
+    await runCommand(
+      handle.db,
+      { kind: "disable", slug: tenantSlug, hostname, reason: "Removal test again" },
+      {},
+    );
+    expect(await runCommand(handle.db, { kind: "status", slug: tenantSlug }, {})).toEqual([line]);
+  });
+
+  it("shows and deletes a disabled orphan, audited, and never resumes it (recheck Q3)", async () => {
+    const { tenantSlug, hostname, orphan, release } = await interrupted("orphan");
+    await runCommand(
+      handle.db,
+      { kind: "disable", slug: tenantSlug, hostname, reason: "Interrupted and abandoned" },
+      {},
+    );
+    const [status] = await runCommand(handle.db, { kind: "status", slug: tenantSlug }, {});
+    expect(status).toMatch(
+      new RegExp(
+        `^${hostname}  custom  disabled  hostname pending  certificate pending  no provider id, reserved at \\S+Z  disabled at \\S+Z \\(hostname\\.disabled\\)$`,
+      ),
+    );
+    const deps = { provider: fake };
+    const dry = await runCommand(handle.db, release(false, null), {}, deps);
+    expect(dry[0]).toMatch(
+      new RegExp(
+        `^${hostname}: provider record ${orphan} \\(hostname pending, certificate pending\\); reserved at \\d{4}-`,
+      ),
+    );
+    expect(dry[1]).toContain(
+      "The name is disabled, so --apply deletes this record and does not resume the request.",
+    );
+    expect((await fake.findByHostname(hostname))?.providerId).toBe(orphan);
+
+    const applied = await runCommand(handle.db, release(true, orphan), {}, deps);
+    expect(applied.slice(1)).toEqual([
+      `deleted provider record ${orphan}`,
+      "not resumed: the name is disabled, and a disabled name stays disabled.",
+      "  Continue the removal by docs/runbooks/hostname-removal.md.",
+    ]);
+    expect(await fake.findByHostname(hostname)).toBeNull();
+    expect(await storedId(hostname)).toBeNull();
+    expect(await releaseAudits(hostname)).toEqual([
+      { action: "hostname.provider_release_started", after: { provider_hostname_id: orphan } },
+      { action: "hostname.provider_released", after: { provider_hostname_id: orphan } },
+    ]);
+
+    // The absent-record branch: nothing to delete, nothing resumed.
+    for (const apply of [false, true]) {
+      const lines = await runCommand(handle.db, release(apply, null), {}, deps);
+      expect(lines[0]).toMatch(new RegExp(`^${hostname}: no provider record holds this name`));
+      expect(lines.slice(1)).toEqual([
+        "not resumed: the name is disabled, and a disabled name stays disabled.",
+        "  Continue the removal by docs/runbooks/hostname-removal.md.",
+      ]);
+    }
+    const [after] = await runCommand(handle.db, { kind: "status", slug: tenantSlug }, {});
+    expect(after).toBe(status);
   });
 });

@@ -52,6 +52,118 @@ export class HostnameNameRefusedError extends Error {
   }
 }
 
+// The per-hostname guard ------------------------------------------------------------
+
+/**
+ * The per-hostname guard (recheck Q1, W1-SAAS-PREP). Every admin path that
+ * attaches a provider record to a name or deletes one holds it: `request`
+ * from its reservation check through the attach, and the admin CLI's
+ * `release` from its eligibility check through the delete, its audit rows,
+ * and any resumed request. So an attach never lands between release's check
+ * and its delete.
+ *
+ * It is a session-level PostgreSQL advisory lock keyed on the hostname alone,
+ * never the tenant, held on one pinned connection. A session lock, not a
+ * transaction lock, because no provider call is ever made inside a database
+ * transaction. It is taken by polling, never by a waiting statement, which
+ * would hold a snapshot (the migration runner's rule). Each write it protects
+ * first checks, in its own transaction, that this session still holds it, so
+ * a connection lost and silently reopened writes nothing.
+ *
+ * The admin connection must be a direct one: a transaction-mode pooler does
+ * not keep a session lock with the session that took it, and the check above
+ * then refuses the write.
+ */
+export interface HostnameGuard {
+  /** Bound to the one connection whose session holds the guard. Use only this inside. */
+  readonly db: Kysely<Database>;
+  readonly hostname: string;
+}
+
+/** The guard stayed busy for the whole wait. Nothing was read or changed. */
+export class HostnameGuardBusyError extends Error {
+  constructor(readonly hostname: string) {
+    super(`another hostname command holds ${hostname}; try again when it ends`);
+    this.name = "HostnameGuardBusyError";
+  }
+}
+
+/** The session no longer holds the guard, so the guarded write was refused. */
+export class HostnameGuardLostError extends Error {
+  constructor(readonly hostname: string) {
+    super(`the hostname guard on ${hostname} was lost; nothing was written`);
+    this.name = "HostnameGuardLostError";
+  }
+}
+
+/** Milliseconds between tries of the guard. */
+const GUARD_POLL_MS = 100;
+/**
+ * How long a command waits for the guard. A guarded release makes up to four
+ * provider calls (two lookups, a delete, and a resumed create), each bounded
+ * by the client's 15-second timeout, plus a lookup after a lost create.
+ */
+export const DEFAULT_HOSTNAME_GUARD_WAIT_MS = 120_000;
+
+function guardKey(hostname: string) {
+  return sql`pg_catalog.hashtextextended(${`tidegrid.hostname:${hostname.toLowerCase()}`}, 0)`;
+}
+
+/**
+ * Run `fn` holding the per-hostname guard. `fn` must use `guard.db` for every
+ * query: it is bound to the connection that holds the lock, and the pool may
+ * have no other connection to give.
+ */
+export async function withHostnameGuard<T>(
+  adminDb: Kysely<Database>,
+  hostname: string,
+  fn: (guard: HostnameGuard) => Promise<T>,
+  options: { waitMs?: number } = {},
+): Promise<T> {
+  const waitMs = options.waitMs ?? DEFAULT_HOSTNAME_GUARD_WAIT_MS;
+  return adminDb.connection().execute(async (db) => {
+    const started = Date.now();
+    for (;;) {
+      const { rows } = await sql<{ ok: boolean }>`
+        select pg_catalog.pg_try_advisory_lock(${guardKey(hostname)}) as ok`.execute(db);
+      if (rows[0]?.ok === true) break;
+      if (Date.now() - started >= waitMs) throw new HostnameGuardBusyError(hostname);
+      await new Promise((resolve) => setTimeout(resolve, GUARD_POLL_MS));
+    }
+    try {
+      return await fn({ db, hostname });
+    } finally {
+      // A lost session has dropped the lock already; nothing else to undo.
+      await sql`select pg_catalog.pg_advisory_unlock(${guardKey(hostname)})`
+        .execute(db)
+        .catch(() => undefined);
+    }
+  });
+}
+
+/**
+ * Throw unless this transaction's session holds the guard on `hostname`. Call
+ * it inside the transaction that makes the guarded write.
+ */
+export async function assertHostnameGuardHeld(
+  trx: Kysely<Database>,
+  hostname: string,
+): Promise<void> {
+  // A bigint advisory key shows in pg_locks as its high half in classid and
+  // its low half in objid, with objsubid 1.
+  const { rows } = await sql<{ held: boolean }>`
+    with k as (select ${guardKey(hostname)} as v)
+    select exists (
+      select 1 from pg_catalog.pg_locks l, k
+       where l.locktype = 'advisory' and l.granted
+         and l.pid = pg_catalog.pg_backend_pid()
+         and l.objsubid = 1
+         and l.classid = ((k.v >> 32) & 4294967295)::oid
+         and l.objid = (k.v & 4294967295)::oid
+    ) as held`.execute(trx);
+  if (rows[0]?.held !== true) throw new HostnameGuardLostError(hostname);
+}
+
 export type RequestOutcome =
   | { kind: "requested"; reading: ProviderHostname; adopted: boolean }
   /** The provider could not be reached; the name stays reserved and pending without a record. */
@@ -75,10 +187,38 @@ export async function requestCustomHostname(
   adminDb: Kysely<Database>,
   provider: CustomHostnameProvider,
   input: { tenantId: string; hostname: string; actor: AdminActor },
+  options: {
+    /**
+     * The guard on this hostname, when the caller holds it already, as
+     * release does when it resumes a request. Otherwise the request takes it.
+     */
+    guard?: HostnameGuard;
+  } = {},
 ): Promise<RequestOutcome> {
   const problem = customHostnameProblem(input.hostname);
   if (problem) throw new HostnameNameRefusedError(problem);
+  const { guard } = options;
+  if (guard) {
+    if (guard.hostname !== input.hostname) {
+      throw new Error("the hostname guard names another hostname");
+    }
+    return requestUnderGuard(guard, provider, input);
+  }
+  return withHostnameGuard(adminDb, input.hostname, (held) =>
+    requestUnderGuard(held, provider, input),
+  );
+}
+
+async function requestUnderGuard(
+  guard: HostnameGuard,
+  provider: CustomHostnameProvider,
+  input: { tenantId: string; hostname: string; actor: AdminActor },
+): Promise<RequestOutcome> {
+  const adminDb = guard.db;
   await inTenantTransaction(adminDb, adminContext(input.tenantId, input.actor), async (trx) => {
+    // Checked before any provider call too, so a connection that cannot keep
+    // the guard (a transaction-mode pooler) fails here, before a record exists.
+    await assertHostnameGuardHeld(trx, input.hostname);
     // Running the request again resumes a reservation of this tenant's that
     // never got its provider record, such as after an outage. Anything else
     // reserves the name now, or is refused because some tenant holds it.
@@ -131,6 +271,7 @@ export async function requestCustomHostname(
   // JSON travels as text and is cast in SQL: postgres.js would encode a
   // string sent for a jsonb parameter as a JSON string, not as the array.
   await inTenantTransaction(adminDb, adminContext(input.tenantId, input.actor), async (trx) => {
+    await assertHostnameGuardHeld(trx, input.hostname);
     await sql`select app.hostname_attach_provider(
         ${input.tenantId}::uuid, ${input.hostname}, ${reading.providerId},
         ${JSON.stringify(reading.instructions)}::text::jsonb)`.execute(trx);
