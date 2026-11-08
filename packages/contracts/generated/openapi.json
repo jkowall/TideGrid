@@ -13177,6 +13177,53 @@
                             "type": "boolean",
                             "description": "True for an email staff sent again from the console (G2.16b)"
                           },
+                          "deliveryReport": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "bounced",
+                                  "complained"
+                                ],
+                                "description": "bounced: the receiving mail server refused it after the provider accepted it. complained: the guest marked it as spam"
+                              },
+                              "bounceType": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "hard",
+                                  "soft",
+                                  null
+                                ],
+                                "description": "For a bounce: hard, the address does not take mail; soft, the provider gave up retrying. Null for a complaint, or when the provider did not say"
+                              },
+                              "detailCode": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The bounce's enhanced SMTP status (such as 5.1.1) or the complaint's type (such as abuse); never the provider's text"
+                              },
+                              "reportedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "When the provider says it happened"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "bounceType",
+                              "detailCode",
+                              "reportedAt"
+                            ],
+                            "description": "What the provider reported after accepting it: its first bounce or spam complaint, or null. The state stays sent (W1-EMAIL-EVENTS)"
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -13196,6 +13243,7 @@
                           "failureCode",
                           "provider",
                           "staffResend",
+                          "deliveryReport",
                           "createdAt"
                         ],
                         "description": "A message's delivery, without its recipient or content"

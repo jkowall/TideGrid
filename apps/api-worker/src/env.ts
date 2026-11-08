@@ -58,6 +58,18 @@ export interface Bindings {
    */
   EMAIL_FROM_ADDRESS?: string;
   /**
+   * The queue Cloudflare's Email Sending event subscription publishes to
+   * (W1-EMAIL-EVENTS, src/email-events.ts). Unset means no batch is treated
+   * as email events. No configuration in the repository declares the queue.
+   */
+  EMAIL_EVENTS_QUEUE?: string;
+  /**
+   * Secret, never in the repository. The Cloudflare account id whose email
+   * events this deployment accepts, 32 hex characters. Unset or malformed
+   * keeps the email events consumer off: every event is retried.
+   */
+  EMAIL_EVENTS_ACCOUNT_ID?: string;
+  /**
    * The guest site's origin for links in email, with {slug} for the tenant's
    * slug; default https://{slug}.book.tidegrid.us. Its hostname must be an
    * active, verified hostname of the tenant.

@@ -34,6 +34,11 @@ export function retryDelaySeconds(attempts: number): number {
   return Math.min(900, 30 * 2 ** Math.max(0, attempts - 1));
 }
 
+/** The outbox queue and its DLQ are named tidegrid-outbox-<environment>[-dlq]. */
+export function isOutboxQueue(queueName: string): boolean {
+  return queueName.startsWith("tidegrid-outbox-");
+}
+
 /** The DLQ's messages arrive on a queue whose name ends in -dlq. */
 export function isDeadLetterQueue(queueName: string): boolean {
   return queueName.endsWith("-dlq");

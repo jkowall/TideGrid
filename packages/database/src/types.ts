@@ -144,7 +144,7 @@ export interface OutboxEventsTable {
   payload: Json;
   request_id: ColumnType<string | null, string | null | undefined, never>;
   created_at: CreatedAt;
-  // Delivery columns (0021, W3-G2.3): the publisher and the consumer move these.
+  // Delivery columns (0023, W3-G2.3): the publisher and the consumer move these.
   available_at: ColumnType<Date, Date | string | undefined, Date | string>;
   published_at: ColumnType<Date | null, never, Date | string | null>;
   delivered_at: ColumnType<Date | null, never, Date | string | null>;
@@ -975,6 +975,29 @@ export interface FinalizationExceptionResolutionsTable {
   created_at: CreatedAt;
 }
 
+export type EmailEventType = "bounced" | "complained";
+
+/**
+ * Append-only (0021, W1-EMAIL-EVENTS). A trigger joins each row to the
+ * tenant's own sent message and stamps received_at. The platform table
+ * email_events_unmatched is not here: the runtime reaches it only through
+ * app.record_unmatched_email_event.
+ */
+export interface EmailEventsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  provider: Fixed<"cloudflare">;
+  event_id: Fixed<string>;
+  event_type: Fixed<EmailEventType>;
+  provider_message_id: Fixed<string>;
+  message_id: Fixed<string>;
+  bounce_type: ColumnType<"hard" | "soft" | null, "hard" | "soft" | null | undefined, never>;
+  detail_code: ColumnType<string | null, string | null | undefined, never>;
+  occurred_at: ColumnType<Date, Date | string, never>;
+  received_at: ColumnType<Date, never, never>;
+  applied: Fixed<boolean>;
+}
+
 /** Tables added by the console completion migration (G2.12c), merged into Database below. */
 interface ConsoleTables {
   booking_notes: BookingNotesTable;
@@ -1247,12 +1270,14 @@ export interface Database
   booking_email_resend_claims: BookingEmailResendClaimsTable;
   // Finalization exception resolutions (0018, W1-FIN-EXC).
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
-  // Delivery foundation (0021, W3-G2.3).
+  // Email bounce and complaint events (0021, W1-EMAIL-EVENTS).
+  email_events: EmailEventsTable;
+  // Delivery foundation (0023, W3-G2.3).
   outbox_deliveries: OutboxDeliveriesTable;
   outbox_dead_letters: OutboxDeadLettersTable;
 }
 
-/** One handler's outcome for one outbox event (0021, W3-G2.3). Append-only. */
+/** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
 export interface OutboxDeliveriesTable {
   tenant_id: TenantColumn;
   outbox_event_id: Fixed<string>;
@@ -1261,11 +1286,11 @@ export interface OutboxDeliveriesTable {
   request_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
-/** Where a dead letter came from (0021). */
+/** Where a dead letter came from (0023). */
 export type DeadLetterSource = "consumer" | "queue" | "publisher";
 
 /**
- * A message that exhausted its retries (0021, W3-G2.3). Written open; a replay
+ * A message that exhausted its retries (0023, W3-G2.3). Written open; a replay
  * sets the reason once and the trigger stamps who and when.
  */
 export interface OutboxDeadLettersTable {

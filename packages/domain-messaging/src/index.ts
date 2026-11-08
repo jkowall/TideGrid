@@ -87,11 +87,24 @@ export {
   getMessageStatus,
   listBookingMessages,
   MAX_LINK_TTL_SECONDS,
+  type MessageDeliveryReport,
   type MessageStatus,
   MIN_LINK_TTL_SECONDS,
   STAFF_RESEND_TOPIC,
   subjectRefPattern,
 } from "./enqueue.ts";
+export {
+  CLOUDFLARE_EMAIL_EVENT_TYPES,
+  type CloudflareEmailEvent,
+  type CloudflareEmailEventType,
+  type EmailEventsConfig,
+  emailEventsConfig,
+  type IngestOutcome,
+  type IngestResult,
+  ingestEmailEvent,
+  type ParseResult,
+  parseCloudflareEmailEvent,
+} from "./events.ts";
 export {
   type EmailExceptionKind,
   type EmailExceptionState,

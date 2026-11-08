@@ -108,6 +108,56 @@ describe("a booking's email (G2.16b)", () => {
     expect(text(card())).not.toContain("@");
   });
 
+  it("shows a bounce or spam complaint reported after sending (W1-EMAIL-EVENTS)", async () => {
+    const report = (kind: "bounced" | "complained", bounceType: "hard" | "soft" | null) => ({
+      kind,
+      bounceType,
+      detailCode: kind === "bounced" ? "5.1.1" : "abuse",
+      reportedAt: "2026-11-04T14:30:00.000Z",
+    });
+    stubApi(() =>
+      json(
+        200,
+        messagesBody({
+          messages: [
+            message({ deliveryReport: report("bounced", "hard") }),
+            message({ deliveryReport: report("bounced", "soft") }),
+            message({ deliveryReport: report("complained", null) }),
+            message(),
+          ],
+        }),
+      ),
+    );
+    renderCard();
+    await settled();
+    const rows = items();
+    expect(rows.map((row) => text(row.querySelector(".tg-status")))).toEqual([
+      "Bounced",
+      "Bounced",
+      "Marked as spam",
+      "Sent",
+    ]);
+    for (const badge of card().querySelectorAll(".tg-status")) {
+      expect(badge.querySelector("svg")).not.toBeNull();
+    }
+    expect(text(rows[0])).toContain(
+      "the guest's mail server refused it. The address may be wrong.",
+    );
+    expect(text(rows[1])).toContain("kept refusing it and the email service gave up");
+    expect(text(rows[2])).toContain("The guest marked it as spam.");
+    // The provider's code is never shown as words.
+    expect(text(card())).not.toMatch(/5\.1\.1|abuse|@/);
+  });
+
+  it("reads an API that sends no delivery report as none", async () => {
+    const legacy = { ...message() } as Partial<ReturnType<typeof message>>;
+    delete legacy.deliveryReport;
+    stubApi(() => json(200, messagesBody({ messages: [legacy as ReturnType<typeof message>] })));
+    renderCard();
+    await settled();
+    expect(items().map((row) => text(row.querySelector(".tg-status")))).toEqual(["Sent"]);
+  });
+
   it("shows a code it does not know in generic words and still renders", async () => {
     stubApi(() =>
       json(

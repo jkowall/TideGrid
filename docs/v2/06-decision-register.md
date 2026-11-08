@@ -12,18 +12,34 @@ Dated decisions that changed scope, wording, or process. Each entry records the 
 
 The owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." This is a dated synthetic pull-forward. It waives the Validation gate and the O-VAL-2 dependency for W3-OPS-1 (plan only), W3-G2.3, W3-G2.9, W3-G2.10, and W3-G2.2b without managed OIDC and MFA. It allows no provider signup, no Cloudflare, Neon, or Stripe call, no Terraform apply, and no deploy. A new Worker binding stays out of the configuration a release deploys until its resource exists. No gate is claimed.
 
-W3-G2.3 builds the delivery foundation with migration `0021` (renumbered at merge after W1-0014-RESIDUALS took `0019` and waiver signing took `0020`) and the [database contract](../../packages/database/README.md#delivery-foundation-0021). Coordinator defaults, pending owner confirmation:
+W3-G2.3 builds the delivery foundation with migration `0023` (renumbered at merge: W1-0014-RESIDUALS took `0019`, waiver signing `0020`, and email events `0021` and `0022`) and the [database contract](../../packages/database/README.md#delivery-foundation-0023). Coordinator defaults, pending owner confirmation:
 
 - **D1: at-least-once delivery with idempotent handlers** (the goal's recommended default). A handler's outcome row commits with its writes; a duplicate skips it.
 - **D2: cleanup through an admin-owned schema app function** (the goal's recommended default). `app.delivery_cleanup` removes completed idempotency keys and unused quotes seven days past their expiry. The runtime still holds no DELETE. Quotes stay append-only for updates.
 - **D3: one Worker script, queue only in tests.** The API Worker gains a queue entry. Only `env.test` declares the queue and its DLQ. A separate async Worker deployment and the real queues wait for W3-OPS provisioning, so the next release from main deploys unchanged bindings.
-- **D4: events before 0021 are not sent.** The migration marks them published and delivered, because no consumer existed and the cron sweeps already did their work.
+- **D4: events before 0023 are not sent.** The migration marks them published and delivered, because no consumer existed and the cron sweeps already did their work.
 - **D5: retry budget.** The consumer retries with 30 s doubling to 15 minutes and records its own dead letter on the fifth attempt. The queue's own DLQ is the backstop. A hint not delivered within 15 minutes is sent again, up to 10 accepted sends. A send the queue refused counts for nothing and waits five minutes.
 - **D6: "operator" means the TideGrid operator here.** Dead letters are visible through `outbox:dlq list` and an error log line, not in the tenant console.
 - **D7: one handler to start.** `ops_alert` logs ids for a finalization exception, a refused refund, and a failed confirmation email. New handlers come with the goals that need them.
 
 The cron sweeps stay as the backstop for the work they already do.
 
+### 2026-11-08: W1-EMAIL-EVENTS, a local consumer for email bounces and complaints (owner pull-forward; coordinator defaults pending owner confirmation)
+
+The plan's O-SCOPE item 7 held this goal until a dated owner entry placed a local consumer in demo scope or recorded a pull-forward. On 2026-11-08 the owner wrote: "Anyways, I just want all the work to be done for the next waves." and, about the threads' pull requests, "go ahead and merge them dont ask me to review them". This entry records that as the owner's pull-forward of W1-EMAIL-EVENTS into the demo: a local build against recorded event shapes. The live event subscription, the queue, and the account id secret stay owner steps. `packages/domain-messaging/README.md` calls bounce ingestion a Core live gate blocker; this goal builds the consumer and does not claim that gate.
+
+Start checks: (a) this entry; (c) the CONCURRENTLY mode is on `main`; (d) the sender guard is built. (b) is not met: O-P7's A9, the first real send with its `send()` id compared to an event's `payload.messageId`, has not run. The join form below is therefore unproven against the live service, and that check is still owed.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1, the join form.** Exact match after the adapter's own normalization (`normalizeCloudflareMessageId`), the rule applied when the id was stored at send. Revisit after A9.
+- **D2, a queue consumer, not a signed webhook.** The goal's recommended option was a signed webhook route. Cloudflare's documentation (read 2026-11-08) delivers Email Sending events only to a Cloudflare queue through an event subscription, with no webhook and no signature. So the API Worker consumes the queue (`EMAIL_EVENTS_QUEUE`), and checks each event's account (`EMAIL_EVENTS_ACCOUNT_ID`, a secret) and sending domain. No binding is added to the deployed configuration. The background jobs goal (W3-G2.3) adds its own queue consumer to the same Worker; the handler routes by queue name.
+- **D3, the message stays `sent`.** A bounce or complaint is an event joined to the message, shown to staff in place of "Sent", rather than a new message state, so the delivery rules, resend limits, and claims are untouched.
+- **D4, once.** The first bounce or complaint is applied; later ones are kept and not applied; a duplicate event id changes nothing.
+- **D5, only bounced and complained are kept.** Delivered, deferred, failed, and rejected events are acknowledged and dropped.
+- **D6, unknown ids** go to a platform table no runtime role can read, once per event id.
+
+Migrations `0021` and `0022` (provisional). Security review under rule R9, run under the owner's go to merge without asking him: no critical or high finding. One medium is recorded, not fixed: the queue is authenticated only by who may publish to it, so no producer but Cloudflare's subscription may be bound to it. The other findings are fixed or recorded in the [verification log](../verification-log.md). Canonical: the [database README](../../packages/database/README.md#email-events-0021-and-0022) and the [messaging README](../../packages/domain-messaging/README.md#email-events-w1-email-events).
 ### 2026-11-08: W1-G215-SIGNING, staff-assisted and QR waiver signing (owner pull-forward; coordinator defaults pending owner confirmation)
 
 The O-SCOPE entry below left items 4 to 6, waiver staff-assisted and QR signing, reminders, and guest renewal, as Core live gate work. On 2026-11-08 at 17:33 UTC the owner wrote: "Anyways, I just want all the work to be done for the next waves." The coordinator reads it as a pull-forward of those three Core live gate items into the demo, synthetic data only, each its own goal and pull request in order: W1-G215-SIGNING, W1-G215-REMINDERS, and W1-WAIVER-RENEWAL. The [demo build plan's G2.15 row](12-demo-build-plan.md#goal-sequence) now says so. This entry is the start gate for all three.
