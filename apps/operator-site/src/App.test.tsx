@@ -776,3 +776,57 @@ describe("returning to the page after signing in", () => {
     expect(recallSearch(tenantId)).toBeUndefined();
   });
 });
+
+describe("pending invitations (W3-G2.2b)", () => {
+  const invited = (): MeResponse => ({ ...me(), memberships: [] });
+
+  it("lists an invitation on the no-access screen and accepting it opens the console", async () => {
+    const tenant = me().memberships[0] as Membership;
+    vi.stubGlobal(
+      "fetch",
+      api({
+        "GET /api/v1/me": [() => json(invited()), () => json(me())],
+        "GET /api/v1/staff/invitations": [
+          () =>
+            json({
+              invitations: [
+                {
+                  tenantId: tenant.tenantId,
+                  tenantSlug: tenant.tenantSlug,
+                  tenantName: tenant.tenantName,
+                  role: "booking_staff",
+                  invitedAt: "2026-11-08T12:00:00.000Z",
+                  expiresAt: "2026-11-15T12:00:00.000Z",
+                },
+              ],
+            }),
+        ],
+        [`POST /api/v1/staff/invitations/${tenant.tenantId}/accept`]: [
+          () => json({ tenantId: tenant.tenantId, status: "active" }),
+        ],
+      }),
+    );
+    const App = await loadApp();
+    render(<App />);
+    await heading("No operator access yet");
+    const invitations = await screen.findByRole("region", { name: "Invitations" });
+    expect(within(invitations).getByText(/invited you to join as booking staff/)).toBeTruthy();
+    fireEvent.click(within(invitations).getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(screen.queryByText("No operator access yet")).toBeNull());
+  });
+
+  it("shows no invitations when the list does not load", async () => {
+    vi.stubGlobal(
+      "fetch",
+      api({
+        "GET /api/v1/me": [() => json(invited())],
+        "GET /api/v1/staff/invitations": [() => status(500)],
+      }),
+    );
+    const App = await loadApp();
+    render(<App />);
+    await heading("No operator access yet");
+    await settle();
+    expect(screen.queryByRole("region", { name: "Invitations" })).toBeNull();
+  });
+});
