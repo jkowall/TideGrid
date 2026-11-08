@@ -262,8 +262,10 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
     try {
       await lock`begin`;
       await lock`select id from public.bookings where id = ${b.bookingId} for no key update`;
-      const report = await deliverMail(world, A.id);
+      // A turn of one: passing the reminder over does not use it up.
+      const report = await deliverMail(world, A.id, world.mail, { limit: 1 });
       expect(report.items.map((i) => i.messageId)).not.toContain(reminder.id);
+      expect(report.claimed).toBe(1);
       const [confirmation] = await world.admin<{ state: string }[]>`
         select state from public.email_messages
          where booking_id = ${other.bookingId} and template = 'booking_confirmation'`;
@@ -276,6 +278,48 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
     // Once the booking is free, the reminder goes out.
     await deliverMail(world, A.id);
     expect((await messageOf(world.admin, reminder.id)).state).toBe("sent");
+  });
+
+  it("keeps the booking and its confirmation when only the reminder cannot be written", async () => {
+    await world.admin.unsafe(`
+      create or replace function public.test_refuse_reminder() returns trigger
+        language plpgsql as $$
+      begin
+        raise exception 'no reminder for this operator' using errcode = '23514';
+      end $$`);
+    await world.admin.unsafe(`
+      create trigger test_refuse_reminder before insert on public.email_messages
+        for each row when (new.tenant_id = '${A.id}'::uuid and new.template = 'booking_reminder')
+        execute function public.test_refuse_reminder()`);
+    try {
+      const b = await book(world, A, trips.shared(), 1);
+      const [booking] = await world.admin<{ state: string; payment: string; hold: string }[]>`
+        select b.state, p.state as payment, h.state as hold from public.bookings b
+          join public.payments p on p.id = b.payment_id
+          join public.capacity_holds h on h.id = b.hold_id
+         where b.id = ${b.bookingId}`;
+      expect(booking).toEqual({ state: "confirmed", payment: "succeeded", hold: "confirmed" });
+      const mail = await world.admin<{ template: string; state: string }[]>`
+        select template, state from public.email_messages where booking_id = ${b.bookingId}`;
+      expect(mail).toEqual([{ template: "booking_confirmation", state: "queued" }]);
+      const [audit] = await world.admin<{ n: number }[]>`
+        select count(*)::int as n from public.audit_events
+         where subject_id = ${b.bookingId} and action = 'booking.reminder_email_failed'`;
+      expect(audit?.n).toBe(1);
+      const [event] = await world.admin<{ n: number }[]>`
+        select count(*)::int as n from public.outbox_events
+         where topic = 'booking.reminder_email_failed' and payload->>'bookingId' = ${b.bookingId}`;
+      expect(event?.n).toBe(1);
+      const [confirmationFailed] = await world.admin<{ n: number }[]>`
+        select count(*)::int as n from public.audit_events
+         where subject_id = ${b.bookingId} and action = 'booking.confirmation_email_failed'`;
+      expect(confirmationFailed?.n).toBe(0);
+    } finally {
+      await world.admin.unsafe(
+        "drop trigger if exists test_refuse_reminder on public.email_messages",
+      );
+      await world.admin.unsafe("drop function if exists public.test_refuse_reminder()");
+    }
   });
 
   it("cancels at claim a reminder written for a booking already canceled", async () => {

@@ -684,7 +684,11 @@ async function deliverWithOrigin(
     const claimed = await claimOne(db, ctx, options, origin, passed);
     if (claimed.kind === "none") break;
     if (claimed.kind === "passed") {
+      // Passing a message over is not a claim: it does not use up the turn,
+      // so the sweep still sees a full turn when more mail is due. At most
+      // `limit` messages are passed over in one run.
       passed.add(claimed.messageId);
+      if (passed.size <= limit) i -= 1;
       continue;
     }
     if (claimed.kind === "held") {
