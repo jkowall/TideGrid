@@ -16,11 +16,21 @@ Coordinator defaults, pending owner confirmation:
 
 - **D7, one trip reminder per booking, 24 hours before departure.** Written with the confirmation and sent by the existing delivery job when due, with a fresh management link. A booking made within two days of departure gets none, since its confirmation is recent enough.
 - **D8, never late.** The delivery job checks again when it picks the reminder up: a canceled booking or trip, or a trip leaving within 2 hours (the waiver reminders' cutoff), cancels it unsent (`reminder_too_late`). Canceling a booking cancels its waiting reminder at once, and a reminder is never picked up while a cancellation is in progress.
-
-Independent and security review (R9): no critical or high finding. Fixed: a lapsed reminder attempt near departure now ends as `outcome_unknown` rather than canceled, and revokes no link (M1); the claim waits for a cancellation in progress (L1); the email no longer says earlier links stopped working (L2); no reminder for a booking made within two days (L3); tests for the boundary and the lapsed attempt (L4). Recorded: tests outside the reminder suite ignore the reminder (L5).
 - **D9, staff see it.** The booking's Email card lists it as "Trip reminder", "Scheduled" until it is due. Staff cannot turn reminders off per operator yet (proposed follow-up, with operator-set timing).
 
+Independent and security review (R9): no critical or high finding. Fixed: a lapsed reminder attempt near departure now ends as `outcome_unknown` rather than canceled, and revokes no link (M1); the claim waits for a cancellation in progress (L1); the email no longer says earlier links stopped working (L2); no reminder for a booking made within two days (L3); tests for the boundary and the lapsed attempt (L4). Recorded: tests outside the reminder suite ignore the reminder (L5).
+
 Canonical: the [messaging README](../../packages/domain-messaging/README.md#trip-reminders-w3-g216-rest).
+
+### 2026-11-08: W1-WAIVER-RENEWAL, guest link renewal, a staff reset of the five sends, and a shared-address flag (coordinator defaults pending owner confirmation)
+
+The third of the three waiver goals the owner pulled into the demo on 2026-11-08, under the [W1-G215-SIGNING entry](#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation), where the owner wrote: "Anyways, I just want all the work to be done for the next waves." The owner did not answer the three open choices, so the coordinator's recommended defaults apply until the owner confirms them:
+
+- **D1: a guest asks for a new link themselves, at most 3 a day per participant.** A spent, lapsed, or replaced emailed link offers "Email me a new link". The new email goes only to the address the latest one went to, within the usual sending limits, and the answer is the same whatever happened, so it reveals no address or booking. Staff-assisted codes are not renewed. The database holds the daily cap and the address for every writer.
+- **D2: staff can allow five more sends, with a reason, audited.** Once a waiver has been sent 5 times, owners and booking staff may reset the count from the console's Waivers card, up to 20 sends in all. Each reset is its own append-only row, and the audit history records the reason and the staff member.
+- **D3: a shared family address is flagged to staff, not blocked.** When a minor's parent or guardian has the same address as a participant's own address on the booking, the console says so and asks staff to check who signs at the dock. A family of minors sharing one guardian is not flagged.
+
+Migration `0028` (provisional, claimed at merge) and the service are in the [waiver contract](../../packages/domain-waivers/README.md#renewal-and-the-send-count-w1-waiver-renewal). Not built: verifying a mailbox beyond the link itself, bounce handling, the generic dock QR, R2, and field encryption. Security review under rule R9: run under the owner's standing go of 2026-11-08 (results in the [verification log](../verification-log.md#2026-11-08)).
 
 ### 2026-11-08: W3-G2.16-rest, per-operator sender domains and suppression, code only (synthetic pull-forward; coordinator defaults pending owner confirmation)
 

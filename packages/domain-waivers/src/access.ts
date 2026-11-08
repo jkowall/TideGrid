@@ -39,6 +39,12 @@ export type RedeemResult =
   | { kind: "used" }
   /** A newer email replaced this link, or the address changed. */
   | { kind: "replaced" }
+  /**
+   * A staff-assisted code that no longer opens (lapsed, used, or replaced)
+   * while its waiver still waits: only the crew issues another, so the page
+   * offers no emailed renewal.
+   */
+  | { kind: "code_ended" }
   /** The waiver no longer takes a signature: signed, superseded, or no longer needed. */
   | { kind: "closed"; state: Exclude<WaiverRequestState, "pending"> };
 
@@ -79,23 +85,27 @@ export async function redeemWaiverToken(
   if (!requestId || !peeked[0]) return { kind: "invalid" };
   const request = await lockRequest(trx, ctx.tenantId, requestId);
   if (!request) return { kind: "invalid" };
-  // Once the trip has ended a link opens nothing, even one issued before the
-  // trip moved earlier; the link is left as it is.
-  if (await tripIsOver(trx, ctx.tenantId, request.booking_id)) {
-    return request.state === "pending"
-      ? { kind: "expired" }
-      : { kind: "closed", state: request.state };
-  }
-
   // A link no email carried opens a session only as a staff-assisted start.
   const assisted =
     peeked[0].message_id === null ? await assistedLinkFacts(trx, ctx.tenantId, peeked[0].id) : null;
+  // Once the trip has ended a link opens nothing, even one issued before the
+  // trip moved earlier; the link is left as it is. A crew code says so as a
+  // code, since no emailed link can follow it.
+  if (await tripIsOver(trx, ctx.tenantId, request.booking_id)) {
+    if (request.state !== "pending") return { kind: "closed", state: request.state };
+    return assisted ? { kind: "code_ended" } : { kind: "expired" };
+  }
   if (peeked[0].message_id === null && !assisted) return { kind: "invalid" };
 
   const redeemed = await redeemAccessLink(trx, ctx, {
     token: input.token,
     purpose: WAIVER_LINK_PURPOSE,
   });
+  if (assisted && redeemed.kind !== "invalid" && redeemed.kind !== "redeemed") {
+    return request.state === "pending"
+      ? { kind: "code_ended" }
+      : { kind: "closed", state: request.state };
+  }
   switch (redeemed.kind) {
     case "invalid":
       return { kind: "invalid" };

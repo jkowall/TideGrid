@@ -132,7 +132,7 @@ export function resendFailureText(reason: string): string {
     case "too_soon":
       return "It went to this address less than 10 minutes ago. Try again shortly.";
     case "limit":
-      return "It has been sent 5 times, the most a waiver request can be.";
+      return "Its sends are used up. Below 20 sends in all, allow 5 more first, with a reason; at 20, help the guest sign at the dock.";
     case "rate_limited":
       return "Waiver email for this guest, address, or booking has reached its sending limit for now. Try again later.";
     case "email_invalid":
@@ -144,13 +144,31 @@ export function resendFailureText(reason: string): string {
     case "trip_over":
       return "The trip ends too soon to send a link.";
     case "forbidden":
-      return "Your role can't send waivers.";
+      return "Your role can't send waivers or allow more sends.";
     case "signed_out":
       return "You're signed out. Sign in again to send it.";
     case "unreachable":
       return "The console can't reach TideGrid. Check your connection, then try again.";
     default:
       return "TideGrid didn't send it. Try again in a moment.";
+  }
+}
+
+/** Why "Allow 5 more" did not save, in words for the dialog. */
+export function resetFailureText(reason: string): string {
+  switch (reason) {
+    case "reset_not_needed":
+      return "This waiver can't take more sends now. Close this and reload to see its sends.";
+    case "not_pending":
+      return "This waiver no longer needs a signature.";
+    case "forbidden":
+      return "Your role can't allow more sends.";
+    case "signed_out":
+      return "You're signed out. Sign in again to save it.";
+    case "unreachable":
+      return "The console can't reach TideGrid. Check your connection, then try again.";
+    default:
+      return "TideGrid didn't save it. Try again in a moment.";
   }
 }
 

@@ -20,7 +20,7 @@ import {
   type WaiverSignerRole,
 } from "@tidegrid/database";
 import { sql } from "kysely";
-import { MAX_GENERATIONS } from "./delivery.ts";
+import { MAX_ALL_GENERATIONS, MAX_GENERATIONS, sendsUsed } from "./delivery.ts";
 import {
   closedSinceInvitation,
   latestEmailAt,
@@ -98,6 +98,15 @@ export interface ParticipantWaiver {
     };
     /** When staff may send it again; null when it cannot be sent again. */
     resendAvailableAt: Date | null;
+    /** Sends left before staff must reset the count (W1-WAIVER-RENEWAL, D2). */
+    sendsLeft: number;
+    /** Whether staff may reset the count now: five used, and under 20 in all. */
+    canResetSends: boolean;
+    /**
+     * A guardian's address that is also a participant's own address on the
+     * booking, so someone else could open the email (D3): a flag, not a block.
+     */
+    sharedAddress: boolean;
     /** Reminder emails before departure (W1-G215-REMINDERS). */
     reminders: ParticipantWaiverReminders;
   };
@@ -160,6 +169,9 @@ interface Row {
   refusal_retry_after: Date | null;
   /** When the booking's trip leaves. */
   starts_at: Date;
+  /** The generation the latest staff reset was at (0028); null when none. */
+  reset_at: number | null;
+  shared_address: boolean | null;
   /** The request's reminders (0025), oldest first. */
   reminders:
     | { slot: WaiverReminderSlot; queued_at: string; state: MessageState; at: string }[]
@@ -193,6 +205,13 @@ async function rows(
            ${latestEmailAt(tenantId, sql<string>`r.id`)} as latest_email_at,
            cr.address as current_recipient, f.retry_after as refusal_retry_after,
            st.starts_at,
+           (select max(x.after_generation) from waiver_send_resets x
+             where x.tenant_id = b.tenant_id and x.request_id = r.id) as reset_at,
+           (r.required_signer = 'guardian' and cr.address is not null
+            and exists (select 1 from booking_participants q
+                         where q.tenant_id = b.tenant_id and q.booking_id = b.id
+                           and q.id <> p.id and not q.is_minor
+                           and nullif(lower(btrim(q.email)), '') = cr.address)) as shared_address,
            (select json_agg(json_build_object(
                      'slot', w.slot, 'queued_at', w.created_at, 'state', wm.state,
                      'at', coalesce(wm.sent_at, wm.failed_at, wm.canceled_at, w.created_at))
@@ -295,10 +314,23 @@ function remindersOf(row: Row, status: WaiverStatusCode): ParticipantWaiverRemin
   return { sent, next };
 }
 
+function sendCount(row: Row): { sendsLeft: number; canResetSends: boolean } {
+  const used = sendsUsed(row.generation, row.reset_at);
+  const open = row.state === "pending" && row.booking_state === "confirmed";
+  return {
+    sendsLeft: open ? Math.max(0, MAX_GENERATIONS - used) : 0,
+    canResetSends:
+      open &&
+      row.generation !== null &&
+      used >= MAX_GENERATIONS &&
+      row.generation + MAX_GENERATIONS <= MAX_ALL_GENERATIONS,
+  };
+}
+
 function resendAt(row: Row): Date | null {
   if (row.state !== "pending" || row.booking_state !== "confirmed") return null;
   if (row.current_recipient === null) return null;
-  if (row.generation !== null && row.generation >= MAX_GENERATIONS) return null;
+  if (sendsUsed(row.generation, row.reset_at) >= MAX_GENERATIONS) return null;
   // The database's sending limits, across the participant's requests.
   return row.refusal_retry_after ?? row.now;
 }
@@ -378,6 +410,8 @@ async function assemble(
                     }
                   : null,
               resendAvailableAt: resendAt(row),
+              ...sendCount(row),
+              sharedAddress: row.state === "pending" && row.shared_address === true,
               reminders: remindersOf(row, statusOf(row, booking.required)),
             }
           : null,

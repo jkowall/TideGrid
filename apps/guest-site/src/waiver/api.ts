@@ -1,6 +1,7 @@
 import {
   ErrorResponse,
   ManageWaiversResponse,
+  WaiverLinkRenewalResponse,
   WaiverSessionOpenResponse,
   WaiverSessionResponse,
   type WaiverSigning,
@@ -106,6 +107,17 @@ export async function openSession(token: string): Promise<Result<OpenedSession>>
   return result.kind === "ok"
     ? { ...result, value: { secret: result.value.sessionSecret, waiver: result.value.waiver } }
     : result;
+}
+
+/**
+ * Ask for a new link in place of a spent, lapsed, or replaced one. The API
+ * answers the same whatever happened, so a 202 says only that it was taken.
+ */
+export async function renewLink(token: string): Promise<Result<{ accepted: true }>> {
+  return call("/v1/public/waiver-links/renewal", WaiverLinkRenewalResponse, {
+    method: "POST",
+    body: { token },
+  });
 }
 
 export async function readSession(secret: string): Promise<Result<WaiverSigning>> {
