@@ -346,6 +346,8 @@ An absence of pain is evidence when it is based on a specific smooth event or es
 
 ## Structured note template
 
+A copyable blank version, with evidence split from interpretation and the qualification arithmetic shown, is in the [interview record template](interview-record-template.md). The [evidence register template](evidence-register-template.md) tallies the gate across all 12 interviews.
+
 ```text
 Interview ID: OP-__
 Date and time:
