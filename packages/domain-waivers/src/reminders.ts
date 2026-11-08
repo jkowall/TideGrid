@@ -49,6 +49,10 @@ export const REMINDER_SLOTS: readonly { slot: WaiverReminderSlot; hours: number 
   { slot: "72h", hours: 72 },
   { slot: "24h", hours: 24 },
 ];
+const [EARLY, LATE] = REMINDER_SLOTS as readonly [
+  (typeof REMINDER_SLOTS)[number],
+  (typeof REMINDER_SLOTS)[number],
+];
 /** No reminder is queued from this many hours before departure. */
 export const REMINDER_CUTOFF_HOURS = 2;
 /**
@@ -331,14 +335,29 @@ export async function sweepWaiverReminders(
     turn: async (tenantId) => {
       const ctx = contextOf(tenantId);
       const candidates = await inTenantTransaction(db, ctx, async (trx) => {
+        // Only requests whose due slot is not yet reminded and not covered by
+        // a recent email, so the ones already handled never crowd out the
+        // rest from run to run. remindWaiverRequest decides again under lock.
         const { rows } = await sql<{ id: string }>`
-          select r.id from waiver_requests r
+          select r.id
+            from waiver_requests r
             join bookings b on b.tenant_id = r.tenant_id and b.id = r.booking_id
             join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
+            cross join lateral (
+              select case when t.starts_at <= now() + make_interval(hours => ${LATE.hours}::int)
+                          then ${LATE.slot}::text else ${EARLY.slot}::text end as slot,
+                     case when t.starts_at <= now() + make_interval(hours => ${LATE.hours}::int)
+                          then ${LATE.hours}::int else ${EARLY.hours}::int end as hours) due
            where r.tenant_id = ${tenantId} and r.state = 'pending'
+             and b.state = 'confirmed'
              and t.starts_at > now() + make_interval(hours => ${REMINDER_CUTOFF_HOURS})
-             and t.starts_at <= now() + make_interval(hours => ${REMINDER_SLOTS[0]?.hours ?? 72})
+             and t.starts_at <= now() + make_interval(hours => ${EARLY.hours})
              and not (r.id = any(${[...seen]}::uuid[]))
+             and not exists (select 1 from waiver_reminders w
+                              where w.tenant_id = r.tenant_id and w.request_id = r.id
+                                and w.slot::text = due.slot)
+             and ${latestEmailAt(tenantId, sql<string>`r.id`)}
+                   < t.starts_at - make_interval(hours => due.hours + ${REMINDER_GRACE_HOURS}::int)
            order by t.starts_at, r.id
            limit ${limit + 1}`.execute(trx);
         return rows.map((r) => r.id);
