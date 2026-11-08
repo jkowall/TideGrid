@@ -44,64 +44,90 @@ function valid(value: unknown, now: number): value is StoredSession {
 }
 
 export class SessionStore {
+  /** Every read and write in order, so a removal never overwrites a booking just added. */
+  #queue: Promise<unknown> = Promise.resolve();
+  /**
+   * What the app last knew, kept while it runs: if secure storage fails, a
+   * booking just opened (its link already used) still shows until the app closes.
+   */
+  #memory: StoredSession[] = [];
+
   constructor(
     private readonly store: KeyValueStore,
     private readonly slug: string,
   ) {}
 
+  #serial<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.#queue.then(run, run);
+    this.#queue = next.catch(() => undefined);
+    return next;
+  }
+
   /** The sessions still in date, newest first. Never throws. */
-  async list(now: number = Date.now()): Promise<StoredSession[]> {
+  list(now: number = Date.now()): Promise<StoredSession[]> {
+    return this.#serial(() => this.#list(now));
+  }
+
+  /** Keep a session, replacing any older one for the same booking. */
+  add(session: StoredSession, now: number = Date.now()): Promise<void> {
+    return this.#serial(async () => {
+      if (!valid(session, now)) return;
+      const others = (await this.#list(now)).filter((s) => s.reference !== session.reference);
+      const { token, expiresAt, reference } = session;
+      await this.#write([{ token, expiresAt, reference }, ...others].slice(0, maxSessions));
+    });
+  }
+
+  /** Forget one booking's session, as when the API says it ended. */
+  remove(reference: string, now: number = Date.now()): Promise<void> {
+    return this.#serial(async () => {
+      const list = await this.#list(now);
+      const kept = list.filter((s) => s.reference !== reference);
+      if (kept.length !== list.length) await this.#write(kept);
+    });
+  }
+
+  clear(): Promise<void> {
+    return this.#serial(() => this.#write([]));
+  }
+
+  async #list(now: number): Promise<StoredSession[]> {
+    const fresh = (list: StoredSession[]) => list.filter((v) => valid(v, now));
     let raw: string | null;
     try {
       raw = await this.store.get(storageKey(this.slug));
     } catch {
-      return [];
+      this.#memory = fresh(this.#memory);
+      return this.#memory;
     }
-    if (!raw) return [];
+    if (!raw) {
+      // Nothing stored: what memory holds is only what a failed write left.
+      this.#memory = fresh(this.#memory);
+      return this.#memory;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch {
-      await this.clear();
+      await this.#write([]);
       return [];
     }
     const all = Array.isArray(parsed) ? parsed : [];
     const kept = all
       .filter((v): v is StoredSession => valid(v, now))
       .map(({ token, expiresAt, reference }) => ({ token, expiresAt, reference }));
-    if (kept.length !== all.length) await this.write(kept);
+    if (kept.length !== all.length) await this.#write(kept);
+    this.#memory = kept;
     return kept;
   }
 
-  /** Keep a session, replacing any older one for the same booking. */
-  async add(session: StoredSession, now: number = Date.now()): Promise<void> {
-    if (!valid(session, now)) return;
-    const others = (await this.list(now)).filter((s) => s.reference !== session.reference);
-    const { token, expiresAt, reference } = session;
-    await this.write([{ token, expiresAt, reference }, ...others].slice(0, maxSessions));
-  }
-
-  /** Forget one booking's session, as when the API says it ended. */
-  async remove(reference: string, now: number = Date.now()): Promise<void> {
-    const list = await this.list(now);
-    const kept = list.filter((s) => s.reference !== reference);
-    if (kept.length !== list.length) await this.write(kept);
-  }
-
-  async clear(): Promise<void> {
-    try {
-      await this.store.remove(storageKey(this.slug));
-    } catch {
-      // Nothing to clear.
-    }
-  }
-
-  private async write(list: StoredSession[]): Promise<void> {
+  async #write(list: StoredSession[]): Promise<void> {
+    this.#memory = list;
     try {
       if (list.length === 0) await this.store.remove(storageKey(this.slug));
       else await this.store.set(storageKey(this.slug), JSON.stringify(list));
     } catch {
-      // Storage blocked: the session still works while the app is open.
+      // Storage blocked: the memory copy keeps the session while the app is open.
     }
   }
 }

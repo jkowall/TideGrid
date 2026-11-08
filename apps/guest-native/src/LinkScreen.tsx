@@ -27,6 +27,7 @@ export function LinkScreen({
   const [problem, setProblem] = useState<{ title: string; body: string } | null>(null);
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
   const alive = useRef(true);
+  const lock = useRef(false);
   useEffect(
     () => () => {
       alive.current = false;
@@ -43,6 +44,8 @@ export function LinkScreen({
   }, [onClose]);
 
   const open = async () => {
+    // One exchange at a time, from the button or the keyboard: the link works once.
+    if (lock.current) return;
     setProblem(null);
     const token = linkTokenFrom(text);
     if (!token) {
@@ -51,8 +54,10 @@ export function LinkScreen({
     }
     setFieldError(undefined);
     setBusy(true);
+    lock.current = true;
     const r = await openWithLink(endpoint, token);
     if (!alive.current) return;
+    if (r.kind !== "ok") lock.current = false;
     if (r.kind === "ok") {
       setText("");
       await onOpened(r.value);

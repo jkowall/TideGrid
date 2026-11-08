@@ -294,6 +294,28 @@ export function policySummary(
   return lines;
 }
 
+// Clock -------------------------------------------------------------------------------
+
+/**
+ * The API's clock, as the app estimates it, as the web app does
+ * (apps/guest-site src/booking/clock.ts). Holds and prices expire on the
+ * server's time; a phone's clock can be minutes or hours off. The app learns
+ * the offset from a fresh quote's `quotedAt` or a new checkout's `createdAt`.
+ * Until it learns, the phone's clock stands; the server decides every deadline.
+ */
+export class ServerClock {
+  #offset = 0;
+
+  learn(serverInstant: string, receivedAt: number = Date.now()): void {
+    const at = Date.parse(serverInstant);
+    if (!Number.isNaN(at)) this.#offset = at - receivedAt;
+  }
+
+  now(local: number = Date.now()): number {
+    return local + this.#offset;
+  }
+}
+
 // Checkout ----------------------------------------------------------------------------
 
 export const finalStates: ReadonlySet<CheckoutSession["state"]> = new Set([

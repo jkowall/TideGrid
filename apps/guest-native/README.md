@@ -17,7 +17,7 @@ Not in the app yet: Stripe's card form (the demo runs the fake provider; a check
 ## Secrets on the phone
 
 - The checkout secret and the payment's client secret live only in the booking screen's memory, as on the web. Closing the app mid-payment loses them; the confirmation email still opens the booking.
-- A booking session is what the web app keeps in its tab's sessionStorage: its token, when it expires, and the booking's reference. The app keeps those same three fields, one record per booking and per operator, in the platform's secure storage through expo-secure-store (Keychain on iOS, readable only while the phone is unlocked and never restored to another device; Keystore-backed storage on Android). Sessions last an hour, as the API sets them, and expired ones are dropped. Nothing else is stored.
+- A booking session is what the web app keeps in its tab's sessionStorage: its token, when it expires, and the booking's reference. The app keeps those same three fields, one record per booking and per operator, in the platform's secure storage through expo-secure-store (Keychain on iOS, readable only while the phone is unlocked and never restored to another device; Keystore-backed storage on Android). Sessions last an hour, as the API sets them, and expired ones are dropped. Nothing else is stored. If secure storage fails, the app keeps the record in memory until it closes.
 - Secrets and personal data travel only in an Authorization header or a POST body, never a path or query. A unit test checks every route's URL. The app's source never logs; a unit test checks for `console`.
 - Checkout secrets and Idempotency-Keys come from expo-crypto's `getRandomValues`, the platform's secure generator. There is no fallback to `Math.random`.
 

@@ -43,6 +43,7 @@ import {
   quoteRows,
   quoteTrouble,
   type Selection,
+  ServerClock,
   stopText,
   type Trouble,
   tripWhen,
@@ -125,6 +126,8 @@ export function BookScreen({
   const [stalled, setStalled] = useState(false);
   /** What the screen is waiting on while it reads the checkout: the payment sent, or the hold's end. */
   const [waiting, setWaiting] = useState<string | null>(null);
+  /** The server's clock as the app estimates it: holds and prices expire on its time. */
+  const clock = useRef(new ServerClock());
   const [now, setNow] = useState(Date.now());
   const quoteKey = useRef(new CommandKey());
   const attempt = useRef(new CheckoutAttempt());
@@ -221,6 +224,7 @@ export function BookScreen({
       const r = await createQuote(endpoint, body, quoteKey.current.for(JSON.stringify(body)));
       if (!still()) return;
       if (r.kind === "ok") {
+        clock.current.learn(r.value.quotedAt);
         quoteKey.current.done();
         setShowErrors(false);
         // A new price asks again: the policy accepted is the one on this quote.
@@ -313,6 +317,8 @@ export function BookScreen({
         apply(checkoutTrouble(r, operator, isCharter(offer)), offer);
         return;
       }
+      // A retry after a lost answer may replay an old snapshot, which teaches nothing.
+      if (!doubtedFields.current) clock.current.learn(r.value.session.createdAt);
       attempt.current.done();
       doubtedFields.current = null;
       setInDoubt(false);
@@ -367,11 +373,20 @@ export function BookScreen({
           go({ kind: "outcome", offer, session: now.value, secret });
           return;
         }
+        // Not confirmed either way: an earlier try may have settled with its answer lost.
         setNotice({
           kind: "notice",
-          title: "The test payment didn't go through",
-          body:
-            r.status === 429 ? "Wait a minute, then try again." : "Wait a moment, then try again.",
+          title: "We couldn't confirm the test payment",
+          body: `${r.status === 429 ? "Wait a minute, then" : "Wait a moment, then"} press the same button again. It can't charge twice.`,
+        });
+        return;
+      }
+      if (r.kind === "ok" && r.value.delivery && r.value.delivery.status >= 500) {
+        // Settled, but its event didn't reach the booking: sending again redelivers it.
+        setNotice({
+          kind: "notice",
+          title: "The test payment hasn't reached your booking yet",
+          body: "Press the same button again. It can't charge twice.",
         });
         return;
       }
@@ -413,10 +428,11 @@ export function BookScreen({
   const paying = phase.kind === "pay" && phase.payment ? phase : null;
   useEffect(() => {
     if (!paying) return;
-    const tick = setInterval(() => setNow(Date.now()), 5_000);
-    const wait = Math.max(0, Date.parse(paying.session.expiresAt) - Date.now()) + 1_000;
+    setNow(clock.current.now());
+    const tick = setInterval(() => setNow(clock.current.now()), 5_000);
+    const wait = Math.max(0, Date.parse(paying.session.expiresAt) - clock.current.now()) + 1_000;
     const expiry = setTimeout(() => {
-      setNow(Date.now());
+      setNow(clock.current.now());
       watch(paying.offer, paying.session, paying.secret);
     }, wait);
     return () => {
@@ -607,7 +623,7 @@ export function BookScreen({
             error={problems.email}
           />
           <Heading>Cancellation policy</Heading>
-          {policySummary(quote.policy, quote.trip, Date.now()).map((line) => (
+          {policySummary(quote.policy, quote.trip, clock.current.now()).map((line) => (
             <Body key={line}>{line}</Body>
           ))}
           <Pressable

@@ -388,6 +388,14 @@ describe("stored booking sessions", () => {
     expect(await new SessionStore(kv, "demo-reef").list(now)).toEqual([]);
   });
 
+  it("runs a removal and an addition in order, so neither is lost", async () => {
+    const kv = memory();
+    const store = new SessionStore(kv, "demo-harbor");
+    await store.add(session("ABCDEFGH"), now);
+    await Promise.all([store.remove("ABCDEFGH", now), store.add(session("ABCDEFGJ"), now)]);
+    expect((await store.list(now)).map((s) => s.reference)).toEqual(["ABCDEFGJ"]);
+  });
+
   it("drops expired and malformed records, and keeps the newest few", async () => {
     const kv = memory();
     const store = new SessionStore(kv, "demo-harbor");
@@ -417,7 +425,11 @@ describe("stored booking sessions", () => {
       },
     };
     const store = new SessionStore(broken, "demo-harbor");
-    await expect(store.add(session("ABCDEFGH"), now)).resolves.toBeUndefined();
+    const opened = session("ABCDEFGH");
+    await expect(store.add(opened, now)).resolves.toBeUndefined();
+    // Kept in memory while the app runs, so a booking whose link was used still shows.
+    await expect(store.list(now)).resolves.toEqual([opened]);
+    await expect(store.remove("ABCDEFGH", now)).resolves.toBeUndefined();
     await expect(store.list(now)).resolves.toEqual([]);
   });
 });
