@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Stage 0 commercial requirements draft (W1-COMM-REQ), written November 8, 2026
+
+A proposed draft lists 51 commercial requirements for paid pilots: [docs/v2/drafts/commercial-requirements.md](v2/drafts/commercial-requirements.md) ([decision register](v2/06-decision-register.md#2026-11-08-w1-comm-req-stage-0-commercial-requirements-draft-proposed-pending-owner-approval)). They cover the pilot agreement, data handling, service terms, payment terms, and app-store responsibilities. Each requirement names its V2 source, one open question for counsel, and its gate, paid-pilot readiness. The draft links the pricing worksheet and the standard CSV import drafts. It holds no contract language, gives no legal advice, claims no gate, and changes no price. It has no authority until the owner records approval in the register. No code changed. The reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed, including the doc link check.
+- **Independent review.** Accept with listed fixes, three findings, all fixed. The evidence section now records that the one interview on file values 24/7 support and prefers no monthly fee, which cut against three requirements, each now with an evidence note. A service-terms item now cites sources for prices and customer remedies. Two requirements regained conditions their sources state.
+- **Recheck.** Accept.
+- **Telemetry.** About one hour of agent time across draft, review, and one fix round. Token use and cost per checkpoint: missing.
+
 ### Inventory, pricing, and booking read review notes (W1-INV-PRICING), built November 8, 2026
 
 Five notes from the G2.5 to G2.7 reviews are closed or recorded ([decision register](v2/06-decision-register.md#2026-11-08-w1-inv-pricing-inventory-pricing-and-booking-read-review-notes-owner-go-d1-owner-decision-d2-and-d3-coordinator-defaults-pending-owner-confirmation)). The promotion window stays at the quote instant, an owner decision of November 8. The staff reads of a trip's holds and bookings are now paged. Both trip listings read capacity usage in one grouped call through migration `0016_grouped_trip_usage.sql`, which adds a function and changes no table, column, index, or row. Pricing names refuse Unicode format characters in the service. D2 and D3 are coordinator defaults pending owner confirmation. Nothing was released, and `0016` is not applied to Neon. The local runs and the reviews below are coordinator-reported.

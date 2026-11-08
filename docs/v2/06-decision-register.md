@@ -8,6 +8,21 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-COMM-REQ, Stage 0 commercial requirements draft (proposed, pending owner approval)
+
+The roadmap's Stage 0 asks to "Record the required pilot agreement, data, service, payment, and app-store terms." On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed", and later: "keep going until wave 1 is complete". The coordinator read that as the owner's go for this docs goal and for local commits. It is not an approval of the draft's content. No token budget was set.
+
+- **What was drafted.** [Stage 0 commercial requirements](drafts/commercial-requirements.md), a draft outside the numbered documents and outside the authority order. It lists 51 requirements in the five Stage 0 term areas: pilot agreement (12), data handling (12), service terms (10), payment terms (9), and app-store responsibilities (8). Each names its V2 source, an open question for counsel, and its gate. It links the [pricing worksheet draft](../customer/pricing-worksheet-draft.md) and the [standard CSV import draft](drafts/standard-csv-import.md).
+- **Status.** Proposed, not adopted. It has no authority until the owner records approval in this register. Every requirement restates a V2 source; none needed the "proposed" label. The grouping, the requirement IDs, and the open questions are proposed.
+- **Gate.** Every requirement belongs to [paid-pilot readiness](07-company-formation-and-costs.md#paid-pilot-readiness-exit-gate). Nothing in the draft passes or claims a gate.
+- **Not legal advice.** The draft holds no contract language. It names and engages no counsel. Counsel review waits for the [Validation gate](05-roadmap-validation.md#validation-gate) to support the readiness spend.
+- **No commercial change.** No price, fee base rule, support target, or store rule changes. Where V2 is silent (renewal, early termination, payment due dates, when recurring fees start, retention periods, liability caps), the draft asks a question and decides nothing.
+- **Branch.** `goal/comm-req`, named by the coordinator. The goal file's name was `docs/stage0-commercial-requirements`.
+- **Not done.** No link from Stage 0 or any numbered document to the draft; that waits for the owner. The independent trace review and the verification log entry are the coordinator's.
+- **Review fixes, 2026-11-08.** The independent trace review found three gaps, now fixed. The evidence section had said the one interview records no view on support or payment terms. It does: the operator values 24/7 support and prefers no monthly fee. The draft now records that tension as observed evidence next to ST-1, PA-2, and PT-1, and changes no requirement. ST-3 now also cites the operator's approval of customer remedies and of its price configuration. PT-7 keeps the 40% setup margin condition above 40 hours, and PA-3 keeps the full list of operator supplies.
+
+Promotion to a numbered document is a later goal, after the owner's approval entry. Canonical: none until then.
+
 ### 2026-11-08: W1-INV-PRICING, inventory, pricing, and booking read review notes (owner go; D1 owner decision; D2 and D3 coordinator defaults pending owner confirmation)
 
 The G2.5, G2.6, and G2.7 reviews left five notes: the staff holds read and a trip's bookings read had no pagination, both trip listings called `app.trip_capacity_usage` once per trip, pricing names accepted Unicode format characters (category Cf), and the promotion window's reading waited on the owner. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits.
