@@ -12,6 +12,7 @@ import {
   emailSettings,
   fakeEmailProvider,
   parseAllowedRecipients,
+  senderPolicy,
   WAIT_UNTIL_BUDGET_MS,
 } from "../src/email.ts";
 import type { Bindings } from "../src/env.ts";
@@ -286,6 +287,7 @@ describe("after-commit delivery (G2.16a)", () => {
       fromAddress: "bookings@tidegrid.us",
       guestLinkOrigin: "https://{slug}.book.tidegrid.us",
       environment: "preview",
+      senderPolicy: "shared",
     });
   });
 });
@@ -304,3 +306,39 @@ export function bindingTypes(binding: SendEmail): void {
   void fits;
   void drifted;
 }
+
+describe("sender policy (W3-G2.16-rest)", () => {
+  it("defaults to operator_only in production and shared elsewhere", () => {
+    expect(senderPolicy(cloudflare({ ENVIRONMENT: "production" }))).toBe("operator_only");
+    for (const environment of ["local", "preview", "staging"] as const) {
+      expect(senderPolicy(cloudflare({ ENVIRONMENT: environment }))).toBe("shared");
+    }
+  });
+
+  it("takes either policy by name, and refuses email for anything else", () => {
+    expect(senderPolicy(cloudflare({ EMAIL_SENDER_POLICY: " operator_only " }))).toBe(
+      "operator_only",
+    );
+    expect(
+      senderPolicy(cloudflare({ ENVIRONMENT: "production", EMAIL_SENDER_POLICY: "shared" })),
+    ).toBe("shared");
+    const bad = cloudflare({ EMAIL_SENDER_POLICY: "operator" });
+    expect(senderPolicy(bad)).toBeNull();
+    expect(emailSettings(bad)).toEqual({ kind: "refused", reason: "sender_policy_invalid" });
+    expect(emailProvider(bad, db)).toBeNull();
+    const fake = {
+      ...base,
+      ENVIRONMENT: "local" as const,
+      EMAIL_PROVIDER: "fake",
+      EMAIL_SENDER_POLICY: "x",
+    };
+    expect(emailSettings(fake)).toEqual({ kind: "refused", reason: "sender_policy_invalid" });
+  });
+
+  it("goes to delivery with the shared sender", () => {
+    expect(deliverySettings(cloudflare())).toMatchObject({ senderPolicy: "shared" });
+    expect(deliverySettings(cloudflare({ EMAIL_SENDER_POLICY: "operator_only" }))).toMatchObject({
+      senderPolicy: "operator_only",
+    });
+  });
+});

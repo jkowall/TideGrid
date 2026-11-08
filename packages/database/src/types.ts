@@ -1010,6 +1010,42 @@ export interface EmailEventsTable {
   applied: Fixed<boolean>;
 }
 
+export type SenderDomainStatus = "pending" | "verified" | "retired";
+
+/**
+ * Read only for the runtime (0027, W3-G2.16-rest): the admin connection adds,
+ * verifies, and retires a domain through app.sender_domain_* functions.
+ */
+export interface TenantSenderDomainsTable {
+  id: ColumnType<string, never, never>;
+  tenant_id: ColumnType<string, never, never>;
+  domain: ColumnType<string, never, never>;
+  local_part: ColumnType<string, never, never>;
+  status: ColumnType<SenderDomainStatus, never, never>;
+  verified_at: ColumnType<Date | null, never, never>;
+  retired_at: ColumnType<Date | null, never, never>;
+  created_at: ColumnType<Date, never, never>;
+  updated_at: ColumnType<Date, never, never>;
+}
+
+export type EmailSuppressionReason = "hard_bounce" | "complaint";
+
+/**
+ * One operator's suppressed addresses (0027). A trigger joins each row to the
+ * tenant's own complaint or hard bounce and that message's address; only the
+ * admin connection lifts one, through app.email_suppression_lift.
+ */
+export interface EmailSuppressionsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  address: Fixed<string>;
+  reason: Fixed<EmailSuppressionReason>;
+  event_id: Fixed<string>;
+  created_at: ColumnType<Date, never, never>;
+  lifted_at: ColumnType<Date | null, never, never>;
+  lift_reason: ColumnType<string | null, never, never>;
+}
+
 /** Tables added by the console completion migration (G2.12c), merged into Database below. */
 interface ConsoleTables {
   booking_notes: BookingNotesTable;
@@ -1329,6 +1365,9 @@ export interface Database
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
   // Email bounce and complaint events (0021, W1-EMAIL-EVENTS).
   email_events: EmailEventsTable;
+  // Per-operator sender domains and suppression (0027, W3-G2.16-rest).
+  tenant_sender_domains: TenantSenderDomainsTable;
+  email_suppressions: EmailSuppressionsTable;
   // Delivery foundation (0023, W3-G2.3).
   outbox_deliveries: OutboxDeliveriesTable;
   outbox_dead_letters: OutboxDeadLettersTable;

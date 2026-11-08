@@ -70,6 +70,7 @@ import {
 import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
 import { fillLinkSlot } from "./render.ts";
+import { ADDRESS_SUPPRESSED, isSuppressed, type SenderPolicy, senderAddressFor } from "./sender.ts";
 
 /**
  * Counted attempts before a temporarily failing message fails for good. An
@@ -96,6 +97,19 @@ export const RESEND_LOCK_PREFIX = "tidegrid.booking_resend:";
  * cancels the message with that code.
  */
 export const RESEND_WAIT_CODES = ["resend_interval", "resend_rate"] as const;
+/**
+ * The provider's code for a sender it will not send from. From an operator's
+ * own address it holds that operator's run only (0027); from the shared
+ * sender it is an account-level fault, as before.
+ */
+export const SENDER_NOT_VERIFIED = "sender_not_verified";
+/**
+ * The one account-level code that stops every run even from an operator's
+ * own sender: the whole account is suspended. Any other account-level code
+ * met on an operator's address (a limit Cloudflare may count per domain)
+ * holds that operator only.
+ */
+export const ACCOUNT_SUSPENDED = "provider_account_suspended";
 /** Room a deadline keeps beyond one send's bound, for the claim and the record. */
 export const DEADLINE_MARGIN_MS = 2_000;
 /** Why a message whose outcome nobody knows fails on a provider that does not deduplicate. */
@@ -120,8 +134,18 @@ export const DEFAULT_GUEST_LINK_ORIGIN = "https://{slug}.book.tidegrid.us";
 
 export interface DeliveryOptions {
   provider: EmailProvider;
-  /** The sender address; the display name is the operator's brand name. */
+  /**
+   * The shared sender address; the display name is the operator's brand
+   * name. An operator with a verified sending domain sends from its own
+   * address instead (0027, see src/sender.ts).
+   */
   fromAddress: string;
+  /**
+   * Whether an operator without a verified sending domain may use the shared
+   * address (`shared`, the default) or waits (`operator_only`): its mail
+   * stays queued and the run reports it as held.
+   */
+  senderPolicy?: SenderPolicy;
   /**
    * The guest site's origin, with `{slug}` for the tenant's slug, such as
    * "https://{slug}.book.tidegrid.us" or locally "http://{slug}.book.localhost:5301".
@@ -182,6 +206,8 @@ export interface DeliveryItem {
 
 /** Why a run stopped before it ran out of due messages or its limit, or null. */
 export type DeliveryStop = "deadline" | "account_fault";
+/** Why a tenant's run claimed nothing although mail may be due, or null. */
+export type DeliveryHold = "sender_unverified" | "sender_fault";
 
 export interface TenantDeliveryReport {
   claimed: number;
@@ -192,6 +218,8 @@ export interface TenantDeliveryReport {
   superseded: number;
   items: DeliveryItem[];
   stopped: DeliveryStop | null;
+  /** The operator has no verified sending domain under `operator_only`: nothing was claimed. */
+  held: DeliveryHold | null;
 }
 
 interface ClaimedRow {
@@ -202,6 +230,8 @@ interface ClaimedRow {
   subject_ref: string | null;
   to_email: string;
   to_name: string | null;
+  /** Who the claim decided sends it: the operator's verified address or the shared one. */
+  from_address: string;
   from_name: string;
   reply_to: string | null;
   subject: string;
@@ -215,6 +245,7 @@ interface ClaimedRow {
 
 type Claimed =
   | { kind: "none" }
+  | { kind: "held"; reason: DeliveryHold }
   | { kind: "ready"; row: ClaimedRow; url: string | null }
   | { kind: "failed"; messageId: string; attempt: number; code: string }
   | { kind: "canceled"; messageId: string; attempt: number; code: string };
@@ -321,9 +352,43 @@ async function claimOne(
       trx,
     );
     if (lockRows[0]?.locked !== true) return { kind: "none" } as const;
+    // Who sends, read under the claim (0027): the operator's verified domain,
+    // else the shared sender, else nothing under operator_only, and the
+    // tenant's mail waits for a verified domain.
+    const fromAddress = await senderAddressFor(
+      trx,
+      ctx.tenantId,
+      options.senderPolicy ?? "shared",
+      options.fromAddress,
+    );
+    if (fromAddress === null) {
+      // Held, but a lapsed attempt still ends the way it would have: on a
+      // provider that does not deduplicate, as outcome_unknown, so a message
+      // never sits in sending for as long as the operator is held.
+      if (!providerDeduplicates(options.provider)) {
+        const { rows: lapsed } = await sql<{ id: string; attempts: number }>`
+          select id, attempts from email_messages
+           where tenant_id = ${ctx.tenantId} and state = 'sending' and lease_expires_at <= now()
+           order by lease_expires_at, id limit 1
+           for update skip locked`.execute(trx);
+        const row = lapsed[0];
+        if (row) {
+          await fail(trx, ctx, row.id, row.attempts, OUTCOME_UNKNOWN);
+          return {
+            kind: "failed",
+            messageId: row.id,
+            attempt: row.attempts,
+            code: OUTCOME_UNKNOWN,
+          } as const;
+        }
+      }
+      return { kind: "held", reason: "sender_unverified" } as const;
+    }
     // A staff resend that must wait for its limits is left in the queue, and
     // the claim takes the next message instead.
-    const { rows } = await sql<ClaimedRow & { state: string; resend: boolean }>`
+    const { rows } = await sql<
+      Omit<ClaimedRow, "from_address"> & { state: string; resend: boolean }
+    >`
       select id, attempts, state, booking_id, participant_id, subject_ref, to_email, to_name,
              from_name, reply_to, subject, html_body, text_body, link_purpose, link_path,
              link_ttl_seconds, link_slot, starts_with(dedupe_key, ${RESEND_KEY_PREFIX}) as resend
@@ -403,15 +468,22 @@ async function claimOne(
       await fail(trx, ctx, found.id, attempt, "retries_exhausted");
       return { kind: "failed", messageId: found.id, attempt, code: "retries_exhausted" } as const;
     }
+    // This operator's suppression (0027): a complaint or hard bounce the
+    // provider reported for the address stops its later mail, with no call.
+    if (await isSuppressed(trx, ctx.tenantId, found.to_email)) {
+      await fail(trx, ctx, found.id, attempt, ADDRESS_SUPPRESSED);
+      return { kind: "failed", messageId: found.id, attempt, code: ADDRESS_SUPPRESSED } as const;
+    }
     // The stored sender is checked again against the tenant's current brand,
     // never trusted as written (W1-SENDER-GUARD, pull request review fix G1).
     const sender = deliverySender(
       { fromName: found.from_name, replyTo: found.reply_to },
       await loadEmailBrand(trx, ctx.tenantId),
     );
-    const row = {
+    const row: ClaimedRow = {
       ...found,
       attempts: attempt,
+      from_address: fromAddress,
       from_name: sender.fromName,
       reply_to: sender.replyTo,
     };
@@ -567,6 +639,7 @@ async function deliverWithOrigin(
     superseded: 0,
     items: [],
     stopped: null,
+    held: null,
   };
   const clock = options.clock ?? Date.now;
   const reserve = (options.provider.sendTimeoutMs ?? 0) + DEADLINE_MARGIN_MS;
@@ -577,6 +650,10 @@ async function deliverWithOrigin(
     }
     const claimed = await claimOne(db, ctx, options, origin);
     if (claimed.kind === "none") break;
+    if (claimed.kind === "held") {
+      report.held = claimed.reason;
+      break;
+    }
     report.claimed += 1;
     let item: DeliveryItem;
     if (claimed.kind === "failed" || claimed.kind === "canceled") {
@@ -598,6 +675,9 @@ async function deliverWithOrigin(
         | { kind: "retry"; code: string; giveBack?: boolean }
         | { kind: "failed"; code: string };
       let accountFault = false;
+      // An account-level fault met on the operator's own sender (0027):
+      // only this operator's run stops. A suspended account still stops all.
+      let senderFault: DeliveryHold | null = null;
       // Whether the provider was called at all: a throw before it is a known
       // "not sent" on every provider (review note F2).
       let attempted = false;
@@ -613,7 +693,7 @@ async function deliverWithOrigin(
           const email = {
             idempotencyKey: row.id,
             tenantId,
-            from: { email: options.fromAddress, name: row.from_name },
+            from: { email: row.from_address, name: row.from_name },
             replyTo: row.reply_to,
             to: { email: row.to_email, name: row.to_name },
             subject: row.subject,
@@ -628,7 +708,15 @@ async function deliverWithOrigin(
           if (error instanceof EmailProviderRejectedError) {
             result = { kind: "failed", code: error.code };
           } else if (error instanceof EmailProviderUnavailableError) {
-            accountFault = error.scope === "account";
+            if (
+              error.scope === "account" &&
+              row.from_address !== options.fromAddress &&
+              error.code !== ACCOUNT_SUSPENDED
+            ) {
+              senderFault =
+                error.code === SENDER_NOT_VERIFIED ? "sender_unverified" : "sender_fault";
+            }
+            accountFault = error.scope === "account" && senderFault === null;
             // Retried with the same key when the provider deduplicates, or when
             // it said the email was not sent; otherwise never repeated (D1 B).
             // An account-level fault the provider says took nothing gives its
@@ -653,6 +741,7 @@ async function deliverWithOrigin(
       }
       item = await record(db, ctx, row, result);
       if (accountFault) report.stopped = "account_fault";
+      if (senderFault) report.held = senderFault;
     }
     report.items.push(item);
     if (item.outcome === "sent") report.sent += 1;
@@ -662,7 +751,7 @@ async function deliverWithOrigin(
     else report.superseded += 1;
     // Every other email would meet the same account-level fault now (D2 B),
     // and a run out of time claims no more.
-    if (report.stopped !== null) break;
+    if (report.stopped !== null || report.held !== null) break;
   }
   return report;
 }
@@ -709,6 +798,11 @@ export interface EmailSweepReport {
   deferredTenants: number;
   /** Tenants whose stamp failed; each still took its turn. */
   stampFailures: number;
+  /**
+   * Tenants whose run was held (0027): no verified sending domain under
+   * `operator_only`, or an account-level refusal of the operator's own sender.
+   */
+  heldTenants: number;
 }
 
 export const DEFAULT_EMAIL_SWEEP_TURN_MESSAGES = 5;
@@ -786,7 +880,9 @@ export async function sweepEmail(
     passes: 0,
     deferredTenants: 0,
     stampFailures: 0,
+    heldTenants: 0,
   };
+  const held = new Set<string>();
   const claimedBy = new Map<string, number>();
   /** Each tenant's link origin, resolved at its first turn and reused for the run. */
   const origins = new Map<string, string | null>();
@@ -821,6 +917,11 @@ export async function sweepEmail(
       report.failed += done.failed;
       report.canceled += done.canceled;
       report.superseded += done.superseded;
+      // A held tenant gets no more turns this run: the same refusal would meet it.
+      if (done.held !== null) {
+        held.add(tenantId);
+        return { units: done.claimed, more: false };
+      }
       // An account-level fault meets every tenant alike (D2 B); a passed
       // deadline leaves the rest to the next run.
       if (done.stopped !== null) {
@@ -848,5 +949,6 @@ export async function sweepEmail(
   report.passes = fair.passes;
   report.deferredTenants = fair.deferredTenants;
   report.stampFailures = fair.stampFailures;
+  report.heldTenants = held.size;
   return report;
 }

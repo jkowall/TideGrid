@@ -245,6 +245,7 @@ export async function runScheduled(
           "tidegrid.email_sweep.pass_count": report.passes,
           "tidegrid.email_sweep.deferred_tenant_count": report.deferredTenants,
           "tidegrid.email_sweep.stamp_failure_count": report.stampFailures,
+          "tidegrid.email_sweep.held_tenant_count": report.heldTenants,
           // Always logged: the one stop cause the counts cannot show (D-E5 B).
           "tidegrid.email_sweep.account_fault": report.accountFault,
           "tidegrid.email_sweep.complete": report.complete,

@@ -705,6 +705,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // unmatched events are a platform table reached through a function.
         email_events: ["INSERT", "SELECT"],
         email_events_unmatched: [],
+        // Sender domains (0027): read only; the admin connection writes them.
+        tenant_sender_domains: ["SELECT"],
+        // Suppression (0027): added by the events consumer, lifted by the admin.
+        email_suppressions: ["INSERT", "SELECT"],
         // Delivery foundation (0023): outcomes are append-only; a dead letter
         // takes its replay reason once.
         outbox_deliveries: ["INSERT", "SELECT"],
