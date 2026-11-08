@@ -8,10 +8,12 @@ import {
   SessionResponse,
   type StaffRole,
 } from "@tidegrid/contracts";
+import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { sql } from "kysely";
 import { limitByIp } from "../auth/guards.ts";
 import { defaultLoginLinkSender } from "../auth/login-links.ts";
+import { emailLinkSignInEnabled } from "../auth/methods.ts";
 import { requirePrincipal, SESSION_COOKIE, SESSION_TTL_SECONDS } from "../auth/principal.ts";
 import { newOpaqueToken, sha256Hex } from "../auth/tokens.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
@@ -20,6 +22,17 @@ import { ApiError } from "../errors.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const LOGIN_TOKEN_TTL_SECONDS = 15 * 60;
+
+/** Deployed environments refuse the email link before any database work. */
+function requireEmailLinkSignIn(c: Context<AppEnv>): void {
+  if (!emailLinkSignInEnabled(c.env)) {
+    throw new ApiError(
+      403,
+      "sign_in_method_disabled",
+      "Sign in through Cloudflare Access with your Google or Microsoft account",
+    );
+  }
+}
 
 export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
   const requestLink = createRoute({
@@ -38,12 +51,13 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
         description: "Accepted",
       },
       400: errorBody("Invalid request"),
-      403: errorBody("Origin not allowed"),
+      403: errorBody("Origin not allowed, or the email link is off in this environment"),
       429: errorBody("Too many attempts"),
     },
   });
 
   app.openapi(requestLink, async (c) => {
+    requireEmailLinkSignIn(c);
     await limitByIp(c, "login-links");
     const { email } = c.req.valid("json");
     const normalized = email.trim().toLowerCase();
@@ -85,12 +99,13 @@ export function registerAuthRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
       },
       400: errorBody("Invalid request"),
       401: errorBody("Token invalid, used, or expired"),
-      403: errorBody("Origin not allowed"),
+      403: errorBody("Origin not allowed, or the email link is off in this environment"),
       429: errorBody("Too many attempts"),
     },
   });
 
   app.openapi(createSession, async (c) => {
+    requireEmailLinkSignIn(c);
     await limitByIp(c, "sessions");
     const { token } = c.req.valid("json");
     const sessionToken = newOpaqueToken();
