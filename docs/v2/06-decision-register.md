@@ -8,6 +8,24 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-INV-PRICING, inventory, pricing, and booking read review notes (owner go; D1 owner decision; D2 and D3 coordinator defaults pending owner confirmation)
+
+The G2.5, G2.6, and G2.7 reviews left five notes: the staff holds read and a trip's bookings read had no pagination, both trip listings called `app.trip_capacity_usage` once per trip, pricing names accepted Unicode format characters (category Cf), and the promotion window's reading waited on the owner. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits.
+
+- **D1, the promotion window (owner decision, 2026-11-08).** Asked "(o, W1-INV-PRICING) Promotion window: which instant decides whether a promotion code applies? Today it is the quote instant, so a code quoted a minute before its window ends still holds for the quote's 30 minutes (packages/domain-pricing/README.md).", the owner selected "Quote instant (Recommended)", whose text reads: "Keep today's behavior: the quote instant decides, and the code holds for the quote's 30 minutes." ([entry](#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions), question o). The code is unchanged; boundary tests at the marina's local midnights pin it.
+- **D2, expired quote cleanup stays out (coordinator default, the goal's recommended option).** The runtime never receives DELETE, so cleanup needs its own goal and an owner decision.
+- **D3, Cf refused in the service only (coordinator default, the goal's recommended option).** `isName` in `packages/domain-pricing/src/validate.ts` refuses any Cf character as `invalid_name`. The database's name constraints still refuse control characters only, so no migration touches them.
+
+Coordinator choices inside the goal, pending owner confirmation:
+
+- **Paging shape.** Both reads take `limit` (1 to 200, default 100) and `after` (the last id of the previous page), and answer `nextAfter`, as the console's day list does. Holds order by creation time, then id; bookings by confirmation time, then id, canceled ones included. A cursor that names nothing on this trip of this operator answers 400 `cursor_invalid`. The fields are additive, but the default page of 100 means a client that read every row from one answer now reads the first 100. No client in this repository calls either route.
+- **One migration.** `0016_grouped_trip_usage.sql`, a provisional number claimed at merge, adds `app.trip_capacity_usage_grouped` and replaces `app.trip_capacity_usage` in place as a one-trip call of it, so the capacity rule for reads lives in one function. No table, column, index, or row changes; no index on a pilot-volume table (rule R4 holds: `migrate.ts` has no concurrent index support on `main` yet).
+- **The catalog's listing statement.** The listings live in `packages/domain-catalog/src/catalog.ts`. The coordinator read "its usage reads" in the goal's owned paths as covering that statement, since the goal's acceptance names the listings. Only the usage part of the statement changed: the trips are selected into a materialized CTE and their ids passed to one grouped call.
+- **The unbounded reads stay.** `listTripHolds` and `listTripBookings` remain for tests; the routes call the paged reads.
+- **No HTTP 422 yet for names.** There is no staff endpoint for pricing terms. The refusal is the service's `invalid_name`; the endpoint, when built, maps it (proposed).
+
+Not done, and needing the owner: confirming D2, D3, and the choices above; any release of the API or migration `0016`, which must be applied first. The canonical text is in the [inventory](../../packages/domain-inventory/README.md#paged-holds-and-grouped-usage-w1-inv-pricing), [pricing](../../packages/domain-pricing/README.md#names-and-the-promotion-window-w1-inv-pricing), [booking](../../packages/domain-booking/README.md#a-trips-bookings-a-page-at-a-time-w1-inv-pricing), and [database](../../packages/database/README.md#grouped-trip-usage-0016) READMEs.
+
 ### 2026-11-08: W1-SENDER-GUARD, a guard on tenant-controlled email sender identity (owner go; coordinator defaults pending owner confirmation)
 
 The [messaging README](../../packages/domain-messaging/README.md#known-gaps) recorded that every tenant sends from one TideGrid address under its brand's name, and that a guard on tenant-controlled sender identity was needed before any production email configuration. It proposed three guards: a "via TideGrid" suffix, a reserved-name refusal, or verified reply-to ownership.
