@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Standard CSV import draft (W1-CSV-DEF), written November 8, 2026
+
+A proposed, non-authoritative Stage 0 draft of the standard CSV import is at [docs/v2/drafts/standard-csv-import.md](v2/drafts/standard-csv-import.md) ([decision register](v2/06-decision-register.md#2026-11-08-w1-csv-def-standard-csv-import-draft-proposed-pending-owner-approval)). It is pending the owner's approval of the columns, required fields, dedup keys, control totals, and custom-work boundaries. It becomes the G2.13 input contract only after a dated owner approval and a later promotion goal. All examples are synthetic. No code or schema changed. The reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed, including the doc link check.
+- **Independent review.** Accept with listed fixes, six findings, all fixed. Among them: the commit re-checks every row at commit time, not only at the dry run; the errors file escapes untrusted input; trip card expiry follows the product scope; and the sample's sums and dates are consistent.
+- **Two rechecks.** The first found that the draft's capacity path contradicted the schema: checkout's capacity trigger refuses holds on draft trips and holds past one hour. The draft now proposes an import-only branch of `app.check_capacity_hold`, labeled as a change to the shared capacity invariant that needs a migration and the owner's approval (open question 12). It also refuses a trip that departs before the commit (`trip_departed`). The second recheck: accept.
+- **Telemetry.** About one and a half hours of agent time across draft, review, and three fix rounds. Token use and cost per checkpoint: missing.
+
 ### Guards that refuse Neon main in test setup and app-role (W1-TEST-GUARDS), built November 8, 2026
 
 Integration setup and `app-role:password` now refuse the Neon main host recorded as `NEON_MAIN_HOST` ([decision register](v2/06-decision-register.md#2026-11-08-w1-test-guards-guards-that-refuse-neon-main-in-test-setup-and-app-role-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). With no main host recorded, they refuse any Neon host unless `TIDEGRID_NEON_BRANCH=1` marks a throwaway branch, and `app-role` on main needs `--neon-main`. No host, connection string, or credential is committed or printed. Nothing ran against Neon. The local runs and the reviews below are coordinator-reported.
