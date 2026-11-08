@@ -14,7 +14,7 @@ import {
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
-import { sql } from "kysely";
+import { type RawBuilder, sql } from "kysely";
 import { expandSchedule } from "./recurrence.ts";
 import type { BlackoutInterval, Occurrence, ScheduleRule, SkipReason } from "./schedule-types.ts";
 import {
@@ -94,8 +94,8 @@ type CapacityRow = Pick<
 /**
  * Capacity left now. Seats held by holds within their time and confirmed
  * seats are taken; a whole-boat hold takes every seat, so a held charter has
- * nothing left. The numbers come from app.trip_capacity_usage, which the
- * inventory service reads too, and are advisory: only acquisition decides.
+ * nothing left. The numbers come from app.trip_capacity_usage_grouped, which
+ * the inventory service reads too, and are advisory: only acquisition decides.
  */
 function capacityOf(row: CapacityRow): TripCapacity {
   const remaining = Math.max(0, row.seat_capacity - row.seats_held - row.seats_confirmed);
@@ -180,9 +180,9 @@ function toAvailableTrip(row: TripRow): AvailableTrip {
 /**
  * The trip columns every view needs. A blackout applies when it overlaps the
  * trip and is tenant-wide or names the trip's location, product, or boat.
- * Seats taken (u) come from app.trip_capacity_usage, by the database clock.
+ * Seats taken come from tripsWithUsage, below.
  */
-const tripSelect = sql`
+const tripColumns = sql`
   select t.id as trip_id, t.product_id, p.name as product_name, p.kind as product_kind,
          p.summary as product_summary, p.min_party_size, p.max_party_size,
          p.booking_cutoff_minutes, t.boat_id, b.name as boat_name,
@@ -198,13 +198,29 @@ const tripSelect = sql`
                    or x.location_id = p.location_id
                    or x.product_id = t.product_id
                    or x.boat_id = t.boat_id)
-         ) as blacked_out,
-         u.held as seats_held, u.confirmed as seats_confirmed
+         ) as blacked_out
     from scheduled_trips t
     join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
     join locations l on l.tenant_id = p.tenant_id and l.id = p.location_id
-    join boats b on b.tenant_id = t.tenant_id and b.id = t.boat_id
-    cross join lateral app.trip_capacity_usage(t.tenant_id, t.id) u`;
+    join boats b on b.tenant_id = t.tenant_id and b.id = t.boat_id`;
+
+/**
+ * The trips `filter` selects, each with the seats taken on it, as rows of a
+ * subquery named `trips`. Seats taken come from one grouped call of
+ * app.trip_capacity_usage_grouped (migration 0016) over every selected trip,
+ * by the database clock, never one call per trip: a staff listing can span 92
+ * days. The filter names columns of t, p, l, and b, starting with `where`.
+ */
+function tripsWithUsage(tenantId: string, filter: RawBuilder<unknown>): RawBuilder<unknown> {
+  return sql`(
+    with listed as materialized (${tripColumns} ${filter})
+    select listed.*, u.held as seats_held, u.confirmed as seats_confirmed
+      from listed
+      join app.trip_capacity_usage_grouped(
+             ${tenantId}::uuid, array(select listed.trip_id from listed)) u
+        on u.trip_id = listed.trip_id
+  ) trips`;
+}
 
 // Reads ---------------------------------------------------------------------------
 
@@ -228,8 +244,9 @@ export async function findAvailableTrips(
   query: AvailabilityQuery,
 ): Promise<AvailableTrip[]> {
   const { rows } = await sql<TripRow>`
-    select * from (${tripSelect}
-     where t.tenant_id = ${tenantId}
+    select * from ${tripsWithUsage(
+      tenantId,
+      sql`where t.tenant_id = ${tenantId}
        and t.local_date between ${query.from}::date and ${query.to}::date
        and t.sales_state = 'published'
        and p.sales_status = 'published'
@@ -237,10 +254,10 @@ export async function findAvailableTrips(
        and b.status = 'active'
        and t.starts_at - make_interval(mins => p.booking_cutoff_minutes) > ${query.now}
        and ${query.party}::int between p.min_party_size and p.max_party_size
-       and t.seat_capacity - u.held - u.confirmed >= ${query.party}::int
-       ${query.productId ? sql`and t.product_id = ${query.productId}` : sql``}
-    ) trips
+       ${query.productId ? sql`and t.product_id = ${query.productId}` : sql``}`,
+    )}
     where not blacked_out
+      and seat_capacity - seats_held - seats_confirmed >= ${query.party}::int
     order by starts_at, trip_id`.execute(trx);
   return rows.map(toAvailableTrip);
 }
@@ -252,10 +269,12 @@ export async function listTrips(
   range: { from: string; to: string },
 ): Promise<StaffTrip[]> {
   const { rows } = await sql<TripRow>`
-    ${tripSelect}
-     where t.tenant_id = ${tenantId}
-       and t.local_date between ${range.from}::date and ${range.to}::date
-     order by t.starts_at, t.id`.execute(trx);
+    select * from ${tripsWithUsage(
+      tenantId,
+      sql`where t.tenant_id = ${tenantId}
+       and t.local_date between ${range.from}::date and ${range.to}::date`,
+    )}
+    order by starts_at, trip_id`.execute(trx);
   return rows.map(toStaffTrip);
 }
 
@@ -265,7 +284,10 @@ async function loadTrip(
   tripId: string,
 ): Promise<TripRow | undefined> {
   const { rows } = await sql<TripRow>`
-    ${tripSelect} where t.tenant_id = ${tenantId} and t.id = ${tripId}`.execute(trx);
+    select * from ${tripsWithUsage(
+      tenantId,
+      sql`where t.tenant_id = ${tenantId} and t.id = ${tripId}`,
+    )}`.execute(trx);
   return rows[0];
 }
 
@@ -857,9 +879,11 @@ export async function generateTrips(
       ? []
       : (
           await sql<TripRow>`
-            ${tripSelect}
-             where t.tenant_id = ${ctx.tenantId} and t.id = any(${createdIds}::uuid[])
-             order by t.starts_at, t.id`.execute(trx)
+            select * from ${tripsWithUsage(
+              ctx.tenantId,
+              sql`where t.tenant_id = ${ctx.tenantId} and t.id = any(${createdIds}::uuid[])`,
+            )}
+            order by starts_at, trip_id`.execute(trx)
         ).rows.map(toStaffTrip);
   return { kind: "generated", created, alreadyScheduled, skipped };
 }

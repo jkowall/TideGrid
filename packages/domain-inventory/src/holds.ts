@@ -733,7 +733,9 @@ export interface TripCapacityView {
 
 /**
  * Seats remaining on one trip now: capacity minus holds within their time and
- * confirmed holds. Advisory, like availability; only acquisition decides.
+ * confirmed holds. Advisory, like availability; only acquisition decides. The
+ * seats taken come from app.trip_capacity_usage_grouped (0016), as the
+ * catalog's listings read them.
  */
 export async function getTripCapacity(
   trx: TenantTransaction,
@@ -751,7 +753,8 @@ export async function getTripCapacity(
     select t.id as trip_id, p.kind as product_kind, t.seat_capacity, u.held, u.confirmed
       from scheduled_trips t
       join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
-      cross join lateral app.trip_capacity_usage(t.tenant_id, t.id) u
+      join app.trip_capacity_usage_grouped(${tenantId}::uuid, array[${tripId}::uuid]) u
+        on u.trip_id = t.id
      where t.tenant_id = ${tenantId} and t.id = ${tripId}`.execute(trx);
   const row = rows[0];
   if (!row) return null;
@@ -845,7 +848,11 @@ export interface TripHold extends Hold {
   takesCapacity: boolean;
 }
 
-/** Every hold on one trip in any state, oldest first, for staff. */
+/**
+ * Every hold on one trip in any state, oldest first, in one read with no
+ * bound. Holds are never deleted, so this only grows: the staff route reads
+ * `listTripHoldsPage` instead.
+ */
 export async function listTripHolds(
   trx: TenantTransaction,
   tenantId: string,
@@ -859,4 +866,74 @@ export async function listTripHolds(
      where tenant_id = ${tenantId} and trip_id = ${tripId}
      order by created_at, id`.execute(trx);
   return rows.map((row) => ({ ...toHold(row), takesCapacity: row.takes_capacity }));
+}
+
+/** Largest page of holds a caller may ask for. */
+export const MAX_TRIP_HOLDS_PAGE = 200;
+
+export type TripHoldsPage =
+  | {
+      kind: "ok";
+      holds: TripHold[];
+      /** The last hold's id when more follow; pass it back as `after`. Null on the last page. */
+      nextAfter: string | null;
+    }
+  /** The cursor names no hold on this trip of this tenant. */
+  | { kind: "cursor_invalid" };
+
+/**
+ * One page of a trip's holds in any state, oldest first: by creation time,
+ * then id. The cursor is the last hold id of the previous page and must name
+ * a hold on this trip; its position is read in SQL, so the database's own
+ * precision orders the page. A hold's creation time never changes and holds
+ * are never deleted, so a cursor stays valid and pages never repeat a hold.
+ * The creation time is now(), the start of the hold's transaction, so a hold
+ * whose transaction began before a page was read and committed after it can
+ * land before that page's cursor. Read again from the first page to see
+ * every hold.
+ */
+export async function listTripHoldsPage(
+  trx: TenantTransaction,
+  tenantId: string,
+  tripId: string,
+  page: { limit: number; after?: string | undefined },
+): Promise<TripHoldsPage> {
+  if (!Number.isInteger(page.limit) || page.limit < 1 || page.limit > MAX_TRIP_HOLDS_PAGE) {
+    throw new RangeError(`limit must be a whole number from 1 to ${MAX_TRIP_HOLDS_PAGE}`);
+  }
+  if (page.after !== undefined && (!isUuid(page.after) || !isUuid(tripId))) {
+    return { kind: "cursor_invalid" };
+  }
+  if (!isUuid(tripId)) return { kind: "ok", holds: [], nextAfter: null };
+  if (page.after !== undefined) {
+    const { rows: found } = await sql<{ id: string }>`
+      select id from capacity_holds
+       where tenant_id = ${tenantId} and trip_id = ${tripId} and id = ${page.after}::uuid`.execute(
+      trx,
+    );
+    if (!found[0]) return { kind: "cursor_invalid" };
+  }
+  const cursor =
+    page.after === undefined
+      ? sql``
+      : sql`and (created_at, id) > (
+              select c.created_at, c.id from capacity_holds c
+               where c.tenant_id = ${tenantId} and c.trip_id = ${tripId}
+                 and c.id = ${page.after}::uuid)`;
+  const { rows } = await sql<HoldRow & { takes_capacity: boolean }>`
+    select ${holdColumns},
+           (state = 'confirmed' or (state = 'active' and expires_at > now())) as takes_capacity
+      from capacity_holds
+     where tenant_id = ${tenantId} and trip_id = ${tripId}
+       ${cursor}
+     order by created_at, id
+     limit ${page.limit + 1}`.execute(trx);
+  const holds = rows
+    .slice(0, page.limit)
+    .map((row) => ({ ...toHold(row), takesCapacity: row.takes_capacity }));
+  return {
+    kind: "ok",
+    holds,
+    nextAfter: rows.length > page.limit ? (holds.at(-1)?.id ?? null) : null,
+  };
 }

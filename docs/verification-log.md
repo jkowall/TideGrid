@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Inventory, pricing, and booking read review notes (W1-INV-PRICING), built November 8, 2026
+
+Five notes from the G2.5 to G2.7 reviews are closed or recorded ([decision register](v2/06-decision-register.md#2026-11-08-w1-inv-pricing-inventory-pricing-and-booking-read-review-notes-owner-go-d1-owner-decision-d2-and-d3-coordinator-defaults-pending-owner-confirmation)). The promotion window stays at the quote instant, an owner decision of November 8. The staff reads of a trip's holds and bookings are now paged. Both trip listings read capacity usage in one grouped call through migration `0016_grouped_trip_usage.sql`, which adds a function and changes no table, column, index, or row. Pricing names refuse Unicode format characters in the service. D2 and D3 are coordinator defaults pending owner confirmation. Nothing was released, and `0016` is not applied to Neon. The local runs and the reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed. Every integration suite passed on a throwaway local PostgreSQL 17: 899 tests passed and 2 skipped.
+- **Independent review**, under the holds reviewer override. Accept with listed fixes. The paging contract no longer says a cursor never skips a row: a row whose transaction began before the page was read can be missed, with a test that shows it. The names item is met in the service only. No route carries a pricing name yet, so the 422 waits for the staff terms endpoint.
+- **Security review.** Accept, no findings. It checked tenant isolation of the grouped read and the migration, the cursor across tenants and trips, and the read limits.
+- **Recheck.** Accept, with this entry.
+- **Telemetry.** About two hours of agent time across build, two reviews, and one fix round. Token use and cost per checkpoint: missing.
+
 ### A guard on tenant-controlled email sender identity (W1-SENDER-GUARD), built November 8, 2026
 
 Guest email now shows "Brand Name via TideGrid" from the fixed TideGrid address, and one sender name rule applies in brand validation and in rendering ([decision register](v2/06-decision-register.md#2026-11-08-w1-sender-guard-a-guard-on-tenant-controlled-email-sender-identity-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). The rule refuses names that read as TideGrid after lookalike folding, names made only of staff or mailbox words, a second relay, and characters outside a small Latin set. Email uses a brand's name only when it reads as the tenant's provisioned name. For both synthetic brands, the rendered subject and bodies match the old renderer byte for byte. No migration. Nothing was released. The local runs and the reviews below are coordinator-reported.

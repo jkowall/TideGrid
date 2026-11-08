@@ -33,6 +33,12 @@ const LOCAL_DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 // C0, DEL, and C1: what PostgreSQL's [[:cntrl:]] refuses in names.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+// Unicode format characters (category Cf): bidirectional overrides and
+// isolates, zero-width spaces and joiners, the soft hyphen, the byte order
+// mark, and tag characters. They render as nothing, or reorder what follows,
+// so a name could read differently from what it holds (W1-INV-PRICING; the
+// database constraint still refuses control characters only, D3).
+const FORMAT = /\p{Cf}/u;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: newlines are allowed in policy text.
 const CONTROL_EXCEPT_NEWLINE = /[\u0000-\u0009\u000b-\u001f\u007f]/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -50,8 +56,9 @@ export const MAX_TAX_RATE_PPM = 500_000;
 export const isItemCode = (code: string): boolean => ITEM_CODE.test(code);
 export const isPromotionCode = (code: string): boolean => PROMOTION_CODE.test(code);
 
+/** 1 to 80 characters with a visible one, and no control or format character. */
 export function isName(name: string): boolean {
-  return name.trim().length > 0 && name.length <= 80 && !CONTROL.test(name);
+  return name.trim().length > 0 && name.length <= 80 && !CONTROL.test(name) && !FORMAT.test(name);
 }
 
 export function isReason(reason: string): boolean {

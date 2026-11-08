@@ -152,6 +152,65 @@ describe("policy validation", () => {
 });
 
 describe("tax rate and promotion validation", () => {
+  it("refuses Unicode format characters (Cf) in every name, and keeps visible text (W1-INV-PRICING)", () => {
+    // Each renders as nothing or reorders what follows: the soft hyphen, the
+    // zero-width space, non-joiner, and joiner, the left-to-right and
+    // right-to-left marks, a right-to-left override, a first-strong isolate,
+    // the word joiner, the byte order mark inside a name, an interlinear
+    // annotation anchor, and a tag character from the supplementary planes.
+    const format = [
+      "\u00ad",
+      "\u200b",
+      "\u200c",
+      "\u200d",
+      "\u200e",
+      "\u200f",
+      "\u202e",
+      "\u2068",
+      "\u2060",
+      "\ufeff",
+      "\ufff9",
+      "\u{e0041}",
+    ];
+    for (const ch of format) {
+      const name = `Adu${ch}lt`;
+      expect(validatePriceList("shared_seat", { tickets: [{ ...ticket, name }] }), name).toEqual([
+        "invalid_name",
+      ]);
+      expect(
+        validatePriceList("shared_seat", { tickets: [ticket], fees: [{ ...fee, name }] }),
+      ).toEqual(["invalid_name"]);
+      expect(
+        validatePriceList("shared_seat", { tickets: [ticket], addOns: [{ ...addOn, name }] }),
+      ).toEqual(["invalid_name"]);
+      expect(
+        validatePriceList("private_charter", { charter: { name, amount: 1000, taxable: true } }),
+      ).toEqual(["invalid_name"]);
+      expect(validateTaxRate({ name, ratePpm: 70_000, inclusive: false })).toEqual([
+        "invalid_name",
+      ]);
+    }
+    // A format character alone, or at either end, is refused too.
+    expect(validateTaxRate({ name: "\u202eSales tax", ratePpm: 1, inclusive: true })).toEqual([
+      "invalid_name",
+    ]);
+    expect(validateTaxRate({ name: "Sales tax\u200b", ratePpm: 1, inclusive: true })).toEqual([
+      "invalid_name",
+    ]);
+    // Accents, other scripts, symbols, and a plain emoji are not format characters.
+    for (const name of [
+      "Caf\u00e9 ticket",
+      "\u0410\u0434\u0443\u043b\u044c\u0442",
+      "Kei\u2019iki",
+      "Snorkel \u{1f420}",
+    ]) {
+      expect(validatePriceList("shared_seat", { tickets: [{ ...ticket, name }] }), name).toEqual(
+        [],
+      );
+      expect(validateTaxRate({ name, ratePpm: 1, inclusive: true }), name).toEqual([]);
+    }
+  });
+
   it("bounds a tax rate to between one millionth and 50%", () => {
     expect(validateTaxRate({ name: "Sales tax", ratePpm: 70_000, inclusive: false })).toEqual([]);
     expect(validateTaxRate({ name: "Zero", ratePpm: 0, inclusive: false })).toEqual([

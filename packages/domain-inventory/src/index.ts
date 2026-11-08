@@ -17,14 +17,17 @@ export {
   IsolationLevelError,
   isOwnerRef,
   listTripHolds,
+  listTripHoldsPage,
   MAX_EXPIRY_BATCH,
   MAX_HOLD_TTL_SECONDS,
+  MAX_TRIP_HOLDS_PAGE,
   MIN_HOLD_TTL_SECONDS,
   type NotBookableReason,
   type ReleaseHoldResult,
   releaseHold,
   type TripCapacityView,
   type TripHold,
+  type TripHoldsPage,
   type TripSaleView,
 } from "./holds.ts";
 export {

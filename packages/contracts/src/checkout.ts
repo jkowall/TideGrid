@@ -267,9 +267,30 @@ export const StaffBooking = z.object({
 });
 export type StaffBooking = z.infer<typeof StaffBooking>;
 
+export const TripBookingsQuery = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .default(100)
+    .describe("Bookings on this page; 1 to 200, 100 when absent (W1-INV-PRICING)"),
+  after: Uuid.optional().describe(
+    "Cursor: the last booking id of the previous page (nextAfter). One that names no booking on this trip of this operator answers 400 cursor_invalid",
+  ),
+});
+export type TripBookingsQuery = z.infer<typeof TripBookingsQuery>;
+
 export const TripBookingsResponse = z
-  .object({ bookings: z.array(StaffBooking) })
-  .describe("Every booking on the trip, oldest first");
+  .object({
+    bookings: z
+      .array(StaffBooking)
+      .describe("This page, oldest first: by confirmation, then by id; canceled ones included"),
+    nextAfter: Uuid.nullable().describe(
+      "Pass as after for the next page; null on the last page. A booking's confirmation time never changes and bookings are never deleted, so a cursor stays valid and a page never repeats a booking. A booking's confirmation time is the start of the transaction that confirmed it, so a booking whose transaction began before a page was read and committed after it can land before that page's cursor. Read again from the first page to see every booking",
+    ),
+  })
+  .describe("The trip's bookings, a page at a time, oldest first");
 export type TripBookingsResponse = z.infer<typeof TripBookingsResponse>;
 
 export const FinalizationReason = z

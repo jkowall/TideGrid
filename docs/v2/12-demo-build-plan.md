@@ -245,7 +245,7 @@ The adapter, the shim, and the delivery job are in [packages/domain-messaging](.
 **Owner confirmations, 2026-10-19.** The owner kept the current behavior on each of these:
 
 - A late payment that arrives after the seats are gone is refunded in full and raises an exception for the operator. There is no grace period.
-- A promotion's window is checked at quote time ("book by"): a quote made inside the window keeps its discount through checkout.
+- A promotion's window is checked at quote time ("book by"): a quote made inside the window keeps its discount through checkout. Update, 2026-11-08: the owner confirmed it again as D1 of W1-INV-PRICING, and boundary tests at the marina's local midnights now pin it ([decision register](06-decision-register.md#2026-11-08-w1-inv-pricing-inventory-pricing-and-booking-read-review-notes-owner-go-d1-owner-decision-d2-and-d3-coordinator-defaults-pending-owner-confirmation)); built on `goal/inv-pricing`, not released.
 - Closing sales stops new checkouts. A guest already holding seats can still pay within the hold.
 
 Also kept by default: after a trip's booking cutoff the console offers only Cancel until the trip departs, and the cron sweep runs every 15 minutes.

@@ -6411,8 +6411,8 @@
           "staff",
           "inventory"
         ],
-        "summary": "A trip's capacity and every hold on it",
-        "description": "Every role. Holds in any state, oldest first, each marked with whether it takes capacity now. Capacity is computed by the database clock and is advisory; only acquiring a hold decides.",
+        "summary": "A trip's capacity and its holds, a page at a time",
+        "description": "Every role. Holds in any state, a page at a time, oldest first, each marked with whether it takes capacity now (W1-INV-PRICING: limit and after). Capacity is computed by the database clock and is advisory; only acquiring a hold decides.",
         "security": [
           {
             "accessJwt": []
@@ -6437,6 +6437,30 @@
             "required": true,
             "name": "tripId",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100,
+              "description": "Holds on this page; 1 to 200, 100 when absent (W1-INV-PRICING)"
+            },
+            "required": false,
+            "description": "Holds on this page; 1 to 200, 100 when absent (W1-INV-PRICING)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Cursor: the last hold id of the previous page (nextAfter). One that names no hold on this trip of this operator answers 400 cursor_invalid"
+            },
+            "required": false,
+            "description": "Cursor: the last hold id of the previous page (nextAfter). One that names no hold on this trip of this operator answers 400 cursor_invalid",
+            "name": "after",
+            "in": "query"
           }
         ],
         "responses": {
@@ -6588,14 +6612,58 @@
                           "releasedAt",
                           "expiredAt"
                         ]
-                      }
+                      },
+                      "description": "This page, oldest first: by creation, then by id"
+                    },
+                    "nextAfter": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid",
+                      "description": "Pass as after for the next page; null on the last page. Holds are never deleted and a hold's creation time never changes, so a cursor stays valid and a page never repeats a hold. A hold's creation time is the start of the transaction that made it, so a hold whose transaction began before a page was read and committed after it can land before that page's cursor. Read again from the first page to see every hold"
                     }
                   },
                   "required": [
                     "capacity",
-                    "holds"
+                    "holds",
+                    "nextAfter"
                   ],
-                  "description": "Every hold on the trip, in any state, oldest first, with the capacity left now"
+                  "description": "The trip's holds, in any state, a page at a time, oldest first, with the capacity left now"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed limit or cursor (validation_failed), or a cursor that names no hold on this trip (cursor_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -9619,7 +9687,7 @@
           "bookings"
         ],
         "summary": "A trip's bookings",
-        "description": "Owners and booking staff. Every booking on the trip, oldest first, with the booker's name and email, the order, and the payment.",
+        "description": "Owners and booking staff. The trip's bookings, canceled ones included, a page at a time, oldest first, with the booker's name and email, the order, and the payment (W1-INV-PRICING: limit and after).",
         "security": [
           {
             "accessJwt": []
@@ -9644,6 +9712,30 @@
             "required": true,
             "name": "tripId",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100,
+              "description": "Bookings on this page; 1 to 200, 100 when absent (W1-INV-PRICING)"
+            },
+            "required": false,
+            "description": "Bookings on this page; 1 to 200, 100 when absent (W1-INV-PRICING)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking on this trip of this operator answers 400 cursor_invalid"
+            },
+            "required": false,
+            "description": "Cursor: the last booking id of the previous page (nextAfter). One that names no booking on this trip of this operator answers 400 cursor_invalid",
+            "name": "after",
+            "in": "query"
           }
         ],
         "responses": {
@@ -9795,13 +9887,57 @@
                           "order",
                           "payment"
                         ]
-                      }
+                      },
+                      "description": "This page, oldest first: by confirmation, then by id; canceled ones included"
+                    },
+                    "nextAfter": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid",
+                      "description": "Pass as after for the next page; null on the last page. A booking's confirmation time never changes and bookings are never deleted, so a cursor stays valid and a page never repeats a booking. A booking's confirmation time is the start of the transaction that confirmed it, so a booking whose transaction began before a page was read and committed after it can land before that page's cursor. Read again from the first page to see every booking"
                     }
                   },
                   "required": [
-                    "bookings"
+                    "bookings",
+                    "nextAfter"
                   ],
-                  "description": "Every booking on the trip, oldest first"
+                  "description": "The trip's bookings, a page at a time, oldest first"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed limit or cursor (validation_failed), or a cursor that names no booking on this trip (cursor_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
