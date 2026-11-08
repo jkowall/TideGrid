@@ -22,6 +22,7 @@
  * https://developers.cloudflare.com/email-service/api/send-emails/workers-api/
  * https://developers.cloudflare.com/email-service/reference/headers/
  */
+import { senderDisplayName } from "@tidegrid/contracts";
 import {
   type EmailProvider,
   EmailProviderRejectedError,
@@ -190,8 +191,13 @@ export class CloudflareEmailProvider implements EmailProvider {
     // No control character in a name or the subject, and one address in
     // each address field, checked here rather than left to the message
     // table's CHECKs or the provider's encoding (review notes F8, S3).
+    // The display name is the operator's name and " via TideGrid", and only
+    // a name that passes the sender name rule (`senderDisplayName`): never
+    // TideGrid itself, a lookalike, a staff mailbox, or a control or format
+    // character (W1-SENDER-GUARD).
+    const fromName = senderDisplayName(email.from.name);
     if (
-      hasControl(email.from.name) ||
+      fromName === null ||
       (email.to.name !== null && hasControl(email.to.name)) ||
       hasControl(email.subject) ||
       !isAddress(email.from.email) ||
@@ -206,7 +212,7 @@ export class CloudflareEmailProvider implements EmailProvider {
       throw new EmailProviderRejectedError("recipient_not_allowed");
     }
     const builder: CloudflareEmailBuilder = {
-      from: { email: email.from.email, name: email.from.name },
+      from: { email: email.from.email, name: fromName },
       to: email.to.name ? { email: to, name: email.to.name } : to,
       subject: email.subject,
       html: email.html,

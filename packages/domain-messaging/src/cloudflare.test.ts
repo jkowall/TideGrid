@@ -158,7 +158,7 @@ describe("the Cloudflare email adapter: mapping", () => {
     expect(sent.providerMessageId).toMatch(providerMessageIdPattern);
     expect(fixture.sends).toHaveLength(1);
     const expected: CloudflareEmailBuilder = {
-      from: { email: FROM, name: "Harbor Synthetic" },
+      from: { email: FROM, name: "Harbor Synthetic via TideGrid" },
       to: { email: "reef.guest@example.test", name: GUEST_NAME },
       subject: SUBJECT,
       html: "<p>Hello</p>",
@@ -644,5 +644,39 @@ describe("the recorded fixture", () => {
       code: "E_RATE_LIMIT_EXCEEDED",
     });
     expect((await fixture.binding.send(flaky)).messageId).toMatch(/-msg-/);
+  });
+});
+
+describe("the Cloudflare email adapter: sender identity (W1-SENDER-GUARD)", () => {
+  it("sends as the operator's name via TideGrid, and never doubles the suffix", async () => {
+    for (const name of ["Harbor Synthetic", "Harbor Synthetic via TideGrid"]) {
+      const h = harness();
+      await h.provider.send(outgoing({ from: { email: FROM, name } }));
+      expect(h.fixture.sends[0]?.builder.from).toEqual({
+        email: FROM,
+        name: "Harbor Synthetic via TideGrid",
+      });
+    }
+  });
+
+  it.each([
+    ["TideGrid itself", "TideGrid"],
+    ["TideGrid staff", "TideGrid Billing"],
+    ["a lookalike", "Tide Gr1d"],
+    ["a Unicode confusable", "\u0422ideGrid"],
+    ["a Cf format character", "Harbor\u200dSynthetic"],
+    ["a bidi override", "Harbor\u202eSynthetic"],
+    ["a reserved name", "Security Team"],
+    ["a second relay", "Harbor via PayPal"],
+    ["an address", "ops@example.test"],
+    ["a quote", 'Harbor" <ops@example.test>'],
+    ["CR and LF", "Harbor\r\nBcc: x@example.test"],
+    ["an empty name", ""],
+  ])("refuses %s as the sender name, with no provider call", async (_label, name) => {
+    const h = harness();
+    const error = await caught(h.provider.send(outgoing({ from: { email: FROM, name } })));
+    expect(error).toBeInstanceOf(EmailProviderRejectedError);
+    expect((error as EmailProviderRejectedError).code).toBe("invalid_message");
+    expect(h.calls()).toBe(0);
   });
 });

@@ -1,9 +1,12 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
   checkContent,
   displayPhone,
   type EmailBrand,
   type EmailContent,
+  emailOperatorName,
+  emailSenderName,
   escapeHtml,
   fillLinkSlot,
   linkMarker,
@@ -11,7 +14,7 @@ import {
 } from "./render.ts";
 
 const brand: EmailBrand = {
-  name: "Demo Harbor <Charters> & Co",
+  name: "Demo Harbor's Charters & Co",
   primary: "#0b3c5d",
   accent: "#e0a526",
   contactEmail: "hello@demo-harbor.test",
@@ -45,7 +48,7 @@ describe("email rendering", () => {
     const out = renderEmail(brand, content, { slot });
     expect(out.html).not.toContain("<script>");
     expect(out.html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
-    expect(out.html).toContain("Demo Harbor &lt;Charters&gt; &amp; Co");
+    expect(out.html).toContain("Demo Harbor&#39;s Charters &amp; Co");
     expect(out.html).toContain("Booker &quot;Ann&quot; &amp; friends");
     expect(out.html).toContain("Sunset &lt;sail&gt;");
     expect(escapeHtml(`<a href="x">'&'</a>`)).toBe(
@@ -105,7 +108,7 @@ describe("email rendering", () => {
 
   it("writes a plain-text twin with the footer and the demo notice", () => {
     const out = renderEmail(brand, content, { slot });
-    expect(out.text.startsWith("Demo Harbor <Charters> & Co\n")).toBe(true);
+    expect(out.text.startsWith("Demo Harbor's Charters & Co\n")).toBe(true);
     expect(out.text).toContain("Trip: Sunset <sail>");
     expect(out.text).toContain("Total: $96.30");
     expect(out.text).toContain("no real booking or payment is made");
@@ -126,5 +129,104 @@ describe("email rendering", () => {
     expect(light.html).toContain('color:#0e2b1f;">Demo Harbor');
     const dark = renderEmail(brand, content, { slot });
     expect(dark.html).toContain('color:#ffffff;">Demo Harbor');
+  });
+});
+
+describe("sender identity (W1-SENDER-GUARD)", () => {
+  const harbor: EmailBrand = {
+    name: "Demo Harbor Charters",
+    primary: "#0b3c5d",
+    accent: "#e0a526",
+    contactEmail: "hello@demo-harbor.test",
+    contactPhone: "+13055550142",
+  };
+  const reef: EmailBrand = {
+    name: "Demo Reef Divers",
+    primary: "#006d77",
+    accent: "#ffd166",
+    contactEmail: "dive@demo-reef.test",
+    contactPhone: "+13055550187",
+  };
+  // Every block kind, as the templates use them.
+  const golden: EmailContent = {
+    subject: "Booking 7KQ2M9XA is confirmed",
+    preview: "See you on the water",
+    blocks: [
+      { kind: "heading", text: "You're booked" },
+      { kind: "paragraph", text: 'Booker "Ann" & friends' },
+      {
+        kind: "details",
+        rows: [
+          { label: "Trip", value: "Sunset sail" },
+          { label: "Meet", value: "Dock C" },
+        ],
+      },
+      {
+        kind: "lines",
+        rows: [
+          { label: "Adult x 2", amount: "$90.00" },
+          { label: "Total", amount: "$96.30", strong: true },
+        ],
+      },
+      { kind: "action", label: "Manage your booking", href: "access_link" },
+      { kind: "note", text: "This link works once." },
+    ],
+  };
+  const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+
+  it("renders the two synthetic brands exactly as before the guard", () => {
+    // Hashes of the baseline renderer's output (b1461f3) for the same input.
+    const before = [
+      [
+        harbor,
+        "27ba75520d4a0ccfb56181f4da2c70ffb3b01b95a90bfb23e41b7fe7d9ccb4ae",
+        "3e0cc92e921144c25931dd171d2b3466a270cfd1a0961f78f271719494d08e69",
+      ],
+      [
+        reef,
+        "f9a327d64f96245cd841e26549db07c01a77df89f6d4ce9aedacd9abd3a0fa3b",
+        "5ed4882c766eb83bdb85a4c0609bc8172752e6b59a926d47333fac01114f7a02",
+      ],
+    ] as const;
+    for (const [b, html, text] of before) {
+      const out = renderEmail(b, golden, { slot });
+      expect(sha(out.html), b.name).toBe(html);
+      expect(sha(out.text), b.name).toBe(text);
+      expect(out.subject).toBe(golden.subject);
+    }
+  });
+
+  it("sends as the operator's name via TideGrid", () => {
+    expect(renderEmail(harbor, golden, { slot }).fromName).toBe(
+      "Demo Harbor Charters via TideGrid",
+    );
+    expect(renderEmail(reef, golden, { slot }).fromName).toBe("Demo Reef Divers via TideGrid");
+    expect(emailSenderName(reef)).toBe("Demo Reef Divers via TideGrid");
+  });
+
+  it.each([
+    ["TideGrid itself", "TideGrid"],
+    ["TideGrid staff", "TideGrid Support"],
+    ["a lookalike spelling", "T1de Gr!d"],
+    ["Cyrillic i (a Unicode confusable)", "T\u0456deGr\u0456d"],
+    ["fullwidth letters", "\uff34\uff49\uff44\uff45\uff27\uff52\uff49\uff44"],
+    ["Latin small capitals", "\u1d1b\u026a\u1d05\u1d07\u0262\u0280\u026a\u1d05"],
+    ["a reserved staff name", "Customer Support"],
+    ["a mailbox name", "No-Reply"],
+    ["a second relay", "Harbor via Stripe"],
+    ["a domain", "billing.example"],
+    ["a right-to-left override (Cf)", "Harbor\u202eCharters"],
+    ["a zero-width space (Cf)", "Tide\u200bGrid"],
+    ["CR and LF header injection", "Harbor\r\nBcc: victim@example.test"],
+    ["a bare LF", "Harbor\nX-Inj: 1"],
+    ["angle brackets", "Harbor <ops@example.test>"],
+  ])("never shows or sends %s as the operator", (_label, name) => {
+    const out = renderEmail({ ...harbor, name }, golden, { slot });
+    expect(emailOperatorName({ name })).toBe("Your trip operator");
+    expect(out.fromName).toBe("Your trip operator via TideGrid");
+    expect(out.text.startsWith("Your trip operator\n")).toBe(true);
+    expect(out.text).toContain("Sent by TideGrid for Your trip operator.");
+    expect(out.html).toContain(">Your trip operator</td>");
+    expect(out.html).not.toContain("\r");
   });
 });

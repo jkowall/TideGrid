@@ -572,6 +572,279 @@ export const BrandLogo = z
   );
 export type BrandLogo = z.infer<typeof BrandLogo>;
 
+// Sender identity ------------------------------------------------------------------
+
+/**
+ * Email goes out from one fixed TideGrid address. Its display name is the
+ * operator's name followed by this suffix ("Demo Harbor Charters via
+ * TideGrid"), so a guest always sees that TideGrid relayed it (D1, coordinator
+ * default 2026-11-08, pending owner confirmation).
+ */
+export const senderNameSuffix = " via TideGrid";
+
+/** The operator name an email falls back to when no safe name is known. */
+export const fallbackSenderName = "Your trip operator";
+
+/** Longest operator name in a sender display name; with the suffix, 93 characters. */
+export const maxSenderNameLength = 80;
+
+/**
+ * Lookalikes folded to the Latin letter they imitate, after NFKD, mark
+ * removal, and lowercasing. Cyrillic and Greek letters never pass the
+ * name rule below; they are folded too so the skeleton is safe on any input.
+ */
+const lookalikes: Record<string, string> = {
+  // Latin letters that NFKD leaves alone.
+  ı: "i",
+  ɩ: "i",
+  ɪ: "i",
+  ł: "l",
+  ƚ: "l",
+  ɫ: "l",
+  ʟ: "l",
+  ɡ: "g",
+  ɢ: "g",
+  đ: "d",
+  ð: "d",
+  ɗ: "d",
+  ᴅ: "d",
+  ø: "o",
+  ɵ: "o",
+  ᴏ: "o",
+  ß: "ss",
+  æ: "ae",
+  œ: "oe",
+  ʀ: "r",
+  ɾ: "r",
+  ʙ: "b",
+  ᴇ: "e",
+  ᴛ: "t",
+  ŧ: "t",
+  ħ: "h",
+  // Cyrillic.
+  а: "a",
+  в: "b",
+  с: "c",
+  ԁ: "d",
+  е: "e",
+  ё: "e",
+  һ: "h",
+  н: "h",
+  і: "i",
+  ї: "i",
+  ӏ: "l",
+  ј: "j",
+  к: "k",
+  м: "m",
+  о: "o",
+  р: "p",
+  ԛ: "q",
+  г: "r",
+  ѕ: "s",
+  т: "t",
+  у: "y",
+  ү: "y",
+  х: "x",
+  ԝ: "w",
+  ь: "b",
+  ԍ: "g",
+  // Greek.
+  α: "a",
+  β: "b",
+  γ: "y",
+  δ: "d",
+  ε: "e",
+  η: "n",
+  ι: "i",
+  κ: "k",
+  μ: "u",
+  ν: "v",
+  ο: "o",
+  ρ: "p",
+  τ: "t",
+  υ: "u",
+  χ: "x",
+  ω: "w",
+  // Digits and symbols read as letters.
+  "0": "o",
+  "1": "l",
+  "3": "e",
+  "4": "a",
+  "5": "s",
+  "7": "t",
+  "8": "b",
+  "9": "g",
+  "|": "l",
+  "!": "i",
+  $: "s",
+  "@": "a",
+};
+
+/**
+ * A name's skeleton: what it reads as, for comparing names. Folds
+ * compatibility forms (fullwidth, ligatures), drops accents and other marks,
+ * lowercases, folds the lookalikes above, reads "l" as "i", "rn" as "m", "vv"
+ * as "w", and "cl" as "d", and keeps only a to z. "T1de Gr!d", "TіdeGrіd" with
+ * Cyrillic i, and "TideGricl" all read as "tidegrid".
+ */
+export function senderSkeleton(text: string): string {
+  const folded = [...text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase()]
+    .map((ch) => lookalikes[ch] ?? ch)
+    .join("");
+  return folded
+    .replace(/[^a-z]/g, "")
+    .replaceAll("cl", "d")
+    .replaceAll("rn", "m")
+    .replaceAll("vv", "w")
+    .replaceAll("l", "i");
+}
+
+/** The skeletons no sender name may contain: TideGrid itself. */
+const reservedSkeletons = [senderSkeleton("TideGrid")];
+
+/**
+ * Words that name a platform's staff or a system mailbox. A sender name made
+ * only of these ("Support", "Billing Team", "No-Reply") reads as TideGrid's
+ * own staff once " via TideGrid" follows it, so it is refused. A name with
+ * any other word ("Harbor Support") names its operator and passes.
+ */
+const staffWords = new Set(
+  [
+    "abuse",
+    "account",
+    "accounts",
+    "admin",
+    "administration",
+    "administrator",
+    "alert",
+    "alerts",
+    "billing",
+    "booking",
+    "bookings",
+    "care",
+    "compliance",
+    "customer",
+    "customers",
+    "daemon",
+    "desk",
+    "help",
+    "helpdesk",
+    "info",
+    "mail",
+    "mailer",
+    "no",
+    "noreply",
+    "notification",
+    "notifications",
+    "official",
+    "operator",
+    "operators",
+    "payment",
+    "payments",
+    "postmaster",
+    "reply",
+    "safety",
+    "security",
+    "service",
+    "services",
+    "staff",
+    "support",
+    "system",
+    "team",
+    "the",
+    "trust",
+    "verification",
+  ].map(senderSkeleton),
+);
+
+/**
+ * Characters a sender name may use: Latin letters, ASCII digits, single
+ * spaces, and a little punctuation. No quote, backslash, @, colon,
+ * semicolon, or angle bracket, so a name cannot look like or break into an
+ * address, and no control or format character, so CR and LF cannot inject a
+ * header and nothing invisible can hide inside a name.
+ */
+const senderNameCharacters = /^[\p{Script=Latin}0-9 &'’.,!()/+#-]+$/u;
+const latinLetter = /^[\p{Script=Latin}]$/u;
+const domainLike = /[\p{L}\p{N}]\.\p{L}{2,}/u;
+
+/**
+ * Why a name may not lead an email's sender display name, or null when it
+ * may. Brand validation and email rendering both apply it, and the Cloudflare
+ * adapter applies it again to the name it is given. Refused:
+ * - anything but Latin letters, ASCII digits, single spaces, and `& ' ’ . , ! ( ) / + # -`
+ *   (so CR, LF, every other control, every Cf format character, and Cyrillic or
+ *   Greek lookalikes), or text not in composed, compatibility-folded form;
+ * - a name that reads as TideGrid in any spelling its skeleton folds;
+ * - a name made only of staff and mailbox words;
+ * - the word "via" after the first word, which would name a second relay;
+ * - a domain-like word, such as "tidegrid.us" or "paypal.com".
+ */
+export function senderNameProblem(name: string): string | null {
+  if (typeof name !== "string" || name.length === 0 || name.length > maxSenderNameLength) {
+    return `A sender name is 1 to ${maxSenderNameLength} characters`;
+  }
+  if (name !== name.trim() || name.includes("  ")) {
+    return "A sender name uses single spaces, with none at either end";
+  }
+  if (name !== name.normalize("NFC") || name !== name.normalize("NFKC")) {
+    return "A sender name uses plain composed characters";
+  }
+  if (!senderNameCharacters.test(name)) {
+    return "A sender name uses Latin letters, digits, spaces, and & ' . , ! ( ) / + # - only";
+  }
+  if (![...name].some((ch) => latinLetter.test(ch))) {
+    return "A sender name needs a letter";
+  }
+  const skeleton = senderSkeleton(name);
+  if (reservedSkeletons.some((reserved) => skeleton.includes(reserved))) {
+    return "A sender name may not use or imitate the TideGrid name";
+  }
+  if (domainLike.test(name)) return "A sender name may not contain a domain name";
+  const words = name
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 0)
+    .map(senderSkeleton);
+  if (words.slice(1).includes("via")) return 'A sender name may not use "via" after its first word';
+  if (staffWords.has(skeleton) || (words.length > 0 && words.every((w) => staffWords.has(w)))) {
+    return "A sender name may not be only staff or mailbox words";
+  }
+  return null;
+}
+
+/**
+ * The display name an email is sent under: the operator's name and the
+ * suffix. A name that already ends in the suffix is taken without it, so the
+ * suffix is never doubled. Null when the name fails `senderNameProblem`.
+ */
+export function senderDisplayName(name: string): string | null {
+  const bare =
+    typeof name === "string" && name.endsWith(senderNameSuffix)
+      ? name.slice(0, -senderNameSuffix.length)
+      : name;
+  return senderNameProblem(bare) === null ? `${bare}${senderNameSuffix}` : null;
+}
+
+/**
+ * Whether two operator names read as the same name. Email binds a brand's
+ * name to the tenant's provisioned name with this: a brand that reads as
+ * another name is not used as the sender.
+ */
+export function sameSenderName(a: string, b: string): boolean {
+  const sa = senderSkeleton(a);
+  return sa.length > 0 && sa === senderSkeleton(b);
+}
+
+/** A contact address may not sit on a domain that reads as TideGrid's. */
+export function contactEmailProblem(address: string): string | null {
+  const at = address.lastIndexOf("@");
+  const domain = at === -1 ? address : address.slice(at + 1);
+  const skeleton = senderSkeleton(domain);
+  return reservedSkeletons.some((reserved) => skeleton.includes(reserved))
+    ? "A contact address may not use a TideGrid domain"
+    : null;
+}
+
 // Brand configuration --------------------------------------------------------------
 
 /**
@@ -600,7 +873,10 @@ export const BrandFonts = z.strictObject({ display: DisplayFont, body: BodyFont 
 
 export const BrandContact = z
   .strictObject({
-    email: EmailAddress.optional(),
+    email: EmailAddress.superRefine((address, ctx) => {
+      const problem = contactEmailProblem(address);
+      if (problem) ctx.addIssue({ code: "custom", message: problem });
+    }).optional(),
     phone: PhoneNumber.optional(),
     website: HttpsUrl.optional(),
   })
@@ -613,7 +889,14 @@ export const BrandLegal = z.strictObject({ terms: LinkTarget, privacy: LinkTarge
 
 /** Brand fields without cross-field rules, so the public shape can extend it. */
 const brandConfigShape = z.strictObject({
-  name: BrandText(80).describe("Guest-facing brand name"),
+  name: BrandText(80)
+    .superRefine((name, ctx) => {
+      const problem = senderNameProblem(name);
+      if (problem) ctx.addIssue({ code: "custom", message: problem });
+    })
+    .describe(
+      'Guest-facing brand name. Email is sent as "<name> via TideGrid", so the name must pass the sender name rule: Latin letters, digits, single spaces, and a little punctuation; not TideGrid or a lookalike of it; not only staff or mailbox words.',
+    ),
   tagline: BrandText(140).optional(),
   colors: BrandColors,
   fonts: BrandFonts,

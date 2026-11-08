@@ -8,6 +8,25 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-SENDER-GUARD, a guard on tenant-controlled email sender identity (owner go; coordinator defaults pending owner confirmation)
+
+The [messaging README](../../packages/domain-messaging/README.md#known-gaps) recorded that every tenant sends from one TideGrid address under its brand's name, and that a guard on tenant-controlled sender identity was needed before any production email configuration. It proposed three guards: a "via TideGrid" suffix, a reserved-name refusal, or verified reply-to ownership.
+
+The owner's go, recorded verbatim. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator read that as the go for this goal, for the security reviewer where R9 calls for one, and for local commits. The owner did not choose among the three guards.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1, the guard.** The display name reads "Brand Name via TideGrid", with the fixed TideGrid address (the recommended option). A reserved-name refusal alone and a verified reply-to table stay proposed and not built, so no migration was needed.
+- **D2, one sender name rule, in brand validation and in rendering.** `senderNameProblem` in `packages/contracts/src/brand.ts` refuses anything but Latin letters, ASCII digits, single spaces, and a little punctuation (so CR, LF, Cf format characters, quotes, `@`, and other scripts); any name that reads as TideGrid after lookalike folding; a name made only of staff or mailbox words; "via" after the first word; and a domain-like word. `BrandConfig` applies it to the brand's name, and refuses a contact email on a domain that reads as TideGrid's. `renderEmail` and the Cloudflare adapter apply it again.
+- **D3, binding to the provisioned name.** Email uses a brand's name only when it reads as the tenant's provisioned display name, which TideGrid sets and the runtime role cannot change. Otherwise it uses the provisioned name, so a brand cannot send as another operator. A failing provisioned name becomes "Your trip operator".
+- **D4, scope.** The stored `from_name` stays the bare operator name, since `enqueue.ts` was outside the goal's owned paths. The Cloudflare adapter adds the suffix, and the fake provider's local mailbox shows the bare name. Proposed: store the full sender name in a later messaging goal.
+
+Observed: for the two synthetic brands, the rendered subject and both bodies match the baseline renderer byte for byte (a hash test). The published OpenAPI changed only in the brand name's description.
+
+Open: a security review of the spoofing cases (R9) and an independent review, both run by the lead. Two tenants provisioned with confusable names, an unverified reply-to, and lookalikes outside the hand-written table are recorded as residuals in the README.
+
+Canonical: the [messaging README](../../packages/domain-messaging/README.md#sender-identity-w1-sender-guard) and the [brand contract](../../packages/contracts/src/brand.ts).
+
 ### 2026-11-08: W1-SAAS-PREP, pre-SaaS hostname items and the D-E11 and D-E12 sweep follow-ups (owner go; coordinator defaults pending owner confirmation)
 
 G2.14b-live waits for the [Nov 1 runbook](../runbooks/2026-11-01-preview-deploy.md)'s P10, Cloudflare for SaaS, which stays deferred. The demo build plan's [G2.14b row and hostnames narrowing](12-demo-build-plan.md#goal-sequence) left preparation items before any operator domain, and the [pre-pilot hardening section](#owner-decision-2026-11-08-pre-pilot-hardening-coordinator-defaults-2026-10-28-and-2026-10-29) recorded D-E11 A and D-E12 A as follow-ups. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits.
