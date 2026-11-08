@@ -131,7 +131,13 @@ export const noTransactionMarker = "-- tidegrid:no-transaction";
 
 export type MigrationPlan = { mode: "transaction" } | { mode: "no-transaction"; statement: string };
 
-const looseMarker = /^[ \t]*--[ \t]*tidegrid:[ \t]*no-transaction\b/im;
+/**
+ * Any `-- tidegrid:` directive comment, on any line, in any case, with any
+ * value. Only the exact marker on the first line is honored; every other one
+ * (a misspelled value such as `no_transaction`, or the marker on a later
+ * line) refuses before anything is applied.
+ */
+const looseMarker = /^[ \t]*--[ \t]*tidegrid[ \t]*:/im;
 const concurrentIndex = /^create\s+(unique\s+)?index\s+concurrently\s/i;
 
 /**
@@ -148,7 +154,7 @@ export function planMigration(m: Pick<MigrationFile, "name" | "sql">): Migration
   const rest = marked ? (newline === -1 ? "" : m.sql.slice(newline + 1)) : m.sql;
   if (looseMarker.test(rest)) {
     throw new Error(
-      `Migration ${m.name}: the no-transaction marker must be the file's first line, exactly "${noTransactionMarker}"`,
+      `Migration ${m.name}: a tidegrid directive is only recognized as the no-transaction marker, which must be the file's first line, exactly "${noTransactionMarker}"`,
     );
   }
   if (!marked) return { mode: "transaction" };
@@ -180,7 +186,9 @@ function singleStatement(name: string, text: string): string {
     const c = text[i];
     const next = text[i + 1];
     if (c === "-" && next === "-") {
-      while (i < text.length && text[i] !== "\n") out[i++] = " ";
+      // PostgreSQL ends a line comment at either CR or LF; a bare CR must not
+      // hide the SQL after it.
+      while (i < text.length && text[i] !== "\n" && text[i] !== "\r") out[i++] = " ";
     } else if (c === "/" && next === "*") {
       let depth = 0;
       while (i < text.length) {

@@ -177,9 +177,21 @@ describe("no-transaction files (D6 A: CREATE INDEX CONCURRENTLY)", () => {
       "--tidegrid:no-transaction\nCREATE INDEX CONCURRENTLY a ON t (x);",
       "-- TideGrid:No-Transaction\nCREATE INDEX CONCURRENTLY a ON t (x);",
       `${noTransactionMarker}\n${noTransactionMarker}\nCREATE INDEX CONCURRENTLY a ON t (x);`,
+      // A misspelled value on the first line must not fall back to a transaction.
+      "-- tidegrid:no_transaction\nCREATE INDEX CONCURRENTLY a ON t (x);",
+      "-- tidegrid:no-transacton\nCREATE INDEX CONCURRENTLY a ON t (x);",
+      "-- tidegrid: notransaction\nCREATE INDEX CONCURRENTLY a ON t (x);",
+      "CREATE TABLE t (x int);\n-- tidegrid:no-transaction\n",
     ]) {
       expect(() => plan(sql), sql).toThrow(/must be the file's first line/);
     }
+  });
+
+  it("end a line comment at a bare carriage return, as PostgreSQL does", () => {
+    expect(plan(marked("CREATE INDEX CONCURRENTLY i ON t (x) -- note\rWHERE x > 0;"))).toEqual({
+      mode: "no-transaction",
+      statement: "CREATE INDEX CONCURRENTLY i ON t (x)        \rWHERE x > 0",
+    });
   });
 
   it("set session timeouts for a marked file, and reset them after", () => {
