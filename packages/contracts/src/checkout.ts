@@ -132,10 +132,37 @@ export type CheckoutSessionCreateResponse = z.infer<typeof CheckoutSessionCreate
 export const CheckoutSessionResponse = z.object({ checkoutSession: CheckoutSession });
 export type CheckoutSessionResponse = z.infer<typeof CheckoutSessionResponse>;
 
+/**
+ * What Stripe.js needs to mount the card form for a direct charge (G2.11,
+ * W1-STRIPE-ELEMENT): the platform's publishable key, test mode only, and the
+ * operator's connected account the payment was created on. Only the payment
+ * read carries it, to the checkout's holder.
+ */
+export const StripeElementConfig = z
+  .object({
+    publishableKey: z
+      .string()
+      .regex(/^pk_test_[A-Za-z0-9]{24,247}$/)
+      .describe("The platform's Stripe publishable key, test mode only"),
+    account: z
+      .string()
+      .regex(/^acct_[A-Za-z0-9]{1,64}$/)
+      .describe("The operator's connected account the payment was created on"),
+  })
+  .describe("What Stripe.js needs to mount the card-only Payment Element");
+export type StripeElementConfig = z.infer<typeof StripeElementConfig>;
+
+export const CheckoutPaymentRead = CheckoutPayment.extend({
+  stripe: StripeElementConfig.optional().describe(
+    "Present only when the provider is stripe: what the browser mounts the card form with",
+  ),
+}).describe("What the guest needs to pay at the provider, read again with the checkout secret");
+export type CheckoutPaymentRead = z.infer<typeof CheckoutPaymentRead>;
+
 export const CheckoutPaymentResponse = z
   .object({
     checkoutSession: CheckoutSession.describe("The checkout's current state"),
-    payment: CheckoutPayment.nullable().describe(
+    payment: CheckoutPaymentRead.nullable().describe(
       "Null unless the checkout is open and within its expiry",
     ),
   })

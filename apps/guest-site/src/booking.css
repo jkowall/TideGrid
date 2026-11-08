@@ -446,6 +446,28 @@
   }
 }
 
+/* The Stripe card form (W1-STRIPE-ELEMENT): Stripe draws the fields in its own
+   frame inside .booking-card__form, from the appearance in stripe-js.ts. */
+.booking-card {
+  display: grid;
+  gap: var(--space-3);
+}
+.booking-card__loading {
+  display: grid;
+  gap: var(--space-3);
+}
+.booking-card__status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.booking-card__form:empty {
+  display: none;
+}
+.booking-card__form[hidden] {
+  display: none;
+}
+
 .booking-waiting__status {
   display: flex;
   align-items: center;

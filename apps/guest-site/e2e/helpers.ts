@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 
-export const PORT = 5361;
+/** 5361, as CI runs it; E2E_PORT moves a local run off a port another run holds. */
+export const PORT = Number(process.env.E2E_PORT ?? 5361);
 
 export function hostUrl(host: string, path = "/"): string {
   return `http://${host}:${PORT}${path}`;

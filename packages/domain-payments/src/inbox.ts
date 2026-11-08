@@ -5,7 +5,11 @@ import type {
   TenantTransaction,
 } from "@tidegrid/database";
 import { sql } from "kysely";
-import type { PaymentProviderName, VerifiedProviderEvent } from "./adapter.ts";
+import {
+  isVerifiedProviderEvent,
+  type PaymentProviderName,
+  type VerifiedProviderEvent,
+} from "./adapter.ts";
 
 /**
  * The provider-event inbox (G2.7). Every verified callback is written once,
@@ -40,6 +44,18 @@ export interface RecordedEvent {
   samePayload: boolean;
   processingState: InboxProcessingState;
   outcome: string | null;
+}
+
+/**
+ * Thrown before any database work when `recordProviderEvent` is given an
+ * object that an adapter's `verifyWebhook` did not build: a spread or other
+ * copy of a real event included. A programming error, never a provider's.
+ */
+export class UnverifiedProviderEventError extends Error {
+  constructor() {
+    super("only an event an adapter's verifyWebhook built can be recorded");
+    this.name = "UnverifiedProviderEventError";
+  }
 }
 
 /** Thrown when the event id exists but is not visible in this tenant. */
@@ -91,13 +107,16 @@ function toInboxEvent(row: InboxRow): InboxEvent {
  * Record a verified event in the tenant that owns its account, once. A
  * duplicate delivery returns the first row and whether its body matches.
  * Only a VerifiedProviderEvent, which only an adapter's verifyWebhook builds,
- * can be recorded.
+ * can be recorded. The runtime brand is checked first, so a copy of a real
+ * event (`{ ...event, accountRef }`), which the compiler accepts, is refused
+ * with UnverifiedProviderEventError before any statement runs.
  */
 export async function recordProviderEvent(
   trx: TenantTransaction,
   ctx: TenantContext,
   event: VerifiedProviderEvent,
 ): Promise<RecordedEvent> {
+  if (!isVerifiedProviderEvent(event)) throw new UnverifiedProviderEventError();
   const payment = event.payment;
   const { rows } = await sql<{ id: string }>`
     insert into provider_events (

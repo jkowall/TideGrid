@@ -84,6 +84,14 @@ export interface Bindings {
   CF_SAAS_API_TOKEN?: string;
   /** The CNAME target operators point at; default customers.tidegrid.us. */
   CF_SAAS_ROUTING_TARGET?: string;
+  /**
+   * Secret, never a var, and never in the repository (W1-STRIPE-ELEMENT D2).
+   * The platform's pk_test_ publishable key for the guest's card form. Only
+   * the checkout's payment read returns it, to the checkout's holder; a live
+   * key, a malformed one, or one outside local, preview, and staging is
+   * never returned.
+   */
+  STRIPE_PUBLISHABLE_KEY?: string;
 }
 
 export function databaseUrl(env: Bindings): string | undefined {

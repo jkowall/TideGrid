@@ -1,6 +1,7 @@
 import {
   type AvailableTrip,
   type CheckoutPayment,
+  type CheckoutPaymentRead,
   CheckoutPaymentResponse,
   type CheckoutSession,
   CheckoutSessionCreateResponse,
@@ -275,18 +276,25 @@ export async function getCheckoutOffer(
   return mapOk(result, (r) => r.offer);
 }
 
+export interface PaymentRead {
+  session: CheckoutSession;
+  /** Null once the checkout is not open. Under Stripe it carries the card form's key and account. */
+  payment: CheckoutPaymentRead | null;
+}
+
 /**
  * What an open checkout pays with, read again with the checkout secret as a
  * bearer token (W1-GUEST-API): the provider payment and its client secret,
- * or null once the checkout is not open. For the provider's payment element
- * after a reload. The client secret stays in memory: never stored, and never
- * in an address.
+ * or null once the checkout is not open. Under Stripe it also carries the
+ * publishable key and the connected account the card form mounts with
+ * (W1-STRIPE-ELEMENT). The client secret and the key stay in memory: never
+ * stored, and never in an address.
  */
 export async function readCheckoutPayment(
   sessionId: string,
   secret: string,
   signal?: AbortSignal,
-): Promise<Result<OpenedCheckout>> {
+): Promise<Result<PaymentRead>> {
   const result = await call(
     `/v1/public/checkout-sessions/${encodeURIComponent(sessionId)}/payment`,
     { bearer: secret, schema: CheckoutPaymentResponse, signal, timeoutMs: commandTimeoutMs },

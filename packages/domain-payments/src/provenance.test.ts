@@ -6,15 +6,19 @@
  * narrow the ways to forge one: `verifyWebhook` stays the only caller of the
  * minting function; no file casts to the brand, gives the type to an object
  * literal, a parse, or an `any` value, or returns a literal from a function
- * typed to return it; nothing outside this package reaches into its source;
- * and no runtime code reaches the test fixture, by package path or relative.
+ * typed to return it; no file reaches `adapter.ts` as a whole (a namespace
+ * import, `export *`, or a dynamic import) where a computed key could read the
+ * minting function without naming it; nothing outside this package reaches
+ * into its source; and no runtime code reaches the test fixture, by package
+ * path or relative.
  *
  * Limits, recorded: a scan reads text, not types. An unannotated spread of a
- * real verified event (`{ ...event, accountRef }`) keeps the brand and is not
- * caught here, nor is an `any` that never meets the type's name. Review and
- * the `noExplicitAny` lint rule cover those. A runtime brand (a private
- * WeakSet checked by the inbox) would close them; the inbox is outside this
- * goal, so it is a proposed follow-up.
+ * real verified event (`{ ...event, accountRef }`) keeps the type brand and is
+ * not caught here, nor is an `any` that never meets the type's name. Since
+ * W1-PROVENANCE the runtime brand closes both at the inbox: a module-private
+ * WeakSet in `adapter.ts` holds every event the minting function returned,
+ * and `recordProviderEvent` refuses anything not in it
+ * (`inbox-brand.test.ts`). The last case here keeps that check in place.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -132,6 +136,49 @@ function brandFindings(rel: string, text: string): string[] {
   return problems;
 }
 
+/** Where a relative specifier in `rel` points, without its extension. */
+function resolvedBare(rel: string, spec: string): string {
+  return relative(root, resolve(root, dirname(rel), spec))
+    .split(sep)
+    .join("/")
+    .replace(/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/, "");
+}
+
+/**
+ * Ways to reach the minting function without writing its name: a namespace
+ * import or `export *` of `adapter.ts`, which a computed key can then read; a
+ * dynamic `import()` or `require()` of it; and, in runtime code and anywhere
+ * in this package, a dynamic `import()` or `require()` whose specifier is not
+ * a plain string, which could spell the path out at run time. Only named
+ * imports of `adapter.ts` remain, and `brandFindings` sees those by name.
+ */
+function adapterFindings(rel: string, text: string): string[] {
+  const problems: string[] = [];
+  const line = (offset: number) => text.slice(0, offset).split("\n").length;
+  const reaches = [
+    /\bimport\s*\*\s*as\s+[\w$]+\s*from\s*["'`]([^"'`]+)["'`]/g,
+    /\bexport\s*\*(?:\s*as\s+[\w$]+)?\s*from\s*["'`]([^"'`]+)["'`]/g,
+    /\bimport\s*\(\s*["'`]([^"'`]+)["'`]/g,
+    /\brequire\s*\(\s*["'`]([^"'`]+)["'`]/g,
+  ];
+  for (const re of reaches) {
+    for (const hit of text.matchAll(re)) {
+      const spec = hit[1] ?? "";
+      if (spec.startsWith(".") && resolvedBare(rel, spec) === `${payments}adapter`) {
+        problems.push(`${rel}:${line(hit.index)}: reaches adapter.ts as a whole through ${spec}`);
+      }
+    }
+  }
+  const runtime =
+    /^(?:apps\/[^/]+\/(?:src|worker)|packages\/[^/]+\/src)\//.test(rel) && !testFile.test(rel);
+  if (runtime || rel.startsWith(payments)) {
+    for (const hit of text.matchAll(/\b(?:import|require)\s*\(\s*(?!["'`][^"'`$]*["'`]\s*[,)])/g)) {
+      problems.push(`${rel}:${line(hit.index)}: a dynamic import with a computed specifier`);
+    }
+  }
+  return problems;
+}
+
 const specifier =
   /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*|\bmock\s*\(\s*)["'`]([^"'`]+)["'`]/g;
 
@@ -187,7 +234,10 @@ describe("verified-event provenance", () => {
   });
 
   it("lets only verifyWebhook in the fake and Stripe adapters mint the brand", () => {
-    const problems = files.flatMap((f) => brandFindings(f.rel, f.text));
+    const problems = files.flatMap((f) => [
+      ...brandFindings(f.rel, f.text),
+      ...adapterFindings(f.rel, f.text),
+    ]);
     expect(problems).toEqual([]);
     const stripe = files.find((f) => f.rel === `${payments}stripe.ts`);
     expect(verifyWebhookBody(stripe?.text ?? "")).not.toBeNull();
@@ -223,6 +273,73 @@ describe("verified-event provenance", () => {
     expect(brandFindings("apps/api-worker/src/x.ts", generic)).toEqual([]);
     const outside = `async other() { return ${mintName}({}); }\nasync verifyWebhook(input) { return ${mintName}(input); }`;
     expect(brandFindings(`${payments}stripe.ts`, outside).length).toBeGreaterThan(0);
+    // Reaching the minting function without its name: a computed key on the module.
+    const unnamed: [string, string][] = [
+      [
+        `${payments}x.ts`,
+        `import * as adapter from "./adapter.ts";\nadapter["verified" + "Event"];`,
+      ],
+      [`${payments}deep/x.ts`, `import * as a from "../adapter";`],
+      [`${payments}x.ts`, `export * from "./adapter.js";`],
+      [`${payments}x.ts`, `export * as adapter from "./adapter.ts";`],
+      [`${payments}x.ts`, `const m = await import("./adapter.ts");`],
+      [`${payments}x.ts`, `const m = require("./adapter");`],
+      [`${payments}x.ts`, `const m = await import("./ada" + "pter.ts");`],
+      [`${payments}x.ts`, `const m = await import(\`./\${name}.ts\`);`],
+      [`${payments}x.test.ts`, `const m = await import(path);`],
+      ["packages/domain-booking/src/x.ts", `const m = await import(where);`],
+      ["apps/api-worker/src/x.ts", `const m = require(where);`],
+    ];
+    for (const [rel, text] of unnamed) {
+      expect(brandFindings(rel, text), `${rel}: ${text}`).toEqual([]);
+      expect(adapterFindings(rel, text), `${rel}: ${text}`).not.toEqual([]);
+    }
+    const allowed: [string, string][] = [
+      [`${payments}inbox.ts`, `import { isVerifiedProviderEvent } from "./adapter.ts";`],
+      [`${payments}x.ts`, `import type * as adapter from "./accounts.ts";`],
+      [`${payments}x.ts`, `const m = await import("./accounts.ts");`],
+      ["apps/api-worker/src/x.ts", `import * as payments from "@tidegrid/domain-payments";`],
+      ["tools/release/test/x.test.ts", `const m = await import(where);`],
+    ];
+    for (const [rel, text] of allowed) {
+      expect(adapterFindings(rel, text), `${rel}: ${text}`).toEqual([]);
+    }
+  });
+});
+
+describe("the runtime brand stays in place", () => {
+  const text = (rel: string) => files.find((f) => f.rel === `${payments}${rel}`)?.text ?? "";
+
+  it("checks the brand before anything else in recordProviderEvent", () => {
+    const inbox = text("inbox.ts");
+    const start = inbox.indexOf("export async function recordProviderEvent(");
+    expect(start).toBeGreaterThan(0);
+    const open = inbox.indexOf("{", inbox.indexOf("): Promise<RecordedEvent>", start));
+    const range = bodyFrom(inbox, open);
+    if (!range) throw new Error("no body for recordProviderEvent");
+    const first = inbox
+      .slice(range[0] + 1, range[1])
+      .trim()
+      .split("\n")[0];
+    expect(first).toBe(
+      "if (!isVerifiedProviderEvent(event)) throw new UnverifiedProviderEventError();",
+    );
+  });
+
+  it("keeps the marker private to adapter.ts and used only by the minting function", () => {
+    const adapter = text("adapter.ts");
+    expect(adapter).toMatch(/^const minted = new WeakSet<object>\(\);$/m);
+    expect(adapter).toMatch(/^const mark = minted\.add\.bind\(minted\);$/m);
+    expect(adapter).toMatch(/^const isMinted = minted\.has\.bind\(minted\);$/m);
+    expect(adapter).not.toMatch(/export\s*\{|export\s+(?:const|let|var)\s/);
+    // The set is named nowhere but its three declarations.
+    const rest = adapter.replace(/^const (?:minted|mark|isMinted) = .*$/gm, "");
+    expect(rest).not.toMatch(/\bminted\b/);
+    expect([...adapter.matchAll(/\bmark\(/g)].length).toBe(1);
+    const fn = adapter.indexOf(`export function ${mintName}(`);
+    const range = bodyFrom(adapter, adapter.indexOf("{", adapter.indexOf(")", fn)));
+    if (!range) throw new Error("no body for the minting function");
+    expect(adapter.slice(range[0], range[1])).toContain("mark(event);");
   });
 });
 
