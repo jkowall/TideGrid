@@ -32,9 +32,12 @@
 -- booking_email_resends_kind_mismatch, _trip_over, _refund_failed, then
 -- 0014's limits, then _in_progress.
 -- The booking's row, a cancellation notice's refund, and the earlier emails
--- are locked FOR SHARE before the decision, as the service locks them, so a
--- cancellation, a refund outcome, or a delivery claim in progress finishes
--- first and none starts until the resend commits.
+-- are locked FOR SHARE before the decision (the service holds stronger
+-- locks on the same rows, so for it these are no-ops), so a cancellation, a
+-- refund outcome, or a delivery claim in progress finishes first and none
+-- starts until the resend commits. An earlier email still queued is not
+-- refused: the service cancels it first, a direct writer may leave it, and
+-- the limits still count every resend (security review, low, recorded).
 --
 -- D6, the waiver send_after hole. A waiver delivery's send_after is when the
 -- sending limits allow its email; 0010 requires the message to be due no
@@ -155,8 +158,9 @@ BEGIN
   -- Eligibility (0019, D5 A): the service's refusals, decided again for
   -- every writer. The booking's row first (FOR SHARE: a cancellation in
   -- progress finishes before this reads its state, and none starts until
-  -- this transaction ends), then a cancellation notice's refund, as the
-  -- service locks them; the delivery job's key checks never wait behind it.
+  -- this transaction ends), then a cancellation notice's refund. The
+  -- service already holds stronger locks on both, so for it these are
+  -- no-ops; the delivery job's key checks never wait behind them.
   PERFORM 1 FROM public.bookings b
     WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id
       FOR SHARE OF b;

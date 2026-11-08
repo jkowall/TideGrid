@@ -15,11 +15,12 @@ Goal branch `claude/project-thread-wqkheo`, from `main` at `c365545` and rebased
 - **The holes, shown.** Without the migration, R1, R2, R3, R5 and the `send_after` case fail on a fresh container: each direct write is accepted.
 - **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `pnpm test:local-db integration`, every package, 999 passed and 2 skipped, in 323 s. `pnpm check` passed. Three existing tests changed: a claim case marks its first resend sent before the next, a binding case now fails earlier at the message (`email_messages_booking_key`), and the waiver re-add case moves its delivery's `send_after` before its email.
 - **Independent review** on the first draft: no blocker. Fixed: an original key taken early (a false cancellation notice that would leave the real one a duplicate), a narrower lock-wait probe in R3, and the email trigger added to R5's catalog check. Recorded, not fixed: below.
+- **Security review** (R9, under the owner's go to merge without asking him, 2026-11-08) on `27185cc`: nothing above low. No privilege, tenant isolation, or `search_path` issue; error messages carry ids and codes only. One low finding, recorded below. Info: a message of another template can still take an original's key (the accepted other-template residual), and two comments now say the trigger's locks are weaker than the service's.
 - **Still open.**
   - A message of another template is not held: a writer can send a confirmation's text under a template name of its own, or a `booking_manage` link message, under any key, and each claim mints a management link.
   - Eligibility is not decided again at the claim: a writer that cancels a booking by hand, skipping the cancel path's step that cancels pending confirmations, can let a queued confirmation resend go out.
   - The `0015` give-back forgery (W1-RESEND-CLAIM's D5) is unchanged.
-  - Security review under R9: asked of the owner, answer pending.
+  - A direct writer may leave the booking's earlier email of the template queued, so the original and a resend can go out close together (security review, low); the limits still count every resend.
 
 ### W1-FIN-EXC: staff resolve finalization exceptions, built November 8, 2026
 

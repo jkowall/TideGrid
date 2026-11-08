@@ -18,7 +18,7 @@ The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and
 - **D4, eligibility at the ledger row, in the service's order, under the service's locks.** Kind, trip over, and failed refund before `0014`'s limits; an earlier email being sent after them. The booking, a notice's refund, and the earlier emails are locked `FOR SHARE` first. Eligibility is not decided again at the claim: a booking canceled after a resend is queued relies on the cancel path, which cancels its pending confirmations.
 - **D5, a waiver email moves earlier only to its `send_after`, or once that has passed** (`email_messages_waiver_send_after`).
 
-Security review under rule R9: asked of the owner on 2026-11-08 for this lane, answer pending. Canonical: the [database README](../../packages/database/README.md#staff-resend-residuals-0019) and the [verification log](../verification-log.md).
+Security review under rule R9: run on 2026-11-08 under the owner's go to merge without asking him ("go ahead and merge them dont ask me to review them"). Nothing above low; the one low finding (an earlier queued email a direct writer leaves in place) is recorded, not fixed. Canonical: the [database README](../../packages/database/README.md#staff-resend-residuals-0019) and the [verification log](../verification-log.md).
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
