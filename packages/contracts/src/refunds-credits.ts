@@ -144,7 +144,13 @@ export const CreditAdjustRequest = z.object({
     .max(100_000_000)
     .refine((n) => n !== 0, "an adjustment is not 0")
     .describe("Cents to add (positive) or take away (negative)"),
-  reason: z.string().min(1).max(500).describe("Why; kept on the ledger and in the audit history"),
+  reason: z
+    .string()
+    .min(1)
+    .max(500)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+    .regex(/^[^\u0000-\u001f\u007f]*$/, "Control characters are not allowed")
+    .describe("Why; kept on the ledger and in the audit history"),
 });
 export type CreditAdjustRequest = z.infer<typeof CreditAdjustRequest>;
 

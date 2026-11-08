@@ -27994,6 +27994,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
                     "description": "Why; kept on the ledger and in the audit history"
                   }
                 },

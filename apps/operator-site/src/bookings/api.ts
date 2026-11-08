@@ -113,7 +113,7 @@ export function isPaymentStatus(p: Partial<BookingPaymentStatus> | null | undefi
 const isBookingState = (v: unknown): v is BookingDetail["state"] =>
   v === "confirmed" || v === "canceled";
 
-const remedies = new Set(["full_refund", "percent_refund", "none"]);
+const remedies = new Set(["full_refund", "percent_refund", "credit", "none"]);
 const cancelers = new Set(["guest", "staff", "system", "support"]);
 
 function isCancellation(c: Partial<BookingCancellation> | null | undefined): boolean {

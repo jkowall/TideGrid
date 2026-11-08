@@ -423,6 +423,20 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
     expect(await redeem(1000)).toMatchObject({ kind: "applied", duplicate: true });
     await expect(redeem(999)).rejects.toBeInstanceOf(CreditKeyReusedError);
     expect(await balance()).toBe(preview.policyValue - 1000);
+    // Two commands with one key at once move the balance once.
+    const raceKey = `redeem:${randomUUID()}`;
+    const raced = await Promise.all([redeem(100, raceKey), redeem(100, raceKey)]);
+    expect(raced.map((r) => r.kind)).toEqual(["applied", "applied"]);
+    expect(await balance()).toBe(preview.policyValue - 1100);
+    await as(ctx, (trx, c) =>
+      adjustCredit(trx, c, {
+        accountId,
+        amount: 100,
+        reason: "test: undo the race",
+        idempotencyKey: `adjust:${randomUUID()}`,
+      }),
+    );
+    expect(await balance()).toBe(preview.policyValue - 1000);
 
     // Credit comes back only once its booking is canceled, and then once.
     await expect(
@@ -488,7 +502,7 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
     expect(await balance()).toBe(preview.policyValue - 500);
     const account = await as(ctx, (trx) => getCreditAccount(trx, A.id, accountId));
     expect(account?.entries.map((e) => e.kind).sort()).toEqual(
-      ["adjust", "issue", "redeem", "reinstate"].sort(),
+      ["adjust", "adjust", "issue", "redeem", "redeem", "reinstate"].sort(),
     );
     // Issuing credit reverses no fee.
     const [fees] = await admin<{ n: number }[]>`
@@ -647,6 +661,47 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
     const [row] = await admin<{ state: string }[]>`
       select state from public.payment_cancellations where id = ${id}`;
     expect(row?.state).toBe("canceled");
+  });
+
+  it("cancels a payment whose checkout closed while the provider was creating it", async () => {
+    const quote = await quoteFor(runtime.db, A.id, tripsA.shared(), 1, { charter: false });
+    const secret = newSecret();
+    const ctx = guestContext(A.id);
+    const created = await as(ctx, (trx, c) =>
+      createCheckoutSession(trx, c, {
+        quoteId: quote.quoteId,
+        acceptedPolicyVersion: quote.policy.version,
+        booker: { name: "Racing Guest", email: "racing@example.test" },
+        secret,
+        clientAddress: null,
+        provider: "fake",
+        minimumAmount: 50,
+      }),
+    );
+    if (created.kind !== "created") throw new Error(JSON.stringify(created));
+    const slow = new FlakyProvider(payments);
+    slow.createPayment = async (input) => {
+      const answer = await payments.createPayment(input);
+      // The guest cancels while the provider is still answering.
+      const canceled = await as(ctx, (trx, c) =>
+        cancelCheckoutSession(trx, c, { sessionId: created.session.id, secret }),
+      );
+      expect(canceled).toMatchObject({ kind: "canceled", paymentCancellationId: null });
+      return answer;
+    };
+    expect(await ensureProviderPayment(runtime.db, slow, ctx, created.session.id)).toEqual({
+      kind: "not_open",
+      state: "canceled",
+    });
+    const [row] = await admin<{ id: string; state: string }[]>`
+      select c.id, c.state from public.payment_cancellations c
+        join public.payments p on p.id = c.payment_id
+       where p.checkout_session_id = ${created.session.id}`;
+    expect(row?.state).toBe("requested");
+    if (!row) throw new Error("no cancellation");
+    expect(await settlePaymentCancellation(runtime.db, payments, ctx, row.id)).toEqual({
+      kind: "canceled",
+    });
   });
 
   it("has the sweep cancel an expired checkout's payment and ask again about a pending refund", async () => {

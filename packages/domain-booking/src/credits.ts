@@ -196,13 +196,22 @@ export async function appendCreditEntry(
       values (${entry.id ?? crypto.randomUUID()}, ${ctx.tenantId}, ${entry.accountId},
         ${entry.kind}, ${entry.amount}, ${entry.bookingId ?? null}, ${entry.cancellationId ?? null},
         ${entry.reinstatesEntryId ?? null}, ${entry.reason ?? null}, ${entry.idempotencyKey})
-      on conflict (tenant_id, idempotency_key) do nothing
       returning ${entryColumns}`.execute(trx);
     inserted = rows[0];
     await sql`release savepoint credit_entry`.execute(trx);
   } catch (error) {
+    // No ON CONFLICT: the balance trigger runs before any conflict check, so
+    // a skipped row would still move the balance. A failed insert instead
+    // undoes the trigger's work with it, under the savepoint.
     await sql`rollback to savepoint credit_entry`.execute(trx);
     const e = error as { code?: unknown; constraint_name?: unknown };
+    const raced =
+      (e.code === "23505" && e.constraint_name === "credit_entries_key") ||
+      (e.code === "23514" && e.constraint_name === "credit_entries_balance")
+        ? await entryByKey(trx, ctx.tenantId, entry.idempotencyKey)
+        : undefined;
+    // A concurrent command with the same key committed first.
+    if (raced) return sameCommand(raced, entry);
     if (e.code === "23514" && e.constraint_name === "credit_entries_balance") {
       const { rows } = await sql<{ balance: number }>`
         select balance from credit_accounts
@@ -211,12 +220,7 @@ export async function appendCreditEntry(
     }
     throw error;
   }
-  if (!inserted) {
-    // A concurrent command with the same key committed first.
-    const raced = await entryByKey(trx, ctx.tenantId, entry.idempotencyKey);
-    if (!raced) throw new Error("a credit entry's key conflicted with no entry");
-    return sameCommand(raced, entry);
-  }
+  if (!inserted) throw new Error("a credit entry was not written");
   const view = entryView(inserted);
   await record(trx, ctx, {
     action: `credit.${entry.kind}`,
@@ -254,7 +258,9 @@ function sameCommand(prior: EntryRow, entry: NewEntry): CreditCommandResult {
     prior.kind !== entry.kind ||
     prior.amount !== entry.amount ||
     prior.booking_id !== (entry.bookingId ?? null) ||
-    prior.reinstates_entry_id !== (entry.reinstatesEntryId ?? null)
+    prior.cancellation_id !== (entry.cancellationId ?? null) ||
+    prior.reinstates_entry_id !== (entry.reinstatesEntryId ?? null) ||
+    prior.reason !== (entry.reason ?? null)
   ) {
     throw new CreditKeyReusedError();
   }

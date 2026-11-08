@@ -125,7 +125,8 @@ export function registerRefundsCreditsStaffRoutes(app: OpenAPIHono<AppEnv>, deps
     const { body } = await withStaffTenant(
       c,
       deps,
-      { tenantId, permission: "bookings.cancel" },
+      // One snapshot: the terms, the balance, and the totals describe one moment.
+      { tenantId, permission: "bookings.cancel", snapshot: true },
       async (trx) => {
         const preview = await previewStaffCancellation(trx, tenantId, bookingId);
         if (!preview) throw notFound();
@@ -288,7 +289,8 @@ export function registerRefundsCreditsStaffRoutes(app: OpenAPIHono<AppEnv>, deps
     const { body } = await withStaffTenant(
       c,
       deps,
-      { tenantId, permission: "bookings.read" },
+      // One snapshot: the balance and its ledger agree.
+      { tenantId, permission: "bookings.read", snapshot: true },
       async (trx) => {
         if (!isUuid(bookingId)) throw notFound();
         const found = await trx
