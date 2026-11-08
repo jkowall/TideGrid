@@ -24,6 +24,7 @@ Coordinator choices inside those defaults, pending owner confirmation:
 - **The own-hold offer applies only while the checkout is open and within its expiry.** Every other sale rule still applies. It reuses inventory's hold rules through a new read, `getTripSale`, and the catalog's staff calendar for the trip's times, so the catalog package is unchanged and pricing gains no package dependency.
 - **The guest page reads the problems and the count, and uses the own-hold offer on a reload.** It does not use the payment read yet: a reload still cannot pay until the payment element (W1-STRIPE-ELEMENT) adopts it. An answer without the new members, from an API that predates them, is read as before.
 - **No migration.**
+- **Two files outside the literal owned list, both inside the four behaviors.** `apps/api-worker/src/routes/problems.ts` is the routes' one helper for the problem shape. The trip lookup in `packages/domain-pricing/src/load.ts` (`findTripForSale`) is where the quote and the offer decide a trip is on sale, so the own-hold option lives there. Nothing else outside the list changed. The branch is `goal/guest-api`, the name the coordinator gave it, not the goal packet's `build/guest-api-followups`.
 
 Not done, and needing the owner: confirming D1, D2, and the choices above; any release of the API or the guest site that carries this.
 

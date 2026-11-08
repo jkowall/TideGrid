@@ -16,6 +16,27 @@ import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from
 import { createApp } from "../src/app.ts";
 
 /**
+ * A seam for the race between the payment read's view and the provider
+ * payment: a test can run something just before the route asks for the
+ * provider payment. Every other call passes straight through.
+ */
+const race = vi.hoisted(() => ({
+  beforeEnsure: null as null | ((sessionId: string) => Promise<void>),
+}));
+vi.mock("@tidegrid/domain-booking", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@tidegrid/domain-booking")>();
+  return {
+    ...original,
+    ensureProviderPayment: async (...args: Parameters<typeof original.ensureProviderPayment>) => {
+      const hook = race.beforeEnsure;
+      race.beforeEnsure = null;
+      if (hook) await hook(args[3]);
+      return original.ensureProviderPayment(...args);
+    },
+  };
+});
+
+/**
  * The four guest API follow-ups (W1-GUEST-API) through the API, on a real
  * database as the runtime role: the Bearer read of the payment's client
  * secret, problem details on the guest commands' 409 and 422, the offer of a
@@ -159,6 +180,7 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
   });
 
   afterEach(() => {
+    race.beforeEnsure = null;
     vi.restoreAllMocks();
     lines = [];
   });
@@ -200,6 +222,33 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
       expect(read.status).toBe(200);
       expect(read.json.payment).toBeNull();
       expect(read.json.checkoutSession?.state).toBe("canceled");
+    });
+
+    it("answers the closed state when the checkout closes while the payment is read", async () => {
+      const { session, secret } = await opened(A, tripsA.shared(), 1);
+      // The view reads open; then the guest cancels in another tab before
+      // the route asks for the provider payment.
+      race.beforeEnsure = async (id) => {
+        expect((await cancel(A, id, secret)).status).toBe(200);
+      };
+      const canceled = await paymentRead(A, session.id, secret);
+      expect(canceled.status).toBe(200);
+      expect(canceled.json.payment).toBeNull();
+      expect(canceled.json.checkoutSession).toMatchObject({ id: session.id, state: "canceled" });
+
+      // The same when the expiry passes in between.
+      const lapsing = await opened(A, tripsA.shared(), 1);
+      race.beforeEnsure = async (id) => {
+        await admin`update public.checkout_sessions set expires_at = now() - interval '1 second'
+          where id = ${id}`;
+      };
+      const expired = await paymentRead(A, lapsing.session.id, lapsing.secret);
+      expect(expired.status).toBe(200);
+      expect(expired.json.payment).toBeNull();
+      expect(expired.json.checkoutSession).toMatchObject({
+        id: lapsing.session.id,
+        state: "expired",
+      });
     });
 
     it("answers a wrong secret, another checkout's secret, or no secret as nothing", async () => {

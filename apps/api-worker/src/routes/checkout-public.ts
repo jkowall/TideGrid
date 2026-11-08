@@ -8,6 +8,7 @@ import {
   IdempotencyKey,
   TripOfferResponse,
 } from "@tidegrid/contracts";
+import { inTenantTransaction } from "@tidegrid/database";
 import {
   type CheckoutSessionView,
   cancelCheckoutSession,
@@ -279,7 +280,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
     tags: ["public", "checkout"],
     summary: "What the guest needs to pay an open checkout, read again",
     description: [
-      "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token, never a URL. For an open checkout within its expiry, returns the provider payment and its client secret, so a page that reloaded, or lost the answer to opening the checkout, can still pay without sending the booker's details again. It asks the provider with the payment's own idempotency key, so it never creates a second payment. Any other state answers 200 with `payment: null`. A wrong secret, another operator's checkout, and an unknown id answer the same 404.",
+      "Resolves the browser Origin as /v1/public/trips does and needs the checkout's secret as a bearer token, never a URL. For an open checkout within its expiry, returns the provider payment and its client secret, so a page that reloaded, or lost the answer to opening the checkout, can still pay without sending the booker's details again. It asks the provider with the payment's own idempotency key, so it never creates a second payment. Any other state answers 200 with `payment: null`, including a checkout that closes or lapses while it is read: the body then shows the closed state. A wrong secret, another operator's checkout, and an unknown id answer the same 404.",
       "Never cached. Rate limited like public commands, since it may call the provider. The client secret is a capability: keep it out of URLs and logs.",
     ].join("\n\n"),
     security: bearerSecurity,
@@ -330,17 +331,24 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
       );
     }
     if (ready.kind === "not_found") throw new Error("a committed checkout has no payment");
+    if (ready.kind === "not_open") {
+      // It closed or lapsed after the view was read: read the view again, so
+      // the answer never shows an open checkout with no payment.
+      const closed = await inTenantTransaction(getDb(c), read.ctx, (trx) =>
+        getCheckoutSession(trx, read.ctx.tenantId, { sessionId: session.id, secret }),
+      );
+      if (!closed) throw checkoutNotFound();
+      const state = closed.state === "open" ? ready.state : closed.state;
+      return c.json({ checkoutSession: { ...closed, state }, payment: null }, 200);
+    }
     return c.json(
       {
         checkoutSession: session,
-        payment:
-          ready.kind === "ready"
-            ? {
-                provider: ready.provider,
-                paymentRef: ready.paymentRef,
-                clientSecret: ready.clientSecret,
-              }
-            : null,
+        payment: {
+          provider: ready.provider,
+          paymentRef: ready.paymentRef,
+          clientSecret: ready.clientSecret,
+        },
       },
       200,
     );
@@ -352,7 +360,7 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
     tags: ["public", "checkout"],
     summary: "The offer of a checkout's trip, without the guest's own hold",
     description:
-      "Resolves the browser Origin and needs the checkout's secret as a bearer token. The same offer as GET /v1/public/trips/{tripId}/offer for the checkout's trip, except that while the checkout is open and within its expiry its own hold does not count against the trip: a checkout whose hold took the last seats, or the whole boat, still reads its trip's offer. Every other rule applies as for the public offer. Once the checkout is closed it answers exactly as the public offer does. A wrong secret, another operator's checkout, and an unknown id answer the same 404.",
+      "Resolves the browser Origin and needs the checkout's secret as a bearer token. The same offer as GET /v1/public/trips/{tripId}/offer for the checkout's trip, except that while the checkout is open and within its expiry its own hold does not count against the trip when that hold is what takes the trip off sale: a checkout whose hold took the last seats, or the whole boat, still reads its trip's offer. Every other rule applies as for the public offer. Once the checkout is closed it answers exactly as the public offer does. A wrong secret, another operator's checkout, and an unknown id answer the same 404.",
     security: bearerSecurity,
     request: { params: CheckoutSessionParams },
     responses: {
