@@ -4,6 +4,17 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Runtime provenance brand checked by the inbox (W1-PROVENANCE), built November 8, 2026
+
+The payments inbox now refuses any provider event that an adapter's `verifyWebhook` did not mint ([decision register](v2/06-decision-register.md#2026-11-08-w1-provenance-runtime-provenance-brand-checked-by-the-inbox-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator default D1 pending owner confirmation). The minting function records each event in a module-private set. `recordProviderEvent` checks that set before any SQL runs. A spread, `Object.assign`, a structured clone, a JSON round trip, a proxy, or a hand-built object is refused. A minted event is frozen, and its time cannot be changed. No migration and no contract change. Nothing was released. The local runs and the reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed. Every integration suite passed on a throwaway local PostgreSQL 17: 892 tests passed and 2 skipped, including the new provenance suite, which shows that spread copies write no row and the real event records once. With the inbox check removed, 4 of the 7 brand unit tests fail.
+- **Independent review**, under the payments reviewer override. Accept, with only this entry outstanding.
+- **Security review.** Two low findings, fixed with tests that failed before. `Object.freeze` and `Date` are captured at load, like the set's methods. The scan that limits who may call the minting function now also refuses a namespace import or a dynamic import of the adapter module.
+- **Recheck.** Accept with listed fixes. Deliberately obfuscated source (a comment inside an import, or a unicode escape in the name) still passes the scan. The package README now says the scan guards against mistakes, not against a hostile commit. The runtime brand still refuses every copy.
+- **Open risks.** The brand is checked at the inbox only, so a forged event can read one account row before it is refused. Checking at the top of the booking and route functions is a proposed follow-up.
+- **Telemetry.** About one and a half hours of agent time across build, two reviews, and one fix round, with one retry for a busy container port. Token use and cost per checkpoint: missing.
+
 ### The Stripe card form in guest checkout (W1-STRIPE-ELEMENT), built November 8, 2026
 
 Under the Stripe provider, the guest pay step now mounts a card-only Payment Element, loaded from js.stripe.com through an injectable loader with no npm dependency ([decision register](v2/06-decision-register.md#2026-11-08-w1-stripe-element-the-stripe-card-form-in-guest-checkout-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults D1 and D2 pending owner confirmation). The publishable key is an API secret the owner sets, `pk_test_` only and never committed. It and the client secret reach only the checkout's holder through the Bearer payment read. Confirmation still waits for the checkout's confirmed state from a verified webhook. Decline, expiry, lost answer, and load error have designed screens. The guest CSP adds Stripe's script, frame, and connect origins (D3, approved by the owner on 2026-11-08). The fake provider path is unchanged. Nothing was released, and no Stripe call was made. The local runs and the reviews below are coordinator-reported.
