@@ -4,6 +4,42 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+The three entries below record demo acceptance step 9 for the three released SHAs that had none, by a `workflow_dispatch` run of `ci.yml` on each. The coordinator gave the owner a checklist on 2026-11-08: dispatch `ci.yml` from `main` on each SHA, check the four jobs and "The commit under test", and authorize a W0-CLOSEOUT docs goal for these entries. The owner replied: "step 5 authorized, use your branch". This goal is separate from the ruleset W0-CLOSEOUT in the [decision register](v2/06-decision-register.md#2026-11-08-w0-closeout-a-ruleset-on-main-for-the-four-ci-checks-owner-action-pending-confirmation).
+
+A green dispatch counts as a SHA's step 9 under [a2, an owner decision of 2026-11-08](v2/06-decision-register.md#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions), while `main`'s `ci.yml` differs from the SHA's only by the pull request 75 change. That holds: `git log <sha>..main -- .github/workflows/ci.yml` lists only `3bd529b`, `df444b6`, and `cdc7bb2`, and each SHA's `ci.yml` equals the one just before `3bd529b`.
+
+The evidence runs were triggered from the owner's account at 00:58 UTC. About 90 seconds later the coordinator dispatched a second run on each SHA through the GitHub connector, which also acts as the owner's account. It canceled those three as duplicates while they waited behind the first runs, before any job started. These entries were written from git and the GitHub Actions API.
+
+### Step 9 for the guest site 91a4faa by dispatch, November 8, 2026
+
+`91a4faa` is the merge of pull request 59, C7. Per the [November 7 entry](#step-9-for-the-live-api-dd30fc8-november-7-2026), not read live, the guest site runs it.
+
+- **The run.** [Run 42432174275](https://github.com/jkowall/TideGrid/actions/runs/42432174275), event `workflow_dispatch`, started 2026-11-08 at 00:58:27 UTC, completed at 01:02:53 UTC.
+- **Head.** `main` at `f72b1bd3f3bd177be7bfcd59643aefea7853bb45`, the merge of pull request 80. The step's `workflow` field shows that commit's workflow file ran.
+- **Commit under test.** In all four jobs, the step printed `commit 91a4faaa14ae01838e6aeb5df33f1f466722f790 tree 0d228fed48469c00420278cdfc0d3e23457b762c ref refs/heads/main workflow f72b1bd3f3bd177be7bfcd59643aefea7853bb45`. `git rev-parse` gives the same tree for `91a4faa`, and `91a4faa` is on `main`.
+- **Result.** All four jobs succeeded: checks, integration, browser, and console-browser. Step 9 is shown for `91a4faa`.
+- **A second dispatch.** [Run 42432268632](https://github.com/jkowall/TideGrid/actions/runs/42432268632) on the same SHA, the coordinator's duplicate, was canceled before any job started. It is not evidence.
+
+### Step 9 for 1f39feb by dispatch, November 8, 2026
+
+`1f39feb` is the merge of pull request 62, the C5 revert, released to the API at P9.6 of the [November 4 entry](#demo-acceptance-on-the-preview-deployment-the-november-1-runbook-november-4-2026).
+
+- **The run.** [Run 42432176209](https://github.com/jkowall/TideGrid/actions/runs/42432176209), event `workflow_dispatch`, started 2026-11-08 at 00:58:29 UTC, completed at 01:03:22 UTC.
+- **Head.** `main` at `f72b1bd3f3bd177be7bfcd59643aefea7853bb45`.
+- **Commit under test.** In all four jobs, the step printed `commit 1f39febf90fdd8e9ba691cb9d262c4b79ceeea10 tree c0cea555601299b0205d6203d62aa2e963662703 ref refs/heads/main workflow f72b1bd3f3bd177be7bfcd59643aefea7853bb45`. `git rev-parse` gives the same tree for `1f39feb`, and `1f39feb` is on `main`.
+- **Result.** All four jobs succeeded: checks, integration, browser, and console-browser. Step 9 is shown for `1f39feb`.
+- **A second dispatch.** [Run 42432270747](https://github.com/jkowall/TideGrid/actions/runs/42432270747) on the same SHA, the coordinator's duplicate, was canceled before any job started. It is not evidence.
+
+### Step 9 for 9086a18 by dispatch, November 8, 2026
+
+`9086a18` is the merge of pull request 60, C6, released to the API as `99464dec` at P11 of the [November 4 entry](#demo-acceptance-on-the-preview-deployment-the-november-1-runbook-november-4-2026).
+
+- **The run.** [Run 42432178347](https://github.com/jkowall/TideGrid/actions/runs/42432178347), event `workflow_dispatch`, started 2026-11-08 at 00:58:30 UTC, completed at 01:01:40 UTC.
+- **Head.** `main` at `f72b1bd3f3bd177be7bfcd59643aefea7853bb45`.
+- **Commit under test.** In all four jobs, the step printed `commit 9086a1812ee943d6056a3bfccb206bba3fbbc85d tree 21f44d164d100c56173ef41aefaf76aba64911e9 ref refs/heads/main workflow f72b1bd3f3bd177be7bfcd59643aefea7853bb45`. `git rev-parse` gives the same tree for `9086a18`, and `9086a18` is on `main`.
+- **Result.** All four jobs succeeded: checks, integration, browser, and console-browser. Step 9 is shown for `9086a18`.
+- **A second dispatch.** [Run 42432272795](https://github.com/jkowall/TideGrid/actions/runs/42432272795) on the same SHA, the coordinator's duplicate, was canceled before any job started. It is not evidence.
+
 ### G2.12 follow-ups merged in pull request 78, recorded November 8, 2026
 
 Pull request 78 (search by source, the calendar carrying the source, and the CSV guard for number-shaped references) merged on 2026-11-07 at 20:37 UTC as `7ef50cf`. No release of `7ef50cf` is recorded. This entry was written from git, the GitHub Actions API, and the pull request's reviews, except where marked.
