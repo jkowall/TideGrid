@@ -59,6 +59,7 @@ export {
   DEADLINE_REACHED,
   DEFAULT_GUEST_LINK_ORIGIN,
   DEFAULT_LEASE_SECONDS,
+  type DeliveryHold,
   type DeliveryItem,
   type DeliveryOptions,
   type DeliveryOutcome,
@@ -136,3 +137,11 @@ export {
   renderEmail,
   usesAccessLink,
 } from "./render.ts";
+export {
+  ADDRESS_SUPPRESSED,
+  isSuppressed,
+  operatorSenderAddress,
+  SENDER_POLICIES,
+  type SenderPolicy,
+  senderAddressFor,
+} from "./sender.ts";
