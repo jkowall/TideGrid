@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
+
+The owner placed finalization exception resolution in the G2.12 row with the O-SCOPE choice "Booking fixes and email limits". The goal's start gate is that entry. Staff now mark a payment exception as followed up, with migration `0017` (provisional, claimed at merge) and its service in the [booking contract](../../packages/domain-booking/README.md#exception-resolution-w1-fin-exc). The owner gave no answer on who may resolve or what reason is required, so these are coordinator defaults, pending owner confirmation:
+
+- **D1 A: an append-only resolution table.** One resolution per exception, never edited or removed, for any role. The exception itself is not changed; the open list is the exceptions without a resolution. The database stamps who resolved it, the request, and the time.
+- **D2: owners and booking staff resolve; finance reads.** A new permission, `exceptions.resolve`.
+- **D3: four reason codes.** Contacted the guest, refunded outside TideGrid, no action needed, and other, which requires a note. The note is optional otherwise, and follows a booking note's rules.
+- **D4: the note goes where the booker goes.** Finance sees the reason, who, and when, but not the note, since a note can name a guest (as with booking notes, owner decision of 2026-10-19). The note never enters the audit row, an event, a log, or the idempotency store.
+- **D5: no resolve while the automatic refund is still requested.** Its outcome is not known yet, and a refund that then failed would leave the open list unseen. A refund the provider refused can be resolved, for example as refunded outside TideGrid.
+
+Resolving changes no money, booking, payment, refund, or checkout. Retries and refunds from the console, email exceptions, overrides, and staff cancel stay out of scope.
+
 ### 2026-11-08: Neon migrations from CI (owner request; owner decision 2026-11-08)
 
 On 2026-11-08 the owner asked: "can we push to neon from CI instead of from laptops in the future?" Migrations to Neon main run today only from the owner's Mac (`nov1 db backup` and `nov1 db migrate`), and `nov1` refuses every live step when `CI` is set. The Mac's journal also still recorded a deleted backup branch, so `nov1 db backup` would not make a new restore point. The [hosting plan](08-build-hosting-and-operations.md#infrastructure-and-configuration-ownership) already puts migration and backup credentials in GitHub environment secrets. This change proposes a manual GitHub Actions workflow for migrations only. It has never run.

@@ -59,3 +59,13 @@ export function canCreateBookings(role: StaffRole): boolean {
 export function canResendEmail(role: StaffRole): boolean {
   return role === "owner" || role === "booking_staff";
 }
+
+/**
+ * Who marks a payment exception as followed up (W1-FIN-EXC): owners and
+ * booking staff. Finance reads the resolutions and resolves none. This
+ * mirrors the API's `exceptions.resolve` permission for display only; the
+ * API refuses finance either way.
+ */
+export function canResolveExceptions(role: StaffRole): boolean {
+  return role === "owner" || role === "booking_staff";
+}

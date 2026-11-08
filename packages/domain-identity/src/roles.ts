@@ -17,7 +17,9 @@ import type { StaffRole } from "@tidegrid/contracts";
  * staff create staff-assisted bookings for a guest who phoned, emailed, or
  * walked up (`bookings.create`, G2.12d); finance changes no booking. Owners
  * and booking staff send a booking's email again (`messages.resend`, G2.16b);
- * finance sends none.
+ * finance sends none. Owners and booking staff mark a payment exception as
+ * followed up (`exceptions.resolve`, W1-FIN-EXC); finance reads the
+ * resolutions as part of the exceptions and resolves none.
  */
 export type Permission =
   | "members.read"
@@ -36,7 +38,9 @@ export type Permission =
   // Staff-assisted bookings (G2.12d): quote, open, pay through the shim, cancel.
   | "bookings.create"
   // Booking email (G2.16b): send a booking's confirmation or cancellation notice again.
-  | "messages.resend";
+  | "messages.resend"
+  // Exception resolution (W1-FIN-EXC): mark a payment exception as followed up.
+  | "exceptions.resolve";
 
 const matrix: Record<StaffRole, readonly Permission[]> = {
   owner: [
@@ -53,6 +57,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "waivers.manage",
     "bookings.create",
     "messages.resend",
+    "exceptions.resolve",
   ],
   booking_staff: [
     "catalog.read",
@@ -64,6 +69,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "waivers.manage",
     "bookings.create",
     "messages.resend",
+    "exceptions.resolve",
   ],
   finance: ["audit.read", "catalog.read", "payments.read"],
 };

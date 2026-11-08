@@ -10074,7 +10074,7 @@
           "bookings"
         ],
         "summary": "Payments that could not become bookings",
-        "description": "Every role. Verified payments whose capacity was gone, whose trip changed, or whose checkout had already failed or been canceled, newest first, with the trip, the checkout, the masked provider reference, and the state of the automatic full refund. A payment_mismatch is not refunded automatically. The booker's name and email, for following up, go only to roles that hold bookings.read.",
+        "description": "Every role. Verified payments whose capacity was gone, whose trip changed, or whose checkout had already failed or been canceled, newest first, with the trip, the checkout, the masked provider reference, and the state of the automatic full refund. A payment_mismatch is not refunded automatically. The booker's name and email, for following up, go only to roles that hold bookings.read. W1-FIN-EXC: status=open (the default) lists the exceptions not yet followed up, and status=resolved the history, each with its resolution; a resolution's note goes only to roles that hold bookings.read.",
         "security": [
           {
             "accessJwt": []
@@ -10093,6 +10093,21 @@
             "description": "Tenant UUID; anything else answers 404",
             "name": "tenantId",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "resolved"
+              ],
+              "default": "open",
+              "description": "Which exceptions to list; open when absent (W1-FIN-EXC). Both lists are newest first by when the exception arose"
+            },
+            "required": false,
+            "description": "Which exceptions to list; open when absent (W1-FIN-EXC). Both lists are newest first by when the exception arose",
+            "name": "status",
+            "in": "query"
           },
           {
             "schema": {
@@ -10366,6 +10381,65 @@
                               "email"
                             ],
                             "description": "Personal data, for following up with the guest. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise"
+                          },
+                          "resolution": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "reasonCode": {
+                                "type": "string",
+                                "enum": [
+                                  "contacted_guest",
+                                  "refunded_outside",
+                                  "no_action_needed",
+                                  "other"
+                                ],
+                                "description": "How staff followed the exception up: contacted the guest, refunded outside TideGrid, no action needed, or other (a note is then required)"
+                              },
+                              "note": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "What the staff member wrote, or null when they wrote nothing. Text a person typed that can name a guest: present only for roles that hold bookings.read (owners and booking staff); absent otherwise"
+                              },
+                              "resolvedBy": {
+                                "type": "object",
+                                "properties": {
+                                  "userId": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "description": "How this operator names the staff member"
+                                  }
+                                },
+                                "required": [
+                                  "userId",
+                                  "name"
+                                ],
+                                "description": "Who resolved it: the signed-in staff member, never a value the request named"
+                              },
+                              "resolvedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "When it was resolved, on the database's clock"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reasonCode",
+                              "resolvedBy",
+                              "resolvedAt"
+                            ],
+                            "description": "How staff followed it up; null while it is open"
                           }
                         },
                         "required": [
@@ -10380,7 +10454,8 @@
                           "trip",
                           "partySize",
                           "checkout",
-                          "payment"
+                          "payment",
+                          "resolution"
                         ]
                       }
                     },
@@ -18247,6 +18322,395 @@
           },
           "404": {
             "description": "No such tenant, or no such booking for it (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key reused with a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/finalization-exceptions/{exceptionId}/resolution": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Mark a payment exception as followed up",
+        "description": "Owners and booking staff; finance reads resolutions and resolves none. Records how staff followed the exception up: a reason code and, when they choose, a note (required for other). Once per exception, never edited or removed. It changes no money, booking, payment, or refund. Refused while the automatic refund is still requested. The resolver is the signed-in staff member and the time is the database's. Recorded in the audit history by the resolution's id and reason code; the note never enters the audit history or the answer. Idempotent by key: a replay answers the first result.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Exception UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Exception UUID; anything else answers 404",
+            "name": "exceptionId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reasonCode": {
+                    "type": "string",
+                    "enum": [
+                      "contacted_guest",
+                      "refunded_outside",
+                      "no_action_needed",
+                      "other"
+                    ],
+                    "description": "How staff followed the exception up: contacted the guest, refunded outside TideGrid, no action needed, or other (a note is then required)"
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f\\u007f-\\u009f]*$",
+                    "description": "Up to 500 characters with at least one visible one, as a booking note. Required for other. Seen by owners and booking staff only"
+                  }
+                },
+                "required": [
+                  "reasonCode"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The resolution, without its note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exceptionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "resolution": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reasonCode": {
+                          "type": "string",
+                          "enum": [
+                            "contacted_guest",
+                            "refunded_outside",
+                            "no_action_needed",
+                            "other"
+                          ],
+                          "description": "How staff followed the exception up: contacted the guest, refunded outside TideGrid, no action needed, or other (a note is then required)"
+                        },
+                        "resolvedBy": {
+                          "type": "object",
+                          "properties": {
+                            "userId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string",
+                              "description": "How this operator names the staff member"
+                            }
+                          },
+                          "required": [
+                            "userId",
+                            "name"
+                          ],
+                          "description": "Who resolved it: the signed-in staff member, never a value the request named"
+                        },
+                        "resolvedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When it was resolved, on the database's clock"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "reasonCode",
+                        "resolvedBy",
+                        "resolvedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "exceptionId",
+                    "resolution"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request: an unknown reason, a bad note, or other without a note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role or origin does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such exception for it (exception_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already followed up (exception_already_resolved), or the automatic refund is still in progress (exception_refund_pending)",
             "content": {
               "application/json": {
                 "schema": {

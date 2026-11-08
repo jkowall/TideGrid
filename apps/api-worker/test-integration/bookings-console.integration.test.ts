@@ -51,6 +51,7 @@ import {
   type PartySelection,
 } from "@tidegrid/domain-pricing";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
+import { sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createApp } from "../src/app.ts";
@@ -2250,5 +2251,311 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
       guests: count,
     });
     expect(settled.bookings.filter((b) => b.tripId === tripId)).toHaveLength(count);
+  });
+  // Exception resolution (W1-FIN-EXC) ------------------------------------------------------
+  //
+  // These run last: they resolve exceptions the list tests above read as open.
+
+  const resolutionPath = (tenantId: string, exceptionId: string) =>
+    `${staffBase(tenantId)}/finalization-exceptions/${encodeURIComponent(exceptionId)}/resolution`;
+  const statusPath = (tenantId: string, status: string, before?: string) =>
+    `${staffBase(tenantId)}/finalization-exceptions?status=${status}${before ? `&before=${before}` : ""}`;
+  function resolve(
+    tenantId: string,
+    exceptionId: string,
+    as: string,
+    body: unknown,
+    key: string = randomUUID(),
+  ): Promise<Res> {
+    return request("POST", resolutionPath(tenantId, exceptionId), {
+      as,
+      origin: "https://console.test",
+      body,
+      headers: { "idempotency-key": key },
+    });
+  }
+  /** Everything a resolution must leave alone: money, bookings, checkouts, and the exceptions. */
+  async function moneyState(tenantId: string) {
+    return admin`
+      select (select coalesce(json_agg(row_to_json(x) order by x.id), '[]') from (
+                select id, state, amount, provider_payment_id from public.payments
+                 where tenant_id = ${tenantId}) x) as payments,
+             (select coalesce(json_agg(row_to_json(x) order by x.id), '[]') from (
+                select id, state, amount, failure_code from public.payment_refunds
+                 where tenant_id = ${tenantId}) x) as refunds,
+             (select coalesce(json_agg(row_to_json(x) order by x.id), '[]') from (
+                select id, state from public.bookings where tenant_id = ${tenantId}) x) as bookings,
+             (select coalesce(json_agg(row_to_json(x) order by x.id), '[]') from (
+                select id, state from public.checkout_sessions where tenant_id = ${tenantId}) x) as checkouts,
+             (select coalesce(json_agg(row_to_json(x) order by x.id), '[]') from (
+                select * from public.finalization_exceptions where tenant_id = ${tenantId}) x) as exceptions`;
+  }
+
+  it("lets booking staff resolve with a reason and a note, once, replays the key, and changes no money", async () => {
+    const id = fx.exceptionIds.lost;
+    const before = await moneyState(A.id);
+    const note = "Called the guest back.\nRebooked them for Friday.";
+    // Finance reads and never resolves.
+    const refused = await resolve(A.id, id, A.finance, { reasonCode: "contacted_guest" });
+    expect(answer(refused)).toEqual(refusal(403, "forbidden"));
+
+    const key = randomUUID();
+    const first = await resolve(A.id, id, A.staff, { reasonCode: "contacted_guest", note }, key);
+    expect(first.status, first.text).toBe(201);
+    expect(first.json).toEqual({
+      exceptionId: id,
+      resolution: {
+        id: expect.any(String),
+        reasonCode: "contacted_guest",
+        resolvedBy: { userId: expect.any(String), name: "booking_staff" },
+        resolvedAt: expect.any(String),
+      },
+    });
+    // The note is in neither the answer, the stored replay, nor the audit history.
+    expect(first.text).not.toContain("Rebooked");
+    const replay = await resolve(A.id, id, A.staff, { reasonCode: "contacted_guest", note }, key);
+    expect(replay.status).toBe(201);
+    expect(replay.headers.get("idempotent-replayed")).toBe("true");
+    expect(replay.json).toEqual(first.json);
+    const reused = await resolve(A.id, id, A.staff, { reasonCode: "other", note }, key);
+    expect(answer(reused)).toEqual(refusal(422, "idempotency_key_reused"));
+    const again = await resolve(A.id, id, A.owner, { reasonCode: "no_action_needed" });
+    expect(answer(again)).toEqual(refusal(409, "exception_already_resolved"));
+
+    const stored = await admin<
+      { reason_code: string; note: string; resolved_by: string; request_id: string | null }[]
+    >`
+      select r.reason_code, r.note, u.email as resolved_by, r.request_id
+        from public.finalization_exception_resolutions r
+        join public.staff_users u on u.id = r.resolved_by_user_id
+       where r.exception_id = ${id}`;
+    expect(stored).toEqual([
+      {
+        reason_code: "contacted_guest",
+        note,
+        resolved_by: A.staff,
+        request_id: expect.any(String),
+      },
+    ]);
+    const audits = await admin<{ action: string; after_state: unknown; text: string }[]>`
+      select action, after_state, row_to_json(a)::text as text
+        from public.audit_events a
+       where tenant_id = ${A.id} and subject_type = 'finalization_exception' and subject_id = ${id}
+         and action = 'finalization_exception.resolved'`;
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      action: "finalization_exception.resolved",
+      after_state: { reasonCode: "contacted_guest", withNote: true },
+    });
+    expect(audits[0]?.text).not.toContain("Rebooked");
+    const keys = await admin<{ body: string }[]>`
+      select coalesce(response_body::text, '') as body from public.idempotency_keys
+       where tenant_id = ${A.id} and key = ${key}`;
+    expect(keys).toHaveLength(1);
+    expect(keys[0]?.body).not.toContain("Rebooked");
+
+    // Resolving moved no money and changed no booking, checkout, or exception.
+    expect(await moneyState(A.id)).toEqual(before);
+  });
+
+  it("takes a resolved exception off the open list and keeps it in the history, with the note for owners only", async () => {
+    const lost = fx.exceptionIds.lost;
+    const [open, owner, staff, finance] = await Promise.all([
+      get(exceptionsPath(A.id), A.owner),
+      get(statusPath(A.id, "resolved"), A.owner),
+      get(statusPath(A.id, "resolved"), A.staff),
+      get(statusPath(A.id, "resolved"), A.finance),
+    ]);
+    expect(open.status, open.text).toBe(200);
+    const openPage = FinalizationExceptionsResponse.parse(open.json);
+    expect(openPage.exceptions.map((e) => e.id)).toEqual([
+      fx.exceptionIds.mismatched,
+      fx.exceptionIds.canceled,
+    ]);
+    expect(openPage.exceptions.every((e) => e.resolution === null)).toBe(true);
+    const history = FinalizationExceptionsResponse.parse(owner.json);
+    expect(history.exceptions.map((e) => e.id)).toEqual([lost]);
+    expect(history.exceptions[0]?.resolution).toMatchObject({
+      reasonCode: "contacted_guest",
+      note: "Called the guest back.\nRebooked them for Friday.",
+      resolvedBy: { name: "booking_staff" },
+    });
+    // The history still shows the refund that went with it.
+    expect(history.exceptions[0]?.refund).toMatchObject({ state: "succeeded" });
+    expect(staff.json).toEqual(owner.json);
+    // Finance sees the history without the booker or the note.
+    expect(finance.status).toBe(200);
+    expect(finance.json).toEqual(withoutKey(withoutKey(owner.json, "booker"), "note"));
+    expect(finance.text).not.toContain("Rebooked");
+    // Both lists page with before, within their own status.
+    const paged = await get(`${statusPath(A.id, "open")}&limit=1`, A.owner);
+    const one = FinalizationExceptionsResponse.parse(paged.json);
+    expect(one.exceptions.map((e) => e.id)).toEqual([fx.exceptionIds.mismatched]);
+    const next = FinalizationExceptionsResponse.parse(
+      (await get(`${statusPath(A.id, "open", one.nextBefore ?? "")}&limit=1`, A.owner)).json,
+    );
+    expect(next.exceptions.map((e) => e.id)).toEqual([fx.exceptionIds.canceled]);
+    expect(next.nextBefore).toBeNull();
+    const bad = await get(statusPath(A.id, "closed"), A.owner);
+    expect(bad.status).toBe(400);
+  });
+
+  it("refuses while the refund is still requested, and accepts a refund the provider refused", async () => {
+    const ids = fx.bExceptionIds;
+    const pending = await resolve(B.id, ids.unanswered, B.owner, {
+      reasonCode: "no_action_needed",
+    });
+    expect(answer(pending)).toEqual(refusal(409, "exception_refund_pending"));
+    const failed = await resolve(B.id, ids.refused, B.owner, {
+      reasonCode: "refunded_outside",
+      note: "Refunded by bank transfer.",
+    });
+    expect(failed.status, failed.text).toBe(201);
+    expect(failed.json).toMatchObject({ resolution: { reasonCode: "refunded_outside" } });
+    const rows = await admin<{ exception_id: string }[]>`
+      select exception_id from public.finalization_exception_resolutions where tenant_id = ${B.id}`;
+    expect(rows.map((r) => r.exception_id)).toEqual([ids.refused]);
+  });
+
+  it("answers another tenant's exception, and an unknown one, with the same 404 on resolve and in the lists", async () => {
+    const unknown = randomUUID();
+    const foreign = fx.bExceptionIds.canceled;
+    const [viaA, missing, notUuid, outsider] = await Promise.all([
+      resolve(A.id, foreign, A.owner, { reasonCode: "no_action_needed" }),
+      resolve(A.id, unknown, A.owner, { reasonCode: "no_action_needed" }),
+      resolve(A.id, "not-a-uuid", A.owner, { reasonCode: "no_action_needed" }),
+      resolve(B.id, foreign, A.owner, { reasonCode: "no_action_needed" }),
+    ]);
+    expect(answer(viaA)).toEqual(refusal(404, "exception_not_found"));
+    expect(answer(missing)).toEqual(answer(viaA));
+    expect(answer(notUuid)).toEqual(answer(viaA));
+    expect(answer(outsider)).toEqual(refusal(404, "tenant_not_found"));
+    // Nothing was written for B.
+    const [row] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.finalization_exception_resolutions
+       where exception_id = ${foreign}`;
+    expect(row?.n).toBe(0);
+    // Each tenant's history lists its own resolutions only, and a cursor of
+    // the other tenant's names nothing.
+    const [aHistory, bHistory, crossCursor] = await Promise.all([
+      get(statusPath(A.id, "resolved"), A.owner),
+      get(statusPath(B.id, "resolved"), B.owner),
+      get(statusPath(B.id, "resolved", fx.exceptionIds.lost), B.owner),
+    ]);
+    const aIds = FinalizationExceptionsResponse.parse(aHistory.json).exceptions.map((e) => e.id);
+    const bIds = FinalizationExceptionsResponse.parse(bHistory.json).exceptions.map((e) => e.id);
+    expect(aIds).toEqual([fx.exceptionIds.lost]);
+    expect(bIds).toEqual([fx.bExceptionIds.refused]);
+    expect(answer(crossCursor)).toEqual(refusal(400, "cursor_invalid"));
+  });
+
+  it("refuses other without a note, an unknown reason, a missing key, and a foreign origin", async () => {
+    const id = fx.exceptionIds.canceled;
+    const cases = await Promise.all([
+      resolve(A.id, id, A.owner, { reasonCode: "other" }),
+      resolve(A.id, id, A.owner, { reasonCode: "other", note: " \u200b " }),
+      resolve(A.id, id, A.owner, { reasonCode: "refunded" }),
+      resolve(A.id, id, A.owner, { reasonCode: "contacted_guest", note: "x".repeat(501) }),
+      request("POST", resolutionPath(A.id, id), {
+        as: A.owner,
+        origin: "https://console.test",
+        body: { reasonCode: "contacted_guest" },
+      }),
+    ]);
+    for (const res of cases) expect(res.status, res.text).toBe(400);
+    const foreign = await request("POST", resolutionPath(A.id, id), {
+      as: A.owner,
+      origin: "https://evil.example",
+      body: { reasonCode: "contacted_guest" },
+      headers: { "idempotency-key": randomUUID() },
+    });
+    expect(foreign.status).toBe(403);
+    const [row] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.finalization_exception_resolutions
+       where exception_id = ${id}`;
+    expect(row?.n).toBe(0);
+  });
+
+  it("lets one of two staff resolving at once win, and answers the other already resolved", async () => {
+    const id = fx.exceptionIds.canceled;
+    const results = await Promise.all([
+      resolve(A.id, id, A.owner, { reasonCode: "contacted_guest" }),
+      resolve(A.id, id, A.staff, { reasonCode: "no_action_needed" }),
+      resolve(A.id, id, A.owner, { reasonCode: "refunded_outside" }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409, 409]);
+    for (const r of results.filter((x) => x.status === 409)) {
+      expect(answer(r)).toEqual(refusal(409, "exception_already_resolved"));
+    }
+    const [row] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.finalization_exception_resolutions
+       where exception_id = ${id}`;
+    expect(row?.n).toBe(1);
+  });
+
+  it("keeps resolutions append-only, authored by the transaction, and staff-only in the database", async () => {
+    const [user] = await admin<{ id: string }[]>`
+      select id from public.staff_users where email = ${A.owner}`;
+    if (!user) throw new Error("no owner");
+    const staffCtx = {
+      tenantId: A.id,
+      actorType: "staff" as const,
+      actorId: user.id,
+      requestId: "w1-fin-exc-db",
+      sourceIp: null,
+    };
+    const id = fx.exceptionIds.mismatched;
+    // The runtime cannot change or remove a resolution, whoever it names.
+    type Trx = Parameters<Parameters<typeof inTenantTransaction>[2]>[0];
+    const attempt = (statement: (trx: Trx) => Promise<unknown>) =>
+      inTenantTransaction(runtime.db, staffCtx, statement).then(
+        () => "ok",
+        (err: { code?: string; cause?: { code?: string } }) =>
+          err.code ?? err.cause?.code ?? "error",
+      );
+    // The trigger names the actor, whatever the insert says.
+    const other = randomUUID();
+    expect(
+      await attempt((trx) =>
+        sql`insert into finalization_exception_resolutions
+              (tenant_id, exception_id, reason_code, resolved_by_user_id, created_at)
+            values (${A.id}, ${id}, 'no_action_needed', ${other}, '2000-01-01')`.execute(trx),
+      ),
+    ).toBe("ok");
+    const [row] = await admin<
+      { resolved_by_user_id: string; created_at: Date; request_id: string }[]
+    >`
+      select resolved_by_user_id, created_at, request_id
+        from public.finalization_exception_resolutions where exception_id = ${id}`;
+    expect(row?.resolved_by_user_id).toBe(user.id);
+    expect(row?.request_id).toBe("w1-fin-exc-db");
+    expect(row?.created_at.getUTCFullYear()).toBeGreaterThan(2000);
+    expect(
+      await attempt((trx) =>
+        sql`update finalization_exception_resolutions set reason_code = 'other', note = 'x'
+             where exception_id = ${id}`.execute(trx),
+      ),
+    ).toBe("42501");
+    expect(
+      await attempt((trx) =>
+        sql`delete from finalization_exception_resolutions where exception_id = ${id}`.execute(trx),
+      ),
+    ).toBe("42501");
+    // Only staff resolve: the system actor cannot.
+    expect(
+      await inTenantTransaction(runtime.db, systemContext(B.id), (trx) =>
+        sql`insert into finalization_exception_resolutions (tenant_id, exception_id, reason_code)
+            values (${B.id}, ${fx.bExceptionIds.canceled}, 'no_action_needed')`.execute(trx),
+      ).then(
+        () => "ok",
+        (err: { code?: string }) => err.code ?? "error",
+      ),
+    ).toBe("42501");
+    // Row-level security: A's context reads none of B's resolutions.
+    const seen = await inTenantTransaction(runtime.db, staffCtx, (trx) =>
+      sql<{ n: number }>`select count(*)::int as n from finalization_exception_resolutions
+                          where tenant_id = ${B.id}`.execute(trx),
+    );
+    expect(seen.rows[0]?.n).toBe(0);
   });
 });

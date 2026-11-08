@@ -949,11 +949,13 @@ describe("the booking views' reads", () => {
     expect(asked().path).toBe(`/api/v1/staff/tenants/${tenant}/bookings/${bookingIdsMaya}`);
     await loadRoster(tenant, tripIds.sunset);
     expect(asked().path).toBe(`/api/v1/staff/tenants/${tenant}/trips/${tripIds.sunset}/roster`);
-    await loadExceptions(tenant, {});
-    expect(asked().path).toBe(`/api/v1/staff/tenants/${tenant}/finalization-exceptions?limit=50`);
-    await loadExceptions(tenant, { before: bookingIdsMaya });
+    await loadExceptions(tenant, { status: "open" });
     expect(asked().path).toBe(
-      `/api/v1/staff/tenants/${tenant}/finalization-exceptions?limit=50&before=${bookingIdsMaya}`,
+      `/api/v1/staff/tenants/${tenant}/finalization-exceptions?status=open&limit=50`,
+    );
+    await loadExceptions(tenant, { status: "resolved", before: bookingIdsMaya });
+    expect(asked().path).toBe(
+      `/api/v1/staff/tenants/${tenant}/finalization-exceptions?status=resolved&limit=50&before=${bookingIdsMaya}`,
     );
     await findReference(tenant, "QKG6ERBF");
     expect(asked().path).toBe(`/api/v1/staff/tenants/${tenant}/booking-references/QKG6ERBF`);
@@ -968,8 +970,10 @@ describe("the booking views' reads", () => {
     const asked = ask(reply(404, {}));
     await loadDay(tenant, { date: "2026-11-04", tripId: undefined, after: undefined });
     expect(asked().path).toBe(`/api/v1/staff/tenants/${tenant}/bookings?date=2026-11-04`);
-    await loadExceptions(tenant, { before: undefined });
-    expect(asked().path).toBe(`/api/v1/staff/tenants/${tenant}/finalization-exceptions?limit=50`);
+    await loadExceptions(tenant, { status: "open", before: undefined });
+    expect(asked().path).toBe(
+      `/api/v1/staff/tenants/${tenant}/finalization-exceptions?status=open&limit=50`,
+    );
   });
 
   it("answers with why it could not, and never throws", async () => {
@@ -986,7 +990,10 @@ describe("the booking views' reads", () => {
       kind: "failed",
       reason: "unreachable",
     });
-    expect(await loadExceptions(tenant, {})).toEqual({ kind: "failed", reason: "unreachable" });
+    expect(await loadExceptions(tenant, { status: "open" })).toEqual({
+      kind: "failed",
+      reason: "unreachable",
+    });
     expect(await findReference(tenant, "QKG6ERBF")).toEqual({
       kind: "failed",
       reason: "unreachable",
@@ -1043,7 +1050,10 @@ describe("the booking views' reads", () => {
       kind: "failed",
       reason: "unreadable",
     });
-    expect(await loadExceptions(tenant, {})).toEqual({ kind: "failed", reason: "unreadable" });
+    expect(await loadExceptions(tenant, { status: "open" })).toEqual({
+      kind: "failed",
+      reason: "unreadable",
+    });
     expect(await findReference(tenant, "QKG6ERBF")).toEqual({
       kind: "failed",
       reason: "unreadable",
@@ -1066,7 +1076,7 @@ describe("the booking views' reads", () => {
     ask(reply(200, { roster: tripRoster() }));
     expect(await loadRoster(tenant, tripIds.sunset)).toEqual({ kind: "ok", value: tripRoster() });
     ask(reply(200, { exceptions: [finalizationException()], nextBefore: null }));
-    expect(await loadExceptions(tenant, {})).toEqual({
+    expect(await loadExceptions(tenant, { status: "open" })).toEqual({
       kind: "ok",
       value: { exceptions: [finalizationException()], nextBefore: null },
     });

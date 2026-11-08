@@ -24,6 +24,7 @@ import {
   json,
   membership,
   route,
+  sentTo,
   strayRequests,
   tenantName,
   terms,
@@ -346,7 +347,7 @@ describe("what each role sees", () => {
     const { container } = renderPage("finance");
     await waitFor(() => expect(items()).toHaveLength(2));
     expect(text(screen.getByText(/aren't shown to your role/))).toBe(
-      "Guests' names and contact details aren't shown to your role, finance.",
+      "Guests' names and contact details, and follow-up notes, aren't shown to your role, finance.",
     );
     for (const item of items()) {
       expect("Paid by" in factsOf(item)).toBe(false);
@@ -378,9 +379,12 @@ describe("when there are none", () => {
   it("shows the designed empty state", async () => {
     api({ [route.exceptions()]: () => json(body([])) });
     renderPage();
-    const heading = await screen.findByRole("heading", { level: 2, name: "No payment exceptions" });
+    const heading = await screen.findByRole("heading", {
+      level: 2,
+      name: "No payment exceptions to follow up",
+    });
     expect(text(heading.closest(".tg-empty"))).toContain(
-      `Every payment ${tenantName} received became a booking. A payment that arrives too late, or doesn't match its checkout, shows here for follow-up.`,
+      `Nothing at ${tenantName} is waiting for follow-up. A payment that arrives too late, or doesn't match its checkout, shows here. Ones already followed up are under Followed up.`,
     );
     expect(items()).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /older/ })).toBeNull();
@@ -626,5 +630,188 @@ describe("when the exceptions do not load", () => {
     expect(text(await screen.findByRole("alert"))).toContain(
       "Payment exceptions couldn't be shown",
     );
+  });
+});
+
+describe("following an exception up (W1-FIN-EXC)", () => {
+  const resolution = {
+    id: "8a91b2c3-4d5e-4f60-8b72-8c9d0e1f2a01",
+    reasonCode: "contacted_guest" as const,
+    resolvedBy: { userId: "9b0c1d2e-3f40-4a51-8c62-9d0e1f2a3b01", name: "Dana Reyes" },
+    resolvedAt: "2026-11-04T16:30:00.000Z",
+  };
+  const resolvedBody =
+    (over: Partial<typeof resolution> = {}) =>
+    () =>
+      json({ exceptionId: noCapacity.id, resolution: { ...resolution, ...over } }, 201);
+  const markButton = (item: HTMLElement) =>
+    within(item).getByRole("button", { name: "Mark as followed up" });
+  const reasonField = () => screen.getByLabelText("How did you follow it up?") as HTMLSelectElement;
+  const noteField = () => screen.getByLabelText(/^Note/) as HTMLTextAreaElement;
+  const save = (item: HTMLElement) =>
+    fireEvent.click(within(item).getByRole("button", { name: "Mark as followed up" }));
+  const sent = () => sentTo(route.resolveException(noCapacity.id));
+
+  it("asks for the open list, and offers owners and booking staff the action", async () => {
+    for (const role of ["owner", "booking_staff"] as const) {
+      const calls = api({ [route.exceptions()]: () => json(body([noCapacity, canceled])) });
+      renderPage(role);
+      await waitFor(() => expect(items()).toHaveLength(2));
+      expect(calls[0]?.query.get("status")).toBe("open");
+      expect(markButton(items()[0] as HTMLElement)).toBeTruthy();
+      // A refund still on its way: its outcome is not known yet.
+      const waiting = items()[1] as HTMLElement;
+      expect(within(waiting).queryByRole("button", { name: "Mark as followed up" })).toBeNull();
+      expect(text(waiting.querySelector(".ex-item__wait"))).toBe(
+        "You can mark this as followed up once the refund finishes.",
+      );
+      cleanup();
+    }
+  });
+
+  it("offers finance no way to mark one", async () => {
+    api({ [route.exceptions()]: () => json(asSeenBy("finance", body([noCapacity, mismatch]))) });
+    renderPage("finance");
+    await waitFor(() => expect(items()).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: "Mark as followed up" })).toBeNull();
+  });
+
+  it("sends the reason and the trimmed note with a key, then takes the item off the open list", async () => {
+    api({
+      [route.exceptions()]: () => json(body([noCapacity, mismatch])),
+      [route.resolveException(noCapacity.id)]: resolvedBody(),
+    });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(2));
+    const item = items()[0] as HTMLElement;
+    fireEvent.click(markButton(item));
+    await waitFor(() => expect(document.activeElement).toBe(reasonField()));
+    expect(text(item.querySelector(".ex-resolve__fine"))).toBe(
+      "This records the follow-up only. It doesn't refund, rebook, or change any payment.",
+    );
+    fireEvent.change(reasonField(), { target: { value: "contacted_guest" } });
+    fireEvent.change(noteField(), { target: { value: "  Called back, rebooked for Friday. " } });
+    save(item);
+    await waitFor(() => expect(items()).toHaveLength(1));
+    const [request] = sent();
+    expect(request?.body).toEqual({
+      reasonCode: "contacted_guest",
+      note: "Called back, rebooked for Friday.",
+    });
+    expect(request?.headers.get("idempotency-key")).toMatch(/^[0-9a-f-]{32,36}$/);
+    expect(liveText()).toBe(
+      "Marked as followed up: Paid after the checkout ran out of time, and the seats were gone. It's now under Followed up.",
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(document.getElementById(`exception-${mismatch.id}`)),
+    );
+  });
+
+  it("asks for a reason, and for a note with other, before sending anything", async () => {
+    api({ [route.exceptions()]: () => json(body([noCapacity])) });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(1));
+    const item = items()[0] as HTMLElement;
+    fireEvent.click(markButton(item));
+    save(item);
+    expect(text(item.querySelector(".tg-field__error"))).toBe("Choose how you followed it up.");
+    fireEvent.change(reasonField(), { target: { value: "other" } });
+    expect(screen.getByLabelText("Note")).toBeTruthy();
+    fireEvent.change(noteField(), { target: { value: " \u200b " } });
+    save(item);
+    expect(text(item.querySelector(".tg-field__error"))).toBe("Add a note to say what happened.");
+    expect(sent()).toHaveLength(0);
+  });
+
+  it("keeps the item, says why, and sends the same key again after a lost connection", async () => {
+    api({
+      [route.exceptions()]: () => json(body([noCapacity])),
+      [route.resolveException(noCapacity.id)]: [
+        dropped,
+        () => apiError(409, "exception_already_resolved"),
+      ],
+    });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(1));
+    const item = items()[0] as HTMLElement;
+    fireEvent.click(markButton(item));
+    fireEvent.change(reasonField(), { target: { value: "no_action_needed" } });
+    save(item);
+    await waitFor(() =>
+      expect(text(item.querySelector(".tg-field__error"))).toBe(
+        "It wasn't sent. Check your connection, then try again.",
+      ),
+    );
+    save(item);
+    await waitFor(() =>
+      expect(text(item.querySelector(".tg-field__error"))).toBe(
+        "Someone already marked this as followed up. Reload to see who.",
+      ),
+    );
+    const keys = sent().map((r) => r.headers.get("idempotency-key"));
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    expect(sent()[0]?.body).toEqual({ reasonCode: "no_action_needed" });
+    expect(items()).toHaveLength(1);
+  });
+
+  it("puts focus back on the action when the form is canceled", async () => {
+    api({ [route.exceptions()]: () => json(body([noCapacity])) });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(1));
+    const item = items()[0] as HTMLElement;
+    fireEvent.click(markButton(item));
+    fireEvent.click(within(item).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(markButton(item)));
+    expect(item.querySelector("form")).toBeNull();
+  });
+
+  it("lists the history under Followed up, with who, when, and the note", async () => {
+    const done = finalizationException({
+      resolution: { ...resolution, note: "Called back.\nRebooked." },
+    });
+    const calls = api({
+      [route.exceptions()]: [() => json(body([noCapacity])), () => json(body([done]))],
+    });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(1));
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "resolved" } });
+    await waitFor(() => expect(factsOf(items()[0] as HTMLElement)["Followed up"]).toBeDefined());
+    expect(calls.map((c) => c.query.get("status"))).toEqual(["open", "resolved"]);
+    const facts = factsOf(items()[0] as HTMLElement);
+    expect(facts["Followed up"]).toBe("Contacted the guest");
+    expect(facts.By).toMatch(/^Dana Reyes, .*11:30/);
+    expect(facts.Note).toBe("Called back. Rebooked.");
+    expect(screen.queryByRole("button", { name: "Mark as followed up" })).toBeNull();
+    expect(liveText()).toBe("1 followed-up exception.");
+  });
+
+  it("shows finance the history without the note", async () => {
+    const done = finalizationException({
+      resolution: { ...resolution, note: "Spoke with the guest." },
+    });
+    api({
+      [route.exceptions()]: [
+        () => json(asSeenBy("finance", body([]))),
+        () => json(asSeenBy("finance", body([done]))),
+      ],
+    });
+    const { container } = renderPage("finance");
+    await screen.findByRole("heading", { level: 2, name: "No payment exceptions to follow up" });
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "resolved" } });
+    await waitFor(() => expect(items()).toHaveLength(1));
+    const facts = factsOf(items()[0] as HTMLElement);
+    expect(facts["Followed up"]).toBe("Contacted the guest");
+    expect("Note" in facts).toBe(false);
+    expect(container.textContent).not.toContain("Spoke with the guest");
+  });
+
+  it("shows a designed empty history", async () => {
+    api({ [route.exceptions()]: [() => json(body([])), () => json(body([]))] });
+    renderPage();
+    await screen.findByRole("heading", { level: 2, name: "No payment exceptions to follow up" });
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "resolved" } });
+    await screen.findByRole("heading", { level: 2, name: "Nothing followed up yet" });
+    expect(liveText()).toBe("No followed-up exceptions.");
   });
 });

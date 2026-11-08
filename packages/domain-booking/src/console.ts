@@ -18,6 +18,7 @@ import {
   type CancellationRemedy,
   type ChargeBasis,
   type CheckoutSessionState,
+  type ExceptionResolutionReason,
   type FinalizationReason,
   isUuid,
   type OrderLineKind,
@@ -253,6 +254,20 @@ export interface ConsoleExceptionView {
     reportedCurrency: string | null;
   };
   booker?: { name: string; email: string };
+  /** How staff followed it up; null while it is open (W1-FIN-EXC). */
+  resolution: ExceptionResolutionView | null;
+}
+
+/**
+ * A resolution as the exceptions list shows it. The note is text a person
+ * typed: present only where the booker is (roles that hold bookings.read).
+ */
+export interface ExceptionResolutionView {
+  id: string;
+  reasonCode: ExceptionResolutionReason;
+  note?: string | null;
+  resolvedBy: { userId: string; name: string };
+  resolvedAt: string;
 }
 
 // Pure helpers -----------------------------------------------------------------------
@@ -983,7 +998,16 @@ export type ExceptionsPageResult =
 export async function listExceptionsPage(
   trx: TenantTransaction,
   tenantId: string,
-  query: { limit: number; before?: string; withBooker: boolean },
+  query: {
+    limit: number;
+    before?: string;
+    withBooker: boolean;
+    /**
+     * open: no resolution yet. resolved: the history (W1-FIN-EXC). Absent:
+     * every exception, as G2.7's read lists them.
+     */
+    status?: "open" | "resolved";
+  },
 ): Promise<ExceptionsPageResult> {
   if (query.before !== undefined) {
     if (!isUuid(query.before)) return { kind: "cursor_invalid" };
@@ -1002,8 +1026,14 @@ export async function listExceptionsPage(
               select e2.created_at, e2.id from finalization_exceptions e2
                where e2.tenant_id = ${tenantId} and e2.id = ${query.before}::uuid)`;
   const booker: RawBuilder<unknown> = query.withBooker
-    ? sql`, s.booker_name, s.booker_email`
+    ? sql`, s.booker_name, s.booker_email, res.note as resolution_note`
     : sql``;
+  const status =
+    query.status === "open"
+      ? sql`and res.id is null`
+      : query.status === "resolved"
+        ? sql`and res.id is not null`
+        : sql``;
   const { rows } = await sql<
     TripRow & {
       id: string;
@@ -1027,6 +1057,12 @@ export async function listExceptionsPage(
       settled_at: Date | string | null;
       booker_name?: string;
       booker_email?: string;
+      resolution_id: string | null;
+      resolution_reason: ExceptionResolutionReason | null;
+      resolution_note?: string | null;
+      resolved_by_user_id: string | null;
+      resolved_by_name: string | null;
+      resolved_at: Date | string | null;
     }
   >`
     select e.id, e.reason, e.checkout_session_id, e.payment_id, e.created_at,
@@ -1037,7 +1073,10 @@ export async function listExceptionsPage(
            ev.currency as reported_currency,
            ${tripColumns},
            r.id as refund_id, r.state as refund_state, r.amount as refund_amount,
-           r.failure_code, r.settled_at
+           r.failure_code, r.settled_at,
+           res.id as resolution_id, res.reason_code as resolution_reason,
+           res.resolved_by_user_id, rm.display_name as resolved_by_name,
+           res.created_at as resolved_at
            ${booker}
       from finalization_exceptions e
       join checkout_sessions s on s.tenant_id = e.tenant_id and s.id = e.checkout_session_id
@@ -1046,7 +1085,12 @@ export async function listExceptionsPage(
       join scheduled_trips t on t.tenant_id = s.tenant_id and t.id = s.trip_id
       ${tripJoins}
       left join payment_refunds r on r.tenant_id = e.tenant_id and r.id = e.refund_id
+      left join finalization_exception_resolutions res
+        on res.tenant_id = e.tenant_id and res.exception_id = e.id
+      left join tenant_memberships rm
+        on rm.tenant_id = res.tenant_id and rm.user_id = res.resolved_by_user_id
      where e.tenant_id = ${tenantId}
+       ${status}
        ${cursor}
      order by e.created_at desc, e.id desc
      limit ${query.limit + 1}`.execute(trx);
@@ -1084,6 +1128,20 @@ export async function listExceptionsPage(
       ...(query.withBooker && r.booker_name !== undefined && r.booker_email !== undefined
         ? { booker: { name: r.booker_name, email: r.booker_email } }
         : {}),
+      resolution:
+        r.resolution_id &&
+        r.resolution_reason &&
+        r.resolved_by_user_id &&
+        r.resolved_by_name !== null &&
+        r.resolved_at
+          ? {
+              id: r.resolution_id,
+              reasonCode: r.resolution_reason,
+              ...(query.withBooker ? { note: r.resolution_note ?? null } : {}),
+              resolvedBy: { userId: r.resolved_by_user_id, name: r.resolved_by_name },
+              resolvedAt: iso(r.resolved_at),
+            }
+          : null,
     })),
     nextBefore: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
   };

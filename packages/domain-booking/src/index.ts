@@ -31,6 +31,7 @@ export {
   type DayBookingsResult,
   type DayBookingView,
   type DayTripView,
+  type ExceptionResolutionView,
   type ExceptionsPageResult,
   type ExtraView,
   extrasOf,
@@ -95,6 +96,12 @@ export {
   MANAGE_LINK_TTL_SECONDS,
   MANAGE_PATH,
 } from "./emails.ts";
+// Finalization exception resolution (W1-FIN-EXC).
+export {
+  type ResolvedExceptionView,
+  type ResolveExceptionResult,
+  resolveFinalizationException,
+} from "./exception-resolution.ts";
 export {
   type HandledEvent,
   handleVerifiedEvent,

@@ -128,7 +128,7 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "Payments that could not become bookings",
     description:
-      "Every role. Verified payments whose capacity was gone, whose trip changed, or whose checkout had already failed or been canceled, newest first, with the trip, the checkout, the masked provider reference, and the state of the automatic full refund. A payment_mismatch is not refunded automatically. The booker's name and email, for following up, go only to roles that hold bookings.read.",
+      "Every role. Verified payments whose capacity was gone, whose trip changed, or whose checkout had already failed or been canceled, newest first, with the trip, the checkout, the masked provider reference, and the state of the automatic full refund. A payment_mismatch is not refunded automatically. The booker's name and email, for following up, go only to roles that hold bookings.read. W1-FIN-EXC: status=open (the default) lists the exceptions not yet followed up, and status=resolved the history, each with its resolution; a resolution's note goes only to roles that hold bookings.read.",
     security: staffSecurity,
     request: { params: StaffTenantParams, query: FinalizationExceptionQuery },
     responses: {
@@ -145,20 +145,27 @@ export function registerBookingStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
 
   app.openapi(exceptionsRoute, async (c) => {
     const { tenantId } = c.req.valid("param");
-    const { limit, before } = c.req.valid("query");
+    const { status, limit, before } = c.req.valid("query");
     const { body } = await withStaffTenant(
       c,
       deps,
       { tenantId, permission: "payments.read", snapshot: true },
       async (trx, ctx) => {
         const page = await listExceptionsPage(trx, tenantId, {
+          status,
           limit,
           ...(before === undefined ? {} : { before }),
           withBooker: seesBooker(ctx),
         });
         if (page.kind === "cursor_invalid") throw cursorInvalid();
         return {
-          exceptions: page.exceptions.map((e) => ({ ...e })),
+          exceptions: page.exceptions.map((e) => ({
+            ...e,
+            resolution: e.resolution && {
+              ...e.resolution,
+              resolvedBy: { ...e.resolution.resolvedBy },
+            },
+          })),
           nextBefore: page.nextBefore,
         };
       },
