@@ -683,6 +683,7 @@ describe.skipIf(!env)("checkout to confirmation against a real database", () => 
       minimumAmount: (c) => provider.minimumAmount(c),
       createPayment: (i) => provider.createPayment(i),
       retrievePayment: (i) => provider.retrievePayment(i),
+      cancelPayment: (i) => provider.cancelPayment(i),
       verifyWebhook: (i) => provider.verifyWebhook(i),
       refundPayment,
     });

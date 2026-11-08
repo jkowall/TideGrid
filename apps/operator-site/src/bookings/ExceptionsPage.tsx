@@ -380,7 +380,7 @@ function ExceptionItem({
       </dl>
       {resolves &&
         !e.resolution &&
-        (e.refund?.state === "requested" ? (
+        (e.refund?.state === "requested" || e.refund?.state === "pending" ? (
           <p className="ex-item__wait">
             You can mark this as followed up once the refund finishes.
           </p>

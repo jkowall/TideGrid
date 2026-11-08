@@ -14,8 +14,11 @@
   },
   "dependencies": {
     "@tidegrid/contracts": "workspace:*",
+    "@tidegrid/design-system": "workspace:*",
     "expo": "~58.0.23",
     "expo-constants": "~58.0.15",
+    "expo-crypto": "~58.0.7",
+    "expo-secure-store": "~58.0.2",
     "expo-status-bar": "~58.0.4",
     "react": "19.3.0",
     "react-native": "0.88.1",

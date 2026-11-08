@@ -35,7 +35,7 @@ import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import { deliverFakeEvent } from "../fake-delivery.ts";
-import { fakeProviderFor, providerFor } from "../payments.ts";
+import { cancelPaymentAfterCommit, fakeProviderFor, providerFor } from "../payments.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
@@ -434,6 +434,7 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
   app.openapi(cancelRoute, async (c) => {
     const { tenantId, checkoutId } = c.req.valid("param");
     const key = c.req.valid("header")["idempotency-key"];
+    let paymentCancellationId: string | null = null;
     const result = await withStaffTenant(
       c,
       deps,
@@ -451,6 +452,7 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       },
       async (trx, ctx) => {
         const canceled = await cancelStaffCheckout(trx, ctx, { sessionId: checkoutId });
+        if (canceled.kind === "canceled") paymentCancellationId = canceled.paymentCancellationId;
         switch (canceled.kind) {
           case "canceled":
           case "unchanged": {
@@ -470,6 +472,8 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       },
     );
     if (result.replayed) c.header("Idempotent-Replayed", "true");
+    // Committed: the payment may still be open at the provider (W3-G2.9).
+    else await cancelPaymentAfterCommit(c, deps, result.ctx, paymentCancellationId);
     return c.json(result.body, 200);
   });
 

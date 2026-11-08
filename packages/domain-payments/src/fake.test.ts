@@ -62,6 +62,7 @@ describe("the fake provider", () => {
       accountRef: "acct_fake_demo-harbor",
       occurredAt: new Date(1_759_665_600_000),
       payment: { ref: paymentRef, amount: 12_345, currency: "USD", clientReference },
+      refund: null,
     });
     expect(parseFakeEventBody(body({ type: "payment.failed" }))?.type).toBe("payment.failed");
     // Anything else is recorded as other, without a payment.

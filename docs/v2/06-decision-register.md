@@ -59,6 +59,26 @@ The Stage 0 provider choice (below) picked Cloudflare-only staff sign-in with Go
 - **Dashboard (owner-run).** Google and Microsoft Entra ID login methods, independent MFA on for the organization and the console application, and One-time PIN off for the console. The steps and the acceptance check are in the [staff sign-in runbook](../runbooks/staff-sign-in-access.md).
 - **What the code cannot check.** The Access application token carries no documented claim showing that independent MFA ran, so the API does not check it. The Access settings enforce it, and the runbook's check is the evidence the [security controls](08-build-hosting-and-operations.md#security-controls) ask for before an operator's first live booking.
 
+### 2026-11-08: W3-G2.9, refunds, booking credit, and fee reversal (owner decision; coordinator defaults pending owner confirmation)
+
+Under the same owner decision as W3-G2.3 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
+
+W3-G2.9 lands as migrations `0029` and `0030` and the [database contract](../../packages/database/README.md#refunds-and-credits-0029-and-0030). What it adds:
+
+- **A pending refund state.** A refund the provider accepted and has not finished is `pending`, with its provider id, instead of staying `requested` (this closes the D3 (a) deferral above). The provider's own refund events settle it through the inbox (`refund.updated`, matched by TideGrid's key and checked against the refund's payment, amount, account, and provider id), and the sweep asks about it again once an hour.
+- **Refund exceptions after 24 hours.** A refund still requested or pending 24 hours after it was requested, or whose lookup the provider keeps refusing, is raised once for staff, as is a failure reported after a success. Staff read them at `GET /v1/staff/tenants/{tenantId}/refund-exceptions`.
+- **Booking credit.** A noncash, per-operator balance for each booker email, kept as an append-only ledger (issue, redeem, reinstate, adjust) whose balance the database keeps and never lets go below zero. Credit used on a booking that is later canceled comes back as credit.
+- **Staff cancellation.** Owners and booking staff cancel with the policy's remedy, or take its value as booking credit instead; owners may override the remedy with a reason (the manager override). The preview shows the refund, the TideGrid fee it reverses, and the credit alternative with the resulting balance. A guest is never given credit on their own.
+- **Fee reversal.** A succeeded cancellation refund writes a negative entry to a new fee ledger: 1.5% of the refunded eligible value (taxes excluded), half up, once per refund. Issuing credit reverses nothing. The fee's assessment arrives with G2.10.
+- **Canceling an unpaid payment.** When a checkout expires or is canceled, its open payment is canceled at the provider (`cancelPayment` on the port, closing D4 (a) above), so a guest is not charged and then refunded. A payment that succeeds first still takes the late-success refund.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: a stuck refund becomes an exception after 24 hours.** The database checks the same bound.
+- **D2: booking credit never expires during the pilot.**
+- **D3: a canceled Stripe payment intent maps to a payment failure through its verified event** (`payment_intent.canceled` is `payment.failed`, with no new payment state).
+- **D4: who may do what.** Cancel and preview: owners and booking staff (`bookings.cancel`). Override and credit adjustment: owners only (`bookings.override`, `credits.adjust`). Refund exceptions: everyone with `payments.read`, finance included.
+
 ### 2026-11-08: W3-G2.2b, tenant access remainder without managed OIDC and MFA (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
 
 On 2026-11-08 at 17:35 UTC the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That choice waives the Validation gate and the O-VAL-2 dependency for this goal, as a synthetic pull-forward into the demo build. Managed OIDC with MFA is left out, because it needs a provider account (O-PROVIDERS). Nothing live was touched: no provider calls, no deploys, and no new Worker bindings.
@@ -193,6 +213,8 @@ On 2026-11-08 the owner wrote: "My customers really want mobile native apps. Is 
 Not done: no code, no account, and no build. The goals are W1N-APP, W1N-JOURNEYS, and W1N-TESTFLIGHT in the roadmap tracker.
 
 Status 2026-11-08: W1N-APP is built on branch `claude/project-thread-bqlorn` under the owner's go of 20:03 UTC: `apps/guest-native`, Expo SDK 58 and React Native 0.88, two variants, no API change. The app presents its variant's guest origin, because the API picks the operator from the Origin header, and it refuses any answer for another operator. The owner chose on 2026-11-08 to build on his own Mac with Xcode and Android Studio rather than Expo's cloud service. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
+
+Status 2026-11-08, later: W1N-JOURNEYS is built under the owner's go of 22:16 UTC. The app books a trip with the demo's test payment, shows the outcome, keeps each booking opened on the phone for its one-hour session in the platform's secure storage, and shows the booking with its waiver statuses. It uses the guest web app's own API calls; no API, contract, or guest site change. Two new Expo packages, expo-crypto and expo-secure-store, from the Expo SDK 58 set. Changing the party, canceling, Stripe's card form, push, and deep links stay out of the demo app. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
 
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)

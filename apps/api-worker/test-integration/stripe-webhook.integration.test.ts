@@ -425,22 +425,42 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     expect(post.at(-1)?.form.some(([k]) => k.includes("application_fee"))).toBe(false);
   });
 
-  it("leaves a pending refund requested, and the sweep settles it once Stripe does", async () => {
+  it("records a pending refund as pending, and the sweep settles it once Stripe does", async () => {
     const booked = await confirmed(A);
     fixture.refundPending();
     const { res } = await cancel(A, booked.session);
-    expect(res.json.booking.refund).toMatchObject({ state: "requested" });
-    expect((await refundOf(booked.paymentRef)).state).toBe("requested");
+    // W3-G2.9: Stripe accepted it and has not finished, so it is pending, with its id.
+    expect(res.json.booking.refund).toMatchObject({ state: "pending" });
     const [pending] = fixture.refundIds(booked.paymentRef);
     if (!pending) throw new Error("no Stripe refund");
-    // Still pending at Stripe: the sweep leaves it requested.
+    expect(await refundOf(booked.paymentRef)).toMatchObject({
+      state: "pending",
+      provider_refund_id: pending,
+    });
+    // Checked a moment ago: the sweep waits an hour before asking again.
     await sweepCheckouts(runtime.db, {
       runId: `stripe-${randomUUID()}`,
       provider: stripe,
       graceSeconds: 0,
     });
-    expect((await refundOf(booked.paymentRef)).state).toBe("requested");
+    expect((await refundOf(booked.paymentRef)).state).toBe("pending");
+    // An hour later, still pending at Stripe: it stays pending.
+    const lastCheckedLongAgo = () =>
+      admin.begin(async (tx) => {
+        await tx`set local session_replication_role = replica`;
+        await tx`update public.payment_refunds r set checked_at = now() - interval '2 hours'
+                   from public.payments p
+                  where p.id = r.payment_id and p.provider_payment_id = ${booked.paymentRef}`;
+      });
+    await lastCheckedLongAgo();
+    await sweepCheckouts(runtime.db, {
+      runId: `stripe-${randomUUID()}`,
+      provider: stripe,
+      graceSeconds: 0,
+    });
+    expect((await refundOf(booked.paymentRef)).state).toBe("pending");
     fixture.settleRefund(pending, "succeeded");
+    await lastCheckedLongAgo();
     const report = await sweepCheckouts(runtime.db, {
       runId: `stripe-${randomUUID()}`,
       provider: stripe,

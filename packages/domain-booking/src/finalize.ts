@@ -36,20 +36,20 @@ import {
   markInboxProcessed,
   type PaymentProvider,
   type PaymentProviderName,
-  ProviderRejectedError,
-  ProviderUnavailableError,
   recordProviderEvent,
   resolvePaymentAccount,
   type VerifiedProviderEvent,
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
-import {
-  enqueueConfirmationEmail,
-  enqueueRefundFailedEmail,
-  enqueueReminderEmail,
-} from "./emails.ts";
+import { enqueueConfirmationEmail, enqueueReminderEmail } from "./emails.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
+import {
+  onRefundEvent,
+  type RefundEventOutcome,
+  type SettleRefundResult,
+  settleRefund,
+} from "./refunds.ts";
 import { newBookingReference } from "./secrets.ts";
 import { record } from "./views.ts";
 
@@ -75,7 +75,9 @@ export type ProcessOutcome =
   /** No payment of this tenant matches the event. */
   | "unmatched_payment"
   /** An event type checkout does not act on. */
-  | "ignored_event_type";
+  | "ignored_event_type"
+  /** A refund event (W3-G2.9). */
+  | RefundEventOutcome;
 
 export interface ProcessResult {
   outcome: ProcessOutcome;
@@ -169,7 +171,9 @@ export async function processProviderEvent(
       ? await onSuccess(trx, ctx, event, hooks)
       : event.eventType === "payment.failed"
         ? await onFailure(trx, ctx, event)
-        : result("ignored_event_type");
+        : event.eventType === "refund.updated"
+          ? result(await onRefundEvent(trx, ctx, event))
+          : result("ignored_event_type");
   await markInboxProcessed(trx, ctx.tenantId, event.id, outcome.outcome);
   return outcome;
 }
@@ -631,135 +635,8 @@ async function onFailure(
   return result("released", ids);
 }
 
-// Refunds -------------------------------------------------------------------------------
-
-export type SettleRefundResult =
-  | { kind: "succeeded"; providerRefundId: string }
-  | { kind: "failed"; failureCode: string }
-  /** The provider did not answer; the refund stays requested for the next attempt. */
-  | { kind: "unknown" }
-  /** Not requested any more, or not this provider's. */
-  | { kind: "not_pending" };
-
-interface RefundRow {
-  id: string;
-  payment_id: string;
-  reason: string;
-  amount: number;
-  idempotency_key: string;
-  state: string;
-  provider: PaymentProviderName;
-  account_ref: string;
-  provider_payment_id: string | null;
-}
-
-/**
- * Send a requested refund to the provider and record the answer. Outside any
- * transaction; idempotent by the refund's key, so it is safe to repeat after a
- * crash or a timeout until the outcome is known.
- */
-export async function settleRefund(
-  db: Kysely<Database>,
-  provider: PaymentProvider,
-  ctx: TenantContext,
-  refundId: string,
-): Promise<SettleRefundResult> {
-  const refund = await inTenantTransaction(db, ctx, async (trx) => {
-    const { rows } = await sql<RefundRow>`
-      select r.id, r.payment_id, r.reason, r.amount, r.idempotency_key, r.state, p.provider,
-             p.account_ref, p.provider_payment_id
-        from payment_refunds r
-        join payments p on p.tenant_id = r.tenant_id and p.id = r.payment_id
-       where r.tenant_id = ${ctx.tenantId} and r.id = ${refundId}`.execute(trx);
-    return rows[0];
-  });
-  if (refund?.state !== "requested" || refund.provider !== provider.name) {
-    return { kind: "not_pending" };
-  }
-  if (refund.provider_payment_id === null) throw new Error("a refunded payment has no provider id");
-  let outcome: { state: "succeeded"; ref: string } | { state: "failed"; code: string };
-  try {
-    const answered = await provider.refundPayment({
-      accountRef: refund.account_ref,
-      paymentRef: refund.provider_payment_id,
-      amount: refund.amount,
-      currency: "USD",
-      idempotencyKey: refund.idempotency_key,
-    });
-    outcome =
-      answered.status === "succeeded"
-        ? { state: "succeeded", ref: answered.refundRef }
-        : { state: "failed", code: answered.failureCode ?? "refund_failed" };
-  } catch (err) {
-    if (err instanceof ProviderRejectedError) outcome = { state: "failed", code: err.code };
-    else if (err instanceof ProviderUnavailableError) return { kind: "unknown" };
-    else throw err;
-  }
-  return inTenantTransaction(db, ctx, async (trx) => {
-    const updated = await trx
-      .updateTable("payment_refunds")
-      .set(
-        outcome.state === "succeeded"
-          ? { state: "succeeded", provider_refund_id: outcome.ref }
-          : { state: "failed", failure_code: outcome.code },
-      )
-      .where("tenant_id", "=", ctx.tenantId)
-      .where("id", "=", refund.id)
-      .where("state", "=", "requested")
-      .executeTakeFirst();
-    if (updated.numUpdatedRows !== 1n) return { kind: "not_pending" as const };
-    await record(trx, ctx, {
-      action: outcome.state === "succeeded" ? "payment_refund.succeeded" : "payment_refund.failed",
-      subjectType: "payment_refund",
-      subjectId: refund.id,
-      before: { state: "requested" },
-      after:
-        outcome.state === "succeeded"
-          ? { state: "succeeded", providerRefundId: outcome.ref }
-          : { state: "failed", failureCode: outcome.code },
-      topic: outcome.state === "succeeded" ? "payment.refund.succeeded" : "payment.refund.failed",
-      payload: { refundId: refund.id, paymentId: refund.payment_id },
-    });
-    if (outcome.state === "failed" && refund.reason === "booking_canceled") {
-      await followUpRefusedRefund(trx, ctx, refund);
-    }
-    return outcome.state === "succeeded"
-      ? { kind: "succeeded" as const, providerRefundId: outcome.ref }
-      : { kind: "failed" as const, failureCode: outcome.code };
-  });
-}
-
-/**
- * A canceled booking's refund was refused: the cancellation email said it was
- * on its way, so the guest is told it is not, once. Written under a
- * savepoint, so an email problem never undoes the recorded refusal; a
- * failure is audited for staff instead.
- */
-async function followUpRefusedRefund(
-  trx: TenantTransaction,
-  ctx: TenantContext,
-  refund: RefundRow,
-): Promise<void> {
-  const { rows } = await sql<{ id: string }>`
-    select id from bookings where tenant_id = ${ctx.tenantId} and payment_id = ${refund.payment_id}`.execute(
-    trx,
-  );
-  const bookingId = rows[0]?.id;
-  if (!bookingId) return;
-  await sql`savepoint refund_failed_email`.execute(trx);
-  try {
-    await enqueueRefundFailedEmail(trx, ctx, bookingId, refund.amount);
-    await sql`release savepoint refund_failed_email`.execute(trx);
-  } catch (error) {
-    await sql`rollback to savepoint refund_failed_email`.execute(trx);
-    await record(trx, ctx, {
-      action: "booking.refund_failed_email_failed",
-      subjectType: "booking",
-      subjectId: bookingId,
-      after: { error: error instanceof Error ? error.name : "unknown" },
-    });
-  }
-}
+// Refunds live in refunds.ts (W3-G2.9); re-exported for the callers that import them here.
+export { type SettleRefundResult, settleRefund } from "./refunds.ts";
 
 // The webhook path ---------------------------------------------------------------------
 

@@ -108,7 +108,7 @@ describe.skipIf(!env)("the checkout sweep takes fair turns across tenants", () =
     const ids: string[] = [];
     for (let i = 0; i < n; i++) {
       const body = craftedFakeEventBody({
-        type: "refund.updated",
+        type: "payout.paid",
         accountRef: t.accountRef,
         paymentRef: "fpay_unused",
         amount: 0,
@@ -136,6 +136,7 @@ describe.skipIf(!env)("the checkout sweep takes fair turns across tenants", () =
     minimumAmount: (c) => provider.minimumAmount(c),
     createPayment: (i) => provider.createPayment(i),
     retrievePayment: (i) => provider.retrievePayment(i),
+    cancelPayment: (i) => provider.cancelPayment(i),
     verifyWebhook: (i) => provider.verifyWebhook(i),
     refundPayment: async () => {
       throw new ProviderUnavailableError("no answer");

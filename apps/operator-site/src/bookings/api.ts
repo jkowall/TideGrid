@@ -101,7 +101,7 @@ function isExtras(extras: unknown): boolean {
 }
 
 const paymentStates = new Set(["pending", "succeeded", "failed"]);
-const refundStates = new Set(["requested", "succeeded", "failed"]);
+const refundStates = new Set(["requested", "pending", "succeeded", "failed"]);
 
 export function isPaymentStatus(p: Partial<BookingPaymentStatus> | null | undefined): boolean {
   if (!paymentStates.has(p?.state as string)) return false;
@@ -113,7 +113,7 @@ export function isPaymentStatus(p: Partial<BookingPaymentStatus> | null | undefi
 const isBookingState = (v: unknown): v is BookingDetail["state"] =>
   v === "confirmed" || v === "canceled";
 
-const remedies = new Set(["full_refund", "percent_refund", "none"]);
+const remedies = new Set(["full_refund", "percent_refund", "credit", "none"]);
 const cancelers = new Set(["guest", "staff", "system", "support"]);
 
 function isCancellation(c: Partial<BookingCancellation> | null | undefined): boolean {

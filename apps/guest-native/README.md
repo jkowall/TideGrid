@@ -5,10 +5,21 @@ The demo guest app: one React Native and Expo app, built once per synthetic oper
 ## What it does today
 
 - Starts with the operator's brand from `GET /v1/public/tenant`, parsed against the same contract as the guest web app (`PublicExperienceResponse`). The header shows the brand's name, tagline, and primary color.
-- Lists the operator's bookable trips for the next four weeks from `GET /v1/public/trips`, for a party of one.
-- Shows one designed screen for each other outcome: loading, not published, not ready, could not connect (with Try again), trips that did not load, no trips, a misconfigured build, and an answer for the wrong operator.
+- Lists the operator's bookable trips for the next four weeks from `GET /v1/public/trips`, with seats left.
+- Books a trip (W1N-JOURNEYS): the party by ticket type or charter guests, extras, a price from `POST /v1/public/quotes`, the booker's name and email, the cancellation policy to accept, a hold from `POST /v1/public/checkout-sessions`, and the demo's test payment ("Simulate successful payment" or "Simulate declined payment"). The app then waits for the checkout's own state, which only the provider's verified event changes, and shows the outcome: booked, declined, hold expired, canceled, or refunded because the seats were gone.
+- Shows "Your bookings": each booking opened on this phone in the last hour, and the booking's page with the trip, where to meet, the party, what was paid, and each named person's waiver status. A booking opens right after paying, or by pasting the link from the confirmation email.
+- Shows one designed screen for each other outcome: loading, not published, not ready, could not connect (with Try again), trips that did not load, no trips, sold out, booking closed, prices not set, payments unavailable, too many open checkouts, a price that expired, a misconfigured build, and an answer for the wrong operator.
 
-Booking, payment, upcoming bookings, and waivers are the next goal (W1N-JOURNEYS). The logo and the brand fonts are not drawn yet: React Native cannot show an SVG data URI without another package, and the fonts need bundling. The app uses system fonts.
+The app uses the same API calls, headers, and bodies as the guest web app, and the same words for prices, the policy, and each failure (`src/booking-model.ts` is a port of the web app's booking model for the parts the app shows). No API change.
+
+Not in the app yet: Stripe's card form (the demo runs the fake provider; a checkout that asks for Stripe gives the seats back and says to book on the website), changing the party, naming people, and canceling (the booking's page says to use the email link), promotion codes, push, and deep links. The logo and the brand fonts are not drawn yet: React Native cannot show an SVG data URI without another package, and the fonts need bundling. The app uses system fonts.
+
+## Secrets on the phone
+
+- The checkout secret and the payment's client secret live only in the booking screen's memory, as on the web. Closing the app mid-payment loses them; the confirmation email still opens the booking.
+- A booking session is what the web app keeps in its tab's sessionStorage: its token, when it expires, and the booking's reference. The app keeps those same three fields, one record per booking and per operator, in the platform's secure storage through expo-secure-store (Keychain on iOS, readable only while the phone is unlocked and never restored to another device; Keystore-backed storage on Android). Sessions last an hour, as the API sets them, and expired ones are dropped. Nothing else is stored. If secure storage fails, the app keeps the record in memory until it closes.
+- Secrets and personal data travel only in an Authorization header or a POST body, never a path or query. A unit test checks every route's URL. The app's source never logs; a unit test checks for `console`.
+- Checkout secrets and Idempotency-Keys come from expo-crypto's `getRandomValues`, the platform's secure generator. There is no fallback to `Math.random`.
 
 ## Variants
 
@@ -49,4 +60,4 @@ The brand contract checks a logo with `atob` and a fatal UTF-8 `TextDecoder`. Ex
 
 ## Tests
 
-`pnpm --filter @tidegrid/guest-native test` runs the unit tests in Node: the variant files, the endpoint guard, the start and trip loaders (origin sent, no credentials, wrong operator refused, the API's own 404 versus any other, broken bodies), and the polyfills. `typecheck` and the repository's Biome lint cover the app's code. No test needs a simulator.
+`pnpm --filter @tidegrid/guest-native test` runs the unit tests in Node: the variant files, the endpoint guard, the start and trip loaders (origin sent, no credentials, wrong operator refused, the API's own 404 versus any other, broken bodies), the polyfills, and the booking journey (quote and checkout bodies parsed by the API's own schemas, the routes the web app uses, no secret in any URL, refusals mapped to the right screen, secrets and keys, and the stored sessions). `typecheck` and the repository's Biome lint cover the app's code. No test needs a simulator.

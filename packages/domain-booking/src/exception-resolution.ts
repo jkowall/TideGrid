@@ -66,9 +66,11 @@ export async function resolveFinalizationException(
      where e.tenant_id = ${ctx.tenantId} and e.id = ${input.exceptionId}::uuid`.execute(trx);
   const exception = found[0];
   if (!exception) return { kind: "exception_not_found" };
-  // Never true of a resolved exception: a refund leaves requested only for
-  // succeeded or failed, and none resolves while it is requested.
-  if (exception.refund_state === "requested") return { kind: "refund_pending" };
+  // Never true of a resolved exception: none resolves while its refund is
+  // unsettled, requested or pending at the provider (W3-G2.9).
+  if (exception.refund_state === "requested" || exception.refund_state === "pending") {
+    return { kind: "refund_pending" };
+  }
 
   const { rows: inserted } = await sql<{ id: string }>`
     insert into finalization_exception_resolutions (tenant_id, exception_id, reason_code, note)

@@ -266,6 +266,8 @@ export function canceledBooking(
     remedy: now.remedy,
     refundBp: now.refundBp,
     refundAmount: now.refundAmount,
+    creditAmount: 0,
+    overridden: false,
     paidAmount: now.paidAmount,
     cutoffAt: now.cutoffAt,
     beforeCutoff: now.beforeCutoff,

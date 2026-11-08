@@ -230,6 +230,7 @@ describe.skipIf(!env)("guest API follow-ups through the API", () => {
             return created;
           },
           retrievePayment: (input) => real.retrievePayment(input),
+          cancelPayment: (input) => real.cancelPayment(input),
           refundPayment: (input) => real.refundPayment(input),
           verifyWebhook: (input) => real.verifyWebhook(input),
         };

@@ -20,6 +20,8 @@ import {
 import { type Kysely, sql } from "kysely";
 import { accountRefPattern, resolvePaymentAccount } from "./accounts.ts";
 import {
+  type CanceledPayment,
+  type CancelPaymentInput,
   type CreatedPayment,
   type CreatePaymentInput,
   type PaymentCurrency,
@@ -134,6 +136,57 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Parse a fake event body. Returns null for anything that is not the fake's
  * own envelope; payment events must carry the payment object.
  */
+/**
+ * A fake refund event (W3-G2.9): the fake settles its own refunds at once and
+ * sends none, but tests and the demo may deliver one in this envelope, shaped
+ * like the fields Stripe's refund events carry: the refund's id, its
+ * payment, amount, status, TideGrid's key, and a failure code.
+ */
+function parseFakeRefundEvent(
+  id: string,
+  created: number,
+  account: string,
+  data: unknown,
+): Omit<ProviderEventFields, "payloadSha256"> | null {
+  const obj = isRecord(data) ? data.object : undefined;
+  if (!isRecord(obj) || obj.object !== "refund") return null;
+  const { id: ref, payment, amount, currency, status, idempotency_key, failure_code } = obj;
+  if (
+    typeof ref !== "string" ||
+    !/^[A-Za-z0-9_]{3,255}$/.test(ref) ||
+    typeof payment !== "string" ||
+    !fakePaymentRefPattern.test(payment) ||
+    typeof amount !== "number" ||
+    !Number.isInteger(amount) ||
+    amount < 1 ||
+    amount > 100_000_000 ||
+    currency !== "usd" ||
+    (status !== "pending" && status !== "succeeded" && status !== "failed") ||
+    typeof idempotency_key !== "string" ||
+    !idempotencyKeyPattern.test(idempotency_key) ||
+    (failure_code !== undefined &&
+      failure_code !== null &&
+      (typeof failure_code !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(failure_code)))
+  ) {
+    return null;
+  }
+  return {
+    provider: "fake",
+    eventId: id,
+    type: "refund.updated",
+    providerType: "refund.updated",
+    accountRef: account,
+    occurredAt: new Date(created * 1000),
+    payment: { ref: payment, amount, currency: "USD", clientReference: null },
+    refund: {
+      ref,
+      status,
+      key: idempotency_key,
+      failureCode: status === "failed" ? (failure_code ?? "refund_failed") : null,
+    },
+  };
+}
+
 export function parseFakeEventBody(
   rawBody: string,
 ): Omit<ProviderEventFields, "payloadSha256"> | null {
@@ -160,6 +213,7 @@ export function parseFakeEventBody(
   ) {
     return null;
   }
+  if (type === "refund.updated") return parseFakeRefundEvent(id, created, account, data);
   const kind = type === "payment.succeeded" || type === "payment.failed" ? type : "other";
   let payment: VerifiedProviderEvent["payment"] = null;
   if (kind !== "other") {
@@ -194,6 +248,8 @@ export function parseFakeEventBody(
     accountRef: account,
     occurredAt: new Date(created * 1000),
     payment,
+    // The fake settles refunds at once and sends no refund events.
+    refund: null,
   };
 }
 interface PaymentRow {
@@ -489,6 +545,34 @@ export class FakePaymentProvider implements PaymentProvider {
                 ${input.idempotencyKey})`.execute(trx);
       return { refundRef, status: "succeeded" as const };
     });
+  }
+
+  /**
+   * Cancel an unpaid fake payment (W3-G2.9): it settles as failed, once, with
+   * its stored payment.failed event, as a canceled Stripe intent does. A
+   * payment that already succeeded answers succeeded; one that already
+   * failed answers canceled. The key is checked, not stored: settling is
+   * idempotent by the payment itself.
+   */
+  async cancelPayment(input: CancelPaymentInput): Promise<CanceledPayment> {
+    if (!idempotencyKeyPattern.test(input.idempotencyKey)) {
+      throw new ProviderRejectedError("idempotency_key_invalid", "Malformed idempotency key");
+    }
+    if (!fakePaymentRefPattern.test(input.paymentRef)) {
+      throw new ProviderRejectedError("payment_unknown", "No such fake payment");
+    }
+    const tenantId = await this.tenantOf(input.accountRef, false);
+    const view = await this.getPayment(tenantId, input.paymentRef);
+    if (!view || view.accountRef !== input.accountRef) {
+      throw new ProviderRejectedError("payment_unknown", "No such fake payment");
+    }
+    const settled = await this.settlePayment(tenantId, input.paymentRef, "failed", Date.now());
+    if (settled.kind === "not_found") {
+      throw new ProviderRejectedError("payment_unknown", "No such fake payment");
+    }
+    return settled.event.type === "payment.succeeded"
+      ? { status: "succeeded", paymentRef: input.paymentRef }
+      : { status: "canceled", paymentRef: input.paymentRef };
   }
 
   async verifyWebhook(input: VerifyWebhookInput): Promise<WebhookVerification> {

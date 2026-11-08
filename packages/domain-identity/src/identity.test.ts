@@ -34,6 +34,7 @@ describe("role permissions", () => {
       "bookings.create",
       "messages.resend",
       "exceptions.resolve",
+      "bookings.cancel",
     ]);
     expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read", "payments.read"]);
   });
@@ -88,6 +89,15 @@ describe("role permissions", () => {
       "booking_staff",
     ]);
     expect(permissionsFor("owner")).toContain("messages.resend");
+  });
+
+  it("lets owners and booking staff cancel, and only owners override or adjust credit (W3-G2.9)", () => {
+    expect(StaffRole.options.filter((r) => can(r, "bookings.cancel"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
+    expect(StaffRole.options.filter((r) => can(r, "bookings.override"))).toEqual(["owner"]);
+    expect(StaffRole.options.filter((r) => can(r, "credits.adjust"))).toEqual(["owner"]);
   });
 
   it("keeps support access, export, and the deletion request with owners (W3-G2.2b)", () => {

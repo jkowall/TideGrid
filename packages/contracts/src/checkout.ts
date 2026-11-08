@@ -73,8 +73,10 @@ export const CheckoutSessionState = z
 export type CheckoutSessionState = z.infer<typeof CheckoutSessionState>;
 
 export const RefundState = z
-  .enum(["requested", "succeeded", "failed"])
-  .describe("requested until the provider confirms it; a failed refund is an operator exception");
+  .enum(["requested", "pending", "succeeded", "failed"])
+  .describe(
+    "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception",
+  );
 
 export const CheckoutSession = z
   .object({

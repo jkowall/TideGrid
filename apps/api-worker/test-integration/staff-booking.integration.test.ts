@@ -420,7 +420,13 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
       audience: AUD,
       keys: createLocalJWKSet({ keys: [jwk] }),
     });
-    app = createApp({ accessVerifier: verifier, deliverEmailAfterCommit: false });
+    app = createApp({
+      accessVerifier: verifier,
+      deliverEmailAfterCommit: false,
+      // Pays some checkouts after they were canceled (the late-success refund),
+      // so a cancel never reaches the provider first (W3-G2.9).
+      cancelPaymentAfterCommit: false,
+    });
     const [a, b] = await Promise.all([
       // G2.12e keeps the last two days of A and the last day of B to itself:
       // the allocator hands out days from the first, and no earlier test reaches

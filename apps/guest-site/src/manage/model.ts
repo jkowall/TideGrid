@@ -184,6 +184,7 @@ export function refundStateText(refund: NonNullable<ManagedBooking["refund"]>): 
     case "succeeded":
       return `${formatMoney(refund.amount)} refunded to your original payment method`;
     case "requested":
+    case "pending":
       return `${formatMoney(refund.amount)} refund on its way`;
     case "failed":
       return `${formatMoney(refund.amount)} refund could not be sent yet; the operator will follow up`;

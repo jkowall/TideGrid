@@ -1,6 +1,7 @@
 import type {
   InboxProcessingState,
   ProviderEventType,
+  ProviderRefundStatus,
   TenantContext,
   TenantTransaction,
 } from "@tidegrid/database";
@@ -34,6 +35,13 @@ export interface InboxEvent {
   payloadSha256: string;
   processingState: InboxProcessingState;
   outcome: string | null;
+  /** Present for refund.updated events (W3-G2.9). */
+  refund: {
+    ref: string;
+    status: ProviderRefundStatus;
+    key: string;
+    failureCode: string | null;
+  } | null;
 }
 
 export interface RecordedEvent {
@@ -80,10 +88,15 @@ interface InboxRow {
   payload_sha256: string;
   processing_state: InboxProcessingState;
   outcome: string | null;
+  refund_ref: string | null;
+  refund_status: ProviderRefundStatus | null;
+  refund_key: string | null;
+  refund_failure_code: string | null;
 }
 
 const inboxColumns = sql`id, provider, event_id, event_type, provider_type, account_ref,
-  payment_ref, client_reference, amount, currency, payload_sha256, processing_state, outcome`;
+  payment_ref, client_reference, amount, currency, payload_sha256, processing_state, outcome,
+  refund_ref, refund_status, refund_key, refund_failure_code`;
 
 function toInboxEvent(row: InboxRow): InboxEvent {
   return {
@@ -100,6 +113,15 @@ function toInboxEvent(row: InboxRow): InboxEvent {
     payloadSha256: row.payload_sha256,
     processingState: row.processing_state,
     outcome: row.outcome,
+    refund:
+      row.refund_ref !== null && row.refund_status !== null && row.refund_key !== null
+        ? {
+            ref: row.refund_ref,
+            status: row.refund_status,
+            key: row.refund_key,
+            failureCode: row.refund_failure_code,
+          }
+        : null,
   };
 }
 
@@ -118,15 +140,18 @@ export async function recordProviderEvent(
 ): Promise<RecordedEvent> {
   if (!isVerifiedProviderEvent(event)) throw new UnverifiedProviderEventError();
   const payment = event.payment;
+  const refund = event.refund;
   const { rows } = await sql<{ id: string }>`
     insert into provider_events (
       tenant_id, provider, event_id, event_type, provider_type, account_ref, payment_ref,
-      client_reference, amount, currency, provider_created_at, payload_sha256)
+      client_reference, amount, currency, provider_created_at, payload_sha256,
+      refund_ref, refund_status, refund_key, refund_failure_code)
     values (
       ${ctx.tenantId}, ${event.provider}, ${event.eventId}, ${event.type}, ${event.providerType},
       ${event.accountRef}, ${payment?.ref ?? null}, ${payment?.clientReference ?? null},
       ${payment?.amount ?? null}, ${payment?.currency ?? null}, ${event.occurredAt},
-      ${event.payloadSha256})
+      ${event.payloadSha256}, ${refund?.ref ?? null}, ${refund?.status ?? null},
+      ${refund?.key ?? null}, ${refund?.failureCode ?? null})
     on conflict (provider, event_id) do nothing
     returning id`.execute(trx);
   const inserted = rows[0];
