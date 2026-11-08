@@ -159,7 +159,9 @@ export function recordedNeonMainHost(source: NeonGuardSource = defaultSource()):
  * (parseUrl and parseOptions), which cuts at the first '@', does not treat '#'
  * as a delimiter, and percent-decodes the host list. A host either parse finds
  * counts, so a crafted URL cannot hide a host from the guard that postgres.js
- * would still try. A unit test compares the copy with the installed client.
+ * would still try. A unit test checks nine fixed URLs against the installed
+ * client: every host it lists must be one this function returns. It proves
+ * nothing about other URLs, so recheck the copy when postgres.js moves.
  */
 export function connectionHosts(
   url: string,

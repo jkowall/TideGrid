@@ -290,7 +290,7 @@ describe("connectionHosts matches postgres.js on crafted URLs", () => {
     vi.unstubAllEnvs();
   });
 
-  it("includes every host postgres.js 3.4.9 would try", async () => {
+  it("includes every host the installed postgres.js lists for nine fixed URLs", async () => {
     vi.stubEnv("PGHOST", "");
     for (const url of [...crafted, local, onMain, onMainPooled, "postgresql:///db"]) {
       const sql = postgres(url, { max: 1 });
