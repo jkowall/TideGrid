@@ -355,11 +355,14 @@ describe.skipIf(!env)("the email exceptions list: the API (W1-EMAIL-EXC)", () =>
       // A malformed cursor fails the contract before any role is read.
       const expected = query === "?before=not-a-cursor" ? 400 : 403;
       expect(res.status, query).toBe(expected);
+      // A refusal is never cached either.
+      expect(res.headers.get("cache-control"), query).toBe("no-store");
       if (expected === 403) expect(res.json.error?.code).toBe("forbidden");
       expect(res.text).not.toContain(bounced.reference);
     }
     const unsigned = await request("GET", listPath(A.id));
     expect([unsigned.status, unsigned.json.error?.code]).toEqual([401, "unauthenticated"]);
+    expect(unsigned.headers.get("cache-control")).toBe("no-store");
   });
 
   it("keeps two tenants apart: another tenant's id is 404, and its message id as a cursor is 400", async () => {
@@ -371,6 +374,8 @@ describe.skipIf(!env)("the email exceptions list: the API (W1-EMAIL-EXC)", () =>
       as: A.owner,
     });
     expect([cursor.status, cursor.json.error?.code]).toEqual([400, "cursor_invalid"]);
+    expect(across.headers.get("cache-control")).toBe("no-store");
+    expect(cursor.headers.get("cache-control")).toBe("no-store");
 
     const ownB = await request("GET", listPath(B.id), { as: B.bookingStaff });
     expect(ownB.status).toBe(200);
