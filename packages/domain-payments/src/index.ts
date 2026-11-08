@@ -50,6 +50,7 @@ export {
   markInboxProcessed,
   type RecordedEvent,
   recordProviderEvent,
+  tryLockInboxEvent,
 } from "./inbox.ts";
 export {
   DEFAULT_TOLERANCE_SECONDS,
@@ -76,3 +77,12 @@ export {
   stripeSecretKeyPattern,
   stripeWebhookSecretPattern,
 } from "./stripe.ts";
+export {
+  compareStripeWebhookIps,
+  isStripeWebhookIp,
+  STRIPE_WEBHOOK_IPS,
+  STRIPE_WEBHOOK_IPS_SOURCE,
+  STRIPE_WEBHOOK_IPS_VERIFIED,
+  STRIPE_WEBHOOK_IPS_VERSION,
+  type StripeWebhookIpsComparison,
+} from "./stripe-webhook-ips.ts";

@@ -158,6 +158,24 @@ export async function lockInboxEvent(
   return rows[0] ? toInboxEvent(rows[0]) : null;
 }
 
+/**
+ * Lock one inbox row unless another transaction holds it. Null when one does,
+ * or when the row is not in this tenant: either way there is nothing for this
+ * caller to do. For processing after a quick acknowledgement, which must
+ * never wait on a sweep or a redelivery that is already processing the row.
+ */
+export async function tryLockInboxEvent(
+  trx: TenantTransaction,
+  tenantId: string,
+  inboxId: string,
+): Promise<InboxEvent | null> {
+  const { rows } = await sql<InboxRow>`
+    select ${inboxColumns} from provider_events
+     where tenant_id = ${tenantId} and id = ${inboxId}
+       for update skip locked`.execute(trx);
+  return rows[0] ? toInboxEvent(rows[0]) : null;
+}
+
 /** Record the outcome once. Refuses a row that is not received, so nothing is processed twice. */
 export async function markInboxProcessed(
   trx: TenantTransaction,
