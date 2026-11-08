@@ -8,6 +8,30 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-MIG-CONC, a no-transaction runner mode for CREATE INDEX CONCURRENTLY (owner go; coordinator defaults pending owner confirmation)
+
+On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal and for local commits on its branch. That reading is the coordinator's, pending owner confirmation. Pushing, the pull request, and the merge still wait for the owner's go for this goal, and the goal's rules leave the merge to the owner. The run continued under the owner's message "keep going". No token budget was set.
+
+The rule this goal serves is the owner's. The [pre-pilot hardening section](#owner-decision-2026-11-08-pre-pilot-hardening-coordinator-defaults-2026-10-28-and-2026-10-29) holds D6 A's standing rule: a non-transactional runner mode for `CREATE INDEX CONCURRENTLY` lands before any pilot-volume table gets a new index. On 2026-11-08 the owner confirmed it ([entry](#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions), question e). The question read, in part: "D6 A's standing CREATE INDEX CONCURRENTLY runner rule which gates W1-MIG-CONC". The owner selected "Confirm all (Recommended)", whose text reads: "Confirm D1 to D9 and D-E1 to D-E6, D-E9 to D-E12 as recorded. Type in Other to replace any one."
+
+What was built, on branch `goal/mig-conc` from `main` `8f2d485` (first built on `b1461f3`, then rebased). The coordinator named the branch; the goal file's name was `build/migrate-concurrently-mode`. A file whose first line is exactly `-- tidegrid:no-transaction` runs its one statement outside a transaction, under session-level lock and statement timeouts, and is recorded in `schema_migrations` only after the statement succeeds. Every run refuses while an invalid index exists, prints the repair command, and drops nothing. Unmarked files run exactly as before. Test-only fixture migrations prove the mode; no index is added to any real table, and no migration in the tree is marked. Details: the [database README](../../packages/database/README.md#indexes-built-concurrently-no-transaction-files).
+
+Coordinator defaults, pending owner confirmation. D1 to D4 are the goal's recommended options:
+
+- **D1: the marker** is the first line, exactly `-- tidegrid:no-transaction`. The marker anywhere else, or misspelled on the first line, fails the run before anything is applied.
+- **D2: one statement.** A marked file holds exactly one statement. The coordinator narrowed it further: the statement must be `CREATE [UNIQUE] INDEX CONCURRENTLY`, and the file's reader refuses dollar quotes, parameters, escape strings, and unterminated quotes or comments rather than parse them. `IF NOT EXISTS` is recommended in the README, not enforced.
+- **D3: an invalid index blocks.** Each run, under the advisory lock and before it applies anything, refuses while any invalid index exists outside the system catalogs and temporary schemas, pending files or not. It names each index and prints `DROP INDEX CONCURRENTLY IF EXISTS` for it. Nothing is dropped automatically. Partitioned indexes are not checked, because they cannot be built concurrently and one created `ON ONLY` a parent is invalid by design.
+- **D4: the 0005 rebuild stays out.** The owner's input "whether the 0005 constraints are rebuilt concurrently later" was not supplied, so the default holds: no rebuild in this goal.
+- **Also taken by default.** The marked file uses the same timeout values as the transactional files (5 s and 120 s, or the two environment overrides). Runners now take the advisory lock by polling `pg_try_advisory_lock` every 250 ms instead of waiting in `pg_advisory_lock`: a runner blocked inside a statement holds a snapshot, a concurrent build waits for it, and the two deadlock. The integration suite showed that deadlock with the blocking call. `tools/release` is unchanged; its migrate plan still says each file runs in its own transaction, which stays true while no file in the tree is marked.
+
+Observed, on the local PostgreSQL 17 container: the session `lock_timeout` ends a build's wait for a writer on the table, and also its wait for a transaction elsewhere in the database whose snapshot is older than the build's. So a long transaction anywhere can fail a build on a busy database, and the invalid index it leaves blocks the next run until it is dropped.
+
+Security review: the implementer read rule R9 as not triggered, since the change touches no money, tenancy, token, secret, link, or hostname code. The coordinator decides.
+
+Not changed: rule R4 of the wave 1 goals still holds back new indexes on the pilot-volume tables until `grep -n -i concurrently packages/database/src/migrate.ts` matches on `main`. The [pre-pilot hardening section](#owner-decision-2026-11-08-pre-pilot-hardening-coordinator-defaults-2026-10-28-and-2026-10-29) still says each file runs in one transaction; this entry supersedes that sentence once the branch merges. Not yet recorded: the verification log entry and the goal's checkpoint telemetry. Both are the coordinator's, written with the CI facts once the pull request runs, and the goal is not complete until they land.
+
+Canonical: the [database README](../../packages/database/README.md#indexes-built-concurrently-no-transaction-files) and `packages/database/src/migrate.ts`.
+
 ### 2026-11-08: O-ACCESS, the D4 (a) run closed with steps 5 and 7 not shown (owner decisions)
 
 The owner asked for the O-ACCESS commands ("give me what to run") and reported running the D4 (a) seed in the owner's own terminal, output not seen. Whether the owner saved the Access policy change was not read back. The owner's decisions and words, in the coordinator's session:

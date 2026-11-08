@@ -1,13 +1,67 @@
 import { randomUUID } from "node:crypto";
+import net from "node:net";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import { describe, expect, it } from "vitest";
-import { loadMigrations, migrate, status } from "./migrate.ts";
+import {
+  defaultMigrationTimeouts,
+  loadMigrations,
+  type MigrationFile,
+  migrate,
+  status,
+} from "./migrate.ts";
 import { runtimeRoleFindings } from "./role.ts";
 
 const url = process.env.DATABASE_URL;
 if (!url && process.env.CI) {
   throw new Error("DATABASE_URL is required in CI; the integration suite must not skip silently.");
 }
+
+/** The tag of a backend ReadyForQuery frame, "Z". */
+const readyForQuery = 0x5a;
+
+/**
+ * The complete PostgreSQL backend frames at the start of `bytes`: each is a
+ * one-byte tag, then a four-byte length that counts itself and the body. A
+ * partial frame at the end is left out until the rest arrives.
+ */
+function backendFrames(bytes: Buffer): { tag: number; end: number }[] {
+  const frames: { tag: number; end: number }[] = [];
+  let at = 0;
+  while (bytes.length - at >= 5) {
+    const end = at + 1 + bytes.readUInt32BE(at + 1);
+    if (end > bytes.length) break;
+    frames.push({ tag: bytes[at] as number, end });
+    at = end;
+  }
+  return frames;
+}
+
+describe("the connection-cut relay's frame reader", () => {
+  const frame = (tag: string, body: Buffer) => {
+    const head = Buffer.alloc(5);
+    head.write(tag, 0, "latin1");
+    head.writeUInt32BE(4 + body.length, 1);
+    return Buffer.concat([head, body]);
+  };
+  const ready = frame("Z", Buffer.from("I", "latin1"));
+  // A CommandComplete whose text holds a "Z" byte.
+  const complete = frame("C", Buffer.from("SET Z\0", "latin1"));
+
+  it("waits for the rest of a ReadyForQuery split right after its tag", () => {
+    const bytes = Buffer.concat([complete, ready]);
+    const cut = complete.length + 1;
+    expect(backendFrames(bytes.subarray(0, cut)).map((f) => f.tag)).toEqual([0x43]);
+    expect(backendFrames(bytes).map((f) => f.tag)).toEqual([0x43, readyForQuery]);
+    expect(backendFrames(bytes).at(-1)?.end).toBe(bytes.length);
+  });
+
+  it("does not read a 0x5a byte inside another frame as ReadyForQuery", () => {
+    expect(complete.includes(readyForQuery)).toBe(true);
+    expect(backendFrames(complete).map((f) => f.tag)).toEqual([0x43]);
+  });
+});
 
 describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
   it("applies every migration once, then is a no-op, and the app role can read", async () => {
@@ -212,4 +266,379 @@ describe.skipIf(!url)("migrate against a live PostgreSQL branch", () => {
       await admin.end({ timeout: 5 });
     }
   }, 60_000);
+});
+
+/**
+ * The no-transaction mode for CREATE INDEX CONCURRENTLY (the D6 A standing
+ * rule), proved with test-only fixture migrations, each test on a scratch
+ * database it creates and drops. The fixtures never reach the job's own
+ * database, so its schema_migrations keeps only the real files.
+ */
+describe.skipIf(!url)("no-transaction files on a scratch database", () => {
+  const fixtureDir = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "test-fixtures",
+    "no-transaction-migrations",
+  );
+  type Sql = ReturnType<typeof postgres>;
+
+  /** Create a scratch database, run the body against it, and always drop it. */
+  async function onScratch(
+    body: (scratchUrl: string, scratch: Sql, files: MigrationFile[]) => Promise<void>,
+  ): Promise<void> {
+    const name = `noxact_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+    const admin = postgres(url as string, { max: 1, onnotice: () => {} });
+    try {
+      // The name is generated here, lowercase letters, digits, and underscore only.
+      await admin.unsafe(`CREATE DATABASE ${name}`);
+      const u = new URL(url as string);
+      u.pathname = `/${name}`;
+      const scratchUrl = u.toString();
+      const scratch = postgres(scratchUrl, { max: 2, onnotice: () => {} });
+      try {
+        await body(scratchUrl, scratch, await loadMigrations(fixtureDir));
+      } finally {
+        await scratch.end({ timeout: 5 });
+      }
+    } finally {
+      try {
+        await admin.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      } finally {
+        await admin.end({ timeout: 5 });
+      }
+    }
+  }
+
+  async function indexState(sql: Sql, index: string) {
+    const [row] = await sql<{ valid: boolean | null }[]>`
+      SELECT (SELECT x.indisvalid FROM pg_index x
+               WHERE x.indexrelid = to_regclass(${`public.${index}`})) AS valid`;
+    return row?.valid ?? null;
+  }
+
+  async function recorded(sql: Sql): Promise<string[]> {
+    const rows = await sql<{ name: string }[]>`SELECT name FROM schema_migrations ORDER BY name`;
+    return rows.map((r) => r.name);
+  }
+
+  const pick = (files: MigrationFile[], ...numbers: number[]) =>
+    files.filter((f) => numbers.includes(Number(f.name.slice(0, 4))));
+
+  it("runs a marked file outside a transaction, records it after success, and is then a no-op", async () => {
+    await onScratch(async (scratchUrl, scratch, files) => {
+      const first = await migrate(scratchUrl, pick(files, 1, 2));
+      expect(first.applied).toEqual(["0001_fixture_items.sql", "0002_fixture_items_code_key.sql"]);
+      expect(await indexState(scratch, "fixture_items_code_key")).toBe(true);
+      expect(await recorded(scratch)).toEqual([
+        "0001_fixture_items.sql",
+        "0002_fixture_items_code_key.sql",
+      ]);
+      const again = await migrate(scratchUrl, pick(files, 1, 2));
+      expect(again).toEqual({ applied: [], skipped: first.applied });
+
+      // The same statement without the marker runs in a transaction, as every
+      // unmarked file does, and PostgreSQL refuses it there.
+      const [marked] = pick(files, 2);
+      const unmarked = {
+        name: "0003_unmarked.sql",
+        sql: (marked as MigrationFile).sql
+          .replace("-- tidegrid:no-transaction\n", "")
+          .replace("fixture_items_code_key", "fixture_items_code_again"),
+        checksum: "e".repeat(64),
+      };
+      await expect(migrate(scratchUrl, [...pick(files, 1, 2), unmarked])).rejects.toThrow(
+        /0003_unmarked\.sql failed: CREATE INDEX CONCURRENTLY cannot run inside a transaction block/,
+      );
+      expect(await indexState(scratch, "fixture_items_code_again")).toBeNull();
+      expect(await recorded(scratch)).not.toContain("0003_unmarked.sql");
+    });
+  }, 60_000);
+
+  it("leaves a failed build unrecorded, refuses every later run with the repair, and never drops the index", async () => {
+    await onScratch(async (scratchUrl, scratch, files) => {
+      await migrate(scratchUrl, pick(files, 1));
+      await scratch`INSERT INTO public.fixture_items (id, code) VALUES (1001, 'code-1')`;
+
+      const repair = "DROP INDEX CONCURRENTLY IF EXISTS public.fixture_items_code_key;";
+      const failed = migrate(scratchUrl, pick(files, 1, 2));
+      await expect(failed).rejects.toThrow(
+        /0002_fixture_items_code_key\.sql failed: could not create unique index/,
+      );
+      await expect(failed).rejects.toThrow(/The failed build left 1 invalid index/);
+      await expect(failed).rejects.toThrow(repair);
+      expect(await indexState(scratch, "fixture_items_code_key")).toBe(false);
+      expect(await recorded(scratch)).toEqual(["0001_fixture_items.sql"]);
+
+      // The next run refuses before it applies anything, pending files or not.
+      for (const run of [pick(files, 1, 2), pick(files, 1)]) {
+        const refused = migrate(scratchUrl, run);
+        await expect(refused).rejects.toThrow(/^Migrations refused: 1 invalid index\(es\)/);
+        await expect(refused).rejects.toThrow(repair);
+        await expect(refused).rejects.toThrow(/Nothing was dropped and nothing was applied/);
+      }
+      expect(await indexState(scratch, "fixture_items_code_key")).toBe(false);
+      expect(await recorded(scratch)).toEqual(["0001_fixture_items.sql"]);
+
+      // The repair the message names, then the cause, then the same file again.
+      await scratch.unsafe(repair);
+      await scratch`DELETE FROM public.fixture_items WHERE id = 1001`;
+      const fixed = await migrate(scratchUrl, pick(files, 1, 2));
+      expect(fixed.applied).toEqual(["0002_fixture_items_code_key.sql"]);
+      expect(await indexState(scratch, "fixture_items_code_key")).toBe(true);
+    });
+  }, 60_000);
+
+  it("holds a marked file to the session-level lock_timeout", async () => {
+    await onScratch(async (scratchUrl, scratch, files) => {
+      await migrate(scratchUrl, pick(files, 1));
+      // An open transaction that wrote to the table: the build waits for it.
+      const writer = postgres(scratchUrl, { max: 1, onnotice: () => {} });
+      try {
+        let release: () => void = () => {};
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let ready: () => void = () => {};
+        const writing = new Promise<void>((resolve) => {
+          ready = resolve;
+        });
+        const tx = writer.begin(async (t) => {
+          await t`INSERT INTO public.fixture_items (id, code) VALUES (2001, 'code-2001')`;
+          ready();
+          await held;
+          throw new Error("roll back");
+        });
+        await writing;
+        const timeouts = { lockTimeoutMs: 300, statementTimeoutMs: 60_000 };
+        const started = Date.now();
+        await expect(migrate(scratchUrl, pick(files, 1, 2), timeouts)).rejects.toThrow(
+          /0002_fixture_items_code_key\.sql failed: canceling statement due to lock timeout/,
+        );
+        expect(Date.now() - started).toBeLessThan(10_000);
+        release();
+        await expect(tx).rejects.toThrow("roll back");
+      } finally {
+        await writer.end({ timeout: 5 });
+      }
+      expect(await indexState(scratch, "fixture_items_code_key")).toBe(false);
+      expect(await recorded(scratch)).toEqual(["0001_fixture_items.sql"]);
+      await expect(migrate(scratchUrl, pick(files, 1, 2))).rejects.toThrow(
+        /Migrations refused: 1 invalid index/,
+      );
+    });
+  }, 60_000);
+
+  it("ends the build's wait for an older snapshot on another table at the lock_timeout", async () => {
+    await onScratch(async (scratchUrl, scratch, files) => {
+      await migrate(scratchUrl, pick(files, 1));
+      // A reader of another table only, holding its snapshot open.
+      const reader = postgres(scratchUrl, { max: 1, onnotice: () => {} });
+      try {
+        let release: () => void = () => {};
+        const held = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let ready: () => void = () => {};
+        const reading = new Promise<void>((resolve) => {
+          ready = resolve;
+        });
+        const tx = reader.begin("isolation level repeatable read", async (t) => {
+          await t`SELECT count(*) FROM schema_migrations`;
+          ready();
+          await held;
+        });
+        await reading;
+        const timeouts = { lockTimeoutMs: 300, statementTimeoutMs: 60_000 };
+        await expect(migrate(scratchUrl, pick(files, 1, 2), timeouts)).rejects.toThrow(
+          /0002_fixture_items_code_key\.sql failed: canceling statement due to lock timeout/,
+        );
+        release();
+        await tx;
+      } finally {
+        await reader.end({ timeout: 5 });
+      }
+      expect(await indexState(scratch, "fixture_items_code_key")).toBe(false);
+      expect(await recorded(scratch)).toEqual(["0001_fixture_items.sql"]);
+    });
+  }, 60_000);
+
+  it("holds a marked file to the session-level statement_timeout", async () => {
+    await onScratch(async (scratchUrl, scratch, files) => {
+      await migrate(scratchUrl, pick(files, 1));
+      const timeouts = { lockTimeoutMs: 5_000, statementTimeoutMs: 300 };
+      await expect(migrate(scratchUrl, pick(files, 1, 3), timeouts)).rejects.toThrow(
+        /0003_fixture_items_slow\.sql failed: canceling statement due to statement timeout[\s\S]*DROP INDEX CONCURRENTLY IF EXISTS public\.fixture_items_slow;/,
+      );
+      expect(await indexState(scratch, "fixture_items_slow")).toBe(false);
+      expect(await recorded(scratch)).toEqual(["0001_fixture_items.sql"]);
+    });
+  }, 60_000);
+
+  it("lets a second runner wait for the lock without stalling a concurrent build", async () => {
+    await onScratch(async (scratchUrl, scratch, files) => {
+      await migrate(scratchUrl, pick(files, 1));
+      const run = pick(files, 1, 3);
+      const first = migrate(scratchUrl, run, defaultMigrationTimeouts);
+      // A failure before the build starts must end the wait, not hang it.
+      let firstSettled = false;
+      first.then(
+        () => {
+          firstSettled = true;
+        },
+        () => {
+          firstSettled = true;
+        },
+      );
+      // Start the second runner once the first holds the lock and is building.
+      const deadline = Date.now() + 30_000;
+      for (;;) {
+        if (firstSettled) await first;
+        if (Date.now() > deadline) throw new Error("the first runner never started its build");
+        const [row] = await scratch<{ building: boolean }[]>`
+          SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                          WHERE datname = current_database()
+                            AND query LIKE 'CREATE INDEX CONCURRENTLY fixture_items_slow%') AS building`;
+        if (row?.building) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const second = migrate(scratchUrl, run, defaultMigrationTimeouts);
+      const [a, b] = await Promise.all([first, second]);
+      expect(a.applied).toEqual(["0003_fixture_items_slow.sql"]);
+      expect(b).toEqual({
+        applied: [],
+        skipped: ["0001_fixture_items.sql", "0003_fixture_items_slow.sql"],
+      });
+      expect(await indexState(scratch, "fixture_items_slow")).toBe(true);
+    });
+  }, 60_000);
+
+  /**
+   * A TCP relay that cuts the runner's connection the instant the server
+   * answers its session `SET statement_timeout`: the reply and the close go
+   * out together. postgres.js reconnects silently when a connection closes
+   * while idle, and a build sent on that new session would run with no
+   * timeouts and without the runners' lock. The runner never idles there: the
+   * build is handed to the connection in the same turn the reply arrives, so
+   * the close fails the build instead. This guards that ordering.
+   */
+  async function cutAfterSessionTimeouts(target: URL) {
+    let cuts = 0;
+    const sockets = new Set<net.Socket>();
+    const server = net.createServer((client) => {
+      const upstream = net.connect({ port: Number(target.port || 5432), host: target.hostname });
+      let armed = false;
+      // TCP does not keep message boundaries: keep a short tail so a marker
+      // split across two chunks still matches.
+      let tail = "";
+      const marker = "SET statement_timeout";
+      for (const s of [client, upstream]) {
+        sockets.add(s);
+        s.on("error", () => {});
+        s.on("close", () => sockets.delete(s));
+      }
+      client.on("close", () => upstream.destroy());
+      upstream.on("close", () => client.destroy());
+      client.on("data", (chunk) => {
+        const seen = tail + chunk.toString("latin1");
+        if (seen.includes(marker)) armed = true;
+        tail = seen.slice(-(marker.length - 1));
+        upstream.write(chunk);
+      });
+      // Forward only whole backend frames, so the cut lands right after a
+      // complete ReadyForQuery and never inside a frame or on a stray 0x5a.
+      let pending = Buffer.alloc(0);
+      upstream.on("data", (chunk) => {
+        pending = Buffer.concat([pending, chunk]);
+        let sent = 0;
+        for (const frame of backendFrames(pending)) {
+          // ReadyForQuery after the SET: the SET is done and the session is idle.
+          if (armed && cuts === 0 && frame.tag === readyForQuery) {
+            cuts++;
+            client.end(pending.subarray(0, frame.end));
+            upstream.destroy();
+            return;
+          }
+          sent = frame.end;
+        }
+        if (sent > 0) client.write(pending.subarray(0, sent));
+        pending = pending.subarray(sent);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const relayed = new URL(target);
+    relayed.hostname = "127.0.0.1";
+    relayed.port = String((server.address() as net.AddressInfo).port);
+    // No SSLRequest: its one-byte answer is not a frame.
+    relayed.searchParams.set("sslmode", "disable");
+    return {
+      url: relayed.toString(),
+      cuts: () => cuts,
+      close: async () => {
+        for (const s of sockets) s.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      },
+    };
+  }
+
+  // The relay rewrites the host, so TLS with SNI (Neon) cannot pass through it.
+  const local = url ? ["127.0.0.1", "localhost"].includes(new URL(url).hostname) : false;
+
+  it.skipIf(!local)(
+    "fails a marked file whose connection drops after its session timeouts, and never sends the build on a new session",
+    async () => {
+      await onScratch(async (scratchUrl, scratch, files) => {
+        await migrate(scratchUrl, pick(files, 1));
+        // A writer holds the table, so a build on a session without
+        // lock_timeout would wait for it with no limit.
+        const writer = postgres(scratchUrl, { max: 1, onnotice: () => {} });
+        const relay = await cutAfterSessionTimeouts(new URL(scratchUrl));
+        try {
+          let release: () => void = () => {};
+          const held = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          let ready: () => void = () => {};
+          const writing = new Promise<void>((resolve) => {
+            ready = resolve;
+          });
+          const tx = writer.begin(async (t) => {
+            await t`INSERT INTO public.fixture_items (id, code) VALUES (3001, 'code-3001')`;
+            ready();
+            await held;
+            throw new Error("roll back");
+          });
+          await writing;
+          const timeouts = { lockTimeoutMs: 300, statementTimeoutMs: 60_000 };
+          const outcome = await Promise.race([
+            migrate(relay.url, pick(files, 1, 2), timeouts).then(
+              () => "applied",
+              (err: Error) => err.message,
+            ),
+            new Promise<string>((resolve) =>
+              setTimeout(() => resolve("still running after 10 s"), 10_000),
+            ),
+          ]);
+          release();
+          await expect(tx).rejects.toThrow("roll back");
+          expect(relay.cuts()).toBe(1);
+          expect(outcome).toMatch(
+            /^Migration 0002_fixture_items_code_key\.sql failed: .*CONNECTION_CLOSED/,
+          );
+        } finally {
+          await relay.close();
+          await writer.end({ timeout: 5 });
+        }
+        // The build never ran anywhere: no index, no record, no lock left.
+        expect(await indexState(scratch, "fixture_items_code_key")).toBeNull();
+        expect(await recorded(scratch)).toEqual(["0001_fixture_items.sql"]);
+        const [locks] = await scratch<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory'`;
+        expect(locks?.n).toBe(0);
+        const rerun = await migrate(scratchUrl, pick(files, 1, 2));
+        expect(rerun.applied).toEqual(["0002_fixture_items_code_key.sql"]);
+      });
+    },
+    60_000,
+  );
 });

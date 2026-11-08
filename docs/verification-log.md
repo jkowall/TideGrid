@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### A no-transaction runner mode for CREATE INDEX CONCURRENTLY (W1-MIG-CONC), built November 8, 2026
+
+The migration runner now runs a file whose first line is exactly `-- tidegrid:no-transaction` outside a transaction, so `CREATE INDEX CONCURRENTLY` can run ([decision register](v2/06-decision-register.md#2026-11-08-w1-mig-conc-a-no-transaction-runner-mode-for-create-index-concurrently-owner-go-coordinator-defaults-pending-owner-confirmation); the owner confirmed the D6 A standing rule on 2026-11-08, and D1 to D4 are coordinator defaults pending confirmation). Every other file still runs in one transaction. No migration in the tree uses the mode yet, and no real index was added. Nothing ran against Neon. The local runs and the reviews below are coordinator-reported.
+
+- **The mode.** A marked file holds exactly one `CREATE [UNIQUE] INDEX CONCURRENTLY` statement, checked by a conservative scanner. Every run first looks for invalid indexes, under the advisory lock, and refuses with a printed repair command if it finds any; it never drops anything. Runners now poll the advisory lock instead of blocking on it, since a blocked runner holds a snapshot that a concurrent build waits for.
+- **Proof.** Unit tests for the marker and the scanner, and integration tests on a throwaway PostgreSQL 17 container, using test-only fixture migrations. After the rebase onto `main`: `pnpm check` passed, with the database unit tests at 98 of 98, and `pnpm test:integration` passed 898 tests with 0 failed. A negative control with the old blocking lock deadlocked, which shows the polling lock is needed. A manual probe showed a long transaction elsewhere can fail a build and leave an invalid index, which the next run then refuses.
+- **Independent review.** Accept with listed fixes. Fixed: the register's wording of who merges, and the rebase onto `main`. Rebutted with evidence: a feared silent reconnect between the session settings and the build, which happens only on an idle connection the runner never leaves. A security review was not run: the change touches no money, tenancy, token, secret, link, or hostname code.
+- **Recheck.** Accept with listed fixes; the open item was this entry. It also noted a pre-existing hang when a connection is reset rather than closed, unchanged by this goal.
+- **Telemetry.** About two hours of agent time across build, review, one fix round, and a recheck. Token use and cost per checkpoint: missing.
+
 ### O-ACCESS: the D4 (a) run, steps 5 and 7 not shown, November 8, 2026
 
 The owner ran the [November 1 runbook](runbooks/2026-11-01-preview-deploy.md)'s D4 (a) path for demo acceptance steps 4, 5, and 7, then directed the coordinator to finish it on the owner's work Mac through a remote session ([decision register](v2/06-decision-register.md#2026-11-08-o-access-the-d4-a-run-closed-with-steps-5-and-7-not-shown-owner-decisions)). The coordinator ran `nov1` there from about 04:24 to 04:41 UTC on November 8, on `main` at `69843c3` with Node 24.22.2, with every target declared by `--confirm`. The owner closed the run at 04:47 UTC with steps 5 and 7 not shown. The times and results below are *coordinator-reported*, from the JSON lines and Playwright output of that session; no log file was saved.
