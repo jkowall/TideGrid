@@ -37,8 +37,9 @@
       "@biomejs/biome"
     ],
     "overrides": {
+      "@cloudflare/vitest-pool-workers>wrangler": "4.152.0",
+      "@cloudflare/vitest-pool-workers>miniflare": "5.20261019.2-beta",
       "@cloudflare/vitest-pool-workers>zod": "4.6.6",
-      "miniflare>sharp": "0.35.5",
       "miniflare>undici": "7.30.1"
     }
   }
