@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W3-G2.5-TAX, per-location tax rates entered by each operator (synthetic pull-forward; coordinator default in place of the CPA's answer)
+
+The tracker held this goal until the Validation gate passed and the register recorded a CPA's per-location tax answer. At 17:35 UTC on 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That waives the Validation gate and the O-VAL-2 dependency as a synthetic pull-forward. About the open pilot questions, the owner then wrote on 2026-11-08 at 19:58 UTC: "I already gave answers to this one, so nothing is needed for the pilot." The owner has no accountant, so there is no CPA step.
+
+Coordinator default, chosen by the coordinator in place of the CPA's answer, pending owner confirmation:
+
+- **Each operator enters its own tax rates, per location.** A tax rate version applies at every location, as before, or at the one location it names. TideGrid calculates and displays the rates; it decides nothing about what is owed. That stays the operator's responsibility, as the [pricing README](../../packages/domain-pricing/README.md#terms) already says.
+- **The location is part of the version.** Moving a rate appends a version. A version that does not name a location keeps the current one, so a scoped rate never widens to every location by accident; an explicit null applies it everywhere.
+- **One location per version.** A tax that applies at two of several docks is two rates, or one rate for every location if it applies at all of them.
+
+Migration `0024` (`0023` went to the delivery foundation). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0024).
+
 ### 2026-11-08: Wave 3 code-only pull-forward, and W3-G2.3 delivery foundation (owner decision; coordinator defaults pending owner confirmation)
 
 The owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." This is a dated synthetic pull-forward. It waives the Validation gate and the O-VAL-2 dependency for W3-OPS-1 (plan only), W3-G2.3, W3-G2.9, W3-G2.10, and W3-G2.2b without managed OIDC and MFA. It allows no provider signup, no Cloudflare, Neon, or Stripe call, no Terraform apply, and no deploy. A new Worker binding stays out of the configuration a release deploys until its resource exists. No gate is claimed.

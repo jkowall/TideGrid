@@ -381,6 +381,8 @@ export interface TaxRateVersionsTable extends TermsAuthor {
   inclusive: Insert<boolean>;
   active: Insert<boolean>;
   reason: Insert<string>;
+  /** The location whose departures this version applies to; null for every location (0024). */
+  location_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
 export interface PromotionsTable {

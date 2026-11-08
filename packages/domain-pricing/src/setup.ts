@@ -217,7 +217,11 @@ export type CreateTaxRateResult =
   | { kind: "created"; taxRateId: string; version: number }
   | { kind: "invalid"; problems: TermsProblem[] };
 
-/** A new tax rate, active from its first version. */
+/**
+ * A new tax rate, active from its first version. With a `locationId` it
+ * applies only to trips departing that location; without one, at every
+ * location.
+ */
 export async function createTaxRate(
   trx: TenantTransaction,
   ctx: TenantContext,
@@ -225,13 +229,29 @@ export async function createTaxRate(
 ): Promise<CreateTaxRateResult> {
   const problems = withReason(validateTaxRate(input), input.reason);
   if (problems.length > 0) return { kind: "invalid", problems };
+  const locationId = input.locationId ?? null;
+  if (!(await locationExists(trx, ctx.tenantId, locationId))) {
+    return { kind: "invalid", problems: ["invalid_location"] };
+  }
   // Web Crypto, available in Node and in Workers alike.
   const taxRateId = crypto.randomUUID();
-  await insertTaxRateVersion(trx, ctx, { ...input, taxRateId, version: 1, active: true });
+  await insertTaxRateVersion(trx, ctx, {
+    ...input,
+    locationId,
+    taxRateId,
+    version: 1,
+    active: true,
+  });
   return { kind: "created", taxRateId, version: 1 };
 }
 
-/** The next version of a tax rate; `active: false` retires it. */
+/**
+ * The next version of a tax rate; `active: false` retires it. A version
+ * restates the whole rate, except its location: omitted, the location stays
+ * as the current version has it, so a scoped rate never widens to every
+ * location by accident. Pass `locationId: null` to apply it everywhere, or
+ * another location to move it.
+ */
 export async function createTaxRateVersion(
   trx: TenantTransaction,
   ctx: TenantContext,
@@ -243,20 +263,48 @@ export async function createTaxRateVersion(
   await lock(trx, `tidegrid.tax_rate:${ctx.tenantId}:${input.taxRateId}`);
   const current = await trx
     .selectFrom("tax_rate_versions")
-    .select((eb) => eb.fn.max("version").as("version"))
+    .select(["version", "location_id"])
     .where("tenant_id", "=", ctx.tenantId)
     .where("tax_rate_id", "=", input.taxRateId)
+    .orderBy("version", "desc")
+    .limit(1)
     .executeTakeFirst();
-  if (!current?.version) return { kind: "not_found" };
+  if (!current) return { kind: "not_found" };
+  const locationId = input.locationId === undefined ? current.location_id : input.locationId;
+  if (!(await locationExists(trx, ctx.tenantId, locationId))) {
+    return { kind: "invalid", problems: ["invalid_location"] };
+  }
   const version = current.version + 1;
-  await insertTaxRateVersion(trx, ctx, { ...input, version });
+  await insertTaxRateVersion(trx, ctx, { ...input, locationId, version });
   return { kind: "created", version };
+}
+
+/** True for no location, or for one of this tenant's locations. */
+async function locationExists(
+  trx: TenantTransaction,
+  tenantId: string,
+  locationId: string | null,
+): Promise<boolean> {
+  if (locationId === null) return true;
+  const row = await trx
+    .selectFrom("locations")
+    .select("id")
+    .where("tenant_id", "=", tenantId)
+    .where("id", "=", locationId)
+    .executeTakeFirst();
+  return row !== undefined;
 }
 
 async function insertTaxRateVersion(
   trx: TenantTransaction,
   ctx: TenantContext,
-  input: TaxRateInput & { taxRateId: string; version: number; active: boolean; reason: string },
+  input: TaxRateInput & {
+    locationId: string | null;
+    taxRateId: string;
+    version: number;
+    active: boolean;
+    reason: string;
+  },
 ): Promise<void> {
   await trx
     .insertInto("tax_rate_versions")
@@ -269,6 +317,7 @@ async function insertTaxRateVersion(
       inclusive: input.inclusive,
       active: input.active,
       reason: input.reason,
+      location_id: input.locationId,
     })
     .execute();
   await recordAudit(trx, ctx, {
@@ -282,6 +331,7 @@ async function insertTaxRateVersion(
       ratePpm: input.ratePpm,
       inclusive: input.inclusive,
       active: input.active,
+      locationId: input.locationId,
     },
   });
 }
