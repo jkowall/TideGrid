@@ -4,6 +4,17 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### The Stripe card form in guest checkout (W1-STRIPE-ELEMENT), built November 8, 2026
+
+Under the Stripe provider, the guest pay step now mounts a card-only Payment Element, loaded from js.stripe.com through an injectable loader with no npm dependency ([decision register](v2/06-decision-register.md#2026-11-08-w1-stripe-element-the-stripe-card-form-in-guest-checkout-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults D1 and D2 pending owner confirmation). The publishable key is an API secret the owner sets, `pk_test_` only and never committed. It and the client secret reach only the checkout's holder through the Bearer payment read. Confirmation still waits for the checkout's confirmed state from a verified webhook. Decline, expiry, lost answer, and load error have designed screens. The guest CSP adds Stripe's script, frame, and connect origins (D3, pending owner approval). The fake provider path is unchanged. Nothing was released, and no Stripe call was made. The local runs and the reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed. Every integration suite passed on a throwaway local PostgreSQL 17: 931 tests passed and 2 skipped. The new guest browser spec passed 12 of 12 at 375 px and 1280 px, with Stripe.js and the API doubled under the real CSP and every other Stripe host blocked.
+- **Independent review**, under the payments reviewer override. Accept with listed fixes. A decline no longer counts as a payment tried, so leaving after a decline cancels the checkout and says nothing was charged, with tests that failed first.
+- **Security review.** Accept, no findings: the CSP is set in one place and adds only the four Stripe origins, and the key and client secret reach only the holder.
+- **Recheck.** Accept, with this entry.
+- **Open risks.** Stripe's documentation could not be read from this session, so the CSP origins, the Stripe.js URL, and the test cards are unverified; the owner check list in the payments README compares them. The ui-reviewer was not run; the guest browser tests stand in.
+- **Telemetry.** About three and a half hours of agent time across build, two reviews, and one fix round. Token use and cost per checkpoint: missing.
+
 ### Tenant-wide staff email exceptions list (W1-EMAIL-EXC), built November 8, 2026
 
 Owners and booking staff now see a tenant's failed email in one place: a new console page and `GET /v1/staff/tenants/{tenantId}/email-exceptions` ([decision register](v2/06-decision-register.md#2026-11-08-w1-email-exc-tenant-wide-staff-email-exceptions-list-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults D1 to D3 pending owner confirmation). The list covers failed, outcome unknown, and delivery failed messages, waiver requests included and labeled. It is paged, read inside the tenant transaction, and never cached. Rows carry no recipient, name, subject, or body. Finance gets no entry and a 403. No migration and no index. Nothing was released. The local runs and the reviews below are coordinator-reported.
