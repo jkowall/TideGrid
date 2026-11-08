@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { treeMigrations } from "../src/commands/preflight.ts";
 import type { Deps, Env, ExecOptions, ExecResult, SqlClient } from "../src/core.ts";
 import { type Configs, configPaths, parseJsonc } from "../src/phase.ts";
+import { defaultGh } from "./ci-fixtures.ts";
 
 export const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 
@@ -78,7 +79,10 @@ export interface FakeOptions {
   env?: Env;
   tty?: boolean;
   answers?: string[];
-  /** Answer an exec; default: a clean releasable git on HEAD = origin/main = "a".repeat(40). */
+  /**
+   * Answer an exec; default: a clean releasable git on HEAD = origin/main =
+   * "a".repeat(40), and a green four-job push run for any SHA gh is asked about.
+   */
   exec?: (call: ExecCall) => ExecResult | undefined;
   fetch?: (call: FetchCall) => Response | undefined;
   sql?: (url: string) => SqlClient;
@@ -110,6 +114,8 @@ export function defaultGit(call: ExecCall): ExecResult | undefined {
   if (a.startsWith("rev-parse --verify")) return { code: 0, stdout: `${headSha}\n` };
   if (a.endsWith("^{tree}")) return { code: 0, stdout: `${"b".repeat(40)}\n` };
   if (a.startsWith("merge-base --is-ancestor")) return { code: 0, stdout: "" };
+  // The committer date the CI gate bounds its dispatch query with: 2026-10-26.
+  if (a.startsWith("show -s --format=%ct")) return { code: 0, stdout: "1793000000\n" };
   if (a.startsWith("ls-tree"))
     return { code: 0, stdout: "packages/database/migrations/0013_sweep_fairness.sql\n" };
   return { code: 0, stdout: "" };
@@ -160,7 +166,12 @@ export function fakeDeps(o: FakeOptions = {}) {
     exec: async (cmd, args, options) => {
       const call = { cmd, args: [...args], options };
       execs.push(call);
-      return o.exec?.(call) ?? committedGit(call) ?? defaultGit(call) ?? { code: 0, stdout: "[]" };
+      return (
+        o.exec?.(call) ??
+        committedGit(call) ??
+        defaultGit(call) ??
+        defaultGh(call) ?? { code: 0, stdout: "[]" }
+      );
     },
     fetch: fetchImpl,
     localFetch: fetchImpl,
