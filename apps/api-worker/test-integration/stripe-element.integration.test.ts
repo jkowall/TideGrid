@@ -9,8 +9,9 @@
  * checkout's holder, through the Bearer payment read, beside the client
  * secret; opening the checkout and reading its state never carry them; each
  * tenant's read names its own account; a wrong secret, another operator, and
- * a closed checkout get neither; and without a valid test-mode key an open
- * checkout answers 503 before Stripe is asked.
+ * a closed checkout get neither; a checkout that lapses while its account is
+ * read answers its closed state, with neither; and without a valid test-mode
+ * key an open checkout answers 503 before Stripe is asked.
  */
 import { randomUUID } from "node:crypto";
 import { createDb } from "@tidegrid/database";
@@ -67,6 +68,8 @@ describe.skipIf(!env)("the Stripe card form's configuration through the API", ()
   let tripsB: ReturnType<typeof tripAllocator>;
   let realFetch = 0;
   let stripeCalls = 0;
+  /** Runs once, after the fixture answers and before the adapter sees it. */
+  let afterStripe: (() => Promise<void>) | null = null;
 
   const bindings = (key: string | undefined) => ({
     ENVIRONMENT: "local" as const,
@@ -157,6 +160,9 @@ describe.skipIf(!env)("the Stripe card form's configuration through the API", ()
       const body = typeof init?.body === "string" ? init.body.replaceAll(ours, theirs) : init?.body;
       const res = await fixture.fetch(url, { ...init, body: body ?? null });
       const text = (await res.text()).replaceAll(theirs, ours);
+      const hook = afterStripe;
+      afterStripe = null;
+      await hook?.();
       return new Response(text, { status: res.status, headers: res.headers });
     };
     stripe = createStripePaymentProvider({
@@ -195,6 +201,7 @@ describe.skipIf(!env)("the Stripe card form's configuration through the API", ()
   });
 
   afterEach(() => {
+    afterStripe = null;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     expect(realFetch).toBe(0);
@@ -267,6 +274,53 @@ describe.skipIf(!env)("the Stripe card form's configuration through the API", ()
     const read = await readPayment(A, a.id, a.secret);
     expect(read.status).toBe(200);
     expect(read.json).toMatchObject({ checkoutSession: { state: "canceled" }, payment: null });
+    expect(read.text).not.toContain(publishableKey);
+    expect(read.text).not.toContain(A.stripeAccount);
+  });
+
+  it("answers the closed state when the checkout lapses while its account is read", async () => {
+    const a = await open(A, tripsA.shared());
+    // The first runtime query left waiting on a lock, other than this one.
+    const firstWaiting = async () => {
+      for (let i = 0; i < 200; i += 1) {
+        const [row] = await admin<{ query: string }[]>`
+          select query from pg_stat_activity
+           where wait_event_type = 'Lock' and datname = current_database()
+             and pid <> pg_backend_pid()
+           limit 1`;
+        if (row) return row.query;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error("no query waited on the payments lock");
+    };
+    // Once Stripe has answered the read, hold every read of payments behind
+    // a lock. The first one to wait must be the account lookup. Lapse the
+    // checkout while it waits, so the read after it finds the closed state.
+    let held: Promise<string> | undefined;
+    afterStripe = async () => {
+      let locked: () => void = () => {};
+      const isLocked = new Promise<void>((resolve) => {
+        locked = resolve;
+      });
+      held = admin.begin(async (tx) => {
+        await tx`lock table public.payments in access exclusive mode`;
+        locked();
+        const waiting = await firstWaiting();
+        if (/account_ref/.test(waiting) && !/checkout_sessions/.test(waiting)) {
+          await tx`update public.checkout_sessions set expires_at = now() - interval '1 second'
+                    where id = ${a.id}`;
+        }
+        return waiting;
+      });
+      await isLocked;
+    };
+    const read = await readPayment(A, a.id, a.secret);
+    const waiting = await held;
+    expect(waiting).toMatch(/account_ref/);
+    expect(waiting).not.toMatch(/checkout_sessions/);
+    expect(read.status).toBe(200);
+    expect(read.json).toMatchObject({ checkoutSession: { state: "expired" }, payment: null });
+    expect(read.text).not.toContain("_secret_");
     expect(read.text).not.toContain(publishableKey);
     expect(read.text).not.toContain(A.stripeAccount);
   });

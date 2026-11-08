@@ -3,11 +3,11 @@ import { Button, Icon, Notice } from "@tidegrid/design-system/components";
 import { formatMoney, formatTimeLeft } from "@tidegrid/design-system/format";
 import type { Ref } from "react";
 import type { TestPaymentOutcome } from "./api.ts";
-import { CardPayment } from "./CardPayment.tsx";
+import { type CardAttempt, type CardAttemptRun, CardPayment } from "./CardPayment.tsx";
 import { deadlineText, heldThing, type Trouble } from "./model.ts";
-import type { CardOutcome, StripeLoader } from "./stripe-js.ts";
+import type { StripeLoader } from "./stripe-js.ts";
 
-/** "card": the Stripe card form is confirming a payment. */
+/** "card": the Stripe card form is checking its fields or confirming a payment. */
 export type PayBusy = TestPaymentOutcome | "cancel" | "card";
 
 /** The Stripe card form's wiring, from the page (W1-STRIPE-ELEMENT). */
@@ -15,7 +15,7 @@ export interface CardWiring {
   /** The checkout's capability secret, for the Bearer payment read. */
   secret: string;
   loader: StripeLoader;
-  onPay: (confirm: () => Promise<CardOutcome>) => Promise<CardOutcome | null>;
+  onPay: (run: CardAttemptRun) => Promise<CardAttempt | null>;
   onEnded: () => void;
 }
 
@@ -107,6 +107,7 @@ export function PayStep({
         </p>
         {byCard ? (
           <CardPayment
+            key={session.id}
             sessionId={session.id}
             secret={card.secret}
             amount={session.amount}

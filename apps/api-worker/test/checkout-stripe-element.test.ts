@@ -26,6 +26,8 @@ const state = vi.hoisted(() => ({
   open: true,
   /** The payment row's account, as the database would answer it. */
   account: "acct_1TestHarbor0000" as string | null,
+  /** Runs while the account is read, as a close racing the lookup would. */
+  duringAccount: null as (() => void) | null,
   log: [] as string[],
 }));
 
@@ -92,6 +94,7 @@ vi.mock("@tidegrid/database", async (importOriginal) => {
           expect(where).toContainEqual(["tenant_id", "=", A]);
           expect(where).toContainEqual(["checkout_session_id", "=", sessionA]);
           expect(where).toContainEqual(["provider", "=", "stripe"]);
+          state.duringAccount?.();
           return state.account === null ? undefined : { account_ref: state.account };
         },
       };
@@ -189,6 +192,7 @@ async function readPayment(
 afterEach(() => {
   state.open = true;
   state.account = account;
+  state.duringAccount = null;
   state.log = [];
 });
 
@@ -202,9 +206,41 @@ describe("the payment read under Stripe (W1-STRIPE-ELEMENT)", () => {
       clientSecret,
       stripe: { publishableKey: testKey, account },
     });
-    // The account is read after the checkout is read again, under the tenant.
-    expect(state.log).toEqual(["read", "ensure", "provider", "tx", "tx", "account:payments"]);
+    // The account is read before the checkout is read again, under the
+    // tenant, so the last read decides whether a client secret goes out.
+    expect(state.log).toEqual(["read", "ensure", "provider", "tx", "account:payments", "tx"]);
   });
+
+  it("answers the closed state when the checkout closes while the account is read", async () => {
+    state.duringAccount = () => {
+      state.open = false;
+    };
+    const res = await readPayment(underStripe, { STRIPE_PUBLISHABLE_KEY: testKey });
+    expect(res.status).toBe(200);
+    expect(res.json.checkoutSession?.state).toBe("canceled");
+    expect(res.json.payment).toBeNull();
+    expect(res.text).not.toContain(clientSecret);
+    expect(res.text).not.toContain(testKey);
+    expect(res.text).not.toContain(account);
+  });
+
+  for (const [label, stored] of [
+    ["no payment row", null],
+    ["a malformed account", "acct_fake_demo-harbor"],
+  ] as const) {
+    it(`answers a checkout that closes while the account is read with its closed state, even with ${label}`, async () => {
+      state.account = stored;
+      state.duringAccount = () => {
+        state.open = false;
+      };
+      const res = await readPayment(underStripe, { STRIPE_PUBLISHABLE_KEY: testKey });
+      expect(res.status).toBe(200);
+      expect(res.json.checkoutSession?.state).toBe("canceled");
+      expect(res.json.payment).toBeNull();
+      expect(res.text).not.toContain(clientSecret);
+      expect(res.text).not.toContain(testKey);
+    });
+  }
 
   for (const [label, overrides] of [
     ["no key", {}],

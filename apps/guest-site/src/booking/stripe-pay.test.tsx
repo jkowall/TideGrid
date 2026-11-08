@@ -86,6 +86,8 @@ const readUnderStripe = () =>
 interface DoubleOptions {
   /** What each confirmation answers, in order; the last repeats. */
   confirm?: (() => Promise<ConfirmResultLike>)[];
+  /** What each check of the fields answers, in order; the last repeats. */
+  submit?: (() => Promise<{ error?: { type: string } }>)[];
   /** The form fails to load inside Stripe's frame. */
   loadError?: boolean;
   /** The loader rejects these many times first, as a blocked script would. */
@@ -104,6 +106,7 @@ function stripeDouble(options: DoubleOptions = {}) {
   };
   let failures = options.loaderFailures ?? 0;
   const answers = options.confirm ?? [async () => ({ paymentIntent: { status: "succeeded" } })];
+  const checks = options.submit ?? [async () => ({})];
   const factory: StripeFactory = (key, opts) => {
     seen.factory.push([key, opts]);
     return {
@@ -130,8 +133,9 @@ function stripeDouble(options: DoubleOptions = {}) {
             };
           },
           submit: async () => {
+            const check = checks[Math.min(seen.submits, checks.length - 1)];
             seen.submits += 1;
-            return {};
+            return check ? check() : {};
           },
         };
       },
@@ -462,6 +466,174 @@ describe("the card form under Stripe", () => {
     expect(screen.getByRole("heading", { name: "Payment" })).toBeTruthy();
     answer({ paymentIntent: { status: "processing" } });
     expect(await heading("Confirming your payment")).toBeTruthy();
+  });
+
+  /** A check of the fields that answers when the test says. */
+  const deferredCheck = () => {
+    let answer: (result: { error?: { type: string } }) => void = () => {};
+    const check = () =>
+      new Promise<{ error?: { type: string } }>((resolve) => {
+        answer = resolve;
+      });
+    return { check, answer: (result: { error?: { type: string } }) => answer(result) };
+  };
+  const status = () => document.querySelector("p.tg-visually-hidden[role='status']")?.textContent;
+  const stored = () => JSON.parse(window.sessionStorage.getItem("tidegrid.checkout") ?? "{}");
+
+  it("holds Cancel checkout and Back while the card form checks its fields, then confirms", async () => {
+    stubApi({ openCheckout: openUnderStripe, readPayment: readUnderStripe });
+    const pending = deferredCheck();
+    const { loader, seen } = stripeDouble({
+      submit: [pending.check],
+      confirm: [async () => ({ paymentIntent: { status: "processing" } })],
+    });
+    renderPage(loader);
+    await toPayment();
+    fireEvent.click(await payButton());
+    await waitFor(() => expect(seen.submits).toBe(1));
+    // The page's lock is held from the check of the fields on.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Cancel checkout" }).getAttribute("aria-disabled"),
+      ).toBe("true"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel checkout" }));
+    window.history.back();
+    await waitFor(() => expect(status()).toBe("Wait a moment: the page is still working."));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(seen.confirms).toBe(0);
+    pending.answer({});
+    expect(await heading("Confirming your payment")).toBeTruthy();
+    expect(seen.confirms).toBe(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("asks nothing of a link away while the card form checks its fields", async () => {
+    stubApi({ openCheckout: openUnderStripe, readPayment: readUnderStripe });
+    const pending = deferredCheck();
+    const { loader, seen } = stripeDouble({
+      submit: [pending.check],
+      confirm: [async () => ({ paymentIntent: { status: "processing" } })],
+    });
+    renderPage(loader);
+    await toPayment();
+    fireEvent.click(await payButton());
+    await waitFor(() => expect(seen.submits).toBe(1));
+    fireEvent.click(screen.getByRole("link", { name: "All trips" }));
+    await waitFor(() => expect(status()).toBe("Wait a moment: the page is still working."));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    pending.answer({});
+    expect(await heading("Confirming your payment")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("leaves the checkout untried and Cancel checkout free when the fields do not pass", async () => {
+    const calls = stubApi({ openCheckout: openUnderStripe, readPayment: readUnderStripe });
+    const pending = deferredCheck();
+    const { loader, seen } = stripeDouble({ submit: [pending.check] });
+    renderPage(loader);
+    await toPayment();
+    fireEvent.click(await payButton());
+    await waitFor(() => expect(seen.submits).toBe(1));
+    // Nothing is sent while the fields are checked: the checkout stays untried.
+    expect(stored().paymentTried).toBe(false);
+    pending.answer({ error: { type: "validation_error" } });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Cancel checkout" }).getAttribute("aria-disabled"),
+      ).toBeNull(),
+    );
+    expect(seen.confirms).toBe(0);
+    expect(stored()).toMatchObject({ paymentTried: false, paymentSent: false });
+    expect(callsTo(calls, "cancel")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel checkout" }));
+    expect(await screen.findByRole("dialog", { name: "Cancel this checkout?" })).toBeTruthy();
+  });
+
+  for (const [label, failure] of [
+    ["the form fails", { error: { type: "api_error" } }],
+    ["a field does not pass", { error: { type: "validation_error" } }],
+  ] as const) {
+    it(`keeps the warning that a payment may have gone through when ${label} on a later try`, async () => {
+      stubApi({ openCheckout: openUnderStripe, readPayment: readUnderStripe });
+      const { loader, seen } = stripeDouble({
+        submit: [async () => ({}), async () => failure],
+        confirm: [() => Promise.reject(new TypeError("Failed to fetch"))],
+      });
+      renderPage(loader);
+      await toPayment();
+      fireEvent.click(await payButton());
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "We couldn't confirm your payment",
+      );
+      fireEvent.click(await payButton());
+      await waitFor(() => expect(seen.submits).toBe(2));
+      await payButton();
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("We couldn't confirm your payment");
+      expect(alert.textContent).toContain("it may have gone through");
+      expect(document.body.textContent).not.toContain("Nothing was charged");
+      expect(seen.confirms).toBe(1);
+      // Still tried: a page that goes keeps the checkout, as a sent payment needs.
+      expect(stored().paymentTried).toBe(true);
+    });
+  }
+
+  it("never lets a late read for an earlier checkout end the one that replaced it", async () => {
+    // The first checkout runs out soon; the second keeps the default hold.
+    const ids: string[] = [];
+    const first = () => ids[0] ?? "none";
+    let firstReads = 0;
+    const late = held();
+    const calls = stubApi({
+      openCheckout: (call) => {
+        const body = call.body as { quoteId: string };
+        const id = nextSessionId();
+        ids.push(id);
+        const fields =
+          ids.length === 1 ? { expiresAt: new Date(Date.now() + 100).toISOString() } : {};
+        return json(
+          {
+            checkoutSession: checkout("open", { id, quoteId: body.quoteId, ...fields }),
+            payment: { provider: "stripe", paymentRef, clientSecret },
+          },
+          201,
+        );
+      },
+      // The first checkout's payment read finds it closed; the second's is open.
+      readPayment: (call) =>
+        call.path.includes(first())
+          ? json({ checkoutSession: checkout("failed", { id: first() }), payment: null })
+          : readUnderStripe(),
+      readCheckout: (call) => {
+        if (!call.path.includes(first())) {
+          return json({ checkoutSession: checkout("open", { id: ids[1] ?? "none" }) });
+        }
+        // The first read of the first checkout, after its payment read, waits.
+        firstReads += 1;
+        return firstReads === 1
+          ? late.answer(call)
+          : json({ checkoutSession: checkout("failed", { id: first() }) });
+      },
+    });
+    const { loader } = stripeDouble();
+    renderPage(loader);
+    await toPayment();
+    // The expiry check ends the first checkout while that read waits.
+    expect(await heading("Your payment was declined")).toBeTruthy();
+    expect(firstReads).toBe(2);
+    // The guest starts again, and reaches the second checkout's payment.
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await heading("Payment")).toBeTruthy();
+    expect(await payButton()).toBeTruthy();
+    expect(callsTo(calls, "openCheckout")).toHaveLength(2);
+    expect(stored().sessionId).toBe(ids[1]);
+    // The late answer for the first checkout arrives now.
+    late.release(json({ checkoutSession: checkout("failed", { id: first() }) }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole("heading", { name: "Payment" })).toBeTruthy();
+    expect(screen.queryByText("Your payment was declined")).toBeNull();
+    expect(stored().sessionId).toBe(ids[1]);
   });
 
   it("keeps the fake provider's test controls, and never loads Stripe.js", async () => {

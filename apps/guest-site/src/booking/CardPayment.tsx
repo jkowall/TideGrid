@@ -22,8 +22,11 @@ type Phase =
   | { kind: "declined"; reason: DeclineReason }
   /** No answer from Stripe: the payment may have gone through. */
   | { kind: "unknown" }
-  /** The form failed before anything was sent. */
-  | { kind: "error" }
+  /**
+   * The form failed before anything was sent this time. `sentBefore`: an
+   * earlier press did send a payment, so the page never says nothing was charged.
+   */
+  | { kind: "error"; sentBefore: boolean }
   /** The form could not be shown. */
   | { kind: "unavailable"; reason: "not_configured" | "offline" | "load" };
 
@@ -65,6 +68,20 @@ const unavailableCopy = {
   },
 } as const;
 
+/**
+ * What one press of Pay came to. `not_sent`: nothing was sent to be charged,
+ * because the form failed to check its fields or the checkout ended first.
+ */
+export type CardAttempt = CardOutcome | { kind: "not_sent" };
+
+/**
+ * One press of Pay, run by the page under its one-command lock: check the
+ * fields, then call `begin`, then ask Stripe to confirm. `begin` marks the
+ * checkout as tried before anything is sent, and answers false when the
+ * checkout is no longer this page's to pay: then nothing is sent.
+ */
+export type CardAttemptRun = (begin: () => boolean) => Promise<CardAttempt>;
+
 function unavailableFor(failure: Failure): Phase {
   return failure.kind === "refused" && failure.code === "payments_unavailable"
     ? { kind: "unavailable", reason: "not_configured" }
@@ -95,8 +112,12 @@ export function CardPayment({
   loader: StripeLoader;
   /** Another command is working, such as Cancel checkout: Pay waits. */
   blocked: boolean;
-  /** Runs the confirmation under the page's one-command lock; null when the page was busy. */
-  onPay: (confirm: () => Promise<CardOutcome>) => Promise<CardOutcome | null>;
+  /**
+   * Runs the check of the fields and the confirmation under the page's
+   * one-command lock, so Back and Cancel checkout wait for both. Null when
+   * the page was busy, and nothing was checked or sent.
+   */
+  onPay: (run: CardAttemptRun) => Promise<CardAttempt | null>;
   /** The checkout is not open, or not this guest's: the page reads and shows what it is. */
   onEnded: () => void;
 }) {
@@ -107,6 +128,13 @@ export function CardPayment({
   const elementRef = useRef<PaymentElementLike | null>(null);
   const alive = useRef(true);
   const payingRef = useRef(false);
+  /** A confirmation was sent from this form: never say nothing was charged. */
+  const sentOnce = useRef(false);
+  /**
+   * The last confirmation sent got no answer, so it may have gone through.
+   * Only Stripe's own answer to a later confirmation (a decline) clears it.
+   */
+  const uncertain = useRef(false);
   // The latest callbacks, so a new render does not reload the form.
   const ended = useRef(onEnded);
   ended.current = onEnded;
@@ -208,20 +236,22 @@ export function CardPayment({
 
   const payWith = async (form: { stripe: StripeLike; elements: ElementsLike }) => {
     setPhase({ kind: "paying" });
-    // Checks the fields in the form; nothing is sent to be charged.
-    let checked: { error?: { type: string } };
-    try {
-      checked = await form.elements.submit();
-    } catch {
-      checked = { error: { type: "api_error" } };
-    }
-    if (!alive.current) return;
-    if (checked.error) {
-      setPhase(checked.error.type === "validation_error" ? { kind: "ready" } : { kind: "error" });
-      if (checked.error.type === "validation_error") elementRef.current?.focus();
-      return;
-    }
-    const outcome = await onPay(async () => {
+    const outcome = await onPay(async (begin) => {
+      // Checks the fields in the form; nothing is sent to be charged.
+      let checked: { error?: { type: string } };
+      try {
+        checked = await form.elements.submit();
+      } catch {
+        checked = { error: { type: "api_error" } };
+      }
+      if (checked.error) {
+        return checked.error.type === "validation_error"
+          ? { kind: "invalid" }
+          : { kind: "not_sent" };
+      }
+      // The form went, or the checkout ended, while the fields were checked.
+      if (!alive.current || !begin()) return { kind: "not_sent" };
+      sentOnce.current = true;
       try {
         return cardOutcome(
           await form.stripe.confirmPayment({ elements: form.elements, redirect: "if_required" }),
@@ -231,16 +261,28 @@ export function CardPayment({
       }
     });
     if (!alive.current) return;
+    // Nothing new was sent: a payment that may have gone through still may have.
+    const unsent: Phase = uncertain.current ? { kind: "unknown" } : { kind: "ready" };
     switch (outcome?.kind) {
       case undefined:
+        setPhase(unsent);
+        return;
       case "invalid":
-        setPhase({ kind: "ready" });
-        if (outcome) elementRef.current?.focus();
+        setPhase(unsent);
+        elementRef.current?.focus();
+        return;
+      case "not_sent":
+        setPhase(
+          uncertain.current ? { kind: "unknown" } : { kind: "error", sentBefore: sentOnce.current },
+        );
         return;
       case "declined":
+        // Stripe's own answer for this payment: it was not charged.
+        uncertain.current = false;
         setPhase({ kind: "declined", reason: outcome.reason });
         return;
       case "unknown":
+        uncertain.current = true;
         setPhase({ kind: "unknown" });
         return;
       case "sent":
@@ -264,7 +306,9 @@ export function CardPayment({
         : phase.kind === "error"
           ? {
               title: "The card form ran into a problem",
-              body: "Nothing was charged. Press Pay again.",
+              body: phase.sentBefore
+                ? "Nothing was sent this time. Press Pay again."
+                : "Nothing was charged. Press Pay again.",
             }
           : null;
 

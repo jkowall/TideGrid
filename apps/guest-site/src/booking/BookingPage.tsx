@@ -39,6 +39,7 @@ import {
   settleTestPayment,
   type TestPaymentOutcome,
 } from "./api.ts";
+import type { CardAttempt, CardAttemptRun } from "./CardPayment.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { ServerClock } from "./clock.ts";
 import {
@@ -99,7 +100,7 @@ import {
   saveBooked,
   saveResume,
 } from "./resume.ts";
-import { type CardOutcome, loadStripeJs, type StripeLoader } from "./stripe-js.ts";
+import { loadStripeJs, type StripeLoader } from "./stripe-js.ts";
 import { BookedHeader, TripFacts, TripHeader, tripWhen } from "./TripHeader.tsx";
 
 /**
@@ -383,6 +384,8 @@ export function BookingPage({
 
   const signal = () => page.current?.signal;
   const alive = () => page.current !== null && !page.current.signal.aborted;
+  /** The checkout an answer was asked for is still the page's checkout. */
+  const isCurrent = (open: Live) => liveRef.current?.sessionId === open.sessionId;
 
   const pageTitle =
     load.kind === "booked"
@@ -418,6 +421,13 @@ export function BookingPage({
     const at = stageRef.current.kind;
     const open = liveRef.current;
     if (open && !open.paymentTried && (at === "pay" || at === "interrupted")) {
+      // A command is working, such as a card payment whose fields are being
+      // checked: a dialog now could sit over a confirmation that starts
+      // behind it. The link waits, as Back does.
+      if (lock.current) {
+        setAnnouncement("Wait a moment: the page is still working.");
+        return true;
+      }
       setConfirm({ kind: "leave", proceed });
       return true;
     }
@@ -1246,37 +1256,50 @@ export function BookingPage({
 
   /**
    * Pay by card under Stripe (W1-STRIPE-ELEMENT), under the same one-command
-   * lock as the test payment. From the moment Stripe is asked, the payment
-   * may go through, as with the test payment. `confirm` asks Stripe; a sent
-   * payment moves the page on to wait for the checkout's own state, which
-   * only a verified webhook confirms. A decline stays on the payment step,
-   * where the card form says why and nothing was charged, so the checkout is
-   * as tried as it was before the press. Null when another
-   * command was working.
+   * lock as the test payment, held from the check of the card form's fields
+   * to Stripe's answer, so Back, a link away, and Cancel checkout wait for
+   * both. `run` checks the fields, then calls `begin` before it asks Stripe:
+   * from that moment the payment may go through, as with the test payment,
+   * so `begin` marks the checkout tried, and answers false when the checkout
+   * is no longer the one on the payment step. Fields that do not pass send
+   * nothing, and the checkout stays as tried as it was. A sent payment moves
+   * the page on to wait for the checkout's own state, which only a verified
+   * webhook confirms. A decline stays on the payment step, where the card
+   * form says why and nothing was charged, so the checkout is as tried as it
+   * was before the press. Null when another command was working.
    */
-  async function payByCard(confirm: () => Promise<CardOutcome>): Promise<CardOutcome | null> {
+  async function payByCard(run: CardAttemptRun): Promise<CardAttempt | null> {
     if (lock.current) return null;
+    const current = liveRef.current;
+    if (!current || stageRef.current.kind !== "pay") return null;
     lock.current = true;
     try {
-      const current = liveRef.current;
-      if (!current || stageRef.current.kind !== "pay") return null;
       const { sessionId } = current;
+      const still = () =>
+        alive() && stageRef.current.kind === "pay" && liveRef.current?.sessionId === sessionId;
       setTrouble(null);
       setBusy("card");
-      const tried: Live = { ...current, paymentTried: true };
-      setLive(tried);
-      saveResume(recordOf(tried, false));
-      const outcome = await confirm();
+      const sent: { tried: Live | null; wasTried: boolean } = { tried: null, wasTried: false };
+      const outcome = await run(() => {
+        const now = liveRef.current;
+        if (!now || !still()) return false;
+        const tried: Live = { ...now, paymentTried: true };
+        sent.tried = tried;
+        sent.wasTried = now.paymentTried;
+        setLive(tried);
+        saveResume(recordOf(tried, false));
+        return true;
+      });
       if (!alive()) return outcome;
       setBusy(null);
-      const still = () =>
-        stageRef.current.kind === "pay" && liveRef.current?.sessionId === sessionId;
-      if (!still()) return outcome;
+      const tried = sent.tried;
+      // Nothing was sent, or the checkout ended while Stripe answered: leave it be.
+      if (!tried || !still()) return outcome;
       if (outcome.kind === "declined" || outcome.kind === "invalid") {
         // Stripe said nothing was charged and the checkout is still open, so
         // it is as tried as it was before: a link away asks, and a page that
         // goes releases the seats.
-        const untried: Live = { ...tried, paymentTried: current.paymentTried };
+        const untried: Live = { ...tried, paymentTried: sent.wasTried };
         setLive(untried);
         saveResume(recordOf(untried, false));
         return outcome;
@@ -1291,7 +1314,7 @@ export function BookingPage({
       if (outcome.kind === "unknown") {
         // Stripe did not say. The checkout's own state may: read it once.
         const read = await readCheckout(sessionId, tried.secret, signal());
-        if (alive() && still() && read.kind === "ok" && isFinal(read.value)) finish(read.value);
+        if (still() && read.kind === "ok" && isFinal(read.value)) finish(read.value);
       }
       return outcome;
     } finally {
@@ -1299,12 +1322,16 @@ export function BookingPage({
     }
   }
 
-  /** The card form found the checkout not open, or not this guest's: show what it is. */
+  /**
+   * The card form found the checkout not open, or not this guest's: show
+   * what it is. Only while the same checkout is on the payment step: a late
+   * answer for one that ended, after the guest opened another, changes nothing.
+   */
   async function cardEnded() {
     const open = liveRef.current;
     if (!open || stageRef.current.kind !== "pay") return;
     const result = await readCheckout(open.sessionId, open.secret, signal());
-    if (!alive() || stageRef.current.kind !== "pay") return;
+    if (!alive() || stageRef.current.kind !== "pay" || !isCurrent(open)) return;
     if (result.kind === "ok" && isFinal(result.value)) {
       finish(result.value);
       return;
@@ -1326,6 +1353,8 @@ export function BookingPage({
     if (!open) return "canceled";
     const result = await cancelCheckout(open.sessionId, open.secret, { signal: signal() });
     if (!alive()) return "gone";
+    // Another checkout took its place meanwhile: this answer is not about it.
+    if (liveRef.current && !isCurrent(open)) return "ended";
     if (result.kind === "ok" || (result.kind === "refused" && [401, 404].includes(result.status))) {
       clearResume();
       setLive(null);
@@ -1335,6 +1364,7 @@ export function BookingPage({
       // It ended first, perhaps paid: show how.
       const current = await readCheckout(open.sessionId, open.secret, signal());
       if (!alive()) return "gone";
+      if (liveRef.current && !isCurrent(open)) return "ended";
       if (current.kind === "ok") {
         finish(current.value);
         return "ended";
@@ -1826,7 +1856,10 @@ export function BookingPage({
               trouble={trouble}
               priceChange={priceChange}
               onPay={(outcome) => void pay(outcome)}
-              onCancel={() => setConfirm({ kind: "cancel" })}
+              onCancel={() => {
+                // Never over a payment the page is checking or confirming.
+                if (!lock.current) setConfirm({ kind: "cancel" });
+              }}
               headingRef={stepRef}
             />
           )}
