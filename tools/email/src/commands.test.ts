@@ -59,6 +59,9 @@ describe("email admin CLI arguments (W3-G2.16-rest)", () => {
       ["domain-verify", "demo-harbor", "harbor.example"],
       ["domain-retire", "demo-harbor", "harbor.example", "  "],
       ["suppression-lift", "demo-harbor", "guest@example.test"],
+      ["suppression-lift", "demo-harbor", "guest@example.test", "for", "guest@example.test"],
+      ["domain-verify", "demo-harbor", "harbor.example", "dmarc", "rua=ops@harbor.example"],
+      ["domain-retire", "demo-harbor", "harbor.example", "asked", "by", "a@b.example"],
     ];
     for (const argv of bad) expect(() => parseArgs(argv), argv.join(" ")).toThrow(UsageError);
   });

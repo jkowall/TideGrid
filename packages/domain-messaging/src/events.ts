@@ -238,8 +238,15 @@ export async function ingestEmailEvent(
     return { ...base, outcome: "refused_domain" };
   }
   // A bounce that is not final (the provider still retries) is not an
-  // outcome: applying it would label the message for good.
+  // outcome: applying it would label the message for good. Dropped only from
+  // a domain TideGrid sends from, so a wrong sending domain setting still
+  // sends every event to the dead-letter queue instead of acknowledging it.
   if ((event.type !== "bounced" && event.type !== "complained") || !event.terminal) {
+    if (!sharedDomain) {
+      const { rows: known } = await sql<{ known: boolean }>`
+        select app.email_sender_domain_known(${event.domain}) as known`.execute(db);
+      if (known[0]?.known !== true) return { ...base, outcome: "refused_domain" };
+    }
     return { ...base, outcome: "ignored" };
   }
   const eventType = event.type;

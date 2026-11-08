@@ -60,6 +60,7 @@ export interface RequestAttributes {
   "tidegrid.email.provider_message_id"?: string;
   "tidegrid.email.provider_id_normalized"?: boolean;
   "tidegrid.email.stopped"?: string;
+  "tidegrid.email.held"?: string;
   "tidegrid.email_sweep.tenant_count"?: number;
   "tidegrid.email_sweep.sent_count"?: number;
   "tidegrid.email_sweep.retried_count"?: number;
@@ -154,6 +155,7 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.email.provider_message_id",
   "tidegrid.email.provider_id_normalized",
   "tidegrid.email.stopped",
+  "tidegrid.email.held",
   "tidegrid.email_sweep.tenant_count",
   "tidegrid.email_sweep.sent_count",
   "tidegrid.email_sweep.retried_count",

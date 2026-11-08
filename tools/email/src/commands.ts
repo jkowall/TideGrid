@@ -28,7 +28,10 @@ export const usage = `Usage:
   email suppressions <tenant-slug>
   email suppression-lift <tenant-slug> <address> <reason...>
 
-Environment: DATABASE_URL (the admin connection).`;
+Environment: DATABASE_URL (the admin connection).
+Evidence and reasons go into the audit trail: never put a guest's address in
+them. suppression-lift takes the address on the command line, so it is in the
+shell's history; clear it afterwards if the address is a real guest's.`;
 
 export type Command =
   | { kind: "domain-status" | "suppressions"; slug: string }
@@ -57,6 +60,12 @@ export function senderDomainProblem(domain: string): string | null {
   return null;
 }
 
+/** Evidence and reasons are audited; an address in them would be personal data there. */
+function auditText(text: string, what: string): string {
+  if (text.includes("@")) throw new UsageError(`keep addresses out of the ${what}`);
+  return text;
+}
+
 export function parseArgs(argv: readonly string[]): Command {
   const [kind, slug, target, ...rest] = argv;
   if (!kind) throw new UsageError("name a command");
@@ -79,7 +88,12 @@ export function parseArgs(argv: readonly string[]): Command {
   if (kind === "suppression-lift") {
     const reason = rest.join(" ").trim();
     if (!reason) throw new UsageError("give a reason for lifting");
-    return { kind, slug, address: target.trim().toLowerCase(), reason };
+    return {
+      kind,
+      slug,
+      address: target.trim().toLowerCase(),
+      reason: auditText(reason, "reason"),
+    };
   }
   const domain = target.toLowerCase();
   const problem = senderDomainProblem(domain);
@@ -104,10 +118,10 @@ export function parseArgs(argv: readonly string[]): Command {
     if (!text) {
       throw new UsageError("give the evidence: what the provider showed for SPF, DKIM, and DMARC");
     }
-    return { kind, slug, domain, evidence: text };
+    return { kind, slug, domain, evidence: auditText(text, "evidence") };
   }
   if (!text) throw new UsageError("give a reason for retiring");
-  return { kind, slug, domain, reason: text };
+  return { kind, slug, domain, reason: auditText(text, "reason") };
 }
 
 /** A database error: its type, SQLSTATE, and constraint, never a connection string. */

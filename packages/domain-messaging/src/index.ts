@@ -139,7 +139,6 @@ export {
 } from "./render.ts";
 export {
   ADDRESS_SUPPRESSED,
-  addressDomain,
   isSuppressed,
   operatorSenderAddress,
   SENDER_POLICIES,

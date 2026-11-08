@@ -69,13 +69,3 @@ export async function isSuppressed(
     ) as found`.execute(trx);
   return rows[0]?.found === true;
 }
-
-/** The domain of an address, lowercased, without a trailing dot. */
-export function addressDomain(address: string): string | null {
-  const at = address.lastIndexOf("@");
-  if (at === -1 || at === address.length - 1) return null;
-  return address
-    .slice(at + 1)
-    .toLowerCase()
-    .replace(/\.$/, "");
-}

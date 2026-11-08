@@ -206,6 +206,24 @@ describe.skipIf(!env)("per-operator sender domains and suppression (W3-G2.16-res
     expect(fixture.sends[0]?.builder.from.email).toBe(`bookings@${domainOf("s2")}`);
   });
 
+  it("S2b a held operator's lapsed attempt still ends, as outcome_unknown", async () => {
+    const T = await newTenant("s2b");
+    const id = await enqueue(T, "s2b");
+    await admin`update public.email_messages
+                   set state = 'sending', attempts = 1, provider = 'cloudflare',
+                       lease_expires_at = now() + interval '1 second'
+                 where id = ${id}`;
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    const fixture = createCloudflareEmailFixture();
+    const report = await deliver(T, fixture, ["s2b"], "operator_only");
+    expect(report).toMatchObject({ failed: 1, held: "sender_unverified" });
+    expect(fixture.sends).toHaveLength(0);
+    expect(await message(id)).toMatchObject({
+      state: "failed",
+      last_error_code: "outcome_unknown",
+    });
+  });
+
   it("S3 the sweep holds one operator and still serves another", async () => {
     const held = await newTenant("s3-held");
     const ready = await newTenant("s3-ready");
@@ -214,34 +232,61 @@ describe.skipIf(!env)("per-operator sender domains and suppression (W3-G2.16-res
     const heldId = await enqueue(held, "s3-held");
     const readyId = await enqueue(ready, "s3-ready");
     const fixture = createCloudflareEmailFixture();
+    const turns: string[] = [];
     const report = await sweepEmail(runtime.db, {
       provider: provider(fixture, ["s3-held", "s3-ready"]),
       fromAddress: SHARED,
       runId: `run-${randomUUID()}`,
       senderPolicy: "operator_only",
       tenantLimit: 500,
+      onTurnStart: (tenantId) => turns.push(tenantId),
     });
+    // The held operator had its one turn, and no second one.
+    expect(turns.filter((t) => t === held)).toHaveLength(1);
+    expect(turns).toContain(ready);
     expect(report.heldTenants).toBeGreaterThanOrEqual(1);
     expect(report.accountFault).toBe(false);
     expect(await message(heldId)).toMatchObject({ state: "queued" });
     expect(await message(readyId)).toMatchObject({ state: "sent" });
   });
 
-  it("S4 a provider that refuses the operator's own sender holds that operator only", async () => {
+  it("S4 a provider that refuses the operator's own sender holds that operator's run", async () => {
     const T = await newTenant("s4");
     await adminAdd(T, domainOf("s4"));
     await adminVerify(T, domainOf("s4"));
     // The binding allows only the shared sender, as the repository's does.
     const fixture = createCloudflareEmailFixture({ allowedSenderAddresses: [SHARED] });
     const id = await enqueue(T, "s4");
-    await enqueue(T, "s4", "s4-second");
+    const second = await enqueue(T, "s4", "s4-second");
     const report = await deliver(T, fixture, ["s4"]);
+    // The run stopped at the first refusal: the second was never claimed.
+    expect(await message(second)).toMatchObject({ state: "queued", attempts: 0 });
     expect(report).toMatchObject({ claimed: 1, held: "sender_unverified", stopped: null });
     // The attempt is given back and waits, as an account-level fault's is.
     expect(await message(id)).toMatchObject({
       state: "queued",
       attempts: 0,
       last_error_code: "sender_not_verified",
+    });
+  });
+
+  it("S4b any other account-level fault on an operator's own sender holds that operator, except a suspended account", async () => {
+    const T = await newTenant("s4b");
+    await adminAdd(T, domainOf("s4b"));
+    await adminVerify(T, domainOf("s4b"));
+    const fixture = createCloudflareEmailFixture();
+    await enqueue(T, "s4b");
+    fixture.failNext("E_DAILY_LIMIT_EXCEEDED");
+    expect(await deliver(T, fixture, ["s4b"])).toMatchObject({
+      held: "sender_fault",
+      stopped: null,
+    });
+    await admin`update public.email_messages set next_attempt_at = now()
+                 where tenant_id = ${T} and state = 'queued'`;
+    fixture.failNext("E_ACCOUNT_SUSPENDED");
+    expect(await deliver(T, fixture, ["s4b"])).toMatchObject({
+      held: null,
+      stopped: "account_fault",
     });
   });
 
@@ -282,7 +327,7 @@ describe.skipIf(!env)("per-operator sender domains and suppression (W3-G2.16-res
     expect(theirs.rows).toEqual([]);
   });
 
-  it("S6 the database refuses a second live domain, a shared domain, TideGrid names, and backward moves", async () => {
+  it("S6 the database refuses a second live domain, one operator's domain for another, overlaps, TideGrid names, and backward moves", async () => {
     const A = await newTenant("s6a");
     const B = await newTenant("s6b");
     await adminAdd(A, domainOf("s6"));
@@ -301,6 +346,11 @@ describe.skipIf(!env)("per-operator sender domains and suppression (W3-G2.16-res
     expect(await refused(adminAdd(B, "xn--tdegrd-pvfe.example"))).toBe(
       "tenant_sender_domains_domain_check",
     );
+    // Nor a parent or subdomain of another operator's live domain.
+    expect(await refused(adminAdd(B, `sub.${domainOf("s6")}`))).toBe(
+      "tenant_sender_domains_overlap",
+    );
+    expect(await refused(adminAdd(B, "harbor.example"))).toBe("tenant_sender_domains_overlap");
     await adminVerify(A, domainOf("s6"));
     expect(
       await refused(
@@ -517,7 +567,30 @@ describe.skipIf(!env)("per-operator sender domains and suppression (W3-G2.16-res
     expect(
       await ingestEmailEvent(runtime.db, config, event(domainA, `s11-a-${run}`)),
     ).toMatchObject({ outcome: "applied", suppressed: true });
-    // A name that is not a domain is refused before any read.
+    // Events the consumer drops are still refused from a domain nobody verified.
+    expect(
+      await ingestEmailEvent(
+        runtime.db,
+        config,
+        cloudflareEmailEvent("delivered", {
+          messageId: m.providerId,
+          eventId: `s11-d1-${run}`,
+          domain: "unknown.example",
+        }),
+      ),
+    ).toMatchObject({ outcome: "refused_domain" });
+    expect(
+      await ingestEmailEvent(
+        runtime.db,
+        config,
+        cloudflareEmailEvent("delivered", {
+          messageId: m.providerId,
+          eventId: `s11-d2-${run}`,
+          domain: domainB,
+        }),
+      ),
+    ).toMatchObject({ outcome: "ignored" });
+    // A name that is not a domain is refused.
     expect(
       await ingestEmailEvent(runtime.db, config, event("not a domain", `s11-z-${run}`)),
     ).toMatchObject({ outcome: "refused_domain" });

@@ -21,12 +21,14 @@
 -- database cannot check DNS itself.
 --
 -- One live domain per operator and one operator per live domain: two partial
--- unique keys over rows that are not retired. A domain that names TideGrid
+-- unique keys over rows that are not retired. app.sender_domain_add also
+-- refuses a domain that is a parent or a subdomain of another operator's live
+-- domain, since relaxed DMARC alignment lets a subdomain pass for its parent. A domain that names TideGrid
 -- (a 'tidegrid' label before the top-level one) or carries an IDNA label is
 -- refused, as the brand rules refuse such contact addresses.
 --
--- app.email_sender_domain_known(domain) answers whether any operator's
--- domain with that name was ever verified, and nothing else. The events
+-- app.email_sender_domain_known(domain) answers whether some operator's
+-- domain with that name is verified now, and nothing else. The events
 -- consumer uses it for an event whose message id joins nothing, so it can
 -- refuse events from a domain TideGrid never sent from without learning
 -- which operator owns it.
@@ -39,8 +41,11 @@
 -- composite foreign key to the tenant's own email_events row). The check
 -- trigger app.check_email_suppression() (an invoker function) refuses a row
 -- unless that event is a complaint or a hard bounce and the address is the
--- one its message was sent to, so the runtime cannot suppress an address the
--- provider never reported. One active row per operator and address. The
+-- one its message was sent to, so a suppression always follows a recorded
+-- event. (A writer holding tidegrid_app's credentials can still record a
+-- made-up event for its own tenant's sent message, 0021's residual, and so
+-- suppress that message's address within its own tenant.) One active row per
+-- operator and address. The
 -- admin lifts one through app.email_suppression_lift, with a reason and an
 -- audit row; a lifted row stays, and a later event adds a new one. The
 -- row keeps the address because delivery must match on it; the audit row
@@ -159,6 +164,14 @@ CREATE FUNCTION app.sender_domain_add(p_tenant_id uuid, p_domain text, p_local_p
 DECLARE
   v_id uuid;
 BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.tenant_sender_domains d
+     WHERE d.status <> 'retired' AND d.tenant_id <> p_tenant_id
+       AND (pg_catalog.right(p_domain, pg_catalog.length(d.domain) + 1) = '.' || d.domain
+            OR pg_catalog.right(d.domain, pg_catalog.length(p_domain) + 1) = '.' || p_domain)) THEN
+    RAISE EXCEPTION 'a sending domain may not be a parent or subdomain of another operator''s live domain'
+      USING ERRCODE = '23505', CONSTRAINT = 'tenant_sender_domains_overlap';
+  END IF;
   INSERT INTO public.tenant_sender_domains (tenant_id, domain, local_part)
   VALUES (p_tenant_id, p_domain, coalesce(p_local_part, 'bookings'))
   RETURNING id INTO v_id;
@@ -244,9 +257,9 @@ BEGIN
 END;
 $$;
 
--- Whether any operator's domain of this name was ever verified. Filters
+-- Whether some operator's domain of this name is verified now. Filters
 -- explicitly, since its owner bypasses row-level security; answers nothing
--- about which operator.
+-- about which operator, and nothing about retired domains.
 CREATE FUNCTION app.email_sender_domain_known(p_domain text)
   RETURNS boolean
   LANGUAGE sql STABLE SECURITY DEFINER
@@ -254,7 +267,7 @@ CREATE FUNCTION app.email_sender_domain_known(p_domain text)
   AS $$
     SELECT EXISTS (
       SELECT 1 FROM public.tenant_sender_domains d
-       WHERE d.domain = p_domain AND d.verified_at IS NOT NULL)
+       WHERE d.domain = p_domain AND d.status = 'verified')
   $$;
 
 -- Suppression ----------------------------------------------------------------------
