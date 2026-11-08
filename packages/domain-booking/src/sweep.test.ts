@@ -27,9 +27,28 @@ class FakeStore implements CheckoutSweepStore {
   readonly log: string[] = [];
   readonly sent: string[] = [];
   settleRefund: CheckoutSweepStore["settleRefund"];
+  readonly cancellations = new Map<string, string[]>();
+  readonly canceled: string[] = [];
+  settleCancellation: CheckoutSweepStore["settleCancellation"];
 
   constructor(withProvider = true) {
     this.settleRefund = withProvider ? (ctx, id) => this.settle(ctx, id) : null;
+    this.settleCancellation = withProvider
+      ? async (ctx, id) => {
+          this.canceled.push(id);
+          this.cancellations.set(
+            ctx.tenantId,
+            (this.cancellations.get(ctx.tenantId) ?? []).filter((c) => c !== id),
+          );
+          return { kind: "canceled" };
+        }
+      : null;
+  }
+
+  async requestedCancellations(ctx: TenantContext, query: WindowQuery): Promise<string[]> {
+    return (this.cancellations.get(ctx.tenantId) ?? [])
+      .filter((id) => !query.excluding.includes(id))
+      .slice(0, query.limit);
   }
 
   tenant(id: string): this {

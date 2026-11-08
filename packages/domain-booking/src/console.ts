@@ -130,15 +130,19 @@ export type TimelineKind =
   | "refunded"
   | "refund_failed";
 
-/** A guest's cancellation within policy (lane 1, G2.11c): the terms as applied. */
+/** A cancellation (lane 1, G2.11c; staff and credit, W3-G2.9): the terms as applied. */
 export interface CancellationView {
   canceledAt: string;
-  /** Who canceled: the guest, through the management link. */
+  /** Who canceled: the guest, through the management link, or staff. */
   by: "guest" | "staff" | "system" | "support";
   remedy: CancellationRemedy;
-  /** Basis points of what was paid: 10000 for a full refund, 0 for none. */
+  /** Basis points of what was paid, as a refund or credit: 10000 for all of it, 0 for none. */
   refundBp: number;
   refundAmount: number;
+  /** Booking credit issued instead of a refund (W3-G2.9). */
+  creditAmount: number;
+  /** Staff applied a remedy the policy does not give, with a reason. */
+  overridden: boolean;
   paidAmount: number;
   cutoffAt: string;
   beforeCutoff: boolean;
@@ -647,6 +651,8 @@ export async function getBookingDetail(
       c_cutoff_at: Date | string | null;
       c_before_cutoff: boolean | null;
       c_policy_version: number | null;
+      c_credit_amount: number | null;
+      c_overridden: boolean | null;
       c_actor_type: ActorType | null;
       party_size: number;
       location_name: string;
@@ -683,6 +689,7 @@ export async function getBookingDetail(
            c.remedy as c_remedy, c.refund_bp as c_refund_bp, c.refund_amount as c_refund_amount,
            c.paid_amount as c_paid_amount, c.cutoff_at as c_cutoff_at,
            c.before_cutoff as c_before_cutoff, c.policy_version as c_policy_version,
+           c.credit_amount as c_credit_amount, (c.override_reason is not null) as c_overridden,
            c.actor_type as c_actor_type,
            ${tripColumns},
            t.ends_at, t.end_utc_offset_minutes, t.duration_minutes,
@@ -767,11 +774,13 @@ export async function getBookingDetail(
           cutoffAt: iso(row.c_cutoff_at),
           beforeCutoff: row.c_before_cutoff,
           policyVersion: row.c_policy_version,
+          creditAmount: row.c_credit_amount ?? 0,
+          overridden: row.c_overridden ?? false,
         }
       : null;
   if (refund) {
     timeline.push({ kind: "refund_requested", at: refund.requestedAt });
-    if (refund.settledAt && refund.state !== "requested") {
+    if (refund.settledAt && (refund.state === "succeeded" || refund.state === "failed")) {
       timeline.push({
         kind: refund.state === "succeeded" ? "refunded" : "refund_failed",
         at: refund.settledAt,

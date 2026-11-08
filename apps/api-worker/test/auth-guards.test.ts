@@ -192,6 +192,9 @@ describe("contract", () => {
         // Console booking views (G2.12b).
         "/v1/staff/tenants/{tenantId}/bookings",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/cancellation",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/credit",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/credit/adjustments",
         "/v1/staff/tenants/{tenantId}/booking-references/{reference}",
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/roster",
         // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
@@ -224,6 +227,7 @@ describe("contract", () => {
         // Staff-assisted booking (G2.12d).
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/offer",
         "/v1/staff/tenants/{tenantId}/quotes",
+        "/v1/staff/tenants/{tenantId}/refund-exceptions",
         "/v1/staff/tenants/{tenantId}/checkouts",
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}",
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/cancel",

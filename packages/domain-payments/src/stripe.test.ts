@@ -724,21 +724,65 @@ describe("refunds", () => {
     });
   });
 
-  it("leaves a pending refund unknown, then reads it settled on the next call", async () => {
+  it("reports a pending refund as pending, then reads it settled on the next call (W3-G2.9)", async () => {
     const { fixture, provider } = harness();
     const created = await paid(fixture, provider);
     const input = refundInput(created.paymentRef);
     fixture.refundPending();
-    expect(await unavailable(provider.refundPayment(input))).toBe("stripe_refund_pending");
-    expect(await unavailable(provider.refundPayment(input))).toBe("stripe_refund_pending");
+    const [first, second] = [
+      await provider.refundPayment(input),
+      await provider.refundPayment(input),
+    ];
     const [refundRef] = fixture.refundIds(created.paymentRef);
     if (!refundRef) throw new Error("no refund");
+    expect(first).toEqual({ refundRef, status: "pending" });
+    expect(second).toEqual({ refundRef, status: "pending" });
     fixture.settleRefund(refundRef, "succeeded");
     const before = fixture.requests.length;
     expect(await provider.refundPayment(input)).toEqual({ refundRef, status: "succeeded" });
     // Found by the lookup: no second POST.
     expect(fixture.requests.slice(before).map((r) => r.method)).toEqual(["GET"]);
     expect(fixture.refundIds(created.paymentRef)).toEqual([refundRef]);
+  });
+
+  it("cancels an unpaid intent once, and answers succeeded for one already paid (W3-G2.9)", async () => {
+    const { fixture, provider } = harness();
+    const open = await provider.createPayment({
+      accountRef: harbor,
+      amount: 5000,
+      currency: "USD",
+      idempotencyKey: `checkout_payment:${randomUUID()}`,
+      clientReference: randomUUID(),
+    });
+    const key = `payment_cancel:${randomUUID()}`;
+    const input = { accountRef: harbor, paymentRef: open.paymentRef, idempotencyKey: key };
+    expect(await provider.cancelPayment(input)).toEqual({
+      status: "canceled",
+      paymentRef: open.paymentRef,
+    });
+    expect(fixture.intent(open.paymentRef).status).toBe("canceled");
+    // Asked again with a new key: the intent is already canceled.
+    expect(
+      await provider.cancelPayment({ ...input, idempotencyKey: `payment_cancel:${randomUUID()}` }),
+    ).toEqual({ status: "canceled", paymentRef: open.paymentRef });
+
+    const settled = await paid(fixture, provider);
+    expect(
+      await provider.cancelPayment({
+        accountRef: harbor,
+        paymentRef: settled.paymentRef,
+        idempotencyKey: `payment_cancel:${randomUUID()}`,
+      }),
+    ).toEqual({ status: "succeeded", paymentRef: settled.paymentRef });
+
+    // An intent Stripe does not have is refused for good.
+    await expect(
+      provider.cancelPayment({
+        accountRef: harbor,
+        paymentRef: "pi_TestFixtureMissing00000001",
+        idempotencyKey: `payment_cancel:${randomUUID()}`,
+      }),
+    ).rejects.toMatchObject({ name: "ProviderRejectedError", code: "resource_missing" });
   });
 
   it("creates no second refund after Stripe forgets the key", async () => {

@@ -6,7 +6,12 @@ export {
   type CancelRefusal,
   cancelBooking,
   previewCancellation,
+  previewStaffCancellation,
   refundFor,
+  type StaffCancellationPreview,
+  type StaffCancelResult,
+  type StaffRemedyChoice,
+  staffCancelBooking,
 } from "./cancel.ts";
 export {
   type BookerDetails,
@@ -47,6 +52,21 @@ export {
   type RosterView,
   sumByCode,
 } from "./console.ts";
+// Refunds, booking credit, fee reversal, and payment cancellation (W3-G2.9).
+export {
+  adjustCredit,
+  appendCreditEntry,
+  type CreditAccountView,
+  type CreditCommandResult,
+  type CreditEntryView,
+  CreditKeyReusedError,
+  creditAccountForBooking,
+  creditBalanceForBooking,
+  ensureCreditAccount,
+  getCreditAccount,
+  redeemCredit,
+  reinstateCredit,
+} from "./credits.ts";
 // Console completion (G2.12c): search, a day's report and CSV, and notes.
 export {
   csvField,
@@ -103,6 +123,12 @@ export {
   resolveFinalizationException,
 } from "./exception-resolution.ts";
 export {
+  CORE_FEE_BP,
+  type FeeReversal,
+  feeReversalFor,
+  reverseFeeForRefund,
+} from "./fee-ledger.ts";
+export {
   type HandledEvent,
   handleVerifiedEvent,
   type ProcessOutcome,
@@ -155,6 +181,11 @@ export {
   putParticipant,
 } from "./participants.ts";
 export {
+  requestPaymentCancellation,
+  type SettleCancellationResult,
+  settlePaymentCancellation,
+} from "./payment-cancel.ts";
+export {
   type FinalizationExceptionView,
   listFinalizationExceptions,
   listTripBookings,
@@ -163,6 +194,14 @@ export {
   type StaffBooking,
   type TripBookingsPage,
 } from "./reads.ts";
+export {
+  listRefundExceptions,
+  onRefundEvent,
+  REFUND_EXCEPTION_AFTER_HOURS,
+  type RefundEventOutcome,
+  type RefundExceptionView,
+  raiseRefundException,
+} from "./refunds.ts";
 export {
   type BookingSearchField,
   type BookingSearchOutcome,

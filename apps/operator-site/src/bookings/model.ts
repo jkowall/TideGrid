@@ -167,6 +167,7 @@ export function paymentCopy(payment: BookingPaymentStatus): StatusCopy {
       case "succeeded":
         return { label: "Refunded", tone: "info", icon: "receipt" };
       case "requested":
+      case "pending":
         return { label: "Refund pending", tone: "pending", icon: "clock" };
       // A refund's states share the receipt; its tone tells them apart. A failed
       // refund is not a failed charge, so the two differ in icon as well as words.
@@ -195,12 +196,18 @@ export const bookingStates: Record<BookingDetail["state"], StatusCopy> = {
  * refund", "After the cutoff: 50% refund", "After the cutoff: no refund".
  */
 export function cancellationRemedyText(c: NonNullable<BookingDetail["cancellation"]>): string {
-  const side = c.beforeCutoff ? "Before the cutoff" : "After the cutoff";
+  const side = c.overridden
+    ? "Staff override"
+    : c.beforeCutoff
+      ? "Before the cutoff"
+      : "After the cutoff";
   switch (c.remedy) {
     case "full_refund":
       return `${side}: full refund`;
     case "percent_refund":
       return `${side}: ${Number((c.refundBp / 100).toFixed(2))}% refund`;
+    case "credit":
+      return `${side}: ${formatMoney(c.creditAmount)} booking credit`;
     case "none":
       return `${side}: no refund`;
   }
@@ -384,6 +391,13 @@ export function exceptionRefund(e: Pick<FinalizationException, "refund" | "reaso
         tone: "pending",
         icon: "clock",
         detail: `A full refund of ${amount} is on its way. TideGrid retries it until the provider answers.`,
+      };
+    case "pending":
+      return {
+        label: "Refund pending",
+        tone: "pending",
+        icon: "clock",
+        detail: `The provider accepted the ${amount} refund and is still finishing it.`,
       };
     case "failed":
       return {

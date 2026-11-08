@@ -741,7 +741,7 @@ export function BookingPage({
   const refundPending =
     stage.kind === "outcome" &&
     stage.session.state === "unfulfilled" &&
-    stage.session.refund?.state === "requested";
+    (stage.session.refund?.state === "requested" || stage.session.refund?.state === "pending");
   useEffect(() => {
     if (!refundPending || !live) return;
     const controller = new AbortController();
@@ -750,7 +750,8 @@ export function BookingPage({
     const tick = async () => {
       const result = await readCheckout(live.sessionId, live.secret, controller.signal);
       if (controller.signal.aborted) return;
-      if (result.kind === "ok" && result.value.refund?.state !== "requested") {
+      const state = result.kind === "ok" ? result.value.refund?.state : undefined;
+      if (result.kind === "ok" && state !== "requested" && state !== "pending") {
         go({ kind: "outcome", session: result.value });
         setAnnouncement(
           result.value.refund?.state === "succeeded"

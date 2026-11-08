@@ -8,6 +8,26 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W3-G2.9, refunds, booking credit, and fee reversal (owner decision; coordinator defaults pending owner confirmation)
+
+Under the same owner decision as W3-G2.3 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
+
+W3-G2.9 lands as migrations `0024` and `0025` and the [database contract](../../packages/database/README.md#refunds-and-credits-0024-and-0025). What it adds:
+
+- **A pending refund state.** A refund the provider accepted and has not finished is `pending`, with its provider id, instead of staying `requested` (this closes the D3 (a) deferral above). The provider's own refund events settle it through the inbox (`refund.updated`, matched by TideGrid's key and checked against the refund's payment, amount, account, and provider id), and the sweep asks about it again once an hour.
+- **Refund exceptions after 24 hours.** A refund still requested or pending 24 hours after it was requested, or whose lookup the provider keeps refusing, is raised once for staff, as is a failure reported after a success. Staff read them at `GET /v1/staff/tenants/{tenantId}/refund-exceptions`.
+- **Booking credit.** A noncash, per-operator balance for each booker email, kept as an append-only ledger (issue, redeem, reinstate, adjust) whose balance the database keeps and never lets go below zero. Credit used on a booking that is later canceled comes back as credit.
+- **Staff cancellation.** Owners and booking staff cancel with the policy's remedy, or take its value as booking credit instead; owners may override the remedy with a reason (the manager override). The preview shows the refund, the TideGrid fee it reverses, and the credit alternative with the resulting balance. A guest is never given credit on their own.
+- **Fee reversal.** A succeeded cancellation refund writes a negative entry to a new fee ledger: 1.5% of the refunded eligible value (taxes excluded), half up, once per refund. Issuing credit reverses nothing. The fee's assessment arrives with G2.10.
+- **Canceling an unpaid payment.** When a checkout expires or is canceled, its open payment is canceled at the provider (`cancelPayment` on the port, closing D4 (a) above), so a guest is not charged and then refunded. A payment that succeeds first still takes the late-success refund.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: a stuck refund becomes an exception after 24 hours.** The database checks the same bound.
+- **D2: booking credit never expires during the pilot.**
+- **D3: a canceled Stripe payment intent maps to a payment failure through its verified event** (`payment_intent.canceled` is `payment.failed`, with no new payment state).
+- **D4: who may do what.** Cancel and preview: owners and booking staff (`bookings.cancel`). Override and credit adjustment: owners only (`bookings.override`, `credits.adjust`). Refund exceptions: everyone with `payments.read`, finance included.
+
 ### 2026-11-08: Wave 3 code-only pull-forward, and W3-G2.3 delivery foundation (owner decision; coordinator defaults pending owner confirmation)
 
 The owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." This is a dated synthetic pull-forward. It waives the Validation gate and the O-VAL-2 dependency for W3-OPS-1 (plan only), W3-G2.3, W3-G2.9, W3-G2.10, and W3-G2.2b without managed OIDC and MFA. It allows no provider signup, no Cloudflare, Neon, or Stripe call, no Terraform apply, and no deploy. A new Worker binding stays out of the configuration a release deploys until its resource exists. No gate is claimed.

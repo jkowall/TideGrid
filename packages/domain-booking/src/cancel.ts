@@ -14,6 +14,11 @@
  * through the payment adapter with `settleRefund`; the checkout sweep resends
  * one whose outcome is unknown.
  *
+ * Staff cancel too (W3-G2.9, `staffCancelBooking`): the policy's remedy, the
+ * policy's refund value as booking credit instead, or an override with a
+ * reason. Credit is issued in the same transaction, to the booker's credit
+ * account; a refund is sent after commit as for a guest.
+ *
  * Lock order: checkout session, booking, payment, then the trip and the hold
  * inside the inventory call. The confirmation path takes the session, the
  * payment, the trip, and the hold in that order, so the two never deadlock: a
@@ -31,7 +36,9 @@ import { releaseHold } from "@tidegrid/domain-inventory";
 import { cancelMessage } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
+import { appendCreditEntry, creditBalanceForBooking, ensureCreditAccount } from "./credits.ts";
 import { CONFIRMATION_TEMPLATE, enqueueCancellationEmail, MANAGE_LINK_TEMPLATE } from "./emails.ts";
+import { feeReversalFor } from "./fee-ledger.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import { iso, record } from "./views.ts";
 
@@ -174,6 +181,11 @@ export interface CancellationRecord {
   paidAmount: number;
   refundAmount: number;
   refundId: string | null;
+  creditAmount: number;
+  creditEntryId: string | null;
+  overridden: boolean;
+  /** Who canceled, as the database stamped it. */
+  by: "staff" | "guest" | "system" | "support";
   beforeCutoff: boolean;
   cutoffAt: string;
   policyVersion: number;
@@ -202,11 +214,16 @@ async function existingCancellation(
     paid_amount: number;
     refund_amount: number;
     refund_id: string | null;
+    credit_amount: number;
+    credit_entry_id: string | null;
+    overridden: boolean;
+    actor_type: CancellationRecord["by"];
     before_cutoff: boolean;
     cutoff_at: Date | string;
     policy_version: number;
   }>`
     select id, created_at, remedy, refund_bp, paid_amount, refund_amount, refund_id,
+           credit_amount, credit_entry_id, override_reason is not null as overridden, actor_type,
            before_cutoff, cutoff_at, policy_version
       from booking_cancellations
      where tenant_id = ${tenantId} and booking_id = ${bookingId}`.execute(trx);
@@ -220,10 +237,46 @@ async function existingCancellation(
     paidAmount: c.paid_amount,
     refundAmount: c.refund_amount,
     refundId: c.refund_id,
+    creditAmount: c.credit_amount,
+    creditEntryId: c.credit_entry_id,
+    overridden: c.overridden,
+    by: c.actor_type,
     beforeCutoff: c.before_cutoff,
     cutoffAt: iso(c.cutoff_at),
     policyVersion: c.policy_version,
   };
+}
+
+/** Lock the session, the booking, and the payment, in that order, and read the terms. */
+async function lockForCancel(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<TermsRow | null> {
+  // The session first, as confirmation takes it, then the booking and the payment.
+  const { rows: located } = await sql<{ checkout_session_id: string }>`
+    select checkout_session_id from bookings
+     where tenant_id = ${tenantId} and id = ${bookingId}`.execute(trx);
+  const sessionId = located[0]?.checkout_session_id;
+  if (!sessionId) return null;
+  await sql`select id from checkout_sessions where tenant_id = ${tenantId} and id = ${sessionId}
+              for update`.execute(trx);
+  // NO KEY UPDATE: the email delivery job's foreign key checks on the booking
+  // never wait behind a cancellation whose hooks may wait for that job.
+  await sql`select id from bookings where tenant_id = ${tenantId} and id = ${bookingId}
+              for no key update`.execute(trx);
+  const row = await termsRow(trx, tenantId, bookingId);
+  if (!row) throw new Error("a locked booking's terms were not found");
+  await sql`select id from payments where tenant_id = ${tenantId} and id = ${row.payment_id}
+              for update`.execute(trx);
+  return row;
+}
+
+/** The remedy a cancellation applies, as the database row carries it. */
+interface Applied {
+  remedy: CancellationRemedy;
+  refundBp: number;
+  overrideReason: string | null;
 }
 
 /**
@@ -244,27 +297,10 @@ export async function cancelBooking(
     throw new RangeError("the expected refund is a whole number of cents, at least 0");
   }
   if (!isUuid(input.bookingId)) return { kind: "not_found" };
-  const tenantId = ctx.tenantId;
-
-  // The session first, as confirmation takes it, then the booking and the payment.
-  const { rows: located } = await sql<{ checkout_session_id: string }>`
-    select checkout_session_id from bookings
-     where tenant_id = ${tenantId} and id = ${input.bookingId}`.execute(trx);
-  const sessionId = located[0]?.checkout_session_id;
-  if (!sessionId) return { kind: "not_found" };
-  await sql`select id from checkout_sessions where tenant_id = ${tenantId} and id = ${sessionId}
-              for update`.execute(trx);
-  // NO KEY UPDATE: the email delivery job's foreign key checks on the booking
-  // never wait behind a cancellation whose hooks may wait for that job.
-  await sql`select id from bookings where tenant_id = ${tenantId} and id = ${input.bookingId}
-              for no key update`.execute(trx);
-  const row = await termsRow(trx, tenantId, input.bookingId);
-  if (!row) throw new Error("a locked booking's terms were not found");
-  await sql`select id from payments where tenant_id = ${tenantId} and id = ${row.payment_id}
-              for update`.execute(trx);
-
+  const row = await lockForCancel(trx, ctx.tenantId, input.bookingId);
+  if (!row) return { kind: "not_found" };
   if (row.state === "canceled") {
-    const existing = await existingCancellation(trx, tenantId, input.bookingId);
+    const existing = await existingCancellation(trx, ctx.tenantId, input.bookingId);
     if (!existing) throw new Error("a canceled booking has no cancellation");
     return { kind: "already_canceled", cancellation: existing };
   }
@@ -273,28 +309,256 @@ export async function cancelBooking(
   if (terms.refusal === "remedy_requires_operator")
     return { kind: "remedy_requires_operator", terms };
   if (terms.refundAmount !== input.expectedRefundAmount) return { kind: "terms_changed", terms };
+  const cancellation = await applyCancellation(
+    trx,
+    ctx,
+    input.bookingId,
+    row,
+    terms,
+    { remedy: terms.remedy as CancellationRemedy, refundBp: terms.refundBp, overrideReason: null },
+    hooks,
+    "booking canceled by its guest",
+  );
+  return { kind: "canceled", cancellation };
+}
+
+// Staff cancellation (W3-G2.9) ----------------------------------------------------------
+
+/** What staff may apply instead of the policy's remedy. */
+export type StaffRemedyChoice =
+  /** The policy's own remedy: its refund, its credit, or nothing. */
+  | { kind: "policy" }
+  /** The policy's refund value as booking credit instead (no reason needed). */
+  | { kind: "credit" }
+  /** Any remedy at any basis points the rules allow, with a reason. */
+  | { kind: "override"; remedy: CancellationRemedy; refundBp: number; reason: string };
+
+export interface StaffCancellationPreview {
+  terms: CancellationTerms;
+  /** Why staff cannot cancel now, or null. */
+  refusal: "already_canceled" | "trip_departed" | null;
+  /** The policy's value, in cents: what it refunds, or what it credits when its remedy is credit. */
+  policyValue: number;
+  /** Taking the policy's remedy. Null when the policy gives credit (see credit). */
+  refund: {
+    amount: number;
+    /** TideGrid's fee reversed when this refund succeeds (negative cents). */
+    feeReversal: number;
+  } | null;
+  /** Taking the policy's value as credit. Null when the policy gives nothing. */
+  credit: { amount: number; balanceAfter: number } | null;
+  /** The booker's credit balance with this operator now. */
+  creditBalance: number;
+}
+
+/** The order's eligible value, for the fee reversal estimate. */
+async function orderTotals(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<{ total: number; eligible: number }> {
+  const { rows } = await sql<{ total: number; eligible: number }>`
+    select o.total_amount as total,
+           o.total_amount - o.tax_amount - o.included_tax_amount as eligible
+      from bookings b join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
+  const row = rows[0];
+  if (!row) throw new Error("a booking's order was not found");
+  return row;
+}
+
+/**
+ * What staff canceling now would do, with the credit alternative beside the
+ * refund: the customer, the amount, the policy, and the resulting balance
+ * (docs/v2/02). Read-only. Null when the booking is not this tenant's.
+ */
+export async function previewStaffCancellation(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<StaffCancellationPreview | null> {
+  if (!isUuid(bookingId)) return null;
+  const row = await termsRow(trx, tenantId, bookingId);
+  if (!row) return null;
+  const terms = termsOf(bookingId, row);
+  const value = policyValue(terms);
+  const balance = await creditBalanceForBooking(trx, tenantId, bookingId);
+  const totals = await orderTotals(trx, tenantId, bookingId);
+  const refusal =
+    terms.refusal === "already_canceled" || terms.refusal === "trip_departed"
+      ? terms.refusal
+      : null;
+  return {
+    terms,
+    refusal,
+    policyValue: value,
+    refund:
+      terms.remedy === "credit"
+        ? null
+        : {
+            amount: terms.refundAmount,
+            feeReversal:
+              terms.refundAmount > 0
+                ? feeReversalFor({
+                    refundAmount: terms.refundAmount,
+                    orderTotal: totals.total,
+                    eligibleTotal: totals.eligible,
+                  }).feeAmount
+                : 0,
+          },
+    credit: value > 0 ? { amount: value, balanceAfter: balance + value } : null,
+    creditBalance: balance,
+  };
+}
+
+/** The policy's value in cents: its refund, or the whole payment when it gives credit. */
+function policyValue(terms: CancellationTerms): number {
+  return terms.remedy === "credit" ? terms.paidAmount : terms.refundAmount;
+}
+
+export type StaffCancelResult =
+  | CancelBookingResult
+  /** The policy gives nothing here, so there is nothing to credit. */
+  | { kind: "nothing_to_credit"; terms: CancellationTerms }
+  /** An override's remedy and basis points do not fit together. */
+  | { kind: "override_invalid"; message: string };
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+const overrideReasonPattern = /^[^\u0000-\u001f\u007f]{1,500}$/;
+
+function checkOverride(choice: Extract<StaffRemedyChoice, { kind: "override" }>): string | null {
+  const bp = choice.refundBp;
+  if (!Number.isInteger(bp) || bp < 0 || bp > 10000) return "Basis points are 0 to 10000";
+  if (!overrideReasonPattern.test(choice.reason.trim()) || choice.reason.trim() !== choice.reason) {
+    return "An override needs a reason of 1 to 500 characters";
+  }
+  switch (choice.remedy) {
+    case "full_refund":
+      return bp === 10000 ? null : "A full refund is 10000 basis points";
+    case "percent_refund":
+      return bp >= 1 && bp <= 9999 ? null : "A percentage refund is 1 to 9999 basis points";
+    case "credit":
+      return bp >= 1 ? null : "Credit is 1 to 10000 basis points";
+    case "none":
+      return bp === 0 ? null : "No remedy is 0 basis points";
+  }
+}
+
+/**
+ * Staff cancel a confirmed booking, once: the policy's remedy, its value as
+ * credit, or an override with a reason. `expectedAmount` is the value (refund
+ * plus credit, in cents) staff were shown; if canceling now gives anything
+ * else, nothing changes and the new terms come back. The caller claims its
+ * idempotency key first, commits, and then settles any refund.
+ */
+export async function staffCancelBooking(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: { bookingId: string; choice: StaffRemedyChoice; expectedAmount: number },
+  hooks: BookingHooks = noBookingHooks,
+): Promise<StaffCancelResult> {
+  if (ctx.actorType !== "staff") throw new Error("staff cancellation runs as staff");
+  if (!Number.isInteger(input.expectedAmount) || input.expectedAmount < 0) {
+    throw new RangeError("the expected amount is a whole number of cents, at least 0");
+  }
+  if (input.choice.kind === "override") {
+    const problem = checkOverride(input.choice);
+    if (problem) return { kind: "override_invalid", message: problem };
+  }
+  if (!isUuid(input.bookingId)) return { kind: "not_found" };
+  const row = await lockForCancel(trx, ctx.tenantId, input.bookingId);
+  if (!row) return { kind: "not_found" };
+  if (row.state === "canceled") {
+    const existing = await existingCancellation(trx, ctx.tenantId, input.bookingId);
+    if (!existing) throw new Error("a canceled booking has no cancellation");
+    return { kind: "already_canceled", cancellation: existing };
+  }
+  const terms = termsOf(input.bookingId, row);
+  if (terms.refusal === "trip_departed") return { kind: "trip_departed" };
+  const policyRemedy: CancellationRemedy = terms.remedy;
+  let applied: Applied;
+  switch (input.choice.kind) {
+    case "policy":
+      applied = {
+        remedy: policyRemedy,
+        refundBp: policyRemedy === "credit" ? 10000 : terms.refundBp,
+        overrideReason: null,
+      };
+      break;
+    case "credit":
+      if (policyValue(terms) === 0) return { kind: "nothing_to_credit", terms };
+      applied = {
+        remedy: "credit",
+        refundBp: policyRemedy === "credit" ? 10000 : terms.refundBp,
+        overrideReason: null,
+      };
+      break;
+    case "override":
+      applied = {
+        remedy: input.choice.remedy,
+        refundBp: input.choice.refundBp,
+        overrideReason: input.choice.reason,
+      };
+      break;
+  }
+  if (refundFor(terms.paidAmount, applied.refundBp) !== input.expectedAmount) {
+    return { kind: "terms_changed", terms };
+  }
+  const cancellation = await applyCancellation(
+    trx,
+    ctx,
+    input.bookingId,
+    row,
+    terms,
+    applied,
+    hooks,
+    "booking canceled by staff",
+  );
+  return { kind: "canceled", cancellation };
+}
+
+/**
+ * Write a cancellation whose terms are decided: the cancellation row, the
+ * booking canceled, the refund row or the credit entry, the hold released,
+ * audit and events, the emails, and the hook. Runs under lockForCancel's locks.
+ */
+async function applyCancellation(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+  row: TermsRow,
+  terms: CancellationTerms,
+  applied: Applied,
+  hooks: BookingHooks,
+  holdReason: string,
+): Promise<CancellationRecord> {
+  const tenantId = ctx.tenantId;
   if (row.payment_state !== "succeeded")
     throw new Error("a confirmed booking's payment did not succeed");
-  const remedy = terms.remedy as CancellationRemedy;
-
-  const refundId = terms.refundAmount > 0 ? crypto.randomUUID() : null;
+  const value = refundFor(terms.paidAmount, applied.refundBp);
+  const isCredit = applied.remedy === "credit";
+  const refundAmount = isCredit ? 0 : value;
+  const creditAmount = isCredit ? value : 0;
+  const refundId = refundAmount > 0 ? crypto.randomUUID() : null;
+  const creditEntryId = creditAmount > 0 ? crypto.randomUUID() : null;
   // The instants come from the rows themselves, in SQL, at full precision; the
   // database clock is this transaction's, the same one the terms were read at.
   const { rows: inserted } = await sql<{ id: string; created_at: Date | string }>`
     insert into booking_cancellations (tenant_id, booking_id, payment_id, product_id,
       policy_version, departs_at, cutoff_at, before_cutoff, remedy, refund_bp, paid_amount,
-      refund_amount, refund_id)
+      refund_amount, refund_id, credit_amount, credit_entry_id, override_reason)
     select b.tenant_id, b.id, b.payment_id, o.product_id, o.policy_version, t.starts_at,
            t.starts_at - make_interval(mins => v.change_cutoff_minutes),
            now() < t.starts_at - make_interval(mins => v.change_cutoff_minutes),
-           ${remedy}, ${terms.refundBp}, pay.amount, ${terms.refundAmount}, ${refundId}::uuid
+           ${applied.remedy}, ${applied.refundBp}, pay.amount, ${refundAmount}, ${refundId}::uuid,
+           ${creditAmount}, ${creditEntryId}::uuid, ${applied.overrideReason}
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
       join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       join policy_versions v
         on v.tenant_id = o.tenant_id and v.product_id = o.product_id and v.version = o.policy_version
-     where b.tenant_id = ${tenantId} and b.id = ${input.bookingId}
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}
     returning id, created_at`.execute(trx);
   const cancellation = inserted[0];
   if (!cancellation) throw new Error("cancellation insert returned no row");
@@ -303,7 +567,7 @@ export async function cancelBooking(
     .updateTable("bookings")
     .set({ state: "canceled" })
     .where("tenant_id", "=", tenantId)
-    .where("id", "=", input.bookingId)
+    .where("id", "=", bookingId)
     .where("state", "=", "confirmed")
     .execute();
 
@@ -314,18 +578,38 @@ export async function cancelBooking(
         id: refundId,
         tenant_id: tenantId,
         payment_id: row.payment_id,
-        amount: terms.refundAmount,
+        amount: refundAmount,
         currency: "USD",
         reason: "booking_canceled",
         idempotency_key: `booking_cancel_refund:${refundId}`,
       })
       .execute();
   }
+  if (creditEntryId) {
+    const { rows: booker } = await sql<{ booker_email: string }>`
+      select booker_email from checkout_sessions
+       where tenant_id = ${tenantId} and id = ${row.checkout_session_id}`.execute(trx);
+    const email = booker[0]?.booker_email;
+    if (!email) throw new Error("a booking's checkout has no booker email");
+    const accountId = await ensureCreditAccount(trx, ctx, email);
+    const issued = await appendCreditEntry(trx, ctx, {
+      id: creditEntryId,
+      accountId,
+      kind: "issue",
+      amount: creditAmount,
+      bookingId,
+      cancellationId: cancellation.id,
+      idempotencyKey: `booking_cancel_credit:${bookingId}`,
+    });
+    if (issued.kind !== "applied" || issued.entry.id !== creditEntryId) {
+      throw new Error("a cancellation's credit was not issued");
+    }
+  }
 
   const released = await releaseHold(trx, ctx, {
     holdId: row.hold_id,
     ownerRef: ownerRefFor(row.checkout_session_id),
-    reason: "booking canceled by its guest",
+    reason: holdReason,
   });
   if (released.kind !== "released") {
     throw new Error(`a canceled booking's hold did not release: ${released.kind}`);
@@ -334,22 +618,27 @@ export async function cancelBooking(
   const after = {
     state: "canceled",
     cancellationId: cancellation.id,
-    remedy,
-    refundBp: terms.refundBp,
+    remedy: applied.remedy,
+    refundBp: applied.refundBp,
     paidAmount: terms.paidAmount,
-    refundAmount: terms.refundAmount,
+    refundAmount,
     refundId,
+    creditAmount,
+    creditEntryId,
     beforeCutoff: terms.beforeCutoff,
     policyVersion: terms.policyVersion,
+    policyRemedy: terms.remedy,
+    overridden: applied.overrideReason !== null,
   };
   await record(trx, ctx, {
-    action: "booking.canceled",
+    action: applied.overrideReason !== null ? "booking.canceled_override" : "booking.canceled",
     subjectType: "booking",
-    subjectId: input.bookingId,
-    before: { state: "confirmed" },
+    subjectId: bookingId,
+    reason: applied.overrideReason,
+    before: { state: "confirmed", policyRemedy: terms.remedy, policyRefundBp: terms.refundBp },
     after,
     topic: "booking.canceled",
-    payload: { bookingId: input.bookingId, cancellationId: cancellation.id, refundId },
+    payload: { bookingId, cancellationId: cancellation.id, refundId, creditEntryId },
   });
   if (refundId) {
     await record(trx, ctx, {
@@ -359,7 +648,7 @@ export async function cancelBooking(
       after: {
         state: "requested",
         paymentId: row.payment_id,
-        amount: terms.refundAmount,
+        amount: refundAmount,
         reason: "booking_canceled",
       },
     });
@@ -370,32 +659,33 @@ export async function cancelBooking(
   // working, so the guest can still open the canceled booking and its refund.
   const { rows: pending } = await sql<{ id: string }>`
     select id from email_messages
-     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
+     where tenant_id = ${tenantId} and booking_id = ${bookingId}
        and template in (${CONFIRMATION_TEMPLATE.key}, ${MANAGE_LINK_TEMPLATE.key})
        and state in ('queued', 'sending')
      order by id`.execute(trx);
   for (const message of pending) {
     await cancelMessage(trx, ctx, message.id, { code: "booking_canceled", revokeLinks: false });
   }
-  await enqueueCancellationEmail(trx, ctx, input.bookingId);
+  await enqueueCancellationEmail(trx, ctx, bookingId);
   await hooks.bookingCanceled?.(trx, ctx, {
-    bookingId: input.bookingId,
+    bookingId,
     cancellationId: cancellation.id,
     refundId,
   });
   return {
-    kind: "canceled",
-    cancellation: {
-      cancellationId: cancellation.id,
-      canceledAt: iso(cancellation.created_at),
-      remedy,
-      refundBp: terms.refundBp,
-      paidAmount: terms.paidAmount,
-      refundAmount: terms.refundAmount,
-      refundId,
-      beforeCutoff: terms.beforeCutoff,
-      cutoffAt: terms.cutoffAt,
-      policyVersion: terms.policyVersion,
-    },
+    cancellationId: cancellation.id,
+    canceledAt: iso(cancellation.created_at),
+    remedy: applied.remedy,
+    refundBp: applied.refundBp,
+    paidAmount: terms.paidAmount,
+    refundAmount,
+    refundId,
+    creditAmount,
+    creditEntryId,
+    overridden: applied.overrideReason !== null,
+    by: ctx.actorType,
+    beforeCutoff: terms.beforeCutoff,
+    cutoffAt: terms.cutoffAt,
+    policyVersion: terms.policyVersion,
   };
 }

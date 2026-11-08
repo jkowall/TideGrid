@@ -38,7 +38,20 @@ import { errorBody } from "./responses.ts";
 
 const webhookPath = "/v1/webhooks/payments/{provider}";
 /** Outcomes an operator must see: refunded payments, and events that match no payment or the wrong one. */
-const needsAttention = new Set(["refund_required", "payment_mismatch", "unmatched_payment"]);
+/**
+ * Outcomes a person must look at. The refund outcomes (W3-G2.9) log only the
+ * outcome name: never the provider's refund object (data.object), its
+ * failure text, or its metadata.
+ */
+const needsAttention = new Set([
+  "refund_required",
+  "payment_mismatch",
+  "unmatched_payment",
+  "refund_failed",
+  "refund_failed_after_success",
+  "refund_mismatch",
+  "unmatched_refund",
+]);
 /** Provider events are small; Stripe's largest are well under this. */
 export const MAX_WEBHOOK_BYTES = 64 * 1024;
 
@@ -180,13 +193,15 @@ export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: App
     }
     const attention =
       (needsAttention.has(handled.outcome) && !handled.duplicate) ||
-      (handled.refund !== null && handled.refund.kind !== "succeeded");
+      (handled.refund !== null &&
+        handled.refund.kind !== "succeeded" &&
+        handled.refund.kind !== "pending");
     (attention ? log.error : log.info)("payment_webhook", {
       "event.name": "payment_webhook",
       "tidegrid.tenant_id": handled.tenantId,
       "tidegrid.payment_event.outcome": handled.outcome,
       "tidegrid.payment_event.duplicate": handled.duplicate,
-      ...(handled.refund && handled.refund.kind !== "succeeded"
+      ...(handled.refund && handled.refund.kind !== "succeeded" && handled.refund.kind !== "pending"
         ? { "error.type": `refund_${handled.refund.kind}` }
         : {}),
     });
@@ -381,13 +396,16 @@ function logProcessed(
   durationMs: number,
 ): void {
   const attention =
-    (needsAttention.has(outcome) && !duplicate) || (refund !== null && refund.kind !== "succeeded");
+    (needsAttention.has(outcome) && !duplicate) ||
+    (refund !== null && refund.kind !== "succeeded" && refund.kind !== "pending");
   (attention ? log.error : log.info)("payment_webhook", {
     "event.name": "payment_webhook",
     "tidegrid.tenant_id": tenantId,
     "tidegrid.payment_event.outcome": outcome,
     "tidegrid.payment_event.duplicate": duplicate,
-    ...(refund && refund.kind !== "succeeded" ? { "error.type": `refund_${refund.kind}` } : {}),
+    ...(refund && refund.kind !== "succeeded" && refund.kind !== "pending"
+      ? { "error.type": `refund_${refund.kind}` }
+      : {}),
     duration_ms: durationMs,
   });
 }

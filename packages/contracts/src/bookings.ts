@@ -44,17 +44,29 @@ export type BookingState = z.infer<typeof BookingState>;
 export const BookingCancellation = z
   .object({
     canceledAt: Instant,
-    by: z.enum(["guest", "staff", "system", "support"]).describe("Who canceled: the guest, today"),
+    by: z
+      .enum(["guest", "staff", "system", "support"])
+      .describe("Who canceled: the guest or staff"),
     remedy: z
-      .enum(["full_refund", "percent_refund", "none"])
-      .describe("What the booking's policy version gave on the side of its cutoff it fell"),
+      .enum(["full_refund", "percent_refund", "credit", "none"])
+      .describe(
+        "What the cancellation applied: the policy's remedy, the policy's refund value taken as credit (staff), or an override (staff, with a reason)",
+      ),
     refundBp: z
       .number()
       .int()
       .min(0)
       .max(10000)
-      .describe("Basis points of what was paid: 10000 for a full refund, 0 for none"),
+      .describe(
+        "Basis points of what was paid, returned as a refund or as credit: 10000 for all of it, 0 for none",
+      ),
     refundAmount: Cents,
+    creditAmount: Cents.describe("Booking credit issued to the booker instead of a refund"),
+    overridden: z
+      .boolean()
+      .describe(
+        "Staff applied a remedy the policy does not give, with a reason (kept in the audit history)",
+      ),
     paidAmount: Cents,
     cutoffAt: Instant.describe("The policy's change cutoff for this trip"),
     beforeCutoff: z.boolean(),

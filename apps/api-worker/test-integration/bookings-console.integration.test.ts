@@ -432,6 +432,9 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
    */
   function appWhoseRefunds(outcome: "are refused" | "go unanswered") {
     return createApp({
+      // Pays some checkouts after they were canceled (the late-success refund),
+      // so a cancel never reaches the provider first (W3-G2.9).
+      cancelPaymentAfterCommit: false,
       accessVerifier: createAccessVerifier({
         teamDomain: TEAM,
         audience: AUD,
@@ -445,6 +448,7 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
           minimumAmount: (currency) => fake.minimumAmount(currency),
           createPayment: (input) => fake.createPayment(input),
           retrievePayment: (input) => fake.retrievePayment(input),
+          cancelPayment: (input) => fake.cancelPayment(input),
           verifyWebhook: (input) => fake.verifyWebhook(input),
           refundPayment: async () => {
             if (outcome === "go unanswered") {
@@ -587,6 +591,9 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
     signingKey = pair.privateKey;
     const jwk = { ...(await exportJWK(pair.publicKey)), kid, alg: "RS256", use: "sig" };
     app = createApp({
+      // Pays some checkouts after they were canceled (the late-success refund),
+      // so a cancel never reaches the provider first (W3-G2.9).
+      cancelPaymentAfterCommit: false,
       accessVerifier: createAccessVerifier({
         teamDomain: TEAM,
         audience: AUD,

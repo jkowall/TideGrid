@@ -5,6 +5,8 @@ export {
   resolvePaymentAccount,
 } from "./accounts.ts";
 export {
+  type CanceledPayment,
+  type CancelPaymentInput,
   type CreatedPayment,
   type CreatePaymentInput,
   type PaymentCurrency,

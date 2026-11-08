@@ -270,6 +270,7 @@ describe("Stripe event mapping", () => {
       accountRef: harbor,
       occurredAt: new Date(Math.floor(nowMs / 1000) * 1000),
       payment: { ref, amount: 5000, currency: "USD", clientReference: reference },
+      refund: null,
       payloadSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(Object.isFrozen(event)).toBe(true);
@@ -324,9 +325,10 @@ describe("Stripe event mapping", () => {
       ["payment_intent.amount_capturable_updated", pending],
       ["charge.succeeded", fixture.charge(ref)],
       ["charge.refunded", fixture.charge(ref)],
-      ["refund.created", fixture.refund(refund.refundRef)],
-      ["refund.updated", fixture.refund(refund.refundRef)],
-      ["refund.failed", { ...fixture.refund(refund.refundRef), status: "failed" }],
+      // A refund TideGrid did not make (no key of ours) is someone else's.
+      ["refund.updated", { ...fixture.refund(refund.refundRef), metadata: {} }],
+      // A refund type whose object is not a refund.
+      ["refund.updated", fixture.charge(ref)],
       ["charge.dispute.created", { id: "dp_TestFixture0000000000001", object: "dispute" }],
       ["charge.dispute.closed", { id: "dp_TestFixture0000000000001", object: "dispute" }],
       ["account.updated", { id: harbor, object: "account" }],
@@ -342,6 +344,56 @@ describe("Stripe event mapping", () => {
       const event = accepted(await verify(await fixture.event(type, object, { account: harbor })));
       expect(event, type).toMatchObject({ type: "other", providerType: type, payment: null });
     }
+  });
+
+  it("maps a TideGrid refund's events to refund.updated, with only its id, status, key, and code (W3-G2.9)", async () => {
+    const { fixture, provider, verify, intent } = harness();
+    const { ref } = await intent();
+    fixture.succeed(ref);
+    const key = `booking_cancel_refund:${randomUUID()}`;
+    const refund = await provider.refundPayment({
+      accountRef: harbor,
+      paymentRef: ref,
+      amount: 1000,
+      currency: "USD",
+      idempotencyKey: key,
+    });
+    const object = fixture.refund(refund.refundRef);
+    for (const [type, status, want, code] of [
+      ["refund.created", "pending", "pending", null],
+      ["refund.updated", "succeeded", "succeeded", null],
+      ["charge.refund.updated", "requires_action", "pending", null],
+      ["refund.failed", "failed", "failed", "expired_or_canceled_card"],
+      ["refund.updated", "canceled", "failed", "refund_canceled"],
+    ] as const) {
+      const body = {
+        ...object,
+        status,
+        ...(status === "failed"
+          ? { failure_reason: "expired_or_canceled_card", failure_balance_transaction: "txn_x" }
+          : {}),
+      };
+      const event = accepted(await verify(await fixture.event(type, body)));
+      expect(event, `${type} ${status}`).toMatchObject({
+        type: "refund.updated",
+        providerType: type,
+        payment: { ref, amount: 1000, currency: "USD", clientReference: null },
+        refund: { ref: refund.refundRef, status: want, key, failureCode: code },
+      });
+      // Nothing else of the refund object travels with the event.
+      expect(Object.keys(event.refund ?? {}).sort()).toEqual([
+        "failureCode",
+        "key",
+        "ref",
+        "status",
+      ]);
+      expect(JSON.stringify(event)).not.toContain("txn_x");
+    }
+    // An unknown status on a refund of ours is refused, so Stripe retries.
+    const odd = await verify(
+      await fixture.event("refund.updated", { ...object, status: "mystery" }),
+    );
+    expect(odd).toEqual({ kind: "rejected", reason: "payload_invalid" });
   });
 
   it("records an intent TideGrid did not make as other", async () => {

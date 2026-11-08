@@ -101,7 +101,7 @@ function isExtras(extras: unknown): boolean {
 }
 
 const paymentStates = new Set(["pending", "succeeded", "failed"]);
-const refundStates = new Set(["requested", "succeeded", "failed"]);
+const refundStates = new Set(["requested", "pending", "succeeded", "failed"]);
 
 export function isPaymentStatus(p: Partial<BookingPaymentStatus> | null | undefined): boolean {
   if (!paymentStates.has(p?.state as string)) return false;

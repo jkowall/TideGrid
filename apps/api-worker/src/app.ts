@@ -25,6 +25,7 @@ import { registerParticipantStaffRoutes } from "./routes/participants-staff.ts";
 import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.ts";
 import { registerPricingPublicRoutes } from "./routes/pricing-public.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
+import { registerRefundsCreditsStaffRoutes } from "./routes/refunds-credits-staff.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
 import { registerStaffBookingRoutes } from "./routes/staff-booking.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
@@ -180,6 +181,7 @@ export function createApp(deps: AppDeps = {}) {
   registerStaffBookingRoutes(app, deps);
   // Staff resend of a booking's email (G2.16b).
   registerBookingEmailStaffRoutes(app, deps);
+  registerRefundsCreditsStaffRoutes(app, deps);
 
   // After every route: the cap's 413 on each operation with a request body.
   declarePayloadTooLarge(app);

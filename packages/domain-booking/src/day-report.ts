@@ -193,8 +193,9 @@ export async function buildDayReport(
       cross join lateral (
         select (array_agg(r.state order by r.created_at desc, r.id desc))[1] as refund_state,
                coalesce(sum(r.amount) filter (where r.state = 'succeeded'), 0)::int as refunded,
-               count(*) filter (where r.state = 'requested')::int as pending_count,
-               coalesce(sum(r.amount) filter (where r.state = 'requested'), 0)::int as pending_amount
+               count(*) filter (where r.state in ('requested', 'pending'))::int as pending_count,
+               coalesce(sum(r.amount) filter (where r.state in ('requested', 'pending')), 0)::int
+                 as pending_amount
           from payment_refunds r
          where r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
       ) rf

@@ -275,6 +275,9 @@ describe.skipIf(!env).concurrent("G2.7 adversarial: checkout and payments throug
     signingKey = pair.privateKey;
     const jwk = { ...(await exportJWK(pair.publicKey)), kid, alg: "RS256", use: "sig" };
     app = createApp({
+      // Pays some checkouts after they were canceled (the late-success refund),
+      // so a cancel never reaches the provider first (W3-G2.9).
+      cancelPaymentAfterCommit: false,
       accessVerifier: createAccessVerifier({
         teamDomain: TEAM,
         audience: AUD,

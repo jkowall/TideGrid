@@ -237,7 +237,11 @@ export async function enqueueCancellationEmail(
       ? c.refundAmount === c.paidAmount
         ? `${money(c.refundAmount)}, everything you paid, on its way back to your original payment method`
         : `${money(c.refundAmount)} of the ${money(c.paidAmount)} you paid, on its way back to your original payment method`
-      : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
+      : c.creditAmount > 0
+        ? "None to your card: the value is booking credit instead (below)"
+        : c.overridden
+          ? "None"
+          : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking is canceled" },
     {
@@ -252,6 +256,17 @@ export async function enqueueCancellationEmail(
       rows: [
         { label: "Reference", value: detail.reference },
         { label: "Refund", value: clean(refund, 1000) },
+        ...(c.creditAmount > 0
+          ? [
+              {
+                label: "Booking credit",
+                value: clean(
+                  `${money(c.creditAmount)}, held for you under the email you booked with`,
+                  1000,
+                ),
+              },
+            ]
+          : []),
         { label: "Party", value: clean(partyText(detail.party), 1000) },
       ],
     },

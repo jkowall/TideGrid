@@ -33,6 +33,7 @@ import {
   ProviderUnavailableError,
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
+import { requestPaymentCancellation } from "./payment-cancel.ts";
 import { checkoutSecretPattern, clientKeyFor, hashCheckoutSecret } from "./secrets.ts";
 import { type CheckoutSessionView, loadSessionView, record } from "./views.ts";
 
@@ -434,7 +435,8 @@ export async function getCheckoutSession(
 }
 
 export type CancelCheckoutResult =
-  | { kind: "canceled"; session: CheckoutSessionView }
+  /** paymentCancellationId: the provider payment to cancel after commit (W3-G2.9), if any. */
+  | { kind: "canceled"; session: CheckoutSessionView; paymentCancellationId: string | null }
   /** Already canceled; nothing changed. */
   | { kind: "unchanged"; session: CheckoutSessionView }
   /** Confirmed, failed, expired, or unfulfilled; it cannot be canceled. */
@@ -517,7 +519,10 @@ export async function cancelLockedSession(
     topic: "checkout.session.canceled",
     payload: { checkoutSessionId: session.id },
   });
-  return { kind: "canceled", session: await current() };
+  // The payment may still be open at the provider: cancel it after commit, so
+  // the guest cannot pay it and then be refunded (W3-G2.9).
+  const paymentCancellationId = await requestPaymentCancellation(trx, ctx, session.id);
+  return { kind: "canceled", session: await current(), paymentCancellationId };
 }
 
 export { ownerRefFor };

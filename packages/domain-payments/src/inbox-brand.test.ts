@@ -272,6 +272,7 @@ describe("the inbox's runtime brand", () => {
         "payment",
         "provider",
         "providerType",
+        "refund",
         "type",
       ].sort(),
     );

@@ -19,7 +19,12 @@ import type { StaffRole } from "@tidegrid/contracts";
  * and booking staff send a booking's email again (`messages.resend`, G2.16b);
  * finance sends none. Owners and booking staff mark a payment exception as
  * followed up (`exceptions.resolve`, W1-FIN-EXC); finance reads the
- * resolutions as part of the exceptions and resolves none.
+ * resolutions as part of the exceptions and resolves none. Owners and booking
+ * staff cancel a confirmed booking with its policy's remedy or that value as
+ * booking credit (`bookings.cancel`, W3-G2.9); only owners override the
+ * policy, with a reason (`bookings.override`), and adjust a booker's credit
+ * balance (`credits.adjust`). Finance reads refunds and their exceptions
+ * (`payments.read`) and changes none.
  */
 export type Permission =
   | "members.read"
@@ -40,7 +45,13 @@ export type Permission =
   // Booking email (G2.16b): send a booking's confirmation or cancellation notice again.
   | "messages.resend"
   // Exception resolution (W1-FIN-EXC): mark a payment exception as followed up.
-  | "exceptions.resolve";
+  | "exceptions.resolve"
+  // Refunds and credit (W3-G2.9): cancel a confirmed booking with its policy's
+  // remedy or its value as credit; override the policy with a reason; adjust
+  // a booker's credit balance with a reason.
+  | "bookings.cancel"
+  | "bookings.override"
+  | "credits.adjust";
 
 const matrix: Record<StaffRole, readonly Permission[]> = {
   owner: [
@@ -58,6 +69,9 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "bookings.create",
     "messages.resend",
     "exceptions.resolve",
+    "bookings.cancel",
+    "bookings.override",
+    "credits.adjust",
   ],
   booking_staff: [
     "catalog.read",
@@ -70,6 +84,7 @@ const matrix: Record<StaffRole, readonly Permission[]> = {
     "bookings.create",
     "messages.resend",
     "exceptions.resolve",
+    "bookings.cancel",
   ],
   finance: ["audit.read", "catalog.read", "payments.read"],
 };

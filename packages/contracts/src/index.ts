@@ -194,6 +194,8 @@ export * from "./pricing.ts";
 // Problem details for the guest commands (W1-GUEST-API).
 export * from "./problems.ts";
 export * from "./references.ts";
+// Refunds, booking credit, and staff cancellation (W3-G2.9).
+export * from "./refunds-credits.ts";
 export * from "./self-service.ts";
 // Staff-assisted booking (G2.12d).
 export * from "./staff-booking.ts";

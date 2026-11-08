@@ -484,8 +484,9 @@ export class FlakyProvider implements PaymentProvider {
   readonly name = "fake" as const;
   readonly signatureHeader: string;
   failCreate: Failure = "never";
-  failRefund: Failure | "reject" = "never";
-  readonly calls = { create: 0, refund: 0 };
+  failRefund: Failure | "reject" | "pending" = "never";
+  failCancel: Failure | "reject" = "never";
+  readonly calls = { create: 0, refund: 0, cancel: 0 };
 
   constructor(private readonly real: FakePaymentProvider) {
     this.signatureHeader = real.signatureHeader;
@@ -513,9 +514,28 @@ export class FlakyProvider implements PaymentProvider {
       throw new ProviderRejectedError("simulated_refusal", "simulated refusal");
     }
     if (this.failRefund === "before") throw new ProviderUnavailableError("simulated timeout");
+    if (this.failRefund === "pending") {
+      // Accepted, not finished: the fake keeps no pending refunds, so the
+      // stand-in answers for one without moving money.
+      return {
+        refundRef: `frf_pending${input.idempotencyKey.replace(/[^A-Za-z0-9]/g, "").slice(-13)}`,
+        status: "pending" as const,
+      };
+    }
     const refunded = await this.real.refundPayment(input);
     if (this.failRefund === "after") throw new ProviderUnavailableError("simulated lost answer");
     return refunded;
+  }
+
+  async cancelPayment(input: Parameters<PaymentProvider["cancelPayment"]>[0]) {
+    this.calls.cancel += 1;
+    if (this.failCancel === "reject") {
+      throw new ProviderRejectedError("simulated_refusal", "simulated refusal");
+    }
+    if (this.failCancel === "before") throw new ProviderUnavailableError("simulated timeout");
+    const canceled = await this.real.cancelPayment(input);
+    if (this.failCancel === "after") throw new ProviderUnavailableError("simulated lost answer");
+    return canceled;
   }
 
   verifyWebhook(input: Parameters<PaymentProvider["verifyWebhook"]>[0]) {
