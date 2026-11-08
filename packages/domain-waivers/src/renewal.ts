@@ -37,6 +37,7 @@ export type RenewalResult =
         | "not_pending"
         | "trip_over"
         | "still_usable"
+        | "email_pending"
         | "not_renewable"
         | "renewal_limit"
         | "limit_reached"
@@ -78,6 +79,21 @@ export async function renewWaiverLink(
   if (!request) return skip("invalid");
   if (request.state !== "pending") return skip("not_pending");
   if (await tripIsOver(trx, ctx.tenantId, request.booking_id)) return skip("trip_over");
+  // An invitation or reminder still on its way issues its link when it is
+  // sent, under its message's lock, not the request's. Wait for any such send
+  // to finish (the lock), then leave the email to arrive: renewing now would
+  // replace a link the guest is about to get.
+  const { rows: pending } = await sql<{ id: string }>`
+    select m.id from email_messages m
+     where m.tenant_id = ${ctx.tenantId}
+       and m.id in (select d.message_id from waiver_deliveries d
+                     where d.tenant_id = ${ctx.tenantId} and d.request_id = ${request.id}
+                    union all
+                    select w.message_id from waiver_reminders w
+                     where w.tenant_id = ${ctx.tenantId} and w.request_id = ${request.id})
+       and m.state in ('queued', 'sending')
+     for no key update of m`.execute(trx);
+  if (pending.length > 0) return skip("email_pending");
   // Any emailed link of this request that still works is the guest's to use,
   // whichever token asked: nothing new goes out, and an old token cannot
   // spend the guest's sends while their newest link waits in their inbox.

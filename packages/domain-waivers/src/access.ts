@@ -85,17 +85,16 @@ export async function redeemWaiverToken(
   if (!requestId || !peeked[0]) return { kind: "invalid" };
   const request = await lockRequest(trx, ctx.tenantId, requestId);
   if (!request) return { kind: "invalid" };
-  // Once the trip has ended a link opens nothing, even one issued before the
-  // trip moved earlier; the link is left as it is.
-  if (await tripIsOver(trx, ctx.tenantId, request.booking_id)) {
-    return request.state === "pending"
-      ? { kind: "expired" }
-      : { kind: "closed", state: request.state };
-  }
-
   // A link no email carried opens a session only as a staff-assisted start.
   const assisted =
     peeked[0].message_id === null ? await assistedLinkFacts(trx, ctx.tenantId, peeked[0].id) : null;
+  // Once the trip has ended a link opens nothing, even one issued before the
+  // trip moved earlier; the link is left as it is. A crew code says so as a
+  // code, since no emailed link can follow it.
+  if (await tripIsOver(trx, ctx.tenantId, request.booking_id)) {
+    if (request.state !== "pending") return { kind: "closed", state: request.state };
+    return assisted ? { kind: "code_ended" } : { kind: "expired" };
+  }
   if (peeked[0].message_id === null && !assisted) return { kind: "invalid" };
 
   const redeemed = await redeemAccessLink(trx, ctx, {

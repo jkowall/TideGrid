@@ -136,6 +136,9 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
     expect((await redeem(world, A.id, token)).kind).toBe("opened");
     await ageDeliveries(world.admin, req);
     expect(await renew(A.id, token)).toEqual({ kind: "renewed", generation: 2 });
+    // While that email is still on its way, nothing more is renewed.
+    await ageDeliveries(world.admin, req);
+    expect(await renew(A.id, token)).toEqual({ kind: "skipped", reason: "email_pending" });
     const rows = await deliveries(req);
     expect(rows.at(-1)).toEqual({ generation: 2, actor_type: "guest", recipient_email: email });
     const fresh = await linkFor(world.admin, world.db, A.id, req);
@@ -310,7 +313,52 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
     }
     await ageDeliveries(world.admin, req);
     expect(await resend(A.id, req)).toEqual({ kind: "limit_reached" });
-  }, 240_000);
+
+    // Two more resets reach the 20 in all, and nothing goes past it.
+    for (const after of [10, 15]) {
+      expect(await reset(A.id, req)).toEqual({
+        kind: "reset",
+        afterGeneration: after,
+        sendsAllowed: 5,
+      });
+      for (let generation = after + 1; generation <= after + 5; generation += 1) {
+        await ageDeliveries(world.admin, req);
+        expect(await resend(A.id, req)).toMatchObject({ kind: "sent", generation });
+      }
+    }
+    await ageDeliveries(world.admin, req);
+    expect(await resend(A.id, req)).toEqual({ kind: "limit_reached" });
+    expect(await reset(A.id, req)).toEqual({ kind: "not_needed" });
+    expect(await read()).toMatchObject({ sendsLeft: 0, canResetSends: false });
+    // The database holds the same ceiling for a direct writer.
+    expect(
+      await refusal(world.admin`
+        insert into public.waiver_send_resets (tenant_id, request_id, after_generation, actor_id, reason)
+        values (${A.id}, ${req}, 20, ${staffA}, 'direct')`),
+    ).toMatch(/waiver_send_resets/);
+    expect(
+      await refusal(
+        world.admin.begin(async (tx) => {
+          const [m] = await tx<{ id: string }[]>`
+            insert into public.email_messages
+              (tenant_id, dedupe_key, template, template_version, booking_id, participant_id,
+               subject_ref, to_email, from_name, subject, html_body, text_body, link_purpose,
+               link_path, link_ttl_seconds, link_slot)
+            select tenant_id, ${`waiver.request:${req}:21`}, template, template_version, booking_id,
+                   participant_id, subject_ref, to_email, from_name, subject, html_body, text_body,
+                   link_purpose, link_path, link_ttl_seconds, md5(random()::text)
+              from public.email_messages where subject_ref = ${`waiver_request:${req}`}
+             order by created_at desc limit 1
+            returning id`;
+          await tx`insert into public.waiver_deliveries
+                     (tenant_id, request_id, generation, kind, recipient_email, message_id, reason)
+                   select tenant_id, request_id, 21, 'resend', recipient_email, ${m?.id ?? ""}, 'direct'
+                     from public.waiver_deliveries where request_id = ${req}
+                    order by generation desc limit 1`;
+        }),
+      ),
+    ).toMatch(/waiver_deliveries_generation/);
+  }, 480_000);
 
   it("flags a guardian's address that is also a participant's own, and not a family of minors", async () => {
     const booked = await book(world, A, nextTrip(), 3, hooks);

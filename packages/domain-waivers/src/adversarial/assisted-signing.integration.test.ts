@@ -366,6 +366,22 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
     );
   }
 
+  it("answers a crew code as ended once the trip is over, so no emailed link is offered", async () => {
+    const tripId = nextTrip();
+    const booked = await book(world, A, tripId, 1, hooks);
+    const pid = await name(world, A.id, booked.bookingId, 1, adult("Tia Late"), hooks);
+    const req = (await liveRequest(world.admin, booked.bookingId, pid)).id;
+    const code = await issued(A.id, staffA, req, "staff_device");
+    await world.admin`
+      with t as (select date_trunc('minute', now()) - interval '2 days' as s)
+      update public.scheduled_trips st
+         set starts_at = t.s, ends_at = t.s + make_interval(mins => st.duration_minutes),
+             local_date = (t.s at time zone st.time_zone)::date,
+             local_start_time = (t.s at time zone st.time_zone)::time(0)
+        from t where st.id = ${tripId}`;
+    expect(await redeem(world, A.id, code.token)).toEqual({ kind: "code_ended" });
+  }, 120_000);
+
   it("closes the code when the booking is canceled, the participant changes, or a new version supersedes it", async () => {
     // Canceled.
     const canceled = await book(world, A, nextTrip(), 1, hooks);
