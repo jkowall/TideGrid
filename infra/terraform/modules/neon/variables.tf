@@ -55,6 +55,11 @@ variable "project" {
     condition     = var.project == null || try(var.project.history_retention_seconds >= 0 && var.project.history_retention_seconds <= 2592000, true)
     error_message = "history_retention_seconds must be between 0 and 30 days."
   }
+
+  validation {
+    condition     = var.project == null || try(var.project.suspend_timeout_seconds >= -1 && var.project.suspend_timeout_seconds <= 604800, true)
+    error_message = "suspend_timeout_seconds must be -1 (never), 0 (default), or up to one week."
+  }
 }
 
 variable "branches" {

@@ -36,9 +36,12 @@ module "environment" {
     name = "tidegrid-production"
     # The hosting plan's 30-day point-in-time restore window.
     history_retention_seconds = 2592000
-    min_cu                    = 0.25
-    max_cu                    = 2
-    suspend_timeout_seconds   = 300
+    # Hosting plan production proposal: Azure East US 2, 0.25 to 2 CU, and
+    # scale to zero disabled (-1 means never suspend).
+    region_id               = "azure-eastus2"
+    min_cu                  = 0.25
+    max_cu                  = 2
+    suspend_timeout_seconds = -1
   }
   neon_branches = {}
 }
