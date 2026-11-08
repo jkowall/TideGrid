@@ -235,7 +235,7 @@ export function neonMainRefusal(
   mode: NeonGuardMode,
   source: NeonGuardSource = defaultSource(),
 ): string | null {
-  const what = mode === "tests" ? "Integration suites" : "app-role:password";
+  const what = mode === "tests" ? "integration suites" : "app-role:password";
   const hosts = connectionHosts(url, source.env);
   if (hosts === null) {
     return `Refused: DATABASE_URL is not a valid connection URL, so ${what} cannot tell whether it is Neon main. Its value is not shown.`;

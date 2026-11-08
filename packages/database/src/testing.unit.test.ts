@@ -276,7 +276,7 @@ describe("connectionHosts with an odd PGHOST", () => {
 // Review finding: the guard once parsed the authority differently from
 // postgres.js (last '@' against first, '#' as a delimiter, no percent
 // decoding), so these URLs passed the guard while postgres.js reached main.
-describe("connectionHosts matches postgres.js on crafted URLs", () => {
+describe("connectionHosts returns every host postgres.js lists, on nine fixed URLs", () => {
   const encodedMain = mainHost.replace(".", "%2E");
   const crafted = [
     `postgresql://u:p@${mainHost}%2C127.0.0.1/db`,
