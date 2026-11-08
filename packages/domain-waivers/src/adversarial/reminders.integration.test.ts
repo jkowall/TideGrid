@@ -1,6 +1,6 @@
 /**
  * W1-G215-REMINDERS adversarial: reminders up to a completion cutoff
- * (migration 0023), against the waiver contract
+ * (migration 0024), against the waiver contract
  * (packages/domain-waivers/README.md, "Reminders").
  *
  * - The schedule (D1): one reminder from 72 hours before departure, one from
@@ -333,11 +333,11 @@ describe.skipIf(!env)("W1-G215-REMINDERS adversarial: waiver reminders", () => {
       inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
         listBookingWaivers(trx, A.id, booked.bookingId),
       );
-    // While the reminder is on its way, no next one is promised: once sent it
-    // may cover the next slot.
+    // While the reminder is on its way, only a slot still to open is promised.
     const queued = (await readNow())?.participants[0]?.request?.reminders;
     expect(queued?.sent.map((r) => [r.slot, r.state])).toEqual([["72h", "queued"]]);
-    expect(queued?.next ?? null).toBeNull();
+    expect(queued?.next?.slot).toBe("24h");
+    expect(queued?.next?.at.getTime()).toBeGreaterThan(Date.now());
     // Staff may resend at once: the reminder is no generation and no limit.
     const ctx = { ...systemCtx(A.id), actorType: "staff" as const, actorId: randomUUID() };
     const resent = await inTenantTransaction(world.db, ctx, (trx) =>

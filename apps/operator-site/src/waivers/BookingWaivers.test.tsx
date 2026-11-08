@@ -167,6 +167,55 @@ describe("a booking's waivers", () => {
     expect(screen.getAllByText(/Reminder/)).toHaveLength(1);
   });
 
+  it("says no more reminders only once no email is on its way", async () => {
+    const lastSent = {
+      sent: [
+        {
+          slot: "24h" as const,
+          queuedAt: "2026-10-08T13:00:00.000Z",
+          state: "sent" as const,
+          at: "2026-10-08T13:05:00.000Z",
+        },
+      ],
+      next: null,
+    };
+    const resending = participant(
+      "Ria Resent",
+      "waiting",
+      {
+        reminders: lastSent,
+        delivery: {
+          generation: 2,
+          kind: "resend",
+          recipient: "r•••@example.test",
+          queuedAt: "2026-10-08T15:00:00.000Z",
+          sendAfter: "2026-10-08T15:00:00.000Z",
+          message: { state: "queued", at: null, failureCode: null },
+        },
+      },
+      2,
+    );
+    const settled = participant("Sol Settled", "waiting", { reminders: lastSent }, 3);
+    stubApi(() =>
+      json(200, {
+        waivers: { ...waivers, participants: [resending, settled] },
+      }),
+    );
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={bookingStaff}
+        timeZone="America/New_York"
+      />,
+    );
+    const items = await screen.findAllByRole("listitem");
+    expect(within(items[0] as HTMLElement).queryByText(/No more reminders/)).toBeNull();
+    expect(
+      within(items[1] as HTMLElement).getByText(/No more reminders before the trip/),
+    ).toBeTruthy();
+  });
+
   it("sends a request again with a reason and a key, and reloads", async () => {
     const calls = stubApi((url) =>
       url.endsWith("/resend")

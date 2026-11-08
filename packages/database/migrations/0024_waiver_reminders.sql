@@ -182,7 +182,7 @@ REVOKE ALL ON FUNCTION app.check_waiver_evidence_method() FROM PUBLIC;
 
 ALTER TABLE public.sweep_turns DROP CONSTRAINT sweep_turns_sweep_check;
 ALTER TABLE public.sweep_turns ADD CONSTRAINT sweep_turns_sweep_check
-  CHECK (sweep IN ('hold', 'checkout', 'email', 'hostname', 'waiver_reminder'));
+  CHECK (sweep IN ('hold', 'checkout', 'email', 'hostname', 'outbox', 'waiver_reminder'));
 
 -- Tenants with a pending waiver whose trip leaves within 72 hours and not
 -- within the 2 hour cutoff, the longest-waiting first. Ids only.

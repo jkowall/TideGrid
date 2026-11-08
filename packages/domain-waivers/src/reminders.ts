@@ -1,6 +1,6 @@
 /**
  * Waiver reminders up to a completion cutoff (W1-G215-REMINDERS, migration
- * 0023). An unsigned waiver gets at most two reminder emails before its trip
+ * 0024). An unsigned waiver gets at most two reminder emails before its trip
  * leaves: one in the 72 hour slot and one in the 24 hour slot (decision D1).
  * None is queued from REMINDER_CUTOFF_HOURS before departure. A slot is
  * skipped when an email for the request went out after it opened (a booking

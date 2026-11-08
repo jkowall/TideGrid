@@ -160,7 +160,7 @@ interface Row {
   refusal_retry_after: Date | null;
   /** When the booking's trip leaves. */
   starts_at: Date;
-  /** The request's reminders (0023), oldest first. */
+  /** The request's reminders (0024), oldest first. */
   reminders:
     | { slot: WaiverReminderSlot; queued_at: string; state: MessageState; at: string }[]
     | null;
@@ -275,11 +275,9 @@ function remindersOf(row: Row, status: WaiverStatusCode): ParticipantWaiverRemin
   }));
   if (status !== "waiting" && status !== "email_failed") return { sent, next: null };
   // While an email is still on its way the sweep waits for it, and once sent
-  // it may cover the next slot: no forecast until it settles.
-  const pending = (state: MessageState | null) => state === "queued" || state === "sending";
-  if (pending(row.message_state) || sent.some((r) => pending(r.state))) {
-    return { sent, next: null };
-  }
+  // it may cover a slot already open: only slots still to open are forecast.
+  const isPending = (state: MessageState | null) => state === "queued" || state === "sending";
+  const pending = isPending(row.message_state) || sent.some((r) => isPending(r.state));
   // As the sweep counts it: from when each email was sent, not queued.
   const latest = row.latest_email_at?.getTime() ?? 0;
   const starts = new Date(row.starts_at).getTime();
@@ -291,7 +289,7 @@ function remindersOf(row: Row, status: WaiverStatusCode): ParticipantWaiverRemin
     if (sent.some((r) => r.slot === s.slot)) continue;
     const opens = starts - s.hours * 3_600_000;
     if (opens - REMINDER_GRACE_HOURS * 3_600_000 <= latest) continue;
-    if (opens <= row.now.getTime()) next = { slot: s.slot, at: row.now };
+    if (opens <= row.now.getTime()) next = pending ? null : { slot: s.slot, at: row.now };
     else if (!next) next = { slot: s.slot, at: new Date(opens) };
   }
   return { sent, next };

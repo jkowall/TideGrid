@@ -84,10 +84,20 @@ export function reminderText(
     parts.push(
       `Next reminder ${when(reminders.next.at)} (${slotWords[reminders.next.slot] ?? reminders.next.slot})`,
     );
-  } else if (last && last.state !== "queued" && last.state !== "sending") {
+  } else if (last && !emailOnItsWay(waiver)) {
+    // While an email is on its way a reminder may still follow it, so this
+    // is said only once nothing is pending.
     parts.push("No more reminders before the trip");
   }
   return parts.length ? `${parts.join(". ")}.` : null;
+}
+
+function emailOnItsWay(waiver: ParticipantWaiver): boolean {
+  const pending = (state: string | undefined) => state === "queued" || state === "sending";
+  return (
+    pending(waiver.request?.delivery?.message?.state) ||
+    (waiver.request?.reminders?.sent ?? []).some((r) => pending(r.state))
+  );
 }
 
 /** Who signs: the participant, or a minor's parent or guardian. */

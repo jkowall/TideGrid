@@ -16,7 +16,8 @@
     "neon:branch": "tsx src/neon-branch.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "app-role:password": "tsx src/app-role.ts"
+    "app-role:password": "tsx src/app-role.ts",
+    "outbox:dlq": "tsx src/outbox-dlq.ts"
   },
   "dependencies": {
     "kysely": "^0.29.0",

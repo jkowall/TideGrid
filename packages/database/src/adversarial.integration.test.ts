@@ -6,7 +6,7 @@
  * today. Change them only with a recorded decision.
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { sql } from "kysely";
+import { type KyselyPlugin, sql } from "kysely";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
@@ -746,6 +746,64 @@ describe.skipIf(!env)("adversarial tenancy, privileged-function, and credential 
           }),
         ).rejects.toThrow("probe only");
         expect(reclaimed).toEqual({ kind: "new" });
+      } finally {
+        await handle.end();
+      }
+    });
+
+    it("claims a key as new when delivery cleanup removes the expired row it conflicted with", async () => {
+      const handle = createDb(runtimeUrl, { max: 1 });
+      const context = ctx(A.id, `cleanup-race-${run}`);
+      const claim: IdempotencyClaim = {
+        scope: "members.create",
+        principal: `staff:${shared.id}`,
+        key: `cleanup-race-${run}`,
+        requestHash: sha("cleanup-race"),
+      };
+      // A completed key more than a week past its expiry: cleanup's to remove.
+      await admin`
+        insert into public.idempotency_keys
+          (tenant_id, scope, principal, key, request_hash, status, response_status,
+           response_body, completed_at, expires_at)
+        values (${A.id}, ${claim.scope}, ${claim.principal}, ${claim.key}, ${claim.requestHash},
+                'completed', 201, '{}'::jsonb, now() - interval '9 days', now() - interval '8 days')`;
+      // Run cleanup in the gap between the claim's conflicting insert and its
+      // read, the moment a real cleanup could commit.
+      let insertId: unknown = null;
+      let cleaned = false;
+      const gap: KyselyPlugin = {
+        transformQuery(args) {
+          const node = args.node as {
+            kind: string;
+            into?: { table?: { identifier?: { name?: string } } };
+          };
+          if (
+            node.kind === "InsertQueryNode" &&
+            node.into?.table?.identifier?.name === "idempotency_keys"
+          )
+            insertId ??= args.queryId;
+          return args.node;
+        },
+        async transformResult(args) {
+          if (!cleaned && args.queryId === insertId) {
+            cleaned = true;
+            await admin`select * from app.delivery_cleanup(1000)`;
+          }
+          return args.result;
+        },
+      };
+      try {
+        let claimed: unknown;
+        await inTenantTransaction(handle.db, context, async (trx) => {
+          claimed = await claimIdempotencyKey(trx.withPlugin(gap), context, claim);
+          await completeIdempotencyKey(trx, context, claim, { status: 201, body: { ok: true } });
+        });
+        expect(cleaned).toBe(true);
+        expect(claimed).toEqual({ kind: "new" });
+        const [row] = await admin<{ status: string }[]>`
+          select status from public.idempotency_keys
+           where tenant_id = ${A.id} and key = ${claim.key}`;
+        expect(row?.status).toBe("completed");
       } finally {
         await handle.end();
       }
