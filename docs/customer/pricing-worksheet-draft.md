@@ -41,7 +41,7 @@ A completed worksheet is a discussion aid. It is not a quote, an offer, an invoi
 
 List every booking channel. A channel counts toward the fee base when the booking is managed in TideGrid. Payment rail and import origin do not change fee treatment.
 
-Enter each channel's eligible booking value for trips completed in the period: trip fares and private-charter value, mandatory operator fees, and eligible booking-linked add-ons and equipment rentals. Enter it before discounts and refunds, which Step 2 subtracts. Exclude taxes and tips. Count each booking once, never its deposit and balance separately. A cancelled or no-show booking enters only Step 2 line C, for the amount retained; a fully refunded cancellation enters nowhere. Line C also leaves out any part of a retained amount that trip-count units or a value-preserving credit paid, because that value was already counted.
+Enter each channel's eligible booking value for trips completed in the period: trip fares and private-charter value, mandatory operator fees, and eligible booking-linked add-ons and equipment rentals. Enter it before discounts and refunds, which Step 2 subtracts. Exclude taxes and tips. Count each booking once, never its deposit and balance separately. A cancelled or no-show booking enters only Step 2 line C, for the amount retained. A cancellation fully refunded before its value was assessed enters nowhere. A refund or chargeback in the period of value already assessed (a completed trip, or an amount retained at an earlier closed outcome, in this period or an earlier one) enters Step 2 line E. Line C also leaves out any part of a retained amount that trip-count units or a value-preserving credit paid, because that value was already counted.
 
 Dollar card redemptions from a purchased lot enter here, inside the booking lines they paid for. Promotional credit stays inside the booking line, and Step 2 line F subtracts it. Leave these out of the channel values, and record them in Step 3:
 
@@ -70,7 +70,7 @@ The calculation follows [Net managed booking value](../v2/03-commercial-model.md
 | B. Trip-count card sales (assessed at sale) | + | |
 | C. Retained cancellation and no-show amounts, less any part paid by trip-count units or value-preserving credits | + | |
 | D. Discounts | minus | |
-| E. Refunded or charged-back eligible value | minus | |
+| E. Refunded or charged-back eligible value, including value assessed in an earlier period | minus | |
 | F. Promotional credit applied | minus | |
 | **N. Net managed booking value = A + B + C - D - E - F** | | |
 | Average monthly net managed booking value = N / 12 | | |
