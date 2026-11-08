@@ -22,7 +22,7 @@ import {
 import { ContactActions } from "../Contact.tsx";
 import { useLinkClick } from "../navigation.tsx";
 import { useTitle } from "../States.tsx";
-import { downloadDocument, openSession, readSession, sign } from "./api.ts";
+import { downloadDocument, endSession, openSession, readSession, sign } from "./api.ts";
 import { clearStoredSession, loadStoredSession, storeSession, takeLinkToken } from "./session.ts";
 import "./waiver.css";
 
@@ -34,7 +34,18 @@ import "./waiver.css";
  * waiver, checks each acknowledgment, confirms who they are, consents to sign
  * electronically, types their name, and signs; and can download the signed
  * PDF. Every refusal has its own designed screen.
+ *
+ * Shared devices (W1-G215-SIGNING). A link staff started at the dock (on the
+ * operator's device, or a QR code) may open on a device someone else uses
+ * next. Then the page keeps the session's secret in memory only, never in
+ * storage; after a signature, or 2 minutes with no touch or key, it ends the
+ * session on the server and forgets the waiver, the form, and the secret.
  */
+
+/** How long a staff-assisted page waits, untouched, before it clears itself (decision D3). */
+export const SHARED_DEVICE_IDLE_MS = 2 * 60_000;
+/** The warning before a shared-device clear, so the guest can keep going. */
+export const IDLE_WARNING_MS = 20_000;
 
 type Phase =
   /**
@@ -46,6 +57,8 @@ type Phase =
   | { kind: "review"; secret: string; waiver: WaiverSigning }
   | { kind: "signed"; secret: string; waiver: WaiverSigning }
   | { kind: "stopped"; code: string };
+
+const sharedAccess = (waiver: WaiverSigning) => waiver.access !== "email_link";
 
 interface Stop {
   icon: IconName;
@@ -75,7 +88,7 @@ const stops: Record<string, Stop> = {
     tone: "warning",
     title: "This waiver link doesn't work here",
     body: (op) =>
-      `Check that you opened the whole link from your email from ${op}. If it still doesn't work, ask ${op} to send it again.`,
+      `Check that you opened the whole link from ${op}'s email, or scanned the whole code. If it still doesn't work, ask ${op} for a new one.`,
   },
   waiver_link_used: {
     icon: "lock",
@@ -88,13 +101,15 @@ const stops: Record<string, Stop> = {
     icon: "hourglass",
     tone: "warning",
     title: "This link has expired",
-    body: (op) => `Waiver links last a few days. Ask ${op} to send you a new one.`,
+    body: (op) =>
+      `Waiver links last a few days, and a code from the crew lasts 15 minutes. Ask ${op} for a new one.`,
   },
   waiver_link_replaced: {
     icon: "mail",
     tone: "neutral",
     title: "There's a newer link",
-    body: (op) => `${op} sent you a newer email for this waiver. Use the link in the latest one.`,
+    body: (op) =>
+      `${op} sent a newer link for this waiver. Use the latest email, or ask the crew for a new code.`,
   },
   waiver_signed: {
     icon: "check-circle",
@@ -120,7 +135,7 @@ const stops: Record<string, Stop> = {
     tone: "warning",
     title: "Your signing session ended",
     body: (op) =>
-      `A signing session lasts an hour after you open the link, and ends when the booking changes. If you still need to sign, ask ${op} to send you a new link.`,
+      `A signing session lasts an hour after you open an emailed link, or 15 minutes from a crew code, and ends when the booking changes. If you still need to sign, ask ${op} for a new link.`,
   },
   waiver_changed: {
     icon: "refresh",
@@ -147,11 +162,43 @@ const stops: Record<string, Stop> = {
     title: "Too many tries",
     body: () => "Wait a minute, then try again.",
   },
+  device_cleared: {
+    icon: "check-circle",
+    tone: "ready",
+    title: "All done. Hand the device back",
+    body: (op) =>
+      `${op} has the signed waiver. This page has forgotten it, so the next person can sign safely.`,
+  },
+  device_finished: {
+    icon: "check-circle",
+    tone: "ready",
+    title: "All done",
+    body: (op) =>
+      `${op} has the signed waiver. This page has forgotten it, so nobody else can open it here.`,
+  },
+  device_signed_idle: {
+    icon: "check-circle",
+    tone: "ready",
+    title: "Signed, and this page was cleared",
+    body: (op) =>
+      `${op} has the signed waiver. Nobody used this page for 2 minutes, so it forgot the waiver for privacy. There is nothing more to do.`,
+  },
+  device_idle: {
+    icon: "lock",
+    tone: "neutral",
+    title: "This page was cleared",
+    body: (op) =>
+      `Nobody used it for 2 minutes, so it forgot the waiver for privacy. If you had just tapped Sign, ask the ${op} crew to check whether it went through before starting again.`,
+  },
   unavailable,
 };
 
 /** Codes after which the stored session has nothing more to show. */
 const doneCodes = new Set([
+  "device_cleared",
+  "device_finished",
+  "device_signed_idle",
+  "device_idle",
   "waiver_signed",
   "waiver_not_needed",
   "waiver_superseded",
@@ -525,20 +572,36 @@ function SignedView({
   secret,
   brand,
   headingRef,
+  onDone,
 }: {
   waiver: WaiverSigning;
   secret: string;
   brand: PublicBrand;
   headingRef: Ref<HTMLHeadingElement>;
+  /** On a shared device: forget everything and show the hand-back screen. */
+  onDone: () => void;
 }) {
+  const shared = sharedAccess(waiver);
+  // On the operator's own device the copy is not offered: the operator keeps it.
+  const offerCopy = waiver.access !== "staff_device";
   const linkClick = useLinkClick();
   const [downloading, setDownloading] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
   const signed = waiver.signed;
+  // Once this view is gone (Done, or the idle clear), a download still on its
+  // way is dropped: the page has said it forgot the waiver.
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
   const download = async () => {
     setDownloading(true);
     setDownloadFailed(false);
     const result = await downloadDocument(secret);
+    if (!live.current) return;
     setDownloading(false);
     if (result.kind !== "ok") {
       setDownloadFailed(true);
@@ -561,18 +624,26 @@ function SignedView({
       headingRef={headingRef}
       actions={
         <>
-          <Button
-            variant="primary"
-            icon="receipt"
-            busy={downloading}
-            busyLabel="Preparing…"
-            onClick={() => void download()}
-          >
-            Download your signed copy
-          </Button>
-          <ButtonLink variant="ghost" icon="arrow-left" href="/" onClick={linkClick}>
-            Back to {brand.name}
-          </ButtonLink>
+          {offerCopy && (
+            <Button
+              variant={shared ? "secondary" : "primary"}
+              icon="receipt"
+              busy={downloading}
+              busyLabel="Preparing…"
+              onClick={() => void download()}
+            >
+              Download your signed copy
+            </Button>
+          )}
+          {shared ? (
+            <Button variant="primary" icon="check" onClick={onDone}>
+              Done
+            </Button>
+          ) : (
+            <ButtonLink variant="ghost" icon="arrow-left" href="/" onClick={linkClick}>
+              Back to {brand.name}
+            </ButtonLink>
+          )}
         </>
       }
     >
@@ -599,6 +670,11 @@ function SignedView({
             </dd>
           </div>
         </dl>
+      )}
+      {shared && (
+        <p className="waiver-fine-print">
+          Tap Done when you've finished. This page clears itself after 2 minutes either way.
+        </p>
       )}
       {downloadFailed && (
         <Notice tone="error" title="The copy didn't download">
@@ -686,14 +762,82 @@ export function WaiverPage({
     };
   }, [phase.kind, show, stop]);
 
+  // The shared-device cleanup: end the session on the server, forget the
+  // secret, the waiver, and the form (the phase change unmounts them).
+  const current = useRef(phase);
+  current.current = phase;
+  const clear = useCallback(
+    (reason: "done" | "idle") => {
+      const now = current.current;
+      if (now.kind === "review" || now.kind === "signed") void endSession(now.secret);
+      clearStoredSession();
+      // Someone who already signed is never told to start again.
+      const code =
+        now.kind === "signed"
+          ? reason === "idle"
+            ? "device_signed_idle"
+            : now.waiver.access === "staff_device"
+              ? "device_cleared"
+              : "device_finished"
+          : "device_idle";
+      go({ kind: "stopped", code });
+    },
+    [go],
+  );
+
+  const shared = (phase.kind === "review" || phase.kind === "signed") && sharedAccess(phase.waiver);
+  // A warning first, so a slow reader can keep going (WCAG 2.2.1).
+  const [idleWarning, setIdleWarning] = useState(false);
+  useEffect(() => {
+    if (!shared) return;
+    let warn: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout>;
+    const arm = () => {
+      setIdleWarning(false);
+      warn = setTimeout(() => setIdleWarning(true), SHARED_DEVICE_IDLE_MS - IDLE_WARNING_MS);
+      timer = setTimeout(() => clear("idle"), SHARED_DEVICE_IDLE_MS);
+    };
+    const touched = () => {
+      clearTimeout(warn);
+      clearTimeout(timer);
+      arm();
+    };
+    arm();
+    const events = ["pointerdown", "keydown", "input", "scroll", "touchstart"] as const;
+    for (const e of events) window.addEventListener(e, touched, { passive: true, capture: true });
+    return () => {
+      clearTimeout(warn);
+      clearTimeout(timer);
+      setIdleWarning(false);
+      for (const e of events) window.removeEventListener(e, touched, { capture: true });
+    };
+  }, [shared, clear]);
+  const idleNotice = (
+    <div className="waiver-idle-warning" role="status" aria-live="polite">
+      {shared && idleWarning && (
+        <Notice tone="warning" title="Still there?">
+          This page clears itself in 20 seconds to keep the waiver private. Tap anywhere to keep
+          going.
+        </Notice>
+      )}
+    </div>
+  );
+
   const open = async (token: string) => {
     setPhase({ kind: "start", token, opening: true, failed: false });
     const result = await openSession(token);
     if (result.kind === "ok") {
-      storeSession({
-        secret: result.value.secret,
-        expiresAt: result.value.waiver.sessionExpiresAt,
-      });
+      // A staff-assisted session may be on a shared device: memory only, and
+      // any earlier session this tab kept is forgotten, so a reload never
+      // brings back another person's waiver.
+      if (sharedAccess(result.value.waiver)) {
+        clearStoredSession();
+      } else {
+        storeSession({
+          secret: result.value.secret,
+          expiresAt: result.value.waiver.sessionExpiresAt,
+        });
+      }
       show(result.value.secret, result.value.waiver);
     } else if (result.kind === "refused" && (result.status === 429 || result.status >= 500)) {
       // Too many tries, or the server failed: the link was not spent. Keep
@@ -737,7 +881,7 @@ export function WaiverPage({
           >
             <p>{brand.name} needs a signed waiver before the trip. It takes about two minutes.</p>
             <p className="waiver-fine-print">
-              The link in your email opens once, so keep this page open until you've signed.
+              This link opens once, so keep this page open until you've signed.
             </p>
             {phase.failed === "network" && (
               <Notice tone="error" title="We couldn't reach the booking system">
@@ -769,23 +913,36 @@ export function WaiverPage({
     case "review":
       return (
         <div className="guest-container guest-content">
+          {idleNotice}
           <ReviewForm
             waiver={phase.waiver}
             secret={phase.secret}
             headingRef={heading}
-            onSigned={(waiver) => go({ kind: "signed", secret: phase.secret, waiver })}
-            onStopped={stop}
+            onSigned={(waiver) => {
+              // A reply that lands after the page was cleared is dropped, so
+              // a shared device never shows the signer's details again.
+              const now = current.current;
+              if (now.kind !== "review" || now.secret !== phase.secret) return;
+              go({ kind: "signed", secret: phase.secret, waiver });
+            }}
+            onStopped={(code) => {
+              const now = current.current;
+              if (now.kind !== "review" || now.secret !== phase.secret) return;
+              stop(code);
+            }}
           />
         </div>
       );
     case "signed":
       return (
         <div className="guest-container guest-content">
+          {idleNotice}
           <SignedView
             waiver={phase.waiver}
             secret={phase.secret}
             brand={brand}
             headingRef={heading}
+            onDone={() => clear("done")}
           />
         </div>
       );

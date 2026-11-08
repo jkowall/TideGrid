@@ -36,7 +36,7 @@ export async function claimIdempotencyKey(
   ctx: TenantContext,
   claim: IdempotencyClaim,
 ): Promise<ClaimResult> {
-  // Two tries: delivery cleanup (0020) can delete a long-expired completed
+  // Two tries: delivery cleanup (0021) can delete a long-expired completed
   // key between the conflicting insert and the read below. The second insert
   // then claims the key as new.
   for (let attempt = 0; attempt < 2; attempt += 1) {

@@ -144,7 +144,7 @@ export interface OutboxEventsTable {
   payload: Json;
   request_id: ColumnType<string | null, string | null | undefined, never>;
   created_at: CreatedAt;
-  // Delivery columns (0020, W3-G2.3): the publisher and the consumer move these.
+  // Delivery columns (0021, W3-G2.3): the publisher and the consumer move these.
   available_at: ColumnType<Date, Date | string | undefined, Date | string>;
   published_at: ColumnType<Date | null, never, Date | string | null>;
   delivered_at: ColumnType<Date | null, never, Date | string | null>;
@@ -995,7 +995,9 @@ export type WaiverSessionRevokedReason =
   | "superseded"
   | "recipient_changed"
   /** Another session of the request, when the request was signed. */
-  | "completed";
+  | "completed"
+  /** Its own page ended it: the shared-device cleanup (0020). */
+  | "signed_out";
 export type WaiverDeliveryKind = "initial" | "resend";
 export type GuardianRelationship = "parent" | "legal_guardian";
 
@@ -1110,15 +1112,41 @@ export interface WaiverEvidenceTable {
   acknowledgments: Fixed<string[]>;
   consent_version: Fixed<string>;
   consent_text: Fixed<string>;
-  access_method: Fixed<"email_link">;
-  recipient_email: Fixed<string>;
-  match_method: Fixed<"signer_confirmed">;
+  access_method: Fixed<WaiverAccessMethod>;
+  /** The address an email link went to; null for a staff-assisted signing (0020). */
+  recipient_email: FixedDefault<string | null>;
+  match_method: Fixed<WaiverMatchMethod>;
+  /** The staff member who started a staff-assisted signing; null for an email link (0020). */
+  assisted_by: FixedDefault<string | null>;
   /** Stamped by the database: the signing transaction's own clock. */
   signed_at: Stamped;
   source_ip: FixedDefault<string | null>;
   user_agent: FixedDefault<string | null>;
   document: Fixed<Uint8Array>;
   document_sha256: Fixed<string>;
+}
+
+/** How a signer reached the waiver: an emailed link, or a staff-assisted start (0020). */
+export type WaiverAccessMethod = "email_link" | "staff_device" | "participant_qr";
+export type WaiverAssistedMode = Exclude<WaiverAccessMethod, "email_link">;
+/** Who confirmed the signer: the signer alone, or a staff member who checked them too (0020). */
+export type WaiverMatchMethod = "signer_confirmed" | "staff_confirmed";
+
+/** A staff-assisted signing start (0020): append-only for every role. */
+export interface WaiverAssistedLinksTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  /** The waiver link with no email that it issued (guest_access_links). */
+  access_link_id: Fixed<string>;
+  request_id: Fixed<string>;
+  booking_id: Fixed<string>;
+  participant_id: Fixed<string>;
+  mode: Fixed<WaiverAssistedMode>;
+  identity_checked: Fixed<boolean>;
+  created_at: Stamped;
+  actor_type: ColumnType<"staff", never, never>;
+  actor_id: ColumnType<string, never, never>;
+  api_request_id: ColumnType<string | null, never, never>;
 }
 
 /** Tables added by the waiver migration (G2.15), merged into Database below. */
@@ -1129,6 +1157,7 @@ interface WaiverTables {
   waiver_deliveries: WaiverDeliveriesTable;
   waiver_signing_sessions: WaiverSigningSessionsTable;
   waiver_evidence: WaiverEvidenceTable;
+  waiver_assisted_links: WaiverAssistedLinksTable;
 }
 
 /** The cron's cross-tenant sweeps that take fair turns (0013). */
@@ -1218,12 +1247,12 @@ export interface Database
   booking_email_resend_claims: BookingEmailResendClaimsTable;
   // Finalization exception resolutions (0018, W1-FIN-EXC).
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
-  // Delivery foundation (0020, W3-G2.3).
+  // Delivery foundation (0021, W3-G2.3).
   outbox_deliveries: OutboxDeliveriesTable;
   outbox_dead_letters: OutboxDeadLettersTable;
 }
 
-/** One handler's outcome for one outbox event (0020, W3-G2.3). Append-only. */
+/** One handler's outcome for one outbox event (0021, W3-G2.3). Append-only. */
 export interface OutboxDeliveriesTable {
   tenant_id: TenantColumn;
   outbox_event_id: Fixed<string>;
@@ -1232,11 +1261,11 @@ export interface OutboxDeliveriesTable {
   request_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
-/** Where a dead letter came from (0020). */
+/** Where a dead letter came from (0021). */
 export type DeadLetterSource = "consumer" | "queue" | "publisher";
 
 /**
- * A message that exhausted its retries (0020, W3-G2.3). Written open; a replay
+ * A message that exhausted its retries (0021, W3-G2.3). Written open; a replay
  * sets the reason once and the trigger stamps who and when.
  */
 export interface OutboxDeadLettersTable {

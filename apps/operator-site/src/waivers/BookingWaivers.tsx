@@ -2,6 +2,7 @@ import type { BookingWaivers, ParticipantWaiver, StaffRole } from "@tidegrid/con
 import {
   Button,
   ButtonLink,
+  CheckboxField,
   Dialog,
   Notice,
   Skeleton,
@@ -12,23 +13,36 @@ import {
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { instantText } from "../bookings/model.ts";
 import type { ReadFailure } from "../http.ts";
-import { documentHref, loadBookingWaivers, newResendKey, resendWaiver } from "./api.ts";
 import {
+  type AssistedMode,
+  documentHref,
+  loadBookingWaivers,
+  newResendKey,
+  resendWaiver,
+  startAssistedSigning,
+} from "./api.ts";
+import {
+  assistedFailureText,
   canSendWaivers,
+  canStartAssisted,
   deliveryText,
+  methodText,
   relationshipText,
   resendFailureText,
   resendState,
   signerText,
   waiverStatuses,
 } from "./model.ts";
+import { encodeQr, qrPath } from "./qr.ts";
 import "./waivers.css";
 
 /**
  * A booking's waivers (G2.15), for its detail page: each named participant
  * with how their waiver stands, shown as an icon and a label, who signs, the
  * signature or the latest email, the signed PDF, and, for owners and booking
- * staff, sending the request again with a reason. Self-contained: it loads
+ * staff, sending the request again with a reason, or signing at the dock:
+ * on this device or by a QR code, once staff checked who signs.
+ * Self-contained: it loads
  * its own data, so the page it sits on only places it. Render it only for
  * roles that see guests (owners and booking staff); the API refuses finance.
  */
@@ -53,6 +67,10 @@ export function BookingWaiversCard({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [resending, setResending] = useState<ParticipantWaiver | null>(null);
+  const [assisting, setAssisting] = useState<{
+    participant: ParticipantWaiver;
+    mode: AssistedMode;
+  } | null>(null);
   const [sent, setSent] = useState<{ participantId: string; recipient: string } | null>(null);
 
   useEffect(() => {
@@ -120,6 +138,22 @@ export function BookingWaiversCard({
             setSent(null);
             setResending(p);
           }}
+          onAssist={(participant, mode) => {
+            setSent(null);
+            setAssisting({ participant, mode });
+          }}
+        />
+      )}
+      {assisting?.participant.request && (
+        <AssistedDialog
+          tenantId={tenantId}
+          participant={assisting.participant}
+          mode={assisting.mode}
+          timeZone={timeZone}
+          onClose={() => {
+            setAssisting(null);
+            reload();
+          }}
         />
       )}
       {resending?.request && (
@@ -148,6 +182,7 @@ function WaiverList({
   timeZone,
   sent,
   onResend,
+  onAssist,
 }: {
   waivers: BookingWaivers;
   tenantId: string;
@@ -156,6 +191,7 @@ function WaiverList({
   /** The person just sent again, for a notice under their row. */
   sent: { participantId: string; recipient: string } | null;
   onResend: (participant: ParticipantWaiver) => void;
+  onAssist: (participant: ParticipantWaiver, mode: AssistedMode) => void;
 }) {
   const signed = waivers.participants.filter((p) => p.status === "signed").length;
   const now = Date.now();
@@ -204,7 +240,8 @@ function WaiverList({
                 {signedBy && (
                   <p className="wv-item__line">
                     Signed {instantText(signedBy.signedAt, timeZone)} by {signedBy.signerName}
-                    {signedBy.relationship ? `, ${relationshipText(signedBy.relationship)}` : ""}.
+                    {signedBy.relationship ? `, ${relationshipText(signedBy.relationship)}` : ""},{" "}
+                    {methodText(signedBy.method)}.
                   </p>
                 )}
                 {!signedBy && delivery && <p className="wv-item__line wv-muted">{delivery}</p>}
@@ -221,7 +258,9 @@ function WaiverList({
                     .
                   </p>
                 )}
-                {(signedBy || (canSendWaivers(role) && resend.kind !== "none")) && (
+                {(signedBy ||
+                  canStartAssisted(p, role) ||
+                  (canSendWaivers(role) && resend.kind !== "none")) && (
                   <div className="wv-item__actions">
                     {signedBy && (
                       <ButtonLink
@@ -236,6 +275,16 @@ function WaiverList({
                       <Button icon="mail" onClick={() => onResend(p)}>
                         Send again <VisuallyHidden>to {p.name}</VisuallyHidden>
                       </Button>
+                    )}
+                    {canStartAssisted(p, role) && (
+                      <>
+                        <Button icon="pencil" onClick={() => onAssist(p, "staff_device")}>
+                          Sign here <VisuallyHidden>for {p.name}</VisuallyHidden>
+                        </Button>
+                        <Button icon="phone" onClick={() => onAssist(p, "participant_qr")}>
+                          Show QR code <VisuallyHidden>for {p.name}</VisuallyHidden>
+                        </Button>
+                      </>
                     )}
                     {canSendWaivers(role) && resend.kind === "later" && (
                       <p className="wv-muted wv-item__line">
@@ -341,5 +390,184 @@ function ResendDialog({
         )}
       </form>
     </Dialog>
+  );
+}
+
+/**
+ * Signing at the dock (W1-G215-SIGNING). Staff first tick that they checked
+ * who signs; then TideGrid answers a single-use link that lasts 15 minutes.
+ * On this device it opens in a new tab; as a QR code, the signer scans it
+ * with their phone. The link lives only in this dialog's memory: closing the
+ * dialog forgets it, and the next start ends it.
+ */
+function AssistedDialog({
+  tenantId,
+  participant,
+  mode,
+  timeZone,
+  onClose,
+}: {
+  tenantId: string;
+  participant: ParticipantWaiver;
+  mode: AssistedMode;
+  timeZone: string;
+  onClose: () => void;
+}) {
+  const [checked, setChecked] = useState(false);
+  const [fieldError, setFieldError] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [issued, setIssued] = useState<{ url: string; expiresAt: string } | null>(null);
+  const [opened, setOpened] = useState(false);
+  const box = useRef<HTMLInputElement>(null);
+  const linkArea = useRef<HTMLDivElement>(null);
+  // Once the link is ready, focus it, so Close is not the first thing pressed.
+  useEffect(() => {
+    if (issued) linkArea.current?.querySelector<HTMLElement>("a")?.focus();
+  }, [issued]);
+  const guardian = participant.request?.requiredSigner === "guardian";
+  const qr = mode === "participant_qr";
+  const who = guardian
+    ? `I checked that the person signing is ${participant.name}'s parent or legal guardian.`
+    : `I checked that the person signing is ${participant.name}.`;
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    if (!checked) {
+      setFieldError("Check who is signing first; the signed waiver records that you did");
+      box.current?.focus();
+      return;
+    }
+    setFieldError(undefined);
+    setError(null);
+    setBusy(true);
+    const result = await startAssistedSigning(
+      tenantId,
+      participant.request?.id ?? "",
+      mode,
+      participant.name,
+    );
+    setBusy(false);
+    if (result.kind === "issued") setIssued({ url: result.url, expiresAt: result.expiresAt });
+    else setError(assistedFailureText(result.reason));
+  };
+
+  const until = issued ? instantText(issued.expiresAt, timeZone) : "";
+  return (
+    <Dialog
+      title={
+        qr ? `QR code for ${participant.name}'s waiver` : `Sign ${participant.name}'s waiver here`
+      }
+      onClose={onClose}
+      dismissible={!busy}
+      initialFocus={box}
+      footer={
+        issued ? (
+          <Button variant={qr || opened ? "primary" : "secondary"} onClick={onClose}>
+            {qr || opened ? "Done" : "Close"}
+          </Button>
+        ) : (
+          <>
+            <Button
+              variant="primary"
+              type="submit"
+              form="wv-assist"
+              busy={busy}
+              busyLabel="Starting…"
+            >
+              {qr ? "Show QR code" : "Start signing"}
+            </Button>
+            <Button onClick={onClose} disabled={busy}>
+              Cancel
+            </Button>
+          </>
+        )
+      }
+    >
+      {!issued && (
+        <form id="wv-assist" className="wv-resend" noValidate onSubmit={(e) => void submit(e)}>
+          <p>
+            {qr
+              ? "The signer scans the code with their phone and signs there."
+              : "The signing page opens in a new tab on this device. Hand it to the signer, and stay with them: the console is still open in the other tab."}{" "}
+            The link works once, for 15 minutes. The signed waiver records that staff helped, and
+            who.
+          </p>
+          <CheckboxField
+            ref={box}
+            label={who}
+            checked={checked}
+            error={fieldError}
+            onChange={(e) => setChecked(e.currentTarget.checked)}
+          />
+          {error && (
+            <Notice tone="error" title="It didn't start">
+              {error}
+            </Notice>
+          )}
+        </form>
+      )}
+      {issued && qr && (
+        <QrImage url={issued.url} label={`QR code to sign ${participant.name}'s waiver`} />
+      )}
+      {issued && qr && (
+        <p className="wv-muted">
+          Scan with the phone's camera. It works once, until {until}. Close this as soon as they
+          have scanned it, so nobody else can.
+        </p>
+      )}
+      {issued && !qr && (
+        <div className="wv-resend" ref={linkArea}>
+          <p>
+            The signing page is ready. It works once, until {until}. When they finish, the page
+            clears itself for the next person.
+          </p>
+          {opened ? (
+            <p role="status">Opened in a new tab. The link works only once.</p>
+          ) : (
+            <ButtonLink
+              variant="primary"
+              icon="external"
+              href={issued.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              referrerPolicy="no-referrer"
+              onClick={() => setOpened(true)}
+            >
+              Open the signing page
+              <span className="tg-visually-hidden"> (opens in a new tab)</span>
+            </ButtonLink>
+          )}
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+function QrImage({ url, label }: { url: string; label: string }) {
+  let code: ReturnType<typeof encodeQr>;
+  try {
+    code = encodeQr(url);
+  } catch {
+    // An address too long for the code: say so rather than fail the dialog.
+    return (
+      <Notice tone="error" title="The QR code didn't fit">
+        This site's address is too long for a QR code. Use Sign here instead.
+      </Notice>
+    );
+  }
+  const size = code.size + 8;
+  return (
+    <svg
+      className="wv-qr"
+      role="img"
+      aria-label={label}
+      viewBox={`0 0 ${size} ${size}`}
+      shapeRendering="crispEdges"
+    >
+      <rect width={size} height={size} fill="#fff" />
+      <path d={qrPath(code)} fill="#000" />
+    </svg>
   );
 }

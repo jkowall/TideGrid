@@ -12,17 +12,30 @@ Dated decisions that changed scope, wording, or process. Each entry records the 
 
 The owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." This is a dated synthetic pull-forward. It waives the Validation gate and the O-VAL-2 dependency for W3-OPS-1 (plan only), W3-G2.3, W3-G2.9, W3-G2.10, and W3-G2.2b without managed OIDC and MFA. It allows no provider signup, no Cloudflare, Neon, or Stripe call, no Terraform apply, and no deploy. A new Worker binding stays out of the configuration a release deploys until its resource exists. No gate is claimed.
 
-W3-G2.3 builds the delivery foundation with migration `0020` (renumbered at merge after W1-0014-RESIDUALS took `0019`) and the [database contract](../../packages/database/README.md#delivery-foundation-0020). Coordinator defaults, pending owner confirmation:
+W3-G2.3 builds the delivery foundation with migration `0021` (renumbered at merge after W1-0014-RESIDUALS took `0019` and waiver signing took `0020`) and the [database contract](../../packages/database/README.md#delivery-foundation-0021). Coordinator defaults, pending owner confirmation:
 
 - **D1: at-least-once delivery with idempotent handlers** (the goal's recommended default). A handler's outcome row commits with its writes; a duplicate skips it.
 - **D2: cleanup through an admin-owned schema app function** (the goal's recommended default). `app.delivery_cleanup` removes completed idempotency keys and unused quotes seven days past their expiry. The runtime still holds no DELETE. Quotes stay append-only for updates.
 - **D3: one Worker script, queue only in tests.** The API Worker gains a queue entry. Only `env.test` declares the queue and its DLQ. A separate async Worker deployment and the real queues wait for W3-OPS provisioning, so the next release from main deploys unchanged bindings.
-- **D4: events before 0020 are not sent.** The migration marks them published and delivered, because no consumer existed and the cron sweeps already did their work.
+- **D4: events before 0021 are not sent.** The migration marks them published and delivered, because no consumer existed and the cron sweeps already did their work.
 - **D5: retry budget.** The consumer retries with 30 s doubling to 15 minutes and records its own dead letter on the fifth attempt. The queue's own DLQ is the backstop. A hint not delivered within 15 minutes is sent again, up to 10 accepted sends. A send the queue refused counts for nothing and waits five minutes.
 - **D6: "operator" means the TideGrid operator here.** Dead letters are visible through `outbox:dlq list` and an error log line, not in the tenant console.
 - **D7: one handler to start.** `ops_alert` logs ids for a finalization exception, a refused refund, and a failed confirmation email. New handlers come with the goals that need them.
 
 The cron sweeps stay as the backstop for the work they already do.
+
+### 2026-11-08: W1-G215-SIGNING, staff-assisted and QR waiver signing (owner pull-forward; coordinator defaults pending owner confirmation)
+
+The O-SCOPE entry below left items 4 to 6, waiver staff-assisted and QR signing, reminders, and guest renewal, as Core live gate work. On 2026-11-08 at 17:33 UTC the owner wrote: "Anyways, I just want all the work to be done for the next waves." The coordinator reads it as a pull-forward of those three Core live gate items into the demo, synthetic data only, each its own goal and pull request in order: W1-G215-SIGNING, W1-G215-REMINDERS, and W1-WAIVER-RENEWAL. The [demo build plan's G2.15 row](12-demo-build-plan.md#goal-sequence) now says so. This entry is the start gate for all three.
+
+W1-G215-SIGNING lets staff start a signing at the dock, on their device or as a QR code the participant scans, with migration `0020` (provisional, claimed at merge) and its service in the [waiver contract](../../packages/domain-waivers/README.md#staff-assisted-and-qr-signing-w1-g215-signing). The owner gave no answer on the goal's open decisions, so these are coordinator defaults, pending owner confirmation:
+
+- **D1: a staff-started link lives 15 minutes and is single-use.** The session it opens lasts at most 15 minutes too. A new start replaces the request's earlier unused code; the emailed link keeps working.
+- **D2: staff tick that they checked who signs, and the evidence names them.** The match method is `staff_confirmed`, the staff member is recorded in the evidence and the PDF, and the database refuses a start by anyone but staff.
+- **D3: the signing page clears itself after 2 minutes idle.** On a staff-started session the page never stores the session, ends it after 2 minutes without a tap, key, or scroll, and ends it at Done after signing. On the staff device it offers no download.
+- **D4: the QR code is drawn with no new dependency.** It carries only the guest site's address and the token in the fragment, never a name or a booking detail.
+
+Not built: the generic dock QR with staff lookup, migration suppression, R2, and field encryption. Security review under rule R9: run under the owner's standing go of 2026-11-08 (results in the [verification log](../verification-log.md#2026-11-08)). Canonical: the [database README](../../packages/database/README.md#staff-assisted-waiver-signing-0020).
 
 ### 2026-11-08: W1-0014-RESIDUALS, the 0014 resend residuals closed for direct writers (owner go; coordinator defaults pending owner confirmation)
 
@@ -43,10 +56,9 @@ Security review under rule R9: run on 2026-11-08 under the owner's go to merge w
 - **Staff sign-in: Cloudflare only.** Operator staff and the owner sign in to the console through Cloudflare Access with a Google or Microsoft identity that has two-step login turned on. No separate identity vendor for the paid pilots. Access's one-time PIN alone is one factor, so it does not meet the MFA requirement. The MFA requirement in the [security controls](08-build-hosting-and-operations.md#security-controls) is unchanged: before an operator's first live booking, it must be shown that the console refuses a sign-in without a second step for every identity provider that operator's staff may use, for example through an Access policy that requires a multifactor authentication method. Asking operators to keep two-step login on is not enough on its own. If that cannot be shown for a provider, that provider is not allowed, and the choice returns to the owner.
 - **Transactional email: Cloudflare Email Service**, the adapter already live behind the recipient allowlist. Before the first operator launches, the account's daily sending quota is raised.
 - **Paging and long-retention telemetry: not needed for the paid pilots.** Workers Logs' seven days and the business audit records in PostgreSQL cover the pilots. The owner may add a free uptime alert. Both slots return before the pilots end.
-- **Malware scanning: not decided.** The comparison suggests Cloudmersive, starting on its free tier. In the same discussion the coordinator also suggested type and size checks alone while only the owner handles uploads during Managed Launch, with scanning added once operators upload files themselves. Both stay suggestions until the owner decides.
+- **Malware scanning: skipped for the paid pilots.** The comparison suggests Cloudmersive, starting on its free tier. In the same discussion the coordinator also suggested type and size checks alone while only the owner handles uploads during Managed Launch, with scanning added once operators upload files themselves. Both stay suggestions until the owner decides. Owner decision, 2026-11-08: asked whether to skip scanning while the owner handles all uploads, the owner wrote: "skip". So the paid pilots have no malware scanning provider. Uploads keep their type and size checks, and only the owner uploads files during Managed Launch. Scanning returns before operators upload files themselves.
 
 These decisions narrow the doc 08 Stage 0 sentence for the paid pilots only. Not done: no account, no provider call, and no configuration change.
-
 
 ### 2026-11-08: W3-OPS-1, pilot infrastructure as code, plan only (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
 

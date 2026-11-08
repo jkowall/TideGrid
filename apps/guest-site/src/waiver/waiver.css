@@ -264,3 +264,10 @@
   display: grid;
   gap: var(--space-3);
 }
+
+/* The shared-device timeout warning stays in view at any scroll position. */
+.waiver-idle-warning {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}

@@ -697,7 +697,9 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         booking_email_resend_claims: ["INSERT", "SELECT"],
         // Finalization exception resolutions (0018): append-only, no UPDATE columns.
         finalization_exception_resolutions: ["INSERT", "SELECT"],
-        // Delivery foundation (0020): outcomes are append-only; a dead letter
+        // Staff-assisted waiver signing (0020): append-only, no UPDATE columns.
+        waiver_assisted_links: ["INSERT", "SELECT"],
+        // Delivery foundation (0021): outcomes are append-only; a dead letter
         // takes its replay reason once.
         outbox_deliveries: ["INSERT", "SELECT"],
         outbox_dead_letters: ["INSERT", "SELECT"],
@@ -753,7 +755,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         waiver_signing_sessions: ["revoked_at", "revoked_reason"],
         // Sweep fairness (0013): a turn moves the stamp's time and run id only.
         sweep_turns: ["last_turn_at", "run_id"],
-        // Delivery foundation (0020): the publisher and the consumer move the
+        // Delivery foundation (0021): the publisher and the consumer move the
         // delivery columns; a replay sets its reason.
         outbox_events: ["attempts", "available_at", "delivered_at", "last_error", "published_at"],
         outbox_dead_letters: ["replay_reason"],

@@ -1,4 +1,4 @@
--- 0020 delivery foundation (W3-G2.3): outbox publication, consumer outcomes,
+-- 0021 delivery foundation (W3-G2.3): outbox publication, consumer outcomes,
 -- dead letters, replay, and cleanup
 --
 -- Until now the outbox only collected events: nothing published them, and the

@@ -32,6 +32,7 @@ function waiver(overrides: Partial<WaiverSigning> = {}): WaiverSigning {
     },
     consent: { version: "esign-v1", text: "I agree to sign this waiver electronically." },
     sessionExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    access: "email_link",
     signed: null,
     ...overrides,
   };
@@ -61,7 +62,7 @@ const json = (status: number, body: unknown) =>
 const refusal = (status: number, code: string) =>
   json(status, { error: { code, message: code, requestId: "r" } });
 
-function stubApi(answer: (call: Call) => Response): Call[] {
+function stubApi(answer: (call: Call) => Response | Promise<Response>): Call[] {
   const calls: Call[] = [];
   vi.stubGlobal(
     "fetch",
@@ -351,5 +352,229 @@ describe("the waiver page", () => {
     renderPage();
     await screen.findByRole("heading", { name: title });
     expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+  });
+
+  describe("on a shared device (a staff-assisted link)", () => {
+    const signFlow = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+      await screen.findByText("Boating has risks.");
+      for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+      fireEvent.change(screen.getByLabelText("Type your full name to sign"), {
+        target: { value: "Ann Adult" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Sign waiver" }));
+      await screen.findByRole("heading", { name: "Waiver signed" });
+    };
+
+    it("keeps the secret in memory only, and after Done ends the session and forgets everything", async () => {
+      const staff = waiver({ access: "staff_device" });
+      const calls = stubApi((call) => {
+        if (call.url.endsWith("/waiver-sessions")) {
+          return json(201, { sessionSecret: secret, waiver: staff });
+        }
+        if (call.method === "DELETE") return new Response(null, { status: 204 });
+        return json(201, { waiver: { ...signedWaiver(), access: "staff_device" } });
+      });
+      renderPage();
+      await signFlow();
+      expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+      // The operator keeps the copy; the shared device is not offered one.
+      expect(screen.queryByRole("button", { name: "Download your signed copy" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await screen.findByRole("heading", { name: "All done. Hand the device back" });
+      expect(screen.queryByText("Ann Adult")).toBeNull();
+      expect(calls.at(-1)).toMatchObject({
+        method: "DELETE",
+        url: expect.stringMatching(/\/v1\/public\/waiver-sessions\/current$/),
+        authorization: `Bearer ${secret}`,
+      });
+      for (const call of calls) expect(call.url).not.toContain(secret);
+    });
+
+    it("clears itself after 2 minutes untouched while reading, and not before", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        const calls = stubApi((call) =>
+          call.method === "DELETE"
+            ? new Response(null, { status: 204 })
+            : json(201, {
+                sessionSecret: secret,
+                waiver: waiver({ access: "participant_qr" }),
+              }),
+        );
+        renderPage();
+        fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+        await screen.findByText("Boating has risks.");
+        await vi.advanceTimersByTimeAsync(90_000);
+        // A touch restarts the clock.
+        fireEvent.pointerDown(window);
+        await vi.advanceTimersByTimeAsync(90_000);
+        expect(screen.getByText("Boating has risks.")).toBeTruthy();
+        expect(screen.queryByText("Still there?")).toBeNull();
+        // Twenty seconds before, a warning; a tap would keep the page.
+        await vi.advanceTimersByTimeAsync(11_000);
+        expect(await screen.findByText("Still there?")).toBeTruthy();
+        expect(screen.getByText("Boating has risks.")).toBeTruthy();
+        await vi.advanceTimersByTimeAsync(20_000);
+        await screen.findByRole("heading", { name: "This page was cleared" });
+        expect(screen.queryByText("Boating has risks.")).toBeNull();
+        expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+        expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a signature reply that arrives after the page was cleared", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        // The headers arrive at once; the body only after the page is cleared.
+        let finish: () => void = () => {};
+        const body = JSON.stringify({ waiver: { ...signedWaiver(), access: "staff_device" } });
+        stubApi((call) => {
+          if (call.url.endsWith("/waiver-sessions")) {
+            return json(201, { sessionSecret: secret, waiver: waiver({ access: "staff_device" }) });
+          }
+          if (call.method === "DELETE") return new Response(null, { status: 204 });
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              finish = () => {
+                controller.enqueue(new TextEncoder().encode(body));
+                controller.close();
+              };
+            },
+          });
+          return new Response(stream, {
+            status: 201,
+            headers: { "content-type": "application/json" },
+          });
+        });
+        renderPage();
+        fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+        await screen.findByText("Boating has risks.");
+        for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+        fireEvent.change(screen.getByLabelText("Type your full name to sign"), {
+          target: { value: "Ann Adult" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Sign waiver" }));
+        await vi.advanceTimersByTimeAsync(121_000);
+        await screen.findByRole("heading", { name: "This page was cleared" });
+        finish();
+        // Let the body stream and the reply settle.
+        await new Promise((r) => setTimeout(r, 200));
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(screen.getByRole("heading", { name: "This page was cleared" })).toBeTruthy();
+        expect(screen.queryByRole("heading", { name: "Waiver signed" })).toBeNull();
+        expect(screen.queryByText("Ann Adult")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("offers the copy after a QR signature, then clears after 2 minutes", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        stubApi((call) => {
+          if (call.url.endsWith("/waiver-sessions")) {
+            return json(201, {
+              sessionSecret: secret,
+              waiver: waiver({ access: "participant_qr" }),
+            });
+          }
+          if (call.method === "DELETE") return new Response(null, { status: 204 });
+          return json(201, { waiver: { ...signedWaiver(), access: "participant_qr" } });
+        });
+        renderPage();
+        await signFlow();
+        expect(screen.getByRole("button", { name: "Download your signed copy" })).toBeTruthy();
+        await vi.advanceTimersByTimeAsync(121_000);
+        // Never told to sign again: the waiver is signed.
+        await screen.findByRole("heading", { name: "Signed, and this page was cleared" });
+        expect(screen.queryByText(/start it again/)).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a signed copy still downloading when Done clears the page", async () => {
+      let finish: () => void = () => {};
+      const createObjectURL = vi.fn(() => "blob:waiver");
+      vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+      stubApi((call) => {
+        if (call.url.endsWith("/waiver-sessions")) {
+          return json(201, { sessionSecret: secret, waiver: waiver({ access: "participant_qr" }) });
+        }
+        if (call.method === "DELETE") return new Response(null, { status: 204 });
+        if (call.url.endsWith("/document")) {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              finish = () => {
+                controller.enqueue(new TextEncoder().encode("%PDF-1.7"));
+                controller.close();
+              };
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "content-type": "application/pdf" },
+          });
+        }
+        return json(201, { waiver: { ...signedWaiver(), access: "participant_qr" } });
+      });
+      renderPage();
+      await signFlow();
+      fireEvent.click(screen.getByRole("button", { name: "Download your signed copy" }));
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await screen.findByRole("heading", { name: "All done" });
+      finish();
+      await new Promise((r) => setTimeout(r, 200));
+      expect(createObjectURL).not.toHaveBeenCalled();
+    });
+
+    it("after Done on the guest's own phone, says all done without asking to hand it back", async () => {
+      stubApi((call) => {
+        if (call.url.endsWith("/waiver-sessions")) {
+          return json(201, { sessionSecret: secret, waiver: waiver({ access: "participant_qr" }) });
+        }
+        if (call.method === "DELETE") return new Response(null, { status: 204 });
+        return json(201, { waiver: { ...signedWaiver(), access: "participant_qr" } });
+      });
+      renderPage();
+      await signFlow();
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await screen.findByRole("heading", { name: "All done" });
+    });
+
+    it("forgets an earlier session this tab kept when a staff-assisted one opens", async () => {
+      window.sessionStorage.setItem(
+        "tidegrid.waiver.session",
+        JSON.stringify({
+          secret: "earlier",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      );
+      stubApi(() =>
+        json(201, { sessionSecret: secret, waiver: waiver({ access: "staff_device" }) }),
+      );
+      renderPage();
+      fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+      await screen.findByText("Boating has risks.");
+      expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+    });
+
+    it("never clears an emailed link's page by itself", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        stubApi(() => json(201, { sessionSecret: secret, waiver: waiver() }));
+        renderPage();
+        fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+        await screen.findByText("Boating has risks.");
+        await vi.advanceTimersByTimeAsync(300_000);
+        expect(screen.getByText("Boating has risks.")).toBeTruthy();
+        expect(window.sessionStorage.getItem("tidegrid.waiver.session")).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
