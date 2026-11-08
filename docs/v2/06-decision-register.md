@@ -23,7 +23,7 @@ Coordinator defaults, pending owner confirmation:
 - **D5, only bounced and complained are kept.** Delivered, deferred, failed, and rejected events are acknowledged and dropped.
 - **D6, unknown ids** go to a platform table no runtime role can read, once per event id.
 
-Migrations `0020` and `0021` (provisional). Security review under rule R9 runs under the owner's go to merge without asking him. Canonical: the [database README](../../packages/database/README.md#email-events-0020-and-0021) and the [messaging README](../../packages/domain-messaging/README.md#email-events-w1-email-events).
+Migrations `0020` and `0021` (provisional). Security review under rule R9, run under the owner's go to merge without asking him: no critical or high finding. One medium is recorded, not fixed: the queue is authenticated only by who may publish to it, so no producer but Cloudflare's subscription may be bound to it. The other findings are fixed or recorded in the [verification log](../verification-log.md). Canonical: the [database README](../../packages/database/README.md#email-events-0020-and-0021) and the [messaging README](../../packages/domain-messaging/README.md#email-events-w1-email-events).
 
 ### 2026-11-08: W1-0014-RESIDUALS, the 0014 resend residuals closed for direct writers (owner go; coordinator defaults pending owner confirmation)
 

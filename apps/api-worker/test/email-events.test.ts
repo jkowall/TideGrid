@@ -2,7 +2,12 @@ import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:
 import type { Database } from "@tidegrid/database";
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
-import { consumeEmailEvents, isEmailEventsBatch, sendingDomain } from "../src/email-events.ts";
+import {
+  consumeEmailEvents,
+  isEmailEventsBatch,
+  retryDelaySeconds,
+  sendingDomain,
+} from "../src/email-events.ts";
 import type { Bindings } from "../src/env.ts";
 import worker from "../src/index.ts";
 
@@ -29,7 +34,10 @@ function batch(queue: string, bodies: unknown[]): MessageBatch<unknown> & Record
     attempts: 1,
     body,
     ack: () => recorded.acked.push(`m${i}`),
-    retry: () => recorded.retried.push(`m${i}`),
+    retry: (options?: { delaySeconds?: number }) => {
+      expect(options?.delaySeconds).toBeGreaterThan(0);
+      recorded.retried.push(`m${i}`);
+    },
   }));
   return Object.assign(recorded, {
     queue,
@@ -81,6 +89,10 @@ const lines = () => {
 };
 
 describe("email events queue consumer (W1-EMAIL-EVENTS)", () => {
+  it("backs off from 30 seconds, doubling, up to an hour", () => {
+    expect([0, 1, 2, 3, 8, 50].map(retryDelaySeconds)).toEqual([30, 30, 60, 120, 3600, 3600]);
+  });
+
   it("takes the sending domain from the sender address", () => {
     expect(sendingDomain(configured())).toBe(DOMAIN);
     const { EMAIL_FROM_ADDRESS: _unset, ...noSender } = configured();
@@ -126,22 +138,27 @@ describe("email events queue consumer (W1-EMAIL-EVENTS)", () => {
     ]);
   });
 
-  it("acknowledges refused, invalid, and dropped events without touching the database", async () => {
+  it("retries refused events, acknowledges invalid and dropped ones, without touching the database", async () => {
     const b = batch("tidegrid-email-events", [
       event("bounced", { accountId: "11111111111111111111111111111111" }),
       event("complained", { domain: "other.example.test" }),
       { type: "something else" },
       event("delivered"),
+      { ...event("bounced"), payload: { eventId: "short", messageId: "x-msg-1" } },
     ]);
     const { out, log } = lines();
     await consumeEmailEvents(b, configured(), { log, db: untouchable });
-    expect(b.acked).toEqual(["m0", "m1", "m2", "m3"]);
-    expect(b.retried).toEqual([]);
+    // A refusal, or a shape this code does not know, is retried, so a wrong
+    // setting or a new schema dead-letters real events instead of dropping
+    // them; a malformed event in a known shape, or a dropped type, is final.
+    expect(b.acked).toEqual(["m3", "m4"]);
+    expect(b.retried).toEqual(["m0", "m1", "m2"]);
     expect(out.map((l) => [l.message, l["tidegrid.email_event.outcome"]])).toEqual([
       ["email_event_refused", "refused_account"],
       ["email_event_refused", "refused_domain"],
       ["email_event_refused", "invalid"],
       ["email_event", "ignored"],
+      ["email_event_refused", "invalid"],
     ]);
     // No address, subject, or account id reaches a log line.
     expect(JSON.stringify(out)).not.toMatch(/@|c0ffee|1111111111/);

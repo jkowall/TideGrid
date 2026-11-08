@@ -21,6 +21,7 @@ describe("parseCloudflareEmailEvent (W1-EMAIL-EVENTS)", () => {
         domain: FIXTURE_SENDING_DOMAIN,
         messageId,
         occurredAt: new Date("2026-11-08T12:00:00.000Z"),
+        terminal: true,
         bounceType: "hard",
         detailCode: "5.1.1",
       },
@@ -65,6 +66,20 @@ describe("parseCloudflareEmailEvent (W1-EMAIL-EVENTS)", () => {
         "event_id_invalid",
       ],
       [cloudflareEmailEvent("bounced", { messageId: "" }), "message_id_invalid"],
+      [
+        cloudflareEmailEvent("bounced", {
+          messageId: "cf_no_id.00000000-0000-4000-8000-000000000001",
+        }),
+        "message_id_stand_in",
+      ],
+      [
+        cloudflareEmailEvent("bounced", { messageId, timestamp: "-271821-04-20T00:00:00.000Z" }),
+        "timestamp_invalid",
+      ],
+      [
+        cloudflareEmailEvent("bounced", { messageId, timestamp: "2200-01-01T00:00:00.000Z" }),
+        "timestamp_invalid",
+      ],
       [cloudflareEmailEvent("bounced", { messageId: "x".repeat(999) }), "message_id_invalid"],
     ];
     for (const [body, reason] of cases) {

@@ -181,7 +181,7 @@ describe.skipIf(!env)("email bounce and complaint events (W1-EMAIL-EVENTS)", () 
     expect((await ingest(bounce)).outcome).toBe("duplicate");
     expect((await ingest(complaint)).outcome).toBe("recorded");
     expect((await ingest(complaint)).outcome).toBe("duplicate");
-    // A queue redelivers the same body; a replay may change the envelope.
+    // A queue redelivers the same body.
     expect((await ingest(structuredClone(bounce))).outcome).toBe("duplicate");
     const status = await inTenant(A, (trx) => getMessageStatus(trx, A, m.id));
     expect(status?.deliveryReport).toMatchObject({ kind: "bounced", bounceType: "soft" });
@@ -237,6 +237,14 @@ describe.skipIf(!env)("email bounce and complaint events (W1-EMAIL-EVENTS)", () 
       );
     }
     expect(await counts()).toEqual(before);
+  });
+
+  it("E5b drops a bounce that is not final, so a later delivery is not mislabeled", async () => {
+    const m = await sent(A, "e5b");
+    const body = cloudflareEmailEvent("bounced", { messageId: m.providerId, bounceType: "soft" });
+    (body.payload as { terminal: boolean }).terminal = false;
+    expect((await ingest(body)).outcome).toBe("ignored");
+    expect(await eventRows(m.id)).toEqual([]);
   });
 
   it("E6 joins only the tenant whose message it is, and another tenant reads nothing", async () => {
@@ -412,6 +420,12 @@ describe.skipIf(!env)("email bounce and complaint events (W1-EMAIL-EVENTS)", () 
         app: true,
       },
     ]);
+    // The unmatched table's sequence is out of reach too, and the owner can prune the table.
+    const [seq] = await admin<{ usage: boolean; select: boolean }[]>`
+      select has_sequence_privilege('tidegrid_app', 'public.email_events_unmatched_id_seq', 'USAGE') as usage,
+             has_sequence_privilege('tidegrid_app', 'public.email_events_unmatched_id_seq', 'SELECT') as select`;
+    expect(seq).toEqual({ usage: false, select: false });
+    await admin`delete from public.email_events_unmatched where event_id = ${`e4-${run}-unknown`}`;
     const [index] = await admin<{ valid: boolean; unique: boolean; def: string }[]>`
       select i.indisvalid as valid, i.indisunique as unique, pg_get_indexdef(i.indexrelid) as def
         from pg_index i join pg_class c on c.oid = i.indexrelid

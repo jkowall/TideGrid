@@ -17,17 +17,31 @@ import { type Bindings, databaseUrl } from "./env.ts";
  *
  * Whose events: EMAIL_EVENTS_ACCOUNT_ID (the account's id, a secret so it
  * never enters the repository) and the sending domain, the domain of
- * EMAIL_FROM_ADDRESS. An event from another account or domain is refused
- * and acknowledged, so it is not redelivered. Without a valid configuration
+ * EMAIL_FROM_ADDRESS. An event from another account or domain is refused,
+ * recorded nowhere, and retried, so a wrong setting sends real events to the
+ * queue's dead-letter queue instead of dropping them. These checks are claims
+ * in the event's body, not authentication: the queue's producers are the
+ * trust boundary, so no other producer may be bound to it. Without a valid configuration
  * or a database, every message is retried, so the queue's retry and
  * dead-letter settings decide what happens to events while it is off.
  *
  * Each message is processed on its own: a database error retries that message
- * only; every other outcome (applied, recorded, duplicate, unmatched,
- * ignored, refused, invalid) is final and acknowledged. Logs carry the event's
+ * only, as does a refusal (above); every other outcome (applied, recorded,
+ * duplicate, unmatched, ignored, invalid) is final and acknowledged. Logs carry the event's
  * type, the outcome, and the tenant and message ids it joined, never an
  * address, subject, or provider text.
  */
+
+/** While the consumer is off (no account id or database): try again in ten minutes. */
+const offDelaySeconds = 600;
+/** Invalid reasons that mean "a shape this code does not know yet", not a bad event. */
+const retriedReasons = new Set(["schema_version", "type_unknown", "source_invalid"]);
+
+/** Backoff for a retried message: 30 s, doubling per attempt, at most an hour. */
+export function retryDelaySeconds(attempts: number): number {
+  const n = Math.max(1, Math.floor(attempts));
+  return Math.min(3600, 30 * 2 ** Math.min(n - 1, 7));
+}
 
 /** The domain of the configured sender, lowercased; undefined when it has none. */
 export function sendingDomain(env: Bindings): string | undefined {
@@ -64,7 +78,7 @@ export async function consumeEmailEvents(
   const config = emailEventsConfig(env.EMAIL_EVENTS_ACCOUNT_ID, sendingDomain(env));
   if (!config) {
     log.warn("email_events_unconfigured", { "tidegrid.email_events.count": batch.messages.length });
-    batch.retryAll();
+    batch.retryAll({ delaySeconds: offDelaySeconds });
     return;
   }
   let db = options.db;
@@ -73,7 +87,7 @@ export async function consumeEmailEvents(
     const url = databaseUrl(env);
     if (!url) {
       log.warn("email_events_skipped", { "error.type": "database_unconfigured" });
-      batch.retryAll();
+      batch.retryAll({ delaySeconds: offDelaySeconds });
       return;
     }
     const handle = createDb(url, { max: 1 });
@@ -92,7 +106,7 @@ export async function consumeEmailEvents(
           ...(typeof code === "string" ? { "db.response.status_code": code } : {}),
           "tidegrid.email_events.attempts": message.attempts,
         });
-        message.retry();
+        message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
         continue;
       }
       const attrs = {
@@ -102,11 +116,24 @@ export async function consumeEmailEvents(
         ...(result.tenantId ? { "tidegrid.tenant_id": result.tenantId } : {}),
         ...(result.messageId ? { "tidegrid.email.message_id": result.messageId } : {}),
       };
-      if (
-        result.outcome === "refused_account" ||
-        result.outcome === "refused_domain" ||
-        result.outcome === "invalid"
-      ) {
+      if (result.outcome === "refused_account" || result.outcome === "refused_domain") {
+        // Retried, not acknowledged: until the live payload is confirmed
+        // (O-P7 A9), a wrong account id or domain setting would otherwise drop
+        // every real event. The queue's retry limit and dead-letter queue keep
+        // them for the owner to look at.
+        log.warn("email_event_refused", attrs);
+        message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
+        continue;
+      }
+      // An event this code cannot read because its shape changed (a new
+      // schema version, type, or source) is retried for the same reason; a
+      // malformed one in a shape it knows is final.
+      if (result.outcome === "invalid" && retriedReasons.has(result.reason ?? "")) {
+        log.warn("email_event_refused", attrs);
+        message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
+        continue;
+      }
+      if (result.outcome === "invalid") {
         log.warn("email_event_refused", attrs);
       } else {
         log.info("email_event", attrs);

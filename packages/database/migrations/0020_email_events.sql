@@ -35,13 +35,16 @@
 -- tidegrid_app's credentials cannot attach an event to a queued or failed
 -- message, to another provider's, or to one whose id the event does not
 -- carry. It can still record a made-up bounce for its own tenant's sent
--- message: the runtime is trusted to record what the verified queue gave it
--- (recorded as a residual).
+-- message: the runtime is trusted to record what the queue gave it
+-- (recorded as a residual). The queue itself is not authenticated beyond
+-- who may publish to it: anything that can, can claim the account and
+-- domain the consumer checks.
 --
 -- Unknown ids, public.email_events_unmatched. An event whose id joins no sent
 -- message is recorded here, once per provider event id, and joined to
 -- nothing. It has no tenant, so it is a platform table under rule 6: row-level
--- security forced with no policy, every privilege revoked from the runtime,
+-- security forced with no policy, every privilege revoked from the runtime
+-- (its identity sequence too), not append-only so the owner can prune it,
 -- and written only through app.record_unmatched_email_event, a definer
 -- function that inserts one row and answers whether it was new. The runtime
 -- can never read it back. It holds the provider's ids, the event's type and
@@ -140,17 +143,16 @@ CREATE TABLE public.email_events_unmatched (
   received_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   CONSTRAINT email_events_unmatched_once UNIQUE (provider, event_id)
 );
-CREATE TRIGGER email_events_unmatched_append_only
-  BEFORE UPDATE OR DELETE ON public.email_events_unmatched
-  FOR EACH ROW EXECUTE FUNCTION app.reject_mutation();
-CREATE TRIGGER email_events_unmatched_no_truncate
-  BEFORE TRUNCATE ON public.email_events_unmatched
-  FOR EACH STATEMENT EXECUTE FUNCTION app.reject_mutation();
+-- No append-only trigger: anything that can publish to the queue can add
+-- rows here, so the owner must be able to prune it. The runtime cannot.
 ALTER TABLE public.email_events_unmatched ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.email_events_unmatched FORCE ROW LEVEL SECURITY;
 -- No policy: the runtime holds nothing and reaches it only through the
 -- function below, which runs as the table owner.
 REVOKE ALL ON public.email_events_unmatched FROM tidegrid_app;
+-- 0001's default privileges give the runtime every new sequence; this one
+-- would let it count unmatched events or burn ids.
+REVOKE ALL ON SEQUENCE public.email_events_unmatched_id_seq FROM tidegrid_app;
 
 -- Which tenant's sent message carries a provider's message id: one row or
 -- none. Filters explicitly, since its owner bypasses row-level security.

@@ -52,6 +52,9 @@ const accountIdPattern = /^[0-9a-f]{32}$/;
 const domainPattern =
   /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
 const detailPattern = /^[A-Za-z0-9_.-]{1,64}$/;
+const standInPrefix = "cf_no_id.";
+const earliestEvent = Date.UTC(2020, 0, 1);
+const latestEvent = Date.UTC(2100, 0, 1);
 /** A raw provider id is at most this long before normalization; longer is not an id. */
 const maxRawMessageId = 998;
 
@@ -64,6 +67,8 @@ export interface CloudflareEmailEvent {
   /** The provider's id as the event gives it, before normalization. */
   messageId: string;
   occurredAt: Date;
+  /** False only when the event says delivery is still being retried. */
+  terminal: boolean;
   bounceType: "hard" | "soft" | null;
   /** The enhanced SMTP status for a bounce, or the complaint's type. */
   detailCode: string | null;
@@ -98,7 +103,12 @@ export function parseCloudflareEmailEvent(body: unknown): ParseResult {
     return { kind: "invalid", reason: "metadata_invalid" };
   }
   const occurredAt = new Date(eventTimestamp);
-  if (Number.isNaN(occurredAt.getTime())) return { kind: "invalid", reason: "timestamp_invalid" };
+  const at = occurredAt.getTime();
+  // A time the database can hold and a real event could carry; anything else
+  // would fail the insert on every retry.
+  if (Number.isNaN(at) || at < earliestEvent || at > latestEvent) {
+    return { kind: "invalid", reason: "timestamp_invalid" };
+  }
   if (!isRecord(payload)) return { kind: "invalid", reason: "payload_invalid" };
   const { eventId, messageId } = payload;
   if (typeof eventId !== "string" || !eventIdPattern.test(eventId)) {
@@ -111,8 +121,15 @@ export function parseCloudflareEmailEvent(body: unknown): ParseResult {
   ) {
     return { kind: "invalid", reason: "message_id_invalid" };
   }
+  // The adapter's stand-in for an acceptance with no id is TideGrid's own and
+  // predictable from the message id; Cloudflare never sends it, so an event
+  // naming it is refused rather than joined.
+  if (messageId.startsWith(standInPrefix)) {
+    return { kind: "invalid", reason: "message_id_stand_in" };
+  }
   let bounceType: CloudflareEmailEvent["bounceType"] = null;
   let detailCode: string | null = null;
+  const terminal = payload.terminal !== false;
   if (short === "bounced") {
     const bounce = isRecord(payload.bounce) ? payload.bounce : null;
     if (bounce?.type === "hard" || bounce?.type === "soft") bounceType = bounce.type;
@@ -134,6 +151,7 @@ export function parseCloudflareEmailEvent(body: unknown): ParseResult {
       domain: source.domain.toLowerCase().replace(/\.$/, ""),
       messageId,
       occurredAt,
+      terminal,
       bounceType,
       detailCode,
     },
@@ -204,7 +222,9 @@ export async function ingestEmailEvent(
   const base = { eventType: event.type };
   if (event.accountId !== config.accountId) return { ...base, outcome: "refused_account" };
   if (event.domain !== config.sendingDomain) return { ...base, outcome: "refused_domain" };
-  if (event.type !== "bounced" && event.type !== "complained") {
+  // A bounce that is not final (the provider still retries) is not an
+  // outcome: applying it would label the message for good.
+  if ((event.type !== "bounced" && event.type !== "complained") || !event.terminal) {
     return { ...base, outcome: "ignored" };
   }
   const eventType = event.type;

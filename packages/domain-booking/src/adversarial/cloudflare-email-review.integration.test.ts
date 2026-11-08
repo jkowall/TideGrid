@@ -36,6 +36,14 @@ import {
   type SelfServiceWorld,
 } from "./self-service-harness.ts";
 
+/** Unique per run: provider ids are unique across tenants (0021), and suites share a database. */
+const idRun = Math.random().toString(16).slice(2, 10).padEnd(8, "0");
+let idSeq = 0;
+const nextIdSeq = () => {
+  idSeq += 1;
+  return idSeq;
+};
+
 const state = vi.hoisted(() => ({ failFill: false }));
 
 vi.mock("../../../domain-messaging/src/render.ts", async (importOriginal) => {
@@ -74,7 +82,9 @@ function recorder(): Recorder {
         if (code)
           throw Object.assign(new Error(`${code} for ${JSON.stringify(builder.to)}`), { code });
         n += 1;
-        return { messageId: `0101018f7d0c4d9a-msg-${String(n).padStart(8, "0")}` };
+        return {
+          messageId: `0101018f7d0c4d9a-msg-${idRun}${String(nextIdSeq()).padStart(8, "0")}`,
+        };
       },
     },
   };
