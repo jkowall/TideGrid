@@ -1,0 +1,7 @@
+{
+  "slug": "demo-harbor",
+  "appName": "Demo Harbor",
+  "iosBundleId": "us.tidegrid.demo.harbor",
+  "androidPackage": "us.tidegrid.demo.harbor",
+  "guestOrigin": "https://demo-harbor.book.tidegrid.us"
+}

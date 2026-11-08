@@ -1,0 +1,7 @@
+{
+  "slug": "demo-reef",
+  "appName": "Demo Reef",
+  "iosBundleId": "us.tidegrid.demo.reef",
+  "androidPackage": "us.tidegrid.demo.reef",
+  "guestOrigin": "https://demo-reef.book.tidegrid.us"
+}

@@ -1,0 +1,5 @@
+# Expo prebuild output is disposable (docs/v2/09): never commit it.
+/ios/
+/android/
+.expo/
+dist-check/
