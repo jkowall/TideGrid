@@ -91,6 +91,15 @@ Public routes resolve the tenant from the verified browser Origin, as `/v1/publi
 - The error message lists every problem with the ticket type or add-on it is about. Every promotion problem answers `promotion_not_applicable`, so codes cannot be probed.
 - Responses are `Cache-Control: no-store` and `Vary: Origin`.
 
+## Guest API follow-ups (W1-GUEST-API)
+
+Built on 2026-11-08 under coordinator defaults pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-guest-api-guest-site-api-follow-ups-owner-go-coordinator-defaults-pending-owner-confirmation)). Not released.
+
+- **Problem details on quotes (D1).** `POST /v1/public/quotes` answers its 409 and 422 with the `ProblemResponse` shape in `packages/contracts/src/problems.ts`: the same `error` envelope, plus the RFC 9457 members `type` (`about:blank`), `title`, `status`, and `detail`, a stable `code` equal to `error.code`, and `problems`, every problem as `{ code, subject }`. The message still lists them. A promotion problem's reason is never sent. `idempotency_key_reused` and `trip_not_bookable` take the same shape, with themselves as the one problem. The media type stays `application/json`.
+- **Seats left (D2).** When a problem is `insufficient_capacity`, the answer adds `remaining`: the seats left on the trip the quote asked about, a count only. `createQuote`'s `rejected` result carries it as `capacityRemaining`. A trip with fewer seats than the smallest party still answers `trip_not_bookable` with no count (the follow-up below stands).
+- **The offer without the guest's own hold.** `getTripOffer` and `findTripForSale` take an optional `ownHold` callback. When the availability listing leaves the trip out, the callback answers instead: the seats left with the guest's own hold set aside, if the trip passes every other rule a hold must pass, or null. The trip's times then come from the staff calendar read, which times trips exactly as the listing does. Pricing still does not depend on the inventory module; the caller, the checkout offer route, answers from `getTripSale`. Without the option, nothing changes.
+- **Not changed.** The staff quote route (G2.12d) keeps the plain envelope, and its 409 `insufficient_capacity` gives no count. A proposed follow-up.
+
 ## Seed
 
 `tools/seed/src/pricing.ts` gives every demo product a price list and a policy before the catalog seed publishes it, and gives each operator its tax rates and one promotion code. Demo Harbor adds a state and a county tax and offers `HARBOR10`, 10% off any trip. Demo Reef's prices include a general excise tax and it offers `REEF25`, $25 off its dive and its snorkel sail. Reruns add nothing.

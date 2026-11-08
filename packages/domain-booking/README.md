@@ -387,6 +387,21 @@ What the guest checkout UI calls:
 
 The checkout secret and the client secret travel in headers and bodies only, never in URLs. Every response is `Cache-Control: no-store` and `Vary: Origin`. Public routes resolve the tenant from the verified Origin, as `/v1/public/trips` does.
 
+## Guest API follow-ups (W1-GUEST-API)
+
+Built on 2026-11-08 under coordinator defaults pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-guest-api-guest-site-api-follow-ups-owner-go-coordinator-defaults-pending-owner-confirmation)). Not released. The domain package is unchanged; the routes compose `getCheckoutSession`, `ensureProviderPayment`, and `ownerRefFor` with the pricing and inventory reads.
+
+| Route | Answers |
+|---|---|
+| `GET /v1/public/checkout-sessions/{id}/payment` | 200 `{ checkoutSession, payment }`, `payment` null unless the checkout is open and within its expiry; 401 `checkout_secret_required`; 404 `checkout_not_found`; 429 `rate_limited`; 503 `payments_unavailable`, `payment_provider_unavailable` |
+| `GET /v1/public/checkout-sessions/{id}/offer` | 200 the trip's offer, with the checkout's own hold set aside while it is open; 401; 404; 409 `trip_not_bookable`, `pricing_unavailable` |
+
+- **The Bearer read of the client secret.** The checkout secret travels only as `Authorization: Bearer`; a secret in the query is never read and answers 401. A wrong secret, another checkout's secret, another operator's checkout, and an unknown id answer the same 404. It asks the provider with the payment row's own idempotency key, so it returns the same provider payment and never creates a second. Rate limited like public commands, since it may call the provider; `Cache-Control: no-store`. No log line carries either secret: the request log has the path only, and the provider log has the tenant and the reason.
+- **The offer without the guest's own hold.** For an open checkout within its expiry, the offer of its trip as `GET /v1/public/trips/{tripId}/offer` gives it, except that the checkout's own hold does not count: a checkout whose hold took the last seats, or a charter's whole boat, still reads its trip's offer. Every other rule still applies: a closed trip answers 409 for the guest too. Once the checkout is closed, the answer is exactly the public offer's.
+- **Problem details (D1).** `POST /v1/public/checkout-sessions` answers its 409 and 422 with the `ProblemResponse` shape (see the [pricing README](../domain-pricing/README.md#guest-api-follow-ups-w1-guest-api)): the same envelope and code, the RFC 9457 members, and the problem listed.
+- **Seats left (D2).** Its 409 `insufficient_capacity` adds `remaining`, the count `acquireHold` reports for the quote's trip. The message keeps saying it.
+- Tests: `apps/api-worker/test-integration/guest-api-followups.integration.test.ts` (each behavior, both tenants, and that no log line carries a secret) and `apps/api-worker/test/guest-api-followups.test.ts` (the published contract, and refusals decided before a database).
+
 ## Deferred and known gaps
 
 - **Staff-assisted booking (G2.12d).** Staff cannot cancel a confirmed booking, refund, enter participants, correct the booker's address, override the cutoff, sales state, capacity, or price, or record cash, check, or complimentary bookings. A mistyped booker address sends the management link to whoever holds it; the read-back and its attestation reduce that, nothing removes it.
