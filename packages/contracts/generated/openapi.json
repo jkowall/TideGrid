@@ -955,7 +955,7 @@
             }
           },
           "403": {
-            "description": "Origin not allowed",
+            "description": "Origin not allowed, or the email link is off in this environment",
             "content": {
               "application/json": {
                 "schema": {
@@ -1205,7 +1205,7 @@
             }
           },
           "403": {
-            "description": "Origin not allowed",
+            "description": "Origin not allowed, or the email link is off in this environment",
             "content": {
               "application/json": {
                 "schema": {

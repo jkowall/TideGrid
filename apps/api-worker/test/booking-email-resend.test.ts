@@ -237,7 +237,9 @@ afterEach(() => {
 describe("the resend route's order (G2.16b)", () => {
   it.each(offSettings)("asks for a session before saying email is off: %s", async (_name, s) => {
     const res = await post({ staff: false, settings: s });
-    expect([res.status, res.code]).toEqual([401, "unauthenticated"]);
+    // Deployed environments accept Cloudflare Access only, and say so.
+    const code = s.ENVIRONMENT === "preview" ? "access_required" : "unauthenticated";
+    expect([res.status, res.code]).toEqual([401, code]);
     expect(state.log).toEqual(["authenticate"]);
   });
 

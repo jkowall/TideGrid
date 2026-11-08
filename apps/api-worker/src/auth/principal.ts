@@ -6,6 +6,7 @@ import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import { accessVerifierFromEnv } from "./access.ts";
+import { emailLinkSignInEnabled } from "./methods.ts";
 import { sha256Hex } from "./tokens.ts";
 
 /** `__Host-tg_session`: Secure, Path=/, no Domain, HttpOnly, SameSite=Strict. */
@@ -14,7 +15,9 @@ export const SESSION_TTL_SECONDS = 24 * 60 * 60;
 
 /**
  * Authenticate a staff request. A Cloudflare Access assertion wins when
- * present; otherwise the magic-link session cookie. Both resolve to the same
+ * present; otherwise, in local development only, the magic-link session
+ * cookie (methods.ts). Deployed environments accept Access alone, so a
+ * session cookie there never authenticates. Both resolve to the same
  * principal shape. Authentication carries no tenant authority: each tenant
  * route checks membership and role separately.
  */
@@ -58,6 +61,10 @@ export async function requirePrincipal(c: Context<AppEnv>, deps: AppDeps): Promi
     });
   }
 
+  if (!emailLinkSignInEnabled(c.env)) {
+    // A distinct code, so the console offers Access instead of the email form.
+    throw new ApiError(401, "access_required", "Sign in through Cloudflare Access to continue");
+  }
   const token = getCookie(c, SESSION_COOKIE, "host");
   if (!token) throw new ApiError(401, "unauthenticated", "Sign in to continue");
   if (!OpaqueToken.safeParse(token).success) {
