@@ -31,9 +31,10 @@ Node 24 and pnpm, from the repository root: `pnpm install`.
 # no signing. Proves each variant's config and the shared source bundle.
 pnpm --filter @tidegrid/guest-native bundle:check
 
-# On a Mac with Xcode or Android Studio: generate the native projects
-# (disposable, gitignored) and run on a simulator or a phone.
-TIDEGRID_VARIANT=demo-harbor pnpm --filter @tidegrid/guest-native prebuild
+# On a Mac with Xcode or Android Studio: run on a simulator or a phone.
+# Each run regenerates that platform's native project (disposable,
+# gitignored) from the variant, so switching variants never keeps the
+# other operator's bundle id or application id.
 TIDEGRID_VARIANT=demo-harbor pnpm --filter @tidegrid/guest-native ios
 TIDEGRID_VARIANT=demo-reef pnpm --filter @tidegrid/guest-native android
 ```

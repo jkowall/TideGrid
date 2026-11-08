@@ -182,8 +182,8 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   center: { alignItems: "center", justifyContent: "center", padding: 24, backgroundColor: "#fff" },
   header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 24 },
-  brandName: { color: "#fff", fontSize: 28, fontWeight: "700" },
-  tagline: { color: "#fff", fontSize: 16, marginTop: 6, opacity: 0.9 },
+  brandName: { fontSize: 28, fontWeight: "700" },
+  tagline: { fontSize: 16, marginTop: 6 },
   sheet: {
     flex: 1,
     backgroundColor: "#fff",

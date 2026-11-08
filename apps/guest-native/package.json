@@ -5,8 +5,8 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
-    "ios": "expo run:ios",
-    "android": "expo run:android",
+    "ios": "expo prebuild --clean --platform ios && expo run:ios",
+    "android": "expo prebuild --clean --platform android && expo run:android",
     "prebuild": "expo prebuild --clean",
     "bundle:check": "node scripts/bundle-check.mjs",
     "typecheck": "tsc -p tsconfig.json",
