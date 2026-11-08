@@ -265,6 +265,58 @@ describe("the card form under Stripe", () => {
     expect(seen.confirms).toBe(2);
   });
 
+  const declined = [async () => ({ error: { type: "card_error", code: "card_declined" } })];
+
+  it("after a decline, a link away still asks before it leaves the open checkout", async () => {
+    stubApi({ openCheckout: openUnderStripe, readPayment: readUnderStripe });
+    const { loader } = stripeDouble({ confirm: declined });
+    renderPage(loader);
+    await toPayment();
+    fireEvent.click(await payButton());
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("link", { name: "All trips" }));
+    expect(await screen.findByRole("dialog", { name: "Leave this checkout?" })).toBeTruthy();
+  });
+
+  it("after a decline, releases the open checkout when the page goes", async () => {
+    const calls = stubApi({ openCheckout: openUnderStripe, readPayment: readUnderStripe });
+    const { loader } = stripeDouble({ confirm: declined });
+    renderPage(loader);
+    await toPayment();
+    fireEvent.click(await payButton());
+    await screen.findByRole("alert");
+    cleanup();
+    const [cancel] = callsTo(calls, "cancel");
+    expect(cancel?.keepalive).toBe(true);
+    expect(window.sessionStorage.getItem("tidegrid.checkout")).toBeNull();
+  });
+
+  it("after a decline, stores the checkout as untried, so a reload offers to pay", async () => {
+    stubApi({ openCheckout: openUnderStripe, readPayment: readUnderStripe });
+    const { loader } = stripeDouble({ confirm: declined });
+    renderPage(loader);
+    await toPayment();
+    fireEvent.click(await payButton());
+    await screen.findByRole("alert");
+    const stored = JSON.parse(window.sessionStorage.getItem("tidegrid.checkout") ?? "{}");
+    expect(stored.paymentTried).toBe(false);
+    expect(stored.paymentSent).toBe(false);
+  });
+
+  it("keeps a payment that may have gone through as tried when the page goes", async () => {
+    const calls = stubApi({ openCheckout: openUnderStripe, readPayment: readUnderStripe });
+    const { loader } = stripeDouble({
+      confirm: [() => Promise.reject(new TypeError("Failed to fetch"))],
+    });
+    renderPage(loader);
+    await toPayment();
+    fireEvent.click(await payButton());
+    await screen.findByRole("alert");
+    cleanup();
+    expect(callsTo(calls, "cancel")).toHaveLength(0);
+    expect(window.sessionStorage.getItem("tidegrid.checkout")).not.toBeNull();
+  });
+
   for (const [code, title] of [
     ["expired_card", "Your card has expired"],
     ["incorrect_cvc", "The security code didn't match"],

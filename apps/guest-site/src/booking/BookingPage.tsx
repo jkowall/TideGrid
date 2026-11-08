@@ -1250,7 +1250,8 @@ export function BookingPage({
    * may go through, as with the test payment. `confirm` asks Stripe; a sent
    * payment moves the page on to wait for the checkout's own state, which
    * only a verified webhook confirms. A decline stays on the payment step,
-   * where the card form says why and nothing was charged. Null when another
+   * where the card form says why and nothing was charged, so the checkout is
+   * as tried as it was before the press. Null when another
    * command was working.
    */
   async function payByCard(confirm: () => Promise<CardOutcome>): Promise<CardOutcome | null> {
@@ -1271,6 +1272,15 @@ export function BookingPage({
       const still = () =>
         stageRef.current.kind === "pay" && liveRef.current?.sessionId === sessionId;
       if (!still()) return outcome;
+      if (outcome.kind === "declined" || outcome.kind === "invalid") {
+        // Stripe said nothing was charged and the checkout is still open, so
+        // it is as tried as it was before: a link away asks, and a page that
+        // goes releases the seats.
+        const untried: Live = { ...tried, paymentTried: current.paymentTried };
+        setLive(untried);
+        saveResume(recordOf(untried, false));
+        return outcome;
+      }
       if (outcome.kind === "sent") {
         // A reload from here waits for the outcome instead of offering to pay.
         saveResume(recordOf(tried, true));
