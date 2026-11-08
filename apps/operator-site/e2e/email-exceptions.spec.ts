@@ -142,7 +142,7 @@ test.describe("the email exceptions list (W1-EMAIL-EXC)", () => {
     await expect(links).toHaveText([
       "Booking QKG6ERBF, Email card",
       "Booking QKG6ERBF, Email card",
-      "Booking ZX9KP2QM, Waivers card",
+      "Booking ZX9KP2QM",
     ]);
     await expect(links.first()).toHaveAttribute("href", `/bookings/${bookingA}#email`);
     await expect(links.nth(2)).toHaveAttribute("href", `/bookings/${bookingB}`);

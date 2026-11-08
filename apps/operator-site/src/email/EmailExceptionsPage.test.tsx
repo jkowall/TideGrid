@@ -117,7 +117,7 @@ describe("the operator's email exceptions (W1-EMAIL-EXC)", () => {
     expect(links.map((a) => [text(a), a.getAttribute("href")])).toEqual([
       ["Booking QKG6ERBF, Email card", `/bookings/${bookingId}#email`],
       ["Booking QKG6ERBF, Email card", `/bookings/${bookingId}#email`],
-      ["Booking ZX9KP2QM, Waivers card", `/bookings/${waiverBooking}`],
+      ["Booking ZX9KP2QM", `/bookings/${waiverBooking}`],
     ]);
     // No recipient, subject, or body: the API sends none and the page shows none.
     expect(document.body.textContent).not.toContain("@");

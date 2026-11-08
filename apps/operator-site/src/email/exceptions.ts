@@ -51,11 +51,15 @@ export function followUpHref(e: Pick<EmailException, "kind" | "booking">): strin
   return e.kind === "waiver" ? booking : `${booking}#email`;
 }
 
-/** The follow-up link's words, which name the card it opens. */
+/**
+ * The follow-up link's words. They name the Email card only when the link
+ * opens it. A waiver request's link opens the booking, whose Waivers card
+ * shows it; nothing moves focus to that card, so the words do not name it.
+ */
 export function followUpText(e: Pick<EmailException, "kind" | "booking">): string | null {
   if (!e.booking) return null;
-  const card = e.kind === "waiver" ? "Waivers card" : "Email card";
-  return `Booking ${e.booking.reference}, ${card}`;
+  const booking = `Booking ${e.booking.reference}`;
+  return e.kind === "waiver" ? booking : `${booking}, Email card`;
 }
 
 const attemptsText = (n: number) => (n === 1 ? "1 attempt" : `${n} attempts`);

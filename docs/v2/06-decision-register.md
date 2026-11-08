@@ -14,7 +14,7 @@ G2.16b D9 A kept email failures on booking detail and named a tenant-wide email 
 
 Coordinator defaults, pending owner confirmation:
 
-- **D1 A. Waiver email is included,** labeled by kind. A waiver request shows as "Waiver request" and links to its booking, where the Waivers card shows and sends it again (G2.16b D11). The booking's own email links to the booking's Email card.
+- **D1 A. Waiver email is included,** labeled by kind. A waiver request shows as "Waiver request" and links to its booking, where the Waivers card shows and sends it again (G2.16b D11). The booking's own email links to the booking's Email card. So a waiver row does not link to the Email card, which narrows the goal's "each row links to the booking's Email card". The waiver link's words name the booking only, since nothing moves focus to the Waivers card. A Waivers card anchor would be a later goal, outside this goal's paths.
 - **D2 A. Owners and booking staff only.** The read needs `bookings.read`, as the booking's messages read does. Finance gets no navigation entry and no request; the API answers finance 403. This matches the Email card (G2.16b D7 A).
 - **D3 A. No index at demo size.** The read scans the tenant's messages. Rule R4 holds: no index on `email_messages` until the `CREATE INDEX CONCURRENTLY` runner is on `main`. No migration.
 
@@ -28,6 +28,7 @@ Coordinator choices inside the goal, recorded here, not owner decisions:
 
 Open risks:
 
+- Security review not run in this session (rule R9: role gating and recipient exposure). Until it runs, or the owner declines it, the goal is not complete for pilot use.
 - ui-reviewer not run in this session; covered by console browser tests. The new browser spec (`apps/operator-site/e2e/email-exceptions.spec.ts`, 375 and 1280 px: loading, populated, error, empty, keyboard reach, and finance) was not run locally, by the session's rule on shared ports; the pull request's CI runs it. The suite has no axe check, so none was added.
 - Between 640 and 1023 px the rail shows four entries a row, so the fifth, Email exceptions, wraps to a second row. Finance still sees four.
 - A failed message stays listed after staff send it again; `laterSent` marks it, and resolving an exception remains later work.

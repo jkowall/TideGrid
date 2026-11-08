@@ -31,9 +31,9 @@ import "./email.css";
  * The operator's email exceptions (W1-EMAIL-EXC, a follow-up to G2.16b D9 A):
  * every email that stopped without the email service taking it, newest first,
  * a page at a time. Each says what it was, how it ended, when, after how many
- * attempts, and the last error, and links to its booking's Email card (or
- * Waivers card, for a waiver request), where staff check the address and send
- * it again. Owners and booking staff only; finance gets a designed refusal and
+ * attempts, and the last error, and links to its booking's Email card (or,
+ * for a waiver request, to the booking, whose Waivers card shows it), where
+ * staff check the address and send it again. Owners and booking staff only; finance gets a designed refusal and
  * no request.
  */
 
