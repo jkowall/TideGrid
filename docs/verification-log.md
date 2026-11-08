@@ -4,7 +4,6 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
-<<<<<<< HEAD
 ### Refunds, booking credit, and fee reversal (W3-G2.9), built November 8, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, from `main` at `7ced93c`, migrations `0026_refunds_credits.sql` and `0027_refunds_pending_index.sql` (renumbered at merge to the next free numbers), under the owner's code-only pull-forward ([decision register](v2/06-decision-register.md#2026-11-08-w3-g29-refunds-booking-credit-and-fee-reversal-owner-decision-coordinator-defaults-pending-owner-confirmation)). Synthetic data, the fake provider, and the Stripe adapter's recorded-shape fixture only: no provider call, no binding, no deploy.
@@ -13,7 +12,7 @@ Goal branch `claude/project-thread-g7e2w1`, from `main` at `7ced93c`, migrations
 - **Acceptance, against the goal's list** (partial and full refund, retry, credit, and ledger tests): `packages/domain-booking/src/refunds-credits.integration.test.ts` covers a pending refund settled by its event, mismatched and unknown events, a pending refund that fails, the fee reversal amount on a taxed order, an exception only after 24 hours and once, credit issued, used, refused below zero, replayed by key, returned once its booking is canceled, and corrected only by staff, overrides that fit and that do not, a credit policy left to staff, and payment cancellation by the guest and by the sweep. `apps/api-worker/test-integration/refunds-credits-staff.integration.test.ts` covers who may preview, cancel, override, read, and adjust, idempotent replays and key reuse, and other tenants hidden. The Stripe adapter's unit tests cover the refund event mapping and `cancelPayment`.
 - **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `pnpm test:integration` across every package, 1,053 passed and 2 skipped. `pnpm check` passed. Existing tests changed: the privilege catalog adds the new tables and update columns; one sweep test used `refund.updated` as an ignored type and now uses `payout.paid`; the Stripe pending-refund test now expects `pending`; the API suites that pay a canceled checkout on purpose turn the after-commit cancel off; the role and route lists add the new permissions and routes.
 - **Still open.** The coordinator defaults D1 to D4 await the owner. Refund events from live Stripe and `cancelPayment` against live Stripe are unobserved. The fee's assessment entries arrive with G2.10. The console has no screen yet for the staff cancellation preview, credit, or refund exceptions; the API is in place.
-=======
+
 ### Demo guest app shell (W1N-APP), built November 8, 2026
 
 Goal branch `claude/project-thread-bqlorn`, from `main` at `ddc7d6d`, under the owner's go of 20:03 UTC and his decision of 17:45 UTC ([decision register](v2/06-decision-register.md#2026-11-08-demo-guest-app-pulled-forward-into-the-demo-owner-decision)). No migration, no API change.
@@ -43,7 +42,6 @@ Goal branch `claude/project-thread-v8gj5v`, from `main` at `ddc7d6d`, migration 
 - **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `pnpm test:integration`, every package, 1,047 passed and 2 skipped after merging the delivery foundation, including the new `tax-locations.integration.test.ts` (5 tests). Typecheck, lint, every unit suite, the release dry run, doc links, and the prototype checks passed.
 - **Independent and security review** (R9, under the owner's standing go to merge without asking him): nothing above low. Recorded, not fixed: the trigger checks the named version, not that it is current (as 0005 already allows for stale versions); an archived location is accepted; the foreign key is added validated, on a small table with every value null.
 - **Still open.** Staff screens for tax rates; apply `0024` on Neon main before the API release that carries it.
->>>>>>> origin/main
 
 ### Email bounces and complaints recorded from the provider's events (W1-EMAIL-EVENTS), built November 8, 2026
 

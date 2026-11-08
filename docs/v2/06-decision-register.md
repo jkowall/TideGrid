@@ -8,7 +8,6 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
-<<<<<<< HEAD
 ### 2026-11-08: W3-G2.9, refunds, booking credit, and fee reversal (owner decision; coordinator defaults pending owner confirmation)
 
 Under the same owner decision as W3-G2.3 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
@@ -28,7 +27,7 @@ Coordinator defaults, pending owner confirmation:
 - **D2: booking credit never expires during the pilot.**
 - **D3: a canceled Stripe payment intent maps to a payment failure through its verified event** (`payment_intent.canceled` is `payment.failed`, with no new payment state).
 - **D4: who may do what.** Cancel and preview: owners and booking staff (`bookings.cancel`). Override and credit adjustment: owners only (`bookings.override`, `credits.adjust`). Refund exceptions: everyone with `payments.read`, finance included.
-=======
+
 ### 2026-11-08: W1-G215-REMINDERS, waiver reminders up to a completion cutoff (coordinator defaults pending owner confirmation)
 
 The second of the three waiver goals the owner pulled into the demo on 2026-11-08, under the [W1-G215-SIGNING entry](#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation), which quotes the owner. The goal's two open questions are owner decisions. The owner's message asked for the work to be done and did not answer them, so the coordinator's suggestions apply as defaults, pending owner confirmation:
@@ -48,7 +47,6 @@ Coordinator default, chosen by the coordinator in place of the CPA's answer, pen
 - **One location per version.** A tax that applies at two of several docks is two rates, or one rate for every location if it applies at all of them.
 
 Migration `0024` (`0023` went to the delivery foundation). Quotes keep naming the rate versions they used, so an earlier quote never changes. Not built: staff screens for tax rates (none exist yet for any terms), and jurisdiction lookups. Canonical: the [pricing README](../../packages/domain-pricing/README.md#per-location-tax-rates-w3-g25-tax) and the [database README](../../packages/database/README.md#per-location-tax-rates-0024).
->>>>>>> origin/main
 
 ### 2026-11-08: Wave 3 code-only pull-forward, and W3-G2.3 delivery foundation (owner decision; coordinator defaults pending owner confirmation)
 
