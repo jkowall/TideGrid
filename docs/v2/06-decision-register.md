@@ -8,6 +8,20 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-PRICING-WS, Stage 0 pricing worksheet draft (proposed, pending owner approval)
+
+On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The lead read that as the owner's go for this docs goal and for local commits. It is not an approval of the worksheet's content.
+
+- **What was drafted.** A [pricing worksheet draft](../customer/pricing-worksheet-draft.md), the price calculator that [Stage 0](05-roadmap-validation.md#stage-0-validation-materials-and-bare-bones-company) asks for. It computes net managed booking value from trailing 12-month booking value and channel mix. It follows the formula and the inclusion and exclusion rules of the [commercial model](03-commercial-model.md#net-managed-booking-value), including the rules for trip-count card redemptions and credits that preserve value already counted. It shows the full price first and any pilot credit as a separate step. Two synthetic worked examples: a dive shop and a private charter.
+- **Pending owner approval.** The formula layout and the full-price-then-pilot-credit presentation are proposed, not adopted. The Step 6 checks are proposed.
+- **D1, coordinator default, pending owner confirmation.** A Markdown template with fill-in tables, not a spreadsheet.
+- **No commercial change.** The worksheet restates the adopted prices, the $3,000 Core minimum, the fee base, and the Pilot Native credit. It changes none of them. The proposed Core pilot gate stays proposed, so the worksheet offers no Core-only pilot credit.
+- **Not done.** No link from Stage 0 to the draft. The goal adds that line only if the owner agrees, and the owner has not been asked.
+- **Synthetic only.** Every value in the examples is invented. No prospect, operator, or customer value is in the repository.
+- **Pull request review fixes, 2026-11-08.** Only the trip entitlement that trip-count units cover stays out of the fee base; separately paid fees, rentals, and uncovered party members stay in. Line C leaves out any retained amount paid by trip-count units or a value-preserving credit. Native setup follows the delivery bands of the commercial model ($4,500 or $7,500, a quote above 40 hours). How the pilot setup credit applies above the $4,500 band is an open question for the owner. Two proposed checks were added: the 40% setup gross margin for every Native band, and the Managed Launch scope (eight hours, five to eight only inside the pilot).
+
+Canonical: the [commercial model](03-commercial-model.md) for prices and the fee base. The worksheet has no authority until the owner approves it.
+
 ### 2026-11-08: W1-MIG-CONC, a no-transaction runner mode for CREATE INDEX CONCURRENTLY (owner go; coordinator defaults pending owner confirmation)
 
 On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal and for local commits on its branch. That reading is the coordinator's, pending owner confirmation. Pushing, the pull request, and the merge still wait for the owner's go for this goal, and the goal's rules leave the merge to the owner. The run continued under the owner's message "keep going". No token budget was set.
