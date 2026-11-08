@@ -1,6 +1,6 @@
--- 0027 tenant access remainder (W3-G2.2b, without managed OIDC and MFA)
+-- 0026 tenant access remainder (W3-G2.2b, without managed OIDC and MFA)
 --
--- Migration 0027 (claimed at merge; 0019 to 0026 belong to other goals). Five parts, one goal:
+-- Migration 0026 (claimed at merge; 0019 to 0025 belong to other goals). Five parts, one goal:
 --
 -- 1. Invitations. A person a tenant adds is invited, not active. Only the
 --    invited person, signed in, accepts (app.auth_respond_invitation). An
