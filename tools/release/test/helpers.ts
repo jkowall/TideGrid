@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { treeMigrations } from "../src/commands/preflight.ts";
 import type { Deps, Env, ExecOptions, ExecResult, SqlClient } from "../src/core.ts";
 import { type Configs, configPaths, parseJsonc } from "../src/phase.ts";
+import { defaultGh } from "./ci-fixtures.ts";
 
 export const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 
@@ -78,7 +79,10 @@ export interface FakeOptions {
   env?: Env;
   tty?: boolean;
   answers?: string[];
-  /** Answer an exec; default: a clean releasable git on HEAD = origin/main = "a".repeat(40). */
+  /**
+   * Answer an exec; default: a clean releasable git on HEAD = origin/main =
+   * "a".repeat(40), and a green four-job push run for any SHA gh is asked about.
+   */
   exec?: (call: ExecCall) => ExecResult | undefined;
   fetch?: (call: FetchCall) => Response | undefined;
   sql?: (url: string) => SqlClient;
@@ -160,7 +164,12 @@ export function fakeDeps(o: FakeOptions = {}) {
     exec: async (cmd, args, options) => {
       const call = { cmd, args: [...args], options };
       execs.push(call);
-      return o.exec?.(call) ?? committedGit(call) ?? defaultGit(call) ?? { code: 0, stdout: "[]" };
+      return (
+        o.exec?.(call) ??
+        committedGit(call) ??
+        defaultGit(call) ??
+        defaultGh(call) ?? { code: 0, stdout: "[]" }
+      );
     },
     fetch: fetchImpl,
     localFetch: fetchImpl,

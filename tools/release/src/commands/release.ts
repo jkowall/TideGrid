@@ -8,6 +8,7 @@
  * to this tree's build id, because every secret change adds an untagged version.
  */
 import { type Args, flag, has, onlyFlags } from "../args.ts";
+import { assertCiGreen } from "../ci-status.ts";
 import { banner, type Deps, Failure, out, type Plan, poll, printPlan, Refusal } from "../core.ts";
 import { assertNoBuildLeak } from "../env.ts";
 import { confirmYes, liveGate, typedOnly } from "../gate.ts";
@@ -108,7 +109,7 @@ export function releasePlan(worker: Worker, phase: Phase, rollback: boolean): Pl
     target: w.name,
     notes: [
       banner,
-      "Re-checked just before wrangler: HEAD = approved origin/main, clean migrations, not dirty, clean build env, phase guard; for the API, the live database at the tree's last migration (from /v1/health).",
+      "Re-checked just before wrangler: HEAD = approved origin/main, clean migrations, not dirty, clean build env, phase guard; a completed ci.yml run on main green on all four jobs for HEAD (read with gh's own login); for the API, the live database at the tree's last migration (from /v1/health).",
     ],
     steps: [
       {
@@ -368,6 +369,9 @@ export async function release(deps: Deps, args: Args): Promise<number> {
   // Invariants 3, 7, and 11, again, just before acting.
   const state = await assertReleasable(deps, phase);
   assertNoBuildLeak(deps, killSwitch ? ["GUEST_SW_KILL_SWITCH"] : []);
+  // The CI gate on the SHA being deployed. A rollback deploys a recorded
+  // version, not this tree, and --verify deploys nothing, so neither asks.
+  await assertCiGreen(deps, state.head, { phase, gate, command: "release" });
   const journal = loadJournal(deps);
   const guard = phaseGuard(phase, deps.configs(), journal, worker);
   for (const warning of guard.warnings) out(deps, `WARN ${warning}`);

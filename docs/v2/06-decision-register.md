@@ -8,6 +8,22 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: nov1 refuses a SHA without a green four-job CI run (owner request; coordinator defaults pending owner confirmation)
+
+The [2026-11-07 step 9 entry](#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-owner-decision-2026-11-08) proposed, not built, that `nov1 approve-sha` or `release` refuse a SHA without a completed green four-job run. Five SHAs on November 4, and `dd30fc8` on November 6, were released before their push runs ended, and `dd30fc8`'s push run ran only the checks job. The coordinator's roadmap prompts listed this as goal W1-CI-GATE, with three open decisions. The owner wrote, on 2026-11-08: "run W1-CI-GATE and merge when CI passes". The coordinator reads that as the go for the goal, for the security review its prompt names, and for merging on green. The same day the owner confirmed "release only after a green four-job run" and that a push or a dispatch run counts ([entry](#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions), questions a1 to a3), which this change enforces. Those answers settle D3. D1, D2, and D4 were not asked, so they stay coordinator defaults.
+
+What changed (`tools/release/src/ci-status.ts`, `approve-sha.ts`, `release.ts`): both commands read GitHub before acting and refuse unless the newest run of `ci.yml` on `main` that tested the SHA completed with all four jobs green. Refusals cover no run, a run queued or in progress, a run that did not conclude success, any of the four jobs failed, skipped, cancelled, missing, or still running, a job on another head, and GitHub unreachable. Each decision is journaled as a `ci-check` entry with the run's URL. A rollback and `release --verify` do not ask, since neither deploys the tree. The existing approval, ancestry, and frozen checks are unchanged and run first.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1, GitHub through `gh`'s own login.** `nov1` runs `gh api -X GET` on read-only endpoints and handles no token. `gh` gets the allowlisted child environment, so a `GH_TOKEN` or `GITHUB_TOKEN` in the shell does not reach it; the release machine needs `gh auth login`.
+- **D2, refuse when GitHub is unreachable, with no override.** A missing or logged-out `gh`, a network failure, or an unexpected answer all refuse.
+- **D3, a green dispatch run counts for the SHA it names (owner decision, 2026-11-08, question a1).** The run named `ci on <full sha>`, started from `main`, whose guard step makes every job fail unless it checked out exactly that SHA on `main`. With a blank input (the run keeps the name `ci`), the run's head. A dispatch counts only when its head is on `origin/main`, since a dispatch runs the workflow file at its head.
+- **D4, the newest run decides.** Of the runs that tested the SHA, the one whose latest attempt started last is read, so a re-run counts as the newest. A newer run still going, or a newer failure, refuses even when an older run passed. A run cancelled before any job started is skipped: the owner's step 9 dispatches of 2026-11-08 each left such a duplicate. The prompt left run selection to the coordinator.
+- **The kill-switch checks too.** `release guest --kill-switch` deploys the tree, so it needs GitHub and a green run on HEAD, with no override. The reviews raised this; exempting it would be a new decision for the owner.
+
+Not in this change: a ruleset on `main` requiring the four checks (the owner's GitHub setting), and `NOV1_GO` guards on package scripts. Canonical: the [release tool's README](../../tools/release/README.md#ci-gate-proposed-2026-11-07-built-2026-11-08) and the [runbook's P0.1](../runbooks/2026-11-01-preview-deploy.md#p0-prep-oct-29-to-31-no-live-calls).
+
 ### 2026-11-08: O-REL release of b1461f3 (owner decisions)
 
 The owner directed a preview release per the [November 1 runbook](../runbooks/2026-11-01-preview-deploy.md) and gave these decisions in the coordinator's session:
