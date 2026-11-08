@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createApp } from "./app.ts";
+import { runQueue } from "./delivery.ts";
 import type { Bindings } from "./env.ts";
 import { markConsoleGateway } from "./gateway.ts";
 import { type GuestHostAnswer, resolveGuestHost } from "./hostnames/guest-gateway.ts";
@@ -18,6 +19,11 @@ export default {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
   scheduled: async (controller, env, _ctx) => {
     await runScheduled(controller, env);
+  },
+  // The outbox consumer and its DLQ consumer (W3-G2.3). Only configurations
+  // that declare a queue consumer ever call this.
+  queue: async (batch, env, _ctx) => {
+    await runQueue(batch, env);
   },
 } satisfies ExportedHandler<Bindings>;
 

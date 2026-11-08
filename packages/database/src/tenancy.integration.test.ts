@@ -697,6 +697,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         booking_email_resend_claims: ["INSERT", "SELECT"],
         // Finalization exception resolutions (0018): append-only, no UPDATE columns.
         finalization_exception_resolutions: ["INSERT", "SELECT"],
+        // Delivery foundation (0019): outcomes are append-only; a dead letter
+        // takes its replay reason once.
+        outbox_deliveries: ["INSERT", "SELECT"],
+        outbox_dead_letters: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -749,6 +753,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         waiver_signing_sessions: ["revoked_at", "revoked_reason"],
         // Sweep fairness (0013): a turn moves the stamp's time and run id only.
         sweep_turns: ["last_turn_at", "run_id"],
+        // Delivery foundation (0019): the publisher and the consumer move the
+        // delivery columns; a replay sets its reason.
+        outbox_events: ["attempts", "available_at", "delivered_at", "last_error", "published_at"],
+        outbox_dead_letters: ["replay_reason"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

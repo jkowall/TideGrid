@@ -5,6 +5,32 @@ import type { Database } from "./types.ts";
 
 export { type AuditEntry, recordAudit } from "./audit.ts";
 export {
+  type CleanupReport,
+  type ConsumeOutcome,
+  consumeDelivery,
+  DEFAULT_LOST_AFTER_SECONDS,
+  DEFAULT_MAX_PUBLISH_ATTEMPTS,
+  DEFAULT_PUBLISH_BATCH_SIZE,
+  type DeadLetterInput,
+  type DeadLetterRow,
+  type DeliveredEvent,
+  type DeliveryHandler,
+  DeliveryHandlerError,
+  type DeliveryMessage,
+  type DeliverySender,
+  deliveryErrorCode,
+  listDeadLetters,
+  type PublishOptions,
+  type PublishReport,
+  parseDeliveryMessage,
+  publishBackoffSeconds,
+  publishOutbox,
+  ReplayRefusedError,
+  recordDeadLetter,
+  replayDeadLetter,
+  runDeliveryCleanup,
+} from "./delivery.ts";
+export {
   DEFAULT_FAIR_SWEEP_MAX_PASSES,
   type FairSweepOptions,
   type FairSweepReport,

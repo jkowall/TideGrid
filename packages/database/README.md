@@ -27,7 +27,7 @@ The integration suite enforces rules 1, 5, 6, 7, 8, and the column limits in rul
 - `app.auth_list_memberships` returns the memberships of whatever user id it is given. The API passes only the authenticated principal's own id.
 - A session-level `set_config(..., false)` would survive on a pooled connection. Nothing in the codebase does that, and `setTenantContext` refuses a connection that already carries a tenant.
 - Disabling an identity hides its sessions while it stays disabled; re-enabling revives unexpired sessions. The disable flow, when it exists, must revoke them.
-- Replayed idempotent responses are equal field for field, not byte for byte, because `jsonb` reorders keys. Keys are kept past `expires_at` until the outbox sweeper goal adds cleanup.
+- Replayed idempotent responses are equal field for field, not byte for byte, because `jsonb` reorders keys. Completed keys are kept for seven days past `expires_at`, then removed by `app.delivery_cleanup` (0019). A client that retries with the same key after that runs the command again.
 - Audit and outbox ids come from one sequence per table, so a tenant can infer overall platform volume from gaps. Acceptable for the demo; revisit before the pilot.
 - A person added to a tenant becomes an active member without accepting an invitation. Acceptance is required before transactional email (G2.16) lets owners add real people.
 
@@ -228,6 +228,17 @@ Migration `0018_finalization_exception_resolutions.sql` (W1-FIN-EXC; provisional
 - **Composite keys.** It names its exception and its resolver through foreign keys that carry `tenant_id`, so a resolution can name only its own tenant's exception and a member of that tenant.
 - **The reason and the note.** The reason is `contacted_guest`, `refunded_outside`, `no_action_needed`, or `other`; `other` requires a note (`finalization_exception_resolutions_other_note`). The note follows a booking note's CHECK. It is text a person typed and never enters an audit row, an event, or a log; the idempotency store keeps only a hash of the request and an answer without the note.
 - **No index on a pilot-volume table.** The table's own unique keys are its indexes. Apply it before the API release that reads it: that build's exception list joins it.
+
+## Delivery foundation (0019)
+
+W3-G2.3 publishes the outbox to a queue and consumes it in an async handler. PostgreSQL stays the record of truth: a queue message names one event by tenant and id and carries no payload. Code: `src/delivery.ts`; the Worker's consumer: `apps/api-worker/src/delivery.ts`. Coordinator defaults, pending owner confirmation, are in the [decision register](../../docs/v2/06-decision-register.md).
+
+- **Delivery columns.** `outbox_events` gains `delivered_at`. The runtime may update `published_at`, `delivered_at`, `available_at`, `attempts`, and `last_error`, and nothing else: a trigger refuses any change to an event's content, and no role deletes or truncates one. `last_error` is a short code, never a message. Events written before 0019 are marked published and delivered by the migration, so the first publisher run sends no history.
+- **Publication.** The cron's fifth job sends due events with fair turns per tenant (`app.outbox_publish_tenants`, sweep name `outbox` in `sweep_turns`). A row is marked published only after the queue accepted its batch. A refused send leaves it unpublished with a growing wait. A published event not delivered within 15 minutes, with no open dead letter, is a lost hint and is sent again; after 10 sends it becomes a dead letter with source `publisher`. Without an `OUTBOX_QUEUE` binding the job is skipped.
+- **Outcomes.** `outbox_deliveries` holds one append-only row per event and handler, written in the handler's own tenant transaction after a per-event advisory lock. A duplicate, a retry, or a replay finds the row and skips that handler. Delivery is at least once: a handler's effect outside the database may repeat if the process dies before its commit.
+- **Dead letters.** `outbox_dead_letters` records a message that exhausted its retries: the event, its topic, the failing handler when known, a short error code, the attempts, and the source (`consumer`, `queue`, or `publisher`). Never a payload. At most one is open per event. Rows are never deleted; a replay sets `replay_reason` once and the trigger stamps `replayed_at` and `replayed_by` from the transaction's actor. `app.outbox_dead_letter_tenants` lists tenants with open dead letters.
+- **Replay.** `pnpm --filter @tidegrid/database outbox:dlq list`, then `outbox:dlq replay --tenant <uuid> --id <id> --operator <name> --reason <text>`, which prints what it would do; add `--go` to run it. A replay writes an audit row with the reason and makes the event due again; only handlers without an outcome run.
+- **Cleanup.** `app.delivery_cleanup(limit)` is a definer function the cron calls last. It deletes, across tenants, completed idempotency keys and quotes that no checkout or order names, each seven days past its expiry, at most `limit` (1 to 5,000) of each per call. The runtime holds no DELETE. Quotes, their lines, and their taxes stay append-only for updates; a delete passes their guard trigger only inside this function, and only for a quote a week past expiry.
 
 ## Indexes built concurrently (no-transaction files)
 
