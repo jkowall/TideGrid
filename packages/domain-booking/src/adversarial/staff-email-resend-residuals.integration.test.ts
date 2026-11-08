@@ -14,6 +14,7 @@
  * - R3, a cancellation in progress: a direct confirmation resend waits for
  *   it, then is refused, instead of going out for a canceled booking. R3b,
  *   the same for a claim of the original held open: refused in_progress.
+ *   R3c, an original confirmation written during a cancellation: refused.
  * - R4, the service path: still sends each kind, and maps the database's
  *   eligibility refusals if it ever meets them.
  * - R5, the catalog: the new function is an invoker with search_path pinned,
@@ -396,6 +397,68 @@ describe.skipIf(!env)("adversarial: the 0014 residuals closed for direct writers
     await claiming;
     expect(await writing).toBe("23514:booking_email_resends_in_progress");
     expect(await resendsOf(b.bookingId)).toEqual({ messages: 0, ledger: 0 });
+  });
+
+  it("R3c. a direct original confirmation waits for a cancellation in progress, then is refused", async () => {
+    // A confirmed booking whose original confirmation was never queued (the
+    // finalize step's email can fail under its savepoint): its key moved
+    // aside by the admin, with triggers off, to stand for that.
+    const b = await book(world, A, trips.shared(), 1);
+    await world.admin.begin(async (tx) => {
+      await tx`set local session_replication_role = replica`;
+      await tx`update public.email_messages set dedupe_key = 'test.lost:' || id::text
+                where booking_id = ${b.bookingId} and template = 'booking_confirmation'`;
+    });
+    const terms = await asGuest(world.db, A.id, (trx) =>
+      previewCancellation(trx, A.id, b.bookingId),
+    );
+    if (!terms) throw new Error("setup: no terms");
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached = () => {};
+    const held = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const canceling = asGuest(world.db, A.id, async (trx, ctx) => {
+      const done = await cancelBooking(trx, ctx, {
+        bookingId: b.bookingId,
+        expectedRefundAmount: terms.refundAmount,
+      });
+      reached();
+      await gate;
+      return done.kind;
+    });
+    await held;
+    const writing = outcome(
+      directMessage({
+        key: `booking.confirmation:${b.bookingId}`,
+        template: "booking_confirmation",
+        bookingId: b.bookingId,
+      }),
+    );
+    let waiting = false;
+    try {
+      for (let i = 0; i < 50 && !waiting; i += 1) {
+        const [row] = await world.admin<{ n: number }[]>`
+          select count(*)::int as n from pg_stat_activity
+           where usename = 'tidegrid_app' and wait_event_type = 'Lock'
+             and wait_event in ('tuple', 'transactionid')
+             and query ilike '%email_messages%'`;
+        waiting = (row?.n ?? 0) > 0;
+        if (!waiting) await sleep(50);
+      }
+    } finally {
+      release();
+    }
+    expect(waiting).toBe(true);
+    expect(await canceling).toBe("canceled");
+    expect(await writing).toBe("23514:email_messages_booking_state");
+    const [row] = await world.admin<{ n: number }[]>`
+      select count(*)::int as n from public.email_messages
+       where dedupe_key = ${`booking.confirmation:${b.bookingId}`}`;
+    expect(row?.n).toBe(0);
   });
 
   it("R4. the service still resends each kind that fits, under the new checks", async () => {

@@ -221,6 +221,7 @@ CREATE OR REPLACE FUNCTION app.check_email_message() RETURNS trigger
   AS $$
 DECLARE
   refusal record;
+  booking_state text;
 BEGIN
   IF TG_OP = 'INSERT' THEN
     IF NEW.state IS DISTINCT FROM 'queued' OR NEW.attempts IS DISTINCT FROM 0
@@ -246,17 +247,21 @@ BEGIN
     -- The original fits the booking's state, as the service writes it: the
     -- confirmation for a confirmed booking, the notice once it is canceled.
     -- Otherwise a writer could take the key early, send a false notice, and
-    -- leave the real one a duplicate that never goes out.
+    -- leave the real one a duplicate that never goes out. The booking's row
+    -- is locked (FOR SHARE) so a cancellation in progress finishes first and
+    -- none starts until this message commits: a confirmation never lands
+    -- after a cancellation's scan of the pending emails.
     IF NEW.template IN ('booking_confirmation', 'booking_canceled')
-       AND NOT starts_with(NEW.dedupe_key, 'booking.resend:')
-       AND NOT EXISTS (
-         SELECT 1 FROM public.bookings b
-          WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id
-            AND b.state = CASE NEW.template WHEN 'booking_confirmation' THEN 'confirmed'
-                                            ELSE 'canceled' END) THEN
-      RAISE EXCEPTION 'a booking''s % goes out only while the booking is %', NEW.template,
-        CASE NEW.template WHEN 'booking_confirmation' THEN 'confirmed' ELSE 'canceled' END
-        USING ERRCODE = '23514', CONSTRAINT = 'email_messages_booking_state';
+       AND NOT starts_with(NEW.dedupe_key, 'booking.resend:') THEN
+      SELECT b.state INTO booking_state FROM public.bookings b
+       WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id
+         FOR SHARE OF b;
+      IF booking_state IS DISTINCT FROM
+           (CASE NEW.template WHEN 'booking_confirmation' THEN 'confirmed' ELSE 'canceled' END) THEN
+        RAISE EXCEPTION 'a booking''s % goes out only while the booking is %', NEW.template,
+          CASE NEW.template WHEN 'booking_confirmation' THEN 'confirmed' ELSE 'canceled' END
+          USING ERRCODE = '23514', CONSTRAINT = 'email_messages_booking_state';
+      END IF;
     END IF;
     NEW.created_at := now();
     NEW.updated_at := now();
