@@ -43,6 +43,69 @@ export interface CloudflareFixtureOptions {
   zoneId: string;
   apiToken: string;
   apiBase?: string;
+  /**
+   * The last group of every record id, 12 lowercase hex characters. Provider
+   * ids are unique across the database, so suites that share one give each
+   * fixture its own.
+   */
+  idNamespace?: string;
+}
+
+/**
+ * Account-level refusals as the fixture records their shape (W1-SAAS-PREP).
+ * UNVERIFIED against live Cloudflare: the codes and statuses are as
+ * remembered from its API, and count as verified only at the first real
+ * request (the runbook's P10, A18). See `refusals.ts`.
+ */
+export const recordedAccountRefusals: readonly {
+  label: string;
+  status: number;
+  code: number;
+  message: string;
+  chain?: { code: number; message: string }[];
+}[] = [
+  {
+    label: "a token without the zone's permission",
+    status: 403,
+    code: 10000,
+    message: "Authentication error",
+  },
+  {
+    label: "an invalid or rotated token",
+    status: 403,
+    code: 9109,
+    message: "Invalid access token",
+  },
+  {
+    label: "missing credentials",
+    status: 400,
+    code: 9106,
+    message: "Missing X-Auth-Key, X-Auth-Email or Authorization headers",
+  },
+  {
+    label: "a malformed Authorization header",
+    status: 400,
+    code: 6003,
+    message: "Invalid request headers",
+    chain: [{ code: 6111, message: "Invalid format for Authorization header" }],
+  },
+  { label: "an expired token", status: 401, code: 1000, message: "Invalid API Token" },
+];
+
+/** A recorded-shape body for one of `recordedAccountRefusals`. */
+export function accountRefusalBody(refusal: (typeof recordedAccountRefusals)[number]): string {
+  return JSON.stringify({
+    success: false,
+    errors: [
+      {
+        code: refusal.code,
+        message: refusal.message,
+        ...(refusal.chain ? { error_chain: refusal.chain } : {}),
+      },
+    ],
+    messages: [],
+    result: null,
+  });
 }
 
 export interface CloudflareFixture extends HostnameProviderControls {
@@ -53,6 +116,15 @@ export interface CloudflareFixture extends HostnameProviderControls {
   answerNext(answer: ScriptedAnswer, match?: { method?: string }): void;
   /** Ids and names held, in creation order. */
   records(): { id: string; hostname: string; foreign: boolean }[];
+  /**
+   * A routine certificate renewal on an active hostname, as the fixture
+   * records it: `status` stays `active`, `ssl.status` reads
+   * `pending_validation`, and reads carry fresh validation records.
+   * UNVERIFIED against live Cloudflare until P10.
+   */
+  renewing(hostname: string): void;
+  /** The renewal finished: `ssl.status` reads `active` again. */
+  renewed(hostname: string): void;
 }
 
 type Fault =
@@ -83,6 +155,10 @@ export function createCloudflareFixture(options: CloudflareFixtureOptions): Clou
   const requests: RecordedRequest[] = [];
   let loseNextCreate = false;
   let sequence = 0;
+  const namespace = options.idNamespace ?? "6cc0252067e9";
+  if (!/^[0-9a-f]{12}$/.test(namespace)) {
+    throw new TypeError("idNamespace is 12 lowercase hex characters");
+  }
 
   const byName = (hostname: string) => {
     for (const record of records.values()) if (record.hostname === hostname) return record;
@@ -92,7 +168,7 @@ export function createCloudflareFixture(options: CloudflareFixtureOptions): Clou
   const store = (hostname: string, method: "txt" | "http", foreign: boolean) => {
     sequence += 1;
     const record: FixtureRecord = {
-      id: `${hex(sequence, 8)}-ad9f-4843-b99f-6cc0252067e9`,
+      id: `${hex(sequence, 8)}-ad9f-4843-b99f-${namespace}`,
       hostname,
       status: "pending",
       sslStatus: "pending_validation",
@@ -307,6 +383,17 @@ export function createCloudflareFixture(options: CloudflareFixtureOptions): Clou
       return [...records.values()]
         .sort((a, b) => a.sequence - b.sequence)
         .map((r) => ({ id: r.id, hostname: r.hostname, foreign: r.foreign }));
+    },
+    renewing(hostname: string) {
+      const record = byName(hostname);
+      if (!record) throw new Error(`the fixture holds no record for ${hostname}`);
+      record.status = "active";
+      record.sslStatus = "pending_validation";
+    },
+    renewed(hostname: string) {
+      const record = byName(hostname);
+      if (!record) throw new Error(`the fixture holds no record for ${hostname}`);
+      record.sslStatus = "active";
     },
     advance(hostname: string, change: HostnameAdvance) {
       const record = byName(hostname);

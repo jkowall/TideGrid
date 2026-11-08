@@ -18,27 +18,75 @@ import {
   createCloudflareHostnameProvider,
   createFakeHostnameProvider,
   disableHostname,
+  isAccountLevelRefusal,
   requestCustomHostname,
   sweepHostnames,
 } from "@tidegrid/domain-hostnames";
-import { slugPattern } from "@tidegrid/tenant-config";
+import { customHostnameProblem, slugPattern } from "@tidegrid/tenant-config";
 import { type Kysely, sql } from "kysely";
+import { requestLines } from "./format.ts";
+import { releaseInterruptedRequest } from "./release.ts";
+import {
+  applyRoutePlan,
+  createWorkersRoutesClient,
+  DEFAULT_ROUTE_SCRIPT,
+  describeOutcome,
+  describePlan,
+  planRoute,
+  type WorkersRoutesClient,
+} from "./routes.ts";
+
+export { requestLines } from "./format.ts";
 
 export const usage = `Usage:
   hostnames status <tenant-slug>
   hostnames request <tenant-slug> <hostname>        (Cloudflare for SaaS)
   hostnames activate <tenant-slug> <hostname>       (Cloudflare for SaaS)
   hostnames disable <tenant-slug> <hostname> <reason...>
+  hostnames route <tenant-slug> <hostname> [--remove] [--apply]
+                                                    (proposed; a dry run without --apply)
+  hostnames release <tenant-slug> <hostname> [--apply --provider-id <id>]
+                                                    (proposed; recovers an interrupted request)
   hostnames fake-lifecycle <tenant-slug> <hostname> (throwaway database only)
 
 Environment: DATABASE_URL (admin connection). Cloudflare commands also need
 CF_SAAS_ZONE_ID, CF_SAAS_API_TOKEN, and optionally CF_SAAS_ROUTING_TARGET
-(default customers.tidegrid.us). fake-lifecycle needs TIDEGRID_EPHEMERAL_DB=1.`;
+(default customers.tidegrid.us). route --apply needs the token's Workers Routes
+Write permission, and optionally CF_SAAS_ROUTE_SCRIPT (default tidegrid-guest).
+fake-lifecycle needs TIDEGRID_EPHEMERAL_DB=1.`;
 
 export type Command =
   | { kind: "status"; slug: string }
   | { kind: "request" | "activate" | "fake-lifecycle"; slug: string; hostname: string }
-  | { kind: "disable"; slug: string; hostname: string; reason: string };
+  | { kind: "disable"; slug: string; hostname: string; reason: string }
+  | { kind: "route"; slug: string; hostname: string; remove: boolean; apply: boolean }
+  | { kind: "release"; slug: string; hostname: string; apply: boolean; providerId: string | null };
+
+/** Flags after the hostname, in any order. Each may appear once. */
+function parseFlags(
+  kind: string,
+  rest: readonly string[],
+  allowed: { boolean: readonly string[]; value: readonly string[] },
+): Map<string, string | true> {
+  const flags = new Map<string, string | true>();
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i] as string;
+    if (flags.has(arg)) throw new UsageError(`${arg} given twice`);
+    if (allowed.boolean.includes(arg)) {
+      flags.set(arg, true);
+    } else if (allowed.value.includes(arg)) {
+      const value = rest[i + 1];
+      if (value === undefined || value.startsWith("--")) {
+        throw new UsageError(`${arg} needs a value`);
+      }
+      flags.set(arg, value);
+      i += 1;
+    } else {
+      throw new UsageError(`${kind} does not take ${arg}`);
+    }
+  }
+  return flags;
+}
 
 export class UsageError extends Error {
   constructor(message: string) {
@@ -59,15 +107,36 @@ export function parseArgs(argv: readonly string[]): Command {
     kind !== "request" &&
     kind !== "activate" &&
     kind !== "disable" &&
+    kind !== "route" &&
+    kind !== "release" &&
     kind !== "fake-lifecycle"
   ) {
     throw new UsageError(`unknown command ${kind}`);
   }
-  if (!hostname) throw new UsageError("name the hostname");
+  if (!hostname || hostname.startsWith("--")) throw new UsageError("name the hostname");
   if (kind === "disable") {
     const reason = rest.join(" ").trim();
     if (!reason) throw new UsageError("give a reason for disabling");
     return { kind, slug, hostname, reason };
+  }
+  if (kind === "route") {
+    const flags = parseFlags(kind, rest, { boolean: ["--remove", "--apply"], value: [] });
+    return { kind, slug, hostname, remove: flags.has("--remove"), apply: flags.has("--apply") };
+  }
+  if (kind === "release") {
+    const flags = parseFlags(kind, rest, { boolean: ["--apply"], value: ["--provider-id"] });
+    const providerId = flags.get("--provider-id");
+    const apply = flags.has("--apply");
+    if (providerId !== undefined && !apply) {
+      throw new UsageError("--provider-id goes with --apply");
+    }
+    return {
+      kind,
+      slug,
+      hostname,
+      apply,
+      providerId: typeof providerId === "string" ? providerId : null,
+    };
   }
   if (rest.length > 0) throw new UsageError(`${kind} takes a tenant slug and a hostname`);
   return { kind, slug, hostname };
@@ -77,7 +146,38 @@ export interface CliEnv {
   CF_SAAS_ZONE_ID?: string | undefined;
   CF_SAAS_API_TOKEN?: string | undefined;
   CF_SAAS_ROUTING_TARGET?: string | undefined;
+  CF_SAAS_ROUTE_SCRIPT?: string | undefined;
   TIDEGRID_EPHEMERAL_DB?: string | undefined;
+}
+
+/** Injected in tests; otherwise built from the environment, and only when a command calls out. */
+export interface CliDeps {
+  provider?: CustomHostnameProvider;
+  routes?: WorkersRoutesClient;
+}
+
+export function workersRoutesClient(env: CliEnv): WorkersRoutesClient {
+  if (!env.CF_SAAS_ZONE_ID || !env.CF_SAAS_API_TOKEN) {
+    throw new UsageError("set CF_SAAS_ZONE_ID and CF_SAAS_API_TOKEN for route --apply");
+  }
+  return createWorkersRoutesClient({
+    zoneId: env.CF_SAAS_ZONE_ID,
+    apiToken: env.CF_SAAS_API_TOKEN,
+  });
+}
+
+/**
+ * One line for an error the CLI did not expect: its type and code, never a
+ * token. An account-level refusal (W1-SAAS-PREP; the codes are unverified
+ * until the first real request at P10) names the token and the zone.
+ */
+export function describeError(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  const line = `${error instanceof Error ? error.name : "Error"}${typeof code === "string" ? ` ${code}` : ""}: ${error instanceof Error ? error.message : ""}`;
+  if (isAccountLevelRefusal(error, { lookup: true })) {
+    return `${line}\nThe provider refused the account, not this hostname: check that CF_SAAS_API_TOKEN is scoped to the SaaS zone with the permissions the hostnames package README lists, and that CF_SAAS_ZONE_ID names that zone.`;
+  }
+  return line;
 }
 
 export function cloudflareProvider(env: CliEnv): CustomHostnameProvider {
@@ -128,15 +228,55 @@ async function status(db: Kysely<Database>, tenantId: string): Promise<string[]>
   );
 }
 
+/** This tenant's own row for a custom hostname, or null. */
+async function customRow(db: Kysely<Database>, tenantId: string, hostname: string) {
+  const { rows } = await sql<{ kind: string; status: string }>`
+    select kind, status from public.tenant_hostnames
+     where tenant_id = ${tenantId} and hostname = ${hostname}`.execute(db);
+  return rows[0] ?? null;
+}
+
+/**
+ * The per-hostname route (proposed, W1-SAAS-PREP). Adding needs an active
+ * custom hostname of this tenant; removing needs a custom hostname of this
+ * tenant in any status, so a disabled name's route can go. A dry run makes no
+ * call and needs no token (D3).
+ */
+async function route(
+  db: Kysely<Database>,
+  tenantId: string,
+  command: Extract<Command, { kind: "route" }>,
+  env: CliEnv,
+  routes: WorkersRoutesClient | undefined,
+): Promise<string[]> {
+  const problem = customHostnameProblem(command.hostname);
+  if (problem) throw new UsageError(`that name cannot be a custom hostname: ${problem}`);
+  const row = await customRow(db, tenantId, command.hostname);
+  if (row?.kind !== "custom") {
+    return [`${command.hostname}: refused: not a custom hostname of ${command.slug}`];
+  }
+  if (!command.remove && row.status !== "active") {
+    return [`${command.hostname}: refused: ${row.status}, and only an active hostname is routed`];
+  }
+  const plan = planRoute(
+    command.remove ? "remove" : "add",
+    command.hostname,
+    env.CF_SAAS_ROUTE_SCRIPT || DEFAULT_ROUTE_SCRIPT,
+  );
+  if (!command.apply) return describePlan(plan);
+  return describeOutcome(plan, await applyRoutePlan(routes ?? workersRoutesClient(env), plan));
+}
+
 /** Run one command. Returns the lines to print. */
 export async function runCommand(
   db: Kysely<Database>,
   command: Command,
   env: CliEnv,
-  provider?: CustomHostnameProvider,
+  deps: CliDeps = {},
 ): Promise<string[]> {
   const tenantId = await tenantIdFor(db, command.slug);
   const actor = { actorId: "hostname-cli", requestId: `cli-${randomUUID()}` };
+  const provider = deps.provider;
   switch (command.kind) {
     case "status":
       return status(db, tenantId);
@@ -146,19 +286,19 @@ export async function runCommand(
         hostname: command.hostname,
         actor,
       });
-      if (outcome.kind !== "requested") return [`${command.hostname}: ${outcome.kind}`];
-      return [
-        `${command.hostname}: requested${outcome.adopted ? " (adopted after a lost answer)" : ""}`,
-        "Publish these records:",
-        ...outcome.reading.instructions.map((i) =>
-          i.kind === "cname"
-            ? `  CNAME ${i.name} -> ${i.target}`
-            : i.kind === "txt"
-              ? `  TXT ${i.name} "${i.value}" (${i.purpose})`
-              : `  HTTP ${i.url} (${i.purpose})`,
-        ),
-      ];
+      return requestLines(command.hostname, outcome);
     }
+    case "route":
+      return route(db, tenantId, command, env, deps.routes);
+    case "release":
+      return releaseInterruptedRequest(db, provider ?? cloudflareProvider(env), {
+        tenantId,
+        slug: command.slug,
+        hostname: command.hostname,
+        apply: command.apply,
+        providerId: command.providerId,
+        actor,
+      });
     case "activate": {
       const outcome = await activateCustomHostname(db, provider ?? cloudflareProvider(env), {
         tenantId,

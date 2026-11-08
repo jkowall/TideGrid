@@ -4,7 +4,7 @@
  *   DATABASE_URL=<admin url> pnpm --filter @tidegrid/hostnames-cli hostnames status demo-harbor
  */
 import { createDb } from "@tidegrid/database";
-import { parseArgs, runCommand, UsageError, usage } from "./commands.ts";
+import { describeError, parseArgs, runCommand, UsageError, usage } from "./commands.ts";
 
 const url = process.env.DATABASE_URL;
 let exitCode = 0;
@@ -23,10 +23,7 @@ try {
     exitCode = 2;
   } else {
     // A database or provider error: its type and code only, never a token.
-    const code = (error as { code?: unknown }).code;
-    console.error(
-      `${error instanceof Error ? error.name : "Error"}${typeof code === "string" ? ` ${code}` : ""}: ${error instanceof Error ? error.message : ""}`,
-    );
+    console.error(describeError(error));
     exitCode = 1;
   }
 }

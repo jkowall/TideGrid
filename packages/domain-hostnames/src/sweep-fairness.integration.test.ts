@@ -2,7 +2,8 @@
  * Sweep fairness for the hostname sweep (pre-pilot hardening, item 5, Part
  * D). The shared test database holds other suites' tenants with due
  * hostnames, so every sweep here is limited to this file's tenants
- * (`onlyTenants`) with a tenant limit above every tenant in the database, and
+ * (`onlyTenants`; since D-E11 the filter applies before the limit, and the
+ * tenant limit above every tenant in the database stays harmless), and
  * list assertions are relative facts among this file's tenants. Each test
  * builds fresh tenants, because stamps outlive a test. With no stamps the list
  * is id order (0013), so the tenant that would hog a run takes an id that
@@ -489,10 +490,10 @@ describe.skipIf(!env)("the hostname sweep takes fair turns across tenants", () =
     expect(await checkRow(victimHosts[5] ?? "")).toMatchObject({ status: "active", due: true });
   });
 
-  it("reports incomplete when the unfiltered list fills the tenant limit", async () => {
-    // Two due tenants of this file, so a list of one is full whatever else is
-    // due. The unstamped low id sorts ahead of the high id, so the one listed
-    // tenant is never the target: only the unfiltered count says more wait.
+  it("applies onlyTenants before the tenant limit (D-E11)", async () => {
+    // Two due tenants of this file, and other suites' due tenants in the
+    // database. The unstamped low id sorts ahead of the high id, so with the
+    // filter applied after a limit of one the target was never listed.
     const decoy = await tenant("f11-decoy", "low");
     const target = await tenant("f11-target", "high");
     await activeHost(decoy, name("f11-decoy"));
@@ -500,8 +501,21 @@ describe.skipIf(!env)("the hostname sweep takes fair turns across tenants", () =
     await due(decoy, target);
     const { provider, read } = reads();
     const { report } = await sweep([target], provider, { tenantLimit: 1 });
-    expect(read).toEqual([]);
-    expect(report).toMatchObject({ tenants: 0, complete: false });
+    // Before the fix: read [] and tenants 0, with complete false.
+    expect(read).toEqual([name("f11-target")]);
+    expect(report).toMatchObject({ tenants: 1, checked: 1, complete: true });
+  });
+
+  it("still reports incomplete when the filtered list is longer than the tenant limit (D-E11)", async () => {
+    const first = await tenant("f12-first", "low");
+    const second = await tenant("f12-second", "high");
+    await activeHost(first, name("f12-first"));
+    await activeHost(second, name("f12-second"));
+    await due(first, second);
+    const { provider, read } = reads();
+    const { report } = await sweep([first, second], provider, { tenantLimit: 1 });
+    expect(read).toEqual([name("f12-first")]);
+    expect(report).toMatchObject({ tenants: 1, complete: false });
   });
 
   it.each([0, 1.5, 1001])(

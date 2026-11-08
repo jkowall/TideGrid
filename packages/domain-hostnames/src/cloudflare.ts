@@ -30,7 +30,11 @@ import { mapCloudflareCertificateStatus, mapCloudflareHostnameStatus } from "./s
 export interface CloudflareHostnameOptions {
   /** The SaaS zone's id: 32 lowercase hex characters. */
   zoneId: string;
-  /** A token scoped to the zone's SSL and Certificates edit permission. */
+  /**
+   * A token scoped to the one SaaS zone: SSL and Certificates Write and Zone
+   * Read (plus Workers Routes Write only for per-hostname routes). See the
+   * package README's token scope.
+   */
   apiToken: string;
   /** The CNAME target operators point their hostnames at. */
   routingTarget: string;
