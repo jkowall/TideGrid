@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W3-G2.16-rest, trip reminders a day before departure, code only (synthetic pull-forward; coordinator defaults pending owner confirmation)
+
+The second pull request of W3-G2.16-rest, under the same owner card as the [first](#2026-11-08-w3-g216-rest-per-operator-sender-domains-and-suppression-code-only-synthetic-pull-forward-coordinator-defaults-pending-owner-confirmation). Waiver reminders were already built (W1-G215-REMINDERS); this adds the booking's own reminder. No migration, no deploy, no send beyond the recipient allowlist.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D7, one trip reminder per booking, 24 hours before departure.** Written with the confirmation and sent by the existing delivery job when due, with a fresh management link. A booking made within 26 hours of departure gets none, since the confirmation was just sent.
+- **D8, never late.** The delivery job checks again when it picks the reminder up: a canceled booking or trip, or a trip leaving within 2 hours (the waiver reminders' cutoff), cancels it unsent (`reminder_too_late`). Canceling a booking cancels its waiting reminder at once.
+- **D9, staff see it.** The booking's Email card lists it as "Trip reminder", "Scheduled" until it is due. Staff cannot turn reminders off per operator yet (proposed follow-up, with operator-set timing).
+
+Canonical: the [messaging README](../../packages/domain-messaging/README.md#trip-reminders-w3-g216-rest).
+
 ### 2026-11-08: W3-G2.16-rest, per-operator sender domains and suppression, code only (synthetic pull-forward; coordinator defaults pending owner confirmation)
 
 On 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." The coordinator queued W3-G2.16-rest under that card, with the provider the owner chose on 2026-11-08 (Cloudflare Email, [Stage 0 providers](#2026-11-08-stage-0-providers-for-the-paid-pilots-owner-decisions)). The Validation gate and its dependency are waived as a synthetic pull-forward; nothing here passes the Core live gate. No DNS change, no domain onboarding with the provider, no send beyond the recipient allowlist, no deploy.
