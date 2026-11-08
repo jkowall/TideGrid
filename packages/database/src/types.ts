@@ -973,6 +973,29 @@ export interface FinalizationExceptionResolutionsTable {
   created_at: CreatedAt;
 }
 
+export type EmailEventType = "bounced" | "complained";
+
+/**
+ * Append-only (0021, W1-EMAIL-EVENTS). A trigger joins each row to the
+ * tenant's own sent message and stamps received_at. The platform table
+ * email_events_unmatched is not here: the runtime reaches it only through
+ * app.record_unmatched_email_event.
+ */
+export interface EmailEventsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  provider: Fixed<"cloudflare">;
+  event_id: Fixed<string>;
+  event_type: Fixed<EmailEventType>;
+  provider_message_id: Fixed<string>;
+  message_id: Fixed<string>;
+  bounce_type: ColumnType<"hard" | "soft" | null, "hard" | "soft" | null | undefined, never>;
+  detail_code: ColumnType<string | null, string | null | undefined, never>;
+  occurred_at: ColumnType<Date, Date | string, never>;
+  received_at: ColumnType<Date, never, never>;
+  applied: Fixed<boolean>;
+}
+
 /** Tables added by the console completion migration (G2.12c), merged into Database below. */
 interface ConsoleTables {
   booking_notes: BookingNotesTable;
@@ -1149,7 +1172,7 @@ export interface WaiverAssistedLinksTable {
 
 export type WaiverReminderSlot = "72h" | "24h";
 
-/** A reminder email for an unsigned waiver (0021, W1-G215-REMINDERS). Append-only. */
+/** A reminder email for an unsigned waiver (0023, W1-G215-REMINDERS). Append-only. */
 export interface WaiverRemindersTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
@@ -1261,6 +1284,8 @@ export interface Database
   booking_email_resend_claims: BookingEmailResendClaimsTable;
   // Finalization exception resolutions (0018, W1-FIN-EXC).
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
+  // Email bounce and complaint events (0021, W1-EMAIL-EVENTS).
+  email_events: EmailEventsTable;
 }
 
 export type { Generated, GeneratedAlways };

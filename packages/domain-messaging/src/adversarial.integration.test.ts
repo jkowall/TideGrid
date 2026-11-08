@@ -464,6 +464,8 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
         "attempts",
         "canceledAt",
         "createdAt",
+        // A bounce or complaint the provider reported (W1-EMAIL-EVENTS): ids and codes only.
+        "deliveryReport",
         "failedAt",
         "failureCode",
         "id",
@@ -479,6 +481,7 @@ describe.skipIf(!env)("adversarial: email delivery, retries, and the fake provid
       ].sort(),
     );
     expect(status?.staffResend).toBe(false);
+    expect(status?.deliveryReport).toBeNull();
     const text = JSON.stringify(status);
     expect(text).not.toContain(recipient);
     expect(text).not.toContain("Synthetic status");

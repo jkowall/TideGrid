@@ -82,6 +82,14 @@ import {
 
 // Case 10: a composer that throws, as a programmer error would. Off unless a
 // test sets the count; every other call goes to the real enqueueMessage.
+/** Unique per run: provider ids are unique across tenants (0022), and suites share a database. */
+const idRun = Math.random().toString(16).slice(2, 10).padEnd(8, "0");
+let idSeq = 0;
+const nextIdSeq = () => {
+  idSeq += 1;
+  return idSeq;
+};
+
 const fault = vi.hoisted(() => ({ enqueue: 0 }));
 vi.mock("@tidegrid/domain-messaging", async (importOriginal) => {
   const real = await importOriginal<typeof import("@tidegrid/domain-messaging")>();
@@ -121,7 +129,9 @@ function recorder(): Recorder {
         const code = faults.shift();
         if (code) throw Object.assign(new Error(`${code} for a synthetic booker`), { code });
         n += 1;
-        return { messageId: `0101018f7d0c4d9a-rsd-${String(n).padStart(8, "0")}` };
+        return {
+          messageId: `0101018f7d0c4d9a-rsd-${idRun}${String(nextIdSeq()).padStart(8, "0")}`,
+        };
       },
     },
   };

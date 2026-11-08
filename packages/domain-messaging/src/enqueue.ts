@@ -277,7 +277,21 @@ export interface MessageStatus {
   provider: EmailProviderName | null;
   /** Staff sent it again from the console (G2.16b): its key's topic is STAFF_RESEND_TOPIC. */
   staffResend: boolean;
+  /**
+   * What the provider reported after it accepted the message (W1-EMAIL-EVENTS,
+   * 0021): its first bounce or spam complaint, or null. The state stays sent.
+   */
+  deliveryReport: MessageDeliveryReport | null;
   createdAt: string;
+}
+
+export interface MessageDeliveryReport {
+  kind: "bounced" | "complained";
+  /** For a bounce: hard (the address does not take mail) or soft (it gave up retrying). */
+  bounceType: "hard" | "soft" | null;
+  /** The enhanced SMTP status of a bounce, or the complaint's type; never the provider's text. */
+  detailCode: string | null;
+  reportedAt: string;
 }
 
 /**
@@ -300,6 +314,10 @@ interface StatusRow {
   last_error_code: string | null;
   provider: EmailProviderName | null;
   staff_resend: boolean;
+  report_kind: "bounced" | "complained" | null;
+  report_bounce_type: "hard" | "soft" | null;
+  report_detail_code: string | null;
+  report_at: Date | string | null;
   created_at: Date | string;
 }
 
@@ -321,13 +339,30 @@ function toStatus(row: StatusRow): MessageStatus {
     failureCode: row.last_error_code,
     provider: row.provider,
     staffResend: row.staff_resend,
+    deliveryReport:
+      row.report_kind === null || row.report_at === null
+        ? null
+        : {
+            kind: row.report_kind,
+            bounceType: row.report_bounce_type,
+            detailCode: row.report_detail_code,
+            reportedAt: iso(row.report_at),
+          },
     createdAt: iso(row.created_at),
   };
 }
 
-const statusColumns = sql`id, template, template_version, state, attempts, last_attempt_at,
-  next_attempt_at, sent_at, failed_at, canceled_at, last_error_code, provider, created_at,
-  starts_with(dedupe_key, ${`${STAFF_RESEND_TOPIC}:`}) as staff_resend`;
+// The applied email event, if any (0021): at most one per message, found by
+// the inbox's partial unique key, under the same tenant filter.
+const statusColumns = sql`m.id, m.template, m.template_version, m.state, m.attempts,
+  m.last_attempt_at, m.next_attempt_at, m.sent_at, m.failed_at, m.canceled_at,
+  m.last_error_code, m.provider, m.created_at,
+  starts_with(m.dedupe_key, ${`${STAFF_RESEND_TOPIC}:`}) as staff_resend,
+  r.event_type as report_kind, r.bounce_type as report_bounce_type,
+  r.detail_code as report_detail_code, r.occurred_at as report_at`;
+const statusFrom = sql`email_messages m
+  left join email_events r
+    on r.tenant_id = m.tenant_id and r.message_id = m.id and r.applied`;
 
 /** One message's delivery status, without its recipient or content; null when not this tenant's. */
 export async function getMessageStatus(
@@ -337,8 +372,8 @@ export async function getMessageStatus(
 ): Promise<MessageStatus | null> {
   if (!isUuid(messageId)) return null;
   const { rows } = await sql<StatusRow>`
-    select ${statusColumns} from email_messages
-     where tenant_id = ${tenantId} and id = ${messageId}`.execute(trx);
+    select ${statusColumns} from ${statusFrom}
+     where m.tenant_id = ${tenantId} and m.id = ${messageId}`.execute(trx);
   return rows[0] ? toStatus(rows[0]) : null;
 }
 
@@ -350,8 +385,8 @@ export async function listBookingMessages(
 ): Promise<MessageStatus[]> {
   if (!isUuid(bookingId)) return [];
   const { rows } = await sql<StatusRow>`
-    select ${statusColumns} from email_messages
-     where tenant_id = ${tenantId} and booking_id = ${bookingId}
-     order by created_at, id`.execute(trx);
+    select ${statusColumns} from ${statusFrom}
+     where m.tenant_id = ${tenantId} and m.booking_id = ${bookingId}
+     order by m.created_at, m.id`.execute(trx);
   return rows.map(toStatus);
 }

@@ -160,7 +160,7 @@ interface Row {
   refusal_retry_after: Date | null;
   /** When the booking's trip leaves. */
   starts_at: Date;
-  /** The request's reminders (0021), oldest first. */
+  /** The request's reminders (0023), oldest first. */
   reminders: { slot: WaiverReminderSlot; queued_at: string; state: MessageState }[] | null;
   now: Date;
 }

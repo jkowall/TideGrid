@@ -33,6 +33,7 @@ export function message(over: Partial<MessageStatus> = {}): MessageStatus {
     failureCode: null,
     provider: "fake",
     staffResend: false,
+    deliveryReport: null,
     createdAt: "2026-11-04T14:00:00.000Z",
     ...over,
   };

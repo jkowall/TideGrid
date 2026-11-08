@@ -24,6 +24,7 @@ import { loadBookingEmail, newResendKey, resendBookingEmail } from "./api.ts";
 import { emailCardFragment } from "./exceptions.ts";
 import {
   blockedText,
+  deliveryReportText,
   failureText,
   isBookingEmail,
   kindNames,
@@ -244,7 +245,8 @@ export function BookingEmailCard({
             <ul className="em-list">
               {messages.map((m) => {
                 const state = stateView(m);
-                const failure = failureText(m.failureCode, m.template);
+                const failure =
+                  deliveryReportText(m.deliveryReport) ?? failureText(m.failureCode, m.template);
                 return (
                   <li key={m.id} className="em-item">
                     <div className="em-item__head">

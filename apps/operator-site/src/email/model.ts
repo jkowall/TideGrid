@@ -40,8 +40,17 @@ export interface StateView {
 
 /** A message's state as a badge. An unknown outcome is its own label: it may have arrived. */
 export function stateView(
-  message: Pick<MessageStatus, "state" | "attempts" | "failureCode">,
+  message: Pick<MessageStatus, "state" | "attempts" | "failureCode"> & {
+    deliveryReport?: MessageStatus["deliveryReport"];
+  },
 ): StateView {
+  // A sent email the provider later reported (W1-EMAIL-EVENTS): the report
+  // is what staff need, not the acceptance.
+  if (message.state === "sent" && message.deliveryReport) {
+    return message.deliveryReport.kind === "bounced"
+      ? { tone: "blocked", icon: "x-octagon", label: "Bounced" }
+      : { tone: "warning", icon: "alert-triangle", label: "Marked as spam" };
+  }
   switch (message.state) {
     case "queued":
       // An account-level fault gives its attempt back (0015), so a message
@@ -60,6 +69,19 @@ export function stateView(
     case "canceled":
       return { tone: "neutral", icon: "dot", label: "Not sent" };
   }
+}
+
+/** A bounce or complaint reported after sending, in words; null when there is none. */
+export function deliveryReportText(
+  report: MessageStatus["deliveryReport"] | undefined,
+): string | null {
+  if (!report) return null;
+  if (report.kind === "complained") {
+    return "The guest marked it as spam. Send it again only if they ask for it.";
+  }
+  return report.bounceType === "soft"
+    ? "It was sent, but the guest's mail server kept refusing it and the email service gave up. Check the address, then send it again."
+    : "It was sent, but the guest's mail server refused it. The address may be wrong. Check it, then send it again.";
 }
 
 /** Every known failure or cancellation code in words. */

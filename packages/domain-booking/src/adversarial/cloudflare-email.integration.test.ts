@@ -42,6 +42,14 @@ import {
   tokenIn,
 } from "./self-service-harness.ts";
 
+/** Unique per run: provider ids are unique across tenants (0022), and suites share a database. */
+const idRun = Math.random().toString(16).slice(2, 10).padEnd(8, "0");
+let idSeq = 0;
+const nextIdSeq = () => {
+  idSeq += 1;
+  return idSeq;
+};
+
 const env = inject("integrationDb");
 
 interface Recorder {
@@ -64,7 +72,9 @@ function recorder(): Recorder {
         if (code)
           throw Object.assign(new Error(`${code} for ${JSON.stringify(builder.to)}`), { code });
         n += 1;
-        return { messageId: `0101018f7d0c4d9a-msg-${String(n).padStart(8, "0")}` };
+        return {
+          messageId: `0101018f7d0c4d9a-msg-${idRun}${String(nextIdSeq()).padStart(8, "0")}`,
+        };
       },
     },
   };
@@ -154,7 +164,7 @@ describe.skipIf(!env)("booking email over the Cloudflare email adapter (G2.16a)"
       select provider, provider_message_id from public.email_messages where id = ${confirmation.id}`;
     expect(stored).toEqual({
       provider: "cloudflare",
-      provider_message_id: expect.stringMatching(/^0101018f7d0c4d9a-msg-\d{8}$/),
+      provider_message_id: expect.stringMatching(/^0101018f7d0c4d9a-msg-[0-9a-f]{8}\d{8}$/),
     });
   });
 

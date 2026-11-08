@@ -176,6 +176,30 @@ export const MessageDeliveryState = z
     "queued: waiting, or waiting to retry. sending: an attempt is in flight. sent: the provider accepted it, which is not proof the guest read it. failed: refused, or out of attempts. canceled: no longer needed",
   );
 
+export const MessageDeliveryReport = z
+  .object({
+    kind: z
+      .enum(["bounced", "complained"])
+      .describe(
+        "bounced: the receiving mail server refused it after the provider accepted it. complained: the guest marked it as spam",
+      ),
+    bounceType: z
+      .enum(["hard", "soft"])
+      .nullable()
+      .describe(
+        "For a bounce: hard, the address does not take mail; soft, the provider gave up retrying. Null for a complaint, or when the provider did not say",
+      ),
+    detailCode: z
+      .string()
+      .nullable()
+      .describe(
+        "The bounce's enhanced SMTP status (such as 5.1.1) or the complaint's type (such as abuse); never the provider's text",
+      ),
+    reportedAt: Instant.describe("When the provider says it happened"),
+  })
+  .describe("A bounce or complaint the provider reported for a sent message");
+export type MessageDeliveryReport = z.infer<typeof MessageDeliveryReport>;
+
 export const MessageStatus = z
   .object({
     id: z.uuid(),
@@ -208,6 +232,9 @@ export const MessageStatus = z
     staffResend: z
       .boolean()
       .describe("True for an email staff sent again from the console (G2.16b)"),
+    deliveryReport: MessageDeliveryReport.nullable().describe(
+      "What the provider reported after accepting it: its first bounce or spam complaint, or null. The state stays sent (W1-EMAIL-EVENTS)",
+    ),
     createdAt: Instant,
   })
   .describe("A message's delivery, without its recipient or content");
