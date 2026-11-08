@@ -12,6 +12,7 @@ export {
   findHoldsByOwner,
   getHold,
   getTripCapacity,
+  getTripSale,
   type Hold,
   IsolationLevelError,
   isOwnerRef,
@@ -24,6 +25,7 @@ export {
   releaseHold,
   type TripCapacityView,
   type TripHold,
+  type TripSaleView,
 } from "./holds.ts";
 export {
   DEFAULT_SWEEP_BATCH_SIZE,

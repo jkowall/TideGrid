@@ -20,11 +20,13 @@ export {
   type TaxTotal,
 } from "./compute.ts";
 export {
+  type FindTripOptions,
   findPromotion,
   findTripForSale,
   loadPolicy,
   loadPriceList,
   loadTaxRates,
+  type OwnHoldSale,
   type SaleTrip,
   type TripForSale,
 } from "./load.ts";

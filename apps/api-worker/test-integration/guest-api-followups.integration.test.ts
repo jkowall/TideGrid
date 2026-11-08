@@ -1,0 +1,413 @@
+import { randomUUID } from "node:crypto";
+import { ProblemResponse, TripOfferResponse } from "@tidegrid/contracts";
+import { createDb, inTenantTransaction } from "@tidegrid/database";
+import type {} from "@tidegrid/database/global-setup";
+import {
+  type CheckoutFixture,
+  createCheckoutFixture,
+  newSecret,
+  quoteFor,
+  TEST_FAKE_SECRET,
+} from "@tidegrid/domain-booking/testing";
+import { changeTripSalesState } from "@tidegrid/domain-catalog";
+import { systemContext, tripAllocator } from "@tidegrid/domain-inventory/testing";
+import postgres from "postgres";
+import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from "vitest";
+import { createApp } from "../src/app.ts";
+
+/**
+ * The four guest API follow-ups (W1-GUEST-API) through the API, on a real
+ * database as the runtime role: the Bearer read of the payment's client
+ * secret, problem details on the guest commands' 409 and 422, the offer of a
+ * checkout's trip without its own hold, and the seats left on a capacity
+ * refusal. Two tenants, so every changed read is tried from the other one.
+ */
+
+type Sql = ReturnType<typeof postgres>;
+type Json = Record<string, unknown> & {
+  error?: { code: string; message: string };
+  checkoutSession?: { id: string; state: string; tripId: string };
+  payment?: { provider: string; paymentRef: string; clientSecret: string } | null;
+  offer?: { tripId: string };
+  problems?: { code: string; subject: string | null }[];
+  remaining?: number;
+};
+
+const env = inject("integrationDb");
+
+describe.skipIf(!env)("guest API follow-ups through the API", () => {
+  let admin: Sql;
+  let runtime: ReturnType<typeof createDb>;
+  let app: ReturnType<typeof createApp>;
+  let A: CheckoutFixture & { host: string };
+  let B: CheckoutFixture & { host: string };
+  let tripsA: ReturnType<typeof tripAllocator>;
+  let tripsB: ReturnType<typeof tripAllocator>;
+  /** Every log line the app wrote during the test. */
+  let lines: string[] = [];
+
+  const bindings = () => ({
+    ENVIRONMENT: "local" as const,
+    BUILD_ID: "integration",
+    DATABASE_URL: env?.runtimeUrl ?? "",
+    ALLOWED_ORIGINS: "https://console.test",
+    STAFF_ORIGINS: "https://console.test",
+    PAYMENT_PROVIDER: "fake",
+    FAKE_PAYMENT_WEBHOOK_SECRET: TEST_FAKE_SECRET,
+  });
+  const executionCtx = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
+
+  async function request(
+    method: string,
+    path: string,
+    opts: { tenant: { host: string }; body?: unknown; headers?: Record<string, string> },
+  ) {
+    const headers = new Headers(opts.headers);
+    headers.set("origin", `https://${opts.tenant.host}`);
+    if (opts.body !== undefined) headers.set("content-type", "application/json");
+    const res = await app.request(
+      `http://localhost${path}`,
+      { method, headers, body: opts.body === undefined ? null : JSON.stringify(opts.body) },
+      bindings(),
+      executionCtx,
+    );
+    return { status: res.status, headers: res.headers, json: (await res.json()) as Json };
+  }
+
+  const bearer = (secret: string) => ({ authorization: `Bearer ${secret}` });
+
+  async function open(tenant: typeof A, tripId: string, party: number, charter = false) {
+    const q = await quoteFor(runtime.db, tenant.id, tripId, party, { charter });
+    const secret = newSecret();
+    const res = await request("POST", "/v1/public/checkout-sessions", {
+      tenant,
+      body: {
+        quoteId: q.quoteId,
+        acceptedPolicyVersion: q.policy.version,
+        booker: { name: "Follow Up", email: "follow.up@example.test" },
+        checkoutSecret: secret,
+      },
+      headers: { "idempotency-key": `chk-${randomUUID()}` },
+    });
+    return { ...res, secret, quote: q };
+  }
+  async function opened(tenant: typeof A, tripId: string, party: number, charter = false) {
+    const res = await open(tenant, tripId, party, charter);
+    const session = res.json.checkoutSession;
+    const payment = res.json.payment;
+    if (res.status !== 201 || !session || !payment) throw new Error(JSON.stringify(res.json));
+    return { session, payment, secret: res.secret };
+  }
+
+  const quote = (tenant: typeof A, body: unknown, key = `q-${randomUUID()}`) =>
+    request("POST", "/v1/public/quotes", { tenant, body, headers: { "idempotency-key": key } });
+  const adults = (tripId: string, quantity: number, extra: Record<string, unknown> = {}) => ({
+    tripId,
+    party: { kind: "tickets", tickets: [{ code: "adult", quantity }] },
+    addOns: [],
+    ...extra,
+  });
+  const paymentRead = (tenant: typeof A, id: string, secret: string) =>
+    request("GET", `/v1/public/checkout-sessions/${id}/payment`, {
+      tenant,
+      headers: bearer(secret),
+    });
+  const ownOffer = (tenant: typeof A, id: string, secret: string) =>
+    request("GET", `/v1/public/checkout-sessions/${id}/offer`, { tenant, headers: bearer(secret) });
+  const publicOffer = (tenant: typeof A, tripId: string) =>
+    request("GET", `/v1/public/trips/${tripId}/offer`, { tenant });
+  const cancel = (tenant: typeof A, id: string, secret: string) =>
+    request("POST", `/v1/public/checkout-sessions/${id}/cancel`, {
+      tenant,
+      headers: bearer(secret),
+    });
+
+  /** A problem body: the old envelope still reads, and the new shape parses. */
+  function expectProblem(json: Json, status: number, code: string) {
+    expect(json.error?.code).toBe(code);
+    const parsed = ProblemResponse.safeParse(json);
+    if (!parsed.success) throw new Error(`not a problem body: ${JSON.stringify(json)}`);
+    expect(parsed.data).toMatchObject({
+      type: "about:blank",
+      status,
+      code,
+      detail: json.error?.message,
+    });
+    return parsed.data;
+  }
+
+  beforeAll(async () => {
+    if (!env) return;
+    admin = postgres(env.adminUrl, { max: 2, onnotice: () => {} });
+    runtime = createDb(env.runtimeUrl, { max: 2 });
+    const withHost = async (fixture: CheckoutFixture) => {
+      const host = `${fixture.slug}.book.example.test`;
+      await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
+        values (${host}, ${fixture.id}, 'preview', 'active', now())`;
+      return { ...fixture, host };
+    };
+    A = await withHost(await createCheckoutFixture(admin, runtime.db, "gfu-a"));
+    B = await withHost(await createCheckoutFixture(admin, runtime.db, "gfu-b"));
+    tripsA = tripAllocator(A);
+    tripsB = tripAllocator(B);
+    app = createApp();
+  });
+
+  afterAll(async () => {
+    await runtime?.end();
+    await admin?.end({ timeout: 5 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    lines = [];
+  });
+  const captureLogs = () => {
+    for (const method of ["log", "info", "warn", "error"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        lines.push(args.map(String).join(" "));
+      });
+    }
+  };
+
+  describe("1. the Bearer read of the payment's client secret", () => {
+    it("returns the same provider payment while open, never cached, and never logs it", async () => {
+      captureLogs();
+      const { session, payment, secret } = await opened(A, tripsA.shared(), 2);
+      const first = await paymentRead(A, session.id, secret);
+      expect(first.status).toBe(200);
+      expect(first.headers.get("cache-control")).toBe("no-store");
+      expect(first.json.payment).toEqual(payment);
+      expect(first.json.checkoutSession).toMatchObject({ id: session.id, state: "open" });
+      // Read again: still the one payment, not a second.
+      const again = await paymentRead(A, session.id, secret);
+      expect(again.json.payment).toEqual(payment);
+      const [count] = await admin<{ n: number }[]>`
+        select count(*)::int as n from public.payments where checkout_session_id = ${session.id}`;
+      expect(count?.n).toBe(1);
+      // Neither secret reaches a log line.
+      expect(lines.length).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(line).not.toContain(payment.clientSecret);
+        expect(line).not.toContain(secret);
+      }
+    });
+
+    it("offers no payment once the checkout is closed", async () => {
+      const { session, secret } = await opened(A, tripsA.shared(), 1);
+      expect((await cancel(A, session.id, secret)).status).toBe(200);
+      const read = await paymentRead(A, session.id, secret);
+      expect(read.status).toBe(200);
+      expect(read.json.payment).toBeNull();
+      expect(read.json.checkoutSession?.state).toBe("canceled");
+    });
+
+    it("answers a wrong secret, another checkout's secret, or no secret as nothing", async () => {
+      const one = await opened(A, tripsA.shared(), 1);
+      const two = await opened(A, tripsA.shared(), 1);
+      expect((await paymentRead(A, one.session.id, newSecret())).status).toBe(404);
+      expect((await paymentRead(A, one.session.id, two.secret)).status).toBe(404);
+      expect((await paymentRead(A, randomUUID(), one.secret)).status).toBe(404);
+      const none = await request("GET", `/v1/public/checkout-sessions/${one.session.id}/payment`, {
+        tenant: A,
+      });
+      expect(none.status).toBe(401);
+      // A secret in the URL is never read.
+      const inUrl = await request(
+        "GET",
+        `/v1/public/checkout-sessions/${one.session.id}/payment?checkoutSecret=${one.secret}`,
+        { tenant: A },
+      );
+      expect(inUrl.status).toBe(401);
+    });
+
+    it("never crosses tenants", async () => {
+      const mine = await opened(A, tripsA.shared(), 1);
+      const theirs = await opened(B, tripsB.shared(), 1);
+      // A's checkout, with its own secret, from B's site.
+      const escaped = await paymentRead(B, mine.session.id, mine.secret);
+      expect(escaped.status).toBe(404);
+      expect(escaped.json.payment).toBeUndefined();
+      expect(JSON.stringify(escaped.json)).not.toContain(mine.payment.clientSecret);
+      // And the other way round.
+      expect((await paymentRead(A, theirs.session.id, theirs.secret)).status).toBe(404);
+      expect((await paymentRead(B, theirs.session.id, theirs.secret)).status).toBe(200);
+    });
+  });
+
+  describe("2. problem details on the guest commands", () => {
+    it("lists every quote problem with its subject, and keeps error.code first", async () => {
+      const res = await quote(A, {
+        tripId: tripsA.shared(),
+        party: {
+          kind: "tickets",
+          tickets: [
+            { code: "senior", quantity: 1 },
+            { code: "adult", quantity: 1 },
+          ],
+        },
+        addOns: [{ code: "kayak", quantity: 1 }],
+        promotionCode: "NOSUCHCODE",
+      });
+      expect(res.status).toBe(422);
+      const problem = expectProblem(res.json, 422, "unknown_ticket_type");
+      expect(problem.title).toBe("Unprocessable Content");
+      expect(problem.problems).toEqual([
+        { code: "unknown_ticket_type", subject: "senior" },
+        { code: "unknown_add_on", subject: "kayak" },
+        { code: "promotion_not_applicable", subject: null },
+      ]);
+      expect(problem.remaining).toBeUndefined();
+    });
+
+    it("gives a reused key and a refused checkout the same shape", async () => {
+      const tripId = tripsA.shared();
+      const key = `q-${randomUUID()}`;
+      expect((await quote(A, adults(tripId, 1), key)).status).toBe(201);
+      const reused = await quote(A, adults(tripId, 2), key);
+      expect(reused.status).toBe(422);
+      expectProblem(reused.json, 422, "idempotency_key_reused");
+
+      const q = await quoteFor(runtime.db, A.id, tripsA.shared(), 1);
+      const refused = await request("POST", "/v1/public/checkout-sessions", {
+        tenant: A,
+        body: {
+          quoteId: q.quoteId,
+          acceptedPolicyVersion: q.policy.version + 1,
+          booker: { name: "Follow Up", email: "follow.up@example.test" },
+          checkoutSecret: newSecret(),
+        },
+        headers: { "idempotency-key": `chk-${randomUUID()}` },
+      });
+      expect(refused.status).toBe(422);
+      expect(expectProblem(refused.json, 422, "policy_not_accepted").problems).toEqual([
+        { code: "policy_not_accepted", subject: null },
+      ]);
+    });
+
+    it("gives a trip off sale the same shape, with no count", async () => {
+      const tripId = tripsA.late();
+      const res = await quote(A, adults(tripId, 1));
+      expect(res.status).toBe(409);
+      expect(expectProblem(res.json, 409, "trip_not_bookable").remaining).toBeUndefined();
+    });
+  });
+
+  describe("3. the offer of a checkout's trip, without its own hold", () => {
+    it("reads the offer when the guest's own hold took the last seats", async () => {
+      const tripId = tripsA.shared();
+      const before = await publicOffer(A, tripId);
+      expect(before.status).toBe(200);
+      const other = await opened(A, tripId, 8);
+      const mine = await opened(A, tripId, 2);
+      // Sold out to everyone else: the public offer refuses.
+      expect((await publicOffer(A, tripId)).status).toBe(409);
+      const own = await ownOffer(A, mine.session.id, mine.secret);
+      expect(own.status).toBe(200);
+      expect(own.headers.get("cache-control")).toBe("no-store");
+      expect(TripOfferResponse.safeParse(own.json).success).toBe(true);
+      // The same offer the public route gave while the trip was on sale.
+      expect(own.json.offer).toEqual(before.json.offer);
+      // The other guest's own hold leaves 2 seats: on sale for them too.
+      expect((await ownOffer(A, other.session.id, other.secret)).status).toBe(200);
+    });
+
+    it("reads the offer of a charter whose whole boat the guest holds", async () => {
+      const tripId = tripsA.charter();
+      const mine = await opened(A, tripId, 2, true);
+      expect((await publicOffer(A, tripId)).status).toBe(409);
+      const own = await ownOffer(A, mine.session.id, mine.secret);
+      expect(own.status).toBe(200);
+      expect(own.json.offer?.tripId).toBe(tripId);
+    });
+
+    it("counts the hold again once the checkout is closed, and keeps every other rule", async () => {
+      const tripId = tripsA.charter();
+      const mine = await opened(A, tripId, 2, true);
+      const someone = await opened(A, tripsA.charter(), 2, true);
+      // Canceled: nothing is held, so the trip is on sale to everyone again.
+      expect((await cancel(A, mine.session.id, mine.secret)).status).toBe(200);
+      expect((await ownOffer(A, mine.session.id, mine.secret)).status).toBe(200);
+      expect((await publicOffer(A, tripId)).status).toBe(200);
+      // A closed trip stays off sale even for the guest who holds it.
+      const ctx = systemContext(A.id);
+      await inTenantTransaction(runtime.db, ctx, (trx) =>
+        changeTripSalesState(trx, ctx, {
+          tripId: someone.session.tripId,
+          to: "closed",
+          reason: "test",
+          now: new Date(),
+        }),
+      );
+      const closed = await ownOffer(A, someone.session.id, someone.secret);
+      expect(closed.status).toBe(409);
+      expect(closed.json.error?.code).toBe("trip_not_bookable");
+    });
+
+    it("sets aside only the guest's own hold, and never crosses tenants", async () => {
+      const tripId = tripsA.shared();
+      const big = await opened(A, tripId, 8);
+      const small = await opened(A, tripId, 2);
+      // Another checkout's secret reads nothing.
+      expect((await ownOffer(A, small.session.id, big.secret)).status).toBe(404);
+      expect((await ownOffer(A, small.session.id, newSecret())).status).toBe(404);
+      const none = await request("GET", `/v1/public/checkout-sessions/${small.session.id}/offer`, {
+        tenant: A,
+      });
+      expect(none.status).toBe(401);
+      // From B's site, A's checkout does not exist, with or without its secret.
+      expect((await ownOffer(B, small.session.id, small.secret)).status).toBe(404);
+      const theirs = await opened(B, tripsB.charter(), 2, true);
+      expect((await ownOffer(A, theirs.session.id, theirs.secret)).status).toBe(404);
+      expect((await ownOffer(B, theirs.session.id, theirs.secret)).status).toBe(200);
+    });
+  });
+
+  describe("4. the seats left on a capacity refusal", () => {
+    it("a quote names the count left on the trip it asked about", async () => {
+      const tripId = tripsA.shared();
+      await opened(A, tripId, 7);
+      // A busier trip next to it must not leak into the answer.
+      await opened(A, tripsA.shared(), 8);
+      const res = await quote(A, adults(tripId, 5));
+      expect(res.status).toBe(409);
+      const problem = expectProblem(res.json, 409, "insufficient_capacity");
+      expect(problem.remaining).toBe(3);
+      expect(problem.problems).toEqual([{ code: "insufficient_capacity", subject: null }]);
+      // Count only: nothing about the holds behind it.
+      expect(Object.keys(problem).sort()).toEqual(
+        ["code", "detail", "error", "problems", "remaining", "status", "title", "type"].sort(),
+      );
+    });
+
+    it("a checkout names the count left when another hold got there first", async () => {
+      const tripId = tripsA.shared();
+      const q = await quoteFor(runtime.db, A.id, tripId, 5);
+      await opened(A, tripId, 7);
+      const res = await request("POST", "/v1/public/checkout-sessions", {
+        tenant: A,
+        body: {
+          quoteId: q.quoteId,
+          acceptedPolicyVersion: q.policy.version,
+          booker: { name: "Follow Up", email: "follow.up@example.test" },
+          checkoutSecret: newSecret(),
+        },
+        headers: { "idempotency-key": `chk-${randomUUID()}` },
+      });
+      expect(res.status).toBe(409);
+      const problem = expectProblem(res.json, 409, "insufficient_capacity");
+      expect(problem.remaining).toBe(3);
+      // The message still says it, for clients that read the envelope only.
+      expect(problem.error.message).toBe("Only 3 seat(s) are left on this trip");
+    });
+
+    it("never gives a count for another tenant's trip", async () => {
+      const theirs = tripsB.shared();
+      await opened(B, theirs, 7);
+      const res = await quote(A, adults(theirs, 5));
+      expect(res.status).toBe(404);
+      expect(res.json.remaining).toBeUndefined();
+      expect(res.json.error?.code).toBe("trip_not_found");
+    });
+  });
+});

@@ -12,6 +12,7 @@ import { createQuote, getQuote, getTripOffer, type QuoteProblem } from "@tidegri
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { withPublicTenant } from "../public-tenant.ts";
+import { ProblemError, problemAnswer, withProblems } from "./problems.ts";
 import { errorBody } from "./responses.ts";
 
 const offerPath = "/v1/public/trips/{tripId}/offer";
@@ -29,14 +30,29 @@ const requestProblems = QuoteProblemCode.options.filter((c) => !conflictProblems
 
 /**
  * The first problem is the error code; the message lists every problem with
- * the ticket type or add-on it is about. Promotion problems share one code
- * whatever the reason, so codes cannot be probed.
+ * the ticket type or add-on it is about, and `problems` lists them again by
+ * code and subject (W1-GUEST-API). Promotion problems share one code whatever
+ * the reason, and the reason is never sent, so codes cannot be probed. Too
+ * few seats adds `remaining`: the count left on this trip, nothing more.
  */
-function quoteRejected(problems: readonly QuoteProblem[]): ApiError {
+export function quoteRejected(
+  problems: readonly QuoteProblem[],
+  capacityRemaining?: number,
+): ProblemError {
   const code = problems[0]?.code ?? "pricing_unavailable";
   const status = conflictProblems.includes(code) ? 409 : 422;
   const detail = problems.map((p) => (p.subject ? `${p.code} (${p.subject})` : p.code)).join(", ");
-  return new ApiError(status, code, `This quote cannot be priced: ${detail}`);
+  const listed = problems.map((p) => ({ code: p.code, subject: p.subject ?? null }));
+  const remaining = problems.some((p) => p.code === "insufficient_capacity")
+    ? capacityRemaining
+    : undefined;
+  return new ProblemError(
+    status,
+    code,
+    `This quote cannot be priced: ${detail}`,
+    listed.length > 0 ? listed : [{ code, subject: null }],
+    remaining,
+  );
 }
 
 export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
@@ -108,11 +124,11 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
       },
       400: errorBody("Request did not match the contract"),
       404: errorBody("No active tenant hostname matches the origin, or no such trip"),
-      409: errorBody(
-        "The trip is not on sale now (trip_not_bookable), has no price list or policy (pricing_unavailable), or has too few seats left (insufficient_capacity)",
+      409: problemAnswer(
+        "The trip is not on sale now (trip_not_bookable), has no price list or policy (pricing_unavailable), or has too few seats left (insufficient_capacity, with `remaining`: the seats left on this trip). Problem details",
       ),
-      422: errorBody(
-        `The party, add-ons, or promotion code cannot be priced; the code names the first problem and the message lists all: ${requestProblems.join(", ")}. Or idempotency_key_reused: the key was used with another request`,
+      422: problemAnswer(
+        `The party, add-ons, or promotion code cannot be priced; \`code\` names the first problem and \`problems\` lists all, each with its ticket type or add-on: ${requestProblems.join(", ")}. Or idempotency_key_reused: the key was used with another request. Problem details`,
       ),
       429: errorBody(
         "Too many quotes from this address for this operator in the last minute (rate_limited); nothing was written",
@@ -120,44 +136,46 @@ export function registerPricingPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
     },
   });
 
-  app.openapi(createQuoteRoute, async (c) => {
-    const input = c.req.valid("json");
-    const key = c.req.valid("header")["idempotency-key"];
-    const result = await withPublicTenant(
-      c,
-      {
-        idempotency: {
-          scope: "public.quotes.create",
-          key,
-          route: quotesPath,
-          body: input,
-          successStatus: 201,
+  app.openapi(createQuoteRoute, (c) =>
+    withProblems(c, async () => {
+      const input = c.req.valid("json");
+      const key = c.req.valid("header")["idempotency-key"];
+      const result = await withPublicTenant(
+        c,
+        {
+          idempotency: {
+            scope: "public.quotes.create",
+            key,
+            route: quotesPath,
+            body: input,
+            successStatus: 201,
+          },
         },
-      },
-      async (trx, ctx) => {
-        const created = await createQuote(trx, ctx, {
-          tripId: input.tripId,
-          party: input.party,
-          addOns: input.addOns,
-          promotionCode: input.promotionCode ?? null,
-          now: now(),
-        });
-        switch (created.kind) {
-          case "created":
-            return { quote: created.quote };
-          case "trip_not_found":
-            throw tripNotFound();
-          case "trip_not_on_sale":
-            throw tripNotOnSale();
-          case "rejected":
-            throw quoteRejected(created.problems);
-        }
-      },
-    );
-    if (result.replayed) c.header("Idempotent-Replayed", "true");
-    if (result.status !== 201) throw new Error(`unexpected stored status ${result.status}`);
-    return c.json(result.body, 201);
-  });
+        async (trx, ctx) => {
+          const created = await createQuote(trx, ctx, {
+            tripId: input.tripId,
+            party: input.party,
+            addOns: input.addOns,
+            promotionCode: input.promotionCode ?? null,
+            now: now(),
+          });
+          switch (created.kind) {
+            case "created":
+              return { quote: created.quote };
+            case "trip_not_found":
+              throw tripNotFound();
+            case "trip_not_on_sale":
+              throw tripNotOnSale();
+            case "rejected":
+              throw quoteRejected(created.problems, created.capacityRemaining);
+          }
+        },
+      );
+      if (result.replayed) c.header("Idempotent-Replayed", "true");
+      if (result.status !== 201) throw new Error(`unexpected stored status ${result.status}`);
+      return c.json(result.body, 201);
+    }),
+  );
 
   const readQuoteRoute = createRoute({
     method: "get",
