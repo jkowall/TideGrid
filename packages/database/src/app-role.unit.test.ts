@@ -61,6 +61,34 @@ describe("neonMainRefusal for app-role:password", () => {
     expect(neonMainRefusal(local, optIn, source())).toMatch(/--neon-main was given/);
   });
 
+  it("refuses --neon-main when a multi-host URL lists any host beside main", () => {
+    // postgres.js tries each host in turn, so a branch or localhost beside
+    // main could get the new password.
+    const branchHost = "ep-branch-111111.us-east-2.aws.neon.tech";
+    const mixed = [
+      `postgresql://owner:pw-not-real@${mainHost},${branchHost}/neondb`,
+      `postgresql://owner:pw-not-real@${branchHost},${mainHost}/neondb`,
+      `postgresql://owner:pw-not-real@${mainHost},127.0.0.1:55432/neondb`,
+    ];
+    for (const url of mixed) {
+      const recorded = neonMainRefusal(url, optIn, source({ NEON_MAIN_HOST: mainHost }));
+      expect(recorded).toMatch(/not only the Neon main host/);
+      expectNoEcho(recorded);
+    }
+    // With main not recorded, a non-Neon host beside a Neon one refuses too.
+    const unrecorded = neonMainRefusal(mixed[2] as string, optIn, source());
+    expect(unrecorded).toMatch(/lists another host beside one/);
+    expectNoEcho(unrecorded);
+    // Main listed twice is still only main.
+    expect(
+      neonMainRefusal(
+        `postgresql://owner:pw-not-real@${mainHost},${mainHost}/neondb`,
+        optIn,
+        source({ NEON_MAIN_HOST: mainHost }),
+      ),
+    ).toBeNull();
+  });
+
   it("with main missing, refuses a Neon host unless a flag says which it is", () => {
     const refusal = neonMainRefusal(onMain, plain, source());
     expect(refusal).toMatch(/--neon-main/);

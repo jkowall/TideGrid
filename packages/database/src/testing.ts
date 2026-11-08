@@ -265,11 +265,17 @@ export function neonMainRefusal(
 
   const { neonMain } = mode.appRole;
   if (neonMain) {
-    if (recorded.kind === "missing" && !neon) {
-      return "Refused: --neon-main was given, but DATABASE_URL is not a Neon host. Drop --neon-main for any other database.";
+    // The opt-in covers Neon main only. postgres.js tries each host of a
+    // multi-host URL in turn, so every host it could reach must qualify, not
+    // just one: a branch or localhost beside main would otherwise get the new
+    // password.
+    const allNeon = hosts.length > 0 && hosts.every(isNeonHostName);
+    const allMain = recorded.kind === "set" ? hosts.every((h) => recorded.hosts.includes(h)) : null;
+    if (recorded.kind === "missing" && !allNeon) {
+      return "Refused: --neon-main was given, but DATABASE_URL is not a Neon host, or lists another host beside one. Drop --neon-main for any other database.";
     }
-    if (!neon || isMain === false) {
-      return "Refused: --neon-main was given, but DATABASE_URL is not the Neon main host recorded in NEON_MAIN_HOST. Check both; drop --neon-main for any other database.";
+    if (!allNeon || allMain === false) {
+      return "Refused: --neon-main was given, but DATABASE_URL is not only the Neon main host recorded in NEON_MAIN_HOST. Check both; drop --neon-main for any other database.";
     }
     return null;
   }
