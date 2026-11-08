@@ -38,7 +38,13 @@ A completed worksheet is a discussion aid. It is not a quote, an offer, an invoi
 
 List every booking channel. A channel counts toward the fee base when the booking is managed in TideGrid. Payment rail and import origin do not change fee treatment.
 
-Enter each channel's eligible booking value for trips completed in the period: trip fares and private-charter value, mandatory operator fees, and eligible booking-linked add-ons and equipment rentals. Enter it before discounts and refunds, which Step 2 subtracts. Exclude taxes and tips. Count each booking once, never its deposit and balance separately. A cancelled or no-show booking enters only Step 2 line C, for the amount retained; a fully refunded cancellation enters nowhere. Dollar card redemptions enter here, inside the booking lines they paid for.
+Enter each channel's eligible booking value for trips completed in the period: trip fares and private-charter value, mandatory operator fees, and eligible booking-linked add-ons and equipment rentals. Enter it before discounts and refunds, which Step 2 subtracts. Exclude taxes and tips. Count each booking once, never its deposit and balance separately. A cancelled or no-show booking enters only Step 2 line C, for the amount retained; a fully refunded cancellation enters nowhere.
+
+Dollar card redemptions from a purchased lot enter here, inside the booking lines they paid for. Promotional credit stays inside the booking line, and Step 2 line F subtracts it. Leave these out of the channel values, and record them in Step 3:
+
+- complimentary value;
+- trips redeemed against a trip-count card, because Step 2 line B already counted the card sale;
+- the part of a booking paid from a credit that preserves value already counted on an earlier booking, in this period or an earlier one. A cancellation-credit lot is the usual case: its value was already counted, for example in line C.
 
 | Channel | Bookings (count) | Eligible booking value (USD) | In fee base |
 |---|---:|---:|:---:|
@@ -76,7 +82,8 @@ Record these so the prospect can see what was left out. None of them enters N.
 | Tips | | Operator-settled and excluded |
 | Complimentary value | | Contributes zero |
 | Trip-count card redemptions | | The card sale was already counted in B |
-| Dollar card purchases at issue | | Prepaid value; its redemption counts in Step 1 |
+| Redemptions of value-preserving credits (cancellation-credit lots) | | Value already counted on the original booking |
+| Dollar card purchases at issue | | Prepaid value; its purchased-lot redemption counts in Step 1 |
 | Imported OTA reservation value | | Excluded during the pilot |
 | Unrelated retail sales | | Not booking value |
 | Payment-processing fees | | Not booking value |
@@ -121,7 +128,7 @@ Show this step only after Step 4. The credit applies only under the Pilot Native
 
 ```text
 Native setup credit    = $4,500 - $2,250 = $2,250
-Managed Launch credit  = $1,000
+Managed Launch credit  = $1,000 if Managed Launch appears in Step 4, else $0
 Pilot credit           = Native setup credit + Managed Launch credit (at most $3,250)
 Year-one pilot price   = year-one full price - pilot credit
 ```
@@ -133,13 +140,13 @@ Year-one pilot price   = year-one full price - pilot credit
 | Pilot credit: Managed Launch | |
 | **Year-one pilot price** | |
 
-When the Pilot Native offer does not apply, enter $0 for both credit lines and say why.
+The Managed Launch credit only offsets a Managed Launch charge that Step 4 shows. When the offer applies but the operator does not take Managed Launch, the Managed Launch credit is $0. When the Pilot Native offer does not apply, enter $0 for both credit lines and say why.
 
 ## Step 6: Checks before showing the worksheet (proposed)
 
 | Check | Rule | Source |
 |---|---|---|
-| Custom quote | Average monthly N above $100,000, five or more active boats, or more than one location, brand, legal operator, or app pair needs a custom quote. Do not show this worksheet's price. | [Custom work](../v2/03-commercial-model.md#pass-through-costs-and-custom-work) |
+| Custom quote | Any trigger in Custom work needs a custom quote: average monthly N above $100,000; five or more active boats; more than one location, brand, legal operator, or native app pair; non-US entities, currencies, taxes, or payment methods; enterprise security, procurement, support, or service-level terms; or requirements outside the published V2 product scope. Do not show this worksheet's price. | [Custom work](../v2/03-commercial-model.md#pass-through-costs-and-custom-work) |
 | Direct-first share | At least 80% of trailing booking count through direct or staff-assisted channels. Use counts from Step 1, not value. | [Direct-first profile](operator-validation-guide.md#direct-first-discovery-profile) |
 | Native fit | Average monthly N of at least $25,000 for a pilot Native learning case. Standard Native sales target about $50,000 or more. | [Native pilot qualification](operator-validation-guide.md#native-pilot-qualification) |
 | Fee base explained | The prospect can restate which channels and values count, and that externally paid bookings managed in TideGrid count. | [Price reveal](operator-validation-guide.md#039-to-043-price-reveal-and-commitment-tests) |
@@ -158,6 +165,8 @@ All values are synthetic. Trailing 12 months. Three active boats. Requests Booki
 | Cash, check, or external point-of-sale | 300 | 25,000 | Yes |
 | Imported OTA reservation | 600 | 60,000 | No |
 | **Included channels subtotal (A)** | 3,350 | **330,000** | |
+
+The channel values leave out the 15,000 of trips redeemed against trip-count cards (see A3). This example has no cancellation-credit redemptions.
 
 ### A2. Net managed booking value
 
@@ -211,7 +220,7 @@ The annual recurring price, $13,338.50, is the same with or without the pilot cr
 
 ### A6. Checks
 
-- Custom quote: not needed. Average monthly N is $27,916.67, below $100,000, with three active boats.
+- Custom quote: not needed. Average monthly N is $27,916.67, below $100,000, with three active boats. Assumed: one US location and no other Custom work trigger.
 - Direct-first share by count: 3,350 / 3,950 = 84.8%. OTA is 600 / 3,950 = 15.2%. Passes the 80% rule.
 - Native fit: average monthly N of $27,916.67 meets the $25,000 pilot learning-case floor. It is below the about-$50,000 standard Native target, so it fits only as a pilot learning case with an evidenced repeat-use reason.
 
@@ -283,7 +292,7 @@ No pilot credit applies. The Pilot Native offer requires the Native add-on, and 
 
 ### B6. Checks
 
-- Custom quote: not needed. Average monthly N is $5,833.33 with one active boat.
+- Custom quote: not needed. Average monthly N is $5,833.33 with one active boat. Assumed: one US location and no other Custom work trigger.
 - Direct-first share by count: 71 / 77 = 92.2%. OTA is 6 / 77 = 7.8%. Passes the 80% rule.
 - Native fit: average monthly N of $5,833.33 is below the $25,000 pilot learning-case floor. Do not offer Native from this worksheet.
 
