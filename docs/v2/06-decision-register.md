@@ -38,6 +38,8 @@ Coordinator readings, pending owner confirmation:
 - **Releases.** A ruleset gates merges, not releases. It would not make `release` wait for the push run on `main`. That follow-up stays proposed and not built.
 - **Older SHAs.** The three SHAs without step 9 are unchanged. A green dispatch on each is still their route.
 
+Update, 2026-11-08, after pull request 80 merged: the owner reported "ruleset is active now, items 3 and 4 both set". So the ruleset requires a pull request, with the owner as the only bypass, and requires branches to be up to date before merging. From then on, GitHub enforces the runbook's merge rule for every merge except a bypass. A bypass merge must still meet that rule by hand.
+
 Canonical: the [runbook's P0.1 merge rule](../runbooks/2026-11-01-preview-deploy.md#p0-prep-oct-29-to-31-no-live-calls) and the repository's rulesets in GitHub.
 
 ### 2026-11-07: G2.12 follow-ups, search and calendar by source and number-shaped references (owner decisions; coordinator defaults pending owner confirmation)
