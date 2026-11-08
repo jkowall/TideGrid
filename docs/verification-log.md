@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Staff resend limits held at the delivery claim (W1-RESEND-CLAIM), built November 8, 2026
+
+Goal branch `claude/project-thread-wqkheo`, from `main` at `f8044a9` ([decision register](v2/06-decision-register.md#2026-11-08-w1-resend-claim-staff-resend-limits-held-at-the-delivery-claim-owner-go-coordinator-defaults-pending-owner-confirmation)). Migration `0017_resend_bound_at_claim.sql` (provisional; `0018` reserved) and the delivery job's claim in `packages/domain-messaging/src/delivery.ts`.
+
+- **The hole, reproduced.** Case C1 commits a resend after `SET CONSTRAINTS email_messages_staff_resend IMMEDIATE` and a wait past the 1 s bound: it commits. With its stamp moved an hour back, `0014` lets a service resend of the same booking through at once. At the claim it now waits 10 minutes from the first resend's claim, and a direct claim raises `email_messages_resend_interval`.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `pnpm test:integration`, every package, all passing, including the new `staff-email-resend-claim.integration.test.ts` (C1 to C10) and the two earlier staff resend suites (60 tests together). `pnpm check` passes. No Neon call, no deploy, no email sent.
+- **Independent review** on `fabd793`: no blocking defect. Five findings were fixed: the delivery job only tries the tenant's resend lock, so a held lock never stalls the sweep; the claim log's insert takes that lock; the backfill skips a resend message with no booking; a refusal under two rules reports the later lift; the README's apply note now says an older delivery job stalls a tenant's mail while a resend waits. One is documented, not fixed: the claim log's stamp can lag a send by the run's deadline when a writer holds the booking row.
+- **Still open.** A writer that forges the `0015` give-back after a send can make the same message go out again (D5, every message). Security review under R9: asked of the owner, answer pending. The `0014` residuals are W1-0014-RESIDUALS.
+
 ### O-P7: G2.16-live, email switched on, A9 and steps 3 and 8 not shown, November 8, 2026
 
 The owner ran the [November 1 runbook](runbooks/2026-11-01-preview-deploy.md)'s P7 in the owner's own terminal on the owner's work Mac, on the commands the coordinator gave, from about 13:10 to 14:31 UTC on November 8 ([decision register](v2/06-decision-register.md#2026-11-08-o-p7-g216-live-email-switched-on-a9-and-steps-3-and-8-not-shown-owner-decisions)). Live steps ran without `--confirm`. The owner closed P7 at 14:32 UTC with A9 and demo steps 3 and 8 not shown. The results below are the owner's pasted terminal output unless marked *coordinator-reported*; no log file was saved.
