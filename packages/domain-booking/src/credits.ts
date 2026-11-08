@@ -139,7 +139,7 @@ export async function getCreditAccount(
   const { rows: entries } = await sql<EntryRow>`
     select ${entryColumns} from credit_entries
      where tenant_id = ${tenantId} and account_id = ${accountId}
-     order by created_at, id`.execute(trx);
+     order by seq`.execute(trx);
   return {
     id: account.id,
     balance: account.balance,

@@ -408,6 +408,8 @@ CREATE TABLE public.credit_accounts (
            AND customer_email ~ '^[^@]+@[^@]+\.[^@]+$'),
   currency text NOT NULL DEFAULT 'USD' CHECK (currency = 'USD'),
   balance integer NOT NULL DEFAULT 0 CHECK (balance BETWEEN 0 AND 1000000000),
+  -- How many entries the account has; the trigger numbers each new one.
+  entry_count integer NOT NULL DEFAULT 0 CHECK (entry_count >= 0),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, id),
@@ -430,6 +432,9 @@ CREATE TABLE public.credit_entries (
   kind text NOT NULL CHECK (kind IN ('issue', 'redeem', 'reinstate', 'adjust')),
   amount integer NOT NULL CHECK (amount <> 0 AND amount BETWEEN -100000000 AND 100000000),
   balance_after integer NOT NULL DEFAULT 0 CHECK (balance_after BETWEEN 0 AND 1000000000),
+  -- The entry's place in its account's ledger, numbered under the account's
+  -- lock, so the last entry's balance_after is the account's balance.
+  seq integer NOT NULL DEFAULT 0 CHECK (seq >= 0),
   currency text NOT NULL DEFAULT 'USD' CHECK (currency = 'USD'),
   booking_id uuid,
   cancellation_id uuid,
@@ -459,7 +464,7 @@ CREATE TABLE public.credit_entries (
   CHECK ((kind = 'reinstate') = (reinstates_entry_id IS NOT NULL)),
   CHECK (expires_at IS NULL OR kind = 'issue')
 );
-CREATE INDEX credit_entries_account_idx ON public.credit_entries (tenant_id, account_id, created_at);
+CREATE UNIQUE INDEX credit_entries_account_seq ON public.credit_entries (tenant_id, account_id, seq);
 
 ALTER TABLE public.booking_cancellations
   ADD CONSTRAINT booking_cancellations_credit FOREIGN KEY (tenant_id, credit_entry_id)
@@ -504,7 +509,7 @@ BEGIN
   NEW.actor_id := app.setting_or_null('app.actor_id');
   NEW.request_id := app.setting_or_null('app.request_id');
 
-  SELECT a.id, a.customer_email, a.balance INTO acct
+  SELECT a.id, a.customer_email, a.balance, a.entry_count INTO acct
     FROM public.credit_accounts a
    WHERE a.tenant_id = NEW.tenant_id AND a.id = NEW.account_id
      FOR UPDATE;
@@ -567,8 +572,9 @@ BEGIN
       USING ERRCODE = '23514', CONSTRAINT = 'credit_entries_balance';
   END IF;
   NEW.balance_after := next_balance::integer;
+  NEW.seq := acct.entry_count + 1;
   UPDATE public.credit_accounts
-     SET balance = next_balance::integer, updated_at = now()
+     SET balance = next_balance::integer, entry_count = acct.entry_count + 1, updated_at = now()
    WHERE tenant_id = NEW.tenant_id AND id = NEW.account_id;
   RETURN NEW;
 END;

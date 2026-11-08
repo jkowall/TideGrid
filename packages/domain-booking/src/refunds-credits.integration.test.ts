@@ -501,6 +501,8 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
     ).rejects.toThrow();
     expect(await balance()).toBe(preview.policyValue - 500);
     const account = await as(ctx, (trx) => getCreditAccount(trx, A.id, accountId));
+    // The ledger reads in the order the balance moved: its last entry is the balance.
+    expect(account?.entries.at(-1)?.balanceAfter).toBe(account?.balance);
     expect(account?.entries.map((e) => e.kind).sort()).toEqual(
       ["adjust", "adjust", "issue", "redeem", "redeem", "reinstate"].sort(),
     );

@@ -151,6 +151,15 @@ export async function settleRefund(
   return inTenantTransaction(db, ctx, async (trx) => {
     const locked = await lockRefund(trx, ctx.tenantId, refund.id);
     if (!locked || (locked.state !== "requested" && locked.state !== "pending")) {
+      // Settled meanwhile (an event). An answer about the same refund that
+      // says the opposite is raised for staff; the settled state stands.
+      const sameRefund =
+        locked !== undefined && outcome.ref !== null && locked.provider_refund_id === outcome.ref;
+      if (sameRefund && locked.state === "succeeded" && outcome.state === "failed") {
+        await raiseRefundException(trx, ctx, locked.id, "failed_after_success", outcome.code);
+      } else if (sameRefund && locked.state === "failed" && outcome.state === "succeeded") {
+        await raiseRefundException(trx, ctx, locked.id, "succeeded_after_failure", null);
+      }
       return { kind: "not_pending" as const };
     }
     if (outcome.state === "failed" && outcome.ref === null && locked.provider_refund_id !== null) {

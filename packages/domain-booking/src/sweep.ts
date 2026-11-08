@@ -625,13 +625,14 @@ export async function runCheckoutSweep(
     turn: async (tenantId) => {
       const run = runOf(tenantId);
       let units = 0;
+      const expiredBefore = run.expired.size;
       if (run.expiry !== "done") units += await expiry(run);
+      // Expiry writes the cancellations this step sends: new expiries reopen it,
+      // even when the cancellation step had finished earlier in the run.
+      if (run.expired.size > expiredBefore) run.cancellations = "todo";
       if (run.inbox !== "done") units += await inbox(run);
       if (run.refunds !== "done") units += await refunds(run);
-      // After the expiry step, which writes the cancellations it then sends.
-      if (run.cancellations !== "done" || run.expiry === "more") {
-        units += await cancellations(run);
-      }
+      if (run.cancellations !== "done") units += await cancellations(run);
       const more =
         run.expiry === "more" ||
         run.inbox === "more" ||

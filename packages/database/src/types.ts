@@ -1389,6 +1389,8 @@ export interface CreditAccountsTable {
   customer_email: Fixed<string>;
   currency: FixedDefault<"USD">;
   balance: ColumnType<number, never, never>;
+  /** Entries so far; the trigger numbers each new entry with it. */
+  entry_count: ColumnType<number, never, never>;
   created_at: Stamped;
   updated_at: Stamped;
 }
@@ -1403,6 +1405,8 @@ export interface CreditEntriesTable {
   kind: Fixed<CreditEntryKind>;
   amount: Fixed<number>;
   balance_after: ColumnType<number, never, never>;
+  /** The entry's place in its account's ledger, set by the trigger under the account's lock. */
+  seq: ColumnType<number, never, never>;
   currency: FixedDefault<"USD">;
   booking_id: FixedDefault<string | null>;
   cancellation_id: FixedDefault<string | null>;
