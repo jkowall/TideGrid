@@ -13,9 +13,11 @@
  *   --out <file>     write {"branchId","connectionString"} to this file with
  *                    mode 0600; the file must not exist yet
  *
- * `create` prints only `{"branchId": ...}`. The admin connection string goes to
- * --out when given and is otherwise never fetched, so it cannot reach a
- * terminal's scrollback or a log. Branches inherit roles and data from the
+ * `create` prints only `{"branchId": ...}` on stdout. The admin connection
+ * string goes to --out when given and is otherwise never fetched, so it cannot
+ * reach a terminal's scrollback or a log. A branch with an endpoint also gets
+ * one line on stderr: the flags the Neon main guard needs to run integration
+ * suites on it. Branches inherit roles and data from the
  * parent (main) at creation time.
  */
 import { open } from "node:fs/promises";
@@ -174,6 +176,15 @@ export function parseCreateArgs(args: readonly string[], now = Date.now()): Crea
   };
 }
 
+/**
+ * The flags a throwaway branch needs before integration suites run on it, set
+ * next to its DATABASE_URL. TIDEGRID_NEON_BRANCH=1 matters while no
+ * NEON_MAIN_HOST is recorded; a branch's host never equals main's. Printed on
+ * stderr so stdout stays one JSON line. Exported for the unit test.
+ */
+export const throwawayBranchFlags = "TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1";
+export const throwawayBranchHint = `For integration suites on this branch, set ${throwawayBranchFlags} with its DATABASE_URL.`;
+
 /** Write the secret file with mode 0600, refusing to replace an existing file. */
 async function writePrivate(path: string, body: string): Promise<void> {
   const handle = await open(path, "wx", 0o600);
@@ -193,6 +204,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       await writePrivate(out, `${JSON.stringify(result)}\n`);
     }
     console.log(JSON.stringify({ branchId: result.branchId }));
+    if (options.endpoint) console.error(throwawayBranchHint);
   } else if (command === "delete") {
     const [arg] = rest;
     if (!arg) throw new Error("branch id required");

@@ -1,5 +1,14 @@
+import { parseEnv } from "node:util";
 import { describe, expect, it } from "vitest";
-import { createBody, createBranch, deleteBranch, parseCreateArgs } from "./neon-branch.ts";
+import {
+  createBody,
+  createBranch,
+  deleteBranch,
+  parseCreateArgs,
+  throwawayBranchFlags,
+  throwawayBranchHint,
+} from "./neon-branch.ts";
+import { neonMainRefusal } from "./testing.ts";
 
 const env = { NEON_API_KEY: "test-key-not-real", NEON_PROJECT_ID: "proj-test" };
 
@@ -99,5 +108,39 @@ describe("neon-branch requests (injected fetch, no network)", () => {
   it("treats an already deleted branch as deleted", async () => {
     const { deps } = recorder({ "/branches/br-gone": { status: 404, body: "" } });
     await expect(deleteBranch("br-gone", deps)).resolves.toBeUndefined();
+  });
+});
+
+describe("neon-branch and the Neon main guard", () => {
+  // Synthetic hosts only. None is a real endpoint.
+  const mainHost = "ep-main-000000.us-east-2.aws.neon.tech";
+  const branchUri =
+    "postgresql://neondb_owner:pw-not-real@ep-branch-111111.us-east-2.aws.neon.tech/neondb?sslmode=require";
+
+  it("prints a hint that names the flags and nothing secret", () => {
+    expect(throwawayBranchHint).toContain(throwawayBranchFlags);
+    expect(throwawayBranchFlags).toBe("TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1");
+  });
+
+  it("a branch it created passes the guard with the printed flags", async () => {
+    const { deps } = recorder({
+      "/branches": { status: 201, body: JSON.stringify({ branch: { id: "br-3" } }) },
+      "/connection_uri": { status: 200, body: JSON.stringify({ uri: branchUri }) },
+    });
+    const { options } = parseCreateArgs(["ci-guard", "--out", "/nonexistent/uri.json"]);
+    const { connectionString } = await createBranch("ci-guard", options, deps);
+    if (!connectionString) throw new Error("expected a connection string");
+    const flags = parseEnv(throwawayBranchFlags.split(" ").join("\n")) as Record<string, string>;
+    const guard = (env: Record<string, string>) =>
+      neonMainRefusal(connectionString, "tests", { env, readEnvLocal: () => null });
+
+    // Without the flags and with no main recorded, a Neon branch is refused.
+    expect(guard({})).toMatch(/TIDEGRID_NEON_BRANCH=1/);
+    expect(guard(flags)).toBeNull();
+    expect(guard({ ...flags, NEON_MAIN_HOST: mainHost })).toBeNull();
+    // The flag never lets a run through to the recorded main host.
+    expect(guard({ ...flags, NEON_MAIN_HOST: "ep-branch-111111.us-east-2.aws.neon.tech" })).toMatch(
+      /recorded in NEON_MAIN_HOST/,
+    );
   });
 });

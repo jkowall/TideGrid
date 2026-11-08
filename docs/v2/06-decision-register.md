@@ -8,6 +8,23 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-TEST-GUARDS, guards that refuse Neon main in test setup and app-role (owner go; coordinator defaults pending owner confirmation)
+
+The Nov 1 runbook's rule 4 says never to run `app-role:password` or `test:integration` against Neon main, because either rotates `tidegrid_app` and breaks Hyperdrive. Its list of things not taken on Nov 1 proposed guards in `packages/database/src/testing.ts` and `app-role.ts` as a separate goal. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the go for this goal. No main host value was supplied, and none is in the repository.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1. Where the main host lives.** `NEON_MAIN_HOST`, a bare host name, in the environment or in the repository root `.env.local`, which is gitignored. When both are set, a match with either refuses. A blank value counts as unset. A value that is not a bare host name (a URL, a port, a user, a path) refuses every run until it is fixed, the local container included.
+- **D2. When no main host is recorded.** Integration setup and `app-role:password` refuse any host `isNeonHost()` matches, unless `TIDEGRID_NEON_BRANCH=1` marks a throwaway branch. The flag never lets a run through to the recorded main host.
+- **D3. The app-role opt-in.** `--neon-main`. With it, `app-role:password` runs on the recorded main host. It refuses `--neon-main` for a database that is not Neon, or not the recorded host.
+- **What counts as a match.** Every host a postgres.js client would reach: each host of a multi-host URL, else `PGHOST`, else localhost. Hosts compare in lower case without a trailing dot, and a Neon pooled endpoint compares as its direct endpoint.
+- **Refusals echo nothing.** A refusal names the rule and the flag. It never prints a host, a user, a password, or the URL, and a URL that does not parse is refused without rethrowing the parser's error, which carries the input.
+- **Where it applies.** `integrationAdminUrl()`, so the shared global setup, and `prepareIntegrationDatabase()` itself. CI and the local container are unchanged: their host is `127.0.0.1`, and neither sets `NEON_MAIN_HOST`.
+- **The throwaway branch route.** `neon:branch create` prints one line on stderr for a branch with an endpoint: set `TIDEGRID_EPHEMERAL_DB=1 TIDEGRID_NEON_BRANCH=1` with its `DATABASE_URL`. Stdout stays one JSON line.
+- **Not done.** No Neon API lookup of the main branch. The `nov1 db` refusals are unchanged. The AGENTS.md command note is proposed and not written, because AGENTS.md was not authorized for this goal. The release tool's refusal text still says app-role has no guard; it is outside this goal's paths.
+
+Canonical: `packages/database/src/testing.ts`, `packages/database/src/app-role.ts`, and the [database README's Neon main guard](../../packages/database/README.md#neon-main-guard).
+
 ### 2026-11-08: W1-STRIPE-WEBHOOK, Stripe webhook quick 2xx and source address list (owner go; coordinator defaults pending owner confirmation)
 
 The demo build plan's [Stripe adapter narrowing](12-demo-build-plan.md#goal-sequence) left two proposed follow-ups before Stripe-live: a quick 2xx before processing, and an allowlist of Stripe's webhook addresses. The Nov 1 runbook's D15 (a) accepted inline, signature-only processing for the November 4 window only. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. The owner did not answer the goal's open decisions, so the three below are coordinator defaults, the goal packet's recommended options. None is an owner decision until the owner confirms it.
