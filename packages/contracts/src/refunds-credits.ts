@@ -59,7 +59,16 @@ export type StaffCancellationPreviewResponse = z.infer<typeof StaffCancellationP
 
 export const StaffRemedyChoice = z
   .discriminatedUnion("kind", [
-    z.object({ kind: z.literal("policy") }).describe("The policy's own remedy"),
+    z
+      .object({
+        kind: z.literal("policy"),
+        remedy: z
+          .enum(["full_refund", "percent_refund", "credit", "none"])
+          .describe(
+            "The policy's remedy staff were shown (the preview's terms.remedy). If the policy now gives another, nothing changes (409 cancellation_terms_changed)",
+          ),
+      })
+      .describe("The policy's own remedy"),
     z
       .object({ kind: z.literal("credit") })
       .describe("The policy's value as booking credit instead of a refund; no reason needed"),

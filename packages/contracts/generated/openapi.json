@@ -27779,10 +27779,21 @@
                             "enum": [
                               "policy"
                             ]
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": [
+                              "full_refund",
+                              "percent_refund",
+                              "credit",
+                              "none"
+                            ],
+                            "description": "The policy's remedy staff were shown (the preview's terms.remedy). If the policy now gives another, nothing changes (409 cancellation_terms_changed)"
                           }
                         },
                         "required": [
-                          "kind"
+                          "kind",
+                          "remedy"
                         ],
                         "description": "The policy's own remedy"
                       },

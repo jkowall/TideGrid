@@ -186,12 +186,28 @@ describe.skipIf(!env)("staff cancellation, credit, and refund exceptions (W3-G2.
     const stale = await request("POST", own.cancellation, {
       as: A.bookingStaff,
       key: `k-${randomUUID()}`,
-      body: { choice: { kind: "policy" }, expectedAmount: shown.refund.amount + 1 },
+      body: {
+        choice: { kind: "policy", remedy: shown.terms.remedy },
+        expectedAmount: shown.refund.amount + 1,
+      },
     });
     expect([stale.status, stale.json.error?.code]).toEqual([409, "cancellation_terms_changed"]);
+    // The same amount shown under another remedy is refused too.
+    const otherRemedy = await request("POST", own.cancellation, {
+      as: A.bookingStaff,
+      key: `k-${randomUUID()}`,
+      body: { choice: { kind: "policy", remedy: "credit" }, expectedAmount: shown.refund.amount },
+    });
+    expect([otherRemedy.status, otherRemedy.json.error?.code]).toEqual([
+      409,
+      "cancellation_terms_changed",
+    ]);
 
     const key = `k-${randomUUID()}`;
-    const body = { choice: { kind: "policy" }, expectedAmount: shown.refund.amount };
+    const body = {
+      choice: { kind: "policy", remedy: shown.terms.remedy },
+      expectedAmount: shown.refund.amount,
+    };
     const done = await request("POST", own.cancellation, { as: A.bookingStaff, key, body });
     expect(done.status).toBe(200);
     expect(done.json).toMatchObject({

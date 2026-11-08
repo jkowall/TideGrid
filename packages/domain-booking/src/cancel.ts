@@ -326,8 +326,11 @@ export async function cancelBooking(
 
 /** What staff may apply instead of the policy's remedy. */
 export type StaffRemedyChoice =
-  /** The policy's own remedy: its refund, its credit, or nothing. */
-  | { kind: "policy" }
+  /**
+   * The policy's own remedy: its refund, its credit, or nothing. `remedy` is
+   * the one staff were shown; a policy that now gives another changes nothing.
+   */
+  | { kind: "policy"; remedy: CancellationRemedy }
   /** The policy's refund value as booking credit instead (no reason needed). */
   | { kind: "credit" }
   /** Any remedy at any basis points the rules allow, with a reason. */
@@ -479,6 +482,9 @@ export async function staffCancelBooking(
   let applied: Applied;
   switch (input.choice.kind) {
     case "policy":
+      // The same value can come as a refund before a cutoff and as credit
+      // after it, so the remedy staff were shown is checked too.
+      if (input.choice.remedy !== policyRemedy) return { kind: "terms_changed", terms };
       applied = {
         remedy: policyRemedy,
         refundBp: policyRemedy === "credit" ? 10000 : terms.refundBp,

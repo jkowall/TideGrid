@@ -144,7 +144,7 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
       if (!preview?.refund) throw new Error("no refund to preview");
       return staffCancelBooking(trx, c, {
         bookingId,
-        choice: { kind: "policy" },
+        choice: { kind: "policy", remedy: preview.terms.remedy },
         expectedAmount: preview.refund.amount,
       });
     });
@@ -610,7 +610,7 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
       as(guestContext(A.id), (trx, c) =>
         staffCancelBooking(trx, c, {
           bookingId: other.bookingId,
-          choice: { kind: "policy" },
+          choice: { kind: "policy", remedy: "full_refund" },
           expectedAmount: 0,
         }),
       ),
@@ -629,10 +629,19 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
     expect(preview.terms.remedy).toBe("credit");
     expect(preview.refund).toBeNull();
     expect(preview.policyValue).toBe(preview.terms.paidAmount);
+    // The same value shown as a full refund (before a cutoff, say) changes nothing.
+    const shownAsRefund = await as(ctx, (trx, c) =>
+      staffCancelBooking(trx, c, {
+        bookingId: booked.bookingId,
+        choice: { kind: "policy", remedy: "full_refund" },
+        expectedAmount: preview.policyValue,
+      }),
+    );
+    expect(shownAsRefund.kind).toBe("terms_changed");
     const canceled = await as(ctx, (trx, c) =>
       staffCancelBooking(trx, c, {
         bookingId: booked.bookingId,
-        choice: { kind: "policy" },
+        choice: { kind: "policy", remedy: preview.terms.remedy },
         expectedAmount: preview.policyValue,
       }),
     );
