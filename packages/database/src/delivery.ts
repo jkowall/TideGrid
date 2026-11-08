@@ -36,6 +36,12 @@ export interface DeliveryMessage {
   /** The outbox event id, a decimal string (the column is bigint). */
   outboxId: string;
   topic: string;
+  /**
+   * How many of the event's dead letters had been replayed when this message
+   * was sent. A dead letter report from a copy older than the last replay is
+   * stale and records nothing. Absent on messages that predate the field.
+   */
+  replays?: number;
 }
 
 const outboxIdPattern = /^[1-9][0-9]{0,18}$/;
@@ -51,7 +57,17 @@ export function parseDeliveryMessage(body: unknown): DeliveryMessage | null {
   if (!isUuid(b.tenantId)) return null;
   if (typeof b.outboxId !== "string" || !outboxIdPattern.test(b.outboxId)) return null;
   if (typeof b.topic !== "string" || !topicPattern.test(b.topic)) return null;
-  return { v: 1, tenantId: b.tenantId, outboxId: b.outboxId, topic: b.topic };
+  const message: DeliveryMessage = {
+    v: 1,
+    tenantId: b.tenantId,
+    outboxId: b.outboxId,
+    topic: b.topic,
+  };
+  if (b.replays !== undefined) {
+    if (typeof b.replays !== "number" || !Number.isInteger(b.replays) || b.replays < 0) return null;
+    message.replays = b.replays;
+  }
+  return message;
 }
 
 /** A short, safe error code for a column or a log: the error's name or SQLSTATE. */
@@ -250,6 +266,9 @@ export async function consumeDelivery(
   return { kind: "delivered", ran };
 }
 
+/** What recording a dead letter did. "stale": the report predates the last replay. */
+export type DeadLetterResult = "recorded" | "already_open" | "missing" | "delivered" | "stale";
+
 export interface DeadLetterInput {
   handler?: string | null;
   errorCode: string;
@@ -268,7 +287,7 @@ export async function recordDeadLetter(
   message: DeliveryMessage,
   input: DeadLetterInput,
   options: { runId?: string | null } = {},
-): Promise<"recorded" | "already_open" | "missing" | "delivered"> {
+): Promise<DeadLetterResult> {
   const ctx: TenantContext = {
     tenantId: message.tenantId,
     actorType: "system",
@@ -293,6 +312,17 @@ export async function recordDeadLetter(
     if (!row || row.topic !== message.topic) return "missing";
     // A late copy of an event already delivered needs nobody's attention.
     if (row.delivered_at !== null) return "delivered";
+    // A copy sent before the last replay reports a failure that replay
+    // already answered; it must not park the event again.
+    if (message.replays !== undefined) {
+      const [replayed] = (
+        await sql<{ n: number }>`
+          select count(*)::int as n from outbox_dead_letters
+           where tenant_id = ${ctx.tenantId} and outbox_event_id = ${message.outboxId}
+             and replayed_at is not null`.execute(trx)
+      ).rows;
+      if ((replayed?.n ?? 0) > message.replays) return "stale";
+    }
     const inserted = await sql<{ id: string }>`
       insert into outbox_dead_letters
         (tenant_id, outbox_event_id, topic, handler, error_code, attempts, source)
@@ -582,14 +612,22 @@ export async function publishOutbox(
     stamp: (tenantId) => recordSweepTurn(db, contextOf(tenantId), "outbox"),
     turn: async (tenantId) => {
       const ctx = contextOf(tenantId);
-      return inTenantTransaction(db, ctx, async (trx) => {
+      // Exhausted events are dead-lettered after this transaction, each
+      // through recordDeadLetter, which takes the per-event lock before any
+      // row lock (the order every other path uses) and rechecks delivery.
+      let exhausted: { id: string; topic: string; attempts: number; replays: number }[] = [];
+      const result = await inTenantTransaction(db, ctx, async (trx) => {
         const { rows } = await sql<{
           id: string;
           topic: string;
           attempts: number;
           resend: boolean;
+          replays: number;
         }>`
-          select o.id::text as id, o.topic, o.attempts, (o.published_at is not null) as resend
+          select o.id::text as id, o.topic, o.attempts, (o.published_at is not null) as resend,
+                 (select count(*)::int from outbox_dead_letters r
+                   where r.tenant_id = o.tenant_id and r.outbox_event_id = o.id
+                     and r.replayed_at is not null) as replays
             from outbox_events o
            where o.tenant_id = ${tenantId}
              and o.available_at <= now()
@@ -608,32 +646,20 @@ export async function publishOutbox(
         if (due.length === 0) return { units: 0, more: false };
         // An event sent too often without a delivery stops being sent: the
         // consumer never saw it, or never finished, and someone must look.
-        const exhausted = due.filter((r) => r.attempts >= maxAttempts);
+        exhausted = due.filter((r) => r.attempts >= maxAttempts);
         const sendable = due.filter((r) => r.attempts < maxAttempts);
-        for (const r of exhausted) {
-          await sql`
-            insert into outbox_dead_letters
-              (tenant_id, outbox_event_id, topic, handler, error_code, attempts, source)
-            values (${tenantId}, ${r.id}, ${r.topic}, null, 'publish_attempts_exhausted',
-                    ${r.attempts}, 'publisher')
-            on conflict (tenant_id, outbox_event_id) where replayed_at is null do nothing`.execute(
-            trx,
-          );
-          await trx
-            .updateTable("outbox_events")
-            .set({ last_error: "dead_letter:publish_attempts_exhausted" })
-            .where("tenant_id", "=", tenantId)
-            .where("id", "=", r.id)
-            .execute();
-          deadLettered += 1;
-          options.onDeadLetter?.({ v: 1, tenantId, outboxId: r.id, topic: r.topic });
-        }
         if (sendable.length === 0)
           return { units: exhausted.length, more: rows.length >= batchSize };
         const ids = sendable.map((r) => r.id);
         try {
           await options.send(
-            sendable.map((r) => ({ v: 1, tenantId, outboxId: r.id, topic: r.topic })),
+            sendable.map((r) => ({
+              v: 1,
+              tenantId,
+              outboxId: r.id,
+              topic: r.topic,
+              replays: r.replays,
+            })),
           );
         } catch (error) {
           sendFailures += 1;
@@ -658,6 +684,31 @@ export async function publishOutbox(
         }
         return { units: due.length, more: rows.length >= batchSize };
       });
+      for (const r of exhausted) {
+        const message: DeliveryMessage = {
+          v: 1,
+          tenantId,
+          outboxId: r.id,
+          topic: r.topic,
+          replays: r.replays,
+        };
+        const recorded = await recordDeadLetter(
+          db,
+          message,
+          {
+            handler: null,
+            errorCode: "publish_attempts_exhausted",
+            attempts: r.attempts,
+            source: "publisher",
+          },
+          { runId: options.runId ?? null },
+        );
+        if (recorded === "recorded") {
+          deadLettered += 1;
+          options.onDeadLetter?.(message);
+        }
+      }
+      return result;
     },
     budgetMs: options.budgetMs ?? 20_000,
     clock,

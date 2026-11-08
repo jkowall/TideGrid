@@ -15,6 +15,7 @@ import {
   type ConsumeOutcome,
   consumeDelivery,
   createDb,
+  type DeadLetterResult,
   type DeliveryHandler,
   DeliveryHandlerError,
   type DeliveryMessage,
@@ -82,7 +83,7 @@ export interface QueueDeps {
       source: "consumer" | "queue";
     },
     runId: string,
-  ) => Promise<"recorded" | "already_open" | "missing" | "delivered">;
+  ) => Promise<DeadLetterResult>;
 }
 
 /** One queue message, as much of Cloudflare's Message as this code uses. */

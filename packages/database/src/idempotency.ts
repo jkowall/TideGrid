@@ -36,6 +36,22 @@ export async function claimIdempotencyKey(
   ctx: TenantContext,
   claim: IdempotencyClaim,
 ): Promise<ClaimResult> {
+  // Two tries: delivery cleanup (0020) can delete a long-expired completed
+  // key between the conflicting insert and the read below. The second insert
+  // then claims the key as new.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await claimOnce(trx, ctx, claim);
+    if (result) return result;
+  }
+  // The conflicting row belongs to this tenant, so it must be visible.
+  throw new Error("idempotency conflict row is not visible; tenant context is inconsistent");
+}
+
+async function claimOnce(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  claim: IdempotencyClaim,
+): Promise<ClaimResult | null> {
   const inserted = await trx
     .insertInto("idempotency_keys")
     .values({
@@ -58,10 +74,7 @@ export async function claimIdempotencyKey(
     .where("principal", "=", claim.principal)
     .where("key", "=", claim.key)
     .executeTakeFirst();
-  if (!existing) {
-    // The conflicting row belongs to this tenant, so it must be visible.
-    throw new Error("idempotency conflict row is not visible; tenant context is inconsistent");
-  }
+  if (!existing) return null;
   if (existing.request_hash !== claim.requestHash) throw new IdempotencyKeyMismatchError();
   if (existing.status !== "completed" || existing.response_status === null) {
     throw new Error("idempotency key is visible before completion; claim invariant broken");

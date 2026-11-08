@@ -12,6 +12,7 @@ export {
   DEFAULT_MAX_PUBLISH_ATTEMPTS,
   DEFAULT_PUBLISH_BATCH_SIZE,
   type DeadLetterInput,
+  type DeadLetterResult,
   type DeadLetterRow,
   type DeliveredEvent,
   type DeliveryHandler,

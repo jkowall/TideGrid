@@ -206,7 +206,7 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
     expect(ours).toHaveLength(2);
     // Ids only: the message never carries the payload.
     for (const m of ours)
-      expect(Object.keys(m).sort()).toEqual(["outboxId", "tenantId", "topic", "v"]);
+      expect(Object.keys(m).sort()).toEqual(["outboxId", "replays", "tenantId", "topic", "v"]);
     expect((await eventRow(A.id, alertId)).published_at).not.toBeNull();
     expect((await eventRow(A.id, alertId)).delivered_at).toBeNull();
 
@@ -422,6 +422,16 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
 
     const replayed = await publishOnly(new Set([id]));
     expect(replayed.sent).toHaveLength(1);
+    // The new hint carries the replay count; a copy from before the replay
+    // (count 0) reaching the DLQ late is stale and parks nothing.
+    expect(replayed.sent[0]?.replays).toBe(1);
+    expect(
+      await recordDeadLetter(
+        runtime.db,
+        { ...(body as DeliveryMessage), replays: 0 },
+        { errorCode: "queue_retries_exhausted", attempts: 7, source: "queue" },
+      ),
+    ).toBe("stale");
     const outcome = await consumeDelivery(
       runtime.db,
       replayed.sent[0] as DeliveryMessage,
@@ -641,6 +651,9 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
       expect(out.join("\n")).not.toContain("marker");
 
       const args = ["replay", "--tenant", B.id, "--id", letter?.id ?? "", "--operator", "ops.test"];
+      // An option where a value belongs is refused, so `--reason --go` is not a go.
+      expect(await outboxDlq([...args, "--reason", "--go"], () => {})).toBe(2);
+      expect((await eventRow(B.id, id)).last_error).toBe("dead_letter:RangeError");
       const dry: string[] = [];
       expect(await outboxDlq([...args, "--reason", "Handler fixed"], (l) => dry.push(l))).toBe(0);
       expect(dry.at(-1)).toContain("dryRun");

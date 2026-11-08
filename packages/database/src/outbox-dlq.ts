@@ -22,9 +22,11 @@ import {
 import { createDb } from "./index.ts";
 import { isUuid } from "./tenant.ts";
 
+/** The value after an option; never another option, so `--reason --go` is refused. */
 function arg(argv: readonly string[], name: string): string | undefined {
   const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
+  const value = i >= 0 ? argv[i + 1] : undefined;
+  return value === undefined || value.startsWith("--") ? undefined : value;
 }
 
 export async function main(argv: readonly string[], out: (line: string) => void = console.log) {
