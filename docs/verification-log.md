@@ -4,6 +4,19 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Guards that refuse Neon main in test setup and app-role (W1-TEST-GUARDS), built November 8, 2026
+
+Integration setup and `app-role:password` now refuse the Neon main host recorded as `NEON_MAIN_HOST` ([decision register](v2/06-decision-register.md#2026-11-08-w1-test-guards-guards-that-refuse-neon-main-in-test-setup-and-app-role-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). With no main host recorded, they refuse any Neon host unless `TIDEGRID_NEON_BRANCH=1` marks a throwaway branch, and `app-role` on main needs `--neon-main`. No host, connection string, or credential is committed or printed. Nothing ran against Neon. The local runs and the reviews below are coordinator-reported.
+
+- **Unit tests.** `pnpm check` passed on the final code after the rebase onto `main`. The database package: 85 of 85 across 6 files, up from 4 files at the baseline.
+- **Integration tests.** `pnpm test:integration` on a throwaway PostgreSQL 17 container: 891 passed and 0 failed, so the guards let the local container through. The guest and console browser suites run in the pull request's CI.
+- **Command check.** With synthetic hosts and no network, `app-role:password` refused a Neon host with no main recorded, refused the recorded main without `--neon-main`, and refused an unknown argument, each with exit 2.
+- **Independent review.** Accept with listed fixes. Fixed: the guard's host parser did not match postgres.js 3.4.9, so a crafted `DATABASE_URL` could slip past the main-host check; it now copies postgres.js's parsing, with a drift test on nine fixed URLs. Fixed: a citation of a rule by the wrong name. Applied by the coordinator in the pull request: this entry, and an Update note in the runbook's "Not taken on Nov 1" list.
+- **Security review.** Accept with listed fixes. The same crafted-URL bypass, fixed by the same change, with both shapes as unit cases. Refusals name the rule and the flag and never print a host, user, password, or URL.
+- **Rechecks.** Two rounds, ending in accept.
+- **Open, for the owner.** Record `NEON_MAIN_HOST` (the bare main host) in your private `.env.local` or environment, never in the repository. Until then every Neon branch run needs `TIDEGRID_NEON_BRANCH=1`. A one-line AGENTS.md command note is proposed and needs your authorization. The refusal text in `tools/release/src/env.ts` still says "app-role has no guard"; correcting it is a proposed follow-up outside this goal's paths.
+- **Telemetry.** About two hours of agent time across build, two reviews, three fix rounds, and rechecks. Token use and cost per checkpoint: missing.
+
 ### Stripe webhook quick 2xx and source address list (W1-STRIPE-WEBHOOK), built November 8, 2026
 
 Under `PAYMENT_PROVIDER=stripe` only, the webhook route now refuses a client address that is not on a committed list of Stripe's webhook addresses (403), records the event, answers 200, and processes it after the answer, with the checkout sweep as the backstop ([decision register](v2/06-decision-register.md#2026-11-08-w1-stripe-webhook-stripe-webhook-quick-2xx-and-source-address-list-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). The fake provider's path is unchanged. No deployed configuration sets the Stripe provider, nothing was released, no Stripe API was called, and no gate is claimed. The local runs and the reviews below are coordinator-reported.
