@@ -699,6 +699,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         finalization_exception_resolutions: ["INSERT", "SELECT"],
         // Staff-assisted waiver signing (0020): append-only, no UPDATE columns.
         waiver_assisted_links: ["INSERT", "SELECT"],
+        // Email events (0021, W1-EMAIL-EVENTS): the inbox is append-only; the
+        // unmatched events are a platform table reached through a function.
+        email_events: ["INSERT", "SELECT"],
+        email_events_unmatched: [],
       };
       const rows = await admin`
         select c.relname,

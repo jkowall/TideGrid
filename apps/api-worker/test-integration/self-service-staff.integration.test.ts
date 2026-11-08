@@ -48,6 +48,8 @@ const STATUS_KEYS = [
   "attempts",
   "canceledAt",
   "createdAt",
+  // A bounce or complaint the provider reported (W1-EMAIL-EVENTS): codes only.
+  "deliveryReport",
   "failedAt",
   "failureCode",
   "id",

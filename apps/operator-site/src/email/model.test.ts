@@ -9,6 +9,7 @@ import { canResendEmail } from "../roles.ts";
 import { availability, message } from "./fixtures.ts";
 import {
   blockedText,
+  deliveryReportText,
   failureCopy,
   failureText,
   isBookingEmail,
@@ -233,5 +234,44 @@ describe("a booking's email in words (G2.16b)", () => {
     expect(canResendEmail("owner")).toBe(true);
     expect(canResendEmail("booking_staff")).toBe(true);
     expect(canResendEmail("finance")).toBe(false);
+  });
+});
+
+describe("a delivery report in words (W1-EMAIL-EVENTS)", () => {
+  const report = (kind: "bounced" | "complained", bounceType: "hard" | "soft" | null) => ({
+    kind,
+    bounceType,
+    detailCode: null,
+    reportedAt: "2026-11-04T14:30:00.000Z",
+  });
+
+  it("puts a report ahead of the sent badge, and only on a sent message", () => {
+    expect(stateView(message({ deliveryReport: report("bounced", "hard") }))).toEqual({
+      tone: "blocked",
+      icon: "x-octagon",
+      label: "Bounced",
+    });
+    expect(stateView(message({ deliveryReport: report("complained", null) }))).toEqual({
+      tone: "warning",
+      icon: "alert-triangle",
+      label: "Marked as spam",
+    });
+    expect(stateView(message({ deliveryReport: null })).label).toBe("Sent");
+    expect(stateView({ state: "sent", attempts: 1, failureCode: null }).label).toBe("Sent");
+  });
+
+  it("says what to do, without codes", () => {
+    expect(deliveryReportText(null)).toBeNull();
+    expect(deliveryReportText(undefined)).toBeNull();
+    for (const r of [
+      report("bounced", "hard"),
+      report("bounced", "soft"),
+      report("bounced", null),
+      report("complained", null),
+    ]) {
+      const copy = deliveryReportText(r);
+      expect(copy).toMatch(/^[A-Z].*\.$/);
+      expect(copy).not.toMatch(/_|5\.1|abuse/);
+    }
   });
 });

@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createApp } from "./app.ts";
+import { consumeEmailEvents, isEmailEventsBatch } from "./email-events.ts";
 import type { Bindings } from "./env.ts";
 import { markConsoleGateway } from "./gateway.ts";
 import { type GuestHostAnswer, resolveGuestHost } from "./hostnames/guest-gateway.ts";
@@ -18,6 +19,19 @@ export default {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
   scheduled: async (controller, env, _ctx) => {
     await runScheduled(controller, env);
+  },
+  /**
+   * Queue consumers. The email events queue (W1-EMAIL-EVENTS) goes to its
+   * consumer; a batch from a queue this Worker does not know is retried, so
+   * nothing is acknowledged unread.
+   */
+  queue: async (batch, env, _ctx) => {
+    if (isEmailEventsBatch(batch, env)) {
+      await consumeEmailEvents(batch, env);
+      return;
+    }
+    console.log(JSON.stringify({ level: "warn", message: "queue_unknown", "event.name": "queue" }));
+    batch.retryAll();
   },
 } satisfies ExportedHandler<Bindings>;
 
