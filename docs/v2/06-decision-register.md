@@ -19,7 +19,7 @@ The owner handed Wave 0 to a coordinator session and ran P7's live steps in the 
 
 Coordinator readings, pending owner confirmation:
 
-- **Email stays on.** Only allowlisted addresses receive mail, and the fence refused the synthetic backlog before any provider call ([verification log](../verification-log.md#o-p7-g216-live-email-switched-on-a9-and-steps-3-and-8-not-shown-november-8-2026)). Deleting the allowlist secret turns it off.
+- **Email stays on.** Only allowlisted addresses receive mail. At the last read the fence had refused 11 of the 14 synthetic backlog messages, none sent, with the rest still queued; their outcome was not read ([verification log](../verification-log.md#o-p7-g216-live-email-switched-on-a9-and-steps-3-and-8-not-shown-november-8-2026)). Deleting the allowlist secret turns it off.
 - **Not shown, a follow-up.** A9, demo steps 3 and 8, the SPF, DKIM, and DMARC results, the `messageId` comparison, the after-commit window, and the `account_fault` alert.
 - **The restore point.** `nov1 db backup` was a no-op again, so `0016` relied on point-in-time restore. The journal fix is still needed before the next migrating release.
 
