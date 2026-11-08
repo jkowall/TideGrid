@@ -16,6 +16,22 @@ This log records each dated verification pass over the throwaway guest workflow 
 - **Pull request review.** The automated pull request review raised four findings, each a way an older green run could decide over newer evidence. All four reproduced, and each now has a test that failed before the fix: a dispatch whose head looks off `main` still blocks when it is not green; an unreadable run row or job record refuses; a run seen in both queries keeps its highest attempt. A second pass raised two more, both real and fixed with tests: a date bound on the dispatch query (taken from the committer date, which a commit can set in the future) could leave out a newer failure, so the whole dispatch history is read; and a retry cancelled before it started now refuses, since it hides the earlier attempt.
 - **Telemetry.** About 90 minutes from start to merge readiness, three rework rounds after reviews, no failed approach. Token use and cost per checkpoint: missing.
 
+### O-REL: b1461f3 released to the API and console, November 8, 2026
+
+This ran on the owner's instructions of 2026-11-08 ([decision register](v2/06-decision-register.md#2026-11-08-o-rel-release-of-b1461f3-owner-decisions)). The coordinator ran it through `nov1` from 02:14 to 02:17 UTC on November 8, from the owner's other Mac, with every target declared by `--confirm` under a plain pty. The guest site was not released.
+
+**Sources.** `journal.json` in the owner's handoff folder (`~/.claude/projects/-Users-jkowall-TideGrid/handoff/nov1`) on the machine that ran it, `GET /v1/health`, and the smoke output. No log file was saved. The work Mac's copy of the journal, and the copy in the owner's private repository, stop before this run.
+
+- **CI.** [Run 42435063410](https://github.com/jkowall/TideGrid/actions/runs/42435063410) ran on `b1461f373340d2c5d81df280f81343d947dc2913` itself. All four jobs succeeded: checks, integration, browser, and console-browser.
+- **A19 approval.** `nov1 approve-sha` recorded `b1461f3` with tree `76f112f7e6022028cfb74beef8dc23f35f393a12` and last migration `0015_email_account_fault_retry.sql`, counting from P11.
+- **A1 backup.** `nov1 db backup` printed "a backup branch is already recorded; nothing to do". No branch was created. The restore point is still `pre-nov1-e111043`, from 2026-11-05 01:14 UTC, plus Neon point-in-time restore.
+- **A1 migrate.** "applied 1 migration(s): 0015_email_account_fault_retry.sql; 14 already applied". `nov1 db status` then listed 15 of 15 applied, last `0015`, the same as the tree.
+- **A19 API.** Released as version `a3118b7c`. The `*/15` schedule stays on. Health at 02:16:31 UTC: `{"version":"b1461f3","environment":"preview","status":"ok","database":"ok","migrations":{"applied":15,"latest":"0015_email_account_fault_retry.sql"}}`.
+- **A19 console.** Released as version `ff0292a9`. An unauthenticated `GET https://console.tidegrid.us/` answered 302 to `winter-feather-7169.cloudflareaccess.com`.
+- **A0 smoke.** The P5 command, preview profile: "smoke passed: 13 checks". Every check passed, the four negatives and the staff 404 included.
+- **Phase guard,** *coordinator-reported*, output not saved. Before any live step, `phaseGuard("p11", ...)` from `tools/release/src/phase.ts` returned no refusals and no warnings for the API and the console, against the tree's configs and the copied journal.
+- **Live now.** The API and the console run `b1461f3`. The guest site still runs `91a4faa`. Step 9 for `b1461f3` is the CI run above, on the commit itself.
+
 ### Step 9 for 91a4faa by dispatch, November 8, 2026
 
 This records demo acceptance step 9 for `91a4faa`, the merge of pull request 59 (C7), released on November 4 (local time, as the entry below dates it). Per the November 7 entry, the guest site runs it. Its pull request merged after `main` had moved past the base its run tested, so tree equality could not show it (the November 4 entry below). The coordinator dispatched `ci.yml` from `main` with `sha=91a4faaa14ae01838e6aeb5df33f1f466722f790`. It did so on the owner's step 9 checklist of 2026-11-08, given in the coordinator's session and not recorded elsewhere in the repository. This entry was written from git and the GitHub Actions API, except where marked.
