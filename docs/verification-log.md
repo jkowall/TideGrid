@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Pre-SaaS hostname items and the D-E11 and D-E12 sweep fixes (W1-SAAS-PREP), built November 8, 2026
+
+The hostname tooling is ready for Cloudflare for SaaS without calling it ([decision register](v2/06-decision-register.md#2026-11-08-w1-saas-prep-pre-saas-hostname-items-and-the-d-e11-and-d-e12-sweep-follow-ups-owner-go-coordinator-defaults-pending-owner-confirmation)). Demotion only on a definitive negative is an owner decision of November 8. The rest are coordinator defaults pending owner confirmation: no re-enable path, a renewal fixture, account-level refusals marked unverified until P10, proposed `route` and `release` admin commands that are dry runs unless `--apply`, a proposed [removal runbook](runbooks/hostname-removal.md), and fixes for D-E11 and D-E12 in the sweep. No provider call was made, no token was used, and nothing was released. The local runs and the reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed. Every integration suite passed on a throwaway local PostgreSQL 17: 902 tests passed and 2 skipped, including the hostnames suites and the admin CLI suite.
+- **Independent review.** Accept with listed fixes. `release` now writes an audit row before the provider delete, so a failed follow-up lookup cannot leave a delete unrecorded. The admin reads of tenant hostname rows now run inside the tenant transaction. The package README no longer says D-E11 A and D-E12 A were confirmed as written.
+- **Security review.** Accept with listed fixes. `release --apply` no longer resumes a reservation whose seven-day claim has ended, with a test that failed before the fix. The token scope guidance in the P10 Update note and the READMEs now proposes leaving Workers Routes Write off the API Worker's token.
+- **Recheck.** Accept, with this entry. Follow-ups: `release --apply` still resumes a claim that ends minutes later, with only the dry run's printed end time as a warning. The register's pre-pilot lines for D-E11 A and D-E12 A have no Update pointer yet.
+
 ### Guest site API follow-ups (W1-GUEST-API), built November 8, 2026
 
 The two guest commands now answer their 409 and 422 refusals with RFC 9457 problem details beside the unchanged error envelope, and a capacity refusal carries the seats left ([decision register](v2/06-decision-register.md#2026-11-08-w1-guest-api-guest-site-api-follow-ups-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). Two new reads under a checkout take its secret as a bearer token: the payment, and an offer that the guest's own hold does not refuse. The guest page reads the problems and uses the own-hold offer on a reload. It does not use the payment read yet; W1-STRIPE-ELEMENT adopts it. No migration. Nothing was released. The local runs and the reviews below are coordinator-reported.
