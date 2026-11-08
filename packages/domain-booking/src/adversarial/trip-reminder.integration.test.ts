@@ -54,6 +54,23 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
        where m.booking_id = ${bookingId} and m.template = 'booking_reminder'`;
   }
 
+  /**
+   * Move a trip to depart somewhere in [from, to] minutes from now, at the
+   * first time its boat is free: the fixture's other daily departures stay.
+   */
+  async function departBetween(tripId: string, from: number, to: number): Promise<void> {
+    for (let m = from; m <= to; m += 10) {
+      try {
+        await departIn(world.admin, tripId, m);
+        return;
+      } catch (error) {
+        const code = (error as { code?: string }).code;
+        if (code !== "23P01" && code !== "23505") throw error;
+      }
+    }
+    throw new Error(`setup: the boat is busy from ${from} to ${to} minutes out`);
+  }
+
   async function cancel(b: Booked) {
     const terms = await asGuest(world.db, A.id, (trx) =>
       previewCancellation(trx, A.id, b.bookingId),
@@ -78,6 +95,9 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
     A = await createCheckoutFixture(admin, runtime.db, "ss-reminder-a", { days: 30 });
     await addLocalHostname(admin, A);
     trips = tripAllocator(A);
+    // The first two daily departures may be within two days, too soon for a reminder.
+    trips.shared();
+    trips.shared();
   });
 
   afterAll(async () => {
@@ -116,9 +136,16 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
     expect((await redeem(world, A.id, token)).kind).toBe("opened");
   });
 
-  it("writes no reminder for a trip that leaves too soon for one", async () => {
+  it("writes a reminder for a trip more than two days away", async () => {
     const tripId = trips.shared();
-    await departIn(world.admin, tripId, 25 * 60);
+    await departBetween(tripId, 49 * 60, 60 * 60);
+    const b = await book(world, A, tripId, 1);
+    expect((await reminderOf(b.bookingId)).map((r) => r.state)).toEqual(["queued"]);
+  });
+
+  it("writes no reminder for a booking made within two days of departure", async () => {
+    const tripId = trips.shared();
+    await departBetween(tripId, 30 * 60, 47 * 60);
     const b = await book(world, A, tripId, 1);
     expect(await reminderOf(b.bookingId)).toEqual([]);
     const [confirmation] = await world.admin<{ n: number }[]>`
@@ -147,7 +174,7 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
     if (!reminder) throw new Error("setup: no reminder");
     await deliverMail(world, A.id);
     // A retry waited too long: the trip now leaves in an hour.
-    await departIn(world.admin, tripId, 60);
+    await departBetween(tripId, -12 * 60, 115);
     await makeDue(world.admin, reminder.id);
     const report = await deliverMail(world, A.id);
     expect(report.items).toContainEqual(
@@ -165,6 +192,41 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
     const [links] = await world.admin<{ n: number }[]>`
       select count(*)::int as n from public.guest_access_links where message_id = ${reminder.id}`;
     expect(links?.n).toBe(0);
+  });
+
+  it("ends a lapsed reminder attempt near departure as it ends any lapsed attempt, and keeps its link", async () => {
+    for (const deduplicates of [false, true]) {
+      const tripId = trips.shared();
+      const b = await book(world, A, tripId, 1);
+      const [reminder] = await reminderOf(b.bookingId);
+      if (!reminder) throw new Error("setup: no reminder");
+      await deliverMail(world, A.id);
+      // The reminder was claimed and its attempt crashed, maybe after the
+      // provider accepted it; by the next run the trip leaves within two hours.
+      await makeDue(world.admin, reminder.id);
+      await world.admin`update public.email_messages
+                           set state = 'sending', attempts = 1, provider = 'fake',
+                               lease_expires_at = now() + interval '1 second'
+                         where id = ${reminder.id}`;
+      await new Promise((r) => setTimeout(r, 1200));
+      await departBetween(tripId, -12 * 60, 115);
+      const provider = {
+        name: "fake" as const,
+        deduplicates,
+        send: world.mail.send.bind(world.mail),
+      };
+      await deliverMail(world, A.id, provider);
+      expect(await messageOf(world.admin, reminder.id), String(deduplicates)).toMatchObject(
+        deduplicates
+          ? { state: "canceled", last_error_code: "reminder_too_late" }
+          : { state: "failed", last_error_code: "outcome_unknown" },
+      );
+      expect(await acceptedFor(world.admin, reminder.id)).toBeNull();
+      const [revoked] = await world.admin<{ n: number }[]>`
+        select count(*)::int as n from public.guest_access_links
+         where booking_id = ${b.bookingId} and revoked_reason = 'withdrawn'`;
+      expect(revoked?.n).toBe(0);
+    }
   });
 
   it("cancels at claim a reminder written for a booking already canceled", async () => {

@@ -15,6 +15,7 @@ import {
 } from "@tidegrid/database";
 import { sql } from "kysely";
 import { loadEmailBrand } from "./brand.ts";
+import { TRIP_REMINDER_TEMPLATE } from "./reminders.ts";
 import { checkContent, type EmailContent, renderEmail, usesAccessLink } from "./render.ts";
 
 /** A management link lasts three days; a guest who needs it later asks for a new one. */
@@ -379,8 +380,7 @@ export async function getMessageStatus(
 
 /**
  * A booking's messages, oldest first, with their delivery status only.
- * Messages written together (a confirmation and its trip reminder) come in
- * the order they are due.
+ * A trip reminder comes after the confirmation written with it.
  */
 export async function listBookingMessages(
   trx: TenantTransaction,
@@ -391,6 +391,6 @@ export async function listBookingMessages(
   const { rows } = await sql<StatusRow>`
     select ${statusColumns} from ${statusFrom}
      where m.tenant_id = ${tenantId} and m.booking_id = ${bookingId}
-     order by m.created_at, m.next_attempt_at, m.id`.execute(trx);
+     order by m.created_at, m.template = ${TRIP_REMINDER_TEMPLATE}, m.id`.execute(trx);
   return rows.map(toStatus);
 }

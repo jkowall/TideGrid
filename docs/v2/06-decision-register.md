@@ -14,8 +14,10 @@ The second pull request of W3-G2.16-rest, under the same owner card as the [firs
 
 Coordinator defaults, pending owner confirmation:
 
-- **D7, one trip reminder per booking, 24 hours before departure.** Written with the confirmation and sent by the existing delivery job when due, with a fresh management link. A booking made within 26 hours of departure gets none, since the confirmation was just sent.
-- **D8, never late.** The delivery job checks again when it picks the reminder up: a canceled booking or trip, or a trip leaving within 2 hours (the waiver reminders' cutoff), cancels it unsent (`reminder_too_late`). Canceling a booking cancels its waiting reminder at once.
+- **D7, one trip reminder per booking, 24 hours before departure.** Written with the confirmation and sent by the existing delivery job when due, with a fresh management link. A booking made within two days of departure gets none, since its confirmation is recent enough.
+- **D8, never late.** The delivery job checks again when it picks the reminder up: a canceled booking or trip, or a trip leaving within 2 hours (the waiver reminders' cutoff), cancels it unsent (`reminder_too_late`). Canceling a booking cancels its waiting reminder at once, and a reminder is never picked up while a cancellation is in progress.
+
+Independent and security review (R9): no critical or high finding. Fixed: a lapsed reminder attempt near departure now ends as `outcome_unknown` rather than canceled, and revokes no link (M1); the claim waits for a cancellation in progress (L1); the email no longer says earlier links stopped working (L2); no reminder for a booking made within two days (L3); tests for the boundary and the lapsed attempt (L4). Recorded: tests outside the reminder suite ignore the reminder (L5).
 - **D9, staff see it.** The booking's Email card lists it as "Trip reminder", "Scheduled" until it is due. Staff cannot turn reminders off per operator yet (proposed follow-up, with operator-set timing).
 
 Canonical: the [messaging README](../../packages/domain-messaging/README.md#trip-reminders-w3-g216-rest).

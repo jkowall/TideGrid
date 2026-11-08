@@ -328,7 +328,7 @@ export interface MessageRow {
 
 /**
  * A booking's messages, oldest first, without its trip reminder: that one
- * waits for its day (W3-G2.16-rest) and reminders.integration.test.ts covers it.
+ * waits for its day (W3-G2.16-rest) and trip-reminder.integration.test.ts covers it.
  */
 export async function messagesOf(admin: Sql, bookingId: string): Promise<MessageRow[]> {
   return admin<MessageRow[]>`

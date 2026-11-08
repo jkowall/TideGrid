@@ -69,7 +69,7 @@ import {
 } from "./adapter.ts";
 import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
-import { REMINDER_TOO_LATE, TRIP_REMINDER_TEMPLATE, tripReminderTooLate } from "./reminders.ts";
+import { REMINDER_TOO_LATE, TRIP_REMINDER_TEMPLATE, tripReminderTiming } from "./reminders.ts";
 import { fillLinkSlot } from "./render.ts";
 import { ADDRESS_SUPPRESSED, isSuppressed, type SenderPolicy, senderAddressFor } from "./sender.ts";
 
@@ -442,24 +442,6 @@ async function claimOne(
         } as const;
       }
     }
-    // A trip reminder (W3-G2.16-rest) is only worth sending before the trip
-    // leaves; a retry can wait for hours, so the claim checks again.
-    if (
-      found.template === TRIP_REMINDER_TEMPLATE &&
-      (await tripReminderTooLate(trx, ctx.tenantId, found.booking_id))
-    ) {
-      await sql`
-        update email_messages set state = 'canceled', last_error_code = ${REMINDER_TOO_LATE}
-         where tenant_id = ${ctx.tenantId} and id = ${found.id}
-           and state in ('queued', 'sending')`.execute(trx);
-      await revokeMessageLinks(trx, ctx.tenantId, found.id, "withdrawn");
-      return {
-        kind: "canceled",
-        messageId: found.id,
-        attempt: found.attempts,
-        code: REMINDER_TOO_LATE,
-      } as const;
-    }
     if (found.state === "sending" && !providerDeduplicates(options.provider)) {
       // A lapsed lease: the attempt crashed or was canceled, maybe after the
       // provider accepted. Without deduplication another send could deliver
@@ -472,6 +454,28 @@ async function claimOne(
         attempt: found.attempts,
         code: OUTCOME_UNKNOWN,
       } as const;
+    }
+    // A trip reminder (W3-G2.16-rest) is only worth sending before the trip
+    // leaves; a retry can wait for hours, so the claim checks again. After
+    // the lapsed-lease rule, so an attempt that may have gone out ends as
+    // outcome_unknown, not as unsent. No link is revoked: the queued row has
+    // none, and a lapsed one's link, if its email arrived, keeps working.
+    if (found.template === TRIP_REMINDER_TEMPLATE) {
+      const timing = await tripReminderTiming(trx, ctx.tenantId, found.booking_id);
+      // The booking is being changed (a cancellation, say): leave the reminder for a later run.
+      if (timing === "busy") return { kind: "none" } as const;
+      if (timing === "too_late") {
+        await sql`
+          update email_messages set state = 'canceled', last_error_code = ${REMINDER_TOO_LATE}
+           where tenant_id = ${ctx.tenantId} and id = ${found.id}
+             and state in ('queued', 'sending')`.execute(trx);
+        return {
+          kind: "canceled",
+          messageId: found.id,
+          attempt: found.attempts,
+          code: REMINDER_TOO_LATE,
+        } as const;
+      }
     }
     const { rows: claimed } = await sql<{ attempts: number }>`
       update email_messages

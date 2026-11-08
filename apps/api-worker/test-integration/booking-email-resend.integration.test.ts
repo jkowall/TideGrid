@@ -271,14 +271,15 @@ describe.skipIf(!env)("staff resend of a booking's email: the API (G2.16b)", () 
     expect(await auditCount(b.bookingId)).toBe(1);
 
     const after = await request("GET", own.messages, { as: A.bookingStaff });
-    // The trip reminder (W3-G2.16-rest) waits for its day, after the confirmation.
-    expect(after.json.messages.map((m: Json) => [m.template, m.staffResend])).toEqual([
+    // The trip reminder (W3-G2.16-rest), when the trip is far enough out for
+    // one, waits for its day; it is not part of the resend's story.
+    const listed = after.json.messages.filter((m: Json) => m.template !== "booking_reminder");
+    expect(listed.map((m: Json) => [m.template, m.staffResend])).toEqual([
       ["booking_confirmation", false],
-      ["booking_reminder", false],
       ["booking_confirmation", true],
     ]);
-    expect(after.json.messages[2].id).toBe(sent.json.message.id);
-    const lifted = new Date(Date.parse(after.json.messages[2].createdAt) + 10 * 60_000);
+    expect(listed[1].id).toBe(sent.json.message.id);
+    const lifted = new Date(Date.parse(listed[1].createdAt) + 10 * 60_000);
     expect(after.json.resend).toEqual({
       kind: "confirmation",
       allowed: false,

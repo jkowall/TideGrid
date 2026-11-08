@@ -15,8 +15,8 @@ import {
   DEFAULT_LINK_TTL_SECONDS,
   type EmailBlock,
   enqueueMessage,
-  TRIP_REMINDER_CUTOFF_HOURS,
   TRIP_REMINDER_LEAD_HOURS,
+  TRIP_REMINDER_MIN_NOTICE_HOURS,
   TRIP_REMINDER_TEMPLATE,
 } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
@@ -229,8 +229,8 @@ export async function enqueueManageLinkEmail(
 
 /**
  * The trip reminder, written with the confirmation and sent a day before the
- * trip leaves, once per booking. A trip that leaves too soon for a reminder
- * to be due before the cutoff gets none: the confirmation was the reminder.
+ * trip leaves, once per booking. A booking made within two days of
+ * departure gets none: its confirmation is recent enough to be the reminder.
  * The delivery job checks again when it is due (see domain-messaging's
  * reminders.ts), and a cancellation cancels it.
  *
@@ -245,7 +245,7 @@ export async function enqueueReminderEmail(
   const { rows } = await sql<{ due: Date; worth: boolean }>`
     select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
            t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS})
-             > now() + make_interval(hours => ${TRIP_REMINDER_CUTOFF_HOURS}) as worth
+             > now() + make_interval(hours => ${TRIP_REMINDER_MIN_NOTICE_HOURS}) as worth
       from bookings b
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
      where b.tenant_id = ${ctx.tenantId} and b.id = ${bookingId}`.execute(trx);
@@ -269,10 +269,7 @@ export async function enqueueReminderEmail(
       text: "Use the button to see your booking or to name everyone in your party.",
     },
     { kind: "action", label: "Manage your booking", href: "access_link" },
-    {
-      kind: "note",
-      text: `${linkNote} Unused links in earlier emails about this booking no longer work.`,
-    },
+    { kind: "note", text: linkNote },
     { kind: "note", text: demoNote },
   ];
   const result = await enqueueMessage(trx, ctx, {

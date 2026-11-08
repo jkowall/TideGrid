@@ -128,8 +128,9 @@ export {
   REMINDER_TOO_LATE,
   TRIP_REMINDER_CUTOFF_HOURS,
   TRIP_REMINDER_LEAD_HOURS,
+  TRIP_REMINDER_MIN_NOTICE_HOURS,
   TRIP_REMINDER_TEMPLATE,
-  tripReminderTooLate,
+  tripReminderTiming,
 } from "./reminders.ts";
 export {
   checkContent,
