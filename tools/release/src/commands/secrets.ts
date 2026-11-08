@@ -11,10 +11,10 @@
  * Under --confirm (declared, not typed) a put needs --from-file, since nobody
  * would answer wrangler's value prompt; a delete gives wrangler no stdin, so
  * its own "permanently delete" prompt takes its non-interactive yes (wrangler
- * 4.135.0 confirm2, cli.js:133743) for the one name nov1 checked was declared.
+ * 4.152.0 confirm2, cli.js:139679-139688) for the one name nov1 checked was declared.
  * `wrangler secret list`
  * (names only) is the verification. Each put or delete deploys the running
- * code (cli.js:299145), so it is journaled with the version ids before and
+ * code (cli.js:311510-311521), so it is journaled with the version ids before and
  * after. It is not a rollback anchor: --rollback undoes releases only.
  */
 import { type Args, flag, onlyFlags } from "../args.ts";
@@ -140,7 +140,7 @@ export function secretsPlan(set: SecretSet): Plan {
           `nov1 secrets ${set} --delete ${name} --phase <current> --live --go ${s.gate} (turns the feature off, in any phase)`,
         ],
         cannotRestore: [
-          "after a code rollback the latest version is not deployed: secret put and delete fail with 10215; use wrangler versions secret put, then wrangler versions deploy (cli.js:299145)",
+          "after a code rollback the latest version is not deployed: secret put and delete fail with 10215; use wrangler versions secret put, then wrangler versions deploy (cli.js:311510-311521)",
         ],
       })),
     ],
@@ -235,7 +235,7 @@ export async function secrets(deps: Deps, args: Args): Promise<number> {
   }
   if (journal.flags.rolledBack?.includes("api")) {
     throw new Refusal(
-      "the API was rolled back, so its latest version is not deployed and secret put fails with 10215. Use `pnpm exec wrangler versions secret put NAME` then `pnpm exec wrangler versions deploy` in apps/api-worker, on the terminal (cli.js:299145).",
+      "the API was rolled back, so its latest version is not deployed and secret put fails with 10215. Use `pnpm exec wrangler versions secret put NAME` then `pnpm exec wrangler versions deploy` in apps/api-worker, on the terminal (cli.js:311510-311521).",
     );
   }
 

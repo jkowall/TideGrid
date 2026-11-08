@@ -104,9 +104,9 @@ export type YesQuestion = keyof typeof yesQuestions;
 
 /**
  * Commands whose own wrangler step asks questions --confirm cannot answer.
- * `wrangler rollback` (4.135.0) asks for a message (cli.js:349347), whether to
- * deploy to 100% (cli.js:349367), and, when secrets changed since the anchor,
- * whether to go on (cli.js:349392). That last one is a new question the
+ * `wrangler rollback` (4.152.0) asks for a message (cli.js:361300), whether to
+ * deploy to 100% (cli.js:361321), and, when secrets changed since the anchor,
+ * whether to go on (cli.js:361351). That last one is a new question the
  * owner has not ruled on, so a rollback stays typed, and yes:feature-off,
  * which only a rollback asks, cannot be declared until it is.
  */
