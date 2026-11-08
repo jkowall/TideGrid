@@ -180,6 +180,8 @@ Not done: no code, no account, and no build. The goals are W1N-APP, W1N-JOURNEYS
 
 Status 2026-11-08: W1N-APP is built on branch `claude/project-thread-bqlorn` under the owner's go of 20:03 UTC: `apps/guest-native`, Expo SDK 58 and React Native 0.88, two variants, no API change. The app presents its variant's guest origin, because the API picks the operator from the Origin header, and it refuses any answer for another operator. The owner chose on 2026-11-08 to build on his own Mac with Xcode and Android Studio rather than Expo's cloud service. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
 
+Status 2026-11-08, later: W1N-JOURNEYS is built under the owner's go of 22:16 UTC. The app books a trip with the demo's test payment, shows the outcome, keeps each booking opened on the phone for its one-hour session in the platform's secure storage, and shows the booking with its waiver statuses. It uses the guest web app's own API calls; no API, contract, or guest site change. Two new Expo packages, expo-crypto and expo-secure-store, from the Expo SDK 58 set. Changing the party, canceling, Stripe's card form, push, and deep links stay out of the demo app. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
+
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
