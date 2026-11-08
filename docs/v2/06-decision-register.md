@@ -8,7 +8,7 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
-### 2026-11-08: a ruleset on main requires the four CI checks (owner action; coordinator readings pending owner confirmation)
+### 2026-11-08: W0-CLOSEOUT, a ruleset on main for the four CI checks (owner action pending confirmation)
 
 Pull requests 59, 60, and 62 merged after `main` had moved past the base their runs tested, so their released SHAs `91a4faa`, `9086a18`, and `1f39feb` have no step 9 ([verification log](../verification-log.md#step-9-for-the-live-api-dd30fc8-november-7-2026)). `main` had no branch protection. The [2026-11-07 entry](#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-pending-owner-confirmation) proposed a ruleset requiring the four checks, as the owner's GitHub setting.
 
@@ -16,23 +16,29 @@ On 2026-11-08 the coordinator gave the owner a checklist. Its items, summarized:
 
 1. A new branch ruleset in the repository's settings, targeting the default branch.
 2. Required status checks: `checks`, `integration`, `browser`, and `console-browser`.
-3. Recommended: "Require branches to be up to date before merging". Cost: each merge makes every other open pull request rebase and rerun all four jobs.
+3. Recommended: "Require branches to be up to date before merging". Cost: after each merge, every other open pull request must update its branch and rerun all four jobs before it can merge.
 4. Recommended: require a pull request, with the owner as the only bypass.
 5. Block force pushes and deletion of `main`.
-6. Authorize this docs goal.
+6. Authorize a W0-CLOSEOUT docs goal: this entry, and an Update note at the runbook line that says branch protection is absent.
 
-The owner replied: "Ruleset saved, step 6 authorized, use your branch". This entry is that goal. It was built on the coordinator's session branch, not `docs/main-ruleset`, as the owner asked.
+The owner replied: "Ruleset saved, step 6 authorized, use your branch". As the owner asked, this goal was built on the coordinator's session branch, not on the `docs/main-ruleset` branch the checklist proposed.
+
+Observed after the reply, on 2026-11-08:
+
+- The GitHub connector's branch list showed `main` as `protected: false`.
+- At 00:48 UTC the goal's independent review read the GitHub API as the owner's account, which has admin rights on the repository. `repos/jkowall/TideGrid/rulesets` returned an empty list, so the repository had no ruleset, active or not. `rules/branches/main` returned no rules. `branches/main/protection` returned "Branch not protected".
 
 Coordinator readings, pending owner confirmation:
 
-- **What is set.** The coordinator reads the reply as items 1, 2, and 5 done, the required ones. The reply does not say whether items 3 and 4 were set, so both are unknown.
-- **Not read by the coordinator.** This session reaches GitHub only through a connector that lists branches and cannot read rulesets. After the reply, on 2026-11-08, it still listed `main` as `protected: false`. Whether that flag reflects rulesets was not checked. The ruleset's settings rest on the owner's report.
-- **Merging.** A pull request now merges only with the four checks green. All four run on every pull request: `ci.yml` has no path filter and no job condition. Until item 3 is confirmed, the runbook's manual rule still holds: merge only when the pull request's last run was against current `main`. With item 3 on, GitHub enforces that rule. A merge by a bypass actor carries neither guarantee.
+- **Not in force as observed.** The owner reports saving the ruleset. GitHub showed none. Until a re-read lists the four required checks on `main`, nothing enforces them, and a pull request can still merge with a red or stale run.
+- **What the owner set.** The reply does not say which items were set. Items 3 and 4 were optional. Once the ruleset reads back, its settings are recorded here as an Update.
+- **Merging until then.** The runbook's manual rule holds: merge only when the four jobs are green and the pull request's last run was against current `main`. If item 3 reads back as set, GitHub enforces that rule. A merge by a bypass actor carries no guarantee.
+- **Every pull request runs all four jobs.** `ci.yml` has no path filter and no job condition, so the four checks report on every pull request.
 - **Merge queue.** `ci.yml` has no `merge_group` trigger, so a merge queue would wait for checks that never report. Leave it off unless a later goal adds that trigger.
-- **Releases.** The ruleset gates merges, not releases. It does not make `release` wait for the push run on `main`. That follow-up stays proposed and not built.
+- **Releases.** A ruleset gates merges, not releases. It would not make `release` wait for the push run on `main`. That follow-up stays proposed and not built.
 - **Older SHAs.** The three SHAs without step 9 are unchanged. A green dispatch on each is still their route.
 
-Canonical: the [runbook's step 9 check](../runbooks/2026-11-01-preview-deploy.md#p12-evidence) and the repository's ruleset in GitHub.
+Canonical: the [runbook's P0.1 merge rule](../runbooks/2026-11-01-preview-deploy.md#p0-prep-oct-29-to-31-no-live-calls) and the repository's rulesets in GitHub.
 
 ### 2026-11-07: G2.12 follow-ups, search and calendar by source and number-shaped references (owner decisions; coordinator defaults pending owner confirmation)
 
@@ -104,7 +110,7 @@ Coordinator defaults, pending owner confirmation:
 
 - **Step 9 after the merge.** A released SHA's step 9 is a green four-job push run on that SHA, or a green dispatch run on it, read from "The commit under test". D10 (a), tree equality with a pull request run's test merge commit, still serves SHAs released before the merge and stays valid for any SHA.
 - **Older SHAs.** A dispatch runs `main`'s job steps against the named commit's code and tests. The three released SHAs without step 9, `91a4faa`, `1f39feb`, and `9086a18`, have the same `ci.yml` as `main` before this change (`git diff`, checked 2026-11-07). While `main`'s `ci.yml` differs from theirs only by this change, a green dispatch on each counts as its step 9.
-- **Release only after the run is green (proposed).** Five SHAs on November 4 and `dd30fc8` on November 6 were released before their push run ended. This change does not enforce the order. Proposed follow-ups, not built: `nov1 approve-sha` or `release` refusing a SHA without a completed green four-job run whose head is that SHA; and a ruleset on `main` requiring the four checks, which is the owner's GitHub setting. Update, 2026-11-08: the owner reports the ruleset saved ([2026-11-08 entry](#2026-11-08-a-ruleset-on-main-requires-the-four-ci-checks-owner-action-coordinator-readings-pending-owner-confirmation)). It gates merges, not releases, so the first follow-up stays proposed and not built.
+- **Release only after the run is green (proposed).** Five SHAs on November 4 and `dd30fc8` on November 6 were released before their push run ended. This change does not enforce the order. Proposed follow-ups, not built: `nov1 approve-sha` or `release` refusing a SHA without a completed green four-job run whose head is that SHA; and a ruleset on `main` requiring the four checks, which is the owner's GitHub setting. Update, 2026-11-08: the owner reports saving the ruleset, but GitHub listed none on the repository that day ([2026-11-08 entry](#2026-11-08-w0-closeout-a-ruleset-on-main-for-the-four-ci-checks-owner-action-pending-confirmation)). A ruleset gates merges, not releases, so the first follow-up stays proposed and not built either way.
 - **Cost.** Each push to `main` now runs the three database and browser jobs too, in parallel with `checks`. On pull request run 42141157514 they took about 4, 2.5, and 1.5 minutes.
 
 Canonical: the workflow's comments, the [demo build plan's CI row](12-demo-build-plan.md#provider-and-environment-choices), and the [runbook's P12](../runbooks/2026-11-01-preview-deploy.md#p12-evidence).
