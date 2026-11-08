@@ -80,8 +80,11 @@ All proposed.
 **Deduplication and re-runs.**
 
 - Within a batch, two rows with the same deduplication key are both refused (`duplicate_key_in_batch`).
-- Re-running a batch, or a later batch from the same source system, finds rows by their deduplication key. An identical row is a no-op. A row whose key exists but whose content changed is refused as `changed_since_import`, listed for the operator, and corrected only through an audited console action. Re-imports never overwrite.
-- A dry run writes nothing. The commit runs only for a batch whose last dry run had no error rows and matched every declared control total. There is no partial commit: the operator fixes the source or removes rows, then runs the dry run again.
+- Re-running a batch, or a later batch from the same source system, finds rows by their deduplication key. An identical row is a no-op. An unchanged row still counts as accepted for the control totals, so a file that repeats earlier rows declares the same totals the legacy system shows. A row whose key exists but whose content changed is refused as `changed_since_import`, listed for the operator, and corrected only through an audited console action. Re-imports never overwrite.
+- A dry run writes nothing. A commit is allowed only for a batch whose last dry run had no error rows and matched every declared control total, and only when every file has the same content hash as in that dry run. The manifest's `batch_mode` and `run_number` rows are left out of the hash.
+- The commit re-runs every row check and every control-total check inside its own transaction. It does not trust the dry run's result, because seats, holds, and customers can change between the two. It takes capacity through the same capacity-hold path and locks that checkout uses. If any check now fails, it refuses the whole batch with the same error codes and commits nothing.
+- There is no partial commit: the operator fixes the source or removes rows, then runs the dry run again.
+- Balance checks read the whole record for a booking or customer, including records from earlier batches of the same source system. A final delta batch that adds one payment is checked against the payments already imported.
 - A row that depends on a refused row is refused too, as `parent_rejected`, so a rejected trip takes its bookings, participants, payments, and waiver rows with it.
 
 **Customer matching.** A customer whose email exactly matches an existing TideGrid customer is a match candidate, shown for operator review. It is never merged automatically. Name similarity, a shared mailbox, or a booker's assertion never merges records, as the [waiver matching rules](../02-product-scope.md#verification-and-matching) require. An unreviewed candidate stays a separate customer.
@@ -101,10 +104,13 @@ All proposed. The dry run writes one `errors.csv` per batch.
 | `column` | text | The column at fault, or empty |
 | `code` | enum | A stable code from the list below |
 | `severity` | enum | `error` blocks the commit; `warning` needs operator review but does not block |
-| `message` | text | A plain sentence, safe to show the operator |
+| `run_number` | int | The manifest's run number |
+| `message` | text | A plain sentence, safe to show the operator. It quotes only values that passed their type check |
 | `value` | text | The offending value, for non-personal columns only. Names, emails, phones, and references show as `[withheld]` |
 
-Proposed codes: `missing_column`, `unknown_column`, `missing_required`, `invalid_type`, `invalid_enum`, `out_of_range`, `duplicate_key_in_batch`, `changed_since_import`, `unknown_reference`, `parent_rejected`, `product_not_found`, `product_kind_mismatch`, `boat_not_linked`, `zone_mismatch`, `nonexistent_local_time`, `ambiguous_local_time`, `trip_in_past`, `boat_overlap`, `trip_date_mismatch`, `over_capacity`, `charter_already_booked`, `amounts_do_not_add_up`, `ota_amounts_present`, `payment_on_ota_booking`, `overpaid`, `unexpected_balance`, `balance_due_date_missing`, `position_out_of_range`, `guardian_required`, `guardian_not_allowed`, `module_disabled`, `balance_expired`, `possible_card_number`, `customer_match_candidate` (warning), `participant_email_missing` (warning), `control_total_mismatch`.
+Every cell of `errors.csv` gets the same formula guard as the console's day export: a cell that starts with `=`, `+`, `-`, `@`, a tab, or a carriage return is written with a leading `'`, so a spreadsheet shows it as text. Rejected values come from the legacy file, so the report treats them as untrusted. A value refused as `invalid_type` or `invalid_enum` appears only in `value`, never in `message`.
+
+Proposed codes: `missing_column`, `batch_changed_since_dry_run`, `not_after_export`, `unknown_column`, `missing_required`, `invalid_type`, `invalid_enum`, `staff_channel_required`, `staff_channel_not_allowed`, `out_of_range`, `duplicate_key_in_batch`, `changed_since_import`, `unknown_reference`, `parent_rejected`, `product_not_found`, `product_kind_mismatch`, `boat_not_linked`, `zone_mismatch`, `nonexistent_local_time`, `ambiguous_local_time`, `trip_in_past`, `boat_overlap`, `trip_date_mismatch`, `over_capacity`, `charter_already_booked`, `amounts_do_not_add_up`, `ota_amounts_present`, `payment_on_ota_booking`, `overpaid`, `unexpected_balance`, `balance_due_date_missing`, `position_out_of_range`, `guardian_required`, `guardian_not_allowed`, `module_disabled`, `balance_expired`, `possible_card_number`, `customer_match_candidate` (warning), `participant_email_missing` (warning), `control_total_mismatch`.
 
 The report also has a summary: accepted and refused rows per file, and each declared control total beside the computed one.
 
@@ -114,15 +120,16 @@ The report also has a summary: accepted and refused rows per file, and each decl
 
 | Item | Required | Rule |
 |---|---|---|
-| `batch_id` | Yes | `id`; unique per operator |
+| `batch_id` | Yes | `id`; unique per operator. One batch keeps the same id across its dry runs and its commit |
+| `run_number` | Yes | `int`; 1 for the first dry run, one higher for each later dry run and for the commit |
 | `source_system` | Yes | `id`; names the legacy system. Part of every deduplication key |
 | `mapping_version` | Yes | `std-csv-v0` while this draft stands |
-| `batch_mode` | Yes | `dry_run` or `commit`. A commit repeats the last clean dry run's files unchanged |
+| `batch_mode` | Yes | `dry_run` or `commit`. A commit carries the last clean dry run's files with the same content hash, apart from this row and `run_number` (`batch_changed_since_dry_run` otherwise). The commit still re-runs every check |
 | `operator_time_zone` | Yes | `zone` |
-| `exported_at` | Yes | `timestamp` of the legacy export |
+| `exported_at` | Yes | `timestamp` of the legacy export. No `booked_at` or `received_at` may be later (`not_after_export`) |
 | `waiver_notifications` | Yes, when bookings are present | `send_at_cutover` or `hold_until_staff_release`. The scope requires an explicit notification policy for imported future bookings; no mass email on import |
 
-**Control totals.** Every other row declares one total for one file: `item` is the metric, `file` is the file, `value` is the number the operator read from the legacy system. The dry run computes the same metric from accepted rows. Any difference is a `control_total_mismatch` error. The metrics for each file are listed with the file below. A batch must declare every listed metric for every file it includes.
+**Control totals.** Every other row declares one total for one file: `item` is the metric, `file` is the file, `value` is the number the operator read from the legacy system. The dry run, and again the commit, computes the same metric from accepted rows, unchanged rows included. Any difference is a `control_total_mismatch` error. The metrics for each file are listed with the file below. A batch must declare every listed metric for every file it includes.
 
 ## products.csv
 
@@ -147,7 +154,7 @@ P-CHARTER4,Half-day private charter,00000000-0000-4000-8000-000000000102,Half-da
 
 ## trips.csv
 
-Future departures. A row maps to an existing TideGrid trip with the same product, boat, and start instant, or creates one in the closed sales state so it does not appear for sale until the operator publishes it (proposed).
+Future departures. A row maps to an existing TideGrid trip with the same product, boat, and start instant, or creates one in the `draft` sales state so it does not appear for sale until the operator publishes it (proposed). The schema lets a new trip start only as `draft` or `published`.
 
 | Column | Type | Required | Rule |
 |---|---|---|---|
@@ -206,29 +213,30 @@ Future confirmed bookings only. Canceled and past bookings are not imported.
 | `source_trip_id` | id | Yes | A row in `trips.csv` |
 | `source_customer_id` | id | Yes | The booker, a row in `customers.csv` |
 | `booking_source` | enum | Yes | `direct`, `staff_assisted`, or `ota` |
-| `staff_channel` | enum | No | `phone`, `email`, or `walk_up`; only with `staff_assisted` |
+| `staff_channel` | enum | With `staff_assisted` | `phone`, `email`, or `walk_up`. Required for `staff_assisted` and refused for any other source (`staff_channel_required`, `staff_channel_not_allowed`), as the schema requires a channel exactly when the source is staff-assisted |
 | `ota_channel` | text(80) | With `ota` | The OTA's name, shown with the external reference |
 | `party_size` | int | Yes | 1 to 500, within the product's party limits |
 | `subtotal_cents` | cents | Not with `ota` | Trip price and add-ons before discounts |
 | `discount_cents` | cents | Not with `ota` | Not above the subtotal |
 | `fee_cents` | cents | Not with `ota` | Mandatory operator fees |
 | `tax_cents` | cents | Not with `ota` | Taxes added to the price |
+| `included_tax_cents` | cents | Not with `ota` | Tax already inside a tax-inclusive price; `0` when none. Not above subtotal minus discount. It does not change the total |
 | `total_cents` | cents | Not with `ota` | Must equal subtotal minus discount plus fee plus tax (`amounts_do_not_add_up`), as the schema's order check does |
 | `balance_due_date` | date | When a balance is outstanding | Private charters only |
-| `booked_at` | timestamp | No | When the legacy system took the booking |
+| `booked_at` | timestamp | No | When the legacy system took the booking; not after `exported_at` |
 
 - **OTA rows** carry no amounts (`ota_amounts_present` otherwise). OTA money, refunds, and changes stay with the OTA, and the booking is a capacity and roster shadow outside the fee base.
 - **Direct and staff-assisted rows** enter the fee base on the same terms as a TideGrid-created booking. Every amount is labeled as an imported opening record, never as a TideGrid Stripe charge.
-- **Capacity.** For each trip, existing TideGrid seats plus imported party sizes must fit the seat capacity (`over_capacity`). A private-charter trip takes one booking (`charter_already_booked`). An import never overbooks; the operator resolves an overbooked legacy trip before cutover.
+- **Capacity.** For each trip, confirmed TideGrid seats plus seats in open capacity holds plus imported party sizes must fit the seat capacity (`over_capacity`). The commit checks this again in its own transaction, through the same capacity-hold path and locks that checkout uses, so a guest checkout between the dry run and the commit cannot oversell the trip. A private-charter trip takes one booking (`charter_already_booked`), counting open holds too. An import never overbooks; the operator resolves an overbooked legacy trip before cutover.
 - **Deduplication key (D1, coordinator default):** `source_system` + `source_booking_ref` + `trip_date`. The trip date guards against legacy systems that reuse short references across seasons.
-- **Control totals:** `row_count`, `sum_party_size`, `rows_direct`, `rows_staff_assisted`, `rows_ota`, `sum_total_cents` (direct and staff-assisted only).
+- **Control totals:** `row_count`, `sum_party_size`, `rows_direct`, `rows_staff_assisted`, `rows_ota`, `sum_total_cents`, `sum_included_tax_cents` (both direct and staff-assisted only).
 
 ```csv
-source_booking_ref,trip_date,source_trip_id,source_customer_id,booking_source,staff_channel,ota_channel,party_size,subtotal_cents,discount_cents,fee_cents,tax_cents,total_cents,balance_due_date,booked_at
-LB-5001,2027-04-12,T-0412-AM,C-1001,direct,,,2,30000,0,1000,2100,33100,,2027-01-05T14:22:00-05:00
-LB-5002,2027-04-12,T-0412-AM,C-1002,staff_assisted,phone,,3,45000,4500,1500,2835,44835,,2027-01-19T11:05:00-05:00
-LB-5003,2027-04-12,T-0412-PM,C-1004,direct,,,6,120000,0,0,8400,128400,2027-04-05,2027-02-10T09:00:00-05:00
-LB-5004,2027-04-13,T-0413-AM,C-1003,ota,,Example OTA,2,,,,,,,2027-02-20T18:30:00-05:00
+source_booking_ref,trip_date,source_trip_id,source_customer_id,booking_source,staff_channel,ota_channel,party_size,subtotal_cents,discount_cents,fee_cents,tax_cents,included_tax_cents,total_cents,balance_due_date,booked_at
+LB-5001,2027-04-12,T-0412-AM,C-1001,direct,,,2,30000,0,1000,2100,0,33100,,2027-01-05T14:22:00-05:00
+LB-5002,2027-04-12,T-0412-AM,C-1002,staff_assisted,phone,,3,45000,4500,1500,2835,0,44835,,2027-01-19T11:05:00-05:00
+LB-5003,2027-04-12,T-0412-PM,C-1004,direct,,,6,120000,0,0,8400,0,128400,2027-04-05,2027-02-10T09:00:00-05:00
+LB-5004,2027-04-13,T-0413-AM,C-1003,ota,,Example OTA,2,,,,,,,,2027-02-20T18:30:00-05:00
 ```
 
 ## participants.csv
@@ -273,17 +281,17 @@ External payment and refund records against imported direct and staff-assisted b
 | `amount_cents` | cents | Yes | At least 1 |
 | `tender` | enum | Yes | `cash`, `check`, `card_outside_tidegrid`, `bank_transfer`, or `other` |
 | `reference` | text(64) | No | The external reference shown to staff. Never a card number |
-| `received_at` | timestamp | Yes | When the money moved |
+| `received_at` | timestamp | Yes | When the money moved; not after `exported_at` (`not_after_export`) |
 
-For each booking, payments minus refunds must not exceed the total (`overpaid`). What remains is the outstanding balance. A private charter with a balance needs a `balance_due_date`. A shared-seat booking with a balance is refused as `unexpected_balance`, because the scope's deposit and balance flow belongs to private charters (proposed; see [open questions](#open-questions-for-the-owner)).
+For each booking, payments minus refunds must not exceed the total (`overpaid`). Both sums count this batch's rows and the rows imported for that booking in earlier batches. What remains is the outstanding balance. A private charter with a balance needs a `balance_due_date`. A shared-seat booking with a balance is refused as `unexpected_balance`, because the scope's deposit and balance flow belongs to private charters (proposed; see [open questions](#open-questions-for-the-owner)).
 
 - **Deduplication key:** `source_system` + `source_payment_id`.
-- **Control totals:** `row_count`, `sum_payment_cents`, `sum_refund_cents`, `sum_outstanding_cents` (over every non-OTA booking). The dry run also checks, per booking, that total equals payments minus refunds plus outstanding.
+- **Control totals:** `row_count`, `sum_payment_cents`, `sum_refund_cents`, `sum_outstanding_cents` (over every non-OTA booking in the batch, after payments from earlier batches). The dry run and the commit also check, per booking, that total equals payments minus refunds plus outstanding.
 
 ```csv
 source_payment_id,source_booking_ref,trip_date,entry_kind,amount_cents,tender,reference,received_at
 PAY-9001,LB-5001,2027-04-12,payment,33100,card_outside_tidegrid,LEGACY-AUTH-7781,2027-01-05T14:23:10-05:00
-PAY-9002,LB-5002,2027-04-12,payment,44835,cash,,2027-03-02T10:00:00-05:00
+PAY-9002,LB-5002,2027-04-12,payment,44835,cash,,2027-02-25T10:00:00-05:00
 PAY-9003,LB-5003,2027-04-12,payment,40000,check,CHK-1042,2027-02-10T09:05:00-05:00
 ```
 
@@ -302,7 +310,7 @@ Active named-customer balances, one row per lot. Each row is an opening record, 
 | `amount_cents` | cents | Not with `trip_count_card` | At least 1 |
 | `units` | int | With `trip_count_card` | Whole trips, 1 to 100 |
 | `eligible_source_product_ids` | text | No | Legacy product ids from `products.csv`, separated by `\|`; empty means every product |
-| `expires_on` | date | With a trip card | After the export date (`balance_expired`) |
+| `expires_on` | date | No | Empty means no expiry, which the scope allows for every balance kind. A given date must be after the export date (`balance_expired`) |
 | `source_card_ref` | id | No | The legacy card code, kept as a reference. TideGrid issues its own card; the legacy code redeems nothing |
 
 - Trip-card rows are refused as `module_disabled` unless the trip cards module is enabled for the operator.
@@ -347,7 +355,8 @@ The manifest for the synthetic batch above. Its totals match the samples.
 
 ```csv
 item,file,value
-batch_id,,DH-2027-03-DRY1
+batch_id,,DH-2027-03-A
+run_number,,1
 source_system,,legacy-booker
 mapping_version,,std-csv-v0
 batch_mode,,dry_run
@@ -365,6 +374,7 @@ rows_direct,bookings.csv,2
 rows_staff_assisted,bookings.csv,1
 rows_ota,bookings.csv,1
 sum_total_cents,bookings.csv,206335
+sum_included_tax_cents,bookings.csv,0
 row_count,participants.csv,5
 rows_minor,participants.csv,1
 row_count,payments.csv,3
@@ -384,12 +394,12 @@ rows_unknown,waivers.csv,1
 A synthetic error report for a different, faulty batch:
 
 ```csv
-batch_id,file,line,record_key,column,code,severity,message,value
-DH-2027-03-DRY2,trips.csv,5,legacy-booker|T-0314-EARLY,local_start_time,nonexistent_local_time,error,02:30 does not exist on 2027-03-14 in America/New_York.,02:30
-DH-2027-03-DRY2,bookings.csv,7,legacy-booker|LB-5010|2027-04-12,party_size,over_capacity,error,Trip T-0412-AM would hold 14 guests against 12 seats.,9
-DH-2027-03-DRY2,payments.csv,3,legacy-booker|PAY-9010,reference,possible_card_number,error,The reference looks like a card number and was not stored.,[withheld]
-DH-2027-03-DRY2,participants.csv,5,legacy-booker|LB-5002|2027-04-12|2,email,participant_email_missing,warning,This adult has no email for the waiver request.,[withheld]
-DH-2027-03-DRY2,manifest.csv,,,sum_total_cents,control_total_mismatch,error,Declared 206335; accepted rows total 173235.,206335
+batch_id,run_number,file,line,record_key,column,code,severity,message,value
+DH-2027-03-B,2,trips.csv,5,legacy-booker|T-0314-EARLY,local_start_time,nonexistent_local_time,error,02:30 does not exist on 2027-03-14 in America/New_York.,02:30
+DH-2027-03-B,2,bookings.csv,7,legacy-booker|LB-5010|2027-04-12,party_size,over_capacity,error,Trip T-0412-AM would hold 14 guests against 12 seats.,9
+DH-2027-03-B,2,payments.csv,3,legacy-booker|PAY-9010,reference,possible_card_number,error,The reference looks like a card number and was not stored.,[withheld]
+DH-2027-03-B,2,participants.csv,5,legacy-booker|LB-5002|2027-04-12|2,email,participant_email_missing,warning,This adult has no email for the waiver request.,[withheld]
+DH-2027-03-B,2,manifest.csv,,,sum_total_cents,control_total_mismatch,error,Declared 206335; accepted rows total 173235.,206335
 ```
 
 ## What counts as custom work
@@ -432,6 +442,10 @@ The import must map to the current schema, which cannot yet hold most of it. The
 - There are no tables for booking credits, dollar cards, or trip-count cards.
 - There is no import batch, source system, external id, mapping version, or deduplication key on any table.
 - There is no place for a legacy waiver status.
+- A new trip can start only as `draft` or `published` (`0003`). The import creates unpublished trips in `draft`.
+- A staff-assisted booking must carry a channel, and only a staff-assisted booking may (`0012`). The import requires `staff_channel` on exactly those rows.
+- An order carries `included_tax_amount` (`0007`). The import fills it from `included_tax_cents`.
+- A capacity hold's owner is an opaque reference (`0006`), so an import can own holds the way a checkout session does, and the hold trigger checks capacity against every live hold. What is missing is the link from a hold to an imported booking, covered by the first gap above.
 - The console's day export writes money as decimals; the import takes cents. The two never meet, but staff will see both.
 
 ## Open questions for the owner
@@ -448,3 +462,4 @@ Each needs an owner decision recorded in the register before this draft can be p
 8. Fee treatment of imported opening balances. An imported trip-count card or dollar-card balance was sold before TideGrid; whether its later redemption enters the fee base is a commercial question the [fee base](../03-commercial-model.md#net-managed-booking-value) does not answer for imported lots.
 9. The default for `waiver_notifications`, and whether it may differ by booking.
 10. Whether the error report may ever show personal values to the operator, or always withholds them.
+11. Whether a trip card or dollar card must carry an expiry date on import. The draft makes it optional, as the scope does.
