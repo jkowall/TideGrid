@@ -5,6 +5,26 @@ import { runScheduled } from "../src/scheduled.ts";
 
 // The earlier jobs succeed without the network; the hostname sweep hits an
 // account-level refusal after one record it could not read.
+// The outbox publisher and cleanup (W3-G2.3) run after the sweeps; env.test
+// declares the queue. Here they report nothing to do.
+vi.mock("@tidegrid/database", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tidegrid/database")>()),
+  publishOutbox: vi.fn(async () => ({
+    tenants: 0,
+    published: 0,
+    resent: 0,
+    deadLettered: 0,
+    sendFailures: 0,
+    failedTenants: 0,
+    turns: 0,
+    passes: 0,
+    deferredTenants: 0,
+    stampFailures: 0,
+    stopped: false,
+    complete: true,
+  })),
+  runDeliveryCleanup: vi.fn(async () => ({ idempotencyKeysDeleted: 0, quotesDeleted: 0 })),
+}));
 vi.mock("@tidegrid/domain-inventory", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tidegrid/domain-inventory")>()),
   sweepExpiredHolds: vi.fn(async () => ({

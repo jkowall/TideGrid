@@ -1,4 +1,4 @@
-import { createDb } from "@tidegrid/database";
+import { createDb, publishOutbox, runDeliveryCleanup } from "@tidegrid/database";
 import { sweepCheckouts } from "@tidegrid/domain-booking";
 import {
   type CustomHostnameProvider,
@@ -9,6 +9,7 @@ import { sweepExpiredHolds } from "@tidegrid/domain-inventory";
 import { sweepEmail } from "@tidegrid/domain-messaging";
 import { createLogger, newRequestId } from "@tidegrid/observability";
 import { bookingHooks } from "./booking-hooks.ts";
+import { queueSender } from "./delivery.ts";
 import { deliverySettings, emailProvider, emailSettings, sendErrorAttributes } from "./email.ts";
 import { type Bindings, databaseUrl } from "./env.ts";
 import { hostnameProvider, hostnameSettings } from "./hostnames.ts";
@@ -24,7 +25,7 @@ function errorAttributes(error: unknown): Record<string, unknown> {
 
 /**
  * Scheduled work for the API Worker, run by the cron trigger in wrangler.jsonc.
- * Four jobs, in order, on one connection:
+ * Six jobs, in order, on one connection:
  *
  * 1. The hold sweep expires capacity holds whose instant has passed, across
  *    tenants, one tenant transaction at a time.
@@ -44,6 +45,12 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  *    recorded with no change. Earlier readings stand, and ended claims still
  *    expire until the budget runs out. Skipped when custom hostnames are
  *    off.
+ * 5. The outbox publisher (W3-G2.3) sends due outbox events to the queue,
+ *    sends again any hint that looks lost, and records a dead letter for an
+ *    event sent too often without a delivery. Skipped when no OUTBOX_QUEUE
+ *    binding is configured, which today is every deployed configuration.
+ * 6. Cleanup (W3-G2.3) removes completed idempotency keys and unused quotes
+ *    a week past their expiry, through app.delivery_cleanup.
  *
  * Correctness never waits for any of them; they write the facts down, emit the
  * events, and finish interrupted work. A failed job is logged and rethrown, so
@@ -271,6 +278,75 @@ export async function runScheduled(
         });
         throw error;
       }
+    }
+    // 5. Outbox publication (W3-G2.3). Skipped without a queue binding.
+    const outboxLog = createLogger({ ...base, "event.name": "outbox_publish" }, options.log);
+    if (!env.OUTBOX_QUEUE) {
+      outboxLog.info("outbox_publish_skipped", { "tidegrid.outbox.reason": "queue_unconfigured" });
+    } else {
+      started = Date.now();
+      try {
+        const report = await publishOutbox(handle.db, {
+          send: queueSender(env.OUTBOX_QUEUE),
+          runId,
+          onTenantError: (tenantId, error) =>
+            outboxLog.error("outbox_publish_tenant_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
+          onStampError: (tenantId, error) =>
+            outboxLog.error("outbox_publish_stamp_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
+          onDeadLetter: (message) =>
+            outboxLog.error("outbox_dead_lettered", {
+              "tidegrid.tenant_id": message.tenantId,
+              "tidegrid.outbox.id": message.outboxId,
+              "tidegrid.outbox.topic": message.topic,
+              "tidegrid.outbox.dead_letter_source": "publisher",
+            }),
+        });
+        outboxLog.info("outbox_publish", {
+          "tidegrid.outbox_publish.tenant_count": report.tenants,
+          "tidegrid.outbox_publish.published_count": report.published,
+          "tidegrid.outbox_publish.resent_count": report.resent,
+          "tidegrid.outbox_publish.dead_lettered_count": report.deadLettered,
+          "tidegrid.outbox_publish.send_failure_count": report.sendFailures,
+          "tidegrid.outbox_publish.failed_tenant_count": report.failedTenants,
+          "tidegrid.outbox_publish.turn_count": report.turns,
+          "tidegrid.outbox_publish.pass_count": report.passes,
+          "tidegrid.outbox_publish.deferred_tenant_count": report.deferredTenants,
+          "tidegrid.outbox_publish.stamp_failure_count": report.stampFailures,
+          "tidegrid.outbox_publish.stopped": report.stopped,
+          "tidegrid.outbox_publish.complete": report.complete,
+          duration_ms: Date.now() - started,
+        });
+      } catch (error) {
+        outboxLog.error("outbox_publish_failed", {
+          ...errorAttributes(error),
+          duration_ms: Date.now() - started,
+        });
+        throw error;
+      }
+    }
+
+    // 6. Cleanup (W3-G2.3): expired idempotency keys and unused quotes.
+    const cleanupLog = createLogger({ ...base, "event.name": "delivery_cleanup" }, options.log);
+    started = Date.now();
+    try {
+      const report = await runDeliveryCleanup(handle.db);
+      cleanupLog.info("delivery_cleanup", {
+        "tidegrid.delivery_cleanup.idempotency_keys_deleted": report.idempotencyKeysDeleted,
+        "tidegrid.delivery_cleanup.quotes_deleted": report.quotesDeleted,
+        duration_ms: Date.now() - started,
+      });
+    } catch (error) {
+      cleanupLog.error("delivery_cleanup_failed", {
+        ...errorAttributes(error),
+        duration_ms: Date.now() - started,
+      });
+      throw error;
     }
   } finally {
     await handle.end();

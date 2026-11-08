@@ -101,6 +101,32 @@ export interface RequestAttributes {
   "tidegrid.hostname_sweep.provider_call_count"?: number;
   /** The provider's requested wait after a 429 or 5xx, in seconds. */
   "tidegrid.hostname_sweep.retry_after_seconds"?: number;
+  // Delivery foundation (W3-G2.3): ids and counts only, never a payload.
+  "tidegrid.outbox.id"?: string;
+  "tidegrid.outbox.topic"?: string;
+  "tidegrid.outbox.aggregate_type"?: string;
+  "tidegrid.outbox.aggregate_id"?: string;
+  "tidegrid.outbox.handler"?: string;
+  "tidegrid.outbox.reason"?: string;
+  "tidegrid.outbox.dead_letter_source"?: string;
+  "tidegrid.outbox.dead_letter_result"?: string;
+  "tidegrid.outbox.attempts"?: number;
+  "tidegrid.outbox.handler_count"?: number;
+  "tidegrid.outbox.queue_dlq"?: boolean;
+  "tidegrid.outbox_publish.tenant_count"?: number;
+  "tidegrid.outbox_publish.published_count"?: number;
+  "tidegrid.outbox_publish.resent_count"?: number;
+  "tidegrid.outbox_publish.dead_lettered_count"?: number;
+  "tidegrid.outbox_publish.send_failure_count"?: number;
+  "tidegrid.outbox_publish.failed_tenant_count"?: number;
+  "tidegrid.outbox_publish.turn_count"?: number;
+  "tidegrid.outbox_publish.pass_count"?: number;
+  "tidegrid.outbox_publish.deferred_tenant_count"?: number;
+  "tidegrid.outbox_publish.stamp_failure_count"?: number;
+  "tidegrid.outbox_publish.stopped"?: boolean;
+  "tidegrid.outbox_publish.complete"?: boolean;
+  "tidegrid.delivery_cleanup.idempotency_keys_deleted"?: number;
+  "tidegrid.delivery_cleanup.quotes_deleted"?: number;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -190,6 +216,32 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.hostname_sweep.expiry_only_turn_count",
   "tidegrid.hostname_sweep.provider_call_count",
   "tidegrid.hostname_sweep.retry_after_seconds",
+  // Delivery foundation (W3-G2.3): ids and counts only, never a payload.
+  "tidegrid.outbox.id",
+  "tidegrid.outbox.topic",
+  "tidegrid.outbox.aggregate_type",
+  "tidegrid.outbox.aggregate_id",
+  "tidegrid.outbox.handler",
+  "tidegrid.outbox.reason",
+  "tidegrid.outbox.dead_letter_source",
+  "tidegrid.outbox.dead_letter_result",
+  "tidegrid.outbox.attempts",
+  "tidegrid.outbox.handler_count",
+  "tidegrid.outbox.queue_dlq",
+  "tidegrid.outbox_publish.tenant_count",
+  "tidegrid.outbox_publish.published_count",
+  "tidegrid.outbox_publish.resent_count",
+  "tidegrid.outbox_publish.dead_lettered_count",
+  "tidegrid.outbox_publish.send_failure_count",
+  "tidegrid.outbox_publish.failed_tenant_count",
+  "tidegrid.outbox_publish.turn_count",
+  "tidegrid.outbox_publish.pass_count",
+  "tidegrid.outbox_publish.deferred_tenant_count",
+  "tidegrid.outbox_publish.stamp_failure_count",
+  "tidegrid.outbox_publish.stopped",
+  "tidegrid.outbox_publish.complete",
+  "tidegrid.delivery_cleanup.idempotency_keys_deleted",
+  "tidegrid.delivery_cleanup.quotes_deleted",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

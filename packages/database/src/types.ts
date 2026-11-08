@@ -144,10 +144,12 @@ export interface OutboxEventsTable {
   payload: Json;
   request_id: ColumnType<string | null, string | null | undefined, never>;
   created_at: CreatedAt;
-  available_at: ColumnType<Date, Date | string | undefined, never>;
-  published_at: ColumnType<Date | null, never, never>;
-  attempts: ColumnType<number, never, never>;
-  last_error: ColumnType<string | null, never, never>;
+  // Delivery columns (0023, W3-G2.3): the publisher and the consumer move these.
+  available_at: ColumnType<Date, Date | string | undefined, Date | string>;
+  published_at: ColumnType<Date | null, never, Date | string | null>;
+  delivered_at: ColumnType<Date | null, never, Date | string | null>;
+  attempts: ColumnType<number, never, number>;
+  last_error: ColumnType<string | null, never, string | null>;
 }
 
 // Catalog and schedule (migration 0003). Columns typed `never` for update are
@@ -1182,7 +1184,7 @@ interface WaiverTables {
 }
 
 /** The cron's cross-tenant sweeps that take fair turns (0013). */
-export type SweepName = "hold" | "checkout" | "email" | "hostname";
+export type SweepName = "hold" | "checkout" | "email" | "hostname" | "outbox";
 
 /**
  * When a sweep last started a turn for a tenant (0013, pre-pilot hardening).
@@ -1270,6 +1272,41 @@ export interface Database
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
   // Email bounce and complaint events (0021, W1-EMAIL-EVENTS).
   email_events: EmailEventsTable;
+  // Delivery foundation (0023, W3-G2.3).
+  outbox_deliveries: OutboxDeliveriesTable;
+  outbox_dead_letters: OutboxDeadLettersTable;
+}
+
+/** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
+export interface OutboxDeliveriesTable {
+  tenant_id: TenantColumn;
+  outbox_event_id: Fixed<string>;
+  handler: Fixed<string>;
+  processed_at: ColumnType<Date, never, never>;
+  request_id: ColumnType<string | null, string | null | undefined, never>;
+}
+
+/** Where a dead letter came from (0023). */
+export type DeadLetterSource = "consumer" | "queue" | "publisher";
+
+/**
+ * A message that exhausted its retries (0023, W3-G2.3). Written open; a replay
+ * sets the reason once and the trigger stamps who and when.
+ */
+export interface OutboxDeadLettersTable {
+  tenant_id: TenantColumn;
+  id: BigIntId;
+  outbox_event_id: Fixed<string>;
+  topic: Fixed<string>;
+  handler: Fixed<string | null>;
+  error_code: Fixed<string>;
+  attempts: Fixed<number>;
+  source: Fixed<DeadLetterSource>;
+  dead_lettered_at: ColumnType<Date, never, never>;
+  request_id: ColumnType<string | null, string | null | undefined, never>;
+  replayed_at: ColumnType<Date | null, never, never>;
+  replayed_by: ColumnType<string | null, never, never>;
+  replay_reason: ColumnType<string | null, never, string>;
 }
 
 export type { Generated, GeneratedAlways };
