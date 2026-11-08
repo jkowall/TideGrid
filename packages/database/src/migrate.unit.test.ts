@@ -182,6 +182,10 @@ describe("no-transaction files (D6 A: CREATE INDEX CONCURRENTLY)", () => {
       "-- tidegrid:no-transacton\nCREATE INDEX CONCURRENTLY a ON t (x);",
       "-- tidegrid: notransaction\nCREATE INDEX CONCURRENTLY a ON t (x);",
       "CREATE TABLE t (x int);\n-- tidegrid:no-transaction\n",
+      // After a statement on the same line, or as a block comment.
+      "CREATE INDEX CONCURRENTLY t_id ON t (id); -- tidegrid:no-transaction\n",
+      "/* tidegrid:no-transaction */\nCREATE INDEX CONCURRENTLY a ON t (x);",
+      "CREATE TABLE t (x int); /* tidegrid: no-transaction */",
     ]) {
       expect(() => plan(sql), sql).toThrow(/must be the file's first line/);
     }

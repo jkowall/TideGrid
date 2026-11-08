@@ -132,12 +132,14 @@ export const noTransactionMarker = "-- tidegrid:no-transaction";
 export type MigrationPlan = { mode: "transaction" } | { mode: "no-transaction"; statement: string };
 
 /**
- * Any `-- tidegrid:` directive comment, on any line, in any case, with any
- * value. Only the exact marker on the first line is honored; every other one
- * (a misspelled value such as `no_transaction`, or the marker on a later
- * line) refuses before anything is applied.
+ * Any `-- tidegrid:` or `/* tidegrid:` directive comment, anywhere in the
+ * file (after SQL on the same line too), in any case, with any value. Only the
+ * exact marker on the first line is honored; every other one (a misspelled
+ * value such as `no_transaction`, the marker on a later line, or after a
+ * statement) refuses before anything is applied. Matching the text, not
+ * parsed comments, can only refuse more, never less.
  */
-const looseMarker = /^[ \t]*--[ \t]*tidegrid[ \t]*:/im;
+const looseMarker = /(--|\/\*)[ \t]*tidegrid[ \t]*:/i;
 const concurrentIndex = /^create\s+(unique\s+)?index\s+concurrently\s/i;
 
 /**
