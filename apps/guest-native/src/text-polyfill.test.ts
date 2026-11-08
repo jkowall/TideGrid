@@ -84,16 +84,24 @@ describe("decodeUtf8", () => {
   it("matches the platform decoder on random bytes", () => {
     let seed = 7;
     const next = () => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
       return seed;
     };
     const native = new TextDecoder();
-    for (let n = 0; n < 2000; n++) {
+    const seen = new Set<number>();
+    let valid = 0;
+    for (let n = 0; n < 20000; n++) {
       const bytes = Uint8Array.from({ length: next() % 12 }, () =>
         next() % 3 === 0 ? 0x80 + (next() % 0x80) : next() % 256,
       );
-      expect(decodeUtf8(bytes)).toBe(native.decode(bytes));
+      for (const b of bytes) seen.add(b);
+      const expected = native.decode(bytes);
+      if (bytes.length > 0 && !expected.includes("\ufffd")) valid += 1;
+      expect(decodeUtf8(bytes)).toBe(expected);
     }
+    // The sample must reach every byte value and include well-formed input.
+    expect(seen.size).toBe(256);
+    expect(valid).toBeGreaterThan(100);
   });
 });
 
