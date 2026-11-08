@@ -99,14 +99,20 @@ export async function renewWaiverLink(
   // spend the guest's sends while their newest link waits in their inbox. A
   // link whose email the provider refused never reached the guest, so it
   // does not count; one whose outcome is unknown (failed as
-  // `outcome_unknown`) may have, so it still does.
+  // `outcome_unknown`) may have, so it still does. Once one token of a
+  // message was opened, that message's other tokens never reached the
+  // mailbox: a provider that deduplicates a retried send delivers only the
+  // first email (domain-messaging's delivery notes), so they do not count.
   const { rows: live } = await sql<{ n: number }>`
     select count(*)::int as n from guest_access_links l
       join email_messages m on m.tenant_id = l.tenant_id and m.id = l.message_id
      where l.tenant_id = ${ctx.tenantId} and l.subject_ref = ${link.subject_ref}
        and l.purpose = ${WAIVER_LINK_PURPOSE}
        and l.consumed_at is null and l.revoked_at is null and l.expires_at > now()
-       and (m.state <> 'failed' or m.last_error_code = 'outcome_unknown')`.execute(trx);
+       and (m.state <> 'failed' or m.last_error_code = 'outcome_unknown')
+       and not exists (select 1 from guest_access_links c
+                        where c.tenant_id = l.tenant_id and c.message_id = l.message_id
+                          and c.consumed_at is not null)`.execute(trx);
   if ((live[0]?.n ?? 0) > 0) return skip("still_usable");
   // Only a link that went to the address the latest invitation went to: after
   // a corrected address, a link the old address held (opened or not) renews

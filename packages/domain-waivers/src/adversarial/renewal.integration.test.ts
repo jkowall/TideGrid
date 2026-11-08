@@ -182,6 +182,24 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
     120_000,
   );
 
+  it("renews past a retried send's second token once the guest opened the email's own", async () => {
+    const { req, token } = await invited("Dee Dupe");
+    // A deduplicating provider's retry issued a second token for the same
+    // message, which the guest never received.
+    await world.admin`
+      insert into public.guest_access_links
+        (tenant_id, booking_id, participant_id, purpose, subject_ref, message_id, token_hash,
+         expires_at)
+      select tenant_id, booking_id, participant_id, purpose, subject_ref, message_id,
+             encode(sha256(gen_random_uuid()::text::bytea), 'hex'), expires_at
+        from public.guest_access_links
+       where subject_ref = ${`waiver_request:${req}`} and message_id is not null`;
+    expect(await renew(A.id, token)).toEqual({ kind: "skipped", reason: "still_usable" });
+    expect((await redeem(world, A.id, token)).kind).toBe("opened");
+    await ageDeliveries(world.admin, req);
+    expect(await renew(A.id, token)).toEqual({ kind: "renewed", generation: 2 });
+  }, 120_000);
+
   it("renews nothing for an unknown token, a crew code, another operator, or a changed address", async () => {
     const { booked, pid, req, token } = await invited("Uma Unknown");
     expect(await renew(A.id, "A".repeat(43))).toEqual({ kind: "skipped", reason: "invalid" });
