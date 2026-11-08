@@ -99,6 +99,7 @@ interface SessionRow {
   hold_id: string;
   trip_id: string;
   party_size: number;
+  booker_redacted_at: Date | null;
 }
 
 const paymentColumns = sql`id, checkout_session_id, order_id, provider, account_ref,
@@ -184,7 +185,7 @@ async function lockCheckout(
   const found = await findPayment(trx, ctx.tenantId, event);
   if (!found) return { kind: "unmatched" };
   const { rows: sessions } = await sql<SessionRow>`
-    select id, state, hold_id, trip_id, party_size from checkout_sessions
+    select id, state, hold_id, trip_id, party_size, booker_redacted_at from checkout_sessions
      where tenant_id = ${ctx.tenantId} and id = ${found.checkout_session_id}
        for update`.execute(trx);
   const session = sessions[0];
@@ -241,6 +242,11 @@ async function onSuccess(
   const { session, payment } = locked;
   const ids = { checkoutSessionId: session.id };
   if (payment.state === "succeeded") return result("already_succeeded", ids);
+  // A checkout whose booker retention cleared (W3-G2.2b), whether it had
+  // expired, failed, or been canceled, is refunded, never booked under a
+  // redacted booker; the database refuses the booking too.
+  if (session.booker_redacted_at !== null)
+    return unfulfilled(trx, ctx, event, session, payment, "session_redacted");
   // A success after the provider declared the payment failed: its hold is
   // gone, so it is refunded, never booked.
   if (payment.state === "failed")

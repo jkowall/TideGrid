@@ -5,6 +5,7 @@ import {
   HostnameSweepFault,
   sweepHostnames,
 } from "@tidegrid/domain-hostnames";
+import { redactAbandonedCheckouts } from "@tidegrid/domain-identity";
 import { sweepExpiredHolds } from "@tidegrid/domain-inventory";
 import { sweepEmail } from "@tidegrid/domain-messaging";
 import { defaultWaiverDeps, sweepWaiverReminders } from "@tidegrid/domain-waivers";
@@ -26,7 +27,7 @@ function errorAttributes(error: unknown): Record<string, unknown> {
 
 /**
  * Scheduled work for the API Worker, run by the cron trigger in wrangler.jsonc.
- * Six jobs, in order, on one connection:
+ * Seven jobs, in order, on one connection:
  *
  * 1. The hold sweep expires capacity holds whose instant has passed, across
  *    tenants, one tenant transaction at a time.
@@ -54,6 +55,9 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  *    binding is configured, which today is every deployed configuration.
  * 6. Cleanup (W3-G2.3) removes completed idempotency keys and unused quotes
  *    a week past their expiry, through app.delivery_cleanup.
+ * 7. Retention (W3-G2.2b) replaces the booker's name and email on abandoned
+ *    checkouts older than 30 days (coordinator default D2) with a fixed
+ *    redaction, up to 500 a run, and records one audit event per tenant.
  *
  * Correctness never waits for any of them; they write the facts down, emit the
  * events, and finish interrupted work. A failed job is logged and rethrown, so
@@ -397,6 +401,25 @@ export async function runScheduled(
       });
     } catch (error) {
       cleanupLog.error("delivery_cleanup_failed", {
+        ...errorAttributes(error),
+        duration_ms: Date.now() - started,
+      });
+      throw error;
+    }
+
+    // 7. Retention (W3-G2.2b): redact abandoned checkouts' bookers.
+    const retentionLog = createLogger({ ...base, "event.name": "retention" }, options.log);
+    started = Date.now();
+    try {
+      const report = await redactAbandonedCheckouts(handle.db);
+      retentionLog.info("retention", {
+        "tidegrid.retention.tenant_count": report.tenants,
+        "tidegrid.retention.redacted_count": report.redacted,
+        "tidegrid.retention.complete": report.complete,
+        duration_ms: Date.now() - started,
+      });
+    } catch (error) {
+      retentionLog.error("retention_failed", {
         ...errorAttributes(error),
         duration_ms: Date.now() - started,
       });

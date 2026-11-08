@@ -6,10 +6,21 @@ import {
   type TenantTransaction,
 } from "@tidegrid/database";
 import { sql } from "kysely";
+import type { AccessRole } from "./roles.ts";
+
+export interface SupportGrantAccess {
+  grantId: string;
+  revealPersonalData: boolean;
+  expiresAt: Date;
+  reason: string;
+}
 
 export interface StaffTenantAccess {
   tenant: { id: string; slug: string; name: string; status: "active" | "suspended" };
-  role: StaffRole;
+  /** A member's role, or, under a support grant, the read-only support role. */
+  role: AccessRole;
+  /** Present only when a TideGrid support agent is in through an owner's grant. */
+  support?: SupportGrantAccess;
 }
 
 /**
@@ -37,13 +48,14 @@ export async function loadStaffTenantAccess(
   };
 }
 
-function toMember(row: {
+export function toMember(row: {
   user_id: string;
   email: string;
   display_name: string;
   role: StaffRole;
-  status: "active" | "disabled";
+  status: "invited" | "active" | "disabled";
   created_at: Date;
+  invitation_expires_at: Date | null;
 }): Member {
   return {
     userId: row.user_id,
@@ -52,6 +64,10 @@ function toMember(row: {
     role: row.role,
     status: row.status,
     createdAt: row.created_at.toISOString(),
+    invitationExpiresAt:
+      row.status === "invited" && row.invitation_expires_at
+        ? row.invitation_expires_at.toISOString()
+        : null,
   };
 }
 
@@ -59,7 +75,15 @@ export async function listMembers(trx: TenantTransaction, tenantId: string): Pro
   const rows = await trx
     .selectFrom("tenant_memberships as m")
     .innerJoin("staff_users as u", "u.id", "m.user_id")
-    .select(["m.user_id", "u.email", "m.display_name", "m.role", "m.status", "m.created_at"])
+    .select([
+      "m.user_id",
+      "u.email",
+      "m.display_name",
+      "m.role",
+      "m.status",
+      "m.created_at",
+      "m.invitation_expires_at",
+    ])
     .where("m.tenant_id", "=", tenantId)
     .orderBy("m.display_name")
     .orderBy("m.user_id")
@@ -70,8 +94,10 @@ export async function listMembers(trx: TenantTransaction, tenantId: string): Pro
 export type AddMemberResult = { kind: "created"; member: Member } | { kind: "exists" };
 
 /**
- * Add a staff member to the context tenant. Records the change with its reason
- * and before and after values, and enqueues `tenant.membership.created`, all in
+ * Invite a staff member to the context tenant (W3-G2.2b): the membership
+ * starts as `invited`, whatever the insert names, and gives no access until
+ * the person signs in and accepts. Records the change with its reason and
+ * before and after values, and enqueues `tenant.membership.created`, all in
  * the caller's transaction. Authorization happens before this call.
  */
 export async function addMember(
@@ -95,7 +121,7 @@ export async function addMember(
       display_name: input.displayName,
     })
     .onConflict((oc) => oc.columns(["tenant_id", "user_id"]).doNothing())
-    .returning(["user_id", "role", "status", "display_name", "created_at"])
+    .returning(["user_id", "role", "status", "display_name", "created_at", "invitation_expires_at"])
     .executeTakeFirst();
   if (!inserted) return { kind: "exists" };
 

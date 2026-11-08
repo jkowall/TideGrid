@@ -1,6 +1,6 @@
 import { StaffRole } from "@tidegrid/contracts";
 import { describe, expect, it } from "vitest";
-import { can, normalizeHostname, permissionsFor } from "./index.ts";
+import { can, EXPORT_TABLES, exportRow, normalizeHostname, permissionsFor } from "./index.ts";
 
 describe("role permissions", () => {
   it("lets only owners read and manage members", () => {
@@ -90,6 +90,28 @@ describe("role permissions", () => {
     expect(permissionsFor("owner")).toContain("messages.resend");
   });
 
+  it("keeps support access, export, and the deletion request with owners (W3-G2.2b)", () => {
+    for (const permission of ["support.manage", "data.export", "account.manage"] as const) {
+      expect(StaffRole.options.filter((r) => can(r, permission))).toEqual(["owner"]);
+    }
+  });
+
+  it("lets support read only, and masked unless the owner revealed personal data (W3-G2.2b)", () => {
+    expect(permissionsFor("support_masked")).toEqual(permissionsFor("finance"));
+    expect(permissionsFor("support_unmasked")).toEqual([
+      "audit.read",
+      "catalog.read",
+      "payments.read",
+      "bookings.read",
+      "members.read",
+    ]);
+    for (const role of ["support_masked", "support_unmasked"] as const) {
+      expect(permissionsFor(role).filter((p) => !p.endsWith(".read"))).toEqual([]);
+      expect(can(role, "notes.read")).toBe(false);
+    }
+    expect(can("support_masked", "bookings.read")).toBe(false);
+  });
+
   it("denies unknown roles", () => {
     expect(can("admin" as never, "members.read")).toBe(false);
   });
@@ -121,5 +143,42 @@ describe("normalizeHostname", () => {
     null,
   ])("rejects %s", (input) => {
     expect(normalizeHostname(input as string)).toBeNull();
+  });
+});
+
+describe("tenant export (W3-G2.2b)", () => {
+  it("drops credentials, provider keys, and client addresses from every row", () => {
+    expect(
+      exportRow({
+        id: "1",
+        booker_email: "guest@example.test",
+        secret_hash: "x",
+        token_hash: "x",
+        session_hash: "x",
+        client_key: "x",
+        idempotency_key: "x",
+        source_ip: "203.0.113.9",
+        signing_secret: "x",
+        reference: "ABCD2345",
+        document: "\\x255044",
+      }),
+    ).toEqual({ id: "1", booker_email: "guest@example.test", reference: "ABCD2345" });
+  });
+
+  it("leaves out credential, link, and working-state tables", () => {
+    for (const table of [
+      "staff_sessions",
+      "staff_login_tokens",
+      "guest_access_links",
+      "guest_sessions",
+      "idempotency_keys",
+      "outbox_events",
+      "email_messages",
+      "waiver_deliveries",
+      "waiver_signing_sessions",
+      "support_access_grants",
+    ]) {
+      expect(EXPORT_TABLES as readonly string[]).not.toContain(table);
+    }
   });
 });

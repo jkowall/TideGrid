@@ -1,4 +1,4 @@
-import type { LoginLinkResponse } from "@tidegrid/contracts";
+import type { Invitation, InvitationListResponse, LoginLinkResponse } from "@tidegrid/contracts";
 import {
   Button,
   ButtonLink,
@@ -236,7 +236,16 @@ export function SignOutControl({
   );
 }
 
-export function NotProvisioned({ message, signOut }: { message: string; signOut: ReactNode }) {
+export function NotProvisioned({
+  message,
+  signOut,
+  invitations,
+}: {
+  message: string;
+  signOut: ReactNode;
+  /** Shown only to a signed-in person; accepting one takes them into the console. */
+  invitations?: ReactNode;
+}) {
   return (
     <GateFrame title="No operator access">
       <div className="console-gate__icon">
@@ -244,9 +253,100 @@ export function NotProvisioned({ message, signOut }: { message: string; signOut:
       </div>
       <GateTitle>No operator access yet</GateTitle>
       <p className="console-gate__lede">{message}</p>
+      {invitations}
       <p className="tg-muted">Ask an owner of your operator to add you as a staff member.</p>
       {signOut}
     </GateFrame>
+  );
+}
+
+const roleNames: Record<Invitation["role"], string> = {
+  owner: "owner",
+  booking_staff: "booking staff",
+  finance: "finance",
+};
+
+/**
+ * The signed-in person's pending invitations (W3-G2.2b): an owner adding a
+ * staff member invites them, and only they accept. Lists nothing when the
+ * list cannot load; the screen around it still explains what to do.
+ */
+export function PendingInvitations({ onAccepted }: { onAccepted: () => Promise<void> }) {
+  const [invitations, setInvitations] = useState<Invitation[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    fetch("/api/v1/staff/invitations", {
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+    })
+      .then(async (res) => (res.ok ? ((await res.json()) as InvitationListResponse) : null))
+      .catch(() => null)
+      .then((body) => {
+        if (live) setInvitations(Array.isArray(body?.invitations) ? body.invitations : []);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!invitations || invitations.length === 0) return null;
+
+  async function answer(tenantId: string, accept: boolean) {
+    setBusy(tenantId);
+    setFailed(false);
+    try {
+      const res = await fetch(
+        `/api/v1/staff/invitations/${encodeURIComponent(tenantId)}/${accept ? "accept" : "decline"}`,
+        { method: "POST", credentials: "same-origin", headers: { accept: "application/json" } },
+      );
+      if (!res.ok) {
+        setFailed(true);
+        return;
+      }
+      if (accept) {
+        await onAccepted();
+        return;
+      }
+      setInvitations((list) => (list ?? []).filter((i) => i.tenantId !== tenantId));
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section aria-label="Invitations" className="console-gate__invitations">
+      {failed ? (
+        <Notice tone="error" title="That didn't go through">
+          Try again.
+        </Notice>
+      ) : null}
+      {invitations.map((i) => (
+        <div key={i.tenantId} className="console-gate__invitation">
+          <p>
+            <strong>{i.tenantName}</strong> invited you to join as {roleNames[i.role] ?? i.role}.
+          </p>
+          <Button
+            variant="primary"
+            disabled={busy !== null}
+            onClick={() => void answer(i.tenantId, true)}
+          >
+            Accept
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={busy !== null}
+            onClick={() => void answer(i.tenantId, false)}
+          >
+            Decline
+          </Button>
+        </div>
+      ))}
+    </section>
   );
 }
 
