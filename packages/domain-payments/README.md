@@ -219,6 +219,7 @@ The integration suite's timing case, 8 deliveries in one process against the loc
 ### Risks and limits
 
 - **The list is unverified** until the owner runs the check step.
+- **Trust in `CF-Connecting-IP`.** The list is only as strong as Cloudflare's rule that it sets this header at its edge and overwrites a client's own, for every request that reaches the API, subrequests from other Workers included. That rule is not checked here against Cloudflare's documentation, and a service binding passes on whatever its caller set. The signature stays the credential; the list narrows who can reach it.
 - **IPv4 only.** A Stripe delivery over IPv6, or from an address Stripe adds before the list is refreshed, is refused with 403 and retried by Stripe.
 - **Local forwarding is refused.** The Stripe CLI's `stripe listen` forwards from a local address, so it gets 403 under Stripe. If the owner approves the CLI for a replay, that needs a proposed follow-up, never a bypass in the route.
 - **The `waitUntil` budget.** Processing, any refund, and the email share the 30 s after the answer. A cut transaction rolls back and the event stays received; a cut refund stays requested for the sweep; the email keeps its own deadline.
