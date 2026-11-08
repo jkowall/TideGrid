@@ -193,6 +193,10 @@ export type WaiverStatusCode = z.infer<typeof WaiverStatusCode>;
 
 export const WaiverMessageState = z.enum(["queued", "sending", "sent", "failed", "canceled"]);
 
+export const WaiverReminderSlot = z
+  .enum(["72h", "24h"])
+  .describe("Which reminder: from 72 or from 24 hours before departure");
+
 export const ParticipantWaiver = z.object({
   participantId: Uuid,
   position: z.number().int().min(1),
@@ -244,6 +248,23 @@ export const ParticipantWaiver = z.object({
       resendAvailableAt: Instant.nullable().describe(
         "When staff may send it again; null when it cannot be sent again",
       ),
+      reminders: z
+        .object({
+          sent: z
+            .array(
+              z.object({
+                slot: WaiverReminderSlot,
+                queuedAt: Instant,
+                state: WaiverMessageState,
+              }),
+            )
+            .describe("Reminder emails queued for this request, oldest first"),
+          next: z
+            .object({ slot: WaiverReminderSlot, at: Instant })
+            .nullable()
+            .describe("The next reminder while nothing changes; null when none will go"),
+        })
+        .describe("Reminder emails before departure: 72 and 24 hours before, none within 2 hours"),
     })
     .nullable(),
 });

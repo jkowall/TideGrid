@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### W1-G215-REMINDERS: waiver reminders before departure, built November 8, 2026
+
+Two automatic reminder emails, 72 and 24 hours before departure, for a waiver still waiting for a signature, with migration `0021` ([decision register](v2/06-decision-register.md#2026-11-08-w1-g215-reminders-waiver-reminders-up-to-a-completion-cutoff-coordinator-defaults-pending-owner-confirmation)). Built on `claude/project-thread-p7r7vu` from `main` at `ba9b6de` (W1-G215-SIGNING's `0020`). Not released, and `0021` is not on Neon main.
+
+- **Checks.** `pnpm check` passed, including the operator-site waiver tests, the cron sweep log suite, and the observability allowlist. `openapi.json` came from `pnpm contracts:generate` and did not change.
+- **Integration.** On the pinned PostgreSQL 17 container (Docker): database 71 of 71 with `waiver_reminders` pinned at SELECT and INSERT, domain-waivers 61 of 61, api-worker 330 of 330. The new `reminders.integration.test.ts` (7 tests) covers both slots once each and the 2-hour cutoff, concurrent sweeps and another operator's trip, a slot an email already covered and a changed address, stopping at a signature, a revocation, or a participant change, the staff resend limits left untouched, signing end to end through a reminder link for an adult and a guardian, and tenant isolation with the database rules for every writer.
+- **Independent review** (accept with fixes, nothing blocking). Fixed: a reminder no longer follows a first email by minutes (the 12-hour grace), the confirmed-booking check, the console's `next` slot after a sweep outage, "Reminder queued" until it is sent, a trip moved mid-sweep no longer fails the tenant's turn, and D2's wording. Recorded: an address whose last email failed still gets its reminders.
+- **Security review** (R9, the owner's standing go of 2026-11-08). One high, fixed before the pull request: signing through a reminder link failed because evidence looked up the address only through `waiver_deliveries`; the evidence trigger and `signing.ts` now also read `waiver_reminders`, with a test. One low, fixed: the reminder trigger now ties the address to the latest invitation's. Recorded: a reminder supersedes an unused staff-assisted code made before it was queued, as a staff resend already does.
+- **UI review.** Not run: no guest page changed; the console only gains reminder lines on the waiver card, covered by its unit tests.
+
 ### W1-G215-SIGNING: staff-assisted and QR waiver signing, built November 8, 2026
 
 Staff start a waiver signing at the dock, on their device or as a QR code, with migration `0020` (provisional), pulled into the demo by the owner on 2026-11-08 ([decision register](v2/06-decision-register.md#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation)). Built on `claude/project-thread-p7r7vu` from `main` at `a55dc7e`. Not released, and `0020` is not on Neon main.

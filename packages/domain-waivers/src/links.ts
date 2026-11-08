@@ -44,10 +44,15 @@ export async function cancelQueuedMessages(
     code: "resent",
   },
 ): Promise<void> {
+  // The request's emails: each generation's, then each reminder's (0021).
   const { rows } = await sql<{ message_id: string }>`
-    select message_id from waiver_deliveries
-     where tenant_id = ${ctx.tenantId} and request_id = ${requestId}
-     order by generation`.execute(trx);
+    select message_id from (
+      select message_id, 0 as k, generation as n, null::timestamptz as at from waiver_deliveries
+       where tenant_id = ${ctx.tenantId} and request_id = ${requestId}
+      union all
+      select message_id, 1, null, created_at from waiver_reminders
+       where tenant_id = ${ctx.tenantId} and request_id = ${requestId}) x
+     order by k, n, at`.execute(trx);
   for (const row of rows) {
     await cancelMessage(trx, ctx, row.message_id, { linkReason: reason.link, code: reason.code });
   }

@@ -95,6 +95,16 @@ export interface RequestAttributes {
   "tidegrid.hostname_sweep.provider_call_count"?: number;
   /** The provider's requested wait after a 429 or 5xx, in seconds. */
   "tidegrid.hostname_sweep.retry_after_seconds"?: number;
+  /** Waiver reminder sweep (W1-G215-REMINDERS). Counts only. */
+  "tidegrid.waiver_reminder_sweep.tenant_count"?: number;
+  "tidegrid.waiver_reminder_sweep.queued_count"?: number;
+  "tidegrid.waiver_reminder_sweep.skipped_count"?: number;
+  "tidegrid.waiver_reminder_sweep.failed_tenant_count"?: number;
+  "tidegrid.waiver_reminder_sweep.complete"?: boolean;
+  "tidegrid.waiver_reminder_sweep.turn_count"?: number;
+  "tidegrid.waiver_reminder_sweep.pass_count"?: number;
+  "tidegrid.waiver_reminder_sweep.deferred_tenant_count"?: number;
+  "tidegrid.waiver_reminder_sweep.stamp_failure_count"?: number;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -179,6 +189,16 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.hostname_sweep.expiry_only_turn_count",
   "tidegrid.hostname_sweep.provider_call_count",
   "tidegrid.hostname_sweep.retry_after_seconds",
+  // Waiver reminder sweep (W1-G215-REMINDERS).
+  "tidegrid.waiver_reminder_sweep.tenant_count",
+  "tidegrid.waiver_reminder_sweep.queued_count",
+  "tidegrid.waiver_reminder_sweep.skipped_count",
+  "tidegrid.waiver_reminder_sweep.failed_tenant_count",
+  "tidegrid.waiver_reminder_sweep.complete",
+  "tidegrid.waiver_reminder_sweep.turn_count",
+  "tidegrid.waiver_reminder_sweep.pass_count",
+  "tidegrid.waiver_reminder_sweep.deferred_tenant_count",
+  "tidegrid.waiver_reminder_sweep.stamp_failure_count",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

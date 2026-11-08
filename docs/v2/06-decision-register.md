@@ -8,6 +8,15 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-G215-REMINDERS, waiver reminders up to a completion cutoff (coordinator defaults pending owner confirmation)
+
+The second of the three waiver goals the owner pulled into the demo on 2026-11-08, under the [W1-G215-SIGNING entry](#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation), which quotes the owner. The goal's two open questions are owner decisions. The owner's message asked for the work to be done and did not answer them, so the coordinator's suggestions apply as defaults, pending owner confirmation:
+
+- **D1: two reminders, 72 and 24 hours before departure, none within 2 hours.** A slot is skipped when an email went out after it opened or in the 12 hours before, so no guest gets a reminder right after their first email.
+- **D2: reminders do not count against the staff resend limits.** They are not delivery generations, so they never use up the five sends or hold a staff resend, and the limits never count them. A reminder still waits 10 minutes after the participant's last delivery generation to the same address.
+
+Migration `0021` and the service are in the [waiver contract](../../packages/domain-waivers/README.md#reminders-w1-g215-reminders). A new cron step queues due reminders before the email sweep, and is skipped while email is off. No SMS, no change to staff resends. Canonical: the [database README](../../packages/database/README.md#waiver-reminders-0021).
+
 ### 2026-11-08: W1-G215-SIGNING, staff-assisted and QR waiver signing (owner pull-forward; coordinator defaults pending owner confirmation)
 
 The O-SCOPE entry below left items 4 to 6, waiver staff-assisted and QR signing, reminders, and guest renewal, as Core live gate work. On 2026-11-08 at 17:33 UTC the owner wrote: "Anyways, I just want all the work to be done for the next waves." The coordinator reads it as a pull-forward of those three Core live gate items into the demo, synthetic data only, each its own goal and pull request in order: W1-G215-SIGNING, W1-G215-REMINDERS, and W1-WAIVER-RENEWAL. The [demo build plan's G2.15 row](12-demo-build-plan.md#goal-sequence) now says so. This entry is the start gate for all three.

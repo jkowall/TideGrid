@@ -91,6 +91,16 @@ export function bookingWaiversJson(b: BookingWaivers): BookingWaiversJson {
             resendAvailableAt: p.request.resendAvailableAt
               ? iso(p.request.resendAvailableAt)
               : null,
+            reminders: {
+              sent: p.request.reminders.sent.map((r) => ({
+                slot: r.slot,
+                queuedAt: iso(r.queuedAt),
+                state: r.state,
+              })),
+              next: p.request.reminders.next
+                ? { slot: p.request.reminders.next.slot, at: iso(p.request.reminders.next.at) }
+                : null,
+            },
           }
         : null,
     })),
