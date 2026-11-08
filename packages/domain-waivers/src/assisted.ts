@@ -11,8 +11,9 @@
  * ASSISTED_LINK_TTL_MINUTES. The evidence then records the mode as the access
  * method, `staff_confirmed` as the match method, and the staff member.
  *
- * A new start supersedes the request's earlier unused assisted link, so one
- * code at most works per request. It never touches the emailed link: a guest
+ * A new start supersedes the request's earlier unused assisted link, and
+ * ends a session an earlier code opened, so one code at most works per
+ * request. It never touches the emailed link: a guest
  * who signs from their email later is still fine. A newer email's link does
  * supersede an older assisted one (the messaging module's rule for a link
  * with no message).
@@ -90,6 +91,15 @@ export async function startAssistedSigning(
        and l.subject_ref = ${subject}
        and l.message_id is null
        and l.consumed_at is null and l.revoked_at is null`.execute(trx);
+  // And a session an earlier code already opened, so one phone at most holds
+  // it. A session from the emailed link stays open.
+  await sql`
+    update waiver_signing_sessions s
+       set revoked_at = now(), revoked_reason = 'superseded'
+      from waiver_assisted_links a
+     where s.tenant_id = ${ctx.tenantId} and s.request_id = ${request.id}
+       and s.revoked_at is null
+       and a.tenant_id = s.tenant_id and a.access_link_id = s.access_link_id`.execute(trx);
   const token = newAccessToken();
   const { rows } = await sql<{ id: string; expires_at: Date }>`
     insert into guest_access_links (tenant_id, booking_id, participant_id, purpose, subject_ref,

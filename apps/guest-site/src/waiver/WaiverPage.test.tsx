@@ -410,7 +410,12 @@ describe("the waiver page", () => {
         fireEvent.pointerDown(window);
         await vi.advanceTimersByTimeAsync(90_000);
         expect(screen.getByText("Boating has risks.")).toBeTruthy();
-        await vi.advanceTimersByTimeAsync(31_000);
+        expect(screen.queryByText("Still there?")).toBeNull();
+        // Twenty seconds before, a warning; a tap would keep the page.
+        await vi.advanceTimersByTimeAsync(11_000);
+        expect(await screen.findByText("Still there?")).toBeTruthy();
+        expect(screen.getByText("Boating has risks.")).toBeTruthy();
+        await vi.advanceTimersByTimeAsync(20_000);
         await screen.findByRole("heading", { name: "This page was cleared" });
         expect(screen.queryByText("Boating has risks.")).toBeNull();
         expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
@@ -437,10 +442,26 @@ describe("the waiver page", () => {
         await signFlow();
         expect(screen.getByRole("button", { name: "Download your signed copy" })).toBeTruthy();
         await vi.advanceTimersByTimeAsync(121_000);
-        await screen.findByRole("heading", { name: "This page was cleared" });
+        // Never told to sign again: the waiver is signed.
+        await screen.findByRole("heading", { name: "Signed, and this page was cleared" });
+        expect(screen.queryByText(/start it again/)).toBeNull();
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("after Done on the guest's own phone, says all done without asking to hand it back", async () => {
+      stubApi((call) => {
+        if (call.url.endsWith("/waiver-sessions")) {
+          return json(201, { sessionSecret: secret, waiver: waiver({ access: "participant_qr" }) });
+        }
+        if (call.method === "DELETE") return new Response(null, { status: 204 });
+        return json(201, { waiver: { ...signedWaiver(), access: "participant_qr" } });
+      });
+      renderPage();
+      await signFlow();
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      await screen.findByRole("heading", { name: "All done" });
     });
 
     it("never clears an emailed link's page by itself", async () => {

@@ -336,17 +336,25 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
         from public.waiver_signing_sessions where id = ${opened.session.id}`;
     expect(session?.seconds).toBeLessThanOrEqual(15 * 60);
 
-    // The emailed link still works: a staff start never touches it.
+    // A new start ends the session the earlier code opened; the emailed
+    // link's session is never touched.
     const fromEmail = await openFor(world, A.id, req);
     expect(fromEmail.session.access).toBe("email_link");
+    const third = await issued(A.id, staffA, req, "staff_device");
+    expect(await loadSessionFor(opened.secret)).toBeNull();
+    const [ended] = await world.admin<{ revoked_reason: string }[]>`
+      select revoked_reason from public.waiver_signing_sessions where id = ${opened.session.id}`;
+    expect(ended?.revoked_reason).toBe("superseded");
+    expect(await loadSessionFor(fromEmail.secret)).not.toBeNull();
+    expect(third.token).not.toBe(second.token);
     expect((await sign(world, A.id, deps, fromEmail.session)).kind).toBe("signed");
     expect(await evidenceOf(req)).toMatchObject({
       access_method: "email_link",
       match_method: "signer_confirmed",
       assisted_by: null,
     });
-    // Signed: the dock session closes, and nothing more starts.
-    expect(await loadSessionFor(opened.secret)).toBeNull();
+    // Signed: the third code closes, and nothing more starts.
+    expect(await redeem(world, A.id, third.token)).not.toMatchObject({ kind: "opened" });
     expect(await start(A.id, staffA, req, "staff_device")).toEqual({ kind: "not_pending" });
   }, 120_000);
 

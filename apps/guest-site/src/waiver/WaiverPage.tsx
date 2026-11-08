@@ -44,6 +44,8 @@ import "./waiver.css";
 
 /** How long a staff-assisted page waits, untouched, before it clears itself (decision D3). */
 export const SHARED_DEVICE_IDLE_MS = 2 * 60_000;
+/** The warning before a shared-device clear, so the guest can keep going. */
+export const IDLE_WARNING_MS = 20_000;
 
 type Phase =
   /**
@@ -165,6 +167,20 @@ const stops: Record<string, Stop> = {
     body: (op) =>
       `${op} has the signed waiver. This page has forgotten it, so the next person can sign safely.`,
   },
+  device_finished: {
+    icon: "check-circle",
+    tone: "ready",
+    title: "All done",
+    body: (op) =>
+      `${op} has the signed waiver. This page has forgotten it, so nobody else can open it here.`,
+  },
+  device_signed_idle: {
+    icon: "check-circle",
+    tone: "ready",
+    title: "Signed, and this page was cleared",
+    body: (op) =>
+      `${op} has the signed waiver. Nobody used this page for 2 minutes, so it forgot the waiver for privacy. There is nothing more to do.`,
+  },
   device_idle: {
     icon: "lock",
     tone: "neutral",
@@ -178,6 +194,8 @@ const stops: Record<string, Stop> = {
 /** Codes after which the stored session has nothing more to show. */
 const doneCodes = new Set([
   "device_cleared",
+  "device_finished",
+  "device_signed_idle",
   "device_idle",
   "waiver_signed",
   "waiver_not_needed",
@@ -737,30 +755,61 @@ export function WaiverPage({
   const current = useRef(phase);
   current.current = phase;
   const clear = useCallback(
-    (code: "device_cleared" | "device_idle") => {
+    (reason: "done" | "idle") => {
       const now = current.current;
       if (now.kind === "review" || now.kind === "signed") void endSession(now.secret);
       clearStoredSession();
+      // Someone who already signed is never told to start again.
+      const code =
+        now.kind === "signed"
+          ? reason === "idle"
+            ? "device_signed_idle"
+            : now.waiver.access === "staff_device"
+              ? "device_cleared"
+              : "device_finished"
+          : "device_idle";
       go({ kind: "stopped", code });
     },
     [go],
   );
 
   const shared = (phase.kind === "review" || phase.kind === "signed") && sharedAccess(phase.waiver);
+  // A warning first, so a slow reader can keep going (WCAG 2.2.1).
+  const [idleWarning, setIdleWarning] = useState(false);
   useEffect(() => {
     if (!shared) return;
-    let timer = setTimeout(() => clear("device_idle"), SHARED_DEVICE_IDLE_MS);
-    const touched = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => clear("device_idle"), SHARED_DEVICE_IDLE_MS);
+    let warn: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout>;
+    const arm = () => {
+      setIdleWarning(false);
+      warn = setTimeout(() => setIdleWarning(true), SHARED_DEVICE_IDLE_MS - IDLE_WARNING_MS);
+      timer = setTimeout(() => clear("idle"), SHARED_DEVICE_IDLE_MS);
     };
+    const touched = () => {
+      clearTimeout(warn);
+      clearTimeout(timer);
+      arm();
+    };
+    arm();
     const events = ["pointerdown", "keydown", "input", "scroll", "touchstart"] as const;
     for (const e of events) window.addEventListener(e, touched, { passive: true, capture: true });
     return () => {
+      clearTimeout(warn);
       clearTimeout(timer);
+      setIdleWarning(false);
       for (const e of events) window.removeEventListener(e, touched, { capture: true });
     };
   }, [shared, clear]);
+  const idleNotice = (
+    <div role="status" aria-live="polite">
+      {shared && idleWarning && (
+        <Notice tone="warning" title="Still there?">
+          This page clears itself in 20 seconds to keep the waiver private. Tap anywhere to keep
+          going.
+        </Notice>
+      )}
+    </div>
+  );
 
   const open = async (token: string) => {
     setPhase({ kind: "start", token, opening: true, failed: false });
@@ -848,6 +897,7 @@ export function WaiverPage({
     case "review":
       return (
         <div className="guest-container guest-content">
+          {idleNotice}
           <ReviewForm
             waiver={phase.waiver}
             secret={phase.secret}
@@ -860,12 +910,13 @@ export function WaiverPage({
     case "signed":
       return (
         <div className="guest-container guest-content">
+          {idleNotice}
           <SignedView
             waiver={phase.waiver}
             secret={phase.secret}
             brand={brand}
             headingRef={heading}
-            onDone={() => clear("device_cleared")}
+            onDone={() => clear("done")}
           />
         </div>
       );

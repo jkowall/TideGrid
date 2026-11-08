@@ -281,7 +281,7 @@ function WaiverList({
                         <Button icon="pencil" onClick={() => onAssist(p, "staff_device")}>
                           Sign here <VisuallyHidden>for {p.name}</VisuallyHidden>
                         </Button>
-                        <Button icon="external" onClick={() => onAssist(p, "participant_qr")}>
+                        <Button icon="phone" onClick={() => onAssist(p, "participant_qr")}>
                           Show QR code <VisuallyHidden>for {p.name}</VisuallyHidden>
                         </Button>
                       </>
@@ -418,7 +418,13 @@ function AssistedDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [issued, setIssued] = useState<{ url: string; expiresAt: string } | null>(null);
+  const [opened, setOpened] = useState(false);
   const box = useRef<HTMLInputElement>(null);
+  const linkArea = useRef<HTMLDivElement>(null);
+  // Once the link is ready, focus it, so Close is not the first thing pressed.
+  useEffect(() => {
+    if (issued) linkArea.current?.querySelector<HTMLElement>("a")?.focus();
+  }, [issued]);
   const guardian = participant.request?.requiredSigner === "guardian";
   const qr = mode === "participant_qr";
   const who = guardian
@@ -453,8 +459,8 @@ function AssistedDialog({
       initialFocus={box}
       footer={
         issued ? (
-          <Button variant="primary" onClick={onClose}>
-            Done
+          <Button variant={qr || opened ? "primary" : "secondary"} onClick={onClose}>
+            {qr || opened ? "Done" : "Close"}
           </Button>
         ) : (
           <>
@@ -479,7 +485,7 @@ function AssistedDialog({
           <p>
             {qr
               ? "The signer scans the code with their phone and signs there."
-              : "The signing page opens in a new tab on this device. Hand it to the signer."}{" "}
+              : "The signing page opens in a new tab on this device. Hand it to the signer, and stay with them: the console is still open in the other tab."}{" "}
             The link works once, for 15 minutes. The signed waiver records that staff helped, and
             who.
           </p>
@@ -502,26 +508,32 @@ function AssistedDialog({
       )}
       {issued && qr && (
         <p className="wv-muted">
-          Scan with the phone's camera. It works once, until {until}. Close this when they have
-          scanned it.
+          Scan with the phone's camera. It works once, until {until}. Close this as soon as they
+          have scanned it, so nobody else can.
         </p>
       )}
       {issued && !qr && (
-        <div className="wv-resend">
+        <div className="wv-resend" ref={linkArea}>
           <p>
             The signing page is ready. It works once, until {until}. When they finish, the page
             clears itself for the next person.
           </p>
-          <ButtonLink
-            variant="primary"
-            icon="external"
-            href={issued.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            referrerPolicy="no-referrer"
-          >
-            Open the signing page
-          </ButtonLink>
+          {opened ? (
+            <p role="status">Opened in a new tab. The link works only once.</p>
+          ) : (
+            <ButtonLink
+              variant="primary"
+              icon="external"
+              href={issued.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              referrerPolicy="no-referrer"
+              onClick={() => setOpened(true)}
+            >
+              Open the signing page
+              <span className="tg-visually-hidden"> (opens in a new tab)</span>
+            </ButtonLink>
+          )}
         </div>
       )}
     </Dialog>
@@ -529,7 +541,17 @@ function AssistedDialog({
 }
 
 function QrImage({ url, label }: { url: string; label: string }) {
-  const code = encodeQr(url);
+  let code: ReturnType<typeof encodeQr>;
+  try {
+    code = encodeQr(url);
+  } catch {
+    // An address too long for the code: say so rather than fail the dialog.
+    return (
+      <Notice tone="error" title="The QR code didn't fit">
+        This site's address is too long for a QR code. Use Sign here instead.
+      </Notice>
+    );
+  }
   const size = code.size + 8;
   return (
     <svg

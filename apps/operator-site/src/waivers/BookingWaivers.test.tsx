@@ -297,10 +297,21 @@ describe("signing at the dock", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sign here for Ben Waiting" }));
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "Start signing" }));
-    const link = await screen.findByRole("link", { name: "Open the signing page" });
+    const link = await screen.findByRole("link", {
+      name: /^Open the signing page\s*\(opens in a new tab\)$/,
+    });
     expect(link.getAttribute("href")).toBe(url);
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    // The link has focus, and Close is not the dialog's main button yet.
+    await waitFor(() => expect(document.activeElement).toBe(link));
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    // Once opened, the used link is gone, so nobody opens it twice.
+    link.addEventListener("click", (e) => e.preventDefault());
+    fireEvent.click(link);
+    expect(await screen.findByText("Opened in a new tab. The link works only once.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Open the signing page/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
   });
 
   it("explains a refusal and keeps the dialog open", async () => {
