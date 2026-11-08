@@ -707,15 +707,56 @@ function readAs(letters: string): string {
     .replaceAll("l", "i");
 }
 
-const anyLetter = /\p{L}/u;
+const letterOrNumber = /[\p{L}\p{N}]/u;
 
 /**
- * Whether every letter in the text folds to a to z. A letter that does not
- * would vanish from the skeleton and so escape every check that reads it
- * (review S1), so a name with one is refused instead.
+ * Whether every letter and number in the text folds to a to z or an ASCII
+ * digit. One that does not would vanish from the skeleton and so escape every
+ * check that reads it (review S1), so a name with one is refused instead.
+ * Numbers count too: Roman numerals such as "ↁ" are Latin number letters that
+ * NFKC leaves alone (recheck N1).
  */
 function lettersFold(text: string): boolean {
-  return [...text].every((ch) => !anyLetter.test(ch) || /^[a-z]+$/.test(foldCharacters(ch)));
+  return [...text].every(
+    (ch) => !letterOrNumber.test(ch) || /^[a-z0-9]+$/.test(foldCharacters(ch)),
+  );
+}
+
+/**
+ * The words of a name. A word is a run of characters that fold to a letter or
+ * digit, so "!" read as "i" stays inside its word: "B!lling" is one word, not
+ * "B" and "lling" (recheck N2). Folding happens before splitting.
+ */
+function senderWords(name: string): string[] {
+  const words: string[] = [];
+  let word = "";
+  for (const ch of name) {
+    if (/^[a-z0-9]+$/.test(foldCharacters(ch))) {
+      word += ch;
+    } else if (word.length > 0) {
+      words.push(word);
+      word = "";
+    }
+  }
+  if (word.length > 0) words.push(word);
+  return words;
+}
+
+/**
+ * Whether some run of whole words after the first reads as "via", with the
+ * separators between them dropped: "via", "v!a", "v.i.a", "V-I-A", "V I A",
+ * and "Vi A" all do (recheck N2). A longer word that only contains it, such
+ * as "Trivia" or "Avian", does not.
+ */
+function namesSecondRelay(words: string[]): boolean {
+  for (let start = 1; start < words.length; start += 1) {
+    for (let end = start + 1; end <= words.length; end += 1) {
+      const read = senderSkeleton(words.slice(start, end).join(""));
+      if (read === "via") return true;
+      if (read.length >= "via".length) break;
+    }
+  }
+  return false;
 }
 
 /** The skeletons no sender name may contain: TideGrid itself. */
@@ -829,9 +870,11 @@ function neutralWord(word: string): boolean {
  * spaces, and a little punctuation. No quote, backslash, @, colon,
  * semicolon, or angle bracket, so a name cannot look like or break into an
  * address, and no control or format character, so CR and LF cannot inject a
- * header and nothing invisible can hide inside a name.
+ * header and nothing invisible can hide inside a name. A Latin character must
+ * be a letter: the Roman numerals that NFKC leaves alone ("ↀ", "ↁ", "ↂ", and
+ * U+2185 to U+2188) are refused (recheck N1).
  */
-const senderNameCharacters = /^[\p{Script=Latin}0-9 &'’.,!()/+#-]+$/u;
+const senderNameCharacters = /^(?:(?=\p{L})\p{Script=Latin}|[0-9 &'’.,!()/+#-])+$/u;
 const latinLetter = /^[\p{Script=Latin}]$/u;
 const domainLike = /[\p{L}\p{N}]\.\p{L}{2,}/u;
 
@@ -840,14 +883,16 @@ const domainLike = /[\p{L}\p{N}]\.\p{L}{2,}/u;
  * may. Brand validation and email rendering both apply it, and the Cloudflare
  * adapter applies it again to the name it is given. Refused:
  * - anything but Latin letters, ASCII digits, single spaces, and `& ' ’ . , ! ( ) / + # -`
- *   (so CR, LF, every other control, every Cf format character, and Cyrillic or
- *   Greek lookalikes), or text not in composed, compatibility-folded form;
+ *   (so CR, LF, every other control, every Cf format character, Latin Roman
+ *   numerals, and Cyrillic or Greek lookalikes), or text not in composed,
+ *   compatibility-folded form;
  * - a Latin letter that does not fold to a to z ("ɨ", "ɖ", an unmapped small
  *   capital), so no letter is invisible to the checks below;
  * - a name that reads as TideGrid in any spelling its skeleton folds;
  * - a name made only of staff, mailbox, and filler words, ignoring digits and
  *   single letters;
- * - the word "via" after the first word, which would name a second relay;
+ * - "via" after the first word, which would name a second relay, also when
+ *   spelled with lookalikes or split by separators ("v!a", "v.i.a", "V I A");
  * - a domain-like word, such as "tidegrid.us" or "paypal.com".
  */
 export function senderNameProblem(name: string): string | null {
@@ -874,9 +919,8 @@ export function senderNameProblem(name: string): string | null {
     return "A sender name may not use or imitate the TideGrid name";
   }
   if (domainLike.test(name)) return "A sender name may not contain a domain name";
-  const rawWords = name.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 0);
-  const words = rawWords.map(senderSkeleton);
-  if (words.slice(1).includes("via")) return 'A sender name may not use "via" after its first word';
+  const rawWords = senderWords(name);
+  if (namesSecondRelay(rawWords)) return 'A sender name may not use "via" after its first word';
   const naming = rawWords.filter((w) => !neutralWord(w)).map(senderSkeleton);
   if (staffWords.has(skeleton) || (naming.length > 0 && naming.every((w) => staffWords.has(w)))) {
     return "A sender name may not be only staff or mailbox words";

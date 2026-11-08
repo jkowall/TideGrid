@@ -165,6 +165,57 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     expect(accepts({ name })).toBe(false);
   });
 
+  // Recheck N1: Latin Roman numerals with no NFKC decomposition. They are
+  // number letters (Nl), not letters, so the letter fold never saw them.
+  it.each([
+    ["U+2180", "ↀ"],
+    ["U+2181", "ↁ"],
+    ["U+2182", "ↂ"],
+    ["U+2185", "ↅ"],
+    ["U+2186", "ↆ"],
+    ["U+2187", "ↇ"],
+    ["U+2188", "ↈ"],
+  ])("refuses the Roman numeral %s (recheck N1)", (_label, numeral) => {
+    expect(numeral.normalize("NFKC")).toBe(numeral);
+    for (const name of [`TideGri${numeral}`, `Harbor ${numeral} Tours`, `Harbor Tours${numeral}`]) {
+      expect(senderNameProblem(name), name).not.toBeNull();
+      expect(senderDisplayName(name), name).toBeNull();
+      expect(accepts({ name }), name).toBe(false);
+    }
+    expect(sameSenderName(`Demo Harbor Charters${numeral}`, "Demo Harbor Charters")).toBe(false);
+  });
+
+  // Recheck N2: words are split after folding, and a run of short words can
+  // spell "via" across separators.
+  it.each([
+    ["an exclamation mark for i", "Harbor v!a Stripe"],
+    ["dots between letters", "Harbor v.i.a Stripe"],
+    ["hyphens between letters", "Harbor V-I-A Stripe"],
+    ["spaces between letters", "Harbor V I A Stripe"],
+    ["a split word", "Harbor Vi A Stripe"],
+    ["a digit and dots", "Harbor V.1.A Stripe"],
+    ["an accent and a separator", "Harbor V.Í.A Stripe"],
+    ["an exclamation mark inside a staff word", "B!lling Team"],
+  ])("refuses %s (recheck N2)", (_label, name) => {
+    expect(senderNameProblem(name)).not.toBeNull();
+    expect(senderDisplayName(name)).toBeNull();
+    expect(accepts({ name })).toBe(false);
+  });
+
+  it("still accepts via as a first word or inside a longer word (recheck N2)", () => {
+    for (const name of [
+      "Via Ferrata Adventures",
+      "V!a Ferrata Tours",
+      "V.I.A. Harbor Tours",
+      "Vivian Charters",
+      "Harbor Avian Tours",
+      "Harbor Trivia Cruises",
+      "Supp!rt Boats",
+    ]) {
+      expect(senderNameProblem(name), name).toBeNull();
+    }
+  });
+
   it("binds only to the same letters and digits: appended unfolded text does not bind", () => {
     for (const name of [
       "ƬɨɖɇƓɍɨɖ ꜱᴜᴘᴘꝋɍƭ (Demo Harbor Charters)",
