@@ -19033,6 +19033,15 @@
                           "type": "string",
                           "format": "date-time"
                         },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "email_link",
+                            "staff_device",
+                            "participant_qr"
+                          ],
+                          "description": "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle"
+                        },
                         "signed": {
                           "type": [
                             "object",
@@ -19090,6 +19099,7 @@
                         "waiver",
                         "consent",
                         "sessionExpiresAt",
+                        "access",
                         "signed"
                       ],
                       "description": "One request, as its signer sees it"
@@ -19427,6 +19437,15 @@
                           "type": "string",
                           "format": "date-time"
                         },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "email_link",
+                            "staff_device",
+                            "participant_qr"
+                          ],
+                          "description": "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle"
+                        },
                         "signed": {
                           "type": [
                             "object",
@@ -19484,6 +19503,7 @@
                         "waiver",
                         "consent",
                         "sessionExpiresAt",
+                        "access",
                         "signed"
                       ],
                       "description": "One request, as its signer sees it"
@@ -19566,6 +19586,126 @@
           },
           "409": {
             "description": "The session ended because the waiver was signed (waiver_signed), replaced by a newer version (waiver_superseded), or is no longer needed (waiver_not_needed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "public",
+          "waivers"
+        ],
+        "summary": "End the current signing session",
+        "description": "Resolves the browser Origin and needs the session's secret as a bearer token. Ends the session at once, so nothing on this device can read the waiver or the signed copy again. The signing page calls it after a staff-assisted signature, or after 2 minutes idle, on what may be a shared device. A signed waiver stays signed: the operator keeps the evidence and the PDF. An ended or unknown session answers 204 too, so a retry is safe.",
+        "security": [
+          {
+            "waiverSession": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The session is ended"
+          },
+          "401": {
+            "description": "No session secret (waiver_session_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No operator at this address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address for this operator (rate_limited)",
             "content": {
               "application/json": {
                 "schema": {
@@ -19812,6 +19952,15 @@
                           "type": "string",
                           "format": "date-time"
                         },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "email_link",
+                            "staff_device",
+                            "participant_qr"
+                          ],
+                          "description": "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle"
+                        },
                         "signed": {
                           "type": [
                             "object",
@@ -19869,6 +20018,7 @@
                         "waiver",
                         "consent",
                         "sessionExpiresAt",
+                        "access",
                         "signed"
                       ],
                       "description": "One request, as its signer sees it"
@@ -20018,6 +20168,15 @@
                           "type": "string",
                           "format": "date-time"
                         },
+                        "access": {
+                          "type": "string",
+                          "enum": [
+                            "email_link",
+                            "staff_device",
+                            "participant_qr"
+                          ],
+                          "description": "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle"
+                        },
                         "signed": {
                           "type": [
                             "object",
@@ -20075,6 +20234,7 @@
                         "waiver",
                         "consent",
                         "sessionExpiresAt",
+                        "access",
                         "signed"
                       ],
                       "description": "One request, as its signer sees it"
@@ -20868,13 +21028,23 @@
                                           null
                                         ],
                                         "description": "What a guardian declares they are to the minor"
+                                      },
+                                      "method": {
+                                        "type": "string",
+                                        "enum": [
+                                          "email_link",
+                                          "staff_device",
+                                          "participant_qr"
+                                        ],
+                                        "description": "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer. Staff check who signs before a staff_device or participant_qr start"
                                       }
                                     },
                                     "required": [
                                       "evidenceId",
                                       "signedAt",
                                       "signerName",
-                                      "relationship"
+                                      "relationship",
+                                      "method"
                                     ]
                                   },
                                   "delivery": {
@@ -21299,13 +21469,23 @@
                                             null
                                           ],
                                           "description": "What a guardian declares they are to the minor"
+                                        },
+                                        "method": {
+                                          "type": "string",
+                                          "enum": [
+                                            "email_link",
+                                            "staff_device",
+                                            "participant_qr"
+                                          ],
+                                          "description": "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer. Staff check who signs before a staff_device or participant_qr start"
                                         }
                                       },
                                       "required": [
                                         "evidenceId",
                                         "signedAt",
                                         "signerName",
-                                        "relationship"
+                                        "relationship",
+                                        "method"
                                       ]
                                     },
                                     "delivery": {
@@ -22047,6 +22227,330 @@
           },
           "404": {
             "description": "No such tenant or evidence (waiver_evidence_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing": {
+      "post": {
+        "tags": [
+          "staff",
+          "waivers"
+        ],
+        "summary": "Start a staff-assisted signing: on this device, or as a QR code",
+        "description": "Owners and booking staff, at the dock. The staff member first checks who signs (the participant, or for a minor, their parent or legal guardian) and says so. Answers the guest site's signing page with a single-use token in its fragment, for this request only: open it on this device (staff_device), or draw it as a QR code the signer scans (participant_qr). The code carries no name, address, or booking detail.\n\nThe link works once, for 15 minutes, never past the trip's end, and opens a session of at most 15 minutes. A new start ends the request's earlier unused code; the emailed link keeps working. The evidence records the mode, that staff confirmed the signer (staff_confirmed), and who started it. The raw token is in this response only, never stored or replayed, so the command takes no Idempotency-Key: a retry issues a new code and ends the old one.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Waiver request UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Waiver request UUID; anything else answers 404",
+            "name": "requestId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "staff_device",
+                      "participant_qr"
+                    ],
+                    "description": "staff_device: open the signing page on this device; participant_qr: show a QR code the signer scans"
+                  },
+                  "identityChecked": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ],
+                    "description": "The staff member checked who signs: the participant, or for a minor, their parent or legal guardian. Recorded with the evidence"
+                  },
+                  "participantName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "The participant's name as the console showed it when staff checked: refused with waiver_participant_changed when the booking names someone else now"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "identityChecked",
+                  "participantName"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The signing link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signing": {
+                      "type": "object",
+                      "properties": {
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "staff_device",
+                            "participant_qr"
+                          ]
+                        },
+                        "url": {
+                          "type": "string",
+                          "format": "uri",
+                          "description": "The guest site's signing page with a single-use token in its fragment: open it on this device, or draw it as a QR code. Never log or store it"
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "The link works once, until this instant (15 minutes at most)"
+                        }
+                      },
+                      "required": [
+                        "mode",
+                        "url",
+                        "expiresAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "signing"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, including identityChecked not true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or waiver request (waiver_request_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The waiver is not waiting for a signature (waiver_not_pending); the trip has ended (waiver_trip_over); the participant's details changed who signs (waiver_participant_changed); or the operator has no working guest site address for the link (waiver_guest_site_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
             "content": {
               "application/json": {
                 "schema": {

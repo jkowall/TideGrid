@@ -1,6 +1,6 @@
 /**
- * Email bounce and complaint events (W1-EMAIL-EVENTS, migrations 0020 and
- * 0021), against a throwaway PostgreSQL 17 as tidegrid_app. Two tenants
+ * Email bounce and complaint events (W1-EMAIL-EVENTS, migrations 0021 and
+ * 0022), against a throwaway PostgreSQL 17 as tidegrid_app. Two tenants
  * throughout. Messages are sent through the Cloudflare adapter over its
  * recorded fixture, so each carries a provider id the way a real send would;
  * events follow the documented shapes (cloudflare-events-fixture.ts).

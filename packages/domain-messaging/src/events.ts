@@ -1,5 +1,5 @@
 /**
- * Email bounce and complaint events (W1-EMAIL-EVENTS, migration 0020).
+ * Email bounce and complaint events (W1-EMAIL-EVENTS, migration 0021).
  *
  * Cloudflare publishes Email Sending events to a queue, never to a webhook,
  * and signs nothing: a queue's messages come only from the account's own

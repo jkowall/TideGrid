@@ -244,7 +244,7 @@ Since migration `0019` (see the [database README](../database/README.md#staff-re
 
 ## Email events (W1-EMAIL-EVENTS)
 
-Bounces and spam complaints the provider reports after it accepted a message now reach staff: the booking's Email card shows "Bounced" or "Marked as spam" in place of "Sent", with what to do. Built and tested locally only. The owner pulled the goal forward on 2026-11-08; the choices below are coordinator defaults, pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md)). Migrations: [0020 and 0021](../database/README.md#email-events-0020-and-0021).
+Bounces and spam complaints the provider reports after it accepted a message now reach staff: the booking's Email card shows "Bounced" or "Marked as spam" in place of "Sent", with what to do. Built and tested locally only. The owner pulled the goal forward on 2026-11-08; the choices below are coordinator defaults, pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md)). Migrations: [0021 and 0022](../database/README.md#email-events-0021-and-0022).
 
 ```ts
 parseCloudflareEmailEvent(body: unknown): { kind: "parsed"; event } | { kind: "invalid"; reason }

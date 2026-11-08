@@ -1,4 +1,4 @@
--- 0020 email bounce and complaint events (W1-EMAIL-EVENTS)
+-- 0021 email bounce and complaint events (W1-EMAIL-EVENTS)
 --
 -- Pulled forward by the owner on 2026-11-08 (docs/v2/06-decision-register.md).
 -- A message marked sent was only accepted by the provider; a later bounce or
@@ -9,7 +9,7 @@
 -- The join. An event carries the provider's message id and no tenant.
 -- app.resolve_email_message(provider, id) answers which tenant's sent message
 -- carries that id, and nothing else: the definer function reads one row by
--- the unique index 0021 builds, and the event is then recorded inside that
+-- the unique index 0022 builds, and the event is then recorded inside that
 -- tenant's own transaction, under its row-level security, like the payment
 -- inbox (0007's app.resolve_payment_account). No other RLS bypass.
 --
@@ -52,13 +52,13 @@
 --
 -- Indexes. The inbox's own keys are its indexes. The unique index on
 -- email_messages (provider, provider_message_id) is a pilot-volume index, so
--- it is built CONCURRENTLY in 0021, a no-transaction file. Until 0021 runs,
+-- it is built CONCURRENTLY in 0022, a no-transaction file. Until 0022 runs,
 -- the resolver works by a slower scan; apply both together.
 
 DO $$
 BEGIN
   IF NOT (SELECT rolbypassrls OR rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user) THEN
-    RAISE EXCEPTION '0020 runs as the migration role, which bypasses row-level security';
+    RAISE EXCEPTION '0021 runs as the migration role, which bypasses row-level security';
   END IF;
 END;
 $$;

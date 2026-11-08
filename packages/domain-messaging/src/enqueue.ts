@@ -279,7 +279,7 @@ export interface MessageStatus {
   staffResend: boolean;
   /**
    * What the provider reported after it accepted the message (W1-EMAIL-EVENTS,
-   * 0020): its first bounce or spam complaint, or null. The state stays sent.
+   * 0021): its first bounce or spam complaint, or null. The state stays sent.
    */
   deliveryReport: MessageDeliveryReport | null;
   createdAt: string;
@@ -352,7 +352,7 @@ function toStatus(row: StatusRow): MessageStatus {
   };
 }
 
-// The applied email event, if any (0020): at most one per message, found by
+// The applied email event, if any (0021): at most one per message, found by
 // the inbox's partial unique key, under the same tenant filter.
 const statusColumns = sql`m.id, m.template, m.template_version, m.state, m.attempts,
   m.last_attempt_at, m.next_attempt_at, m.sent_at, m.failed_at, m.canceled_at,

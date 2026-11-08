@@ -36,7 +36,7 @@ import {
   type SelfServiceWorld,
 } from "./self-service-harness.ts";
 
-/** Unique per run: provider ids are unique across tenants (0021), and suites share a database. */
+/** Unique per run: provider ids are unique across tenants (0022), and suites share a database. */
 const idRun = Math.random().toString(16).slice(2, 10).padEnd(8, "0");
 let idSeq = 0;
 const nextIdSeq = () => {
