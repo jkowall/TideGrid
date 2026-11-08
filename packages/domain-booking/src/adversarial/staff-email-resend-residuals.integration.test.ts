@@ -12,7 +12,8 @@
  *   for the booking's state, a trip that is over, a failed refund, or an
  *   earlier email being sent is refused by the ledger, and leaves nothing.
  * - R3, a cancellation in progress: a direct confirmation resend waits for
- *   it, then is refused, instead of going out for a canceled booking.
+ *   it, then is refused, instead of going out for a canceled booking. R3b,
+ *   the same for a claim of the original held open: refused in_progress.
  * - R4, the service path: still sends each kind, and maps the database's
  *   eligibility refusals if it ever meets them.
  * - R5, the catalog: the new function is an invoker with search_path pinned,
@@ -149,6 +150,20 @@ describe.skipIf(!env)("adversarial: the 0014 residuals closed for direct writers
              (select count(*)::int from public.booking_email_resends
                where booking_id = ${bookingId}) as ledger`;
     return row;
+  }
+
+  /** Whether a runtime writer is waiting on a row lock in a ledger insert, within about 2.5 s. */
+  async function writerWaitsOnRow(): Promise<boolean> {
+    for (let i = 0; i < 50; i += 1) {
+      const [row] = await world.admin<{ n: number }[]>`
+        select count(*)::int as n from pg_stat_activity
+         where usename = 'tidegrid_app' and wait_event_type = 'Lock'
+           and wait_event in ('tuple', 'transactionid')
+           and query ilike '%booking_email_resends%'`;
+      if ((row?.n ?? 0) > 0) return true;
+      await sleep(50);
+    }
+    return false;
   }
 
   beforeAll(async () => {
@@ -334,21 +349,52 @@ describe.skipIf(!env)("adversarial: the 0014 residuals closed for direct writers
     });
     await held;
     const writing = outcome(directResend(b.bookingId, "confirmation"));
-    // The writer waits on the booking's row, not on anything else.
+    // The writer waits on the booking's row, not on anything else. The gate
+    // opens whatever the probe finds, so a failure here never holds the
+    // tenant's resend lock for the cases after it.
     let waiting = false;
-    for (let i = 0; i < 50 && !waiting; i += 1) {
-      const [row] = await world.admin<{ n: number }[]>`
-        select count(*)::int as n from pg_stat_activity
-         where usename = 'tidegrid_app' and wait_event_type = 'Lock'
-           and wait_event in ('tuple', 'transactionid')
-           and query ilike '%booking_email_resends%'`;
-      waiting = (row?.n ?? 0) > 0;
-      if (!waiting) await sleep(50);
+    try {
+      waiting = await writerWaitsOnRow();
+    } finally {
+      release();
     }
     expect(waiting).toBe(true);
-    release();
     expect(await canceling).toBe("canceled");
     expect(await writing).toBe("23514:booking_email_resends_kind_mismatch");
+    expect(await resendsOf(b.bookingId)).toEqual({ messages: 0, ledger: 0 });
+  });
+
+  it("R3b. a direct resend waits for a claim of the original held open, then is refused in_progress", async () => {
+    const b = await book(world, A, trips.shared(), 1);
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached = () => {};
+    const held = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    // The original confirmation is claimed in a transaction held open.
+    const claiming = asSystem(world.db, A.id, async (trx) => {
+      await sql`update email_messages
+                   set state = 'sending', attempts = attempts + 1, provider = 'fake',
+                       lease_expires_at = now() + interval '5 minutes'
+                 where tenant_id = ${A.id} and booking_id = ${b.bookingId}
+                   and template = 'booking_confirmation'`.execute(trx);
+      reached();
+      await gate;
+    });
+    await held;
+    const writing = outcome(directResend(b.bookingId, "confirmation"));
+    let waiting = false;
+    try {
+      waiting = await writerWaitsOnRow();
+    } finally {
+      release();
+    }
+    expect(waiting).toBe(true);
+    await claiming;
+    expect(await writing).toBe("23514:booking_email_resends_in_progress");
     expect(await resendsOf(b.bookingId)).toEqual({ messages: 0, ledger: 0 });
   });
 

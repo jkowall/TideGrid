@@ -308,6 +308,29 @@ describe.skipIf(!env)("G2.15 adversarial: sending limits across requests", () =>
       await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
     });
     expect(await move("-30 seconds")).toBe("no-error");
+
+    // A waiver email whose delivery is not visible (an insert still open
+    // elsewhere, or none at all) never moves earlier: the open insert's own
+    // check read the email's old time.
+    const orphan = await asApp(world, A.id, async (tx) => {
+      const [m] = await tx<{ id: string }[]>`
+        insert into public.email_messages (tenant_id, dedupe_key, template, template_version,
+            to_email, from_name, subject, html_body, text_body, next_attempt_at)
+        values (${A.id}, ${`waiver.request:${request.id}:99`}, 'waiver_request', 1,
+                ${kit}, 'Synthetic Operator', 'Waiver', '<p>Waiver.</p>', 'Waiver.',
+                now() + interval '20 minutes')
+        returning id`;
+      return m?.id ?? "";
+    });
+    expect(
+      await refusal(
+        asApp(
+          world,
+          A.id,
+          (tx) => tx`update public.email_messages set next_attempt_at = now() where id = ${orphan}`,
+        ),
+      ),
+    ).toBe("23514:email_messages_waiver_send_after");
   }, 240_000);
 
   it("queues a valid email for a minor with the longest names a booking can hold", async () => {

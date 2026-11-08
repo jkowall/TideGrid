@@ -46,8 +46,9 @@
 -- a writer could move a waiver email ahead of its send_after and past the
 -- interval. Now a queued waiver.request: message moves earlier only to a
 -- time no earlier than its delivery's send_after, or once send_after has
--- passed, when it could be claimed anyway. Refused as
--- email_messages_waiver_send_after.
+-- passed, when it could be claimed anyway, and only once its delivery is
+-- committed (a delivery insert still open read the message's old time).
+-- Refused as email_messages_waiver_send_after.
 --
 -- D2: the rules run in the existing triggers, through an invoker function
 -- with search_path pinned, not a security definer. Every table they read is
@@ -192,15 +193,17 @@ BEGIN
   -- the booking is being sent. The earlier ones still to go are locked
   -- (FOR SHARE) first, so a claim in progress finishes before this reads
   -- their state, and none starts until this transaction ends.
-  SELECT count(*)::integer INTO pending FROM (
+  -- The filter is on the aggregate, never a WHERE outside the locking
+  -- subquery, so every row still to go is locked, not only those already
+  -- sending: a claim held open on a queued one is waited for, then seen.
+  SELECT count(*) FILTER (WHERE p.state = 'sending')::integer INTO pending FROM (
     SELECT m.state FROM public.email_messages m
      WHERE m.tenant_id = NEW.tenant_id AND m.booking_id = NEW.booking_id
        AND m.id <> NEW.message_id
        AND m.template = CASE NEW.kind WHEN 'confirmation' THEN 'booking_confirmation'
                                       ELSE 'booking_canceled' END
        AND m.state IN ('queued', 'sending')
-       FOR SHARE OF m) p
-   WHERE p.state = 'sending';
+       FOR SHARE OF m) p;
   IF pending > 0 THEN
     RAISE EXCEPTION 'booking %''s earlier % email is being sent', NEW.booking_id, NEW.kind
       USING ERRCODE = '23514', CONSTRAINT = 'booking_email_resends_in_progress';
@@ -395,15 +398,17 @@ BEGIN
         USING ERRCODE = '23514', CONSTRAINT = 'email_messages_transition';
     END IF;
     -- A waiver email never comes due before its delivery's send_after, the
-    -- time the sending limits allowed (0019, D6). Moving it earlier is
-    -- allowed only to a time no earlier than send_after, or once send_after
-    -- has passed, when the message could be claimed anyway.
+    -- time the sending limits allowed (0019, D6). Moving it earlier needs
+    -- its delivery committed, and is allowed only to a time no earlier than
+    -- send_after, or once send_after has passed, when the message could be
+    -- claimed anyway. A delivery not yet visible refuses the move: it may be
+    -- an insert still open, whose own check read the message's old time.
     IF OLD.state = 'queued' AND NEW.next_attempt_at < OLD.next_attempt_at
        AND starts_with(NEW.dedupe_key, 'waiver.request:')
-       AND EXISTS (
+       AND NOT EXISTS (
          SELECT 1 FROM public.waiver_deliveries d
           WHERE d.tenant_id = NEW.tenant_id AND d.message_id = NEW.id
-            AND d.send_after > greatest(NEW.next_attempt_at, now())) THEN
+            AND d.send_after <= greatest(NEW.next_attempt_at, now())) THEN
       RAISE EXCEPTION 'waiver message % is not due before its delivery''s send_after', NEW.id
         USING ERRCODE = '23514', CONSTRAINT = 'email_messages_waiver_send_after';
     END IF;
