@@ -44,7 +44,12 @@ export interface DeliveryMessage {
   replays?: number;
 }
 
-const outboxIdPattern = /^[1-9][0-9]{0,18}$/;
+const outboxIdDigits = /^[1-9][0-9]{0,18}$/;
+/** A positive bigint id as a decimal string, within PostgreSQL's signed range. */
+const outboxIdPattern = {
+  test: (value: string): boolean =>
+    outboxIdDigits.test(value) && BigInt(value) <= 9_223_372_036_854_775_807n,
+};
 const topicPattern = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;
 const handlerPattern = /^[a-z][a-z0-9_]{0,62}$/;
 const errorCodePattern = /^[A-Za-z0-9_.:-]{1,120}$/;
@@ -149,6 +154,21 @@ async function lockEvent(trx: Transaction<Database>, tenantId: string, outboxId:
   );
 }
 
+/** Mark an event delivered; the caller holds the event lock. */
+async function markDelivered(trx: Transaction<Database>, tenantId: string, outboxId: string) {
+  await trx
+    .updateTable("outbox_events")
+    .set({
+      published_at: sql<Date>`coalesce(published_at, clock_timestamp())`,
+      delivered_at: sql<Date>`clock_timestamp()`,
+      last_error: null,
+    })
+    .where("tenant_id", "=", tenantId)
+    .where("id", "=", outboxId)
+    .where("delivered_at", "is", null)
+    .execute();
+}
+
 async function hasOpenDeadLetter(
   trx: Transaction<Database>,
   tenantId: string,
@@ -233,6 +253,22 @@ export async function consumeDelivery(
             request_id: ctx.requestId ?? null,
           })
           .execute();
+        // When this outcome is the last one the event needs, the event is
+        // marked delivered in the same transaction, so a dead letter report
+        // waiting on the event lock sees it delivered and records nothing.
+        const outcomes = await trx
+          .selectFrom("outbox_deliveries")
+          .select(sql<number>`count(*)::int`.as("n"))
+          .where("tenant_id", "=", ctx.tenantId)
+          .where("outbox_event_id", "=", event.outboxId)
+          .where(
+            "handler",
+            "in",
+            matching.map((h) => h.name),
+          )
+          .executeTakeFirst();
+        if ((outcomes?.n ?? 0) >= matching.length)
+          await markDelivered(trx, ctx.tenantId, event.outboxId);
         return "ran" as const;
       });
       if (didRun === "parked") return { kind: "parked" };
@@ -249,17 +285,7 @@ export async function consumeDelivery(
   const parked = await inTenantTransaction(db, ctx, async (trx) => {
     await lockEvent(trx, ctx.tenantId, event.outboxId);
     if (await hasOpenDeadLetter(trx, ctx.tenantId, event.outboxId)) return true;
-    await trx
-      .updateTable("outbox_events")
-      .set({
-        published_at: sql<Date>`coalesce(published_at, clock_timestamp())`,
-        delivered_at: sql<Date>`clock_timestamp()`,
-        last_error: null,
-      })
-      .where("tenant_id", "=", ctx.tenantId)
-      .where("id", "=", event.outboxId)
-      .where("delivered_at", "is", null)
-      .execute();
+    await markDelivered(trx, ctx.tenantId, event.outboxId);
     return false;
   });
   if (parked) return { kind: "parked" };
@@ -330,13 +356,15 @@ export async function recordDeadLetter(
               ${Math.max(0, Math.trunc(input.attempts))}, ${input.source})
       on conflict (tenant_id, outbox_event_id) where replayed_at is null do nothing
       returning id`.execute(trx);
+    // A second report leaves the first one's failure code on the event.
+    if (inserted.rows.length === 0) return "already_open";
     await trx
       .updateTable("outbox_events")
       .set({ last_error: `dead_letter:${errorCode}`.slice(0, 120) })
       .where("tenant_id", "=", ctx.tenantId)
       .where("id", "=", message.outboxId)
       .execute();
-    return inserted.rows.length > 0 ? "recorded" : "already_open";
+    return "recorded";
   });
 }
 
@@ -471,8 +499,11 @@ export async function replayDeadLetter(
     throw new ReplayRefusedError("bad_reason");
   }
   if (!outboxIdPattern.test(input.deadLetterId)) throw new ReplayRefusedError("not_found");
-  // A person replays, never a job: the trigger refuses it too.
-  if (ctx.actorType === "system" || !ctx.actorId) throw new ReplayRefusedError("bad_actor");
+  // A person on the operator's side replays: staff or support, never a job
+  // or a guest. The trigger refuses anyone else too.
+  if ((ctx.actorType !== "staff" && ctx.actorType !== "support") || !ctx.actorId) {
+    throw new ReplayRefusedError("bad_actor");
+  }
   return inTenantTransaction(db, ctx, async (trx) => {
     const target = await trx
       .selectFrom("outbox_dead_letters")

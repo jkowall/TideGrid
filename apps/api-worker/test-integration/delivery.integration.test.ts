@@ -17,6 +17,7 @@ import {
   enqueueOutbox,
   inTenantTransaction,
   listDeadLetters,
+  parseDeliveryMessage,
   publishOutbox,
   ReplayRefusedError,
   recordDeadLetter,
@@ -584,6 +585,34 @@ describe.skipIf(!env)("the delivery foundation (W3-G2.3)", () => {
     await expect(
       replayDeadLetter(runtime.db, sys(A.id), { deadLetterId: letter?.id ?? "", reason: "job" }),
     ).rejects.toMatchObject({ code: "bad_actor" });
+    // A guest is not the operator's side either, in the helper and the trigger.
+    const guest: TenantContext = { ...guestContext(A.id), actorId: "credential-1" };
+    await expect(
+      replayDeadLetter(runtime.db, guest, {
+        deadLetterId: letter?.id ?? "",
+        reason: "guest",
+      }),
+    ).rejects.toMatchObject({ code: "bad_actor" });
+    await expect(
+      inTenantTransaction(runtime.db, guest, (trx) =>
+        trx
+          .updateTable("outbox_dead_letters")
+          .set({ replay_reason: "guest" })
+          .where("tenant_id", "=", A.id)
+          .where("id", "=", letter?.id ?? "0")
+          .execute(),
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
+    // A duplicate report leaves the first failure code on the event.
+    await recordDeadLetter(runtime.db, message, {
+      errorCode: "queue_retries_exhausted",
+      attempts: 7,
+      source: "queue",
+    });
+    expect((await eventRow(A.id, id)).last_error).toBe("dead_letter:Error");
+    // An id past PostgreSQL's bigint range is not a message this code wrote.
+    expect(parseDeliveryMessage({ ...message, outboxId: "9223372036854775808" })).toBeNull();
+    expect(parseDeliveryMessage({ ...message, outboxId: "9223372036854775807" })).not.toBeNull();
 
     const other = await enqueue(A.id, "test.delivery.late");
     const late: DeliveryMessage = { ...message, outboxId: other };

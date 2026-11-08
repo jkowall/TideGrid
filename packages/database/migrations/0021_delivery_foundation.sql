@@ -196,9 +196,10 @@ BEGIN
      OR NEW.replay_reason IS NULL THEN
     RAISE EXCEPTION 'a replay sets its reason and nothing else' USING ERRCODE = '55000';
   END IF;
-  IF v_actor IS NULL OR app.setting_or_null('app.actor_type') IS NULL
-     OR app.setting_or_null('app.actor_type') = 'system' THEN
-    RAISE EXCEPTION 'a replay names its actor, and a system job never replays'
+  IF v_actor IS NULL
+     OR app.setting_or_null('app.actor_type') IS DISTINCT FROM 'staff'
+        AND app.setting_or_null('app.actor_type') IS DISTINCT FROM 'support' THEN
+    RAISE EXCEPTION 'a replay names its actor, who is staff or support, never a job or a guest'
       USING ERRCODE = '42501';
   END IF;
   NEW.replayed_at := clock_timestamp();
