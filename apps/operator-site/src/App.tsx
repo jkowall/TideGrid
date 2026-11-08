@@ -2,6 +2,7 @@ import type { MeResponse } from "@tidegrid/contracts";
 import { useCallback, useEffect, useState } from "react";
 import { ConsoleShell, routeOf } from "./ConsoleShell.tsx";
 import {
+  AccessSignIn,
   Checking,
   ConfirmLink,
   Failed,
@@ -15,8 +16,9 @@ import {
 import { forgetSearches } from "./search/model.ts";
 
 /**
- * Operator console shell. It hosts the G2.2 sign-in flows unchanged: Cloudflare
- * Access on deployed environments and the magic link locally. Both reach the
+ * Operator console shell. It hosts the G2.2 sign-in flows: Cloudflare Access
+ * on deployed environments (a Google or Microsoft account, then Cloudflare's
+ * own second step), and the magic link only in local development. Both reach the
  * same session and the same `/api/v1/me`, and every call stays same-origin
  * under /api, forwarded to the API's ConsoleGateway. The shell (ConsoleShell)
  * routes the signed-in pages: the overview, the calendar (G2.12a), and the
@@ -28,7 +30,8 @@ type State =
   | { kind: "confirm-link"; token: string }
   /** `focus`: the shell replaced a screen the person acted on, so its heading takes focus. */
   | { kind: "signed-in"; me: MeResponse; focus: boolean; signOutFailed?: boolean }
-  | { kind: "signed-out"; notice?: GateNotice }
+  /** `accessOnly`: this environment signs staff in through Cloudflare Access alone. */
+  | { kind: "signed-out"; notice?: GateNotice; accessOnly?: boolean }
   | { kind: "not-provisioned"; message: string; me?: MeResponse }
   | { kind: "failed"; reason: FailureReason };
 
@@ -108,7 +111,12 @@ async function checkSignIn(): Promise<State> {
       }
       return { kind: "signed-in", me, focus: false };
     }
-    if (res.status === 401) return { kind: "signed-out" };
+    if (res.status === 401) {
+      const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null;
+      return body?.error?.code === "access_required"
+        ? { kind: "signed-out", accessOnly: true }
+        : { kind: "signed-out" };
+    }
     if (res.status === 403) {
       const body = (await res.json().catch(() => null)) as {
         error?: { message?: unknown };
@@ -184,7 +192,7 @@ export function App() {
     const next = await checkSignIn();
     if (next.kind === "signed-out") {
       return setState({
-        kind: "signed-out",
+        ...next,
         notice: { tone: "success", title: "You're signed out" },
       });
     }
@@ -199,7 +207,11 @@ export function App() {
     case "confirm-link":
       return <ConfirmLink onContinue={() => redeem(state.token)} />;
     case "signed-out":
-      return <SignIn notice={state.notice} />;
+      return state.accessOnly ? (
+        <AccessSignIn notice={state.notice} />
+      ) : (
+        <SignIn notice={state.notice} />
+      );
     case "not-provisioned":
       return (
         <NotProvisioned

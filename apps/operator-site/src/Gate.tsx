@@ -197,6 +197,31 @@ export function SignIn({ notice }: { notice?: GateNotice | undefined }) {
 }
 
 /**
+ * Deployed consoles sign staff in through Cloudflare Access only. Access
+ * normally stops a signed-out person before this page loads; this screen is
+ * for an Access sign-in that ended while the console was open. Loading the
+ * page again goes back through Access: the Google or Microsoft account, then
+ * Cloudflare's own second step.
+ */
+export function AccessSignIn({ notice }: { notice?: GateNotice | undefined }) {
+  const noticeId = useId();
+  const here = `${window.location.pathname}${window.location.search}`;
+  return (
+    <GateFrame title="Sign in">
+      <GateTitle describedBy={notice ? noticeId : undefined}>Sign in</GateTitle>
+      <p className="console-gate__lede">
+        Sign in with your Google or Microsoft work account. Cloudflare then asks for your second
+        step: your authenticator app or security key.
+      </p>
+      {notice && <Notice id={noticeId} tone={notice.tone} title={notice.title} announce="none" />}
+      <ButtonLink variant="primary" href={here} block>
+        Continue to sign in
+      </ButtonLink>
+    </GateFrame>
+  );
+}
+
+/**
  * Sign out, for either sign-in method. Cloudflare Access sessions end at the
  * Access logout page; email-link sessions end with a request, and the button
  * stays busy until it finishes. The visible label is "Sign out" either way.

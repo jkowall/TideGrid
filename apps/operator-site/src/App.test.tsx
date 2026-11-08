@@ -270,6 +270,33 @@ describe("sign-in notices", () => {
   });
 });
 
+describe("Cloudflare Access sign-in", () => {
+  const accessRequired = () =>
+    json({ error: { code: "access_required", message: "x", requestId: "r" } }, 401);
+
+  it("offers Access, not the email form, where the API accepts Access only", async () => {
+    vi.stubGlobal("fetch", api({ "GET /api/v1/me": [accessRequired] }));
+    window.history.replaceState(null, "", "/bookings?date=2026-10-06");
+    vi.resetModules();
+    const App = (await import("./App.tsx")).App;
+    render(<App />);
+    await focusLandsOn("Sign in");
+    expect(screen.queryByLabelText("Work email")).toBeNull();
+    expect(screen.getByText(/authenticator app or security key/)).toBeTruthy();
+    const go = screen.getByRole("link", { name: "Continue to sign in" });
+    expect(go.getAttribute("href")).toBe("/bookings?date=2026-10-06");
+  });
+
+  it("keeps the email form where the email link is on", async () => {
+    vi.stubGlobal("fetch", api({ "GET /api/v1/me": [() => status(401)] }));
+    const App = await loadApp();
+    render(<App />);
+    await focusLandsOn("Sign in");
+    expect(screen.getByLabelText("Work email")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Continue to sign in" })).toBeNull();
+  });
+});
+
 describe("sign out", () => {
   it("sits in the rail on every page and not in the Overview card", async () => {
     vi.stubGlobal("fetch", api({ "GET /api/v1/me": [() => json(me())] }));
