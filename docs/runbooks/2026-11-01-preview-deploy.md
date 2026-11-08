@@ -272,6 +272,7 @@ Rules for the day apply. Go/no-go: **D11**, then **D6**. Prompt: *"Sender `<addr
   - **Step 8:** waiver requests arrive, and a participant signs on the owner's phone at 375 px. The link is single-use: the phone or Playwright, not both.
   - SPF, DKIM, and DMARC results, recorded in P12.
 - Rollback: first `nov1 secrets email --delete EMAIL_ALLOWED_RECIPIENTS --phase <current> --live --go A7`. An empty fence means email is off (`apps/api-worker/src/email.ts:114-126`), and mail stays queued. Then, if needed, revert C2 and release. Leave the DNS records.
+- Update, 2026-11-08: P7 ran in the owner's terminal, partly. D6 is `bookings@mail.tidegrid.us`. `0016` was applied under A1 first, since the release took all of `main`; `nov1 db backup` was a no-op, so point-in-time restore was the only restore point. C2 merged as `0edc6de`, released as API version `3cd9ada1`, and the allowlist was put under A7. Steps 1 to 4 and the outbox check ran: at the last read 11 of the 14 synthetic backlog messages had failed `recipient_not_allowed`, none sent, and the rest were still queued. A9, steps 3 and 8, and the P12 email records were not done; the owner closed P7 there, with email left on ([verification log](../verification-log.md#o-p7-g216-live-email-switched-on-a9-and-steps-3-and-8-not-shown-november-8-2026)). The second A7 type-back is the secret's name; the list goes at wrangler's own prompt after it.
 
 G2.16-live checklist (12:206-212) on Nov 1:
 
