@@ -389,6 +389,11 @@ export function BookScreen({
         // Settling is idempotent by payment: a refusal may mean it already settled.
         const now = await readCheckout(endpoint, session.id, secret);
         if (!still()) return;
+        if (now.kind === "ok" && now.value.state === "expired") {
+          // A payment event may still be on its way: wait out the late-success grace.
+          watch(offer, session, secret, outcome);
+          return;
+        }
         if (now.kind === "ok" && finalStates.has(now.value.state)) {
           go({ kind: "outcome", offer, session: now.value, secret });
           return;
@@ -439,6 +444,11 @@ export function BookScreen({
         // Too late to cancel: it was paid or ended. Show what happened.
         const now = await readCheckout(endpoint, session.id, secret);
         if (!still()) return;
+        if (now.kind === "ok" && now.value.state === "expired" && paymentSent.current) {
+          // A payment event may still be on its way: wait out the late-success grace.
+          watch(offer, session, secret);
+          return;
+        }
         if (now.kind === "ok" && finalStates.has(now.value.state)) {
           go({ kind: "outcome", offer, session: now.value, secret });
           return;
