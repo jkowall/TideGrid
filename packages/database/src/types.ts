@@ -948,7 +948,7 @@ export interface BookingNotesTable {
   created_at: CreatedAt;
 }
 
-// Finalization exception resolutions (0017, W1-FIN-EXC) ----------------------------
+// Finalization exception resolutions (0018, W1-FIN-EXC) ----------------------------
 
 export type ExceptionResolutionReason =
   | "contacted_guest"
@@ -1168,6 +1168,21 @@ export interface BookingEmailResendsTable {
   api_request_id: ColumnType<string | null, never, never>;
 }
 
+/**
+ * One claim of a staff resend message (0017): the claim guard writes it when
+ * the delivery job, or any writer, claims a booking.resend: message. The
+ * trigger stamps claimed_at at the clock. Append-only.
+ */
+export interface BookingEmailResendClaimsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  message_id: Fixed<string>;
+  /** The attempt the claim began (email_messages.attempts after it). */
+  attempt: Fixed<number>;
+  claimed_at: Stamped;
+}
+
 export interface Database
   extends PricingTables,
     CheckoutTables,
@@ -1198,7 +1213,8 @@ export interface Database
   sweep_turns: SweepTurnsTable;
   // Staff resend ledger (0014).
   booking_email_resends: BookingEmailResendsTable;
-  // Finalization exception resolutions (0017, W1-FIN-EXC).
+  booking_email_resend_claims: BookingEmailResendClaimsTable;
+  // Finalization exception resolutions (0018, W1-FIN-EXC).
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
 }
 

@@ -86,6 +86,16 @@ export const ACCOUNT_FAULT_RETRY_SECONDS = 600;
 /** Seconds before attempt n + 1, after attempt n failed temporarily. */
 export const RETRY_BACKOFF_SECONDS = [60, 300, 900, 3600, 14_400] as const;
 export const DEFAULT_LEASE_SECONDS = 120;
+/** The dedupe key prefix of a staff resend (G2.16b); its claims meet the 0017 limits. */
+export const RESEND_KEY_PREFIX = "booking.resend:";
+/** The tenant's resend lock key prefix, shared with the staff resend service (0014). */
+export const RESEND_LOCK_PREFIX = "tidegrid.booking_resend:";
+/**
+ * The 0017 claim refusals that lift with time: the resend waits in the queue.
+ * The others (`resend_limit`, `resend_unrecorded`) never lift, and the claim
+ * cancels the message with that code.
+ */
+export const RESEND_WAIT_CODES = ["resend_interval", "resend_rate"] as const;
 /** Room a deadline keeps beyond one send's bound, for the claim and the record. */
 export const DEADLINE_MARGIN_MS = 2_000;
 /** Why a message whose outcome nobody knows fails on a provider that does not deduplicate. */
@@ -301,19 +311,55 @@ async function claimOne(
 ): Promise<Claimed> {
   const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
   return inTenantTransaction(db, ctx, async (trx) => {
-    const { rows } = await sql<ClaimedRow & { state: string }>`
+    // The tenant's resend lock first, before any message lock, as a staff
+    // resend takes it (0014), so a claim and a resend never deadlock and the
+    // resend limits on claims (0017) are read and logged one claim at a time.
+    // Never waited for: while a resend holds it, this run claims nothing for
+    // the tenant, and a later run does.
+    const { rows: lockRows } = await sql<{ locked: boolean }>`
+      select pg_try_advisory_xact_lock(hashtextextended(${`${RESEND_LOCK_PREFIX}${ctx.tenantId}`}, 0)) as locked`.execute(
+      trx,
+    );
+    if (lockRows[0]?.locked !== true) return { kind: "none" } as const;
+    // A staff resend that must wait for its limits is left in the queue, and
+    // the claim takes the next message instead.
+    const { rows } = await sql<ClaimedRow & { state: string; resend: boolean }>`
       select id, attempts, state, booking_id, participant_id, subject_ref, to_email, to_name,
              from_name, reply_to, subject, html_body, text_body, link_purpose, link_path,
-             link_ttl_seconds, link_slot
-        from email_messages
+             link_ttl_seconds, link_slot, starts_with(dedupe_key, ${RESEND_KEY_PREFIX}) as resend
+        from email_messages m
        where tenant_id = ${ctx.tenantId}
          and ((state = 'queued' and next_attempt_at <= now())
               or (state = 'sending' and lease_expires_at <= now()))
+         and case when starts_with(dedupe_key, ${RESEND_KEY_PREFIX})
+                  then not exists (
+                    select 1 from app.booking_resend_claim_refusal(m.tenant_id, m.id, clock_timestamp()) r
+                     where r.code in (${RESEND_WAIT_CODES[0]}, ${RESEND_WAIT_CODES[1]}))
+                  else true end
        order by next_attempt_at, id
        limit 1
        for update skip locked`.execute(trx);
     const found = rows[0];
     if (!found) return { kind: "none" } as const;
+    if (found.resend) {
+      // Under the lock the rules only relax with time, so what remains is a
+      // refusal that never lifts: cancel it, as the claim guard would refuse it.
+      const { rows: refused } = await sql<{ code: string }>`
+        select code from app.booking_resend_claim_refusal(${ctx.tenantId}, ${found.id}, clock_timestamp())`.execute(
+        trx,
+      );
+      const code = refused[0]?.code;
+      if (code !== undefined) {
+        if ((RESEND_WAIT_CODES as readonly string[]).includes(code))
+          return { kind: "none" } as const;
+        await sql`
+          update email_messages set state = 'canceled', last_error_code = ${code}
+           where tenant_id = ${ctx.tenantId} and id = ${found.id}
+             and state in ('queued', 'sending')`.execute(trx);
+        await revokeMessageLinks(trx, ctx.tenantId, found.id, "withdrawn");
+        return { kind: "canceled", messageId: found.id, attempt: found.attempts, code } as const;
+      }
+    }
     if (found.link_purpose !== null) {
       const stale = await staleness(trx, ctx.tenantId, found.id);
       if (stale) {

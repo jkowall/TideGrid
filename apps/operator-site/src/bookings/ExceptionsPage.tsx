@@ -418,7 +418,7 @@ export const resolutionNoteLimit = 500;
 /**
  * One character outside the contract's invisibleCharacters (white space, C0
  * and C1 controls, and the Unicode spaces, joiners, marks, fillers, and
- * variation selectors), the set migrations 0008 and 0017 check too. Kept
+ * variation selectors), the set migrations 0008 and 0018 check too. Kept
  * here, as the console imports only types from the contracts package.
  */
 export const invisibleCharacters =

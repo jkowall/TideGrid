@@ -18,7 +18,8 @@
 -- this table holds authorship, immutability, uniqueness, and tenancy.
 --
 -- The note is free text a person typed and may name a guest. It never enters
--- audit rows, outbox events, logs, or the idempotency store: the audit row
+-- audit rows, outbox events, logs, or the idempotency store's kept answer (the
+-- store holds only a hash of the request): the audit row
 -- names the resolution's id and its reason code only. The reason code
 -- 'other' requires a note.
 --

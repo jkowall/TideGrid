@@ -7,11 +7,12 @@
  * A resolution records follow-up only. It changes no money, booking,
  * payment, refund, or checkout: this module writes one resolution row and
  * one audit row, nothing else. One resolution per exception, for ever
- * (migration 0017); the database sets who resolved it, the request, and the
+ * (migration 0018); the database sets who resolved it, the request, and the
  * time from the transaction.
  *
  * The note is text a person typed and may name a guest. It never enters an
- * audit row, an event, a log, or the idempotency store: the audit row names
+ * audit row, an event, a log, or the idempotency store's kept answer (the
+ * store holds only a hash of the request): the audit row names
  * the resolution's id and its reason code.
  */
 import {

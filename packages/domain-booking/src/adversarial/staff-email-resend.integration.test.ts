@@ -227,9 +227,10 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
   }
 
   /**
-   * Make `minutes` pass for the tenant's resend limits: its ledger rows move
-   * earlier, in one admin transaction, with the append-only guard off for
-   * that statement only (as the waiver suite moves its deliveries).
+   * Make `minutes` pass for the tenant's resend limits: its ledger rows and
+   * its resend claims (0017) move earlier, in one admin transaction, with the
+   * append-only guards off for those statements only (as the waiver suite
+   * moves its deliveries).
    */
   async function passMinutes(tenant: CheckoutFixture, minutes: number): Promise<void> {
     await world.admin.begin(async (tx) => {
@@ -238,6 +239,17 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
                   set created_at = created_at - make_interval(mins => ${minutes})
                 where tenant_id = ${tenant.id}`;
       await tx`alter table public.booking_email_resends enable trigger booking_email_resends_append_only`;
+      const [claims] = await tx<{ present: boolean }[]>`
+        select to_regclass('public.booking_email_resend_claims') is not null as present`;
+      if (claims?.present) {
+        await tx`alter table public.booking_email_resend_claims
+                   disable trigger booking_email_resend_claims_append_only`;
+        await tx`update public.booking_email_resend_claims
+                    set claimed_at = claimed_at - make_interval(mins => ${minutes})
+                  where tenant_id = ${tenant.id}`;
+        await tx`alter table public.booking_email_resend_claims
+                   enable trigger booking_email_resend_claims_append_only`;
+      }
     });
   }
 

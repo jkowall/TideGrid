@@ -10,15 +10,29 @@ Dated decisions that changed scope, wording, or process. Each entry records the 
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
-The owner placed finalization exception resolution in the G2.12 row with the O-SCOPE choice "Booking fixes and email limits". The goal's start gate is that entry. Staff now mark a payment exception as followed up, with migration `0017` (provisional, claimed at merge) and its service in the [booking contract](../../packages/domain-booking/README.md#exception-resolution-w1-fin-exc). The owner gave no answer on who may resolve or what reason is required, so these are coordinator defaults, pending owner confirmation:
+The owner placed finalization exception resolution in the G2.12 row with the O-SCOPE choice "Booking fixes and email limits". The goal's start gate is that entry. Staff now mark a payment exception as followed up, with migration `0018` (provisional, claimed at merge) and its service in the [booking contract](../../packages/domain-booking/README.md#exception-resolution-w1-fin-exc). The owner gave no answer on who may resolve or what reason is required, so these are coordinator defaults, pending owner confirmation:
 
 - **D1 A: an append-only resolution table.** One resolution per exception, never edited or removed, for any role. The exception itself is not changed; the open list is the exceptions without a resolution. The database stamps who resolved it, the request, and the time.
 - **D2: owners and booking staff resolve; finance reads.** A new permission, `exceptions.resolve`.
 - **D3: four reason codes.** Contacted the guest, refunded outside TideGrid, no action needed, and other, which requires a note. The note is optional otherwise, and follows a booking note's rules.
-- **D4: the note goes where the booker goes.** Finance sees the reason, who, and when, but not the note, since a note can name a guest (as with booking notes, owner decision of 2026-10-19). The note never enters the audit row, an event, a log, or the idempotency store.
+- **D4: the note goes where the booker goes.** Finance sees the reason, who, and when, but not the note, since a note can name a guest (as with booking notes, owner decision of 2026-10-19). The note never enters the audit row, an event, or a log, and the idempotency store keeps only a hash of the request, never its text.
 - **D5: no resolve while the automatic refund is still requested.** Its outcome is not known yet, and a refund that then failed would leave the open list unseen. A refund the provider refused can be resolved, for example as refunded outside TideGrid.
 
 Resolving changes no money, booking, payment, refund, or checkout. Retries and refunds from the console, email exceptions, overrides, and staff cancel stay out of scope.
+
+Security review under rule R9: the owner said yes on 2026-11-08, and it found no defects. Canonical: the [database README](../../packages/database/README.md#finalization-exception-resolutions-0018) and the [verification log](../verification-log.md#2026-11-08).
+
+### 2026-11-08: W1-RESEND-CLAIM, staff resend limits held at the delivery claim (owner go; coordinator defaults pending owner confirmation)
+
+The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and email limits" on the O-SCOPE card, whose option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." Migration `0014` calls bounding sends at the delivery claim "a possible pre-pilot follow-up": its limits are decided on the ledger's stamps, and a writer with `tidegrid_app`'s credentials that waits after its commit check commits a resend with an old stamp, whose email then goes out beside resends stamped later. Migration `0017` (provisional; `0018` reserved) holds the limits again at every claim of a `booking.resend:` message. Coordinator defaults, pending owner confirmation:
+
+- **D1, a check in the claim's guard, not a new trigger on `email_messages`.** `app.check_email_message()` is replaced in place, as `0015` did, with one new step in its claim branch. The goal's recommended default.
+- **D2, claim times, at the clock.** Each claim is decided at `clock_timestamp()` once the tenant's resend lock is held, and logged in a new append-only table, `booking_email_resend_claims`. The limits on claims: 5 deliverable per booking (`0014`'s count), 10 minutes after another resend of the booking was claimed, 50 other resends of the operator claimed per hour. A message's own earlier claims never bar it.
+- **D3, wait rather than cancel when a limit lifts with time.** The delivery job leaves such a resend in the queue and claims it at a later run. It cancels only a resend that can never go (`resend_limit`, `resend_unrecorded`).
+- **D4, a backlog is paced.** In normal operation a resend goes out as before. After an outage or a missed run, or when the booking's previous resend was retried less than 10 minutes before, a resend now waits until real sends fit the limits.
+- **D5, recorded, not closed here.** A writer that forges the `0015` give-back after a send can make the delivery job send the same message again. That is the at-most-once rule for every message, not only resends.
+
+Security review under rule R9: asked of the owner on 2026-11-08, answer pending. Canonical: the [database README](../../packages/database/README.md#staff-resend-claims-0017) and the [verification log](../verification-log.md).
 
 ### 2026-11-08: Neon migrations from CI (owner request; owner decision 2026-11-08)
 
