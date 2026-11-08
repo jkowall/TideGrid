@@ -29,6 +29,8 @@ Recheck fixes, 2026-11-08: seven Latin Roman numerals (U+2180 to U+2182, U+2185 
 
 Open: a security review of the spoofing cases (R9), run by the lead. Two tenants provisioned with confusable names, an unverified reply-to, the hand-written lookalike and staff-word lists, and the tightened name rule withholding a whole guest site for a stored brand that now fails are recorded as residuals in the README. Proposed, for the owner: run every active brand through the new rule before any non-synthetic brand is stored.
 
+Second recheck fix, 2026-11-08: splitting after folding kept a "!" at a word's edge inside the word, so "Support!" read as "supporti" and "Harbor via! Stripe" as "viai". Both passed, though the review fix had refused them. The staff-word and "via" checks now run on three readings of the words (the folded split, the same with "!" trimmed from each end, and a plain split on letters and digits) and refuse if any fires. Every earlier refusal and accepted name still holds.
+
 Canonical: the [messaging README](../../packages/domain-messaging/README.md#sender-identity-w1-sender-guard) and the [brand contract](../../packages/contracts/src/brand.ts).
 
 ### 2026-11-08: W1-SAAS-PREP, pre-SaaS hostname items and the D-E11 and D-E12 sweep follow-ups (owner go; coordinator defaults pending owner confirmation)

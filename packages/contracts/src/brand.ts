@@ -727,7 +727,7 @@ function lettersFold(text: string): boolean {
  * digit, so "!" read as "i" stays inside its word: "B!lling" is one word, not
  * "B" and "lling" (recheck N2). Folding happens before splitting.
  */
-function senderWords(name: string): string[] {
+function foldedWords(name: string): string[] {
   const words: string[] = [];
   let word = "";
   for (const ch of name) {
@@ -740,6 +740,37 @@ function senderWords(name: string): string[] {
   }
   if (word.length > 0) words.push(word);
   return words;
+}
+
+/** A symbol that folds to a letter, such as "!" read as "i". */
+const symbolLetter = (ch: string) =>
+  !letterOrNumber.test(ch) && /^[a-z]+$/.test(foldCharacters(ch));
+
+/** A word with the symbols that fold to letters trimmed from both ends: "Support!" as "Support". */
+function trimSymbolLetters(word: string): string {
+  const chars = [...word];
+  let start = 0;
+  let end = chars.length;
+  while (start < end && symbolLetter(chars[start] as string)) start += 1;
+  while (end > start && symbolLetter(chars[end - 1] as string)) end -= 1;
+  return chars.slice(start, end).join("");
+}
+
+/**
+ * Three readings of a name's words, for the checks on whole words. A symbol
+ * that folds to a letter may stand for that letter or be punctuation, so each
+ * check runs on every reading and refuses if any fires (recheck R1):
+ * - the folded split, where "!" stays inside its word ("B!lling", "v!a");
+ * - the folded split with such symbols trimmed from each end ("Support!",
+ *   "!Billing", "V!A!" read as "Support", "Billing", "V!A");
+ * - the plain split on letters and digits, where "!" separates
+ *   ("No!Reply", "via!Stripe" read as "No Reply", "via Stripe").
+ */
+function senderWordReadings(name: string): string[][] {
+  const folded = foldedWords(name);
+  const trimmed = folded.map(trimSymbolLetters).filter((word) => word.length > 0);
+  const plain = name.match(/[\p{L}\p{N}]+/gu) ?? [];
+  return [folded, trimmed, plain];
 }
 
 /**
@@ -865,6 +896,12 @@ function neutralWord(word: string): boolean {
   return /^[0-9]+$/.test(word) || senderSkeleton(word).length <= 1;
 }
 
+/** Whether the words that name something are all staff, mailbox, or filler words. */
+function onlyStaffWords(words: string[]): boolean {
+  const naming = words.filter((word) => !neutralWord(word)).map(senderSkeleton);
+  return naming.length > 0 && naming.every((word) => staffWords.has(word));
+}
+
 /**
  * Characters a sender name may use: Latin letters, ASCII digits, single
  * spaces, and a little punctuation. No quote, backslash, @, colon,
@@ -890,9 +927,11 @@ const domainLike = /[\p{L}\p{N}]\.\p{L}{2,}/u;
  *   capital), so no letter is invisible to the checks below;
  * - a name that reads as TideGrid in any spelling its skeleton folds;
  * - a name made only of staff, mailbox, and filler words, ignoring digits and
- *   single letters;
+ *   single letters, also with "!" at a word's end or between words
+ *   ("Support!", "No!Reply");
  * - "via" after the first word, which would name a second relay, also when
- *   spelled with lookalikes or split by separators ("v!a", "v.i.a", "V I A");
+ *   spelled with lookalikes or split by separators ("v!a", "v.i.a", "V I A",
+ *   "via!Stripe", "V!A!");
  * - a domain-like word, such as "tidegrid.us" or "paypal.com".
  */
 export function senderNameProblem(name: string): string | null {
@@ -919,10 +958,11 @@ export function senderNameProblem(name: string): string | null {
     return "A sender name may not use or imitate the TideGrid name";
   }
   if (domainLike.test(name)) return "A sender name may not contain a domain name";
-  const rawWords = senderWords(name);
-  if (namesSecondRelay(rawWords)) return 'A sender name may not use "via" after its first word';
-  const naming = rawWords.filter((w) => !neutralWord(w)).map(senderSkeleton);
-  if (staffWords.has(skeleton) || (naming.length > 0 && naming.every((w) => staffWords.has(w)))) {
+  const readings = senderWordReadings(name);
+  if (readings.some(namesSecondRelay)) {
+    return 'A sender name may not use "via" after its first word';
+  }
+  if (staffWords.has(skeleton) || readings.some(onlyStaffWords)) {
     return "A sender name may not be only staff or mailbox words";
   }
   return null;

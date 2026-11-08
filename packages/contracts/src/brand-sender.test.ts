@@ -202,6 +202,42 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     expect(accepts({ name })).toBe(false);
   });
 
+  // Recheck R1: "!" folds to "i", so the folded split read "Support!" as
+  // "supporti" and "via!" as "viai". Each check now runs on the folded split,
+  // the folded split with such symbols trimmed, and the plain split.
+  it.each([
+    "Support!",
+    "Billing!",
+    "Security!",
+    "Help!",
+    "Support!!",
+    "!Billing",
+    "Support! Team!",
+    "Security Team!",
+    "The Security Team!",
+    "Customer Support!",
+    "Do Not Reply!",
+    "Billing Dept!",
+    "Help Center!",
+    "Payments Team!",
+    "No!Reply",
+    "Support!Team",
+    "Harbor via! Stripe",
+    "Harbor !via Stripe",
+    "Harbor via!Stripe",
+    "Harbor V!A!",
+  ])("refuses %s with an exclamation mark at a word's edge (recheck R1)", (name) => {
+    expect(senderNameProblem(name), name).not.toBeNull();
+    expect(senderDisplayName(name), name).toBeNull();
+    expect(accepts({ name }), name).toBe(false);
+  });
+
+  it("still accepts operator names with an exclamation mark (recheck R1)", () => {
+    for (const name of ["Harbor Tours!", "Dive In! Charters", "Yahoo! Boats", "Support Boats!"]) {
+      expect(senderNameProblem(name), name).toBeNull();
+    }
+  });
+
   it("still accepts via as a first word or inside a longer word (recheck N2)", () => {
     for (const name of [
       "Via Ferrata Adventures",
