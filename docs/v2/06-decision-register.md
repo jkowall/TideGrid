@@ -50,16 +50,49 @@ The owner's checklist of 2026-11-08 began: "Owner checklist: confirm or replace 
 
 What this entry does not change:
 
-- **Proposed follow-ups stay proposed.** The `nov1` refusal of a SHA without a green four-job run is not built. A ruleset on `main` requiring the four checks is the owner's GitHub setting and is not set. A limit on GuestGateway misses stays with G2.14b-live. D-E11 A and D-E12 A stay follow-ups.
+- **Proposed follow-ups stay proposed.** The `nov1` refusal of a SHA without a green four-job run is not built. For the ruleset on `main` requiring the four checks, the owner reports saving one, but GitHub listed none on 2026-11-08 ([W0-CLOSEOUT entry](#2026-11-08-w0-closeout-a-ruleset-on-main-for-the-four-ci-checks-owner-action-pending-confirmation)). A limit on GuestGateway misses stays with G2.14b-live. D-E11 A and D-E12 A stay follow-ups.
 - **"D4 C".** The owner's checklist names the `0014` residuals as "D4 C, D5 A and D6". The 2026-11-01 entry records D4 A, D5 A, and D6 A, and defines no D4 C. The question quoted the checklist, and the owner selected that option as given. This entry does not resolve the label.
 - **The revisit of the demotion rule.** The G2.14b section's "Revisit with the owner before any operator domain" is not edited. The owner confirmed the rule. The question did not ask whether to drop the revisit.
 - **Departures not ratified.** Question i2 listed only some of the 2026-11-04 departures, and the owner ratified "every listed departure". Not listed, so not ratified: this run's own use of the type-back scripts and of the secret files, and the merges of pull requests 59, 60, and 62 after `main` had moved past the base their CI tested. They stay coordinator readings.
 - **Stripe defaults not asked.** Question l named D1 to D12 and the Stripe-live replay. The section's other "Also taken by default" items were not asked: the error codes that never settle a refund as failed, and the adapter's place in `packages/domain-payments`, which narrows the hosting plan's proposed `provider-*/` layout. They stay coordinator defaults.
 - **Not asked again.** Owner decisions already recorded: the calendar, the CSV, `E_DELIVERY_FAILED`, account outages, and the branch (2026-11-07); D-E7 and D-E8; G2.12e D7; and the Nov 1 run's items ratified on 2026-11-05.
+- **The W0-CLOSEOUT entry.** It [merged to `main`](#2026-11-08-w0-closeout-a-ruleset-on-main-for-the-four-ci-checks-owner-action-pending-confirmation) after `7ef50cf`, the commit this session read, so its coordinator readings, pending owner confirmation, were not among the questions.
 - **Labels from the checklist.** The goal ids in the questions (W1-CI-GATE, W1-GW-MISS, W1-MIG-CONC, W1-SAAS-PREP, W1-RESEND-CLAIM, W1-0014-RESIDUALS, W1-INV-PRICING) and "O-P7" are the owner's labels. No repository file defines them.
 - **Other files.** Code comments, package READMEs, the runbook's decisions heading, the pricing README's "(owner to confirm)" line, and the comments in migrations `0013` and `0014` still say pending. This entry and the [demo build plan](12-demo-build-plan.md) are the record. Migrations are forward-only once merged, so those comments stay.
 
 Canonical: the sections updated with this entry, and the status lines of the [demo build plan](12-demo-build-plan.md).
+
+### 2026-11-08: W0-CLOSEOUT, a ruleset on main for the four CI checks (owner action pending confirmation)
+
+Pull requests 59, 60, and 62 merged after `main` had moved past the base their runs tested, so their released SHAs `91a4faa`, `9086a18`, and `1f39feb` have no step 9 ([verification log](../verification-log.md#step-9-for-the-live-api-dd30fc8-november-7-2026)). `main` had no branch protection. The [2026-11-07 entry](#2026-11-07-step-9-on-the-released-sha-ci-on-every-push-to-main-owner-request-coordinator-defaults-owner-decision-2026-11-08) proposed a ruleset requiring the four checks, as the owner's GitHub setting.
+
+On 2026-11-08 the coordinator gave the owner a checklist. Its items, summarized:
+
+1. A new branch ruleset in the repository's settings, targeting the default branch.
+2. Required status checks: `checks`, `integration`, `browser`, and `console-browser`.
+3. Recommended: "Require branches to be up to date before merging". Cost: after each merge, every other open pull request must update its branch and rerun all four jobs before it can merge.
+4. Recommended: require a pull request, with the owner as the only bypass.
+5. Block force pushes and deletion of `main`.
+6. Authorize a W0-CLOSEOUT docs goal: this entry, and an Update note at the runbook line that says branch protection is absent.
+
+The owner replied: "Ruleset saved, step 6 authorized, use your branch". As the owner asked, this goal was built on the coordinator's session branch, not on the `docs/main-ruleset` branch the checklist proposed.
+
+Observed after the reply, on 2026-11-08:
+
+- The GitHub connector's branch list showed `main` as `protected: false`.
+- At 00:48 UTC the goal's independent review read the GitHub API as the owner's account, which has admin rights on the repository. `repos/jkowall/TideGrid/rulesets` returned an empty list, so the repository had no ruleset, active or not. `rules/branches/main` returned no rules. `branches/main/protection` returned "Branch not protected".
+
+Coordinator readings, pending owner confirmation:
+
+- **Not in force as observed.** The owner reports saving the ruleset. GitHub showed none. Until a re-read lists the four required checks on `main`, nothing enforces them, and a pull request can still merge with a red or stale run.
+- **What the owner set.** The reply does not say which items were set. Items 3 and 4 were optional. Once the ruleset reads back, its settings are recorded here as an Update.
+- **Merging until then.** The runbook's manual rule holds: merge only when the four jobs are green and the pull request's last run was against current `main`. If item 3 reads back as set, GitHub enforces that rule. A merge by a bypass actor carries no guarantee.
+- **Every pull request runs all four jobs.** `ci.yml` has no path filter and no job condition, so the four checks report on every pull request.
+- **Merge queue.** `ci.yml` has no `merge_group` trigger, so a merge queue would wait for checks that never report. Leave it off unless a later goal adds that trigger.
+- **Releases.** A ruleset gates merges, not releases. It would not make `release` wait for the push run on `main`. That follow-up stays proposed and not built.
+- **Older SHAs.** The three SHAs without step 9 are unchanged. A green dispatch on each is still their route.
+
+Canonical: the [runbook's P0.1 merge rule](../runbooks/2026-11-01-preview-deploy.md#p0-prep-oct-29-to-31-no-live-calls) and the repository's rulesets in GitHub.
 
 ### 2026-11-07: G2.12 follow-ups, search and calendar by source and number-shaped references (owner decisions; coordinator defaults, owner decision 2026-11-08)
 
@@ -78,6 +111,8 @@ Coordinator defaults for search by source, not put as questions (update, 2026-11
 - **The API echoes it.** The response names the source it applied (`null` for none), and the console refuses an answer whose echo does not match, as the day list does (G2.12e D9 A).
 - **It filters on the booking's source only,** never the checkout, so finance's search never joins the checkout. Results show a "Staff booking" badge for every role.
 - **No new index.** The predicate only narrows the search's one matching step, so the plan keeps its shape (the plan test runs source queries too); the benchmark stays optional.
+
+Status, 2026-11-08: merged in pull request 78 as `7ef50cf` on 2026-11-07; not released ([verification log](../verification-log.md#g212-follow-ups-merged-in-pull-request-78-recorded-november-8-2026)).
 
 Canonical: the [operator console README](../../apps/operator-site/README.md) and the [booking contract](../../packages/domain-booking/README.md).
 
@@ -127,11 +162,11 @@ All of it takes effect when the change merges to `main`; `workflow_dispatch` exi
 - **A dispatch on a named commit (D10 (b)).** `workflow_dispatch` takes a full `sha`, and every job checks it out. In every job, right after checkout and before any install or test code, "The commit under test" prints the commit, its tree, the ref, and the workflow's SHA. On every dispatch it refuses unless the run was started from `main`, the input is a full 40-character SHA (a blank input means the checked-out commit), the checkout is exactly that SHA, and the SHA is on `main`. So a dispatch runs only reviewed code and only `main`'s workflow. The run is named `ci on <sha>`.
 - **`nov1 evidence`.** It resolves each deployed SHA to its full commit. A `--ci` pair whose deployed commit is the tested commit is worded as the CI run testing that commit itself; any other pair stays tree equality. The run's URL is still the owner's to add.
 
-Coordinator defaults, pending owner confirmation. Update, 2026-11-08: the owner confirmed the first three, step 9, older SHAs, and release only after a green run, whose tool guard and ruleset stay proposed ([entry](#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions)):
+Coordinator defaults, pending owner confirmation. Update, 2026-11-08: the owner confirmed the first three, step 9, older SHAs, and release only after a green run, whose tool guard stays proposed ([entry](#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions)):
 
 - **Step 9 after the merge.** A released SHA's step 9 is a green four-job push run on that SHA, or a green dispatch run on it, read from "The commit under test". D10 (a), tree equality with a pull request run's test merge commit, still serves SHAs released before the merge and stays valid for any SHA.
 - **Older SHAs.** A dispatch runs `main`'s job steps against the named commit's code and tests. The three released SHAs without step 9, `91a4faa`, `1f39feb`, and `9086a18`, have the same `ci.yml` as `main` before this change (`git diff`, checked 2026-11-07). While `main`'s `ci.yml` differs from theirs only by this change, a green dispatch on each counts as its step 9.
-- **Release only after the run is green (proposed).** Five SHAs on November 4 and `dd30fc8` on November 6 were released before their push run ended. This change does not enforce the order. Proposed follow-ups, not built: `nov1 approve-sha` or `release` refusing a SHA without a completed green four-job run whose head is that SHA; and a ruleset on `main` requiring the four checks, which is the owner's GitHub setting.
+- **Release only after the run is green (proposed).** Five SHAs on November 4 and `dd30fc8` on November 6 were released before their push run ended. This change does not enforce the order. Proposed follow-ups, not built: `nov1 approve-sha` or `release` refusing a SHA without a completed green four-job run whose head is that SHA; and a ruleset on `main` requiring the four checks, which is the owner's GitHub setting. Update, 2026-11-08: the owner reports saving the ruleset, but GitHub listed none on the repository that day ([2026-11-08 entry](#2026-11-08-w0-closeout-a-ruleset-on-main-for-the-four-ci-checks-owner-action-pending-confirmation)). A ruleset gates merges, not releases, so the first follow-up stays proposed and not built either way.
 - **Cost.** Each push to `main` now runs the three database and browser jobs too, in parallel with `checks`. On pull request run 42141157514 they took about 4, 2.5, and 1.5 minutes.
 
 Canonical: the workflow's comments, the [demo build plan's CI row](12-demo-build-plan.md#provider-and-environment-choices), and the [runbook's P12](../runbooks/2026-11-01-preview-deploy.md#p12-evidence).
