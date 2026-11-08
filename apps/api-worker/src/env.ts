@@ -58,6 +58,13 @@ export interface Bindings {
    */
   EMAIL_FROM_ADDRESS?: string;
   /**
+   * "shared" or "operator_only" (W3-G2.16-rest, src/email.ts senderPolicy):
+   * whether an operator without a verified sending domain may send from
+   * EMAIL_FROM_ADDRESS. Unset: operator_only in production, shared elsewhere.
+   * Any other value refuses email (sender_policy_invalid).
+   */
+  EMAIL_SENDER_POLICY?: string;
+  /**
    * The queue Cloudflare's Email Sending event subscription publishes to
    * (W1-EMAIL-EVENTS, src/email-events.ts). Unset means no batch is treated
    * as email events. No configuration in the repository declares the queue.

@@ -102,6 +102,8 @@ export const failureCopy: Record<MessageFailureCode, string> = {
   invalid_message: "The email service refused the email as TideGrid built it.",
   recipient_suppressed:
     "The email service won't deliver to this address, because mail to it bounced or was reported before.",
+  address_suppressed:
+    "Not sent: an earlier email to this address bounced for good or was marked as spam, so TideGrid stops sending to it.",
   recipient_not_allowed:
     "This environment only sends to approved test addresses, and this isn't one.",
   provider_rate_limited:

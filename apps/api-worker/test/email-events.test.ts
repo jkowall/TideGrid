@@ -141,7 +141,9 @@ describe("email events queue consumer (W1-EMAIL-EVENTS)", () => {
   it("retries refused events, acknowledges invalid and dropped ones, without touching the database", async () => {
     const b = batch("tidegrid-email-events", [
       event("bounced", { accountId: "11111111111111111111111111111111" }),
-      event("complained", { domain: "other.example.test" }),
+      // Not a domain at all: refused before any read. A well-formed domain
+      // other than the shared one is checked in the database (0024).
+      event("complained", { domain: "not a domain" }),
       { type: "something else" },
       event("delivered"),
       { ...event("bounced"), payload: { eventId: "short", messageId: "x-msg-1" } },

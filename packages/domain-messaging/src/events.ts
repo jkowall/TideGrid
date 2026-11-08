@@ -8,8 +8,11 @@
  *
  * 1. The event parses to the documented envelope (schema version 1).
  * 2. Its `metadata.accountId` is this deployment's account, and its
- *    `source.domain` is this deployment's sending domain. Anything else is
- *    refused and recorded nowhere.
+ *    `source.domain` is this deployment's shared sending domain or an
+ *    operator's verified sending domain (0027): for an event that joins a
+ *    message, that message's own operator's; for one that joins nothing, any
+ *    operator's (`app.email_sender_domain_known`). Anything else is refused
+ *    and recorded nowhere.
  * 3. Only `bounced` and `complained` are kept. Delivered, deferred, failed and
  *    rejected events are acknowledged and dropped: the send path already
  *    knows a refusal, and a deferral is not an outcome.
@@ -27,11 +30,16 @@
  * that joins no sent message is recorded once in a platform table, joined to
  * nothing.
  *
+ * Suppression (0027). A complaint, or a hard bounce, newly recorded for a
+ * message also suppresses its address for that message's operator only, in
+ * the same transaction; delivery then fails that operator's later mail to it
+ * as `address_suppressed`. A soft bounce suppresses nothing.
+ *
  * Nothing personal is kept or logged: no recipient, sender, subject, or SMTP
  * response text. Only ids, the event's type and time, the bounce kind, and a
  * short code (the enhanced SMTP status, or the complaint's type).
  */
-import { type Database, inTenantTransaction } from "@tidegrid/database";
+import { type Database, inTenantTransaction, type TenantTransaction } from "@tidegrid/database";
 import { type Kysely, sql } from "kysely";
 import { normalizeCloudflareMessageId } from "./cloudflare.ts";
 
@@ -189,7 +197,7 @@ export type IngestOutcome =
   | "unmatched"
   /** A delivered, deferred, failed, or rejected event: acknowledged, not kept. */
   | "ignored"
-  /** Another account's or another sending domain's event: refused, not kept. */
+  /** Another account's, or a sending domain this operator never verified: refused, not kept. */
   | "refused_account"
   | "refused_domain"
   /** Not a readable Email Sending event: refused, not kept. */
@@ -203,6 +211,8 @@ export interface IngestResult {
   /** Set when the event joined a message. */
   tenantId?: string;
   messageId?: string;
+  /** The event newly suppressed its message's address for that operator (0027). */
+  suppressed?: boolean;
 }
 
 const consumerActor = "email_events";
@@ -221,10 +231,22 @@ export async function ingestEmailEvent(
   const event = parsed.event;
   const base = { eventType: event.type };
   if (event.accountId !== config.accountId) return { ...base, outcome: "refused_account" };
-  if (event.domain !== config.sendingDomain) return { ...base, outcome: "refused_domain" };
+  // The shared domain is checked here; an operator's domain once the event's
+  // tenant is known, below. A name that is not a domain is refused at once.
+  const sharedDomain = event.domain === config.sendingDomain;
+  if (!sharedDomain && !domainPattern.test(event.domain)) {
+    return { ...base, outcome: "refused_domain" };
+  }
   // A bounce that is not final (the provider still retries) is not an
-  // outcome: applying it would label the message for good.
+  // outcome: applying it would label the message for good. Dropped only from
+  // a domain TideGrid sends from, so a wrong sending domain setting still
+  // sends every event to the dead-letter queue instead of acknowledging it.
   if ((event.type !== "bounced" && event.type !== "complained") || !event.terminal) {
+    if (!sharedDomain) {
+      const { rows: known } = await sql<{ known: boolean }>`
+        select app.email_sender_domain_known(${event.domain}) as known`.execute(db);
+      if (known[0]?.known !== true) return { ...base, outcome: "refused_domain" };
+    }
     return { ...base, outcome: "ignored" };
   }
   const eventType = event.type;
@@ -235,6 +257,11 @@ export async function ingestEmailEvent(
   `.execute(db);
   const target = rows[0];
   if (!target) {
+    if (!sharedDomain) {
+      const { rows: known } = await sql<{ known: boolean }>`
+        select app.email_sender_domain_known(${event.domain}) as known`.execute(db);
+      if (known[0]?.known !== true) return { ...base, outcome: "refused_domain" };
+    }
     const { rows: recorded } = await sql<{ inserted: boolean }>`
       select app.record_unmatched_email_event('cloudflare', ${event.eventId}, ${eventType},
         ${providerMessageId}, ${event.occurredAt}) as inserted
@@ -246,6 +273,16 @@ export async function ingestEmailEvent(
     db,
     { tenantId: target.tenant_id, actorType: "system", actorId: consumerActor },
     async (trx) => {
+      if (!sharedDomain) {
+        // Only a domain this operator itself verified, now or before.
+        const { rows: own } = await sql<{ found: boolean }>`
+          select exists (
+            select 1 from tenant_sender_domains
+             where tenant_id = ${target.tenant_id} and domain = ${event.domain}
+               and verified_at is not null) as found`.execute(trx);
+        if (own[0]?.found !== true)
+          return { outcome: "refused_domain" as const, suppressed: false };
+      }
       const insert = (applied: boolean) =>
         sql<{ id: string }>`
         insert into email_events (tenant_id, provider, event_id, event_type, provider_message_id,
@@ -258,10 +295,44 @@ export async function ingestEmailEvent(
       // The first for its message is applied; the partial unique key refuses
       // a second applied row, so a later event lands as not applied, and the
       // same event id lands as neither.
-      if ((await insert(true)).rows.length > 0) return "applied" as const;
-      if ((await insert(false)).rows.length > 0) return "recorded" as const;
-      return "duplicate" as const;
+      const applied = (await insert(true)).rows[0];
+      const kept = applied ?? (await insert(false)).rows[0];
+      if (!kept) return { outcome: "duplicate" as const, suppressed: false };
+      const suppressed = await suppress(trx, target, eventType, event.bounceType, kept.id);
+      return { outcome: applied ? ("applied" as const) : ("recorded" as const), suppressed };
     },
   );
-  return { ...base, outcome, tenantId: target.tenant_id, messageId: target.message_id };
+  if (outcome.outcome === "refused_domain") return { ...base, outcome: "refused_domain" };
+  return {
+    ...base,
+    outcome: outcome.outcome,
+    tenantId: target.tenant_id,
+    messageId: target.message_id,
+    ...(outcome.suppressed ? { suppressed: true } : {}),
+  };
+}
+
+/**
+ * Suppresses the message's address for its operator when the event is a
+ * complaint or a hard bounce; answers whether a new suppression was added.
+ * An address already suppressed stays as it is.
+ */
+async function suppress(
+  trx: TenantTransaction,
+  target: { tenant_id: string; message_id: string },
+  eventType: "bounced" | "complained",
+  bounceType: CloudflareEmailEvent["bounceType"],
+  eventRowId: string,
+): Promise<boolean> {
+  const reason =
+    eventType === "complained" ? "complaint" : bounceType === "hard" ? "hard_bounce" : null;
+  if (reason === null) return false;
+  const { rows } = await sql<{ id: string }>`
+    insert into email_suppressions (tenant_id, address, reason, event_id)
+    select m.tenant_id, m.to_email, ${reason}, ${eventRowId}
+      from email_messages m
+     where m.tenant_id = ${target.tenant_id} and m.id = ${target.message_id}
+    on conflict (tenant_id, address) where lifted_at is null do nothing
+    returning id`.execute(trx);
+  return rows.length > 0;
 }
