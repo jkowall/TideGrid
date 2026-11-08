@@ -356,7 +356,8 @@ function WaiverList({
                 {resetFor === p.participantId && (
                   <div id={`wv-reset-done-${p.participantId}`} tabIndex={-1}>
                     <Notice tone="success" title="5 more sends allowed">
-                      You can send {p.name}'s waiver again now.
+                      {p.name}'s waiver can be sent 5 more times. The usual wait between sends still
+                      applies.
                     </Notice>
                   </div>
                 )}
