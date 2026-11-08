@@ -155,14 +155,14 @@ jobs:
           SHA: ${{ inputs.sha }}
         run: |
           name="pre-migrate-${SHA:0:7}-r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          # Expires after 30 days (Neon's longest), so restore points do not
+          # Expires after 7 days (owner, 2026-11-08: keep Neon cheap), so restore points do not
           # pile up against the plan's branch limit.
-          out=$(pnpm --silent --filter @tidegrid/database neon:branch create "$name" --ttl 720 --no-endpoint)
+          out=$(pnpm --silent --filter @tidegrid/database neon:branch create "$name" --ttl 168 --no-endpoint)
           id=$(printf '%s' "$out" | grep -Eo '"branchId":"[a-z0-9-]+"' | cut -d'"' -f4)
           [ -n "$id" ] || { echo "::error::backup branch create failed"; exit 1; }
           at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "backup branch $name: $id at $at (UTC, the point-in-time restore anchor)"
-          echo "- Restore point: \`$name\` (\`$id\`) at $at UTC, expires in 30 days" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Restore point: \`$name\` (\`$id\`) at $at UTC, expires in 7 days" >> "$GITHUB_STEP_SUMMARY"
       - name: Migrate
         # Runs even with nothing pending: the runner's checksum, runtime-role,
         # and invalid-index checks fail the run on drift, and apply nothing.
