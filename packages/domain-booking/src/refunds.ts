@@ -6,7 +6,7 @@
  * its idempotency key. Its state then moves only on the provider's answer
  * about that refund: a call's answer (`settleRefund`), or a verified refund
  * event in the inbox (`onRefundEvent`). requested may move to pending,
- * succeeded, or failed; pending to succeeded or failed (migration 0027).
+ * succeeded, or failed; pending to succeeded or failed (migration 0028).
  *
  * - succeeded: a cancellation refund reverses TideGrid's fee on the refunded
  *   eligible value, in proportion, in the same transaction (fee-ledger.ts).
@@ -151,10 +151,14 @@ export async function settleRefund(
   return inTenantTransaction(db, ctx, async (trx) => {
     const locked = await lockRefund(trx, ctx.tenantId, refund.id);
     if (!locked || (locked.state !== "requested" && locked.state !== "pending")) {
-      // Settled meanwhile (an event). An answer about the same refund that
-      // says the opposite is raised for staff; the settled state stands.
+      // Settled meanwhile (an event or another call). An answer about the
+      // same refund that says the opposite is raised for staff; the settled
+      // state stands. A refund failed by a rejection never got a provider id,
+      // so an answer naming any id is about it; a different id is not.
       const sameRefund =
-        locked !== undefined && outcome.ref !== null && locked.provider_refund_id === outcome.ref;
+        locked !== undefined &&
+        outcome.ref !== null &&
+        (locked.provider_refund_id === null || locked.provider_refund_id === outcome.ref);
       if (sameRefund && locked.state === "succeeded" && outcome.state === "failed") {
         await raiseRefundException(trx, ctx, locked.id, "failed_after_success", outcome.code);
       } else if (sameRefund && locked.state === "failed" && outcome.state === "succeeded") {

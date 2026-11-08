@@ -314,6 +314,28 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
     expect(fees?.n).toBe(0);
   });
 
+  it("raises a success that races a rejection of the same refund", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    const { ctx, refundId } = await staffCancelForRefund(A, booked.bookingId);
+    const rejecting = new FlakyProvider(payments);
+    rejecting.failRefund = "reject";
+    const racing = new FlakyProvider(payments);
+    const refundPayment = racing.refundPayment.bind(racing);
+    racing.refundPayment = async (input) => {
+      const answer = await refundPayment(input);
+      // While this call is in flight, another is rejected and settles it failed.
+      expect((await settleRefund(runtime.db, rejecting, ctx, refundId)).kind).toBe("failed");
+      return answer;
+    };
+    expect((await settleRefund(runtime.db, racing, ctx, refundId)).kind).toBe("not_pending");
+    expect((await refundOf(booked.bookingId)).state).toBe("failed");
+    const listed = await as(ctx, (trx) => listRefundExceptions(trx, A.id));
+    expect(listed.find((x) => x.refund.id === refundId)).toMatchObject({
+      reason: "succeeded_after_failure",
+      open: true,
+    });
+  });
+
   it("raises an unanswered refund for staff only after 24 hours, once", async () => {
     const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
     const { ctx, refundId } = await staffCancelForRefund(A, booked.bookingId);

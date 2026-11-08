@@ -1,4 +1,4 @@
--- 0027 refunds, booking credits, and fee reversal (W3-G2.9)
+-- 0028 refunds, booking credits, and fee reversal (W3-G2.9)
 --
 -- Design authority: docs/v2/02-product-scope.md ("Refunds and booking
 -- credits", "Policies, cancellation, rescheduling, refunds, and credits"),
@@ -256,7 +256,7 @@ ALTER TABLE public.booking_cancellations
     CHECK (credit_amount BETWEEN 0 AND 100000000),
   -- Chosen by the service before the credit entry is written; checked at commit.
   ADD COLUMN credit_entry_id uuid,
-  -- Null on rows written before 0027, whose remedy was always the policy's.
+  -- Null on rows written before 0028, whose remedy was always the policy's.
   ADD COLUMN policy_remedy text
     CHECK (policy_remedy IN ('full_refund', 'percent_refund', 'credit', 'none')),
   ADD COLUMN policy_refund_bp integer CHECK (policy_refund_bp BETWEEN 0 AND 10000),

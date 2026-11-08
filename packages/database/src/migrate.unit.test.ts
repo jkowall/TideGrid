@@ -90,7 +90,7 @@ describe("no-transaction files (D6 A: CREATE INDEX CONCURRENTLY)", () => {
 
   it("leave every file in the tree transactional, except the named index files", async () => {
     // The first marked file (W1-EMAIL-EVENTS): its one concurrent unique index.
-    const indexFiles = new Set(["0022_email_events_index.sql", "0028_refunds_pending_index.sql"]);
+    const indexFiles = new Set(["0022_email_events_index.sql", "0029_refunds_pending_index.sql"]);
     for (const file of await loadMigrations()) {
       const mode = planMigration(file).mode;
       expect({ file: file.name, mode }).toEqual({

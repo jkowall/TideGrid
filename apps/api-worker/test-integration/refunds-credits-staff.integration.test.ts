@@ -248,6 +248,18 @@ describe.skipIf(!env)("staff cancellation, credit, and refund exceptions (W3-G2.
     const again = await adjust(A.owner, 250, key);
     expect(again.headers.get("idempotent-replayed")).toBe("true");
     expect(again.json.account.balance).toBe(shown.credit.amount + 250);
+
+    // The owner's data export carries the credit account and its ledger.
+    const exported = await request("GET", `/v1/staff/tenants/${A.id}/export`, { as: A.owner });
+    expect(exported.status).toBe(200);
+    const sections = exported.json.sections;
+    const accountId = up.json.account.id;
+    expect(sections.credit_accounts.rows.find((r: Json) => r.id === accountId)).toMatchObject({
+      balance: shown.credit.amount + 250,
+    });
+    const ledger = sections.credit_entries.rows.filter((r: Json) => r.account_id === accountId);
+    expect(ledger.map((r: Json) => r.kind).sort()).toEqual(["adjust", "issue"]);
+    for (const row of ledger) expect(Object.keys(row)).not.toContain("idempotency_key");
   });
 
   it("lists refund exceptions for finance, inside the tenant", async () => {
