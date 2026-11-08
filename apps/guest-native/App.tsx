@@ -139,8 +139,9 @@ function Journeys({
     [store, reload],
   );
   const forget = useCallback(
-    (reference: string) => {
-      void store.remove(reference).then(reload);
+    (reference: string, token: string) => {
+      // Only this session: the same booking may have been opened again since.
+      void store.remove(reference, token).then(reload);
     },
     [store, reload],
   );

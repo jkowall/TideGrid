@@ -6,8 +6,11 @@
  * storage (Keychain on iOS, Keystore-backed storage on Android, through
  * expo-secure-store). Nothing else is stored: no checkout secret, payment
  * secret, link token, name, or email. A session lasts an hour, as the API
- * sets it; an expired record is dropped on the next read.
+ * sets it; an expired record is dropped on the next read, judged on the
+ * server's clock as the app estimates it.
  */
+
+import { serverClock } from "./booking-model.ts";
 
 export interface KeyValueStore {
   get(key: string): Promise<string | null>;
@@ -51,6 +54,8 @@ export class SessionStore {
    * booking just opened (its link already used) still shows until the app closes.
    */
   #memory: StoredSession[] = [];
+  /** A write failed: memory, not storage, holds the truth until a write succeeds. */
+  #dirty = false;
 
   constructor(
     private readonly store: KeyValueStore,
@@ -64,12 +69,12 @@ export class SessionStore {
   }
 
   /** The sessions still in date, newest first. Never throws. */
-  list(now: number = Date.now()): Promise<StoredSession[]> {
+  list(now: number = serverClock.now()): Promise<StoredSession[]> {
     return this.#serial(() => this.#list(now));
   }
 
   /** Keep a session, replacing any older one for the same booking. */
-  add(session: StoredSession, now: number = Date.now()): Promise<void> {
+  add(session: StoredSession, now: number = serverClock.now()): Promise<void> {
     return this.#serial(async () => {
       if (!valid(session, now)) return;
       const others = (await this.#list(now)).filter((s) => s.reference !== session.reference);
@@ -78,11 +83,16 @@ export class SessionStore {
     });
   }
 
-  /** Forget one booking's session, as when the API says it ended. */
-  remove(reference: string, now: number = Date.now()): Promise<void> {
+  /**
+   * Forget one booking's session, as when the API says it ended. With a
+   * token, only that session: the booking may have been opened again since.
+   */
+  remove(reference: string, token?: string, now: number = serverClock.now()): Promise<void> {
     return this.#serial(async () => {
       const list = await this.#list(now);
-      const kept = list.filter((s) => s.reference !== reference);
+      const kept = list.filter(
+        (s) => s.reference !== reference || (token !== undefined && s.token !== token),
+      );
       if (kept.length !== list.length) await this.#write(kept);
     });
   }
@@ -93,6 +103,10 @@ export class SessionStore {
 
   async #list(now: number): Promise<StoredSession[]> {
     const fresh = (list: StoredSession[]) => list.filter((v) => valid(v, now));
+    if (this.#dirty) {
+      this.#memory = fresh(this.#memory);
+      return this.#memory;
+    }
     let raw: string | null;
     try {
       raw = await this.store.get(storageKey(this.slug));
@@ -126,8 +140,10 @@ export class SessionStore {
     try {
       if (list.length === 0) await this.store.remove(storageKey(this.slug));
       else await this.store.set(storageKey(this.slug), JSON.stringify(list));
+      this.#dirty = false;
     } catch {
-      // Storage blocked: the memory copy keeps the session while the app is open.
+      // Storage blocked: the memory copy keeps the truth while the app is open.
+      this.#dirty = true;
     }
   }
 }

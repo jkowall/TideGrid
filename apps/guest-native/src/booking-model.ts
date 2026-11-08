@@ -316,6 +316,9 @@ export class ServerClock {
   }
 }
 
+/** One clock for the app: what a checkout teaches it also dates stored booking sessions. */
+export const serverClock = new ServerClock();
+
 // Checkout ----------------------------------------------------------------------------
 
 export const finalStates: ReadonlySet<CheckoutSession["state"]> = new Set([

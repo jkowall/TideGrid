@@ -29,7 +29,8 @@ export type Failure =
       remaining?: number;
     };
 
-export type Result<T> = { kind: "ok"; value: T } | Failure;
+/** `replayed`: the API answered a repeated Idempotency-Key with the first answer, so it is old. */
+export type Result<T> = { kind: "ok"; value: T; replayed?: boolean } | Failure;
 
 export const readTimeoutMs = 10_000;
 /** Opening a checkout calls the payment provider after commit, so commands get longer. */
@@ -102,7 +103,11 @@ export async function call<S extends z.ZodType>(
     }
     const parsed = schema.safeParse(json);
     if (!parsed.success) return { kind: "unreadable" };
-    return { kind: "ok", value: parsed.data };
+    return {
+      kind: "ok",
+      value: parsed.data,
+      replayed: res.headers.get("idempotent-replayed") === "true",
+    };
   } catch {
     return { kind: "network" };
   } finally {
@@ -111,7 +116,7 @@ export async function call<S extends z.ZodType>(
 }
 
 export const mapOk = <T, U>(result: Result<T>, map: (value: T) => U): Result<U> =>
-  result.kind === "ok" ? { kind: "ok", value: map(result.value) } : result;
+  result.kind === "ok" ? { ...result, value: map(result.value) } : result;
 
 /**
  * Whether a failure leaves a command's outcome unknown, so only the same

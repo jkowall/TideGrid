@@ -43,7 +43,7 @@ import {
   quoteRows,
   quoteTrouble,
   type Selection,
-  ServerClock,
+  serverClock,
   stopText,
   type Trouble,
   tripWhen,
@@ -127,7 +127,10 @@ export function BookScreen({
   /** What the screen is waiting on while it reads the checkout: the payment sent, or the hold's end. */
   const [waiting, setWaiting] = useState<string | null>(null);
   /** The server's clock as the app estimates it: holds and prices expire on its time. */
-  const clock = useRef(new ServerClock());
+  const clock = useRef(serverClock);
+  /** A settled test payment whose event didn't reach the booking: it must be sent again, even after the hold's end. */
+  const undelivered = useRef(false);
+  const [mustResend, setMustResend] = useState(false);
   const [now, setNow] = useState(Date.now());
   const quoteKey = useRef(new CommandKey());
   const attempt = useRef(new CheckoutAttempt());
@@ -224,7 +227,8 @@ export function BookScreen({
       const r = await createQuote(endpoint, body, quoteKey.current.for(JSON.stringify(body)));
       if (!still()) return;
       if (r.kind === "ok") {
-        clock.current.learn(r.value.quotedAt);
+        // An old answer to a retried key teaches nothing about the clock.
+        if (!r.replayed) clock.current.learn(r.value.quotedAt);
         quoteKey.current.done();
         setShowErrors(false);
         // A new price asks again: the policy accepted is the one on this quote.
@@ -261,6 +265,11 @@ export function BookScreen({
         const r = await readCheckout(endpoint, session.id, secret);
         if (!still()) return;
         if (r.kind === "ok" && finalStates.has(r.value.state)) {
+          // A payment whose event never arrived can still book or refund once resent: keep the page.
+          if (r.value.state === "expired" && undelivered.current) {
+            setStalled(true);
+            return;
+          }
           const late = r.value.state === "expired" && paymentSent.current;
           if (late && lateUntil === null) lateUntil = Date.now() + lateSuccessGraceMs;
           if (!late || (lateUntil !== null && Date.now() > lateUntil)) {
@@ -318,11 +327,13 @@ export function BookScreen({
         return;
       }
       // A retry after a lost answer may replay an old snapshot, which teaches nothing.
-      if (!doubtedFields.current) clock.current.learn(r.value.session.createdAt);
+      if (!r.replayed) clock.current.learn(r.value.session.createdAt);
       attempt.current.done();
       doubtedFields.current = null;
       setInDoubt(false);
       paymentSent.current = false;
+      undelivered.current = false;
+      setMustResend(false);
       const { session, payment } = r.value;
       if (payment && payment.provider !== "fake" && session.state === "open") {
         // The demo app pays only with the demo's test provider; give the seats back at once.
@@ -381,7 +392,11 @@ export function BookScreen({
         });
         return;
       }
-      if (r.kind === "ok" && r.value.delivery && r.value.delivery.status >= 500) {
+      const failedDelivery =
+        r.kind === "ok" && r.value.delivery !== null && r.value.delivery.status >= 500;
+      undelivered.current = failedDelivery;
+      setMustResend(failedDelivery);
+      if (failedDelivery) {
         // Settled, but its event didn't reach the booking: sending again redelivers it.
         setNotice({
           kind: "notice",
@@ -711,7 +726,7 @@ export function BookScreen({
             }}
             color={color}
             busy={busy === "succeed" || waiting === "succeed"}
-            disabled={working || left <= 0}
+            disabled={working || (left <= 0 && !mustResend)}
           />
           <Button
             action={{
@@ -721,7 +736,7 @@ export function BookScreen({
             color={color}
             kind="secondary"
             busy={busy === "fail" || waiting === "fail"}
-            disabled={working || left <= 0}
+            disabled={working || (left <= 0 && !mustResend)}
           />
           <Button
             action={{

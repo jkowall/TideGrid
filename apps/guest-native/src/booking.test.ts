@@ -160,6 +160,16 @@ describe("calls", () => {
     expect(await readCheckout(endpoint, tripId, "s", down)).toEqual({ kind: "network" });
   });
 
+  it("marks a replayed answer, so an old quote never sets the clock", async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json", "idempotent-replayed": "true" },
+      })) as unknown as typeof fetch;
+    const r = await call(endpoint, "/v1/x", { schema: QuoteCreateRequest.partial(), fetchImpl });
+    expect(r).toMatchObject({ kind: "ok", replayed: true });
+  });
+
   it("call an answer that breaks the contract unreadable", async () => {
     const { fetchImpl } = recorder(200, { quote: { nope: true } });
     const r = await createQuote(
@@ -392,8 +402,42 @@ describe("stored booking sessions", () => {
     const kv = memory();
     const store = new SessionStore(kv, "demo-harbor");
     await store.add(session("ABCDEFGH"), now);
-    await Promise.all([store.remove("ABCDEFGH", now), store.add(session("ABCDEFGJ"), now)]);
+    await Promise.all([
+      store.remove("ABCDEFGH", undefined, now),
+      store.add(session("ABCDEFGJ"), now),
+    ]);
     expect((await store.list(now)).map((s) => s.reference)).toEqual(["ABCDEFGJ"]);
+  });
+
+  it("forgets an ended session only, not the same booking opened again", async () => {
+    const kv = memory();
+    const store = new SessionStore(kv, "demo-harbor");
+    const first = session("ABCDEFGH");
+    const again = session("ABCDEFGH");
+    await store.add(first, now);
+    await store.add(again, now);
+    await store.remove("ABCDEFGH", first.token, now);
+    expect((await store.list(now)).map((s) => s.token)).toEqual([again.token]);
+    await store.remove("ABCDEFGH", again.token, now);
+    expect(await store.list(now)).toEqual([]);
+  });
+
+  it("keeps memory as the truth after a failed write, while reads still work", async () => {
+    const kv = memory();
+    const store = new SessionStore(kv, "demo-harbor");
+    const a = session("ABCDEFGH");
+    await store.add(a, now);
+    const b = session("ABCDEFGJ");
+    const set = kv.set;
+    kv.set = async () => {
+      throw new Error("full");
+    };
+    await store.add(b, now);
+    expect((await store.list(now)).map((s) => s.reference)).toEqual(["ABCDEFGJ", "ABCDEFGH"]);
+    kv.set = set;
+    await store.remove("ABCDEFGH", undefined, now);
+    expect((await store.list(now)).map((s) => s.reference)).toEqual(["ABCDEFGJ"]);
+    expect(JSON.parse(kv.data.get(storageKey("demo-harbor")) ?? "[]")).toHaveLength(1);
   });
 
   it("drops expired and malformed records, and keeps the newest few", async () => {
@@ -408,7 +452,7 @@ describe("stored booking sessions", () => {
       await store.add(session(`ABCDEF${"0123456789ABCDEFG"[i]}0`), now);
     }
     expect(await store.list(now)).toHaveLength(maxSessions);
-    await store.remove("ABCDEFG0", now);
+    await store.remove("ABCDEFG0", undefined, now);
     expect((await store.list(now)).some((s) => s.reference === "ABCDEFG0")).toBe(false);
   });
 
@@ -429,7 +473,7 @@ describe("stored booking sessions", () => {
     await expect(store.add(opened, now)).resolves.toBeUndefined();
     // Kept in memory while the app runs, so a booking whose link was used still shows.
     await expect(store.list(now)).resolves.toEqual([opened]);
-    await expect(store.remove("ABCDEFGH", now)).resolves.toBeUndefined();
+    await expect(store.remove("ABCDEFGH", undefined, now)).resolves.toBeUndefined();
     await expect(store.list(now)).resolves.toEqual([]);
   });
 });

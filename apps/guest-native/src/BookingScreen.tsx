@@ -44,7 +44,7 @@ export function BookingScreen({
   session: StoredSession;
   onClose: () => void;
   /** The API says the session ended, or the guest closed it: forget it. */
-  onEnded: (reference: string) => void;
+  onEnded: (reference: string, token: string) => void;
   /** Open a booking from the email link instead. */
   onLink: () => void;
 }) {
@@ -74,7 +74,7 @@ export function BookingScreen({
       if (r.kind === "ok") setLoad({ kind: "ready", booking: r.value.booking });
       else if (r.kind === "refused" && r.status === 401) {
         setLoad({ kind: "ended" });
-        onEnded(session.reference);
+        onEnded(session.reference, session.token);
       } else setLoad({ kind: "failed" });
     });
     readWaivers();
@@ -92,7 +92,7 @@ export function BookingScreen({
   const close = async () => {
     setClosing(true);
     await endSession(endpoint, session.token);
-    onEnded(session.reference);
+    onEnded(session.reference, session.token);
     // Leave only if the guest is still here; they may have moved on to a checkout.
     if (alive.current) onClose();
   };
