@@ -32,6 +32,23 @@ Not changed: rule R4 of the wave 1 goals still holds back new indexes on the pil
 
 Canonical: the [database README](../../packages/database/README.md#indexes-built-concurrently-no-transaction-files) and `packages/database/src/migrate.ts`.
 
+### 2026-11-08: O-ACCESS, the D4 (a) run closed with steps 5 and 7 not shown (owner decisions)
+
+The owner asked for the O-ACCESS commands ("give me what to run") and reported running the D4 (a) seed in the owner's own terminal, output not seen. Whether the owner saved the Access policy change was not read back. The owner's decisions and words, in the coordinator's session:
+
+- **D4 (a).** A third Access-allowed address owning demo-harbor only, by the A1 seed the coordinator gave, with the display name `Harbor Desk Owner`. The owner reported "ok it ran". Later: "i do not know the hardbor only address or pin", so the seeded address is not confirmed.
+- **An agent runs it.** "i need an agent to run this", then: "my mac is connected via remote now, you can run it there". The coordinator ran the A5 steps on the owner's work Mac with every target declared by `--confirm`, as the [2026-11-05 entry](#2026-11-05-nov1-declares-type-backs-and-reads-test-mode-secret-files-owner-decision) allows.
+- **Step 4's console check skipped.** "don't care, just keep going".
+- **Sign-in.** On a decision card, "Finish demo steps 5 and 7, or close O-ACCESS without them?", the owner chose "Redo sign-in, then go". The redone sign-in let the run in as the owner's own identity, which sees two operators, so step 5 failed again. The owner then asked "just remote control my browser and do it" and "Can you just control my Chrome and do it?", and wrote "There's no pin. It's asking for a password." The coordinator declined to control the owner's Chrome or sign in on the owner's behalf. The owner wrote "Close it now." (04:47 UTC).
+
+Coordinator readings, pending owner confirmation:
+
+- **Not shown.** Step 4's console observation and steps 5 and 7 stay not shown. The guest part of steps 2 and 4 and the public isolation probe passed again ([verification log](../verification-log.md#o-access-the-d4-a-run-steps-5-and-7-not-shown-november-8-2026)).
+- **The blocker.** The console's Access login page offered only Cloudflare account sign-in, not one-time PIN, so a D4 address without a Cloudflare account gets a password prompt. *Inferred* from the page, not from the application's settings. Adding one-time PIN to the application's login methods is the owner's Access change, its own go. The runbook's P6 now carries this as an Update.
+- **The D4 address.** Until the owner finds the seeded address, a new one whose inbox the owner reads (for example a plus alias) would need a new A1 seed and the Access policy change. If the first seed wrote its address, that membership stays, since memberships are never removed.
+
+Canonical: the [runbook's P6](../runbooks/2026-11-01-preview-deploy.md) and the [demo build plan's acceptance status](12-demo-build-plan.md#demo-acceptance).
+
 ### 2026-11-08: W1-CSV-DEF, standard CSV import draft (proposed, pending owner approval)
 
 The roadmap's Stage 0 asks to "Define the standard CSV import and the boundaries of Managed Launch." On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator read that as the go for this goal. W1-CSV-DEF is the owner's label; no repository file defines it.
