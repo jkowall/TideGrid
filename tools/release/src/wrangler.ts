@@ -1,11 +1,11 @@
 /**
  * Wrangler, on the owner's terminal (invariant 4). With a non-TTY stdout a
  * custom-domain deploy sets override_existing_origin and
- * override_existing_dns_record (wrangler 4.135.0 cli.js:153833-153836), and
+ * override_existing_dns_record (wrangler 4.152.0 cli.js:164530-164533), and
  * confirmations take their default answer. So every deploy, rollback, secret
  * put, and secret delete is spawned with stdio inherit, and version ids are
  * read in a separate `deployments list --json` call. Only ids are parsed: the
- * listing also carries each author's email (cli.js:348974,349090).
+ * listing also carries each author's email (cli.js:360925,361041).
  */
 import { join } from "node:path";
 import { type Deps, type ExecOptions, Failure, Refusal } from "./core.ts";
@@ -82,7 +82,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * The version ids of the latest deployment, from `deployments list --json`
- * (sorted oldest first, cli.js:349049). Everything else in the listing is
+ * (sorted oldest first, cli.js:361001). Everything else in the listing is
  * dropped, the author email included.
  */
 export function latestVersionIds(listing: unknown): string[] {
@@ -97,7 +97,7 @@ export async function deployedVersions(deps: Deps, worker: Worker): Promise<stri
   return latestVersionIds(await wranglerJson(deps, worker, ["deployments", "list", "--json"]));
 }
 
-/** Secret names only, from `secret list` (JSON by default, cli.js:299246). */
+/** Secret names only, from `secret list` (JSON by default, cli.js:311797-311813). */
 export function secretNamesFrom(listing: unknown): string[] {
   if (!Array.isArray(listing)) return [];
   return listing
