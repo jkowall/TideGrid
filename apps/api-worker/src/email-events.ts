@@ -17,7 +17,7 @@ import { type Bindings, databaseUrl } from "./env.ts";
  *
  * Whose events: EMAIL_EVENTS_ACCOUNT_ID (the account's id, a secret so it
  * never enters the repository) and the sending domain: the domain of
- * EMAIL_FROM_ADDRESS, or an operator's verified sending domain (0023, checked
+ * EMAIL_FROM_ADDRESS, or an operator's verified sending domain (0024, checked
  * in the database). An event from another account or domain is refused,
  * recorded nowhere, and retried, so a wrong setting sends real events to the
  * queue's dead-letter queue instead of dropping them. These checks are claims

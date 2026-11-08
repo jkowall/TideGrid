@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createApp } from "./app.ts";
+import { isOutboxQueue, runQueue } from "./delivery.ts";
 import { consumeEmailEvents, isEmailEventsBatch } from "./email-events.ts";
 import type { Bindings } from "./env.ts";
 import { markConsoleGateway } from "./gateway.ts";
@@ -22,12 +23,18 @@ export default {
   },
   /**
    * Queue consumers. The email events queue (W1-EMAIL-EVENTS) goes to its
-   * consumer; a batch from a queue this Worker does not know is retried, so
-   * nothing is acknowledged unread.
+   * consumer, the outbox queue and its DLQ (W3-G2.3) to theirs. A batch from
+   * a queue this Worker does not know is retried, so nothing is acknowledged
+   * unread.
+   * Only configurations that declare a queue consumer ever call this.
    */
   queue: async (batch, env, _ctx) => {
     if (isEmailEventsBatch(batch, env)) {
       await consumeEmailEvents(batch, env);
+      return;
+    }
+    if (isOutboxQueue(batch.queue)) {
+      await runQueue(batch, env);
       return;
     }
     console.log(JSON.stringify({ level: "warn", message: "queue_unknown", "event.name": "queue" }));

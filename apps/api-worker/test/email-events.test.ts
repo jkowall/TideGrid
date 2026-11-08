@@ -142,7 +142,7 @@ describe("email events queue consumer (W1-EMAIL-EVENTS)", () => {
     const b = batch("tidegrid-email-events", [
       event("bounced", { accountId: "11111111111111111111111111111111" }),
       // Not a domain at all: refused before any read. A well-formed domain
-      // other than the shared one is checked in the database (0023).
+      // other than the shared one is checked in the database (0024).
       event("complained", { domain: "not a domain" }),
       { type: "something else" },
       event("delivered"),
