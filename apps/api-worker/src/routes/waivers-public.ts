@@ -391,12 +391,13 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       204: { description: "The session is ended" },
       401: errorBody("No session secret (waiver_session_required)"),
       404: errorBody("No operator at this address"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
     },
   });
 
   app.openapi(endRoute, async (c) => {
     const secret = sessionSecret(c);
-    await withPublicTenant(c, {}, async (trx, ctx) => {
+    await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
       const session = await loadWaiverSession(trx, ctx.tenantId, secret);
       if (session) await endWaiverSession(trx, ctx, session);
       return {};

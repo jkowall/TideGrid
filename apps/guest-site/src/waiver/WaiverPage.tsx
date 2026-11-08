@@ -88,7 +88,7 @@ const stops: Record<string, Stop> = {
     tone: "warning",
     title: "This waiver link doesn't work here",
     body: (op) =>
-      `Check that you opened the whole link from your email from ${op}. If it still doesn't work, ask ${op} to send it again.`,
+      `Check that you opened the whole link from ${op}'s email, or scanned the whole code. If it still doesn't work, ask ${op} for a new one.`,
   },
   waiver_link_used: {
     icon: "lock",
@@ -101,13 +101,15 @@ const stops: Record<string, Stop> = {
     icon: "hourglass",
     tone: "warning",
     title: "This link has expired",
-    body: (op) => `Waiver links last a few days. Ask ${op} to send you a new one.`,
+    body: (op) =>
+      `Waiver links last a few days, and a code from the crew lasts 15 minutes. Ask ${op} for a new one.`,
   },
   waiver_link_replaced: {
     icon: "mail",
     tone: "neutral",
     title: "There's a newer link",
-    body: (op) => `${op} sent you a newer email for this waiver. Use the link in the latest one.`,
+    body: (op) =>
+      `${op} sent a newer link for this waiver. Use the latest email, or ask the crew for a new code.`,
   },
   waiver_signed: {
     icon: "check-circle",
@@ -133,7 +135,7 @@ const stops: Record<string, Stop> = {
     tone: "warning",
     title: "Your signing session ended",
     body: (op) =>
-      `A signing session lasts an hour after you open the link, and ends when the booking changes. If you still need to sign, ask ${op} to send you a new link.`,
+      `A signing session lasts an hour after you open an emailed link, or 15 minutes from a crew code, and ends when the booking changes. If you still need to sign, ask ${op} for a new link.`,
   },
   waiver_changed: {
     icon: "refresh",
@@ -865,7 +867,7 @@ export function WaiverPage({
           >
             <p>{brand.name} needs a signed waiver before the trip. It takes about two minutes.</p>
             <p className="waiver-fine-print">
-              The link in your email opens once, so keep this page open until you've signed.
+              This link opens once, so keep this page open until you've signed.
             </p>
             {phase.failed === "network" && (
               <Notice tone="error" title="We couldn't reach the booking system">
