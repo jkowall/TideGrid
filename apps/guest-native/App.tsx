@@ -170,7 +170,7 @@ function Button({ action, color }: { action: Action; color: string }) {
       accessibilityRole="button"
       style={({ pressed }) => [
         styles.button,
-        { backgroundColor: color, opacity: pressed ? 0.8 : 1 },
+        { backgroundColor: color, transform: [{ scale: pressed ? 0.97 : 1 }] },
       ]}
     >
       <Text style={[styles.buttonText, { color: primaryInk(color) }]}>{action.label}</Text>
