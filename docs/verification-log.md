@@ -4,22 +4,6 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
-### Neon consumption read, November 8, 2026
-
-This records a read of the TideGrid Neon project's usage and plan limits. The coordinator read the Neon console live at 00:50 UTC on November 8, in the owner's Chrome after the owner signed in. It was read only. The coordinator opened the projects list, Billing, the project overview, the branches list, and the project's Postgres settings, and changed nothing.
-
-**Source.** The Neon console, read live by the coordinator. No export was kept as evidence.
-
-- **Compute this month.** 5.19 CU-hrs, which is 18,684 CU-seconds (within 18 s, if the console rounds). The projects list, the project overview, and the branches list agree. The November 5 read, at 02:32 UTC, was 1,404 compute seconds, so 17,280 CU-seconds (4.80 CU-hrs) were added since. *Inferred:* that read's compute seconds are CU-seconds, since its 5,572 active seconds at 0.25 CU come to about 1,393.
-- **Active time.** Not shown on the pages read.
-- **Allowance reset.** The date and UTC time are not shown. The projects list says "Usage since Nov 1, 2026"; the project overview says "Since Oct 31, 2026".
-- **Plan limit.** Free plan, 100 compute hours per project, in Billing's words. Billing also lists 1 GB storage and autoscaling to 2 CU per project. *Inferred:* the 100 hours are CU-hours, the unit the usage figures use.
-- **History window.** 6 hours. The Postgres settings offer 0, 1, 2, or 6 hours on this plan, and say an upgrade gives up to 30 days. *Inferred:* a restore of `main` from Neon's history reaches back 6 hours at most, so it no longer reaches the November 4 run. Past that, only a branch such as P2.2's keeps an older state, and the run's branch was deleted on November 5.
-- **Branches.** 10 per project (Billing). One is in use: `main`, which never expires.
-- **Compute settings.** 0.25 CU, scale to zero after 5 minutes.
-- **Rate, an estimate.** All 4.80 CU-hrs are put on the cron period, from November 6 at 01:11 UTC to the read: 47.65 hours, about 190 wakes. That is about 2.42 CU-hrs a day, or 2.47 if the metrics lag by an hour (the projects list says they "may be delayed by an hour"). It includes the November 6 run's own traffic, any use between November 5 at 02:32 and the cron's return, and any of the November 4 run's use that the lagging November 5 API read had not caught. So it is likely an upper bound. With a reset assumed at December 1, 00:00 UTC (not shown), the month comes to about 61 to 62 CU-hrs of 100. Demos, smoke runs, and migrations add to that.
-- **The cron.** Kept. Asked after this read, the owner chose to keep the `*/15` cron. The owner's [2026-11-05 decision](v2/06-decision-register.md#2026-11-05-payments-and-the-cron-back-on-owner-decision) already covers it, so no new register entry.
-
 ### The release tool's CI gate (W1-CI-GATE), built November 8, 2026
 
 `nov1 approve-sha` and `nov1 release` now refuse a SHA unless the newest run of `ci.yml` on `main` that tested it completed with all four jobs green ([decision register](v2/06-decision-register.md#2026-11-08-nov1-refuses-a-sha-without-a-green-four-job-ci-run-owner-request-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). Built on the owner's go of 2026-11-08. No release ran, no workflow was triggered, and no gate is claimed. The local runs and the reviews below are coordinator-reported.
@@ -79,6 +63,22 @@ This records demo acceptance step 9 for `9086a18`, the merge of pull request 60 
 - **Not evidence.** A second dispatch on this SHA, [run 42432272795](https://github.com/jkowall/TideGrid/actions/runs/42432272795), started at 00:59:55 UTC and was canceled at 01:00:21, before any job ran. All six dispatch runs on these SHAs, the counted ones included, list `jkowall` as actor. *Coordinator-reported:* the coordinator did not start it. Correction, 2026-11-08 (*coordinator-reported*): a second coordinator session started it about 90 seconds later, through the GitHub connector, which acts as the owner's account. It canceled the run while pending, as a duplicate of the counted run.
 - **Step 9 now.** With these three entries, step 9 is shown for all seven SHAs released so far: `e111043`, `cca8880`, and `c62acb7` (November 4, tree equality), `dd30fc8` (November 7, tree equality), and `91a4faa`, `1f39feb`, and `9086a18` (these entries, dispatch). Per those entries, not read live, the three Workers run shown SHAs: the API `dd30fc8`, the console `e111043`, and the guest site `91a4faa`. Each later release records step 9 for its own SHA in its own closeout.
 
+### Neon consumption read, November 8, 2026
+
+This records a read of the TideGrid Neon project's usage and plan limits. The coordinator read the Neon console live at 00:50 UTC on November 8, in the owner's Chrome after the owner signed in. It was read only. The coordinator opened the projects list, Billing, the project overview, the branches list, and the project's Postgres settings, and changed nothing.
+
+**Source.** The Neon console, read live by the coordinator. No export was kept as evidence.
+
+- **Compute this month.** 5.19 CU-hrs, which is 18,684 CU-seconds (within 18 s, if the console rounds). The projects list, the project overview, and the branches list agree. The November 5 read, at 02:32 UTC, was 1,404 compute seconds, so 17,280 CU-seconds (4.80 CU-hrs) were added since. *Inferred:* that read's compute seconds are CU-seconds, since its 5,572 active seconds at 0.25 CU come to about 1,393.
+- **Active time.** Not shown on the pages read.
+- **Allowance reset.** The date and UTC time are not shown. The projects list says "Usage since Nov 1, 2026"; the project overview says "Since Oct 31, 2026".
+- **Plan limit.** Free plan, 100 compute hours per project, in Billing's words. Billing also lists 1 GB storage and autoscaling to 2 CU per project. *Inferred:* the 100 hours are CU-hours, the unit the usage figures use.
+- **History window.** 6 hours. The Postgres settings offer 0, 1, 2, or 6 hours on this plan, and say an upgrade gives up to 30 days. *Inferred:* a restore of `main` from Neon's history reaches back 6 hours at most, so it no longer reaches the November 4 run. Past that, only a branch such as P2.2's keeps an older state, and the run's branch was deleted on November 5.
+- **Branches.** 10 per project (Billing). One is in use: `main`, which never expires.
+- **Compute settings.** 0.25 CU, scale to zero after 5 minutes.
+- **Rate, an estimate.** All 4.80 CU-hrs are put on the cron period, from November 6 at 01:11 UTC to the read: 47.65 hours, about 190 wakes. That is about 2.42 CU-hrs a day, or 2.47 if the metrics lag by an hour (the projects list says they "may be delayed by an hour"). It includes the November 6 run's own traffic, any use between November 5 at 02:32 and the cron's return, and any of the November 4 run's use that the lagging November 5 API read had not caught. So it is likely an upper bound. With a reset assumed at December 1, 00:00 UTC (not shown), the month comes to about 61 to 62 CU-hrs of 100. Demos, smoke runs, and migrations add to that.
+- **The cron.** Kept. Asked after this read, the owner chose to keep the `*/15` cron. The owner's [2026-11-05 decision](v2/06-decision-register.md#2026-11-05-payments-and-the-cron-back-on-owner-decision) already covers it, so no new register entry.
+
 ### G2.12 follow-ups merged in pull request 78, recorded November 8, 2026
 
 Pull request 78 (search by source, the calendar carrying the source, and the CSV guard for number-shaped references) merged on 2026-11-07 at 20:37 UTC as `7ef50cf`. No release of `7ef50cf` is recorded. This entry was written from git, the GitHub Actions API, and the pull request's reviews, except where marked.
@@ -99,7 +99,7 @@ This records demo acceptance step 9 for the API's live SHA, `dd30fc8` (the merge
 - **The tree.** The run's test merge commit is `412387b0587310673da1e2695c0d4ae06d14ef5e`, with parents `818a4ef` and `9603d86`, the same parents as `dd30fc8`. `git rev-parse` gives tree `cb0fef55158bbc024d6c2b0b5de0dc0ddd1d5318` for both.
 - **The push run on `main`.** [Run 42142133952](https://github.com/jkowall/TideGrid/actions/runs/42142133952) ran only the `checks` job (the other three were skipped), from 01:11:25 to 01:14:46 UTC, and passed. The entry below puts the whole `nov1` run, the release included, between 01:11 and 01:12, so `dd30fc8` was released before its push run finished, as five SHAs were on November 4.
 - **Step 9 now.** The entries below record seven SHAs released since November 4; four are shown: `e111043`, `cca8880`, and `c62acb7` (below), and `dd30fc8`. Still not shown: `91a4faa` (pull request 59), `1f39feb` (62), and `9086a18` (60). Per those entries, not read live: the API runs `dd30fc8`, shown; the console `e111043`, shown; and the guest site `91a4faa`, not shown.
-- **Neon.** No consumption read since November 5 at 02:32 UTC is recorded. The `*/15` cron was put back on November 6 (the entry below), so a current read is the owner's to take.
+- **Neon.** No consumption read since November 5 at 02:32 UTC is recorded. The `*/15` cron was put back on November 6 (the entry below), so a current read is the owner's to take. Update, 2026-11-08: read at 00:50 UTC, see the [Neon consumption read](#neon-consumption-read-november-8-2026).
 
 ## 2026-11-06
 
