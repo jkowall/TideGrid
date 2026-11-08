@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Per-location tax rates (W3-G2.5-TAX), built November 8, 2026
+
+Goal branch `claude/project-thread-v8gj5v`, from `main` at `ddc7d6d`, migration `0023_tax_rate_locations.sql` (provisional), a synthetic pull-forward with a coordinator default in place of the CPA's answer ([decision register](v2/06-decision-register.md#2026-11-08-w3-g25-tax-per-location-tax-rates-entered-by-each-operator-synthetic-pull-forward-coordinator-default-in-place-of-the-cpas-answer)).
+
+- **Built.** A tax rate version names one location or none; offers and quotes use only the rates that apply at the trip's product location; the database refuses a quote line tax from a rate scoped to another location, and a rate naming another tenant's location.
+- **Acceptance.** A rate applies per departure location, versioned (moving it appends a version). Quotes name the rate version they used, and a quote taken before a move reads back unchanged. Rounding in integer cents: 2.5% of 4500 is 112.5, rounded half up to 113.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `pnpm test:integration`, every package, 1,031 passed and 2 skipped, including the new `tax-locations.integration.test.ts` (5 tests). Typecheck, lint, every unit suite, the release dry run, doc links, and the prototype checks passed.
+- **Independent and security review** (R9, under the owner's standing go to merge without asking him): nothing above low. Recorded, not fixed: the trigger checks the named version, not that it is current (as 0005 already allows for stale versions); an archived location is accepted; the foreign key is added validated, on a small table with every value null.
+- **Still open.** Staff screens for tax rates; apply `0023` on Neon main before the API release that carries it.
+
 ### Email bounces and complaints recorded from the provider's events (W1-EMAIL-EVENTS), built November 8, 2026
 
 Goal branch `claude/project-thread-wqkheo`, from `main` at `64e8ff7`, migrations `0021_email_events.sql` and `0022_email_events_index.sql` (provisional), pulled forward by the owner ([decision register](v2/06-decision-register.md#2026-11-08-w1-email-events-a-local-consumer-for-email-bounces-and-complaints-owner-pull-forward-coordinator-defaults-pending-owner-confirmation)). Local only: no live event, no queue, no binding, no deploy.
