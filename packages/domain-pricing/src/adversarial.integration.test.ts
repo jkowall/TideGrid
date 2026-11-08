@@ -1145,14 +1145,17 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
             addOns: [],
             promotionCode: null,
           });
+        // The refusal carries the seats left on this trip, a count only (W1-GUEST-API D2).
         expect(await shared(4)).toEqual({
           kind: "rejected",
           problems: [{ code: "insufficient_capacity" }],
+          capacityRemaining: 3,
         });
         expect((await shared(3)).kind).toBe("created");
         expect(await charter(5)).toEqual({
           kind: "rejected",
           problems: [{ code: "insufficient_capacity" }],
+          capacityRemaining: 4,
         });
         expect((await charter(4)).kind).toBe("created");
       } finally {
