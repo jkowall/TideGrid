@@ -8,6 +8,24 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: O-REL release of b1461f3 (owner decisions)
+
+The owner directed a preview release per the [November 1 runbook](../runbooks/2026-11-01-preview-deploy.md) and gave these decisions in the coordinator's session:
+
+- **Release SHA.** `b1461f373340d2c5d81df280f81343d947dc2913`, the merge of pull request 87, carrying migration `0015`.
+- **Approval form.** A19 in P11, for the API and the console.
+- **Guest site skipped.** In the owner's words, "its bundle matches the live 91a4faa apart from contract schema texts". It still runs `91a4faa`.
+- **Declared targets.** The owner first asked to type every target, then answered "--confirm" when the coordinator's shell had no terminal. Every type-back in the run was declared, as the [2026-11-05 entry](#2026-11-05-nov1-declares-type-backs-and-reads-test-mode-secret-files-owner-decision) allows.
+- **No new backup.** `nov1 db backup` is a no-op once the journal records a backup. Question: "What should happen before the 0015 migration?" Selected: "Accept Nov 5 branch", whose text reads: "Run step 3 as written (it does nothing) and go straight to the migration. The restore point stays the November 5 branch plus Neon point-in-time restore. The report will say no new branch was made."
+
+Departures from the runbook, all *coordinator-reported*:
+
+- **Machine and env.** The run used the owner's other Mac. Rule 3 says to source the env file only in the owner's own terminal. The coordinator sourced it inside a subshell per command, from the owner's private repository, on the owner's instruction to use it.
+- **Journal copied.** The `nov1` journal existed only on the owner's work Mac. On the owner's approval, a session there copied it through the owner's private repository. Without it the phase guard refuses every release, since `cutoverDone` comes only from a journaled P8 guest release. The work Mac's copy is now out of date.
+- **Output masking.** `nov1` prints the database host, which is the `db migrate` target. The coordinator masked Neon hosts in all output. Wrangler's binding table, which `nov1` does not redact, showed the Hyperdrive config id and part of `CF_ACCESS_AUD` in the coordinator's session output during the API release, before a filter for hex ids was added. Neither was written to the repository.
+
+Proposed, not adopted: `nov1` could redact the database host and wrangler's binding ids itself, so a declared run cannot print them. Verification: see the [verification log](../verification-log.md#o-rel-b1461f3-released-to-the-api-and-console-november-8-2026).
+
 ### 2026-11-08: owner confirmation of the coordinator defaults (owner decisions)
 
 The owner's checklist of 2026-11-08 began: "Owner checklist: confirm or replace the pending coordinator defaults. This is not a build goal." It asked a session to read this register read-only and put each item pending owner confirmation as one question, with the coordinator default as the recommended answer, in the owner's order. The session read the register at `main` `7ef50cf` and put 20 questions through its question tool, in five batches of four. The owner selected the recommended option on every question. Every default listed below is now an owner decision. Nothing was built, released, or merged under this entry. Recorded verbatim, in the checklist's order:
