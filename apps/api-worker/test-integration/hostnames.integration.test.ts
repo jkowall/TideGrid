@@ -21,6 +21,7 @@ import {
   GUEST_MISS_BUDGET,
   guestHostProjection,
   guestKnownHosts,
+  guestKnownReads,
   guestMissBudget,
   resolveGuestHost,
 } from "../src/hostnames/guest-gateway.ts";
@@ -385,6 +386,7 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
   it("limits a flood of unknown hosts to the miss budget, and never answers it with a miss", async () => {
     guestMissBudget.clear();
     guestKnownHosts.clear();
+    guestKnownReads.clear();
     guestHostProjection.clear();
     try {
       const preview = bindings("preview") as never;
@@ -403,12 +405,14 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
       const again = await resolveGuestHost(preview, hosts.b);
       expect(again.kind).toBe("found");
       if (again.kind === "found") expect(again.experience.tenant.slug).toBe(B.slug);
-      // The other tenant's host was never found here, so it waits for a token.
+      // The other tenant's host was never found here, so it waits for a token:
+      // the cold-isolate risk the decision register records for P10.
       expect(await resolveGuestHost(preview, hosts.a)).toEqual({ kind: "limited" });
       expect(guestHostProjection.get(`preview|${hosts.a}`, Date.now())).toBeUndefined();
     } finally {
       guestMissBudget.clear();
       guestKnownHosts.clear();
+      guestKnownReads.clear();
     }
   });
 
@@ -423,6 +427,7 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
     if (answer.kind === "found") expect(answer.experience.tenant.slug).toBe(B.slug);
     guestMissBudget.clear();
     guestKnownHosts.clear();
+    guestKnownReads.clear();
   });
 
   it("answers with the static allowlist only when PUBLIC_CORS is static (the rollback)", async () => {

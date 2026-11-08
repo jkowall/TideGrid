@@ -73,15 +73,17 @@ export const guestHostProjection = new TtlProjection<PublicExperienceResponse>(
  * - D1: a token bucket per isolate, in memory, with no Workers rate-limit
  *   binding. A lookup for a host this isolate does not know takes a token
  *   before it opens a connection. A `found` answer gives the token back at
- *   once. A `miss`, a `withheld` brand, and a failure keep it until 10
- *   seconds after the lookup began.
+ *   once. A `miss`, a `withheld` brand, a failure, and a lookup that never
+ *   ends (one cancelled mid-read, for example) keep it until 10 seconds after
+ *   the lookup began, and no longer.
  * - D2: no negative cache. A host activated a moment ago resolves on its
  *   next lookup that gets a token.
  * - D3: 20 tokens per 10 seconds per isolate, revisited at P10. Each token
- *   comes back 10 seconds after the lookup that spent it began, so no
- *   10-second span opens more than 20 lookups for unknown hosts that end as
- *   a miss, a withheld brand, or a failure, and no more than 20 such
- *   lookups run at once.
+ *   comes back at most 10 seconds after the lookup that took it began, so no
+ *   10-second span opens more than 20 lookups for unknown hosts that end as a
+ *   miss, a withheld brand, or a failure, or that never end. A lookup that
+ *   runs past 10 seconds no longer holds its token, so while reads hang, at
+ *   most 20 more start every 10 seconds.
  *
  * With no token, the answer is `limited`: a 503 from the guest Worker,
  * never the kill switch. Only a lookup that reached the database and found
@@ -90,43 +92,48 @@ export const guestHostProjection = new TtlProjection<PublicExperienceResponse>(
 export const GUEST_MISS_BUDGET = 20;
 export const GUEST_MISS_WINDOW_MS = 10_000;
 
+/** One token out: it comes back `windowMs` after `startedAt`, or when released. */
+export interface LookupHold {
+  readonly startedAt: number;
+}
+
 export class LookupBudget {
-  /** Start times of settled lookups whose token has not come back yet. */
-  #spent: number[] = [];
-  /** Lookups under way: each holds a token until it settles. */
-  #open = 0;
+  /** Tokens out. Each expires `windowMs` after its lookup began. */
+  readonly #held = new Set<LookupHold>();
 
   constructor(
     readonly capacity: number,
     readonly windowMs: number,
   ) {}
 
-  /** Takes a token for a lookup starting at `now`, or answers false. */
-  take(now: number): boolean {
-    this.#spent = this.#spent.filter((started) => started + this.windowMs > now);
-    if (this.#spent.length + this.#open >= this.capacity) return false;
-    this.#open += 1;
-    return true;
+  /** Takes a token for a lookup starting at `now`, or answers undefined. */
+  take(now: number): LookupHold | undefined {
+    this.#expire(now);
+    if (this.#held.size >= this.capacity) return undefined;
+    const hold = { startedAt: now };
+    this.#held.add(hold);
+    return hold;
   }
 
-  /**
-   * Ends a lookup that took a token at `startedAt`. A spent token comes back
-   * `windowMs` after the lookup began; a token not spent comes back now.
-   */
-  settle(startedAt: number, spent: boolean): void {
-    this.#open = Math.max(0, this.#open - 1);
-    if (spent) this.#spent.push(startedAt);
+  /** Gives a token back at once. A token never released comes back `windowMs` after it was taken. */
+  release(hold: LookupHold): void {
+    this.#held.delete(hold);
   }
 
   /** Tokens free at `now`. */
   available(now: number): number {
-    const held = this.#spent.filter((started) => started + this.windowMs > now).length;
-    return Math.max(0, this.capacity - held - this.#open);
+    this.#expire(now);
+    return Math.max(0, this.capacity - this.#held.size);
   }
 
   clear(): void {
-    this.#spent = [];
-    this.#open = 0;
+    this.#held.clear();
+  }
+
+  #expire(now: number): void {
+    for (const hold of this.#held) {
+      if (hold.startedAt + this.windowMs <= now) this.#held.delete(hold);
+    }
   }
 }
 
@@ -136,34 +143,87 @@ export const guestMissBudget = new LookupBudget(GUEST_MISS_BUDGET, GUEST_MISS_WI
  * Hosts this isolate has recently found (D4, a coordinator default pending
  * owner confirmation): a host whose last lookup here answered `found`, in
  * the last 10 minutes, at most 1,000 hosts, least recently used out first.
- * Such a host skips the miss budget, so a flood of unknown hosts cannot turn
- * a live operator's page into a 503 when its kept answer expires. It is not
- * a cache: the host is still read afresh each time it is not kept as
+ * Such a host skips the miss budget, so in a warm isolate a flood of unknown
+ * hosts cannot turn a live operator's page into a 503 when its kept answer
+ * expires. A host this isolate has not found in 10 minutes, for example any
+ * host in a fresh isolate after a deploy or on scale-out, goes through the
+ * miss budget like any unknown host, and answers `limited` while a flood
+ * holds every token (an open risk for P10, in the decision register). It is
+ * not a cache: the host is still read afresh each time it is not kept as
  * `found` above, so a disable still serves the kill switch once that kept
  * answer expires. A `miss`, a `withheld` answer, or a failure removes the
- * host, and its next lookup takes a token like any unknown host, so a
- * database outage cannot make a known host's reads unbounded. Only a
+ * host, and its next lookup takes a token like any unknown host. Only a
  * database `found` answer adds one.
  */
 export const GUEST_KNOWN_TTL_MS = 600_000;
 export const GUEST_KNOWN_MAX_ENTRIES = 1_000;
 export const guestKnownHosts = new TtlProjection<true>(GUEST_KNOWN_MAX_ENTRIES, GUEST_KNOWN_TTL_MS);
 
-/** Refused lookups since the last `guest_host_lookup_limited` log, at most one log per window. */
-let limitedSinceLog = 0;
-let limitedLoggedAt = Number.NEGATIVE_INFINITY;
+/**
+ * Reads of known hosts under way (D8, a coordinator default pending owner
+ * confirmation): at most 20 per isolate at once. Each read holds a slot until
+ * it settles, whatever its answer, and at most 10 seconds if it never
+ * settles. Past the cap the answer is `limited`, never a miss. Reads in flight
+ * are not shared between requests (see the projection above), so this cap is
+ * what bounds a burst of calls for a live host when its kept answer expires,
+ * or while the database is slow.
+ */
+export const GUEST_KNOWN_READS = 20;
+export const guestKnownReads = new LookupBudget(GUEST_KNOWN_READS, GUEST_MISS_WINDOW_MS);
 
-function logLimited(env: Bindings, now: number): void {
-  limitedSinceLog += 1;
-  if (now - limitedLoggedAt < GUEST_MISS_WINDOW_MS) return;
+/**
+ * Refused lookups, counted per 10-second window (D7). The first refusal of a
+ * window logs `guest_host_lookup_limited started`, a leading-edge marker.
+ * Once the window has closed, the isolate's next call logs
+ * `guest_host_lookup_limited refused <n>`, the window's total. No hostname is
+ * logged.
+ */
+export class RefusalTally {
+  #windowStart = Number.NEGATIVE_INFINITY;
+  #count = 0;
+
+  constructor(readonly windowMs: number) {}
+
+  /** The closed window's total, once, or undefined. */
+  flush(now: number): number | undefined {
+    if (this.#count === 0 || now - this.#windowStart < this.windowMs) return undefined;
+    const total = this.#count;
+    this.#count = 0;
+    return total;
+  }
+
+  /** Counts one refusal; answers true when it opens a window. */
+  refuse(now: number): boolean {
+    this.#count += 1;
+    if (this.#count > 1) return false;
+    this.#windowStart = now;
+    return true;
+  }
+
+  clear(): void {
+    this.#windowStart = Number.NEGATIVE_INFINITY;
+    this.#count = 0;
+  }
+}
+
+export const guestLimitedTally = new RefusalTally(GUEST_MISS_WINDOW_MS);
+
+function logLimited(env: Bindings, message: string): void {
   createLogger({
     "tidegrid.request_id": newRequestId(),
     "tidegrid.environment": env.ENVIRONMENT,
-  }).warn(`guest_host_lookup_limited refused ${limitedSinceLog}`, {
-    "event.name": "guest_host_lookup_limited",
-  });
-  limitedSinceLog = 0;
-  limitedLoggedAt = now;
+  }).warn(message, { "event.name": "guest_host_lookup_limited" });
+}
+
+function flushLimited(env: Bindings, now: number): void {
+  const total = guestLimitedTally.flush(now);
+  if (total !== undefined) logLimited(env, `guest_host_lookup_limited refused ${total}`);
+}
+
+function refuseLookup(env: Bindings, now: number): GuestHostAnswer {
+  flushLimited(env, now);
+  if (guestLimitedTally.refuse(now)) logLimited(env, "guest_host_lookup_limited started");
+  return { kind: "limited" };
 }
 
 /** One database read of the public experience, on its own one-connection handle. */
@@ -185,37 +245,41 @@ const lookupPublicExperience: GuestHostLookup = async (env, host) => {
  * an Origin (lowercase ASCII, no trailing dot, no punycode, no IP literal,
  * and outside local development no loopback-only name), because it never
  * trusts its caller's parsing. A `found` answer may come from the guest host
- * projection above. Otherwise a host this isolate has recently found reads
- * the database at once, and any other host first takes a token from the miss
- * budget, or answers `limited`. Each read opens its own connection and
- * closes it. `lookup` is replaceable only so unit tests can count reads.
+ * projection above. Otherwise a host this isolate has recently found takes
+ * one of the known-host read slots, and any other host takes a token from
+ * the miss budget; with neither, the answer is `limited`. Each read opens its
+ * own connection and closes it. `lookup` is replaceable only so unit tests
+ * can count reads.
  */
 export async function resolveGuestHost(
   env: Bindings,
   host: unknown,
   lookup: GuestHostLookup = lookupPublicExperience,
 ): Promise<GuestHostAnswer> {
+  const now = Date.now();
+  flushLimited(env, now);
   const parsed = parseHostname(host, hostPolicy(env));
   if (!parsed) return { kind: "miss" };
   const key = `${env.ENVIRONMENT ?? ""}|${parsed}`;
-  const now = Date.now();
   const cached = guestHostProjection.get(key, now);
   if (cached) return { kind: "found", experience: structuredClone(cached) };
   if (!databaseUrl(env)) throw new Error("database_unconfigured");
   const known = guestKnownHosts.get(key, now) !== undefined;
-  if (!known && !guestMissBudget.take(now)) {
-    logLimited(env, now);
-    return { kind: "limited" };
-  }
+  const hold = known ? guestKnownReads.take(now) : guestMissBudget.take(now);
+  if (!hold) return refuseLookup(env, now);
   let found: PublicExperience;
   try {
     found = await lookup(env, parsed);
   } catch (error) {
-    if (known) guestKnownHosts.delete(key);
-    else guestMissBudget.settle(now, true);
+    // A failed read of an unknown host keeps its token for the window.
+    if (known) {
+      guestKnownReads.release(hold);
+      guestKnownHosts.delete(key);
+    }
     throw error;
   }
-  if (!known) guestMissBudget.settle(now, found.kind !== "found");
+  if (known) guestKnownReads.release(hold);
+  else if (found.kind === "found") guestMissBudget.release(hold);
   if (found.kind === "miss") {
     guestKnownHosts.delete(key);
     return { kind: "miss" };

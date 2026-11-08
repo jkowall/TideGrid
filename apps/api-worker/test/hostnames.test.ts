@@ -1,6 +1,6 @@
 import { createExecutionContext, env, SELF } from "cloudflare:test";
 import { createFakeHostnameProvider } from "@tidegrid/domain-hostnames";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { Bindings } from "../src/env.ts";
 import { PreflightProjection, preflightProjection } from "../src/hostnames/cors.ts";
@@ -8,14 +8,18 @@ import {
   GUEST_HOST_MAX_ENTRIES,
   GUEST_HOST_TTL_MS,
   GUEST_KNOWN_MAX_ENTRIES,
+  GUEST_KNOWN_READS,
   GUEST_KNOWN_TTL_MS,
   GUEST_MISS_BUDGET,
   GUEST_MISS_WINDOW_MS,
   type GuestHostLookup,
   guestHostProjection,
   guestKnownHosts,
+  guestKnownReads,
+  guestLimitedTally,
   guestMissBudget,
   LookupBudget,
+  RefusalTally,
   resolveGuestHost,
 } from "../src/hostnames/guest-gateway.ts";
 import { TtlProjection } from "../src/hostnames/projection.ts";
@@ -399,7 +403,9 @@ describe("the guest miss budget (G2.14b-live, D1 to D3)", () => {
   const reset = () => {
     guestHostProjection.clear();
     guestKnownHosts.clear();
+    guestKnownReads.clear();
     guestMissBudget.clear();
+    guestLimitedTally.clear();
   };
   beforeEach(reset);
   afterEach(reset);
@@ -434,35 +440,51 @@ describe("the guest miss budget (G2.14b-live, D1 to D3)", () => {
     expect(guestMissBudget.windowMs).toBe(GUEST_MISS_WINDOW_MS);
     expect(GUEST_KNOWN_TTL_MS).toBe(600_000);
     expect(GUEST_KNOWN_MAX_ENTRIES).toBe(1_000);
+    expect(GUEST_KNOWN_READS).toBe(20);
+    expect(guestKnownReads.capacity).toBe(GUEST_KNOWN_READS);
+    expect(guestKnownReads.windowMs).toBe(GUEST_MISS_WINDOW_MS);
     // The cache defaults the owner confirmed are unchanged.
     expect(GUEST_HOST_TTL_MS).toBe(10_000);
     expect(GUEST_HOST_MAX_ENTRIES).toBe(1_000);
   });
 
-  it("never lets a 10-second span open more than its capacity of spent lookups", () => {
+  it("never lets a 10-second span open more than its capacity of held lookups", () => {
     const budget = new LookupBudget(3, 10_000);
-    for (let i = 0; i < 3; i++) expect(budget.take(0)).toBe(true);
-    // Three lookups under way hold every token.
-    expect(budget.take(0)).toBe(false);
-    for (let i = 0; i < 3; i++) budget.settle(0, true);
-    expect(budget.take(9_999)).toBe(false);
+    const first = [budget.take(0), budget.take(0), budget.take(0)];
+    for (const hold of first) expect(hold).toBeDefined();
+    // Three lookups under way, or spent, hold every token.
+    expect(budget.take(0)).toBeUndefined();
+    expect(budget.take(9_999)).toBeUndefined();
     expect(budget.available(9_999)).toBe(0);
-    // Each token comes back 10 seconds after its lookup began.
+    // Each token comes back 10 seconds after its lookup began, released or not.
     expect(budget.available(10_000)).toBe(3);
-    expect(budget.take(10_000)).toBe(true);
-    // A lookup that is not spent gives its token back at once.
-    budget.settle(10_000, false);
+    const found = budget.take(10_000);
+    expect(found).toBeDefined();
+    // A released token comes back at once.
+    if (found) budget.release(found);
     expect(budget.available(10_000)).toBe(3);
-    // Staggered: one spent at 1 s and two at 5 s free at 11 s and 15 s.
-    budget.take(1_000);
-    budget.settle(1_000, true);
-    budget.take(5_000);
-    budget.take(5_000);
-    budget.settle(5_000, true);
-    budget.settle(5_000, true);
-    expect(budget.take(10_999)).toBe(false);
-    expect(budget.available(11_000)).toBe(1);
-    expect(budget.available(15_000)).toBe(3);
+    // Releasing a token that already expired changes nothing.
+    if (first[0]) budget.release(first[0]);
+    expect(budget.available(10_000)).toBe(3);
+    // Staggered: one taken at 11 s and two at 15 s free at 21 s and 25 s.
+    budget.take(11_000);
+    budget.take(15_000);
+    budget.take(15_000);
+    expect(budget.take(20_999)).toBeUndefined();
+    expect(budget.available(21_000)).toBe(1);
+    expect(budget.available(25_000)).toBe(3);
+  });
+
+  it("tallies refusals per window: a leading-edge marker, then the closed window's total once", () => {
+    const tally = new RefusalTally(10_000);
+    expect(tally.flush(0)).toBeUndefined();
+    expect(tally.refuse(1_000)).toBe(true);
+    expect(tally.refuse(1_001)).toBe(false);
+    expect(tally.refuse(10_999)).toBe(false);
+    expect(tally.flush(10_999)).toBeUndefined();
+    expect(tally.flush(11_000)).toBe(3);
+    expect(tally.flush(11_000)).toBeUndefined();
+    expect(tally.refuse(11_000)).toBe(true);
   });
 
   it("opens at most 20 lookups for a flood of distinct unknown hosts, and none is a miss past that", async () => {
@@ -602,5 +624,132 @@ describe("the guest miss budget (G2.14b-live, D1 to D3)", () => {
     );
     expect(db.reads).toHaveLength(0);
     expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+  });
+});
+
+describe("the guest miss budget under review findings (W1-GW-MISS)", () => {
+  const reset = () => {
+    guestHostProjection.clear();
+    guestKnownHosts.clear();
+    guestKnownReads.clear();
+    guestMissBudget.clear();
+    guestLimitedTally.clear();
+  };
+  beforeEach(reset);
+  afterEach(() => {
+    vi.restoreAllMocks();
+    reset();
+  });
+
+  const withDb = { ...base, DATABASE_URL: "postgres://unit:unit@db.invalid:5432/none" } as Bindings;
+  const experience = { tenant: { slug: "demo-harbor", name: "Demo Harbor" } };
+  const live = "demo-harbor.book.tidegrid.us";
+  const hang: GuestHostLookup = () => new Promise(() => {});
+
+  /** A slow lookup that counts reads and the most reads under way at once. */
+  function slowDb(foundHosts: string[] = []) {
+    const stats = { reads: 0, open: 0, peak: 0 };
+    const lookup: GuestHostLookup = async (_env, host) => {
+      stats.reads += 1;
+      stats.open += 1;
+      stats.peak = Math.max(stats.peak, stats.open);
+      await new Promise((r) => setTimeout(r, 5));
+      stats.open -= 1;
+      return foundHosts.includes(host)
+        ? { kind: "found", tenantId: "t", experience }
+        : { kind: "miss" };
+    };
+    return { stats, lookup };
+  }
+
+  /** Freezes the clock at `start`; returns a setter to move it. */
+  function clock(start = 1_800_000_000_000) {
+    let now = start;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    return (ms: number) => {
+      now = start + ms;
+    };
+  }
+
+  it("gives a token back 10 seconds after its lookup began, even if the lookup never settles", async () => {
+    const at = clock();
+    for (let i = 0; i < GUEST_MISS_BUDGET; i++) {
+      void resolveGuestHost(withDb, `hang-${i}.example.com`, hang);
+    }
+    const db = slowDb([live]);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    at(GUEST_MISS_WINDOW_MS - 1);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    // A cancelled read never settles; its token still comes back.
+    at(GUEST_MISS_WINDOW_MS);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "found", experience });
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+  });
+
+  it("caps the reads of a known host under way at once, so a stampede at expiry is bounded", async () => {
+    const db = slowDb([live]);
+    expect((await resolveGuestHost(withDb, live, db.lookup)).kind).toBe("found");
+    guestHostProjection.clear();
+    db.stats.reads = 0;
+    db.stats.peak = 0;
+    const answers = await Promise.all(
+      Array.from({ length: 500 }, () => resolveGuestHost(withDb, live, db.lookup)),
+    );
+    expect(db.stats.peak).toBeLessThanOrEqual(GUEST_MISS_BUDGET);
+    expect(db.stats.reads).toBeLessThanOrEqual(GUEST_MISS_BUDGET);
+    const kinds = answers.map((a) => a.kind);
+    // Never a miss: a refused read is `limited`, the 503.
+    expect(kinds.filter((k) => k === "miss")).toHaveLength(0);
+    expect(kinds.filter((k) => k === "found")).toHaveLength(db.stats.reads);
+    // The miss budget was not touched by a known host.
+    expect(guestMissBudget.available(Date.now())).toBe(GUEST_MISS_BUDGET);
+  });
+
+  it("lets a known host's read that never settles go after 10 seconds too", async () => {
+    const at = clock();
+    const db = slowDb([live]);
+    await resolveGuestHost(withDb, live, db.lookup);
+    guestHostProjection.clear();
+    for (let i = 0; i < GUEST_MISS_BUDGET; i++) void resolveGuestHost(withDb, live, hang);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    at(GUEST_MISS_WINDOW_MS);
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "found", experience });
+  });
+
+  it("refuses a live host a cold isolate has not found while a flood holds the budget (open risk for P10)", async () => {
+    // A cold isolate: nothing kept, nothing known. This is a deliberate,
+    // recorded behavior pending the owner's decision, never a miss.
+    const db = slowDb([live]);
+    await Promise.all(
+      Array.from({ length: GUEST_MISS_BUDGET }, (_, i) =>
+        resolveGuestHost(withDb, `junk-${i}.example.com`, db.lookup),
+      ),
+    );
+    expect(await resolveGuestHost(withDb, live, db.lookup)).toEqual({ kind: "limited" });
+    expect(guestHostProjection.size).toBe(0);
+  });
+
+  it("logs a flood when it starts and its window's total once the window closes", async () => {
+    const at = clock();
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      if (typeof line === "string" && line.includes("guest_host_lookup_limited")) lines.push(line);
+    });
+    const db = slowDb();
+    await Promise.all(
+      Array.from({ length: GUEST_MISS_BUDGET + 41 }, (_, i) =>
+        resolveGuestHost(withDb, `flood-${i}.example.com`, db.lookup),
+      ),
+    );
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0] as string).message).toBe("guest_host_lookup_limited started");
+    // The flood stops. The window's total is written on the isolate's next call.
+    at(GUEST_MISS_WINDOW_MS);
+    await resolveGuestHost(withDb, "Not-Strict.example.com", db.lookup);
+    expect(lines).toHaveLength(2);
+    expect(JSON.parse(lines[1] as string).message).toBe("guest_host_lookup_limited refused 41");
+    // Written once only.
+    await resolveGuestHost(withDb, "Not-Strict.example.com", db.lookup);
+    expect(lines).toHaveLength(2);
   });
 });
