@@ -420,8 +420,10 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
     const alphabet = [..."tidegrclnvmwTG!1023-"];
     let seed = 20261108;
     const random = (n: number) => {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed % n;
+      // Exact 32-bit arithmetic: a plain multiply passes 2^53 and rounds,
+      // which repeats names and starves the "!" cases.
+      seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+      return (seed >>> 16) % n;
     };
     // Half the names mutate TideGrid: a letter may become a lookalike, and
     // any character may be inserted between two.
@@ -443,6 +445,8 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
       return name;
     };
     let refused = 0;
+    const names = new Set<string>();
+    let withBang = 0;
     for (let round = 0; round < 6000; round += 1) {
       let name = "H";
       if (round % 2 === 0) name += mutated();
@@ -450,6 +454,8 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
         const length = 6 + random(9);
         for (let i = 0; i < length; i += 1) name += alphabet[random(alphabet.length)];
       }
+      names.add(name);
+      if (name.includes("!")) withBang += 1;
       const expected = reads(name);
       if (expected) refused += 1;
       const problem = senderNameProblem(name);
@@ -459,6 +465,9 @@ describe("the sender name rule (W1-SENDER-GUARD)", () => {
       const local = name.toLowerCase().replaceAll("!", "");
       expect(contactEmailProblem(`${local}@harbor.test`) !== null, local).toBe(reads(local));
     }
+    // The sample is varied: mostly distinct names, many with a "!".
+    expect(names.size).toBeGreaterThan(5000);
+    expect(withBang).toBeGreaterThan(1000);
     // The sample exercises the refusal, not only the pass.
     expect(refused).toBeGreaterThan(300);
     expect(refused).toBeLessThan(5500);
