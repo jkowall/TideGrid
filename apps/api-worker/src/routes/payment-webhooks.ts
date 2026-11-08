@@ -59,8 +59,10 @@ export const MAX_WEBHOOK_BYTES = 64 * 1024;
  *   before it reads the body (D2, D3). `X-Forwarded-For` is never read.
  * - The route answers 200 once the event is recorded, and processes it
  *   afterwards through `waitUntil` on a connection of its own (D1). A crash
- *   after the 200 leaves the event received for the cron's checkout sweep
- *   and Stripe's next retry, and processing is idempotent per event.
+ *   after the 200 leaves the event received for the cron's checkout sweep,
+ *   the only automatic backstop: Stripe counts the 200 as delivered and does
+ *   not send the event again unless a person resends it. Processing is
+ *   idempotent per event.
  */
 export function registerPaymentWebhookRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
   const webhookRoute = createRoute({
@@ -267,8 +269,11 @@ type Processed =
  * Process one recorded event after the response, through `waitUntil`, on a
  * connection of its own: the request's connection closes with the response.
  * Best effort, like after-commit email: any failure is logged and leaves the
- * event received, which the checkout sweep processes on its next run and
- * Stripe's next retry processes too. A booking it confirms gets its
+ * event received, which the checkout sweep processes on its next run, up to
+ * the cron interval plus the sweep's grace later. Stripe does not retry a
+ * delivery it got a 200 for; a manual resend from Stripe's dashboard, or a
+ * delivery whose 200 was lost, schedules processing again. A booking it
+ * confirms gets its
  * confirmation email in the same background task, inside the `waitUntil`
  * window counted from before the response.
  */

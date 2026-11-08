@@ -546,13 +546,18 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     expect(await inbox(event.id)).toEqual({ processing_state: "processed", outcome: "confirmed" });
     expect((await status(A, opened.id, opened.secret)).state).toBe("confirmed");
 
-    // Stripe's retry after the sweep is a duplicate and changes nothing.
+    // Stripe counts the 200 as delivered and does not retry it, so until the
+    // sweep ran nothing else processed the event. A manual resend after the
+    // sweep is a duplicate and changes nothing.
     const again = await deliver(await fixture.redeliver(event, { nowMs: Date.now() + 1000 }));
     expect(again.json).toEqual({ received: true, duplicate: true, outcome: "confirmed" });
     expect(await bookingsFor(opened.paymentRef)).toBe(1);
   });
 
-  it("processes an event left received on Stripe's next retry", async () => {
+  it("processes an event left received when it is resent by hand from Stripe's dashboard", async () => {
+    // Stripe does not retry a delivery it got a 200 for. A redelivery after a
+    // 200 happens only when a person resends the event, or when the 200 was
+    // lost on the way and Stripe saw a timeout.
     const crashing = appWith({
       async bookingConfirmed() {
         throw new Error("the isolate went away after the 200");
@@ -566,9 +571,9 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     await send(event, { via: crashing });
     await drain();
     expect(await inbox(event.id)).toEqual({ processing_state: "received", outcome: null });
-    const retry = await deliver(await fixture.redeliver(event, { nowMs: Date.now() + 1000 }));
-    expect(retry.json).toEqual({ received: true, duplicate: true, outcome: "received" });
-    expect(retry.processed).toBe("confirmed");
+    const resent = await deliver(await fixture.redeliver(event, { nowMs: Date.now() + 1000 }));
+    expect(resent.json).toEqual({ received: true, duplicate: true, outcome: "received" });
+    expect(resent.processed).toBe("confirmed");
     expect(await bookingsFor(opened.paymentRef)).toBe(1);
   });
 
