@@ -25302,6 +25302,317 @@
           }
         }
       }
+    },
+    "/v1/staff/tenants/{tenantId}/email-exceptions": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Email that could not be delivered",
+        "description": "Owners and booking staff. Every message of the operator whose delivery stopped in the failed state, newest first by when it stopped: what it was (a booking email or a waiver request), how it ended (failed, outcome_unknown, or delivery_failed), the attempts, the last error's class, whether staff sent it, whether a later message of the same template for the same booking, participant, and subject was sent, and its booking's id, reference, and trip time zone. No recipient, subject, body, or name.\n\nFinance does not hold bookings.read and is refused (403). Order: a query that does not match the contract (400 validation_failed), authentication (401), membership (404), permission (403), then the cursor (400 cursor_invalid).",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Cursor: the last exception id of the previous page (nextBefore). One that names no exception of this operator answers 400 cursor_invalid"
+            },
+            "required": false,
+            "description": "Cursor: the last exception id of the previous page (nextBefore). One that names no exception of this operator answers 400 cursor_invalid",
+            "name": "before",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the operator's email exceptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exceptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "The message's id"
+                          },
+                          "template": {
+                            "type": "string",
+                            "description": "booking_confirmation, booking_manage_link, booking_canceled, booking_refund_failed, waiver_request, ..."
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "booking",
+                              "waiver"
+                            ],
+                            "description": "booking: the booking's own email (confirmation, booking link, cancellation notice, refund problem notice). waiver: a waiver request, which the booking's Waivers card shows and sends again"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "failed",
+                              "outcome_unknown",
+                              "delivery_failed"
+                            ],
+                            "description": "How delivery ended. Every listed message is in the failed delivery state; this splits it by the last error. outcome_unknown: the email service did not answer, so it may have arrived, and TideGrid did not try again. delivery_failed: the email service could not deliver it, and TideGrid did not try again. failed: any other final failure, such as bounced or retries_exhausted"
+                          },
+                          "attempts": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Counted delivery attempts"
+                          },
+                          "failureCode": {
+                            "type": "string",
+                            "description": "The last error's class, as the booking's messages read names it (MESSAGE_FAILURE_CODES); a client shows any other code generically"
+                          },
+                          "failedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "When delivery stopped"
+                          },
+                          "staffResend": {
+                            "type": "boolean",
+                            "description": "True for an email staff sent again from the console (G2.16b)"
+                          },
+                          "laterSent": {
+                            "type": "boolean",
+                            "description": "A later message of the same template, for the same booking, participant, and subject, was accepted by the email service. Acceptance is not proof the guest read it"
+                          },
+                          "booking": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "reference": {
+                                "type": "string",
+                                "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                                "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                              },
+                              "timeZone": {
+                                "type": "string",
+                                "description": "The trip's IANA time zone, for showing times"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reference",
+                              "timeZone"
+                            ],
+                            "description": "The booking the message was about; null for a message about no booking"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "template",
+                          "kind",
+                          "state",
+                          "attempts",
+                          "failureCode",
+                          "failedAt",
+                          "staffResend",
+                          "laterSent",
+                          "booking"
+                        ],
+                        "description": "A message that stopped without the email service taking it, without its recipient or content"
+                      }
+                    },
+                    "nextBefore": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uuid",
+                      "description": "Pass as before for the next page; null on the last page"
+                    }
+                  },
+                  "required": [
+                    "exceptions",
+                    "nextBefore"
+                  ],
+                  "description": "The operator's failed email, newest first by when delivery stopped. A failed message never changes again, so a cursor keeps naming the same place"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The query did not match the contract (validation_failed), or the cursor names no email exception of this tenant (cursor_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

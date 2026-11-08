@@ -93,6 +93,16 @@ export {
   subjectRefPattern,
 } from "./enqueue.ts";
 export {
+  type EmailExceptionKind,
+  type EmailExceptionState,
+  type EmailExceptionsPage,
+  type EmailExceptionView,
+  exceptionKind,
+  exceptionState,
+  listEmailExceptions,
+  MAX_EMAIL_EXCEPTIONS_PAGE,
+} from "./exceptions.ts";
+export {
   createFakeEmailProvider,
   type FakeEmailOptions,
   FakeEmailProvider,
