@@ -64,9 +64,18 @@ interface Harness {
   provider: CloudflareEmailProvider;
   logs: LogEntry[];
   calls: () => number;
-  /** Settles when the adapter emits `event`, so a test awaits its work instead of sleeping. */
+  /**
+   * Settles when the adapter emits `event`, so a test awaits its work instead
+   * of sleeping. Rejects with a clear message if the line never comes.
+   */
   logged: (event: string) => Promise<LogEntry>;
 }
+
+// Captured before any test installs fake timers. Used only to bound a wait
+// that should never be reached: a pass never depends on it.
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+const LOG_WAIT_LIMIT_MS = 3000;
 
 function harness(
   options: { recipients?: RecipientPolicy; timeoutMs?: number; environment?: string } = {},
@@ -76,7 +85,8 @@ function harness(
     tenantId: TENANT,
   });
   const logs: Harness["logs"] = [];
-  const waiting: { event: string; resolve: (entry: LogEntry) => void }[] = [];
+  type Waiter = { event: string; resolve: (entry: LogEntry) => void };
+  const waiting: Waiter[] = [];
   const log: EmailProviderLog = (event, attributes) => {
     const entry = { event, attributes };
     logs.push(entry);
@@ -88,7 +98,20 @@ function harness(
   const logged = (event: string) => {
     const seen = logs.find((l) => l.event === event);
     if (seen) return Promise.resolve(seen);
-    return new Promise<LogEntry>((resolve) => waiting.push({ event, resolve }));
+    return new Promise<LogEntry>((resolve, reject) => {
+      const waiter: Waiter = {
+        event,
+        resolve: (entry) => {
+          realClearTimeout(limit);
+          resolve(entry);
+        },
+      };
+      const limit = realSetTimeout(() => {
+        waiting.splice(waiting.indexOf(waiter), 1);
+        reject(new Error(`the adapter never logged ${event} within ${LOG_WAIT_LIMIT_MS} ms`));
+      }, LOG_WAIT_LIMIT_MS);
+      waiting.push(waiter);
+    });
   };
   const provider = createCloudflareEmailProvider({
     binding: fixture.binding,
@@ -240,6 +263,15 @@ const TABLE: [string, "rejected" | "unavailable", string, "not_sent" | "unknown"
   ];
 
 describe("the Cloudflare email adapter: errors", () => {
+  // Cleanup for the late-answer tests. It runs even when a test times out,
+  // which a finally block inside the test does not.
+  let onUnhandled: ((reason: unknown) => void) | undefined;
+  afterEach(() => {
+    vi.useRealTimers();
+    if (onUnhandled) process.off("unhandledRejection", onUnhandled);
+    onUnhandled = undefined;
+  });
+
   it("pins every one of the 21 documented codes", () => {
     expect(TABLE.map((r) => r[0]).sort()).toEqual([...CLOUDFLARE_ERROR_CODES].sort());
     expect(TABLE).toHaveLength(21);
@@ -359,37 +391,34 @@ describe("the Cloudflare email adapter: errors", () => {
 
   it("swallows a rejection that arrives after the timeout, logging its code only", async () => {
     const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    onUnhandled = (reason: unknown) => unhandled.push(reason);
     process.on("unhandledRejection", onUnhandled);
     // Fake timers fix the order of the 15 ms timeout and the 40 ms reject.
     // On real timers a busy machine could preempt the thread between the
     // two setTimeout calls and let the reject come due first.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      const h = harness({ timeoutMs: 15 });
-      // Even a code that is a definite failure on time is unknown once the
-      // timeout has answered: the send's outcome was decided by then.
-      h.fixture.rejectLate("E_DELIVERY_FAILED", 40);
-      const sending = caught(h.provider.send(outgoing()));
-      await vi.advanceTimersByTimeAsync(15);
-      const error = await sending;
-      expect(error).toMatchObject({ code: "provider_unavailable", outcome: "unknown" });
-      expect(h.logs.map((l) => l.event)).toEqual(["email_send_timeout"]);
-      const lateReject = h.logged("email_send_late_reject");
-      await vi.advanceTimersByTimeAsync(25);
-      await lateReject;
-      // One real macrotask turn, so Node has reported any unhandled rejection.
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(unhandled).toEqual([]);
-      expect(h.logs.at(-1)).toEqual({
-        event: "email_send_late_reject",
-        attributes: { "event.name": "email_send_late_reject", "error.type": "E_DELIVERY_FAILED" },
-      });
-      expectNoPersonalData(error, h.logs);
-    } finally {
-      vi.useRealTimers();
-      process.off("unhandledRejection", onUnhandled);
-    }
+    const h = harness({ timeoutMs: 15 });
+    // Even a code that is a definite failure on time is unknown once the
+    // timeout has answered: the send's outcome was decided by then.
+    h.fixture.rejectLate("E_DELIVERY_FAILED", 40);
+    const sending = caught(h.provider.send(outgoing()));
+    await vi.advanceTimersByTimeAsync(15);
+    // The timeout answered, and nothing late is logged yet. Checked before
+    // awaiting the send, so a send that misses its timeout fails here.
+    expect(h.logs.map((l) => l.event)).toEqual(["email_send_timeout"]);
+    const error = await sending;
+    expect(error).toMatchObject({ code: "provider_unavailable", outcome: "unknown" });
+    const lateReject = h.logged("email_send_late_reject");
+    await vi.advanceTimersByTimeAsync(25);
+    await lateReject;
+    // One real macrotask turn, so Node has reported any unhandled rejection.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(unhandled).toEqual([]);
+    expect(h.logs.at(-1)).toEqual({
+      event: "email_send_late_reject",
+      attributes: { "event.name": "email_send_late_reject", "error.type": "E_DELIVERY_FAILED" },
+    });
+    expectNoPersonalData(error, h.logs);
   });
 
   it("logs an acceptance that arrives after the timeout with the normalized provider id, the join key", async () => {
@@ -398,29 +427,27 @@ describe("the Cloudflare email adapter: errors", () => {
     // for the odd id, which no timer controls, so the test awaits the log line
     // itself rather than sleeping past it.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      for (const late of ["0101018f7d0c4d9a-msg-latelate", "{an odd late id}"]) {
-        const h = harness({ timeoutMs: 15 });
-        h.fixture.answerId(late);
-        h.fixture.acceptLate(40);
-        const sending = caught(h.provider.send(outgoing()));
-        await vi.advanceTimersByTimeAsync(15);
-        const error = await sending;
-        expect(error).toMatchObject({ outcome: "unknown" });
-        // The send answered before the provider did: nothing late is logged yet.
-        expect(h.logs.map((l) => l.event)).toEqual(["email_send_timeout"]);
-        const lateAccept = h.logged("email_send_late_accept");
-        await vi.advanceTimersByTimeAsync(25);
-        const entry = await lateAccept;
-        expect(entry.attributes).toEqual({
-          "event.name": "email_send_late_accept",
-          "tidegrid.email.message_id": "0f6c1d2e-3a4b-4c5d-8e9f-a0b1c2d3e4f5",
-          "tidegrid.email.provider_message_id": (await normalizeCloudflareMessageId(late)).id,
-        });
-        expectNoPersonalData(error, h.logs);
-      }
-    } finally {
-      vi.useRealTimers();
+    for (const late of ["0101018f7d0c4d9a-msg-latelate", "{an odd late id}"]) {
+      const h = harness({ timeoutMs: 15 });
+      h.fixture.answerId(late);
+      h.fixture.acceptLate(40);
+      const sending = caught(h.provider.send(outgoing()));
+      await vi.advanceTimersByTimeAsync(15);
+      // The timeout answered before the provider did: nothing late is logged
+      // yet. Checked before awaiting the send, so a send that misses its
+      // timeout fails here.
+      expect(h.logs.map((l) => l.event)).toEqual(["email_send_timeout"]);
+      const error = await sending;
+      expect(error).toMatchObject({ outcome: "unknown" });
+      const lateAccept = h.logged("email_send_late_accept");
+      await vi.advanceTimersByTimeAsync(25);
+      const entry = await lateAccept;
+      expect(entry.attributes).toEqual({
+        "event.name": "email_send_late_accept",
+        "tidegrid.email.message_id": "0f6c1d2e-3a4b-4c5d-8e9f-a0b1c2d3e4f5",
+        "tidegrid.email.provider_message_id": (await normalizeCloudflareMessageId(late)).id,
+      });
+      expectNoPersonalData(error, h.logs);
     }
   });
 });
