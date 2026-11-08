@@ -2,6 +2,24 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-08
+
+### Neon consumption read, November 8, 2026
+
+This records a read of the TideGrid Neon project's usage and plan limits. The coordinator read the Neon console live at 00:50 UTC on November 8, in the owner's Chrome after the owner signed in. It was read only. The coordinator opened the projects list, Billing, the project overview, the branches list, and the project's Postgres settings, and changed nothing.
+
+**Source.** The Neon console, read live by the coordinator. No export was kept as evidence.
+
+- **Compute this month.** 5.19 CU-hrs, which is 18,684 CU-seconds (within 18 s, if the console rounds). The projects list, the project overview, and the branches list agree. The November 5 read, at 02:32 UTC, was 1,404 compute seconds, so 17,280 CU-seconds (4.80 CU-hrs) were added since. *Inferred:* that read's compute seconds are CU-seconds, since its 5,572 active seconds at 0.25 CU come to about 1,393.
+- **Active time.** Not shown on the pages read.
+- **Allowance reset.** The date and UTC time are not shown. The projects list says "Usage since Nov 1, 2026"; the project overview says "Since Oct 31, 2026".
+- **Plan limit.** Free plan, 100 compute hours per project, in Billing's words. Billing also lists 1 GB storage and autoscaling to 2 CU per project. *Inferred:* the 100 hours are CU-hours, the unit the usage figures use.
+- **History window.** 6 hours. The Postgres settings offer 0, 1, 2, or 6 hours on this plan, and say an upgrade gives up to 30 days. *Inferred:* a restore of `main` from Neon's history reaches back 6 hours at most, so it no longer reaches the November 4 run. Past that, only a branch such as P2.2's keeps an older state, and the run's branch was deleted on November 5.
+- **Branches.** 10 per project (Billing). One is in use: `main`, which never expires.
+- **Compute settings.** 0.25 CU, scale to zero after 5 minutes.
+- **Rate, an estimate.** All 4.80 CU-hrs are put on the cron period, from November 6 at 01:11 UTC to the read: 47.65 hours, about 190 wakes. That is about 2.42 CU-hrs a day, or 2.47 if the metrics lag by an hour (the projects list says they "may be delayed by an hour"). It includes the November 6 run's own traffic, any use between November 5 at 02:32 and the cron's return, and any of the November 4 run's use that the lagging November 5 API read had not caught. So it is likely an upper bound. With a reset assumed at December 1, 00:00 UTC (not shown), the month comes to about 61 to 62 CU-hrs of 100. Demos, smoke runs, and migrations add to that.
+- **The cron.** Kept. Asked after this read, the owner chose to keep the `*/15` cron. The owner's [2026-11-05 decision](v2/06-decision-register.md#2026-11-05-payments-and-the-cron-back-on-owner-decision) already covers it, so no new register entry.
+
 ## 2026-11-07
 
 ### Step 9 for the live API dd30fc8, November 7, 2026
