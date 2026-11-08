@@ -1,0 +1,10 @@
+# Never commit state, plans, backend settings, or variable values: they can
+# hold secrets, hosts, or account ids. Provider lock files are committed.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+backend.hcl
+crash.log

@@ -24,6 +24,33 @@ W3-G2.3 builds the delivery foundation with migration `0019` (provisional, claim
 
 The cron sweeps stay as the backstop for the work they already do.
 
+### 2026-11-08: W3-OPS-1, pilot infrastructure as code, plan only (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
+
+At 17:35 UTC on 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That waives the Validation gate and the O-VAL-2 dependency for this goal as a synthetic pull-forward. It allows Terraform written and checked with `terraform fmt` and `terraform validate` only: no plan against a real account, no state backend, no apply, no provider call.
+
+The goal adds Terraform modules under [`infra/terraform`](../../infra/terraform/README.md) for zones, Worker routes, queues and dead letter queues, private R2 buckets, Hyperdrive, scoped tokens, alerts, the Cloudflare for SaaS fallback origin, and Neon, composed into staging and production roots. It adds a CI workflow, `infra.yml`, with no secrets, and an [apply runbook](../runbooks/terraform-apply.md) that requires the owner's approval of each saved plan. The Terraform and Wrangler ownership split of the [hosting plan](08-build-hosting-and-operations.md#infrastructure-and-configuration-ownership) is unchanged, and `tidegrid_app` still comes only from migration 0001. Coordinator defaults, pending owner confirmation:
+
+- **D1, no secrets in state.** The hosting plan says Terraform state holds no secret values. A Hyperdrive configuration, an account token, and a new Neon project each store one. They are created only when an environment sets `allow_secrets_in_state`, which defaults to false. Turning it on would amend the hosting plan.
+- **D2, state in a versioned, KMS-encrypted S3 bucket with lockfile locking,** one key per environment, settings supplied from the owner's private location. R2 has no object versioning. It needs an account the owner does not have yet.
+- **D3, staging only reads the existing `tidegrid.us` zone.** Production gets its own account and zone, created by Terraform.
+- **D4, Wrangler keeps the custom domains it declares today.** Terraform's routes start empty.
+- **D5, production's waiver evidence lock period has no default.** It is a legal retention decision. Staging locks synthetic evidence for 1 day.
+- **D6, providers:** Cloudflare `= 5.28.1` and the community Neon provider `kislerdm/neon` `= 0.18.0`, pinned exactly. No lock file is committed yet, because the goal's container could not reach the Terraform registry; CI validates and uploads the lock files it resolves.
+
+Not done: a plan per change in CI (it needs credentials and a backend), application alerts (W3-OPS-5), backup jobs and drills (W3-OPS-6). Security review: run by the goal's session on the Terraform, the workflow, and the runbook; see the pull request.
+
+### 2026-11-08: Demo guest app pulled forward into the demo (owner decision)
+
+On 2026-11-08 the owner wrote: "My customers really want mobile native apps. Is that in the plan, or do we need to modify the waves?" Native guest apps were already planned as the Native add-on, built in the G4 series under the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate), Native build work starts only after the Validation gate, and an operator's apps go live only after it passes the Core live gate and its own Native pilot gate. A native app for operator staff is out of scope ([product scope](02-product-scope.md)). On a decision card that asked "Which mobile app change do you want in the plan?", the owner chose "Demo guest app now" at 17:45 UTC. The option read: "Add a small wave to build a branded guest app on test data for TestFlight and Android testing to use in sales; full store launch stays in Wave 5." The other options were "Keep plan as is" and "Also add a staff app".
+
+- **What is pulled forward.** A thin, demo-grade version of the G0.2 native factory dry run and of G4.1 and G4.2: one React Native and Expo app at `apps/guest-native`, branded from the tenant configuration for the two synthetic tenants, with the guest journeys the demo API already serves. It is a native app, not a WebView of the PWA, as the [native app factory plan](09-native-app-factory-and-store-submission.md) requires. The [demo build plan](12-demo-build-plan.md#goal-sequence) records the change in its deferred list.
+- **Distribution.** TestFlight internal testing and Google Play internal testing only, on synthetic data, for sales demos and the Validation gate interviews. No public store submission. A production native app still waits for the company readiness rules in [company formation](07-company-formation-and-costs.md) and for the Native pilot gate.
+- **What stays in Wave 5.** Operator-owned store accounts, the release factories (G4.4 and G4.5), push, deep links, account deletion, second-brand reproduction, and public store approval. The Native add-on's price and gates are unchanged.
+- **No staff app.** The operator console stays a responsive web app.
+- **Owner inputs, needed before distribution.** Apple Developer Program ($99 a year) and Google Play developer registration ($25 once) for a TideGrid-owned test account; the account holder's identity; go for each goal. Expo and its packages are new npm dependencies, so the first goal's packet names them for the owner's go under the shared rules.
+
+Not done: no code, no account, and no build. The goals are W1N-APP, W1N-JOURNEYS, and W1N-TESTFLIGHT in the roadmap tracker.
+
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
 The owner placed finalization exception resolution in the G2.12 row with the O-SCOPE choice "Booking fixes and email limits". The goal's start gate is that entry. Staff now mark a payment exception as followed up, with migration `0018` (provisional, claimed at merge) and its service in the [booking contract](../../packages/domain-booking/README.md#exception-resolution-w1-fin-exc). The owner gave no answer on who may resolve or what reason is required, so these are coordinator defaults, pending owner confirmation:
