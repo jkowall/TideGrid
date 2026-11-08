@@ -148,6 +148,12 @@ BEGIN
     NEW.checked_at := now();
   END IF;
   IF NEW.state = OLD.state THEN
+    -- A settled refund never changes, its provider id included.
+    IF OLD.state IN ('succeeded', 'failed')
+       AND NEW.provider_refund_id IS DISTINCT FROM OLD.provider_refund_id THEN
+      RAISE EXCEPTION 'refund % is settled', OLD.id
+        USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_immutable';
+    END IF;
     IF NEW.failure_code IS DISTINCT FROM OLD.failure_code THEN
       RAISE EXCEPTION 'a refund''s failure is recorded with its transition'
         USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_transition';
@@ -649,7 +655,8 @@ CREATE TABLE public.refund_exceptions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
   refund_id uuid NOT NULL,
-  reason text NOT NULL CHECK (reason IN ('unsettled', 'lookup_refused', 'failed_after_success')),
+  reason text NOT NULL
+    CHECK (reason IN ('unsettled', 'lookup_refused', 'failed_after_success', 'succeeded_after_failure')),
   refund_state text NOT NULL CHECK (refund_state IN ('requested', 'pending', 'succeeded', 'failed')),
   error_code text CHECK (error_code ~ '^[a-z][a-z0-9_]{0,63}$'),
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -680,6 +687,10 @@ BEGIN
   END IF;
   IF NEW.reason = 'failed_after_success' AND r.state <> 'succeeded' THEN
     RAISE EXCEPTION 'only a succeeded refund can fail after success'
+      USING ERRCODE = '23514', CONSTRAINT = 'refund_exceptions_refund';
+  END IF;
+  IF NEW.reason = 'succeeded_after_failure' AND r.state <> 'failed' THEN
+    RAISE EXCEPTION 'only a failed refund can succeed after failure'
       USING ERRCODE = '23514', CONSTRAINT = 'refund_exceptions_refund';
   END IF;
   RETURN NEW;

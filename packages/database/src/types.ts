@@ -1409,7 +1409,11 @@ export interface FeeLedgerEntriesTable {
   request_id: ColumnType<string | null, never, never>;
 }
 
-export type RefundExceptionReason = "unsettled" | "lookup_refused" | "failed_after_success";
+export type RefundExceptionReason =
+  | "unsettled"
+  | "lookup_refused"
+  | "failed_after_success"
+  | "succeeded_after_failure";
 
 /** A refund that needs a person (0026). One per refund and reason, append-only. */
 export interface RefundExceptionsTable {

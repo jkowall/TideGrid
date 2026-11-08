@@ -299,6 +299,16 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
       outcome: "refund_failed",
     });
     expect((await refundOf(booked.bookingId)).state).toBe("failed");
+    // A success reported after the failure leaves it failed and raises it for staff.
+    expect(await deliverRefundEvent(A, refund, "succeeded")).toMatchObject({
+      outcome: "refund_succeeded_after_failure",
+    });
+    expect((await refundOf(booked.bookingId)).state).toBe("failed");
+    const listed = await as(ctx, (trx) => listRefundExceptions(trx, A.id));
+    expect(listed.find((x) => x.refund.id === refundId)).toMatchObject({
+      reason: "succeeded_after_failure",
+      open: true,
+    });
     const [fees] = await admin<{ n: number }[]>`
       select count(*)::int as n from public.fee_ledger_entries where booking_id = ${booked.bookingId}`;
     expect(fees?.n).toBe(0);

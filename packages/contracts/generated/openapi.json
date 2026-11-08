@@ -28410,9 +28410,10 @@
                             "enum": [
                               "unsettled",
                               "lookup_refused",
-                              "failed_after_success"
+                              "failed_after_success",
+                              "succeeded_after_failure"
                             ],
-                            "description": "unsettled: no final answer 24 hours after it was requested. lookup_refused: the payment provider keeps refusing to say what happened to it. failed_after_success: the provider reported it failed after it had succeeded"
+                            "description": "unsettled: no final answer 24 hours after it was requested. lookup_refused: the payment provider keeps refusing to say what happened to it. failed_after_success: the provider reported it failed after it had succeeded. succeeded_after_failure: the provider reported it succeeded after TideGrid recorded it failed"
                           },
                           "errorCode": {
                             "type": [
@@ -28426,7 +28427,7 @@
                           },
                           "open": {
                             "type": "boolean",
-                            "description": "Still needs a person: the refund is still unsettled, or (failed_after_success) always until followed up outside TideGrid"
+                            "description": "Still needs a person: the refund is still unsettled, or (failed_after_success, succeeded_after_failure) always until followed up outside TideGrid"
                           },
                           "refund": {
                             "type": "object",

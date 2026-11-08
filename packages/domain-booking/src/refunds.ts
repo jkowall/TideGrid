@@ -123,15 +123,18 @@ export async function settleRefund(
               ref: answered.refundRef,
             };
   } catch (err) {
-    if (err instanceof ProviderRejectedError) {
+    if (err instanceof ProviderRejectedError && refund.provider_refund_id === null) {
       outcome = { state: "failed", code: err.code, ref: null };
-    } else if (err instanceof ProviderUnavailableError) {
-      // No answer. Stamp the check, and past the threshold raise it for staff.
+    } else if (err instanceof ProviderUnavailableError || err instanceof ProviderRejectedError) {
+      // A rejection about a refund the provider already accepted (pending,
+      // with its id) is no answer about that refund: it stays as it is and
+      // reaches staff past the threshold, never settled failed blind. So does
+      // no answer: stamp the check, and past the threshold raise it for staff.
       await inTenantTransaction(db, ctx, async (trx) => {
         const locked = await lockRefund(trx, ctx.tenantId, refund.id);
         if (!locked || (locked.state !== "requested" && locked.state !== "pending")) return;
         await stampChecked(trx, ctx.tenantId, locked.id);
-        const code = safeCode(err.message);
+        const code = safeCode(err instanceof ProviderRejectedError ? err.code : err.message);
         await raiseRefundException(
           trx,
           ctx,
@@ -277,7 +280,9 @@ export async function raiseRefundException(
   const due =
     reason === "failed_after_success"
       ? sql`state = 'succeeded'`
-      : sql`state in ('requested', 'pending')
+      : reason === "succeeded_after_failure"
+        ? sql`state = 'failed'`
+        : sql`state in ('requested', 'pending')
             and created_at <= now() - make_interval(hours => ${REFUND_EXCEPTION_AFTER_HOURS})`;
   const { rows } = await sql<{ id: string; refund_state: RefundState }>`
     insert into refund_exceptions (tenant_id, refund_id, reason, refund_state, error_code)
@@ -344,6 +349,8 @@ export type RefundEventOutcome =
   | "refund_already_settled"
   /** A failure after the refund succeeded: an exception for staff; the refund stays succeeded. */
   | "refund_failed_after_success"
+  /** A success after TideGrid recorded the refund failed: an exception for staff; it stays failed. */
+  | "refund_succeeded_after_failure"
   /** The event's payment, amount, account, or refund id does not match the refund. */
   | "refund_mismatch"
   /** No refund of this tenant carries the event's key. */
@@ -385,6 +392,11 @@ export async function onRefundEvent(
       if (refund.state === "requested") await markPending(trx, ctx, refund, reported.ref);
       return unsettled ? "refund_pending" : "refund_already_settled";
     case "succeeded":
+      if (refund.state === "failed") {
+        // The money moved after all: staff must know the guest was told otherwise.
+        await raiseRefundException(trx, ctx, refund.id, "succeeded_after_failure", null);
+        return "refund_succeeded_after_failure";
+      }
       if (!unsettled) return "refund_already_settled";
       await settleLocked(trx, ctx, refund, { state: "succeeded", ref: reported.ref });
       return "refund_succeeded";
@@ -425,6 +437,9 @@ export interface RefundExceptionView {
 function nextStepFor(reason: RefundExceptionReason, state: RefundState): string {
   if (reason === "failed_after_success") {
     return "The payment provider reported this refund failed after it had succeeded. Check it in the provider's dashboard, then pay the guest another way if the money did not arrive.";
+  }
+  if (reason === "succeeded_after_failure") {
+    return "The payment provider reported this refund succeeded after TideGrid recorded it failed, so the guest may have been told it failed. Check it in the provider's dashboard and tell the guest; do not refund them again another way.";
   }
   if (state === "succeeded") return "Settled since it was raised; nothing to do.";
   if (state === "failed") {
@@ -468,6 +483,7 @@ export async function listRefundExceptions(
     raisedAt: new Date(row.created_at).toISOString(),
     open:
       row.reason === "failed_after_success" ||
+      row.reason === "succeeded_after_failure" ||
       row.state === "requested" ||
       row.state === "pending" ||
       row.state === "failed",

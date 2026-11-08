@@ -152,16 +152,16 @@ export const RefundException = z
   .object({
     id: Uuid,
     reason: z
-      .enum(["unsettled", "lookup_refused", "failed_after_success"])
+      .enum(["unsettled", "lookup_refused", "failed_after_success", "succeeded_after_failure"])
       .describe(
-        "unsettled: no final answer 24 hours after it was requested. lookup_refused: the payment provider keeps refusing to say what happened to it. failed_after_success: the provider reported it failed after it had succeeded",
+        "unsettled: no final answer 24 hours after it was requested. lookup_refused: the payment provider keeps refusing to say what happened to it. failed_after_success: the provider reported it failed after it had succeeded. succeeded_after_failure: the provider reported it succeeded after TideGrid recorded it failed",
       ),
     errorCode: z.string().nullable(),
     raisedAt: Instant,
     open: z
       .boolean()
       .describe(
-        "Still needs a person: the refund is still unsettled, or (failed_after_success) always until followed up outside TideGrid",
+        "Still needs a person: the refund is still unsettled, or (failed_after_success, succeeded_after_failure) always until followed up outside TideGrid",
       ),
     refund: z.object({
       id: Uuid,

@@ -365,7 +365,9 @@ export function registerRefundsCreditsStaffRoutes(app: OpenAPIHono<AppEnv>, deps
             accountId,
             amount: input.amount,
             reason: input.reason,
-            idempotencyKey: `credit_adjust:${ctx.actorId}:${key}`,
+            // The client's key may hold characters or a length the ledger's
+            // key refuses, so the ledger takes a digest of the actor and key.
+            idempotencyKey: `credit_adjust:${await sha256Hex(`${ctx.actorId}:${key}`)}`,
           });
           if (adjusted.kind === "insufficient") {
             throw new ApiError(
@@ -421,4 +423,9 @@ export function registerRefundsCreditsStaffRoutes(app: OpenAPIHono<AppEnv>, deps
     );
     return c.json(body as RefundExceptionsResponse, 200);
   });
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }

@@ -49,6 +49,7 @@ const needsAttention = new Set([
   "unmatched_payment",
   "refund_failed",
   "refund_failed_after_success",
+  "refund_succeeded_after_failure",
   "refund_mismatch",
   "unmatched_refund",
 ]);
