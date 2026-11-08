@@ -329,12 +329,15 @@ describe.skipIf(!env)("W1-G215-REMINDERS adversarial: waiver reminders", () => {
   it("never counts against the staff resend limits, and shows on the staff read", async () => {
     const { booked, req } = await waiting(58, "Dee Two");
     expect(await remind(A.id, req)).toMatchObject({ kind: "queued", slot: "72h" });
-    const read = await inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
-      listBookingWaivers(trx, A.id, booked.bookingId),
-    );
-    const reminders = read?.participants[0]?.request?.reminders;
-    expect(reminders?.sent.map((r) => r.slot)).toEqual(["72h"]);
-    expect(reminders?.next?.slot).toBe("24h");
+    const readNow = () =>
+      inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
+        listBookingWaivers(trx, A.id, booked.bookingId),
+      );
+    // While the reminder is on its way, no next one is promised: once sent it
+    // may cover the next slot.
+    const queued = (await readNow())?.participants[0]?.request?.reminders;
+    expect(queued?.sent.map((r) => [r.slot, r.state])).toEqual([["72h", "queued"]]);
+    expect(queued?.next ?? null).toBeNull();
     // Staff may resend at once: the reminder is no generation and no limit.
     const ctx = { ...systemCtx(A.id), actorType: "staff" as const, actorId: randomUUID() };
     const resent = await inTenantTransaction(world.db, ctx, (trx) =>
@@ -343,6 +346,40 @@ describe.skipIf(!env)("W1-G215-REMINDERS adversarial: waiver reminders", () => {
     expect(resent).toMatchObject({ kind: "sent", generation: 2 });
     // The resend's email replaced the reminder still queued.
     expect((await remindersOf(req)).map((r) => r.state)).toEqual(["canceled"]);
+  }, 120_000);
+
+  it("shows the newest email's outcome, and the reminder's own event time", async () => {
+    const { booked, req } = await waiting(58, "Fen Failed");
+    expect(await remind(A.id, req)).toMatchObject({ kind: "queued", slot: "72h" });
+    const readNow = async () =>
+      (
+        await inTenantTransaction(world.db, systemCtx(A.id), (trx) =>
+          listBookingWaivers(trx, A.id, booked.bookingId),
+        )
+      )?.participants[0];
+    // Sent: still waiting, the 24 hour one next.
+    await deliverWith(world.db, A.id, fakeMail(world.db));
+    const sent = await readNow();
+    expect(sent?.status).toBe("waiting");
+    expect(sent?.request?.reminders?.next?.slot).toBe("24h");
+    // A reminder that failed after a sent invitation shows as a failed email,
+    // with the time it failed.
+    await world.admin.begin(async (tx) => {
+      await tx`alter table public.email_messages disable trigger email_messages_rules`;
+      await tx`update public.email_messages
+                  set state = 'failed', sent_at = null, provider_message_id = null,
+                      failed_at = now() + interval '1 hour',
+                      last_error_code = 'test'
+                where dedupe_key = ${`waiver.reminder:${req}:72h`}`;
+      await tx`alter table public.email_messages enable trigger email_messages_rules`;
+    });
+    const failed = await readNow();
+    expect(failed?.status).toBe("email_failed");
+    const [reminder] = failed?.request?.reminders?.sent ?? [];
+    expect(reminder?.state).toBe("failed");
+    expect((reminder?.at.getTime() ?? 0) - (reminder?.queuedAt.getTime() ?? 0)).toBeGreaterThan(
+      30 * 60_000,
+    );
   }, 120_000);
 
   it("signs through a reminder link, for an adult and for a guardian, with the address it went to", async () => {

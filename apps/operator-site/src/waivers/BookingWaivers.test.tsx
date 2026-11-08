@@ -136,7 +136,14 @@ describe("a booking's waivers", () => {
           "waiting",
           {
             reminders: {
-              sent: [{ slot: "72h", queuedAt: "2026-10-07T13:00:00.000Z", state: "sent" }],
+              sent: [
+                {
+                  slot: "72h",
+                  queuedAt: "2026-10-07T13:00:00.000Z",
+                  state: "sent",
+                  at: "2026-10-07T13:05:00.000Z",
+                },
+              ],
               next: { slot: "24h", at: "2026-10-09T13:00:00.000Z" },
             },
           },

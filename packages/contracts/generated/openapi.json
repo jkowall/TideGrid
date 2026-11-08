@@ -21162,12 +21162,18 @@
                                                 "failed",
                                                 "canceled"
                                               ]
+                                            },
+                                            "at": {
+                                              "type": "string",
+                                              "format": "date-time",
+                                              "description": "When the email was sent, failed, or was canceled; its queue time while it waits"
                                             }
                                           },
                                           "required": [
                                             "slot",
                                             "queuedAt",
-                                            "state"
+                                            "state",
+                                            "at"
                                           ]
                                         },
                                         "description": "Reminder emails queued for this request, oldest first"
@@ -21675,12 +21681,18 @@
                                                   "failed",
                                                   "canceled"
                                                 ]
+                                              },
+                                              "at": {
+                                                "type": "string",
+                                                "format": "date-time",
+                                                "description": "When the email was sent, failed, or was canceled; its queue time while it waits"
                                               }
                                             },
                                             "required": [
                                               "slot",
                                               "queuedAt",
-                                              "state"
+                                              "state",
+                                              "at"
                                             ]
                                           },
                                           "description": "Reminder emails queued for this request, oldest first"

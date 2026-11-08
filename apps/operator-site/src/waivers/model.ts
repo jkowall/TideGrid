@@ -78,13 +78,13 @@ export function reminderText(
           : last.state === "sent"
             ? "Reminder emailed"
             : "Reminder queued";
-    parts.push(`${what} ${when(last.queuedAt)} (${slotWords[last.slot] ?? last.slot})`);
+    parts.push(`${what} ${when(last.at ?? last.queuedAt)} (${slotWords[last.slot] ?? last.slot})`);
   }
   if (reminders.next) {
     parts.push(
       `Next reminder ${when(reminders.next.at)} (${slotWords[reminders.next.slot] ?? reminders.next.slot})`,
     );
-  } else if (last) {
+  } else if (last && last.state !== "queued" && last.state !== "sending") {
     parts.push("No more reminders before the trip");
   }
   return parts.length ? `${parts.join(". ")}.` : null;

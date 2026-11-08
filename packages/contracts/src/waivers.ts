@@ -256,6 +256,9 @@ export const ParticipantWaiver = z.object({
                 slot: WaiverReminderSlot,
                 queuedAt: Instant,
                 state: WaiverMessageState,
+                at: Instant.describe(
+                  "When the email was sent, failed, or was canceled; its queue time while it waits",
+                ),
               }),
             )
             .describe("Reminder emails queued for this request, oldest first"),

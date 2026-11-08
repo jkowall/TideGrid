@@ -104,7 +104,7 @@ export interface ParticipantWaiver {
 }
 
 export interface ParticipantWaiverReminders {
-  sent: { slot: WaiverReminderSlot; queuedAt: Date; state: MessageState }[];
+  sent: { slot: WaiverReminderSlot; queuedAt: Date; state: MessageState; at: Date }[];
   /** The next reminder while nothing changes; null when none will go. */
   next: null | { slot: WaiverReminderSlot; at: Date };
 }
@@ -161,7 +161,11 @@ interface Row {
   /** When the booking's trip leaves. */
   starts_at: Date;
   /** The request's reminders (0023), oldest first. */
-  reminders: { slot: WaiverReminderSlot; queued_at: string; state: MessageState }[] | null;
+  reminders:
+    | { slot: WaiverReminderSlot; queued_at: string; state: MessageState; at: string }[]
+    | null;
+  /** The state of a reminder sent after the latest invitation, the newest; null when none. */
+  reminder_after_state: MessageState | null;
   now: Date;
 }
 
@@ -189,11 +193,18 @@ async function rows(
            ${latestEmailAt(tenantId, sql<string>`r.id`)} as latest_email_at,
            cr.address as current_recipient, f.retry_after as refusal_retry_after,
            st.starts_at,
-           (select json_agg(json_build_object('slot', w.slot, 'queued_at', w.created_at,
-                                              'state', wm.state) order by w.created_at)
+           (select json_agg(json_build_object(
+                     'slot', w.slot, 'queued_at', w.created_at, 'state', wm.state,
+                     'at', coalesce(wm.sent_at, wm.failed_at, wm.canceled_at, w.created_at))
+                     order by w.created_at)
               from waiver_reminders w
               join email_messages wm on wm.tenant_id = w.tenant_id and wm.id = w.message_id
              where w.tenant_id = b.tenant_id and w.request_id = r.id) as reminders,
+           (select wm.state from waiver_reminders w
+              join email_messages wm on wm.tenant_id = w.tenant_id and wm.id = w.message_id
+             where w.tenant_id = b.tenant_id and w.request_id = r.id
+               and w.created_at > d.created_at and wm.state <> 'canceled'
+             order by w.created_at desc limit 1) as reminder_after_state,
            now() as now
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
@@ -243,7 +254,9 @@ function statusOf(row: Row, required: boolean): WaiverStatusCode {
   ) {
     return "email_held";
   }
-  if (row.message_state === "failed") return "email_failed";
+  // The newest email the guest should have: a reminder after the latest
+  // invitation, when there is one, else that invitation.
+  if ((row.reminder_after_state ?? row.message_state) === "failed") return "email_failed";
   return "waiting";
 }
 
@@ -258,8 +271,15 @@ function remindersOf(row: Row, status: WaiverStatusCode): ParticipantWaiverRemin
     slot: r.slot,
     queuedAt: new Date(r.queued_at),
     state: r.state,
+    at: new Date(r.at),
   }));
   if (status !== "waiting" && status !== "email_failed") return { sent, next: null };
+  // While an email is still on its way the sweep waits for it, and once sent
+  // it may cover the next slot: no forecast until it settles.
+  const pending = (state: MessageState | null) => state === "queued" || state === "sending";
+  if (pending(row.message_state) || sent.some((r) => pending(r.state))) {
+    return { sent, next: null };
+  }
   // As the sweep counts it: from when each email was sent, not queued.
   const latest = row.latest_email_at?.getTime() ?? 0;
   const starts = new Date(row.starts_at).getTime();
