@@ -206,6 +206,42 @@ describe("the inbox's runtime brand", () => {
     }
   });
 
+  it("still freezes an event minted after Object.freeze was replaced", async () => {
+    const freeze = Object.freeze;
+    let event: Awaited<ReturnType<typeof fakeEvent>>;
+    try {
+      (Object as { freeze: unknown }).freeze = <T>(value: T): T => value;
+      event = await fakeEvent();
+    } finally {
+      Object.freeze = freeze;
+    }
+    expect(isVerifiedProviderEvent(event)).toBe(true);
+    expect(Object.isFrozen(event)).toBe(true);
+    expect(event.payment === null || Object.isFrozen(event.payment)).toBe(true);
+    expect(Reflect.set(event, "accountRef", "acct_fake_other-operator")).toBe(false);
+    if (event.payment) expect(Reflect.set(event.payment, "amount", 1)).toBe(false);
+    expect(event.accountRef).toBe("acct_fake_demo-harbor");
+  });
+
+  it("reads occurredAt with the Date this module loaded with", async () => {
+    const event = await fakeEvent();
+    const when = event.occurredAt?.getTime();
+    expect(when).toBe(1_762_603_200_000);
+    const RealDate = globalThis.Date;
+    class OtherDate extends RealDate {
+      constructor() {
+        super(0);
+      }
+    }
+    try {
+      globalThis.Date = OtherDate as DateConstructor;
+      expect(event.occurredAt?.getTime()).toBe(when);
+      expect(event.occurredAt).not.toBeInstanceOf(OtherDate);
+    } finally {
+      globalThis.Date = RealDate;
+    }
+  });
+
   it("keeps a branded event's content fixed", async () => {
     for (const event of [await fakeEvent(), await stripeEvent()]) {
       const before = JSON.stringify(event);

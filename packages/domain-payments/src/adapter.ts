@@ -170,6 +170,16 @@ const mark = minted.add.bind(minted);
 const isMinted = minted.has.bind(minted);
 
 /**
+ * The globals the minting function and `occurredAt` use, taken when this
+ * module loads, for the same reason: code that replaces `Object.freeze`,
+ * `Date`, or `Date.prototype.getTime` later cannot mint a branded event that
+ * can be changed, or change the time an event reports.
+ */
+const freeze = Object.freeze;
+const DateAtLoad = Date;
+const timeOf: (date: Date) => number = Function.prototype.call.bind(Date.prototype.getTime);
+
+/**
  * Whether `value` is an event an adapter's `verifyWebhook` built in this
  * module instance. A check only: it cannot mint. The inbox refuses anything
  * that fails it.
@@ -182,19 +192,20 @@ export function isVerifiedProviderEvent(value: unknown): value is VerifiedProvid
  * Builds a verified event. Internal to adapters: call it only after the
  * signature checks out. The event and its payment are frozen, and
  * `occurredAt` is a getter that returns a new Date on each read, so nothing
- * that holds the event can change what the inbox records.
+ * that holds the event can change what the inbox records. Both use the
+ * globals taken at load above.
  */
 export function verifiedEvent(fields: ProviderEventFields): VerifiedProviderEvent {
-  const at = fields.occurredAt === null ? null : fields.occurredAt.getTime();
-  const payment = fields.payment === null ? null : Object.freeze({ ...fields.payment });
-  const event = Object.freeze({
+  const at = fields.occurredAt === null ? null : timeOf(fields.occurredAt);
+  const payment = fields.payment === null ? null : freeze({ ...fields.payment });
+  const event = freeze({
     provider: fields.provider,
     eventId: fields.eventId,
     type: fields.type,
     providerType: fields.providerType,
     accountRef: fields.accountRef,
     get occurredAt(): Date | null {
-      return at === null ? null : new Date(at);
+      return at === null ? null : new DateAtLoad(at);
     },
     payment,
     payloadSha256: fields.payloadSha256,
