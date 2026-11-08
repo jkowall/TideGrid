@@ -6,6 +6,14 @@ import { cspViolations, deployed, signIn } from "./helpers.ts";
  * the console Worker under its real configuration, CSP included. Booking
  * staff and the owner at Demo Harbor; finance at Demo Harbor.
  *
+ * Sign-in budget: each address gets 5 sign-in links in 15 minutes (0002,
+ * app.auth_issue_login_token); past that the API still answers 202 but with
+ * no link, so signIn waits out the test timeout. The suite runs every spec
+ * at both widths. The booking staff here is Eve Desk, whom `local-db.sh
+ * prepare console-e2e` adds for this file alone: Ben Desk already takes 4
+ * links a run in the other specs. The owner and finance take 2 more each
+ * here, 4 a run in all.
+ *
  * The seed fails no email, so the list's answers are served from this file
  * (page.route) for the loading, error, empty, and populated states; sign-in
  * and the shell use the real API. The finance test proves no list request
@@ -24,7 +32,7 @@ import { cspViolations, deployed, signIn } from "./helpers.ts";
  * at load.
  */
 
-const staff = "ben.desk@demo-harbor.test";
+const staff = "eve.desk@demo-harbor.test";
 const owner = "ava.owner@demo-harbor.test";
 const finance = "fay.books@demo-harbor.test";
 const listUrl = "**/api/v1/staff/tenants/*/email-exceptions*";
