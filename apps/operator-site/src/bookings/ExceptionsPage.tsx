@@ -116,6 +116,8 @@ export function ExceptionsPage({
   const loadOlder = () => {
     if (load.kind !== "ready" || !load.page.nextBefore) return;
     const before = load.page.nextBefore;
+    // The page's counts say what loaded, not the last follow-up.
+    setSaid("");
     setLoad({ ...load, more: "loading" });
     void loadExceptions(tenantId, { status: view, before }).then((result) => {
       setLoad((current) => {
@@ -237,7 +239,9 @@ export function ExceptionsPage({
         )}
         {load.kind === "ready" &&
           (exceptions.length === 0 ? (
-            view === "open" ? (
+            view === "open" && load.page.nextBefore ? (
+              <p>Every exception shown here is followed up. Older ones may still be waiting.</p>
+            ) : view === "open" ? (
               <EmptyState icon="check-circle" title="No payment exceptions to follow up">
                 <p>
                   Nothing at {tenantName} is waiting for follow-up. A payment that arrives too late,
@@ -434,7 +438,8 @@ const resolveProblems: Record<ResolveFailure, string> = {
   rejected:
     "That couldn't be saved. Choose a reason, and keep the note to 500 characters with something visible and no tabs.",
   unreadable: "TideGrid sent an answer this console can't read. Reload to check it was saved.",
-  unreachable: "It wasn't sent. Check your connection, then try again.",
+  unreachable:
+    "It couldn't be confirmed. Check your connection, then try again: it won't be saved twice.",
   unavailable: "TideGrid isn't responding right now. Try again in a moment.",
   already_resolved: "Someone already marked this as followed up. Reload to see who.",
   refund_pending: "The refund is still in progress. Try again once it finishes.",

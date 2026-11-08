@@ -637,7 +637,7 @@ describe("when the exceptions do not load", () => {
 describe("following an exception up (W1-FIN-EXC)", () => {
   const resolution = {
     id: "8a91b2c3-4d5e-4f60-8b72-8c9d0e1f2a01",
-    reasonCode: "contacted_guest" as const,
+    reasonCode: "contacted_guest" as "contacted_guest" | "no_action_needed",
     resolvedBy: { userId: "9b0c1d2e-3f40-4a51-8c62-9d0e1f2a3b01", name: "Dana Reyes" },
     resolvedAt: "2026-11-04T16:30:00.000Z",
   };
@@ -708,6 +708,33 @@ describe("following an exception up (W1-FIN-EXC)", () => {
     );
   });
 
+  it("says older ones may wait when every shown exception is followed up, then counts what loads", async () => {
+    api({
+      [route.exceptions()]: [
+        () => json(body([noCapacity], noCapacity.id)),
+        () => json(body([mismatch], null)),
+      ],
+      [route.resolveException(noCapacity.id)]: resolvedBody({ reasonCode: "no_action_needed" }),
+    });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(1));
+    const item = items()[0] as HTMLElement;
+    fireEvent.click(markButton(item));
+    fireEvent.change(reasonField(), { target: { value: "no_action_needed" } });
+    save(item);
+    await waitFor(() => expect(items()).toHaveLength(0));
+    expect(screen.queryByText("No payment exceptions to follow up")).toBeNull();
+    expect(
+      screen.getByText(
+        "Every exception shown here is followed up. Older ones may still be waiting.",
+      ),
+    ).toBeTruthy();
+    expect(liveText()).toMatch(/^Marked as followed up/);
+    fireEvent.click(screen.getByRole("button", { name: "Show older exceptions" }));
+    await waitFor(() => expect(items()).toHaveLength(1));
+    expect(liveText()).toBe("1 payment exception.");
+  });
+
   it("counts visible characters as the contract does", () => {
     expect(invisibleCharacters).toBe(contractInvisible);
   });
@@ -744,7 +771,7 @@ describe("following an exception up (W1-FIN-EXC)", () => {
     save(item);
     await waitFor(() =>
       expect(text(item.querySelector(".tg-field__error"))).toBe(
-        "It wasn't sent. Check your connection, then try again.",
+        "It couldn't be confirmed. Check your connection, then try again: it won't be saved twice.",
       ),
     );
     save(item);
