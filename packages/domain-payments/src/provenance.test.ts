@@ -10,11 +10,12 @@
  * and no runtime code reaches the test fixture, by package path or relative.
  *
  * Limits, recorded: a scan reads text, not types. An unannotated spread of a
- * real verified event (`{ ...event, accountRef }`) keeps the brand and is not
- * caught here, nor is an `any` that never meets the type's name. Review and
- * the `noExplicitAny` lint rule cover those. A runtime brand (a private
- * WeakSet checked by the inbox) would close them; the inbox is outside this
- * goal, so it is a proposed follow-up.
+ * real verified event (`{ ...event, accountRef }`) keeps the type brand and is
+ * not caught here, nor is an `any` that never meets the type's name. Since
+ * W1-PROVENANCE the runtime brand closes both at the inbox: a module-private
+ * WeakSet in `adapter.ts` holds every event the minting function returned,
+ * and `recordProviderEvent` refuses anything not in it
+ * (`inbox-brand.test.ts`). The last case here keeps that check in place.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -223,6 +224,42 @@ describe("verified-event provenance", () => {
     expect(brandFindings("apps/api-worker/src/x.ts", generic)).toEqual([]);
     const outside = `async other() { return ${mintName}({}); }\nasync verifyWebhook(input) { return ${mintName}(input); }`;
     expect(brandFindings(`${payments}stripe.ts`, outside).length).toBeGreaterThan(0);
+  });
+});
+
+describe("the runtime brand stays in place", () => {
+  const text = (rel: string) => files.find((f) => f.rel === `${payments}${rel}`)?.text ?? "";
+
+  it("checks the brand before anything else in recordProviderEvent", () => {
+    const inbox = text("inbox.ts");
+    const start = inbox.indexOf("export async function recordProviderEvent(");
+    expect(start).toBeGreaterThan(0);
+    const open = inbox.indexOf("{", inbox.indexOf("): Promise<RecordedEvent>", start));
+    const range = bodyFrom(inbox, open);
+    if (!range) throw new Error("no body for recordProviderEvent");
+    const first = inbox
+      .slice(range[0] + 1, range[1])
+      .trim()
+      .split("\n")[0];
+    expect(first).toBe(
+      "if (!isVerifiedProviderEvent(event)) throw new UnverifiedProviderEventError();",
+    );
+  });
+
+  it("keeps the marker private to adapter.ts and used only by the minting function", () => {
+    const adapter = text("adapter.ts");
+    expect(adapter).toMatch(/^const minted = new WeakSet<object>\(\);$/m);
+    expect(adapter).toMatch(/^const mark = minted\.add\.bind\(minted\);$/m);
+    expect(adapter).toMatch(/^const isMinted = minted\.has\.bind\(minted\);$/m);
+    expect(adapter).not.toMatch(/export\s*\{|export\s+(?:const|let|var)\s/);
+    // The set is named nowhere but its three declarations.
+    const rest = adapter.replace(/^const (?:minted|mark|isMinted) = .*$/gm, "");
+    expect(rest).not.toMatch(/\bminted\b/);
+    expect([...adapter.matchAll(/\bmark\(/g)].length).toBe(1);
+    const fn = adapter.indexOf(`export function ${mintName}(`);
+    const range = bodyFrom(adapter, adapter.indexOf("{", adapter.indexOf(")", fn)));
+    if (!range) throw new Error("no body for the minting function");
+    expect(adapter.slice(range[0], range[1])).toContain("mark(event);");
   });
 });
 

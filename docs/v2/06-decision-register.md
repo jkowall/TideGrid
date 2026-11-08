@@ -8,6 +8,25 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-PROVENANCE, runtime provenance brand checked by the inbox (owner go; coordinator defaults pending owner confirmation)
+
+The G2.7 review's [inbox provenance follow-up](../../packages/domain-payments/README.md#follow-ups-for-the-stripe-adapter) left one gap open. The `VerifiedProviderEvent` brand was checked only by a text scan, and an unannotated spread of a real verified event kept the type brand, so it could reach `recordProviderEvent` with changed fields. A runtime brand checked by the inbox was the proposed fix. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. The owner did not answer the goal's open decision, so D1 below is a coordinator default, the goal packet's recommended option. It is not an owner decision until the owner confirms it.
+
+- **D1, a module-private WeakSet of minted events.** `adapter.ts` keeps a `WeakSet` that only the minting function adds to, and `recordProviderEvent` refuses, before any statement, any object not in it, with `UnverifiedProviderEventError`. A symbol property was set aside: a spread copies it.
+
+Coordinator choices inside that default, pending owner confirmation:
+
+- **Identity, not shape.** Every copy is refused, even one that changes nothing, because the set holds objects by identity.
+- **Bound at load.** The set's `add` and `has` are bound when the module loads, so a later change to `WeakSet.prototype` cannot widen the check.
+- **Content fixed at mint.** The event and its `payment` are frozen, `occurredAt` returns a new `Date` on each read, and only the port's eight fields are kept, so holding a real event does not let code change what the inbox records.
+- **The text scan stays.** It still limits who calls the minting function to `verifyWebhook` in the fake and Stripe adapters, and it now also checks that the brand check is the first statement of `recordProviderEvent`.
+- **The inbox only.** `handleVerifiedEvent`, the API route, and the package index are unchanged, so the webhook contract and the booking contract do not change. A forged event would still resolve its account before the inbox refuses it; nothing is written. Checking earlier, and exporting the check and the error, are proposed follow-ups.
+- **Fails closed across copies.** If two copies of the package were ever loaded, a real event minted in one would be refused by the other. Today one copy loads everywhere.
+
+Not done, and needing the owner: confirming D1; any release of the API that carries this. The lead runs the independent review, with the G2.7 reviewer override named in [the build execution and agent plan](10-build-execution-and-agent-plan.md), and the security review. No Stripe call was made, no key was used, and the Stripe provider is enabled nowhere.
+
+Canonical: the [payments README](../../packages/domain-payments/README.md#runtime-provenance-brand-proposed-w1-provenance).
+
 ### 2026-11-08: W1-STRIPE-ELEMENT, the Stripe card form in guest checkout (owner go; coordinator defaults pending owner confirmation)
 
 G2.11's checkout with the Stripe element, inside the [demo build plan](12-demo-build-plan.md#goal-sequence): under the Stripe provider the guest pays with a Stripe test card, which restores acceptance step 2's wording once the owner runs a Stripe window. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed", and later: "keep going until wave 1 is complete". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. The owner did not answer the goal's open decisions, so the three below are coordinator defaults, the goal packet's recommended options. None is an owner decision until the owner confirms it, and the CSP change waits for the owner's explicit approval.

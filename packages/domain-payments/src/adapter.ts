@@ -156,7 +156,49 @@ export class ProviderRejectedError extends Error {
 /** A verified event's fields, as an adapter assembles them before vouching for them. */
 export type ProviderEventFields = Omit<VerifiedProviderEvent, typeof verified>;
 
-/** Builds a verified event. Internal to adapters: call it only after the signature checks out. */
+/**
+ * The runtime brand (W1-PROVENANCE). Every event the minting function below
+ * returned, held by identity in a WeakSet that no other module can reach. A
+ * spread, a clone, a parse, a Proxy, or an object whose prototype is a real
+ * event is a new object, so it is not in the set. The methods are bound when
+ * this module loads, so a later change to `WeakSet.prototype` does not reach
+ * them. The type brand above stays for the compiler; this is what the inbox
+ * checks.
+ */
+const minted = new WeakSet<object>();
+const mark = minted.add.bind(minted);
+const isMinted = minted.has.bind(minted);
+
+/**
+ * Whether `value` is an event an adapter's `verifyWebhook` built in this
+ * module instance. A check only: it cannot mint. The inbox refuses anything
+ * that fails it.
+ */
+export function isVerifiedProviderEvent(value: unknown): value is VerifiedProviderEvent {
+  return typeof value === "object" && value !== null && isMinted(value);
+}
+
+/**
+ * Builds a verified event. Internal to adapters: call it only after the
+ * signature checks out. The event and its payment are frozen, and
+ * `occurredAt` is a getter that returns a new Date on each read, so nothing
+ * that holds the event can change what the inbox records.
+ */
 export function verifiedEvent(fields: ProviderEventFields): VerifiedProviderEvent {
-  return Object.freeze({ ...fields }) as VerifiedProviderEvent;
+  const at = fields.occurredAt === null ? null : fields.occurredAt.getTime();
+  const payment = fields.payment === null ? null : Object.freeze({ ...fields.payment });
+  const event = Object.freeze({
+    provider: fields.provider,
+    eventId: fields.eventId,
+    type: fields.type,
+    providerType: fields.providerType,
+    accountRef: fields.accountRef,
+    get occurredAt(): Date | null {
+      return at === null ? null : new Date(at);
+    },
+    payment,
+    payloadSha256: fields.payloadSha256,
+  }) as VerifiedProviderEvent;
+  mark(event);
+  return event;
 }
