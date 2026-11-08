@@ -3,10 +3,14 @@ import {
   BookingEmailResendRequest,
   BookingEmailResendResponse,
   BookingParams,
+  EmailExceptionQuery,
+  EmailExceptionsResponse,
   IdempotencyKey,
+  StaffTenantParams,
 } from "@tidegrid/contracts";
 import { isUuid } from "@tidegrid/database";
 import { type ResendResult, resendBookingEmail } from "@tidegrid/domain-booking";
+import { listEmailExceptions } from "@tidegrid/domain-messaging";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { deliverAfterCommit, emailSettings } from "../email.ts";
 import type { Bindings } from "../env.ts";
@@ -15,6 +19,7 @@ import { withStaffTenant } from "../staff-tenant.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const resendPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/emails/resend";
+const exceptionsPath = "/v1/staff/tenants/{tenantId}/email-exceptions";
 
 /**
  * Whether this deployment sends email: the fake or Cloudflare is on; off and
@@ -207,5 +212,74 @@ export function registerBookingEmailStaffRoutes(app: OpenAPIHono<AppEnv>, deps: 
     // The new email goes out at once; the cron's sweep sends it if this misses.
     if (!replayed) deliverAfterCommit(c, deps, tenantId);
     return c.json(body as BookingEmailResendResponse, 201);
+  });
+
+  registerEmailExceptionsRoute(app, deps);
+}
+
+/**
+ * The tenant-wide email exceptions list (W1-EMAIL-EXC, a follow-up to G2.16b
+ * D9 A): every message of the operator that stopped in the failed state,
+ * newest first, a page at a time, each with its booking's reference so staff
+ * follow it up on the booking. Owners and booking staff hold bookings.read;
+ * finance is refused (D2), as on the booking's Email card. The read runs in
+ * the tenant's transaction (withStaffTenant), and no recipient or content
+ * leaves it.
+ */
+function registerEmailExceptionsRoute(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
+  app.use("/v1/staff/tenants/:tenantId/email-exceptions", async (c, next) => {
+    // Before and after: every answer, refusals included, is never cached.
+    c.header("Cache-Control", "no-store");
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
+
+  const route = createRoute({
+    method: "get",
+    path: exceptionsPath,
+    tags: ["staff", "bookings"],
+    summary: "Email that could not be delivered",
+    description: [
+      "Owners and booking staff. Every message of the operator whose delivery stopped in the failed state, newest first by when it stopped: what it was (a booking email or a waiver request), how it ended (failed, outcome_unknown, or delivery_failed), the attempts, the last error's class, whether staff sent it, whether a later message of the same template for the same booking, participant, and subject was sent, and its booking's id, reference, and trip time zone. No recipient, subject, body, or name.",
+      "Finance does not hold bookings.read and is refused (403). Order: a query that does not match the contract (400 validation_failed), authentication (401), membership (404), permission (403), then the cursor (400 cursor_invalid).",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: { params: StaffTenantParams, query: EmailExceptionQuery },
+    responses: {
+      200: {
+        content: { "application/json": { schema: EmailExceptionsResponse } },
+        description: "A page of the operator's email exceptions",
+      },
+      400: errorBody(
+        "The query did not match the contract (validation_failed), or the cursor names no email exception of this tenant (cursor_invalid)",
+      ),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant"),
+    },
+  });
+
+  app.openapi(route, async (c) => {
+    const { tenantId } = c.req.valid("param");
+    const { limit, before } = c.req.valid("query");
+    const { body } = await withStaffTenant(
+      c,
+      deps,
+      { tenantId, permission: "bookings.read", snapshot: true },
+      async (trx) => {
+        const page = await listEmailExceptions(trx, tenantId, {
+          limit,
+          ...(before === undefined ? {} : { before }),
+        });
+        if (page.kind === "cursor_invalid") {
+          throw new ApiError(400, "cursor_invalid", "The cursor names nothing in this listing");
+        }
+        return {
+          exceptions: page.exceptions.map((e) => ({ ...e })),
+          nextBefore: page.nextBefore,
+        };
+      },
+    );
+    return c.json(body as EmailExceptionsResponse, 200);
   });
 }

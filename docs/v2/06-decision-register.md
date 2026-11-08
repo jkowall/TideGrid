@@ -8,6 +8,37 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-EMAIL-EXC, tenant-wide staff email exceptions list (owner go; coordinator defaults pending owner confirmation)
+
+G2.16b D9 A kept email failures on booking detail and named a tenant-wide email exceptions list as a proposed follow-up. Today staff see failures one booking at a time. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed", and: "keep going until wave 1 is complete". The coordinator reads that as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. The owner did not answer the goal's open decisions, so D1 to D3 are the goal packet's recommended options, as coordinator defaults. None is an owner decision until the owner confirms it.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1 A. Waiver email is included,** labeled by kind. A waiver request shows as "Waiver request" and links to its booking, where the Waivers card shows and sends it again (G2.16b D11). The booking's own email links to the booking's Email card. So a waiver row does not link to the Email card, which narrows the goal's "each row links to the booking's Email card". The waiver link's words name the booking only, since nothing moves focus to the Waivers card. A Waivers card anchor would be a later goal, outside this goal's paths.
+- **D2 A. Owners and booking staff only.** The read needs `bookings.read`, as the booking's messages read does. Finance gets no navigation entry and no request; the API answers finance 403. This matches the Email card (G2.16b D7 A).
+- **D3 A. No index at demo size.** The read scans the tenant's messages. Rule R4 holds: no index on `email_messages` until the `CREATE INDEX CONCURRENTLY` runner is on `main`. No migration.
+
+Coordinator choices inside the goal, recorded here, not owner decisions:
+
+- **What is listed.** Every message in the `failed` delivery state, split by the last error into `failed`, `outcome_unknown`, and `delivery_failed`. No new message state. Newest first by when delivery stopped, 50 a page, with a message id as the cursor. A cursor that names no failed message of the tenant answers 400 `cursor_invalid`.
+- **What a row carries.** Kind, template, state, attempts, the last error's code, when it stopped, whether staff sent it, and the booking's id, reference, and trip time zone. Never a recipient, a name, a subject, or a body. An extra field, `laterSent`, says a later message of the same template for the same booking, participant, and subject was sent; the row still lists, in the info tone. A message about no booking lists with no link; none exists today.
+- **Where it lives.** `GET /v1/staff/tenants/{tenantId}/email-exceptions` in `apps/api-worker/src/routes/booking-email-staff.ts`, the read in a new file, `packages/domain-messaging/src/exceptions.ts`, and the contract in a new file, `packages/contracts/src/email-exceptions.ts`, so the later rebase on W1-SENDER-GUARD stays mechanical. `brand.ts` is untouched.
+- **Outside the named paths.** The console's navigation entries and routes live in `apps/operator-site/src/ConsoleShell.tsx`, not `navigation.tsx`, so this goal adds its one entry, route, and page there and leaves `navigation.tsx` unchanged. The entry carries a role rule, so the shell now filters entries by role. The contracts index export sits in sorted order, because the linter refuses an appended one. `tools/local-db/local-db.sh prepare console-e2e` adds a second Demo Harbor booking staff member, `eve.desk@demo-harbor.test` (Eve Desk), through `app.ensure_staff_user` in that tenant's context, as it already adds Dan Desk. The browser spec signs in as her, not Ben Desk. The seed is unchanged.
+- **Arriving at the card.** A row's link ends in `#email`. The Email card then takes focus from the page's heading once its first read ends, once, and never from where the person moved focus.
+
+Open risks:
+
+- Security review (rule R9: role gating, tenant isolation, recipient exposure, and read limits): run by the coordinator on 2026-11-08. Verdict: accept, no findings.
+- ui-reviewer not run in this session; covered by console browser tests. The new browser spec (`apps/operator-site/e2e/email-exceptions.spec.ts`, 375 and 1280 px: loading, populated, error, empty, keyboard reach, and finance) first ran in pull request 104's CI (run 42469289151, head 3d440bc). There 3 of 18 console tests failed, each waiting 120 s for the local sign-in link: two of this spec's desktop tests and the Demo Harbor walk-up booking at desktop. Root cause: each address gets 5 sign-in links in 15 minutes (`app.auth_issue_login_token`, migration 0002). Past that the API answers 202 with no link. The other specs already sign in as Ben Desk 4 times a run; this spec added 4 more, so his sixth to eighth requests were refused (`login_link_rate_limited` 3 times in the security events of a local rerun). The spec now signs in as Eve Desk. On the CI steps locally (docker PostgreSQL 17, `prepare console-e2e`, the API on 8981, bundled Chromium) the console suite went from 3 failed and 15 passed to 18 passed, with no rate-limited sign-in. Every address now takes 4 of its 5 links a run, so a further spec that signs in as an existing address needs its own identity or a shared session (proposed follow-up). The suite has no axe check, so none was added.
+- Between 640 and 1023 px the rail shows four entries a row, so the fifth, Email exceptions, wraps to a second row. Finance still sees four.
+- A failed message stays listed after staff send it again; `laterSent` marks it, and resolving an exception remains later work.
+
+The coordinator accepts the two edits outside the named paths: the rail lives in `ConsoleShell.tsx`, and the linter needs the sorted export. The exception resolution goal reconciles `ConsoleShell.tsx`, not `navigation.tsx`.
+
+A third edit outside the named paths, the console-e2e preparation in `tools/local-db/local-db.sh`, is proposed for the coordinator's acceptance at recheck. `ci.yml` is unchanged; its step comment names only Dan Desk.
+
+Canonical: [packages/domain-messaging/README.md](../../packages/domain-messaging/README.md#email-exceptions-w1-email-exc), [apps/operator-site/README.md](../../apps/operator-site/README.md#email-exceptions-w1-email-exc), and the [demo build plan's G2.16 row](12-demo-build-plan.md#goal-sequence).
+
 ### 2026-11-08: W1-COMM-REQ, Stage 0 commercial requirements draft (proposed, pending owner approval)
 
 The roadmap's Stage 0 asks to "Record the required pilot agreement, data, service, payment, and app-store terms." On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed", and later: "keep going until wave 1 is complete". The coordinator read that as the owner's go for this docs goal and for local commits. It is not an approval of the draft's content. No token budget was set.

@@ -37,6 +37,8 @@ describe("the public entry hides staff and sign-in routes", () => {
     // Console completion (G2.12c).
     ...completionReads.map((path) => ["GET", path] as const),
     ...completionWrites.map((path) => ["POST", path] as const),
+    // The tenant-wide email exceptions list (W1-EMAIL-EXC).
+    ["GET", `/v1/staff/tenants/${tenant}/email-exceptions`],
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -228,6 +230,8 @@ describe("contract", () => {
         // Guest API follow-ups (W1-GUEST-API).
         "/v1/public/checkout-sessions/{checkoutSessionId}/payment",
         "/v1/public/checkout-sessions/{checkoutSessionId}/offer",
+        // The tenant-wide email exceptions list (W1-EMAIL-EXC).
+        "/v1/staff/tenants/{tenantId}/email-exceptions",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are

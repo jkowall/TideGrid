@@ -4,6 +4,19 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Tenant-wide staff email exceptions list (W1-EMAIL-EXC), built November 8, 2026
+
+Owners and booking staff now see a tenant's failed email in one place: a new console page and `GET /v1/staff/tenants/{tenantId}/email-exceptions` ([decision register](v2/06-decision-register.md#2026-11-08-w1-email-exc-tenant-wide-staff-email-exceptions-list-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults D1 to D3 pending owner confirmation). The list covers failed, outcome unknown, and delivery failed messages, waiver requests included and labeled. It is paged, read inside the tenant transaction, and never cached. Rows carry no recipient, name, subject, or body. Finance gets no entry and a 403. No migration and no index. Nothing was released. The local runs and the reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed. Every integration suite passed on a throwaway local PostgreSQL 17: 899 tests passed and 2 skipped, including the new messaging and API suites.
+- **Independent review.** Accept with listed fixes. A waiver row now names the booking only, since nothing focuses the Waivers card. The doc 12 status sentence was fixed. The console shell edit and the sorted contracts export, both outside the named paths, are accepted by the coordinator.
+- **Security review.** Accept, no findings: role gating, tenant isolation, no recipient exposure, and the read limits.
+- **UI review.** The ui-reviewer needs a desktop browser pane this cloud session does not have. A new console browser spec covers 375 px and 1280 px: loading, populated, error, empty, keyboard reach, and the finance refusal. Its first run is this pull request's CI.
+- **Recheck.** Accept, with this entry.
+- **Pull request CI.** The new console spec failed on its first run: each address gets five sign-in links per 15 minutes, and the spec pushed one booking staff address to eight sign-ins a run, so three tests waited for a link that never came. The spec now signs in as its own booking staff, Eve Desk, added by the console preparation step. The whole console suite went from 3 failed, 15 passed to 18 passed, locally and in a recheck. Every address now uses four of its five links a run; a future spec needs its own identity.
+- **Pull request review.** The client now refuses a negative attempt count, with a test that failed first. The route also sets no-store before its handler runs; refusals already carried it, and integration assertions show that.
+- **Telemetry.** About three hours of agent time across build, two reviews, and one fix round. Token use and cost per checkpoint: missing.
+
 ### Stage 0 commercial requirements draft (W1-COMM-REQ), written November 8, 2026
 
 A proposed draft lists 51 commercial requirements for paid pilots: [docs/v2/drafts/commercial-requirements.md](v2/drafts/commercial-requirements.md) ([decision register](v2/06-decision-register.md#2026-11-08-w1-comm-req-stage-0-commercial-requirements-draft-proposed-pending-owner-approval)). They cover the pilot agreement, data handling, service terms, payment terms, and app-store responsibilities. Each requirement names its V2 source, one open question for counsel, and its gate, paid-pilot readiness. The draft links the pricing worksheet and the standard CSV import drafts. It holds no contract language, gives no legal advice, claims no gate, and changes no price. It has no authority until the owner records approval in the register. No code changed. The reviews below are coordinator-reported.

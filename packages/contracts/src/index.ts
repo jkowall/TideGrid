@@ -184,6 +184,8 @@ export * from "./catalog.ts";
 export * from "./checkout.ts";
 // Console completion (G2.12c): search, day totals and export, booking notes.
 export * from "./console.ts";
+// The tenant-wide staff email exceptions list (W1-EMAIL-EXC).
+export * from "./email-exceptions.ts";
 // Capacity and holds (G2.6).
 export * from "./inventory.ts";
 // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).

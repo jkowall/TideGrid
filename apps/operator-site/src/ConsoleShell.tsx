@@ -1,4 +1,4 @@
-import type { Membership, MeResponse } from "@tidegrid/contracts";
+import type { Membership, MeResponse, StaffRole } from "@tidegrid/contracts";
 import {
   EmptyState,
   Icon,
@@ -13,6 +13,8 @@ import { ExceptionsPage } from "./bookings/ExceptionsPage.tsx";
 import { isUuid } from "./bookings/model.ts";
 import { RosterPage } from "./bookings/RosterPage.tsx";
 import { CalendarPage } from "./calendar/Calendar.tsx";
+import { EmailExceptionsPage } from "./email/EmailExceptionsPage.tsx";
+import { canSeeEmailExceptions, emailExceptionsPath } from "./email/exceptions.ts";
 import { Wordmark } from "./Gate.tsx";
 import { ConsoleLink, NavigationProvider } from "./navigation.tsx";
 import { NewBookingPage } from "./new-booking/NewBookingPage.tsx";
@@ -22,11 +24,24 @@ import { SearchPage } from "./search/SearchPage.tsx";
 
 export { roleLabels } from "./roles.ts";
 
-const sections: ReadonlyArray<{ path: string; label: string; icon: IconName }> = [
+const sections: ReadonlyArray<{
+  path: string;
+  label: string;
+  icon: IconName;
+  /** Roles that see the entry; every role when absent. */
+  shows?: (role: StaffRole) => boolean;
+}> = [
   { path: "/", label: "Overview", icon: "home" },
   { path: "/calendar", label: "Calendar", icon: "calendar" },
   { path: "/bookings", label: "Bookings", icon: "list" },
   { path: "/exceptions", label: "Exceptions", icon: "alert-triangle" },
+  // W1-EMAIL-EXC: owners and booking staff only.
+  {
+    path: emailExceptionsPath,
+    label: "Email exceptions",
+    icon: "mail",
+    shows: canSeeEmailExceptions,
+  },
 ];
 
 /** The console's pages, by address. Ids in an address are UUIDs; anything else is not a page. */
@@ -37,6 +52,7 @@ export type Route =
   | { kind: "search" }
   | { kind: "booking"; bookingId: string }
   | { kind: "exceptions" }
+  | { kind: "email_exceptions" }
   | { kind: "roster"; tripId: string }
   | { kind: "new_booking"; tripId: string }
   | { kind: "not_found" };
@@ -52,6 +68,7 @@ export function routeOf(path: string): Route {
   // G2.12c. Searches carry no terms in the address, only the page.
   if (path === "/bookings/search") return { kind: "search" };
   if (path === "/exceptions") return { kind: "exceptions" };
+  if (path === emailExceptionsPath) return { kind: "email_exceptions" };
   const booking = bookingPath.exec(path)?.[1];
   if (booking && isUuid(booking)) return { kind: "booking", bookingId: booking.toLowerCase() };
   const roster = rosterPath.exec(path)?.[1];
@@ -72,6 +89,7 @@ const placeOf: Record<Route["kind"], { section: string | null; title: string }> 
   roster: { section: "/bookings", title: "Roster" },
   new_booking: { section: "/calendar", title: "New booking" },
   exceptions: { section: "/exceptions", title: "Payment exceptions" },
+  email_exceptions: { section: emailExceptionsPath, title: "Email exceptions" },
   not_found: { section: null, title: "Not found" },
 };
 
@@ -336,6 +354,7 @@ export function ConsoleShell({
   const selected = memberships.find((m) => m.tenantId === scopeId) ?? memberships[0];
   const route = routeOf(path);
   const place = placeOf[route.kind];
+  const navSections = sections.filter((s) => !s.shows || (selected && s.shows(selected.role)));
   useDocumentTitle(`${place.title} · ${selected?.tenantName ?? "Operator console"} · TideGrid`);
   // The app routes a person with no active membership to the not-provisioned screen.
   if (!selected) return null;
@@ -373,6 +392,15 @@ export function ConsoleShell({
     case "exceptions":
       page = (
         <ExceptionsPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />
+      );
+      break;
+    case "email_exceptions":
+      page = (
+        <EmailExceptionsPage
+          key={selected.tenantId}
+          membership={selected}
+          focusHeading={focusPage}
+        />
       );
       break;
     case "roster":
@@ -422,7 +450,7 @@ export function ConsoleShell({
           <ScopePicker memberships={memberships} selected={selected} onSelect={selectScope} />
           <nav className="console-nav" aria-label="Console">
             <ul>
-              {sections.map((s) => (
+              {navSections.map((s) => (
                 <li key={s.path}>
                   <ConsoleLink
                     href={s.path}

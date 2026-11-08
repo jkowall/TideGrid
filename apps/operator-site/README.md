@@ -12,6 +12,7 @@ The operator console for the demo build: one React and Vite build on Workers Sta
 | `/bookings/search` | Search every booking by reference, the booker's name or email, and departure dates (G2.12c), narrowed by source (2026-11-07) |
 | `/bookings/<bookingId>?source=direct\|staff_assisted` | One booking, with its internal notes; the source, when a filtered list linked here, goes back with Bookings on its day (G2.12e) |
 | `/exceptions` | Payment exceptions: payments that could not become bookings |
+| `/email-exceptions` | Email exceptions: the operator's email that stopped without the email service taking it; owners and booking staff (W1-EMAIL-EXC) |
 | `/trips/<tripId>/roster` | A trip's printable roster |
 | `/trips/<tripId>/book` | A staff booking for a guest on one trip: owners and booking staff (G2.12d) |
 
@@ -53,6 +54,7 @@ The API decides; the console mirrors it with `canSeeGuests`, `canUseNotes`, and 
 | Read a booking's notes | Yes | Yes | No |
 | Add a note | Yes | Yes | No |
 | A booking's email and its delivery; send the confirmation or cancellation notice again (G2.16b) | Yes | Yes | No |
+| Email exceptions, and their navigation entry (W1-EMAIL-EXC) | Yes | Yes | No |
 
 - **Finance sees the money, not the people.** Finance holds `payments.read` and `audit.read`, not `bookings.read`. It reads every booking's reference, party, extras, order lines, totals, payment, refund, and the exceptions, which is what reconciling sales, fees, taxes, and refunds needs. The booker's name and email are left out of the API's queries for any role without `bookings.read`, so they are absent from finance's responses, not hidden in the page.
 - **No roster for finance.** The product scope calls the roster a booking-management view. It exists to run a departure: who is coming, how many, and what to prepare. Without the guests' names it would be the bookings list printed again, and finance's reconciliation work is covered by the list, the detail, and the exceptions, which carry the same money. Keeping the roster to `bookings.read` also keeps every sheet that leaves the screen on paper to the roles that manage bookings. The API answers 403 to finance; the console shows a designed explanation and makes no call.
@@ -93,6 +95,17 @@ Tests: `src/email/BookingEmailCard.test.tsx`, `src/email/model.test.ts`, and the
 ### Canceled bookings (lane 1, G2.11c)
 
 A guest may cancel within the booking's policy from the management page. The console reads it: a canceled booking keeps its place in the day's list with a Canceled badge beside its payment's, while the counts are of active bookings, the ones holding seats, so a trip whose bookings are all canceled says "No active bookings" above them. The booking's detail says who canceled and when, and that the seats went back on sale; a Cancellation block gives the remedy the policy applied on its side of the cutoff, the policy version and cutoff, and the refund due; the Refund block and the history follow the refund. Rosters and counts leave canceled bookings out.
+
+## Email exceptions (W1-EMAIL-EXC)
+
+`EmailExceptionsPage` in `src/email/`, at `/email-exceptions`, with an "Email exceptions" entry in the rail after Exceptions. It reads the [email exceptions list](../../packages/domain-messaging/README.md#email-exceptions-w1-email-exc) (`GET /v1/staff/tenants/{tenantId}/email-exceptions`). A follow-up to G2.16b D9 A, under coordinator defaults D1 to D3, pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md)).
+
+- **The list.** Every email of the operator that stopped in the failed state, newest first by when it stopped, 50 at a time with Show older email exceptions. Each row: what it was (Confirmation, Booking link, Cancellation notice, Refund problem notice, or Waiver request, D1), a "Sent again by staff" tag, its state as an icon and a label (Failed, Outcome unknown, or Delivery failed), the failure in the Email card's words, when it stopped on the trip's clock and after how many attempts, and the last error's code. A row whose email was later sent again and taken by the email service says so, in the info tone; its badge still says how it ended. No recipient, subject, or body: the API sends none.
+- **Follow up.** Each row links to its booking: "Booking QKG6ERBF, Email card" opens the booking at `#email`, and the Email card takes focus from the page's heading and comes into view once its first read ends (only once, and never from where the person moved focus). A waiver request links to the booking alone, as "Booking ZX9KP2QM", since its Waivers card shows the request and sends it again (G2.16b D11). Nothing moves focus to the Waivers card, so the link does not name it. The address carries the booking id and the fragment only.
+- **States.** Loading (a skeleton hidden from assistive technology, and "Loading email exceptions…" in a live region), empty ("No email exceptions"), error with Try again (focus goes to the page's heading once it works), signed out with Sign in again, and an answer the console cannot read, which is an error, never an empty list.
+- **Who sees it.** Owners and booking staff (`canSeeEmailExceptions` in `src/email/exceptions.ts`, mirroring `bookings.read`, D2). Finance gets no rail entry, and at the address a designed refusal that asks the API nothing; the API answers finance 403 either way.
+
+Tests: `src/email/EmailExceptionsPage.test.tsx` (the rows, every state, paging and focus, keyboard reach, the rail entry, and finance), `src/email/BookingEmailCard.arrival.test.tsx` (`#email`), and `e2e/email-exceptions.spec.ts` (375 and 1280: loading, populated, error, empty, keyboard, finance, no page-wide side scroll). The browser checks serve the list's answers from the spec, since the seed fails no email. Its booking staff is `eve.desk@demo-harbor.test`, whom `tools/local-db/local-db.sh prepare console-e2e` adds, because each address gets 5 sign-in links in 15 minutes and the other specs already take 4 of Ben Desk's. The API's roles and tenancy are in `apps/api-worker/test-integration/email-exceptions.integration.test.ts`.
 
 ## Staff-assisted booking (G2.12d)
 

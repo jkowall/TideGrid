@@ -93,3 +93,21 @@
     display: none;
   }
 }
+
+/*
+ * The operator's email exceptions (W1-EMAIL-EXC). Rows reuse the payment
+ * exceptions' card (.ex-item in bookings.css); a row whose email was later
+ * sent takes the info tone, and its state badge still carries the words.
+ */
+.ee-later {
+  color: var(--text-muted);
+}
+.ee-item__link {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.ee-code {
+  font-family: ui-monospace, monospace;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}

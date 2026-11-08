@@ -14,7 +14,8 @@
 #                                             tenant, and the API's .dev.vars
 #                                console-e2e  plus local hostnames, the runtime
 #                                             role, a booking staff member at the
-#                                             second operator, and .dev.vars
+#                                             second operator, a second one at the
+#                                             first, and .dev.vars
 #   local-db.sh api <port> <log> [wrangler dev args...]
 #                              start the API in `wrangler dev --env dev` in the
 #                              background and wait until its database answers
@@ -339,6 +340,11 @@ cmd_prepare() {
     # identity comes from app.ensure_staff_user, the one path 0002 gives,
     # inside that operator's tenant context.
     cmd_psql -c "begin; select set_config('app.tenant_id', (select id::text from public.tenants where slug = 'demo-reef'), true); insert into public.tenant_memberships (tenant_id, user_id, role, display_name) select t.id, app.ensure_staff_user('dan.desk@demo-reef.test', 'ci-console-browser'), 'booking_staff', 'Dan Desk' from public.tenants t where t.slug = 'demo-reef' on conflict do nothing; commit;"
+    # A second booking staff member at the first operator, for the email
+    # exceptions journey alone. Each address gets 5 sign-in links in 15
+    # minutes (0002, app.auth_issue_login_token), and the suite runs every
+    # spec at two widths, so a spec that shared Ben Desk took his sixth link.
+    cmd_psql -c "begin; select set_config('app.tenant_id', (select id::text from public.tenants where slug = 'demo-harbor'), true); insert into public.tenant_memberships (tenant_id, user_id, role, display_name) select t.id, app.ensure_staff_user('eve.desk@demo-harbor.test', 'ci-console-browser'), 'booking_staff', 'Eve Desk' from public.tenants t where t.slug = 'demo-harbor' on conflict do nothing; commit;"
     runtime_role_and_dev_vars
     ;;
   *) die "prepare needs one of: integration, guest-e2e, console-e2e" ;;
