@@ -18,6 +18,7 @@ import postgres from "postgres";
 import { type Args, parseArgs } from "./args.ts";
 import { accept } from "./commands/accept.ts";
 import { approveSha } from "./commands/approve-sha.ts";
+import { ciCheck } from "./commands/ci-check.ts";
 import { db } from "./commands/db.ts";
 import { evidence } from "./commands/evidence.ts";
 import { hostnameDisable } from "./commands/hostname-disable.ts";
@@ -49,6 +50,7 @@ export const commands: Record<string, (deps: Deps, args: Args) => Promise<number
   "payment-account": paymentAccount,
   "hostname-disable": hostnameDisable,
   "approve-sha": approveSha,
+  "ci-check": ciCheck,
   evidence,
 };
 
@@ -67,6 +69,7 @@ export const usage = `nov1 <command> [options]   (dry run unless --live on a liv
   payment-account set <slug> stripe [--url-env NAME] --live --go A12
   hostname-disable <slug> <hostname> [--url-env NAME] --live --go A18
   approve-sha <sha> --go <gate> | --frozen
+  ci-check <full sha>   (read-only: is ci.yml green on all four jobs for it; runs in CI too)
   evidence [--ci <deployed sha>=<merge sha, or the same full sha>,...] [--out <file>.md]
 
   Any command: --confirm <target>[,<target>...] answers the type-backs from this
