@@ -111,6 +111,9 @@ export function parseArgs(argv: readonly string[]): Command {
         );
       }
     }
+    if (mailbox.length + 1 + domain.length > 254) {
+      throw new UsageError("the whole address is longer than 254 characters");
+    }
     return { kind, slug, domain, mailbox };
   }
   const text = rest.join(" ").trim();

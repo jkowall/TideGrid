@@ -56,6 +56,13 @@ describe("email admin CLI arguments (W3-G2.16-rest)", () => {
       ["domain-add", "demo-harbor", "harbor.example", "--mailbox"],
       ["domain-add", "demo-harbor", "harbor.example", "--mailbox", "a..b"],
       ["domain-add", "demo-harbor", "harbor.example", "--other", "x"],
+      [
+        "domain-add",
+        "demo-harbor",
+        `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(50)}.example`,
+        "--mailbox",
+        "m".repeat(20),
+      ],
       ["domain-verify", "demo-harbor", "harbor.example"],
       ["domain-retire", "demo-harbor", "harbor.example", "  "],
       ["suppression-lift", "demo-harbor", "guest@example.test"],

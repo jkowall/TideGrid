@@ -351,6 +351,11 @@ describe.skipIf(!env)("per-operator sender domains and suppression (W3-G2.16-res
       "tenant_sender_domains_overlap",
     );
     expect(await refused(adminAdd(B, "harbor.example"))).toBe("tenant_sender_domains_overlap");
+    // Nor an address longer than SMTP's 254 characters, though each part fits.
+    const long = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(50)}.example`;
+    expect(await refused(adminAdd(B, long, "m".repeat(20)))).toBe(
+      "tenant_sender_domains_address_length",
+    );
     await adminVerify(A, domainOf("s6"));
     expect(
       await refused(

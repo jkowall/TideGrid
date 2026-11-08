@@ -84,6 +84,9 @@ CREATE TABLE public.tenant_sender_domains (
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   UNIQUE (tenant_id, id),
+  -- The whole address fits SMTP's 254 characters (Copilot review).
+  CONSTRAINT tenant_sender_domains_address_length
+    CHECK (char_length(local_part) + 1 + char_length(domain) <= 254),
   CONSTRAINT tenant_sender_domains_verified CHECK (status <> 'verified' OR verified_at IS NOT NULL),
   CONSTRAINT tenant_sender_domains_retired CHECK ((status = 'retired') = (retired_at IS NOT NULL))
 );
