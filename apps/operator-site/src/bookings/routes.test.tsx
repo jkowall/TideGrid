@@ -249,12 +249,13 @@ describe("the navigation", () => {
       Bookings: null,
       Exceptions: "page",
     });
-    // The nav lists the four sections, in order.
+    // The nav lists the sections, in order; the owner also sees Email
+    // exceptions (W1-EMAIL-EXC).
     expect(
       within(nav())
         .getAllByRole("link")
         .map((a) => text(a)),
-    ).toEqual(["Overview", "Calendar", "Bookings", "Exceptions"]);
+    ).toEqual(["Overview", "Calendar", "Bookings", "Exceptions", "Email exceptions"]);
   });
 
   it("shows a page that is not part of the console without asking for anything", async () => {

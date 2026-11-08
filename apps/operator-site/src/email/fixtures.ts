@@ -1,6 +1,7 @@
 import type {
   BookingEmailResendAvailability,
   BookingMessagesResponse,
+  EmailException,
   MessageStatus,
 } from "@tidegrid/contracts";
 import { vi } from "vitest";
@@ -98,3 +99,25 @@ export function stubApi(answer: (call: Sent) => Response | Promise<Response>): S
 /** An element's text with every run of white space as one space. */
 export const text = (element: Element | null | undefined) =>
   (element?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+// The operator's email exceptions (W1-EMAIL-EXC) ----------------------------------------
+
+export const exceptionsPath = `/api/v1/staff/tenants/${tenantId}/email-exceptions`;
+
+/** An exception as the API sends it: a bounced confirmation unless told otherwise. */
+export function emailException(over: Partial<EmailException> = {}): EmailException {
+  next += 1;
+  return {
+    id: `00000000-0000-4000-9000-${String(next).padStart(12, "0")}`,
+    template: "booking_confirmation",
+    kind: "booking",
+    state: "failed",
+    attempts: 1,
+    failureCode: "bounced",
+    failedAt: "2026-11-04T14:00:03.000Z",
+    staffResend: false,
+    laterSent: false,
+    booking: { id: bookingId, reference: "QKG6ERBF", timeZone: "America/New_York" },
+    ...over,
+  };
+}

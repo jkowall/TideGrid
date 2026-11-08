@@ -21,6 +21,7 @@ import type { ReadFailure } from "../http.ts";
 import { hereAddress } from "../navigation.tsx";
 import { canResendEmail } from "../roles.ts";
 import { loadBookingEmail, newResendKey, resendBookingEmail } from "./api.ts";
+import { emailCardFragment } from "./exceptions.ts";
 import {
   blockedText,
   failureText,
@@ -94,6 +95,22 @@ export function BookingEmailCard({
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
 
+  // Opened from the email exceptions list (W1-EMAIL-EXC), whose links end in
+  // #email: once the first read ends, the card comes into view and its
+  // heading takes focus from the page's heading. Never from where the person
+  // has moved focus meanwhile, and only once.
+  const arrived = useRef(false);
+  useLayoutEffect(() => {
+    if (busy || arrived.current) return;
+    arrived.current = true;
+    if (window.location.hash !== emailCardFragment) return;
+    const active = document.activeElement;
+    if (!focusIsLost() && !(active instanceof HTMLHeadingElement && active.tagName === "H1"))
+      return;
+    heading.current?.focus();
+    heading.current?.scrollIntoView?.({ block: "start" });
+  }, [busy]);
+
   const data = load.kind === "ready" ? load.data : null;
   const off = data?.emailDelivery === "off";
   const resend = data?.resend ?? null;
@@ -160,7 +177,12 @@ export function BookingEmailCard({
   const blocked = resend ? blockedText(resend, when) : null;
 
   return (
-    <section className="console-card em-card" aria-labelledby="em-booking-title" aria-busy={busy}>
+    <section
+      id="email"
+      className="console-card em-card"
+      aria-labelledby="em-booking-title"
+      aria-busy={busy}
+    >
       <h2 id="em-booking-title" ref={heading} tabIndex={-1}>
         Email
       </h2>

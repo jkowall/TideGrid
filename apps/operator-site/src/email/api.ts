@@ -3,6 +3,8 @@ import type {
   BookingEmailResendKind,
   BookingEmailResendReason,
   BookingMessagesResponse,
+  EmailException,
+  EmailExceptionsResponse,
   MessageStatus,
 } from "@tidegrid/contracts";
 import { call, errorCode, failureOf, type ReadFailure, tenantPath } from "../http.ts";
@@ -175,4 +177,73 @@ export function newResendKey(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// The operator's email exceptions (W1-EMAIL-EXC) ----------------------------------------
+
+/** One page of the list, and the cursor for the next; null on the last page. */
+export interface EmailExceptionsPage {
+  exceptions: EmailException[];
+  nextBefore: string | null;
+}
+
+const exceptionStates = new Set(["failed", "outcome_unknown", "delivery_failed"]);
+const exceptionKinds = new Set(["booking", "waiver"]);
+
+function isEmailException(e: Partial<EmailException> | null | undefined): boolean {
+  if (!e) return false;
+  const b = e.booking as Partial<NonNullable<EmailException["booking"]>> | null | undefined;
+  return (
+    isString(e.id) &&
+    isString(e.template) &&
+    exceptionKinds.has(e.kind as string) &&
+    exceptionStates.has(e.state as string) &&
+    Number.isSafeInteger(e.attempts) &&
+    isString(e.failureCode) &&
+    isInstant(e.failedAt) &&
+    typeof e.staffResend === "boolean" &&
+    typeof e.laterSent === "boolean" &&
+    (b === null || (!!b && isString(b.id) && isString(b.reference) && isString(b.timeZone)))
+  );
+}
+
+/**
+ * A page of the operator's email that stopped without the email service
+ * taking it, newest first (W1-EMAIL-EXC). Owners and booking staff only: the
+ * API refuses finance, and the page asks nothing for finance. Never throws.
+ */
+export function loadEmailExceptions(
+  tenantId: string,
+  query: { before?: string | undefined },
+  signal?: AbortSignal,
+): Promise<Read<EmailExceptionsPage>> {
+  return (async () => {
+    try {
+      const params = new URLSearchParams({ limit: "50" });
+      if (query.before) params.set("before", query.before);
+      const res = await call(
+        `${tenantPath(tenantId)}/email-exceptions?${params}`,
+        { headers: { accept: "application/json" } },
+        signal,
+      );
+      if (!res.ok) return { kind: "failed", reason: await failureOf(res) };
+      const body = (await res.json().catch(() => null)) as Partial<EmailExceptionsResponse> | null;
+      const ok =
+        !!body &&
+        Array.isArray(body.exceptions) &&
+        body.exceptions.every(isEmailException) &&
+        (body.nextBefore === null || isString(body.nextBefore));
+      return ok
+        ? {
+            kind: "ok",
+            value: {
+              exceptions: body.exceptions as EmailException[],
+              nextBefore: body.nextBefore ?? null,
+            },
+          }
+        : { kind: "failed", reason: "unreadable" };
+    } catch {
+      return { kind: "failed", reason: signal?.aborted ? "unavailable" : "unreachable" };
+    }
+  })();
 }
