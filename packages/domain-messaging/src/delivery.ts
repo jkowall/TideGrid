@@ -314,9 +314,13 @@ async function claimOne(
     // The tenant's resend lock first, before any message lock, as a staff
     // resend takes it (0014), so a claim and a resend never deadlock and the
     // resend limits on claims (0017) are read and logged one claim at a time.
-    await sql`select pg_advisory_xact_lock(hashtextextended(${`${RESEND_LOCK_PREFIX}${ctx.tenantId}`}, 0))`.execute(
+    // Never waited for: while a resend holds it, this run claims nothing for
+    // the tenant, and a later run does.
+    const { rows: lockRows } = await sql<{ locked: boolean }>`
+      select pg_try_advisory_xact_lock(hashtextextended(${`${RESEND_LOCK_PREFIX}${ctx.tenantId}`}, 0)) as locked`.execute(
       trx,
     );
+    if (lockRows[0]?.locked !== true) return { kind: "none" } as const;
     // A staff resend that must wait for its limits is left in the queue, and
     // the claim takes the next message instead.
     const { rows } = await sql<ClaimedRow & { state: string; resend: boolean }>`

@@ -23,8 +23,9 @@
  * - C6, the service path: a resend goes out at once; its own retry and the
  *   0015 give-back are not barred by its own earlier claims.
  * - C7, READ COMMITTED only.
- * - C8, lock order: a delivery run waits for a service resend on the
- *   tenant's resend lock holding no message lock, and both finish.
+ * - C8, lock order: a delivery run never waits on the tenant's resend lock;
+ *   while a service resend holds it the run claims nothing, and a later run
+ *   sends.
  * - C9, the log: stamped at the clock, names a resend message of its own
  *   booking, append-only, and isolated by tenant.
  * - C10, the catalog: forced row-level security, no DELETE, invoker
@@ -55,8 +56,6 @@ import {
 } from "./self-service-harness.ts";
 
 const env = inject("integrationDb");
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const templateOf = { confirmation: "booking_confirmation", cancellation: "booking_canceled" };
 
@@ -228,14 +227,6 @@ describe.skipIf(!env)("adversarial: staff resend limits held at the delivery cla
       open = resolve;
     });
     return { opened, open };
-  }
-
-  async function poll(what: string, done: () => Promise<boolean>): Promise<void> {
-    for (let i = 0; i < 200; i += 1) {
-      if (await done()) return;
-      await sleep(50);
-    }
-    throw new Error(`timed out waiting for ${what}`);
   }
 
   beforeAll(async () => {
@@ -466,8 +457,9 @@ describe.skipIf(!env)("adversarial: staff resend limits held at the delivery cla
     expect(await claimsOf(id)).toBe(0);
   });
 
-  it("C8. a delivery run waits for a service resend on the tenant's resend lock, holding no message lock; both finish", async () => {
+  it("C8. a delivery run never waits for a service resend on the tenant's resend lock: it claims nothing, and a later run sends", async () => {
     const b = await book(world, A, tripsA.shared(), 1);
+    await deliverMail(world, A.id);
     await pass(A, 11);
     const ctx = staffContext(A.id);
     const resendHolds = gate();
@@ -483,24 +475,17 @@ describe.skipIf(!env)("adversarial: staff resend limits held at the delivery cla
       return done;
     });
     await resendHolds.opened;
-    const run = deliverMail(world, A.id);
-    await poll("the delivery run to wait on the resend lock", async () => {
-      const [row] = await world.admin<{ n: number }[]>`
-        select count(*)::int as n from pg_locks
-         where locktype = 'advisory' and not granted
-           and ((classid::bigint << 32) | objid::bigint)
-               = hashtextextended(${`tidegrid.booking_resend:${A.id}`}, 0)`;
-      return (row?.n ?? 0) === 1;
-    });
-    const [rowLocks] = await world.admin<{ n: number }[]>`
-      select count(*)::int as n from pg_locks where not granted and locktype <> 'advisory'`;
-    expect(rowLocks?.n).toBe(0);
+    // Due mail the run could claim, if it took the lock: a fresh booking.
+    await book(world, A, tripsA.shared(), 1);
+    const skipped = await deliverMail(world, A.id);
+    expect(skipped.claimed).toBe(0);
+    const [waiting] = await world.admin<{ n: number }[]>`
+      select count(*)::int as n from pg_locks where not granted`;
+    expect(waiting?.n).toBe(0);
     resendGo.open();
     const done = await resend;
-    const report = await run;
     if (done.kind !== "queued") throw new Error(JSON.stringify(done));
-    // The run took the lock after the resend committed, so it saw the resend
-    // and sent it, with the booking's confirmation it superseded canceled.
+    const report = await deliverMail(world, A.id);
     expect(report.items.map((i) => [i.messageId, i.outcome])).toContainEqual([
       done.messageId,
       "sent",

@@ -35,9 +35,10 @@
 --
 -- A refused claim raises (SQLSTATE 23514, email_messages_resend_<rule>), so a
 -- writer that bypasses the delivery job cannot claim past the limits either.
--- The delivery job reads the same rules first, under the same lock, and never
--- meets the error: it leaves a resend that must wait in the queue, and claims
--- other mail, and it cancels one that can never go.
+-- The delivery job reads the same rules first, under the same lock, so it
+-- does not meet the error: it leaves a resend that must wait in the queue,
+-- and claims other mail, and it cancels one that can never go. If the lock is
+-- held when its claim starts, it claims nothing this run rather than wait.
 --
 -- Why claim times, and why this holds for every writer. Only the delivery job
 -- sends, and it sends right after its own claim commits. Its claims run in a
@@ -112,6 +113,7 @@ INSERT INTO public.booking_email_resend_claims
 SELECT m.tenant_id, m.booking_id, m.id, m.attempts, m.last_attempt_at
   FROM public.email_messages m
  WHERE starts_with(m.dedupe_key, 'booking.resend:')
+   AND m.booking_id IS NOT NULL
    AND m.attempts > 0;
 
 -- A log row names a booking.resend: message of its own booking, and is
@@ -121,6 +123,10 @@ CREATE FUNCTION app.check_booking_email_resend_claim() RETURNS trigger
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
+  -- Under the tenant's resend lock, as every claim is, so a log row never
+  -- lands between the delivery job's pick and its claim.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('tidegrid.booking_resend:' || NEW.tenant_id::text, 0));
   NEW.claimed_at := pg_catalog.clock_timestamp();
   IF NOT EXISTS (
        SELECT 1 FROM public.email_messages m
@@ -204,6 +210,8 @@ CREATE FUNCTION app.booking_resend_claim_refusal(p_tenant uuid, p_message uuid, 
          END,
          CASE
            WHEN NOT f.recorded OR f.deliverable >= 5 THEN NULL
+           WHEN f.booking_newest IS NOT NULL AND f.operator_claims >= 50
+             THEN greatest(f.booking_newest + interval '10 minutes', f.operator_available_at)
            WHEN f.booking_newest IS NOT NULL THEN f.booking_newest + interval '10 minutes'
            ELSE f.operator_available_at
          END
