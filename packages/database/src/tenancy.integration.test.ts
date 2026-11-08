@@ -693,6 +693,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         sweep_turns: ["INSERT", "SELECT"],
         // Staff resend ledger (0014): append-only, no UPDATE columns.
         booking_email_resends: ["INSERT", "SELECT"],
+        // Staff resend claims (0017): append-only, no UPDATE columns.
+        booking_email_resend_claims: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

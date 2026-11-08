@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-RESEND-CLAIM, staff resend limits held at the delivery claim (owner go; coordinator defaults pending owner confirmation)
+
+The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and email limits" on the O-SCOPE card, whose option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." Migration `0014` calls bounding sends at the delivery claim "a possible pre-pilot follow-up": its limits are decided on the ledger's stamps, and a writer with `tidegrid_app`'s credentials that waits after its commit check commits a resend with an old stamp, whose email then goes out beside resends stamped later. Migration `0017` (provisional; `0018` reserved) holds the limits again at every claim of a `booking.resend:` message. Coordinator defaults, pending owner confirmation:
+
+- **D1, a check in the claim's guard, not a new trigger on `email_messages`.** `app.check_email_message()` is replaced in place, as `0015` did, with one new step in its claim branch. The goal's recommended default.
+- **D2, claim times, at the clock.** Each claim is decided at `clock_timestamp()` once the tenant's resend lock is held, and logged in a new append-only table, `booking_email_resend_claims`. The limits on claims: 5 deliverable per booking (`0014`'s count), 10 minutes after another resend of the booking was claimed, 50 other resends of the operator claimed per hour. A message's own earlier claims never bar it.
+- **D3, wait rather than cancel when a limit lifts with time.** The delivery job leaves such a resend in the queue and claims it at a later run. It cancels only a resend that can never go (`resend_limit`, `resend_unrecorded`).
+- **D4, a backlog is paced.** In normal operation a resend goes out as before. After an outage or a missed run, or when the booking's previous resend was retried less than 10 minutes before, a resend now waits until real sends fit the limits.
+- **D5, recorded, not closed here.** A writer that forges the `0015` give-back after a send can make the delivery job send the same message again. That is the at-most-once rule for every message, not only resends.
+
+Security review under rule R9: asked of the owner on 2026-11-08, answer pending. Canonical: the [database README](../../packages/database/README.md#staff-resend-claims-0017) and the [verification log](../verification-log.md).
+
 ### 2026-11-08: Neon migrations from CI (owner request; owner decision 2026-11-08)
 
 On 2026-11-08 the owner asked: "can we push to neon from CI instead of from laptops in the future?" Migrations to Neon main run today only from the owner's Mac (`nov1 db backup` and `nov1 db migrate`), and `nov1` refuses every live step when `CI` is set. The Mac's journal also still recorded a deleted backup branch, so `nov1 db backup` would not make a new restore point. The [hosting plan](08-build-hosting-and-operations.md#infrastructure-and-configuration-ownership) already puts migration and backup credentials in GitHub environment secrets. This change proposes a manual GitHub Actions workflow for migrations only. It has never run.

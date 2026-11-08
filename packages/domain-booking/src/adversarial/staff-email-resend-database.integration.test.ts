@@ -253,23 +253,34 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
                   'Seeded resend', '<p>Seeded.</p>', 'Seeded.')
           returning id`;
         if (!m) throw new Error("setup: no seeded message");
-        if (state !== "queued" && state !== "canceled") {
-          await tx`update public.email_messages
-                      set state = 'sending', attempts = 1, provider = 'fake',
-                          lease_expires_at = now() + interval '2 minutes'
-                    where id = ${m.id}`;
-        }
-        if (state === "sent") {
-          await tx`update public.email_messages
-                      set state = 'sent', provider_message_id = ${`seed-${m.id}`} where id = ${m.id}`;
-        } else if (state !== "queued") {
-          await tx`update public.email_messages
-                      set state = 'canceled', last_error_code = 'resent' where id = ${m.id}`;
-        }
         if (ledger) {
           await tx`insert into public.booking_email_resends
                       (tenant_id, booking_id, generation, kind, message_id, actor_type)
                     values (${tenant.id}, ${bookingId}, ${generation}, ${kind}, ${m.id}, 'system')`;
+        }
+        // A seeded delivery is written directly, with triggers off for the
+        // statement (session_replication_role), so a fixture can stand past
+        // the limits on claims too (0017): it has no claim, as a resend long
+        // past would have none in the last hour.
+        if (state !== "queued") {
+          await tx`set local session_replication_role = replica`;
+          if (state === "sent") {
+            await tx`update public.email_messages
+                        set state = 'sent', attempts = 1, provider = 'fake',
+                            provider_message_id = ${`seed-${m.id}`},
+                            last_attempt_at = now(), sent_at = now()
+                      where id = ${m.id}`;
+          } else if (state === "attempted_canceled") {
+            await tx`update public.email_messages
+                        set state = 'canceled', last_error_code = 'resent', canceled_at = now(),
+                            attempts = 1, provider = 'fake', last_attempt_at = now()
+                      where id = ${m.id}`;
+          } else {
+            await tx`update public.email_messages
+                        set state = 'canceled', last_error_code = 'resent', canceled_at = now()
+                      where id = ${m.id}`;
+          }
+          await tx`set local session_replication_role = origin`;
         }
         ids.push(m.id);
       }
