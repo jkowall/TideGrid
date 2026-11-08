@@ -175,6 +175,15 @@ jobs:
           SHA: ${{ inputs.sha }}
         run: |
           pnpm --silent --filter @tidegrid/database migrate:status | tee "$RUNNER_TEMP/after.txt"
+          # The before check ran outside the migrator's advisory lock, so a
+          # runner elsewhere (the Mac fallback) could have applied a newer
+          # file since. Read the whole catalog again: success means Neon main
+          # holds exactly this tree's migrations.
+          psql "$DATABASE_URL" -XAtq -v ON_ERROR_STOP=1 -c "select name from public.schema_migrations" | LC_ALL=C sort > "$RUNNER_TEMP/catalog-after.txt"
+          ahead=$(LC_ALL=C comm -13 "$RUNNER_TEMP/tree.txt" "$RUNNER_TEMP/catalog-after.txt")
+          if [ -n "$ahead" ]; then
+            echo "::error::Neon main now has migrations this SHA does not: $(echo $ahead). Another runner migrated during this run; do not release the API from this SHA"; exit 1
+          fi
           applied=$(grep -c '^applied' "$RUNNER_TEMP/after.txt" || true)
           pending=$(grep -c '^pending' "$RUNNER_TEMP/after.txt" || true)
           last=$(grep '^applied' "$RUNNER_TEMP/after.txt" | tail -1 | awk '{print $2}')

@@ -41,6 +41,8 @@ Only one run against Neon main goes at a time, and a running one is never cancel
 
 - **Gate refused.** Nothing touched Neon. Fix what it names (wait for CI, dispatch `ci.yml` for the SHA) and run again.
 - **Migrate failed.** The failed file rolled back; earlier files in the run stay applied, so main may be at an intermediate version. Do not release the API. Land a forward fix and run again, or restore from the run's restore point, which takes its own owner approval.
+- **Invalid index.** A failed `CREATE INDEX CONCURRENTLY` file leaves an invalid index behind, and the migrator then refuses every run, a forward fix included, until it is repaired. Follow the database README's [repair after a failed concurrent build](../../packages/database/README.md#repair-after-a-failed-concurrent-build), which on Neon main takes the owner's approval.
+- **Neon ahead of the SHA after the run.** Another runner (the Mac fallback) migrated while this run went. Do not release the API from this SHA; migrate the newer SHA instead. Do not run `nov1 db migrate` and this workflow at the same time.
 - **Restore.** In the Neon console, restore main from the `pre-migrate-...` branch, or to the summary's UTC time. Data written after that point is lost.
 
 ## Not changed
