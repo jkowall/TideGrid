@@ -360,7 +360,9 @@ describe("a booking's waivers", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Send again to Ben Waiting" }));
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
-    await screen.findByText("It has been sent 5 times. Allow 5 more sends first, with a reason.");
+    await screen.findByText(
+      "Its sends are used up. Below 20 sends in all, allow 5 more first, with a reason; at 20, help the guest sign at the dock.",
+    );
   });
 
   it("sends a refused resend's next try with a new key, and a lost answer's with the same", async () => {

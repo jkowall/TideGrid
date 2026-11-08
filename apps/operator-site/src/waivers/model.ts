@@ -132,7 +132,7 @@ export function resendFailureText(reason: string): string {
     case "too_soon":
       return "It went to this address less than 10 minutes ago. Try again shortly.";
     case "limit":
-      return "It has been sent 5 times. Allow 5 more sends first, with a reason.";
+      return "Its sends are used up. Below 20 sends in all, allow 5 more first, with a reason; at 20, help the guest sign at the dock.";
     case "rate_limited":
       return "Waiver email for this guest, address, or booking has reached its sending limit for now. Try again later.";
     case "email_invalid":

@@ -96,12 +96,16 @@ export async function renewWaiverLink(
   if (pending.length > 0) return skip("email_pending");
   // Any emailed link of this request that still works is the guest's to use,
   // whichever token asked: nothing new goes out, and an old token cannot
-  // spend the guest's sends while their newest link waits in their inbox.
+  // spend the guest's sends while their newest link waits in their inbox. A
+  // link whose email the provider refused never reached the guest, so it
+  // does not count; one whose outcome is unknown still does.
   const { rows: live } = await sql<{ n: number }>`
-    select count(*)::int as n from guest_access_links
-     where tenant_id = ${ctx.tenantId} and subject_ref = ${link.subject_ref}
-       and purpose = ${WAIVER_LINK_PURPOSE} and message_id is not null
-       and consumed_at is null and revoked_at is null and expires_at > now()`.execute(trx);
+    select count(*)::int as n from guest_access_links l
+      join email_messages m on m.tenant_id = l.tenant_id and m.id = l.message_id
+     where l.tenant_id = ${ctx.tenantId} and l.subject_ref = ${link.subject_ref}
+       and l.purpose = ${WAIVER_LINK_PURPOSE}
+       and l.consumed_at is null and l.revoked_at is null and l.expires_at > now()
+       and m.state <> 'failed'`.execute(trx);
   if ((live[0]?.n ?? 0) > 0) return skip("still_usable");
   // Only a link that went to the address the latest invitation went to: after
   // a corrected address, a link the old address held (opened or not) renews

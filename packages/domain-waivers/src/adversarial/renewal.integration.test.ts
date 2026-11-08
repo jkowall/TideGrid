@@ -156,6 +156,25 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
     expect(audit?.after_state).not.toContain(email);
   }, 120_000);
 
+  it("renews past a resend the provider refused, whose link never reached the guest", async () => {
+    const { req, token } = await invited("Rio Refused");
+    expect((await redeem(world, A.id, token)).kind).toBe("opened");
+    await ageDeliveries(world.admin, req);
+    expect(await resend(A.id, req)).toMatchObject({ kind: "sent", generation: 2 });
+    // Delivered, so its link exists; then the provider's refusal comes back.
+    await linkFor(world.admin, world.db, A.id, req);
+    await world.admin.begin(async (tx) => {
+      await tx`alter table public.email_messages disable trigger email_messages_rules`;
+      await tx`update public.email_messages
+                  set state = 'failed', sent_at = null, provider_message_id = null,
+                      failed_at = now(), last_error_code = 'test'
+                where dedupe_key = ${`waiver.request:${req}:2`}`;
+      await tx`alter table public.email_messages enable trigger email_messages_rules`;
+    });
+    await ageDeliveries(world.admin, req);
+    expect(await renew(A.id, token)).toEqual({ kind: "renewed", generation: 3 });
+  }, 120_000);
+
   it("renews nothing for an unknown token, a crew code, another operator, or a changed address", async () => {
     const { booked, pid, req, token } = await invited("Uma Unknown");
     expect(await renew(A.id, "A".repeat(43))).toEqual({ kind: "skipped", reason: "invalid" });

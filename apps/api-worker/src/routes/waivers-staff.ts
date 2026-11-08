@@ -308,7 +308,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
           case "limit_reached":
             return refuse(
               "waiver_resend_limit",
-              "It has been sent 5 times already; reset the send count to send again",
+              "Its sends are used up; below 20 in all, reset the send count to send again",
             );
           case "not_renewable":
           case "renewal_limit":
