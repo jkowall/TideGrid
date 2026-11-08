@@ -326,11 +326,15 @@ export interface MessageRow {
   provider_message_id: string | null;
 }
 
-/** A booking's messages, oldest first. */
+/**
+ * A booking's messages, oldest first, without its trip reminder: that one
+ * waits for its day (W3-G2.16-rest) and reminders.integration.test.ts covers it.
+ */
 export async function messagesOf(admin: Sql, bookingId: string): Promise<MessageRow[]> {
   return admin<MessageRow[]>`
     select id, template, state, attempts, to_email, last_error_code, provider_message_id
-      from public.email_messages where booking_id = ${bookingId}
+      from public.email_messages
+     where booking_id = ${bookingId} and template <> 'booking_reminder'
      order by created_at, id`;
 }
 

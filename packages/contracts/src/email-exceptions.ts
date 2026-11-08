@@ -36,7 +36,7 @@ export const EmailException = z
     template: z
       .string()
       .describe(
-        "booking_confirmation, booking_manage_link, booking_canceled, booking_refund_failed, waiver_request, ...",
+        "booking_confirmation, booking_manage_link, booking_reminder, booking_canceled, booking_refund_failed, waiver_request, ...",
       ),
     kind: EmailExceptionKind,
     state: EmailExceptionState,

@@ -80,6 +80,23 @@ describe("a booking's email in words (G2.16b)", () => {
         .label,
     ).toBe("Trying again");
     expect(stateView(message({ state: "queued", attempts: 2 })).label).toBe("Trying again");
+    // A trip reminder waits for its day (W3-G2.16-rest).
+    const now = Date.parse("2026-11-04T14:00:00.000Z");
+    expect(
+      stateView(
+        message({ state: "queued", attempts: 0, nextAttemptAt: "2026-11-05T14:00:00.000Z" }),
+        now,
+      ),
+    ).toEqual({ tone: "pending", icon: "calendar", label: "Scheduled" });
+    expect(
+      stateView(
+        message({ state: "queued", attempts: 0, nextAttemptAt: "2026-11-04T13:59:00.000Z" }),
+        now,
+      ).label,
+    ).toBe("Waiting to send");
+    expect(templateName("booking_reminder")).toBe("Trip reminder");
+    expect(failureText("reminder_too_late")).toContain("about to leave");
+    expect(failureText("outcome_unknown", "booking_reminder")).toContain("second working link");
   });
 
   it("says sent means accepted by the email service, not read", () => {

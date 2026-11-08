@@ -125,6 +125,13 @@ export {
   fakeEmailIdPattern,
 } from "./fake.ts";
 export {
+  REMINDER_TOO_LATE,
+  TRIP_REMINDER_CUTOFF_HOURS,
+  TRIP_REMINDER_LEAD_HOURS,
+  TRIP_REMINDER_TEMPLATE,
+  tripReminderTooLate,
+} from "./reminders.ts";
+export {
   checkContent,
   type EmailBlock,
   type EmailBrand,

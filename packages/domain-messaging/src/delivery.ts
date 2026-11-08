@@ -69,6 +69,7 @@ import {
 } from "./adapter.ts";
 import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
+import { REMINDER_TOO_LATE, TRIP_REMINDER_TEMPLATE, tripReminderTooLate } from "./reminders.ts";
 import { fillLinkSlot } from "./render.ts";
 import { ADDRESS_SUPPRESSED, isSuppressed, type SenderPolicy, senderAddressFor } from "./sender.ts";
 
@@ -387,9 +388,9 @@ async function claimOne(
     // A staff resend that must wait for its limits is left in the queue, and
     // the claim takes the next message instead.
     const { rows } = await sql<
-      Omit<ClaimedRow, "from_address"> & { state: string; resend: boolean }
+      Omit<ClaimedRow, "from_address"> & { state: string; resend: boolean; template: string }
     >`
-      select id, attempts, state, booking_id, participant_id, subject_ref, to_email, to_name,
+      select id, attempts, state, template, booking_id, participant_id, subject_ref, to_email, to_name,
              from_name, reply_to, subject, html_body, text_body, link_purpose, link_path,
              link_ttl_seconds, link_slot, starts_with(dedupe_key, ${RESEND_KEY_PREFIX}) as resend
         from email_messages m
@@ -440,6 +441,24 @@ async function claimOne(
           code: stale.code,
         } as const;
       }
+    }
+    // A trip reminder (W3-G2.16-rest) is only worth sending before the trip
+    // leaves; a retry can wait for hours, so the claim checks again.
+    if (
+      found.template === TRIP_REMINDER_TEMPLATE &&
+      (await tripReminderTooLate(trx, ctx.tenantId, found.booking_id))
+    ) {
+      await sql`
+        update email_messages set state = 'canceled', last_error_code = ${REMINDER_TOO_LATE}
+         where tenant_id = ${ctx.tenantId} and id = ${found.id}
+           and state in ('queued', 'sending')`.execute(trx);
+      await revokeMessageLinks(trx, ctx.tenantId, found.id, "withdrawn");
+      return {
+        kind: "canceled",
+        messageId: found.id,
+        attempt: found.attempts,
+        code: REMINDER_TOO_LATE,
+      } as const;
     }
     if (found.state === "sending" && !providerDeduplicates(options.provider)) {
       // A lapsed lease: the attempt crashed or was canceled, maybe after the

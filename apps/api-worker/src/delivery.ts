@@ -48,14 +48,15 @@ type Log = ReturnType<typeof createLogger>;
 
 /**
  * Topics an operator should hear about as soon as they happen: a booking that
- * could not be finalized, a refund the provider refused, a confirmation email
- * that failed. The handler writes one warning line with ids only. The cron
+ * could not be finalized, a refund the provider refused, a confirmation or
+ * trip reminder email that could not be written. The handler writes one warning line with ids only. The cron
  * and the console already show these; the line is the early signal.
  */
 export const OPS_ALERT_TOPICS = [
   "checkout.finalization_exception.raised",
   "payment.refund.failed",
   "booking.confirmation_email_failed",
+  "booking.reminder_email_failed",
 ] as const;
 
 export function deliveryHandlers(log: Log): DeliveryHandler[] {

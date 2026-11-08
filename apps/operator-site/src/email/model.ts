@@ -18,6 +18,7 @@ import type { IconName, StatusTone } from "@tidegrid/design-system/components";
 const templateNames: Record<string, string> = {
   booking_confirmation: "Confirmation",
   booking_manage_link: "Booking link",
+  booking_reminder: "Trip reminder",
   booking_canceled: "Cancellation notice",
   booking_refund_failed: "Refund problem notice",
 };
@@ -42,7 +43,9 @@ export interface StateView {
 export function stateView(
   message: Pick<MessageStatus, "state" | "attempts" | "failureCode"> & {
     deliveryReport?: MessageStatus["deliveryReport"];
+    nextAttemptAt?: string | null;
   },
+  now: number = Date.now(),
 ): StateView {
   // A sent email the provider later reported (W1-EMAIL-EVENTS): the report
   // is what staff need, not the acceptance.
@@ -55,9 +58,14 @@ export function stateView(
     case "queued":
       // An account-level fault gives its attempt back (0015), so a message
       // can wait again with an error and no counted attempt.
-      return message.attempts > 0 || message.failureCode !== null
-        ? { tone: "pending", icon: "refresh", label: "Trying again" }
-        : { tone: "pending", icon: "clock", label: "Waiting to send" };
+      if (message.attempts > 0 || message.failureCode !== null) {
+        return { tone: "pending", icon: "refresh", label: "Trying again" };
+      }
+      // Not yet due, such as a trip reminder waiting for its day.
+      if (message.nextAttemptAt && Date.parse(message.nextAttemptAt) > now) {
+        return { tone: "pending", icon: "calendar", label: "Scheduled" };
+      }
+      return { tone: "pending", icon: "clock", label: "Waiting to send" };
     case "sending":
       return { tone: "pending", icon: "hourglass", label: "Sending" };
     case "sent":
@@ -117,12 +125,19 @@ export const failureCopy: Record<MessageFailureCode, string> = {
   access_withdrawn: "Not sent: what it asked for was no longer needed.",
   booking_canceled: "Not sent: the booking was canceled first.",
   resent: "Replaced by a newer email before it went out.",
+  reminder_too_late:
+    "Not sent: by the time it was due, the booking was canceled or the trip was about to leave.",
 };
 
 const knownCodes = new Set<string>(MESSAGE_FAILURE_CODES);
 
 /** Templates whose email carries a link that opens something. */
-const linkTemplates = new Set(["booking_confirmation", "booking_manage_link", "waiver_request"]);
+const linkTemplates = new Set([
+  "booking_confirmation",
+  "booking_manage_link",
+  "booking_reminder",
+  "waiver_request",
+]);
 
 /**
  * A failure in words; a code the console does not know still reads as a

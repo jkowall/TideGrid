@@ -817,9 +817,17 @@ describe.skipIf(!env)("adversarial: staff resend of a booking's email (G2.16b)",
     const statuses = await asSystem(world.db, A.id, (trx) =>
       listBookingMessages(trx, A.id, b.bookingId),
     );
-    expect(statuses.map((m) => [m.id, m.template, m.staffResend])).toEqual([
+    // The trip reminder (W3-G2.16-rest) waits for its day; staff see it too.
+    expect(
+      statuses
+        .filter((m) => m.template !== "booking_reminder")
+        .map((m) => [m.id, m.template, m.staffResend]),
+    ).toEqual([
       [original.id, "booking_confirmation", false],
       [sent.messageId, "booking_confirmation", true],
+    ]);
+    expect(statuses.filter((m) => m.template === "booking_reminder").map((m) => m.state)).toEqual([
+      "queued",
     ]);
     const statusText = JSON.stringify(statuses);
     for (const secret of [who.name, who.email, stored?.subject ?? "-", "#t="]) {
