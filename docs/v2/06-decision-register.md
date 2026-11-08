@@ -8,6 +8,29 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: GuestGateway miss budget before Cloudflare for SaaS (owner go; coordinator defaults, pending owner confirmation)
+
+The [2026-11-07 cache entry](#2026-11-07-guestgateway-keeps-found-answers-for-10-seconds-owner-request-coordinator-defaults-owner-decision-2026-11-08) left misses uncached and unlimited, and said "a limit on misses belongs to G2.14b-live". Under Cloudflare for SaaS a fallback origin could send any hostname, and each would open a database connection. This goal (W1-GW-MISS) is G2.14b-live preparation inside the [demo build plan](12-demo-build-plan.md), needed before the runbook's P10.
+
+The owner's words, recorded verbatim. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The coordinator reads that as the owner's go for this goal, for the security reviewer that R9 calls for on hostname resolution, and for local commits. Pushing, the pull request, and the merge stay with the coordinator under that go. On the same day the owner confirmed the cache defaults (question c of the [confirmation entry](#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions)), selecting the text: "Confirm all five defaults as owner decisions. A miss limit stays with G2.14b-live (W1-GW-MISS). Type in Other to change a number."
+
+The goal asked the owner for the limit's shape and for how long a negative answer may lag a newly activated hostname. Neither was supplied, so the goal's recommended answers are coordinator defaults, pending owner confirmation:
+
+- **D1. A token bucket per isolate, with no Workers rate-limit binding.** It lives in isolate memory (`guestMissBudget` in `apps/api-worker/src/hostnames/guest-gateway.ts`). `wrangler.jsonc` is unchanged and no binding was added.
+- **D2. No negative cache.** A newly activated host resolves on its next lookup that gets a token. While a flood holds every token in that isolate, the host answers 503 until a token comes back, at most 10 seconds after the flood stops.
+- **D3. 20 tokens per 10 seconds per isolate, revisited at P10.** Each token comes back 10 seconds after the lookup that spent it began, so no 10-second span opens more than 20 lookups for unknown hosts that end as a miss, a withheld brand, or a failure, and no more than 20 such lookups run at once. A plain refilling bucket would let up to 40 through in a 10-second span; this one does not.
+
+Further coordinator defaults, pending owner confirmation, made while building:
+
+- **D4. Recently found hosts skip the budget.** A host whose last lookup in this isolate answered `found` within 10 minutes, at most 1,000 hosts, least recently used out first (`guestKnownHosts`), reads the database without a token. Without it, a flood of unknown hosts would turn a live operator's page into a 503 each time its kept answer expired. It is not a cache: the host is read afresh, so a disable still serves the kill switch once the kept `found` answer expires, as before, and a `miss`, a `withheld` answer, or a database failure removes it, so an outage cannot make a known host's reads unbounded. Only a database `found` answer adds one. Cost: a known host's reads are not budgeted, as before this goal; they are bounded by the 10-second `found` cache, except for calls that arrive before an answer is kept.
+- **D5. What spends a token.** A `found` answer gives its token back at once. A `miss`, a `withheld` brand, and a database failure keep it, so a flood of a withheld host, or of any host while the database fails, is bounded too. A host the strict rules refuse, and a missing database URL, spend nothing, since neither opens a connection.
+- **D6. A new answer, `limited`.** A refused lookup answers `{ kind: "limited" }` rather than throwing, so the gateway never claims a database failure it did not see. The guest Worker answers it with its 503 and no Clear-Site-Data, as it does a withheld brand. A guest Worker built before this answer existed already reads any kind but `found` and `miss` as 503, so the release order (the API first) is safe either way. Only a lookup that reached the database and found nothing, or a host the strict rules refuse, is a `miss`, which alone serves the kill switch.
+- **D7. One log line per window.** Each isolate logs `guest_host_lookup_limited` at most once per 10 seconds, with the count refused since its last log and no hostname.
+
+Unchanged: the owner's cache decisions (found answers only, 10 seconds, 1,000 hosts, least recently used out first, unsigned, in isolate memory), the kill switch, and data routes, which resolve the tenant on each request. Not done here: Cloudflare for SaaS itself, the certificate and authentication-code items, and signed projections. It ships with the next API release, under its own go; nothing was released.
+
+Canonical: `apps/api-worker/src/hostnames/guest-gateway.ts`, the [API README](../../apps/api-worker/README.md), and the [demo build plan's G2.14b row](12-demo-build-plan.md#goal-sequence).
+
 ### 2026-11-08: W1-PRICING-WS, Stage 0 pricing worksheet draft (proposed, pending owner approval)
 
 On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". The lead read that as the owner's go for this docs goal and for local commits. It is not an approval of the worksheet's content.

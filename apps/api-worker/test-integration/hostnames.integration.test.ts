@@ -18,7 +18,10 @@ import { createApp } from "../src/app.ts";
 import { PREFLIGHT_TTL_MS, preflightProjection } from "../src/hostnames/cors.ts";
 import {
   GUEST_HOST_TTL_MS,
+  GUEST_MISS_BUDGET,
   guestHostProjection,
+  guestKnownHosts,
+  guestMissBudget,
   resolveGuestHost,
 } from "../src/hostnames/guest-gateway.ts";
 
@@ -49,6 +52,7 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
     aCached: `cached-${run}.example.com`,
     withheld: `withheld-${run}.example.com`,
     unknown: `nobody-${run}.example.com`,
+    activated: `activated-${run}.example.com`,
   };
 
   const pending: Promise<unknown>[] = [];
@@ -376,6 +380,49 @@ describe.skipIf(!env)("hostname resolution and CORS through the API", () => {
       resolveHost: (h: string) => resolveGuestHost(bindings("preview") as never, h),
     };
     expect(await preview.resolveHost(hosts.aLocal)).toEqual({ kind: "miss" });
+  });
+
+  it("limits a flood of unknown hosts to the miss budget, and never answers it with a miss", async () => {
+    guestMissBudget.clear();
+    guestKnownHosts.clear();
+    guestHostProjection.clear();
+    try {
+      const preview = bindings("preview") as never;
+      // A tenant host found before the flood is known to this isolate.
+      expect((await resolveGuestHost(preview, hosts.b)).kind).toBe("found");
+      const flood = Array.from({ length: 60 }, (_, i) => `flood-${i}-${run}.example.com`);
+      const answers = await Promise.all(flood.map((h) => resolveGuestHost(preview, h)));
+      // Only a lookup that reached the database can say miss.
+      const kinds = answers.map((a) => a.kind);
+      expect(kinds.filter((k) => k === "miss")).toHaveLength(GUEST_MISS_BUDGET);
+      expect(kinds.filter((k) => k === "limited")).toHaveLength(60 - GUEST_MISS_BUDGET);
+      // A pending host is limited too: 503 from the guest Worker, not the kill switch.
+      expect(await resolveGuestHost(preview, hosts.aPending)).toEqual({ kind: "limited" });
+      // The known host's kept answer expires: it reads afresh past the spent budget.
+      guestHostProjection.set(`preview|${hosts.b}`, { tenant: { slug: "x", name: "x" } }, 0);
+      const again = await resolveGuestHost(preview, hosts.b);
+      expect(again.kind).toBe("found");
+      if (again.kind === "found") expect(again.experience.tenant.slug).toBe(B.slug);
+      // The other tenant's host was never found here, so it waits for a token.
+      expect(await resolveGuestHost(preview, hosts.a)).toEqual({ kind: "limited" });
+      expect(guestHostProjection.get(`preview|${hosts.a}`, Date.now())).toBeUndefined();
+    } finally {
+      guestMissBudget.clear();
+      guestKnownHosts.clear();
+    }
+  });
+
+  it("resolves a newly activated host on its next lookup, since no miss is kept", async () => {
+    guestMissBudget.clear();
+    const preview = bindings("preview") as never;
+    expect(await resolveGuestHost(preview, hosts.activated)).toEqual({ kind: "miss" });
+    await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
+      values (${hosts.activated}, ${B.id}, 'preview', 'active', now())`;
+    const answer = await resolveGuestHost(preview, hosts.activated);
+    expect(answer.kind).toBe("found");
+    if (answer.kind === "found") expect(answer.experience.tenant.slug).toBe(B.slug);
+    guestMissBudget.clear();
+    guestKnownHosts.clear();
   });
 
   it("answers with the static allowlist only when PUBLIC_CORS is static (the rollback)", async () => {

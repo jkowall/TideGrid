@@ -128,6 +128,8 @@ describe("guest Worker: per-tenant manifest (G2.14b)", () => {
     for (const env of [
       stubEnv({ throws: true }).env,
       stubEnv({ answer: () => ({ kind: "withheld" }) }).env,
+      // The gateway's miss budget refused the lookup (G2.14b-live): not a miss.
+      stubEnv({ answer: () => ({ kind: "limited" }) }).env,
       stubEnv({ answer: () => ({ kind: "found", experience: { tenant: { slug: "X" } } }) }).env,
       stubEnv({ answer: () => null }).env,
     ]) {

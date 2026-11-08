@@ -23,9 +23,10 @@ import { buildManifest, etagFor, type PublicTenant } from "./manifest.ts";
  *
  * Fail-closed, and careful about which way: only a definite miss (the
  * gateway says no active, verified hostname matches) serves the kill switch.
- * A gateway error, a timeout, a withheld brand, or an answer that fails the
- * contract is 503 with no-store: the installed service worker stays, and no
- * Clear-Site-Data is sent.
+ * A gateway error, a timeout, a withheld brand, a lookup the gateway's miss
+ * budget refused (`limited`), or an answer that fails the contract is 503
+ * with no-store: the installed service worker stays, and no Clear-Site-Data
+ * is sent.
  */
 
 export interface GuestGatewayBinding {
@@ -63,6 +64,9 @@ async function resolve(request: Request, env: GuestEnv): Promise<Resolution> {
   }
   const kind = (answer as { kind?: unknown } | null)?.kind;
   if (kind === "miss") return { kind: "miss" };
+  // Anything else but `found` is 503: `withheld`, `limited` (the gateway's
+  // miss budget refused the lookup, so it never looked), and any kind
+  // outside the contract. None of them is a miss.
   if (kind !== "found") return { kind: "unavailable" };
   const parsed = PublicExperienceResponse.safeParse(
     (answer as { experience?: unknown }).experience,
