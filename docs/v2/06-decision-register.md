@@ -8,6 +8,18 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-0014-RESIDUALS, the 0014 resend residuals closed for direct writers (owner go; coordinator defaults pending owner confirmation)
+
+The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and email limits" on the O-SCOPE card, whose option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." The three fixes are the residuals the [verification log](../verification-log.md) recorded for `0014`, each reachable only by a writer with `tidegrid_app`'s credentials that skips the service. Migration `0019` (provisional; `0018` belongs to W1-FIN-EXC) closes them. Coordinator defaults, pending owner confirmation:
+
+- **D1, close all three.** D4 C (the two templates' keys), D5 A (eligibility in the database), and D6 (the waiver `send_after` hole).
+- **D2, in the existing triggers, through an invoker function.** The goal's recommended option was a security definer function with a pinned `search_path`. Every table the rules read is one the writer already reads under its own row-level security, so a definer would add a privilege and gain nothing. The rules run in `app.check_email_message` and `app.check_booking_email_resend`, each replaced in place as `0015` and `0017` did, and the new `app.booking_resend_eligibility_refusal` is a STABLE invoker with `search_path` pinned.
+- **D3, the keys are pinned at insert.** A `booking_confirmation` or `booking_canceled` message names its booking and uses its original key or a staff resend key (`email_messages_booking_key`), and an original fits the booking's state (`email_messages_booking_state`, added after the independent review). Existing rows are not checked. A message of another template, a `booking_manage` link message included, is not held: the remaining residual.
+- **D4, eligibility at the ledger row, in the service's order, under the service's locks.** Kind, trip over, and failed refund before `0014`'s limits; an earlier email being sent after them. The booking, a notice's refund, and the earlier emails are locked `FOR SHARE` first. Eligibility is not decided again at the claim: a booking canceled after a resend is queued relies on the cancel path, which cancels its pending confirmations.
+- **D5, a waiver email moves earlier only to its `send_after`, or once that has passed** (`email_messages_waiver_send_after`).
+
+Security review under rule R9: asked of the owner on 2026-11-08 for this lane, answer pending. Canonical: the [database README](../../packages/database/README.md#staff-resend-residuals-0019) and the [verification log](../verification-log.md).
+
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
 The owner placed finalization exception resolution in the G2.12 row with the O-SCOPE choice "Booking fixes and email limits". The goal's start gate is that entry. Staff now mark a payment exception as followed up, with migration `0018` (provisional, claimed at merge) and its service in the [booking contract](../../packages/domain-booking/README.md#exception-resolution-w1-fin-exc). The owner gave no answer on who may resolve or what reason is required, so these are coordinator defaults, pending owner confirmation:
@@ -21,6 +33,7 @@ The owner placed finalization exception resolution in the G2.12 row with the O-S
 Resolving changes no money, booking, payment, refund, or checkout. Retries and refunds from the console, email exceptions, overrides, and staff cancel stay out of scope.
 
 Security review under rule R9: the owner said yes on 2026-11-08, and it found no defects. Canonical: the [database README](../../packages/database/README.md#finalization-exception-resolutions-0018) and the [verification log](../verification-log.md#2026-11-08).
+
 
 ### 2026-11-08: W1-RESEND-CLAIM, staff resend limits held at the delivery claim (owner go; coordinator defaults pending owner confirmation)
 

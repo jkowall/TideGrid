@@ -270,9 +270,15 @@ const limitConstraints: Record<string, ResendRefusalCode> = {
   booking_email_resends_limit: "limit",
   booking_email_resends_interval: "too_soon",
   booking_email_resends_rate: "rate_limited",
+  // Eligibility, decided again by the ledger's trigger (0019). The service
+  // decides each first under the same locks, so it never meets them.
+  booking_email_resends_kind_mismatch: "kind_mismatch",
+  booking_email_resends_trip_over: "trip_over",
+  booking_email_resends_refund_failed: "refund_failed",
+  booking_email_resends_in_progress: "in_progress",
 };
 
-/** The limit the ledger's trigger raised, if that is what this error is (0014). */
+/** The refusal the ledger's trigger raised, if that is what this error is (0014, 0019). */
 function limitRefused(error: unknown): ResendRefusalCode | null {
   const e = error as { code?: unknown; constraint_name?: unknown } | null;
   if (e?.code !== "23514" || typeof e.constraint_name !== "string") return null;

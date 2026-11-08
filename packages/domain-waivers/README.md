@@ -177,6 +177,7 @@ Recorded as follow-ups; the demo leaves them out:
 - **Typed signatures outside WinAnsi** show a question mark in the PDF (the evidence keeps the exact text). An embedded font fixes it.
 - **R2.** Above.
 - **Field encryption.** ADR 0019 (retained; docs/v2/06) and docs/v2/08 require personal fields to be encrypted with versioned keys before real data. Waiver evidence stores the participant's and signer's names, the typed signature, the relationship, the recipient address, the source address, the user agent, and the PDF in plain columns; lane 1's participant emails and guardian names are the same. Synthetic demo data only until the pilot adds field encryption.
+- **`send_after` held for every writer (W1-0014-RESIDUALS).** Closed by migration `0019`: a queued waiver email's `next_attempt_at` no longer moves earlier than its delivery's `send_after` while that time is ahead, so a direct writer cannot bring a send the interval holds forward. The service never moved it. Tests that make time pass move the delivery's `send_after` first.
 
 ## Tests
 
