@@ -134,26 +134,34 @@ export async function loadPolicy(
 }
 
 /**
- * Every tax rate whose current version is active, ordered by name and then
- * id. Quotes keep this order for their tax lines.
+ * Every tax rate whose current version is active and applies at this
+ * location: the version names no location, or names this one. Ordered by
+ * name and then id. Quotes keep this order for their tax lines. A rate whose
+ * current version moved to another location no longer applies here, even if
+ * an older version did: only the current version decides (0023).
  */
-export async function loadTaxRates(trx: TenantTransaction, tenantId: string): Promise<TaxRate[]> {
+export async function loadTaxRates(
+  trx: TenantTransaction,
+  tenantId: string,
+  locationId: string,
+): Promise<TaxRate[]> {
   const rows = await trx
     .selectFrom("tax_rate_versions")
-    .select(["tax_rate_id", "version", "name", "rate_ppm", "inclusive", "active"])
+    .select(["tax_rate_id", "version", "name", "rate_ppm", "inclusive", "active", "location_id"])
     .distinctOn("tax_rate_id")
     .where("tenant_id", "=", tenantId)
     .orderBy("tax_rate_id")
     .orderBy("version", "desc")
     .execute();
   return rows
-    .filter((r) => r.active)
+    .filter((r) => r.active && (r.location_id === null || r.location_id === locationId))
     .map((r) => ({
       taxRateId: r.tax_rate_id,
       version: r.version,
       name: r.name,
       ratePpm: r.rate_ppm,
       inclusive: r.inclusive,
+      locationId: r.location_id,
     }))
     .sort((a, b) =>
       a.name !== b.name ? (a.name < b.name ? -1 : 1) : a.taxRateId < b.taxRateId ? -1 : 1,
@@ -222,6 +230,8 @@ export interface SaleTrip {
   productId: string;
   productKind: ProductKind;
   productName: string;
+  /** The product's departure location; it decides which tax rates apply. */
+  locationId: string;
   minPartySize: number;
   maxPartySize: number;
   capacityRemaining: number;
@@ -284,6 +294,7 @@ export async function findTripForSale(
       "t.local_date",
       "t.local_start_time",
       "t.start_utc_offset_minutes",
+      "p.location_id",
       "p.min_party_size",
       "p.max_party_size",
     ])
@@ -319,6 +330,7 @@ export async function findTripForSale(
         productId: staff.productId,
         productKind: staff.productKind,
         productName: staff.productName,
+        locationId: row.location_id,
         minPartySize: row.min_party_size,
         maxPartySize: row.max_party_size,
         capacityRemaining: remaining,
@@ -339,6 +351,7 @@ export async function findTripForSale(
       productId: trip.product.id,
       productKind: trip.product.kind,
       productName: trip.product.name,
+      locationId: row.location_id,
       minPartySize: trip.product.minPartySize,
       maxPartySize: trip.product.maxPartySize,
       capacityRemaining: trip.capacity.remaining,

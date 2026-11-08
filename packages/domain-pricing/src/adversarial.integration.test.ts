@@ -936,7 +936,7 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
               capacityRemaining: found.trip.capacityRemaining,
             },
             priceList: list,
-            taxRates: await loadTaxRates(trx, A.id),
+            taxRates: await loadTaxRates(trx, A.id, found.trip.locationId),
             promotion:
               promotionCode === null
                 ? null
@@ -1495,8 +1495,8 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
             subject: f.subject ? f.subject(subject) : subject,
             priceList: f.list ? f.list(list) : list,
             taxRates: f.rates
-              ? f.rates(await loadTaxRates(trx, A.id))
-              : await loadTaxRates(trx, A.id),
+              ? f.rates(await loadTaxRates(trx, A.id, t.locationId))
+              : await loadTaxRates(trx, A.id, t.locationId),
             promotion: f.promotion ? f.promotion(terms) : terms,
             selection: {
               party: f.party ?? party(["adult", 2], ["child", 1], ["infant", 1]),
@@ -1882,7 +1882,11 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
     });
 
     it("refuses a discount split across trip-price lines other than by the largest remainder", async () => {
-      const rates = await as(A.id, (trx) => loadTaxRates(trx, A.id));
+      const rates = await as(A.id, async (trx) => {
+        const found = await findTripForSale(trx, A.id, trip(a.reefTrips, "2026-11-10"), NOW);
+        if (found.kind !== "on_sale") throw new Error("fixture trip not on sale");
+        return loadTaxRates(trx, A.id, found.trip.locationId);
+      });
       const split = (shares: Record<string, number>) => (r: Rows) => {
         r.lines = r.lines.map((l) =>
           l.kind === "ticket" && l.code in shares
@@ -2374,7 +2378,8 @@ describe.skipIf(!env)("adversarial pricing checks against a real database", () =
           offer: await getTripOffer(trx, B.id, b.trip, NOW),
           priceList: await loadPriceList(trx, B.id, b.dive),
           policy: await loadPolicy(trx, B.id, b.dive),
-          taxes: await loadTaxRates(trx, B.id),
+          // Any location: a rate for every location would still show.
+          taxes: await loadTaxRates(trx, B.id, crypto.randomUUID()),
           promotion: await findPromotion(trx, B.id, "BONLY"),
           created: await createQuote(trx, c, {
             tripId: b.trip,
