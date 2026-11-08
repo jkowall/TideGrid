@@ -9,7 +9,7 @@ Every column, required field, deduplication key, control total, error code, and 
 
 ## What this draft rests on
 
-Observed in the repository (2026-11-08, `main` at `f8c2805`):
+Observed in the repository (2026-11-08, `main` at `8f2d485`):
 
 - The [product scope](../02-product-scope.md#migration-and-launch-data) lists the in-scope migration data: customer identity and contact data; future direct, staff-assisted, and OTA bookings; participant names and allowed non-medical details; outstanding private-charter balances and external-payment references; active named-customer booking credits; and active trip-card balances once that module is enabled. It requires a source system, external identifier, mapping version, import batch, and deduplication key on every import, and a dry run with a row-level error report before any live commit.
 - The scope's acceptance rules: a re-run batch duplicates nothing; an import cannot silently overbook; ambiguous customer matches stay separate until operator review; imported money is labeled as opening or external records, never as TideGrid-processed Stripe charges; every accepted and rejected row reconciles before cutover. Legacy waiver evidence is not migrated in bulk, and TideGrid does not claim an imported legacy waiver is valid.
@@ -80,9 +80,9 @@ All proposed.
 **Deduplication and re-runs.**
 
 - Within a batch, two rows with the same deduplication key are both refused (`duplicate_key_in_batch`).
-- Re-running a batch, or a later batch from the same source system, finds rows by their deduplication key. An identical row is a no-op. An unchanged row still counts as accepted for the control totals, so a file that repeats earlier rows declares the same totals the legacy system shows. A row whose key exists but whose content changed is refused as `changed_since_import`, listed for the operator, and corrected only through an audited console action. Re-imports never overwrite.
+- Re-running a batch, or a later batch from the same source system, finds rows by their deduplication key. An identical row is a no-op. An unchanged row still counts as accepted for the control totals, so a file that repeats earlier rows declares the same totals the legacy system shows. An unchanged row repeated in a re-run or in the final delta batch takes nothing again: its booking's seats are already in that booking's own confirmed hold, and its payment is already on the booking. It is not counted a second time against capacity, the one-booking rule for a private charter, or the balance checks. A row whose key exists but whose content changed is refused as `changed_since_import`, listed for the operator, and corrected only through an audited console action. Re-imports never overwrite.
 - A dry run writes nothing. A commit is allowed only for a batch whose last dry run had no error rows and matched every declared control total, and only when every file has the same content hash as in that dry run. The manifest's `batch_mode` and `run_number` rows are left out of the hash.
-- The commit re-runs every row check and every control-total check inside its own transaction. It does not trust the dry run's result, because seats, holds, and customers can change between the two. It takes capacity through the same capacity-hold path and locks that checkout uses. If any check now fails, it refuses the whole batch with the same error codes and commits nothing.
+- The commit re-runs every row check and every control-total check inside its own transaction. It does not trust the dry run's result, because seats, holds, and customers can change between the two. It takes capacity through the proposed import capacity path in [bookings.csv](#bookingscsv), which locks each trip the way checkout's hold path does and counts the same live holds. If any check now fails, it refuses the whole batch with the same error codes and commits nothing.
 - There is no partial commit: the operator fixes the source or removes rows, then runs the dry run again.
 - Balance checks read the whole record for a booking or customer, including records from earlier batches of the same source system. A final delta batch that adds one payment is checked against the payments already imported.
 - A row that depends on a refused row is refused too, as `parent_rejected`, so a rejected trip takes its bookings, participants, payments, and waiver rows with it.
@@ -98,19 +98,19 @@ All proposed. The dry run writes one `errors.csv` per batch.
 | Column | Type | Meaning |
 |---|---|---|
 | `batch_id` | id | The manifest's batch id |
+| `run_number` | int | The manifest's run number |
 | `file` | text | The file name, or `manifest.csv` for a control total |
 | `line` | int | The record number, counting the header as 1, so it matches a spreadsheet row when no field contains a line break. Empty for a file-level error |
 | `record_key` | text | The row's deduplication key as text, or empty |
 | `column` | text | The column at fault, or empty |
 | `code` | enum | A stable code from the list below |
 | `severity` | enum | `error` blocks the commit; `warning` needs operator review but does not block |
-| `run_number` | int | The manifest's run number |
 | `message` | text | A plain sentence, safe to show the operator. It quotes only values that passed their type check |
 | `value` | text | The offending value, for non-personal columns only. Names, emails, phones, and references show as `[withheld]` |
 
 Every cell of `errors.csv` gets the same formula guard as the console's day export: a cell that starts with `=`, `+`, `-`, `@`, a tab, or a carriage return is written with a leading `'`, so a spreadsheet shows it as text. Rejected values come from the legacy file, so the report treats them as untrusted. A value refused as `invalid_type` or `invalid_enum` appears only in `value`, never in `message`.
 
-Proposed codes: `missing_column`, `batch_changed_since_dry_run`, `not_after_export`, `unknown_column`, `missing_required`, `invalid_type`, `invalid_enum`, `staff_channel_required`, `staff_channel_not_allowed`, `out_of_range`, `duplicate_key_in_batch`, `changed_since_import`, `unknown_reference`, `parent_rejected`, `product_not_found`, `product_kind_mismatch`, `boat_not_linked`, `zone_mismatch`, `nonexistent_local_time`, `ambiguous_local_time`, `trip_in_past`, `boat_overlap`, `trip_date_mismatch`, `over_capacity`, `charter_already_booked`, `amounts_do_not_add_up`, `ota_amounts_present`, `payment_on_ota_booking`, `overpaid`, `unexpected_balance`, `balance_due_date_missing`, `position_out_of_range`, `guardian_required`, `guardian_not_allowed`, `module_disabled`, `balance_expired`, `possible_card_number`, `customer_match_candidate` (warning), `participant_email_missing` (warning), `control_total_mismatch`.
+Proposed codes: `missing_column`, `batch_changed_since_dry_run`, `later_than_export`, `unknown_column`, `missing_required`, `invalid_type`, `invalid_enum`, `staff_channel_required`, `staff_channel_not_allowed`, `out_of_range`, `duplicate_key_in_batch`, `changed_since_import`, `unknown_reference`, `parent_rejected`, `product_not_found`, `product_kind_mismatch`, `boat_not_linked`, `zone_mismatch`, `nonexistent_local_time`, `ambiguous_local_time`, `trip_in_past`, `boat_overlap`, `trip_date_mismatch`, `over_capacity`, `charter_already_booked`, `amounts_do_not_add_up`, `ota_amounts_present`, `payment_on_ota_booking`, `overpaid`, `unexpected_balance`, `balance_due_date_missing`, `position_out_of_range`, `guardian_required`, `guardian_not_allowed`, `module_disabled`, `balance_expired`, `possible_card_number`, `customer_match_candidate` (warning), `participant_email_missing` (warning), `control_total_mismatch`.
 
 The report also has a summary: accepted and refused rows per file, and each declared control total beside the computed one.
 
@@ -126,7 +126,7 @@ The report also has a summary: accepted and refused rows per file, and each decl
 | `mapping_version` | Yes | `std-csv-v0` while this draft stands |
 | `batch_mode` | Yes | `dry_run` or `commit`. A commit carries the last clean dry run's files with the same content hash, apart from this row and `run_number` (`batch_changed_since_dry_run` otherwise). The commit still re-runs every check |
 | `operator_time_zone` | Yes | `zone` |
-| `exported_at` | Yes | `timestamp` of the legacy export. No `booked_at` or `received_at` may be later (`not_after_export`) |
+| `exported_at` | Yes | `timestamp` of the legacy export. No `booked_at` or `received_at` may be later (`later_than_export`) |
 | `waiver_notifications` | Yes, when bookings are present | `send_at_cutover` or `hold_until_staff_release`. The scope requires an explicit notification policy for imported future bookings; no mass email on import |
 
 **Control totals.** Every other row declares one total for one file: `item` is the metric, `file` is the file, `value` is the number the operator read from the legacy system. The dry run, and again the commit, computes the same metric from accepted rows, unchanged rows included. Any difference is a `control_total_mismatch` error. The metrics for each file are listed with the file below. A batch must declare every listed metric for every file it includes.
@@ -154,7 +154,7 @@ P-CHARTER4,Half-day private charter,00000000-0000-4000-8000-000000000102,Half-da
 
 ## trips.csv
 
-Future departures. A row maps to an existing TideGrid trip with the same product, boat, and start instant, or creates one in the `draft` sales state so it does not appear for sale until the operator publishes it (proposed). The schema lets a new trip start only as `draft` or `published`.
+Future departures. A row maps to an existing TideGrid trip with the same product, boat, and start instant, or creates one in the `draft` sales state so it does not appear for sale until the operator publishes it (proposed). The schema lets a new trip start only as `draft` or `published`. Under the current schema a `draft` trip cannot take a capacity hold at all, so imported bookings on it need the proposed import capacity path in [bookings.csv](#bookingscsv), which is a schema change.
 
 | Column | Type | Required | Rule |
 |---|---|---|---|
@@ -223,11 +223,12 @@ Future confirmed bookings only. Canceled and past bookings are not imported.
 | `included_tax_cents` | cents | Not with `ota` | Tax already inside a tax-inclusive price; `0` when none. Not above subtotal minus discount. It does not change the total |
 | `total_cents` | cents | Not with `ota` | Must equal subtotal minus discount plus fee plus tax (`amounts_do_not_add_up`), as the schema's order check does |
 | `balance_due_date` | date | When a balance is outstanding | Private charters only |
-| `booked_at` | timestamp | No | When the legacy system took the booking; not after `exported_at` |
+| `booked_at` | timestamp | No | When the legacy system took the booking; not after `exported_at` (`later_than_export`) |
 
 - **OTA rows** carry no amounts (`ota_amounts_present` otherwise). OTA money, refunds, and changes stay with the OTA, and the booking is a capacity and roster shadow outside the fee base.
 - **Direct and staff-assisted rows** enter the fee base on the same terms as a TideGrid-created booking. Every amount is labeled as an imported opening record, never as a TideGrid Stripe charge.
-- **Capacity.** For each trip, confirmed TideGrid seats plus seats in open capacity holds plus imported party sizes must fit the seat capacity (`over_capacity`). The commit checks this again in its own transaction, through the same capacity-hold path and locks that checkout uses, so a guest checkout between the dry run and the commit cannot oversell the trip. A private-charter trip takes one booking (`charter_already_booked`), counting open holds too. An import never overbooks; the operator resolves an overbooked legacy trip before cutover.
+- **Capacity.** For each trip, confirmed TideGrid seats plus seats in open capacity holds plus newly imported party sizes must fit the seat capacity (`over_capacity`). A private-charter trip takes one booking (`charter_already_booked`), counting open holds too. A booking already imported by an earlier batch is in those confirmed seats once and is never added again. An import never overbooks; the operator resolves an overbooked legacy trip before cutover.
+- **Import capacity path (proposed; needs a schema change).** Checkout's path cannot carry an import. On every insert, the hold trigger `app.check_capacity_hold` (`0006`) refuses a hold unless the trip and product are published, the booking cutoff has not passed, and the party fits the product's limits. A new hold must also expire within an hour. A trip the batch creates starts in `draft`, and an imported booking may sit inside its trip's cutoff, because it was sold before cutover. So the commit needs a separate import path in schema `app`, added by a G2.13 migration. Proposed rules: it takes the same trip row lock as the hold trigger (`FOR NO KEY UPDATE`), so imports and guest checkouts on one trip queue behind each other; it counts the same active and confirmed holds and applies the same capacity and whole-boat rules; it refuses a canceled trip; it records each imported booking's seats as a confirmed hold owned by the import, without checkout's one-hour expiry window; it skips only the on-sale checks, published state and booking cutoff, and only for a batch commit. Party-size limits stay row checks in the dry run and the commit. Until that migration exists, nothing can commit an imported booking.
 - **Deduplication key (D1, coordinator default):** `source_system` + `source_booking_ref` + `trip_date`. The trip date guards against legacy systems that reuse short references across seasons.
 - **Control totals:** `row_count`, `sum_party_size`, `rows_direct`, `rows_staff_assisted`, `rows_ota`, `sum_total_cents`, `sum_included_tax_cents` (both direct and staff-assisted only).
 
@@ -281,7 +282,7 @@ External payment and refund records against imported direct and staff-assisted b
 | `amount_cents` | cents | Yes | At least 1 |
 | `tender` | enum | Yes | `cash`, `check`, `card_outside_tidegrid`, `bank_transfer`, or `other` |
 | `reference` | text(64) | No | The external reference shown to staff. Never a card number |
-| `received_at` | timestamp | Yes | When the money moved; not after `exported_at` (`not_after_export`) |
+| `received_at` | timestamp | Yes | When the money moved; not after `exported_at` (`later_than_export`) |
 
 For each booking, payments minus refunds must not exceed the total (`overpaid`). Both sums count this batch's rows and the rows imported for that booking in earlier batches. What remains is the outstanding balance. A private charter with a balance needs a `balance_due_date`. A shared-seat booking with a balance is refused as `unexpected_balance`, because the scope's deposit and balance flow belongs to private charters (proposed; see [open questions](#open-questions-for-the-owner)).
 
@@ -433,7 +434,7 @@ Proposed boundaries, pending the owner's approval. They narrow the [Managed Laun
 
 ## Schema gaps observed
 
-The import must map to the current schema, which cannot yet hold most of it. These are inputs to the G2.13 build, not changes made here. Observed at `f8c2805`:
+The import must map to the current schema, which cannot yet hold most of it. These are inputs to the G2.13 build, not changes made here. Observed at `8f2d485`:
 
 - A booking requires a checkout session, an order, a payment, and a capacity hold, all non-null (`0007`). An imported booking has none of them.
 - A booking's source is `direct` or `staff_assisted` (`0012`). There is no `ota` or imported source, and no external reference column.
@@ -442,10 +443,10 @@ The import must map to the current schema, which cannot yet hold most of it. The
 - There are no tables for booking credits, dollar cards, or trip-count cards.
 - There is no import batch, source system, external id, mapping version, or deduplication key on any table.
 - There is no place for a legacy waiver status.
-- A new trip can start only as `draft` or `published` (`0003`). The import creates unpublished trips in `draft`.
+- A new trip can start only as `draft` or `published` (`0003`). The import creates unpublished trips in `draft`, and the hold trigger refuses any hold on a `draft` trip (`0006`).
 - A staff-assisted booking must carry a channel, and only a staff-assisted booking may (`0012`). The import requires `staff_channel` on exactly those rows.
 - An order carries `included_tax_amount` (`0007`). The import fills it from `included_tax_cents`.
-- A capacity hold's owner is an opaque reference (`0006`), so an import can own holds the way a checkout session does, and the hold trigger checks capacity against every live hold. What is missing is the link from a hold to an imported booking, covered by the first gap above.
+- A capacity hold's owner is an opaque reference (`0006`), so an import could own a hold. But on every insert `app.check_capacity_hold` refuses a hold unless the trip and product are published, the booking cutoff has not passed, and the party fits the product's limits, and the hold must expire within an hour. An import of a `draft` trip, or of a booking inside its trip's cutoff, cannot take a hold today. The proposed [import capacity path](#bookingscsv) needs a migration: a function in schema `app` that takes the same trip lock and capacity count but skips the on-sale checks for a batch commit. The link from a hold to an imported booking is covered by the first gap above.
 - The console's day export writes money as decimals; the import takes cents. The two never meet, but staff will see both.
 
 ## Open questions for the owner
@@ -463,3 +464,4 @@ Each needs an owner decision recorded in the register before this draft can be p
 9. The default for `waiver_notifications`, and whether it may differ by booking.
 10. Whether the error report may ever show personal values to the operator, or always withholds them.
 11. Whether a trip card or dollar card must carry an expiry date on import. The draft makes it optional, as the scope does.
+12. Approve the proposed import capacity path: a commit may confirm imported seats on a `draft` trip or inside a trip's booking cutoff, under checkout's trip lock and capacity count. The alternative is to require every trip to be published and outside its cutoff at commit, which refuses bookings for the next day's departures at cutover.
