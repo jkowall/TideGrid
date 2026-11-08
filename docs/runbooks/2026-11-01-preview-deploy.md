@@ -18,6 +18,7 @@
 | A secret change after a code rollback fails with 10215 | 299076, 299143-299147 | 311623, 311510-311521, 311696 | held; 4.152.0 also maps 10214 to the same message |
 | `wrangler rollback` leaves bound resources unchanged | 349363 | 361316 | held |
 | Declining the changed-secrets prompt (10220) aborts the rollback and exits 0 | 349296, 349393-349415 | 361248, 361351-361371 | held for the abort and exit 0; 4.135.0 then printed its success line, 4.152.0 returns without it. `nov1` still counts a rollback done only when the anchor alone is live |
+| Deploy and rollback send a Durable Objects code-update strategy, `deferred` with a 300 s delay by default | not sent: 157424-157440, 349377-349405 | 168444-168461, 181401-181410, 220730-220745, 361331-361342, 361356-361367 | new; no step relies on it. No Worker here binds a Durable Object, and `nov1` passes no `--durable-objects-code-update-mode`. Its effect on a rollback is unverified without a live call; `nov1` counts a rollback done only when the anchor alone is live |
 
 ## Owner calls before anything else
 
