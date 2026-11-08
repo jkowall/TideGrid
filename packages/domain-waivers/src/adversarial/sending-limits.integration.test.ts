@@ -249,13 +249,88 @@ describe.skipIf(!env)("G2.15 adversarial: sending limits across requests", () =>
     expect(guest?.participants[0]?.sendsAt?.getTime()).toBeGreaterThan(waitingAt + 8 * 60_000);
     // The old link stays closed; once the time comes, the new email's opens.
     expect((await redeem(world, A.id, first.token)).kind).toBe("replaced");
-    await world.admin`update public.email_messages m set next_attempt_at = now()
-                        from public.waiver_deliveries d
-                       where d.request_id = ${request.id} and d.generation = 2
-                         and m.id = d.message_id and m.state = 'queued'`;
+    // Time passes: the delivery's send_after first, then its email. Since
+    // 0019 the email never comes due before its delivery's send_after.
+    await world.admin.begin(async (tx) => {
+      await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
+      await tx`update public.waiver_deliveries set send_after = now()
+                where request_id = ${request.id} and generation = 2`;
+      await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
+      await tx`update public.email_messages m set next_attempt_at = now()
+                 from public.waiver_deliveries d
+                where d.request_id = ${request.id} and d.generation = 2
+                  and m.id = d.message_id and m.state = 'queued'`;
+    });
     const second = await linkFor(world.admin, world.db, A.id, request.id);
     expect(second.to).toBe(ren);
     expect((await redeem(world, A.id, second.token)).kind).toBe("opened");
+  }, 240_000);
+
+  it("never lets a direct writer bring a waiting email due before its delivery's send_after (0019, D6)", async () => {
+    const booked = await book(world, A, nextTrip(), 1, hooks);
+    const kit = uniqueEmail("kit.early");
+    const pid = await name(world, A.id, booked.bookingId, 1, adult("Kit Early", kit), hooks);
+    const request = await liveRequest(world.admin, booked.bookingId, pid);
+    await linkFor(world.admin, world.db, A.id, request.id);
+    await name(world, A.id, booked.bookingId, 1, adult("Kit Early", null), hooks);
+    await name(world, A.id, booked.bookingId, 1, adult("Kit Early", kit), hooks);
+    const [held] = await world.admin<{ message_id: string; send_after: Date }[]>`
+      select message_id, send_after from public.waiver_deliveries
+       where request_id = ${request.id} and generation = 2`;
+    if (!held) throw new Error("setup: no waiting delivery");
+    expect(held.send_after.getTime()).toBeGreaterThan((await dbNow()) + 8 * 60_000);
+    const move = (to: string) =>
+      refusal(
+        asApp(world, A.id, (tx) =>
+          to === "send_after"
+            ? tx`update public.email_messages m set next_attempt_at = d.send_after
+                   from public.waiver_deliveries d
+                  where d.message_id = m.id and m.id = ${held.message_id}`
+            : tx`update public.email_messages set next_attempt_at = now() + ${to}::interval
+                  where id = ${held.message_id}`,
+        ),
+      );
+    // Now, or a minute before send_after: refused, as tidegrid_app.
+    expect(await move("0 seconds")).toBe("23514:email_messages_waiver_send_after");
+    expect(await move("8 minutes")).toBe("23514:email_messages_waiver_send_after");
+    // To send_after itself, or later: allowed (a later time never moves earlier, so no change).
+    expect(await move("send_after")).toBe("no-error");
+    const [due] = await world.admin<{ next_attempt_at: Date; state: string }[]>`
+      select next_attempt_at, state from public.email_messages where id = ${held.message_id}`;
+    expect(due?.state).toBe("queued");
+    expect(due?.next_attempt_at.getTime()).toBe(held.send_after.getTime());
+    // Once send_after has passed, the email may move anywhere earlier: it
+    // could be claimed anyway.
+    await world.admin.begin(async (tx) => {
+      await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
+      await tx`update public.waiver_deliveries set send_after = now() - interval '1 minute'
+                where message_id = ${held.message_id}`;
+      await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
+    });
+    expect(await move("-30 seconds")).toBe("no-error");
+
+    // A waiver email whose delivery is not visible (an insert still open
+    // elsewhere, or none at all) never moves earlier: the open insert's own
+    // check read the email's old time.
+    const orphan = await asApp(world, A.id, async (tx) => {
+      const [m] = await tx<{ id: string }[]>`
+        insert into public.email_messages (tenant_id, dedupe_key, template, template_version,
+            to_email, from_name, subject, html_body, text_body, next_attempt_at)
+        values (${A.id}, ${`waiver.request:${request.id}:99`}, 'waiver_request', 1,
+                ${kit}, 'Synthetic Operator', 'Waiver', '<p>Waiver.</p>', 'Waiver.',
+                now() + interval '20 minutes')
+        returning id`;
+      return m?.id ?? "";
+    });
+    expect(
+      await refusal(
+        asApp(
+          world,
+          A.id,
+          (tx) => tx`update public.email_messages set next_attempt_at = now() where id = ${orphan}`,
+        ),
+      ),
+    ).toBe("23514:email_messages_waiver_send_after");
   }, 240_000);
 
   it("queues a valid email for a minor with the longest names a booking can hold", async () => {

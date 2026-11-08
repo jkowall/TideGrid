@@ -144,7 +144,7 @@ export interface OutboxEventsTable {
   payload: Json;
   request_id: ColumnType<string | null, string | null | undefined, never>;
   created_at: CreatedAt;
-  // Delivery columns (0019, W3-G2.3): the publisher and the consumer move these.
+  // Delivery columns (0020, W3-G2.3): the publisher and the consumer move these.
   available_at: ColumnType<Date, Date | string | undefined, Date | string>;
   published_at: ColumnType<Date | null, never, Date | string | null>;
   delivered_at: ColumnType<Date | null, never, Date | string | null>;
@@ -1218,12 +1218,12 @@ export interface Database
   booking_email_resend_claims: BookingEmailResendClaimsTable;
   // Finalization exception resolutions (0018, W1-FIN-EXC).
   finalization_exception_resolutions: FinalizationExceptionResolutionsTable;
-  // Delivery foundation (0019, W3-G2.3).
+  // Delivery foundation (0020, W3-G2.3).
   outbox_deliveries: OutboxDeliveriesTable;
   outbox_dead_letters: OutboxDeadLettersTable;
 }
 
-/** One handler's outcome for one outbox event (0019, W3-G2.3). Append-only. */
+/** One handler's outcome for one outbox event (0020, W3-G2.3). Append-only. */
 export interface OutboxDeliveriesTable {
   tenant_id: TenantColumn;
   outbox_event_id: Fixed<string>;
@@ -1232,11 +1232,11 @@ export interface OutboxDeliveriesTable {
   request_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
-/** Where a dead letter came from (0019). */
+/** Where a dead letter came from (0020). */
 export type DeadLetterSource = "consumer" | "queue" | "publisher";
 
 /**
- * A message that exhausted its retries (0019, W3-G2.3). Written open; a replay
+ * A message that exhausted its retries (0020, W3-G2.3). Written open; a replay
  * sets the reason once and the trigger stamps who and when.
  */
 export interface OutboxDeadLettersTable {

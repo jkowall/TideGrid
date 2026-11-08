@@ -12,17 +12,29 @@ Dated decisions that changed scope, wording, or process. Each entry records the 
 
 The owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." This is a dated synthetic pull-forward. It waives the Validation gate and the O-VAL-2 dependency for W3-OPS-1 (plan only), W3-G2.3, W3-G2.9, W3-G2.10, and W3-G2.2b without managed OIDC and MFA. It allows no provider signup, no Cloudflare, Neon, or Stripe call, no Terraform apply, and no deploy. A new Worker binding stays out of the configuration a release deploys until its resource exists. No gate is claimed.
 
-W3-G2.3 builds the delivery foundation with migration `0019` (provisional, claimed at merge) and the [database contract](../../packages/database/README.md#delivery-foundation-0019). Coordinator defaults, pending owner confirmation:
+W3-G2.3 builds the delivery foundation with migration `0020` (renumbered at merge after W1-0014-RESIDUALS took `0019`) and the [database contract](../../packages/database/README.md#delivery-foundation-0020). Coordinator defaults, pending owner confirmation:
 
 - **D1: at-least-once delivery with idempotent handlers** (the goal's recommended default). A handler's outcome row commits with its writes; a duplicate skips it.
 - **D2: cleanup through an admin-owned schema app function** (the goal's recommended default). `app.delivery_cleanup` removes completed idempotency keys and unused quotes seven days past their expiry. The runtime still holds no DELETE. Quotes stay append-only for updates.
 - **D3: one Worker script, queue only in tests.** The API Worker gains a queue entry. Only `env.test` declares the queue and its DLQ. A separate async Worker deployment and the real queues wait for W3-OPS provisioning, so the next release from main deploys unchanged bindings.
-- **D4: events before 0019 are not sent.** The migration marks them published and delivered, because no consumer existed and the cron sweeps already did their work.
+- **D4: events before 0020 are not sent.** The migration marks them published and delivered, because no consumer existed and the cron sweeps already did their work.
 - **D5: retry budget.** The consumer retries with 30 s doubling to 15 minutes and records its own dead letter on the fifth attempt. The queue's own DLQ is the backstop. A hint not delivered within 15 minutes is sent again, up to 10 accepted sends. A send the queue refused counts for nothing and waits five minutes.
 - **D6: "operator" means the TideGrid operator here.** Dead letters are visible through `outbox:dlq list` and an error log line, not in the tenant console.
 - **D7: one handler to start.** `ops_alert` logs ids for a finalization exception, a refused refund, and a failed confirmation email. New handlers come with the goals that need them.
 
 The cron sweeps stay as the backstop for the work they already do.
+
+### 2026-11-08: W1-0014-RESIDUALS, the 0014 resend residuals closed for direct writers (owner go; coordinator defaults pending owner confirmation)
+
+The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and email limits" on the O-SCOPE card, whose option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." The three fixes are the residuals the [verification log](../verification-log.md) recorded for `0014`, each reachable only by a writer with `tidegrid_app`'s credentials that skips the service. Migration `0019` (provisional; `0018` belongs to W1-FIN-EXC) closes them. Coordinator defaults, pending owner confirmation:
+
+- **D1, close all three.** D4 C (the two templates' keys), D5 A (eligibility in the database), and D6 (the waiver `send_after` hole).
+- **D2, in the existing triggers, through an invoker function.** The goal's recommended option was a security definer function with a pinned `search_path`. Every table the rules read is one the writer already reads under its own row-level security, so a definer would add a privilege and gain nothing. The rules run in `app.check_email_message` and `app.check_booking_email_resend`, each replaced in place as `0015` and `0017` did, and the new `app.booking_resend_eligibility_refusal` is a STABLE invoker with `search_path` pinned.
+- **D3, the keys are pinned at insert.** A `booking_confirmation` or `booking_canceled` message names its booking and uses its original key or a staff resend key (`email_messages_booking_key`), and an original fits the booking's state (`email_messages_booking_state`, added after the independent review). Existing rows are not checked. A message of another template, a `booking_manage` link message included, is not held: the remaining residual.
+- **D4, eligibility at the ledger row, in the service's order, under the service's locks.** Kind, trip over, and failed refund before `0014`'s limits; an earlier email being sent after them. The booking, a notice's refund, and the earlier emails are locked `FOR SHARE` first. Eligibility is not decided again at the claim: a booking canceled after a resend is queued relies on the cancel path, which cancels its pending confirmations.
+- **D5, a waiver email moves earlier only to its `send_after`, or once that has passed** (`email_messages_waiver_send_after`).
+
+Security review under rule R9: run on 2026-11-08 under the owner's go to merge without asking him ("go ahead and merge them dont ask me to review them"). Nothing above low; the one low finding (an earlier queued email a direct writer leaves in place) is recorded, not fixed. Canonical: the [database README](../../packages/database/README.md#staff-resend-residuals-0019) and the [verification log](../verification-log.md).
 
 ### 2026-11-08: Stage 0 providers for the paid pilots (owner decisions)
 
@@ -34,6 +46,7 @@ The cron sweeps stay as the backstop for the work they already do.
 - **Malware scanning: not decided.** The comparison suggests Cloudmersive, starting on its free tier. In the same discussion the coordinator also suggested type and size checks alone while only the owner handles uploads during Managed Launch, with scanning added once operators upload files themselves. Both stay suggestions until the owner decides.
 
 These decisions narrow the doc 08 Stage 0 sentence for the paid pilots only. Not done: no account, no provider call, and no configuration change.
+
 
 ### 2026-11-08: W3-OPS-1, pilot infrastructure as code, plan only (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
 
@@ -50,6 +63,7 @@ The goal adds Terraform modules under [`infra/terraform`](../../infra/terraform/
 
 Not done: a plan per change in CI (it needs credentials and a backend), application alerts (W3-OPS-5), backup jobs and drills (W3-OPS-6). Security review: run by the goal's session on the Terraform, the workflow, and the runbook; see the pull request.
 
+
 ### 2026-11-08: Demo guest app pulled forward into the demo (owner decision)
 
 On 2026-11-08 the owner wrote: "My customers really want mobile native apps. Is that in the plan, or do we need to modify the waves?" Native guest apps were already planned as the Native add-on, built in the G4 series under the [Native pilot gate](05-roadmap-validation.md#native-pilot-gate), Native build work starts only after the Validation gate, and an operator's apps go live only after it passes the Core live gate and its own Native pilot gate. A native app for operator staff is out of scope ([product scope](02-product-scope.md)). On a decision card that asked "Which mobile app change do you want in the plan?", the owner chose "Demo guest app now" at 17:45 UTC. The option read: "Add a small wave to build a branded guest app on test data for TestFlight and Android testing to use in sales; full store launch stays in Wave 5." The other options were "Keep plan as is" and "Also add a staff app".
@@ -61,6 +75,7 @@ On 2026-11-08 the owner wrote: "My customers really want mobile native apps. Is 
 - **Owner inputs, needed before distribution.** Apple Developer Program ($99 a year) and Google Play developer registration ($25 once) for a TideGrid-owned test account; the account holder's identity; go for each goal. Expo and its packages are new npm dependencies, so the first goal's packet names them for the owner's go under the shared rules.
 
 Not done: no code, no account, and no build. The goals are W1N-APP, W1N-JOURNEYS, and W1N-TESTFLIGHT in the roadmap tracker.
+
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
@@ -75,6 +90,7 @@ The owner placed finalization exception resolution in the G2.12 row with the O-S
 Resolving changes no money, booking, payment, refund, or checkout. Retries and refunds from the console, email exceptions, overrides, and staff cancel stay out of scope.
 
 Security review under rule R9: the owner said yes on 2026-11-08, and it found no defects. Canonical: the [database README](../../packages/database/README.md#finalization-exception-resolutions-0018) and the [verification log](../verification-log.md#2026-11-08).
+
 
 ### 2026-11-08: W1-RESEND-CLAIM, staff resend limits held at the delivery claim (owner go; coordinator defaults pending owner confirmation)
 
