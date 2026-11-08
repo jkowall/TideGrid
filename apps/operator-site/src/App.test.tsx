@@ -286,6 +286,63 @@ describe("Cloudflare Access sign-in", () => {
     expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeTruthy();
   });
 
+  it("asks for Access again when the Access token is refused", async () => {
+    vi.stubGlobal(
+      "fetch",
+      api({
+        "GET /api/v1/me": [
+          () =>
+            json({ error: { code: "invalid_access_token", message: "x", requestId: "r" } }, 401),
+        ],
+      }),
+    );
+    const App = await loadApp();
+    render(<App />);
+    await focusLandsOn("Sign in");
+    expect(screen.queryByLabelText("Work email")).toBeNull();
+    expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeTruthy();
+  });
+
+  it("treats an API without Access set up as unavailable, not as a sign-in", async () => {
+    vi.stubGlobal(
+      "fetch",
+      api({
+        "GET /api/v1/me": [
+          () =>
+            json({ error: { code: "access_not_configured", message: "x", requestId: "r" } }, 401),
+        ],
+      }),
+    );
+    const App = await loadApp();
+    render(<App />);
+    await heading("The console can't reach TideGrid");
+    expect(screen.queryByLabelText("Work email")).toBeNull();
+  });
+
+  it("opens the Access session when a sign-in link reaches an Access-only console", async () => {
+    vi.stubGlobal(
+      "fetch",
+      api({
+        "POST /api/v1/auth/sessions": [
+          () =>
+            json({ error: { code: "sign_in_method_disabled", message: "x", requestId: "r" } }, 403),
+        ],
+        "GET /api/v1/me": [() => json(me("access"))],
+      }),
+    );
+    const App = await loadApp("#token=synthetic-link");
+    render(<App />);
+    await focusLandsOn("Finish signing in");
+    fireEvent.click(screen.getByRole("button", { name: "Continue signing in" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Finish signing in" })).toBeNull(),
+    );
+    expect(screen.queryByLabelText("Work email")).toBeNull();
+    expect(
+      screen.queryByText("That sign-in link is invalid, already used, or expired."),
+    ).toBeNull();
+  });
+
   it("keeps the email form where the email link is on", async () => {
     vi.stubGlobal("fetch", api({ "GET /api/v1/me": [() => status(401)] }));
     const App = await loadApp();

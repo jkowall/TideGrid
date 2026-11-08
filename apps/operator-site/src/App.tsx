@@ -113,9 +113,15 @@ async function checkSignIn(): Promise<State> {
     }
     if (res.status === 401) {
       const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null;
-      return body?.error?.code === "access_required"
-        ? { kind: "signed-out", accessOnly: true }
-        : { kind: "signed-out" };
+      const code = body?.error?.code;
+      // Access-only deployments: ask for Access again, never the email form.
+      if (code === "access_required" || code === "invalid_access_token") {
+        return { kind: "signed-out", accessOnly: true };
+      }
+      // An Access token reached an API with no Access set up: a configuration
+      // fault, which no sign-in form can fix.
+      if (code === "access_not_configured") return { kind: "failed", reason: "unavailable" };
+      return { kind: "signed-out" };
     }
     if (res.status === 403) {
       const body = (await res.json().catch(() => null)) as {
@@ -170,6 +176,12 @@ export function App() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ token }),
     }).catch(() => null);
+    if (res?.status === 403) {
+      // The email link is off here (Access only): show whatever sign-in the
+      // person already has, or the Access screen, instead of the email form.
+      const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null;
+      if (body?.error?.code === "sign_in_method_disabled") return refresh(true);
+    }
     if (!res?.ok) {
       return setState({
         kind: "signed-out",

@@ -23,11 +23,12 @@ Cloudflare renames dashboard items often. The names below follow Cloudflare's do
    - Allow "Authenticator application" and "Security key". Leave "Biometrics" on as well if staff use Touch ID, Face ID, or Windows Hello.
    - Set the authentication duration. 24 hours matches the console's own session length.
    - Select "Apply global MFA settings by default".
+   - Turn off "Use identity provider MFA" if it is on. With it on, a Microsoft sign-in that already did Microsoft's two-step skips Cloudflare's, and the decision is Cloudflare's second step for everyone.
    - Reference: <https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/independent-mfa/>
 3. **Make the console application require it.** Zero Trust, then Access controls, then Applications, then the console application (console.tidegrid.us), then Edit:
    - Authentication, then the MFA tab: choose "Respect global enforcement setting" (or "Custom MFA settings" with the same methods). Do not choose "Disable MFA".
    - Login methods: allow Google and Microsoft Entra ID only. Turn off One-time PIN for this application: a PIN by email is one factor, and staff should not be offered it.
-   - The application's policy: one Allow policy covering the whole hostname (including `/api`), listing each staff member's exact email address. Do not include a whole domain, and never `gmail.com`. Add no Bypass or Service Auth policy to this application. If the policy has its own MFA setting, it wins over the application's, so set it the same way or leave it on the application's setting.
+   - The application's policies cover the whole hostname (including `/api`). Use one Allow policy per login method: Include the exact email addresses of the staff who sign in that way, and Require "Login Methods" set to that one login method (for example the operator's own Entra ID). Then no other operator's Microsoft tenant, and no other login method, can sign in as those addresses. Do not include a whole domain, and never `gmail.com`. Add no Bypass or Service Auth policy to this application. If a policy has its own MFA setting, it wins over the application's, so set it the same way or leave it on the application's setting.
 4. **Check it.** In a private browser window, open the console:
    - Sign in with a Google account that is a staff member. Cloudflare must ask for the second step before the console opens. If it does not, stop and recheck step 3.
    - Do the same with a Microsoft account.
