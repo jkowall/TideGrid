@@ -324,7 +324,7 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
     const first = await issued(A.id, staffA, req, "participant_qr");
     const second = await issued(A.id, staffA, req, "participant_qr");
     expect(first.token).not.toBe(second.token);
-    expect(await redeem(world, A.id, first.token)).toEqual({ kind: "replaced" });
+    expect(await redeem(world, A.id, first.token)).toEqual({ kind: "code_ended" });
     const [lifetimes] = await world.admin<{ link: number }[]>`
       select extract(epoch from (expires_at - created_at))::int as link
         from public.guest_access_links where id = ${second.linkId}`;
@@ -332,7 +332,7 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
 
     const opened = await redeem(world, A.id, second.token);
     if (opened.kind !== "opened") throw new Error(JSON.stringify(opened));
-    expect(await redeem(world, A.id, second.token)).toEqual({ kind: "used" });
+    expect(await redeem(world, A.id, second.token)).toEqual({ kind: "code_ended" });
     const [session] = await world.admin<{ seconds: number }[]>`
       select extract(epoch from (expires_at - created_at))::int as seconds
         from public.waiver_signing_sessions where id = ${opened.session.id}`;
@@ -365,6 +365,22 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
       loadWaiverSession(trx, A.id, secret),
     );
   }
+
+  it("answers a crew code as ended once the trip is over, so no emailed link is offered", async () => {
+    const tripId = nextTrip();
+    const booked = await book(world, A, tripId, 1, hooks);
+    const pid = await name(world, A.id, booked.bookingId, 1, adult("Tia Late"), hooks);
+    const req = (await liveRequest(world.admin, booked.bookingId, pid)).id;
+    const code = await issued(A.id, staffA, req, "staff_device");
+    await world.admin`
+      with t as (select date_trunc('minute', now()) - interval '2 days' as s)
+      update public.scheduled_trips st
+         set starts_at = t.s, ends_at = t.s + make_interval(mins => st.duration_minutes),
+             local_date = (t.s at time zone st.time_zone)::date,
+             local_start_time = (t.s at time zone st.time_zone)::time(0)
+        from t where st.id = ${tripId}`;
+    expect(await redeem(world, A.id, code.token)).toEqual({ kind: "code_ended" });
+  }, 120_000);
 
   it("closes the code when the booking is canceled, the participant changes, or a new version supersedes it", async () => {
     // Canceled.
