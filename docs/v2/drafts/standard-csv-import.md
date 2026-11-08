@@ -110,7 +110,7 @@ All proposed. The dry run writes one `errors.csv` per batch.
 
 Every cell of `errors.csv` gets the same formula guard as the console's day export: a cell that starts with `=`, `+`, `-`, `@`, a tab, or a carriage return is written with a leading `'`, so a spreadsheet shows it as text. Rejected values come from the legacy file, so the report treats them as untrusted. A value refused as `invalid_type` or `invalid_enum` appears only in `value`, never in `message`.
 
-Proposed codes: `missing_column`, `batch_changed_since_dry_run`, `later_than_export`, `unknown_column`, `missing_required`, `invalid_type`, `invalid_enum`, `staff_channel_required`, `staff_channel_not_allowed`, `out_of_range`, `duplicate_key_in_batch`, `changed_since_import`, `unknown_reference`, `parent_rejected`, `product_not_found`, `product_kind_mismatch`, `boat_not_linked`, `zone_mismatch`, `nonexistent_local_time`, `ambiguous_local_time`, `trip_in_past`, `trip_departed`, `boat_overlap`, `trip_date_mismatch`, `over_capacity`, `charter_already_booked`, `amounts_do_not_add_up`, `ota_amounts_present`, `payment_on_ota_booking`, `overpaid`, `unexpected_balance`, `balance_due_date_missing`, `position_out_of_range`, `guardian_required`, `guardian_not_allowed`, `module_disabled`, `balance_expired`, `possible_card_number`, `customer_match_candidate` (warning), `participant_email_missing` (warning), `control_total_mismatch`.
+Proposed codes: `missing_column`, `batch_changed_since_dry_run`, `later_than_export`, `unknown_column`, `missing_required`, `invalid_type`, `invalid_enum`, `staff_channel_required`, `staff_channel_not_allowed`, `out_of_range`, `duplicate_key_in_batch`, `changed_since_import`, `unknown_reference`, `parent_rejected`, `product_not_found`, `product_kind_mismatch`, `boat_not_linked`, `zone_mismatch`, `nonexistent_local_time`, `ambiguous_local_time`, `trip_in_past`, `trip_departed`, `boat_overlap`, `trip_date_mismatch`, `over_capacity`, `charter_already_booked`, `amounts_do_not_add_up`, `ota_amounts_present`, `payment_on_ota_booking`, `overpaid`, `refund_exceeds_payments`, `unexpected_balance`, `balance_due_date_missing`, `position_out_of_range`, `guardian_required`, `guardian_not_allowed`, `module_disabled`, `balance_expired`, `possible_card_number`, `customer_match_candidate` (warning), `participant_email_missing` (warning), `control_total_mismatch`.
 
 The report also has a summary: accepted and refused rows per file, and each declared control total beside the computed one.
 
@@ -161,7 +161,7 @@ Future departures. A row maps to an existing TideGrid trip with the same product
 | `source_trip_id` | id | Yes | The legacy departure id |
 | `source_product_id` | id | Yes | A row in `products.csv` |
 | `tidegrid_boat_id` | uuid | Yes | A boat linked to the mapped product (`boat_not_linked` otherwise) |
-| `local_date` | date | Yes | After the batch's `exported_at` date (`trip_in_past` otherwise). The trip's start instant must also be after the time of the check: the dry run's time, and again the commit's time (`trip_departed` otherwise) |
+| `local_date` | date | Yes | The trip's start instant (this date and the start time, in the operator's time zone) must be after the batch's `exported_at` (`trip_in_past` otherwise), so a departure later on the export day is accepted. The start instant must also be after the time of the check: the dry run's time, and again the commit's time (`trip_departed` otherwise) |
 | `local_start_time` | time | Yes | See the time zone rules |
 | `time_zone` | zone | Yes | Must equal the product location's zone |
 | `utc_offset` | offset | Only for a fall-back time | Picks one of the two instants |
@@ -293,7 +293,7 @@ External payment and refund records against imported direct and staff-assisted b
 | `reference` | text(64) | No | The external reference shown to staff. Never a card number |
 | `received_at` | timestamp | Yes | When the money moved; not after `exported_at` (`later_than_export`) |
 
-For each booking, payments minus refunds must not exceed the total (`overpaid`). Both sums count this batch's rows and the rows imported for that booking in earlier batches. What remains is the outstanding balance. A private charter with a balance needs a `balance_due_date`. A shared-seat booking with a balance is refused as `unexpected_balance`, because the scope's deposit and balance flow belongs to private charters (proposed; see [open questions](#open-questions-for-the-owner)).
+For each booking, payments minus refunds must not exceed the total (`overpaid`), and must not be negative: a refund can never exceed the payments recorded for that booking (`refund_exceeds_payments`). Both sums count this batch's rows and the rows imported for that booking in earlier batches. What remains is the outstanding balance. A private charter with a balance needs a `balance_due_date`. A shared-seat booking with a balance is refused as `unexpected_balance`, because the scope's deposit and balance flow belongs to private charters (proposed; see [open questions](#open-questions-for-the-owner)).
 
 - **Deduplication key:** `source_system` + `source_payment_id`.
 - **Control totals:** `row_count`, `sum_payment_cents`, `sum_refund_cents`, `sum_outstanding_cents` (over every non-OTA booking in the batch, after payments from earlier batches). The dry run and the commit also check, per booking, that total equals payments minus refunds plus outstanding.
@@ -320,7 +320,7 @@ Active named-customer balances, one row per lot. Each row is an opening record, 
 | `amount_cents` | cents | Not with `trip_count_card` | At least 1 |
 | `units` | int | With `trip_count_card` | Whole trips, 1 to 100 |
 | `eligible_source_product_ids` | text | No | Legacy product ids from `products.csv`, separated by `\|`; empty means every product |
-| `expires_on` | date | No | Empty means no expiry, which the scope allows for every balance kind. A given date must be after the export date (`balance_expired`) |
+| `expires_on` | date | No | Empty means no expiry, which the scope allows for every balance kind. A given date must be a valid date, and not earlier than the operator-local date of the check: the dry run's date, and again the commit's date (`balance_expired` otherwise). A balance that expires on the commit date itself is still imported |
 | `source_card_ref` | id | No | The legacy card code, kept as a reference. TideGrid issues its own card; the legacy code redeems nothing |
 
 - Trip-card rows are refused as `module_disabled` unless the trip cards module is enabled for the operator.
