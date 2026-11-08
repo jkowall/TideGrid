@@ -55,7 +55,7 @@ The owner allows scripted type-backs when the owner directs an unattended run, w
 
 ## Wrangler 4.152.0 re-verification (W1-TOOLING, 2026-11-08)
 
-The three apps pin wrangler 4.152.0 exactly, and the Workers test pool resolves the same version through `pnpm.overrides` ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-tooling-wrangler-41520-and-the-workers-test-pool-owner-go-start-gate-waived-by-the-owner-coordinator-defaults-pending-owner-confirmation); the versions are coordinator defaults pending owner confirmation). The pin is exact so that the line references below cannot drift with a lockfile refresh. Nothing was released or deployed.
+The three apps pin wrangler 4.152.0 exactly, and the Workers test pool resolves the same version through `pnpm.overrides` ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-tooling-wrangler-41520-and-the-workers-test-pool-owner-go-start-gate-waived-by-the-owner-coordinator-defaults-pending-owner-confirmation); the owner confirmed the versions on 2026-11-08). The pin is exact so that the line references below cannot drift with a lockfile refresh. Nothing was released or deployed.
 
 `nov1` relies on wrangler behavior it cannot test, since the unit tests mock wrangler. Each reading was re-read in `node_modules/.pnpm/wrangler@4.152.0_@types+node@24.13.6/node_modules/wrangler/wrangler-dist/cli.js` and compared with the 4.135.0 file. The sections above keep their 4.135.0 line numbers; the comments and refusal texts in `src` now cite 4.152.0 lines.
 
