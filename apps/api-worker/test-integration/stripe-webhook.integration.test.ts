@@ -13,11 +13,18 @@
  * cancellation refund settles through settleRefund, and a pending one through
  * the sweep; and a 401 on the refund leaves it requested, with no email
  * telling the guest it is not coming.
+ *
+ * Ingress hardening (W1-STRIPE-WEBHOOK): under Stripe the route answers 200
+ * once the event is recorded and processes it after the response, through
+ * `waitUntil`, with the sweep as the backstop; and it refuses any client
+ * address, read from CF-Connecting-IP only, that is not on Stripe's list.
+ * The test's execution context keeps every `waitUntil` promise, and `drain`
+ * awaits them, so a test sees the state after the background work.
  */
 import { randomUUID } from "node:crypto";
 import { createDb } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
-import { sweepCheckouts } from "@tidegrid/domain-booking";
+import { type BookingHooks, sweepCheckouts } from "@tidegrid/domain-booking";
 import {
   type CheckoutFixture,
   createCheckoutFixture,
@@ -25,7 +32,11 @@ import {
   quoteFor,
 } from "@tidegrid/domain-booking/testing";
 import { tripAllocator } from "@tidegrid/domain-inventory/testing";
-import { createStripePaymentProvider, type StripePaymentProvider } from "@tidegrid/domain-payments";
+import {
+  createStripePaymentProvider,
+  STRIPE_WEBHOOK_IPS,
+  type StripePaymentProvider,
+} from "@tidegrid/domain-payments";
 import {
   createStripeFixture,
   type StripeFixture,
@@ -50,6 +61,8 @@ type Sql = ReturnType<typeof postgres>;
 type Json = Record<string, any>;
 
 const env = inject("integrationDb");
+
+const [STRIPE_IP = "", OTHER_STRIPE_IP = ""] = STRIPE_WEBHOOK_IPS;
 
 interface Tenant extends CheckoutFixture {
   host: string;
@@ -80,17 +93,39 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     EMAIL_PROVIDER: "fake",
     GUEST_LINK_ORIGIN: "https://{slug}.book.example.test",
   });
-  const executionCtx = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
+  // Keeps the background work each request schedules, for `drain`.
+  let pending: Promise<unknown>[] = [];
+  const executionCtx = {
+    waitUntil: (work: Promise<unknown>) => {
+      pending.push(work);
+    },
+    passThroughOnException: () => {},
+    props: {},
+  };
+  /** Await every `waitUntil` promise so far, and any they schedule. */
+  async function drain() {
+    while (pending.length > 0) {
+      const batch = pending;
+      pending = [];
+      await Promise.allSettled(batch);
+    }
+  }
 
   async function request(
     method: string,
     path: string,
-    opts: { origin?: string; body?: unknown; raw?: string; headers?: Record<string, string> } = {},
+    opts: {
+      origin?: string;
+      body?: unknown;
+      raw?: string;
+      headers?: Record<string, string>;
+      via?: ReturnType<typeof createApp>;
+    } = {},
   ) {
     const headers = new Headers(opts.headers);
     if (opts.origin) headers.set("origin", opts.origin);
     if (opts.body !== undefined) headers.set("content-type", "application/json");
-    const res = await app.request(
+    const res = await (opts.via ?? app).request(
       `http://localhost${path}`,
       {
         method,
@@ -146,18 +181,54 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
       })
     ).json.checkoutSession;
 
-  const deliver = (delivery: StripeFixtureDelivery) =>
-    request("POST", "/v1/webhooks/payments/stripe", {
+  /** One delivery from Stripe's first listed address, answered before processing. */
+  const send = (
+    delivery: StripeFixtureDelivery,
+    opts: {
+      /** CF-Connecting-IP; null sends none. Stripe's first listed address by default. */
+      address?: string | null;
+      headers?: Record<string, string>;
+      via?: ReturnType<typeof createApp>;
+    } = {},
+  ) => {
+    const address = opts.address === undefined ? STRIPE_IP : opts.address;
+    return request("POST", "/v1/webhooks/payments/stripe", {
       raw: delivery.body,
-      headers: { "stripe-signature": delivery.header },
+      headers: {
+        "stripe-signature": delivery.header,
+        ...(address === null ? {} : { "cf-connecting-ip": address }),
+        ...opts.headers,
+      },
+      ...(opts.via ? { via: opts.via } : {}),
     });
+  };
+
+  /** The inbox row for a Stripe event, read over the admin connection. */
+  async function inbox(eventId: string) {
+    const rows = await admin<{ processing_state: string; outcome: string | null }[]>`
+      select processing_state, outcome from public.provider_events
+       where provider = 'stripe' and event_id = ${eventId}`;
+    return rows[0] ?? null;
+  }
+
+  /**
+   * One delivery, its background processing awaited. The response's outcome
+   * is `received` for a new event; the inbox's outcome is what processing did.
+   */
+  async function deliver(delivery: StripeFixtureDelivery) {
+    const res = await send(delivery);
+    await drain();
+    const row = await inbox(delivery.id);
+    return { ...res, processed: row?.outcome ?? null };
+  }
 
   async function confirmed(t: Tenant) {
     const opened = await open(t, tripsA.shared(), 2);
     const paid = await deliver(
       await fixture.event("payment_intent.succeeded", fixture.succeed(opened.paymentRef)),
     );
-    expect(paid.json).toMatchObject({ received: true, outcome: "confirmed" });
+    expect(paid.json).toMatchObject({ received: true, outcome: "received" });
+    expect(paid.processed).toBe("confirmed");
     const session = await request(
       "POST",
       `/v1/public/checkout-sessions/${opened.id}/manage-session`,
@@ -229,6 +300,7 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
 
   beforeEach(() => {
     logs = [];
+    pending = [];
     vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       logs.push(args.map(String).join(" "));
     });
@@ -240,7 +312,8 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await drain();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     expect(realFetch).toBe(0);
@@ -274,7 +347,8 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     );
     const res = await deliver(first);
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ received: true, duplicate: false, outcome: "confirmed" });
+    expect(res.json).toEqual({ received: true, duplicate: false, outcome: "received" });
+    expect(res.processed).toBe("confirmed");
     const session = await status(A, opened.id, opened.secret);
     expect(session.state).toBe("confirmed");
     expect(session.booking?.reference).toBeTruthy();
@@ -297,12 +371,13 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     const declined = await deliver(
       await fixture.event("payment_intent.payment_failed", fixture.decline(opened.paymentRef)),
     );
-    expect(declined.json).toMatchObject({ received: true, outcome: "ignored_event_type" });
+    expect(declined.json).toMatchObject({ received: true, outcome: "received" });
+    expect(declined.processed).toBe("ignored_event_type");
     expect((await status(A, opened.id, opened.secret)).state).toBe("open");
     const paid = await deliver(
       await fixture.event("payment_intent.succeeded", fixture.succeed(opened.paymentRef)),
     );
-    expect(paid.json).toMatchObject({ outcome: "confirmed" });
+    expect(paid.processed).toBe("confirmed");
   });
 
   it("fails a checkout whose intent was canceled, with no payment mismatch", async () => {
@@ -311,7 +386,7 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
       await fixture.event("payment_intent.canceled", fixture.cancel(opened.paymentRef)),
     );
     expect(res.status).toBe(200);
-    expect(res.json.outcome).toBe("released");
+    expect(res.processed).toBe("released");
     expect(logged("payment_mismatch")).toBe(false);
     expect((await status(A, opened.id, opened.secret)).state).toBe("failed");
   });
@@ -324,13 +399,13 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     );
     // Verified and recorded in B's inbox, where no payment matches it.
     expect(forged.status).toBe(200);
-    expect(forged.json.outcome).toBe("unmatched_payment");
+    expect(forged.processed).toBe("unmatched_payment");
     expect((await status(A, opened.id, opened.secret)).state).toBe("open");
     const [payment] = await admin<{ state: string }[]>`
       select state from public.payments where provider_payment_id = ${opened.paymentRef}`;
     expect(payment?.state).toBe("pending");
     const real = await deliver(await fixture.event("payment_intent.succeeded", intent));
-    expect(real.json.outcome).toBe("confirmed");
+    expect(real.processed).toBe("confirmed");
   });
 
   it("refunds a cancellation through settleRefund, on the operator's account", async () => {
@@ -394,5 +469,290 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
     const refund = await refundOf(booked.paymentRef);
     expect(refund).toMatchObject({ state: "requested", refused_emails: 0 });
     expect(fixture.refundIds(booked.paymentRef)).toEqual([]);
+  });
+  const appWith = (hooks: BookingHooks) =>
+    createApp({
+      deliverEmailAfterCommit: false,
+      paymentProvider: () => stripe,
+      bookingHooks: hooks,
+    });
+
+  async function bookingsFor(paymentRef: string) {
+    const [row] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.bookings b
+        join public.payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
+       where p.provider = 'stripe' and p.provider_payment_id = ${paymentRef}`;
+    return row?.n ?? 0;
+  }
+
+  it("answers 200 once the event is recorded, before processing confirms the booking", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = 0;
+    const gated = appWith({
+      async bookingConfirmed() {
+        entered += 1;
+        await gate;
+      },
+    });
+    const opened = await open(A, tripsA.shared(), 1);
+    const event = await fixture.event(
+      "payment_intent.succeeded",
+      fixture.succeed(opened.paymentRef),
+    );
+    const res = await send(event, { via: gated });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ received: true, duplicate: false, outcome: "received" });
+    // The answer came while processing is held inside its transaction: the
+    // event is committed as received, and nothing is confirmed yet.
+    await vi.waitFor(() => expect(entered).toBe(1));
+    expect(await inbox(event.id)).toEqual({ processing_state: "received", outcome: null });
+    expect((await status(A, opened.id, opened.secret)).state).toBe("open");
+    expect(logged("payment_webhook_recorded")).toBe(true);
+    release();
+    await drain();
+    expect(await inbox(event.id)).toEqual({ processing_state: "processed", outcome: "confirmed" });
+    expect((await status(A, opened.id, opened.secret)).state).toBe("confirmed");
+    expect(await bookingsFor(opened.paymentRef)).toBe(1);
+  });
+
+  it("leaves an event received when processing fails after the 200, and the sweep confirms it", async () => {
+    const crashing = appWith({
+      async bookingConfirmed() {
+        throw new Error("the isolate went away after the 200");
+      },
+    });
+    const opened = await open(A, tripsA.shared(), 1);
+    const event = await fixture.event(
+      "payment_intent.succeeded",
+      fixture.succeed(opened.paymentRef),
+    );
+    const res = await send(event, { via: crashing });
+    expect(res.json).toEqual({ received: true, duplicate: false, outcome: "received" });
+    await drain();
+    expect(logged("payment_webhook_processing_failed")).toBe(true);
+    expect(await inbox(event.id)).toEqual({ processing_state: "received", outcome: null });
+    expect((await status(A, opened.id, opened.secret)).state).toBe("open");
+    expect(await bookingsFor(opened.paymentRef)).toBe(0);
+
+    const report = await sweepCheckouts(runtime.db, {
+      runId: `stripe-${randomUUID()}`,
+      provider: stripe,
+      graceSeconds: 0,
+    });
+    expect(report.reprocessed).toBeGreaterThanOrEqual(1);
+    expect(await inbox(event.id)).toEqual({ processing_state: "processed", outcome: "confirmed" });
+    expect((await status(A, opened.id, opened.secret)).state).toBe("confirmed");
+
+    // Stripe counts the 200 as delivered and does not retry it, so until the
+    // sweep ran nothing else processed the event. A manual resend after the
+    // sweep is a duplicate and changes nothing.
+    const again = await deliver(await fixture.redeliver(event, { nowMs: Date.now() + 1000 }));
+    expect(again.json).toEqual({ received: true, duplicate: true, outcome: "confirmed" });
+    expect(await bookingsFor(opened.paymentRef)).toBe(1);
+  });
+
+  it("processes an event left received when it is resent by hand from Stripe's dashboard", async () => {
+    // Stripe does not retry a delivery it got a 200 for. A redelivery after a
+    // 200 happens only when a person resends the event, or when the 200 was
+    // lost on the way and Stripe saw a timeout.
+    const crashing = appWith({
+      async bookingConfirmed() {
+        throw new Error("the isolate went away after the 200");
+      },
+    });
+    const opened = await open(A, tripsA.shared(), 1);
+    const event = await fixture.event(
+      "payment_intent.succeeded",
+      fixture.succeed(opened.paymentRef),
+    );
+    await send(event, { via: crashing });
+    await drain();
+    expect(await inbox(event.id)).toEqual({ processing_state: "received", outcome: null });
+    const resent = await deliver(await fixture.redeliver(event, { nowMs: Date.now() + 1000 }));
+    expect(resent.json).toEqual({ received: true, duplicate: true, outcome: "received" });
+    expect(resent.processed).toBe("confirmed");
+    expect(await bookingsFor(opened.paymentRef)).toBe(1);
+  });
+
+  it("sends the confirmation email in the same background work, after processing", async () => {
+    // Email after commit is on in this app; the bindings name the fake email provider.
+    const mailing = createApp({ paymentProvider: () => stripe });
+    const opened = await open(A, tripsA.shared(), 1);
+    const event = await fixture.event(
+      "payment_intent.succeeded",
+      fixture.succeed(opened.paymentRef),
+    );
+    const res = await send(event, { via: mailing });
+    expect(res.json.outcome).toBe("received");
+    await drain();
+    const mail = await admin<{ template: string; state: string }[]>`
+      select m.template, m.state from public.email_messages m
+        join public.bookings b on b.tenant_id = m.tenant_id and b.id = m.booking_id
+        join public.payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
+       where p.provider = 'stripe' and p.provider_payment_id = ${opened.paymentRef}`;
+    expect(mail).toEqual([{ template: "booking_confirmation", state: "sent" }]);
+    expect(logged("email_delivery")).toBe(true);
+  });
+
+  it("confirms once when one event arrives many times at once, and on later replays", async () => {
+    let confirmations = 0;
+    const counting = appWith({
+      async bookingConfirmed() {
+        confirmations += 1;
+      },
+    });
+    const opened = await open(A, tripsA.shared(), 1);
+    const intent = fixture.succeed(opened.paymentRef);
+    const event = await fixture.event("payment_intent.succeeded", intent, { pendingWebhooks: 3 });
+    const copies = [
+      event,
+      event,
+      await fixture.redeliver(event, { pendingWebhooks: 2 }),
+      await fixture.redeliver(event, { pendingWebhooks: 1, pretty: true }),
+      await fixture.redeliver(event, { pendingWebhooks: 0 }),
+    ];
+    const answers = await Promise.all(copies.map((copy) => send(copy, { via: counting })));
+    for (const answer of answers) expect(answer.status).toBe(200);
+    expect(answers.filter((a) => a.json.duplicate === false)).toHaveLength(1);
+    await drain();
+    expect(confirmations).toBe(1);
+    expect(await inbox(event.id)).toEqual({ processing_state: "processed", outcome: "confirmed" });
+    expect(logged("payment_webhook_payload_mismatch")).toBe(false);
+
+    // A replay after processing answers its outcome and processes nothing.
+    const seen = logs.length;
+    const replay = await send(event, { via: counting });
+    expect(replay.json).toEqual({ received: true, duplicate: true, outcome: "confirmed" });
+    await drain();
+    expect(
+      logs.slice(seen).some((line) => /payment_webhook_(recorded|processing)/.test(line)),
+    ).toBe(false);
+
+    // A second event id for the same success, as Stripe sometimes sends.
+    const second = await fixture.event("payment_intent.succeeded", intent);
+    expect(second.id).not.toBe(event.id);
+    await send(second, { via: counting });
+    await drain();
+    expect(await inbox(second.id)).toEqual({
+      processing_state: "processed",
+      outcome: "already_succeeded",
+    });
+    expect(confirmations).toBe(1);
+    expect(await bookingsFor(opened.paymentRef)).toBe(1);
+    const [inboxRows] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.provider_events
+       where provider = 'stripe' and event_id in (${event.id}, ${second.id})`;
+    expect(inboxRows?.n).toBe(2);
+  });
+
+  it("refuses an address not on Stripe's list with 403, reading CF-Connecting-IP only", async () => {
+    const opened = await open(A, tripsA.shared(), 1);
+    const event = await fixture.event(
+      "payment_intent.succeeded",
+      fixture.succeed(opened.paymentRef),
+    );
+    const refused: [string, string | null, Record<string, string>][] = [
+      ["an unlisted address", "203.0.113.50", {}],
+      ["no CF-Connecting-IP", null, {}],
+      ["an empty CF-Connecting-IP", "", {}],
+      ["X-Forwarded-For naming Stripe", "203.0.113.51", { "x-forwarded-for": STRIPE_IP }],
+      ["X-Forwarded-For only", null, { "x-forwarded-for": STRIPE_IP }],
+      ["X-Real-IP only", null, { "x-real-ip": STRIPE_IP }],
+      ["a list", `${STRIPE_IP}, ${OTHER_STRIPE_IP}`, {}],
+      ["IPv4-mapped IPv6", `::ffff:${STRIPE_IP}`, {}],
+      ["loopback", "127.0.0.1", {}],
+    ];
+    const got: Record<string, [number, string | undefined]> = {};
+    for (const [name, address, headers] of refused) {
+      const res = await send(event, { address, headers });
+      got[name] = [res.status, res.json.error?.code];
+    }
+    expect(got).toEqual(
+      Object.fromEntries(refused.map(([name]) => [name, [403, "source_not_allowed"]])),
+    );
+    expect(await inbox(event.id)).toBeNull();
+    expect(logged("payment_webhook_source_refused")).toBe(true);
+    expect(logged("source_address_missing")).toBe(true);
+    expect(logged("source_address_not_listed")).toBe(true);
+    expect((await status(A, opened.id, opened.secret)).state).toBe("open");
+
+    // From a listed address, whatever X-Forwarded-For says, it is accepted.
+    const accepted = await send(event, {
+      address: OTHER_STRIPE_IP,
+      headers: { "x-forwarded-for": "203.0.113.52" },
+    });
+    expect(accepted.json).toEqual({ received: true, duplicate: false, outcome: "received" });
+    await drain();
+    expect((await status(A, opened.id, opened.secret)).state).toBe("confirmed");
+  });
+
+  it("answers a bad signature from Stripe's address with 400 as before, and checks the address first", async () => {
+    const opened = await open(A, tripsA.shared(), 1);
+    const intent = fixture.succeed(opened.paymentRef);
+    const event = await fixture.event("payment_intent.succeeded", intent);
+    const other = await fixture.event("payment_intent.succeeded", intent);
+    const bad: [string, StripeFixtureDelivery][] = [
+      ["another event's signature", { ...event, header: other.header }],
+      ["a changed body", { ...event, body: event.body.replace('"livemode"', ' "livemode"') }],
+      ["no signature", { ...event, header: "" }],
+    ];
+    for (const [name, delivery] of bad) {
+      const res = await send(delivery);
+      expect([name, res.status, res.json.error?.code]).toEqual([name, 400, "signature_invalid"]);
+    }
+    // An unlisted address is refused before its signature is read.
+    const elsewhere = await send({ ...event, header: other.header }, { address: "203.0.113.53" });
+    expect([elsewhere.status, elsewhere.json.error?.code]).toEqual([403, "source_not_allowed"]);
+    expect(await inbox(event.id)).toBeNull();
+    expect((await status(A, opened.id, opened.secret)).state).toBe("open");
+  });
+
+  it("measures the time to the 200 and to confirmation", async () => {
+    const samples: { ack: number; confirmed: number }[] = [];
+    for (let i = 0; i < 8; i++) {
+      const opened = await open(A, tripsA.shared(), 1);
+      const event = await fixture.event(
+        "payment_intent.succeeded",
+        fixture.succeed(opened.paymentRef),
+      );
+      const started = performance.now();
+      const res = await send(event);
+      const ack = performance.now() - started;
+      await drain();
+      const confirmed = performance.now() - started;
+      expect(res.json.outcome).toBe("received");
+      expect((await inbox(event.id))?.outcome).toBe("confirmed");
+      samples.push({ ack, confirmed });
+    }
+    // The route logs both: the 200's duration, and receipt to the processing commit.
+    const durations = (name: string) =>
+      logs
+        .map((line) => {
+          try {
+            return JSON.parse(line) as Record<string, unknown>;
+          } catch {
+            return null;
+          }
+        })
+        .filter((line) => line?.["event.name"] === name)
+        .map((line) => line?.duration_ms);
+    expect(durations("payment_webhook_recorded")).toHaveLength(samples.length);
+    expect(durations("payment_webhook").every((ms) => typeof ms === "number")).toBe(true);
+    expect(durations("payment_webhook")).toHaveLength(samples.length);
+    const median = (values: number[]) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)] ?? 0;
+    };
+    const ms = (n: number) => n.toFixed(1);
+    const acks = samples.map((s) => s.ack);
+    const confirms = samples.map((s) => s.confirmed);
+    process.stderr.write(
+      `stripe webhook timing, ${samples.length} deliveries on local PostgreSQL: ` +
+        `200 median ${ms(median(acks))} ms, max ${ms(Math.max(...acks))} ms; ` +
+        `confirmed median ${ms(median(confirms))} ms, max ${ms(Math.max(...confirms))} ms\n`,
+    );
   });
 });

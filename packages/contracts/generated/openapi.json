@@ -7649,7 +7649,7 @@
           "webhooks"
         ],
         "summary": "Receive a signed payment provider event",
-        "description": "For the payment provider only. The body is the provider's event, signed over its raw bytes with a timestamp (the fake provider's `Fake-Signature: t=<unix>,v1=<hex HMAC-SHA256>`; Stripe's `Stripe-Signature` in the same scheme, when the Stripe adapter is configured, which no deployment does yet). A signature outside the tolerance window, or for another body, answers 400 and nothing is recorded. A Stripe event must be a snapshot Connect event in test mode; a live, platform-scope, or thin event answers 400 payload_invalid. A verified event is recorded once per event id; a duplicate changes nothing, and a Stripe redelivery whose per-delivery fields changed counts as the same event. A booking is confirmed only here, from a verified success. A 500 leaves the event recorded and unprocessed for the provider's retry and the sweep.",
+        "description": "For the payment provider only. The body is the provider's event, signed over its raw bytes with a timestamp (the fake provider's `Fake-Signature: t=<unix>,v1=<hex HMAC-SHA256>`; Stripe's `Stripe-Signature` in the same scheme, when the Stripe adapter is configured, which no deployment does yet). A signature outside the tolerance window, or for another body, answers 400 and nothing is recorded. A Stripe event must be a snapshot Connect event in test mode; a live, platform-scope, or thin event answers 400 payload_invalid. A verified event is recorded once per event id; a duplicate changes nothing, and a Stripe redelivery whose per-delivery fields changed counts as the same event. A booking is confirmed only here or by the sweep, from a verified event. A 500 leaves the event recorded and unprocessed for the provider's retry and the sweep. Under Stripe only: the client address (`CF-Connecting-IP`) must be one of Stripe's published webhook addresses, or the route answers 403 source_not_allowed before reading the body; and a newly recorded event answers 200 with outcome `received` before it is processed, after the response, with the sweep as the backstop.",
         "parameters": [
           {
             "schema": {
@@ -7730,7 +7730,7 @@
             }
           },
           "403": {
-            "description": "The request came from a browser (origin_not_allowed)",
+            "description": "The request came from a browser (origin_not_allowed), or, under Stripe, from an address not on Stripe's webhook list (source_not_allowed)",
             "content": {
               "application/json": {
                 "schema": {
