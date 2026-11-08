@@ -8,6 +8,23 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: O-P7, G2.16-live email switched on, A9 and steps 3 and 8 not shown (owner decisions)
+
+The owner handed Wave 0 to a coordinator session and ran P7's live steps in the owner's own terminal. The owner's decisions and words:
+
+- **D6, the sender.** Asked whether the booking address forwards to the owner's inbox, the owner wrote "Use bookings I will set it up". The coordinator read it as `bookings@mail.tidegrid.us`, D6 (a), a subdomain sender, with forwarding set up by the owner. The owner later reported the domain onboarding (A6) and forwarding "done".
+- **Release all of `main`, with `0016`.** `nov1` releases only a SHA on `main`, so C2 could not ship alone. On a decision card the owner chose "Yes, migrate 0016 then release": apply `0016` to Neon main under A1, merge pull request 106, and release the API from `main`, so every Wave 1 change merged since `b1461f3` went live with email.
+- **D11 and A8.** "go a8 and go d11".
+- **Closed partial.** After the allowlist and the fence check: "call it finished for now, we can debug later and we should move on" (14:32 UTC).
+
+Coordinator readings, pending owner confirmation:
+
+- **Email stays on.** Only allowlisted addresses receive mail, and the fence refused the synthetic backlog before any provider call ([verification log](../verification-log.md#o-p7-g216-live-email-switched-on-a9-and-steps-3-and-8-not-shown-november-8-2026)). Deleting the allowlist secret turns it off.
+- **Not shown, a follow-up.** A9, demo steps 3 and 8, the SPF, DKIM, and DMARC results, the `messageId` comparison, the after-commit window, and the `account_fault` alert.
+- **The restore point.** `nov1 db backup` was a no-op again, so `0016` relied on point-in-time restore. The journal fix is still needed before the next migrating release.
+
+Canonical: the [runbook's P7](../runbooks/2026-11-01-preview-deploy.md) and the [demo build plan's acceptance status](12-demo-build-plan.md#demo-acceptance).
+
 ### 2026-11-08: W1-TOOLING, wrangler 4.152.0 and the Workers test pool (owner go; start gate waived by the owner; coordinator defaults pending owner confirmation)
 
 The tooling-upgrade goal was recorded as not built ([2026-11-02 entry](#2026-11-02-g216b-follow-up-merges-before-the-nov-1-deploy-owner-decision)). It upgrades wrangler and the Workers test pool for the three apps. On 2026-11-08 the owner wrote: "run W1-CI-GATE and merge when CI passes", then: "after that, run the next wave 1 prompt - continue doing all wave 1 in the plan until the goal is completed". Later the same day the owner wrote: "D1 confirmed, run W1-TOOLING next". The goal's start gate asks that `main` hold no `npx wrangler@4.125.0` pin, which only W1-PROTO-RETIRE removes, and that goal has not run. Asked whether to waive the gate, the owner chose "Waive gate, run TOOLING (Recommended)", whose description read: "Upgrade wrangler and the Workers test pool for the three apps now. The prototype's npx pin stays until W1-PROTO-RETIRE removes it. The waiver is recorded in the register. Version: the newest wrangler at least two weeks old, plus the matching pool (the plan's default)." The coordinator reads these as the owner's go for this goal, for its security reviewer under rule R9, and for local commits. "D1 confirmed" confirmed W1-PROVENANCE's D1 ([entry](#2026-11-08-w1-provenance-runtime-provenance-brand-checked-by-the-inbox-owner-go-coordinator-defaults-pending-owner-confirmation)), not this goal's. The waiver option names the version rule, the newest wrangler at least two weeks old plus the matching pool; the concrete versions below are the coordinator's application of it. While the pull request's CI ran, on 2026-11-08, the owner wrote: "Versions confirmed, merge when green". The coordinator reads that as confirming D1 as presented: wrangler 4.152.0, the pool 0.23.0, the two new overrides, the kept zod and undici overrides, and dropping `miniflare>sharp`. D1 is now an owner decision.
