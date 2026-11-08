@@ -1,8 +1,8 @@
 -- tidegrid:no-transaction
--- 0027 the pending refund index (W3-G2.9)
+-- 0028 the pending refund index (W3-G2.9)
 --
 -- The checkout sweep checks each pending refund about once an hour
--- (0026), by when it was last checked, for one tenant or for the tenant
+-- (0027), by when it was last checked, for one tenant or for the tenant
 -- list. Built CONCURRENTLY under the D6 A standing rule, because
 -- payment_refunds is a pilot-volume table. IF NOT EXISTS: a rerun after a
 -- lost connection between the build and its record only records the file.

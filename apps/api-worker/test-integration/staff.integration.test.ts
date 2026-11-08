@@ -436,7 +436,8 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
       expect(first.res.status).toBe(201);
       expect(first.res.headers.get("idempotent-replayed")).toBeNull();
       const member = first.json.member as { userId: string; role: string; email: string };
-      expect(member).toMatchObject({ email: body.email, role: "finance", status: "active" });
+      // Invited until the person accepts (W3-G2.2b).
+      expect(member).toMatchObject({ email: body.email, role: "finance", status: "invited" });
 
       const again = await call("POST", membersPath(A.id), {
         access: await accessToken(ownerA.email),
@@ -457,7 +458,7 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
           request_id: first.res.headers.get("x-request-id"),
           reason: "Seasonal bookkeeping",
           before_state: null,
-          after_state: { role: "finance", status: "active" },
+          after_state: { role: "finance", status: "invited" },
         },
       ]);
       const events = await admin`select topic, payload from public.outbox_events
@@ -538,7 +539,7 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
       expect(r.res.status).toBe(400);
     });
 
-    it("lets a newly added member sign in and see the membership", async () => {
+    it("lets a newly added member sign in, accept the invitation, and see the membership", async () => {
       const body = { ...newMember("newbie"), role: "booking_staff" as const };
       const added = await call("POST", membersPath(A.id), {
         access: await accessToken(ownerA.email),
@@ -547,6 +548,10 @@ describe.skipIf(!env)("staff API against a real database as the runtime role", (
       });
       expect(added.res.status).toBe(201);
       const session = await signIn(body.email);
+      // Invited, not yet a member (W3-G2.2b).
+      expect((await call("GET", "/v1/me", { session })).json.memberships).toEqual([]);
+      const accepted = await call("POST", `/v1/staff/invitations/${A.id}/accept`, { session });
+      expect(accepted.res.status).toBe(200);
       const me = await call("GET", "/v1/me", { session });
       expect(me.json.memberships).toEqual([
         { tenantId: A.id, tenantSlug: A.slug, tenantName: A.name, role: "booking_staff" },

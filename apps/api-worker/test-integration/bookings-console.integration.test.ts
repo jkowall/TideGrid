@@ -2394,6 +2394,29 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
     expect(finance.status).toBe(200);
     expect(finance.json).toEqual(withoutKey(withoutKey(owner.json, "booker"), "note"));
     expect(finance.text).not.toContain("Rebooked");
+    // Support access, even with personal data revealed, sees the booker but
+    // never the note (W3-G2.2b).
+    const agentId = randomUUID();
+    const agentEmail = `agent-${agentId.slice(0, 8)}@example.test`;
+    await admin`insert into public.staff_users (id, email, display_name)
+      values (${agentId}, ${agentEmail}, 'Support agent')`;
+    await admin`insert into public.support_agents (user_id) values (${agentId})`;
+    const granted = await request("POST", `/v1/staff/tenants/${A.id}/support-grants`, {
+      as: A.owner,
+      origin: "https://console.test",
+      headers: { "idempotency-key": randomUUID() },
+      body: {
+        agentEmail,
+        reason: "Ticket 7: a refund question",
+        minutes: 15,
+        revealPersonalData: true,
+      },
+    });
+    expect(granted.status, granted.text).toBe(201);
+    const support = await get(statusPath(A.id, "resolved"), agentEmail);
+    expect(support.status, support.text).toBe(200);
+    expect(support.json).toEqual(withoutKey(owner.json, "note"));
+    expect(support.text).not.toContain("Rebooked");
     // Both lists page with before, within their own status.
     const paged = await get(`${statusPath(A.id, "open")}&limit=1`, A.owner);
     const one = FinalizationExceptionsResponse.parse(paged.json);

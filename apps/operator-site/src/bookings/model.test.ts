@@ -574,11 +574,12 @@ describe("what happened to a payment that could not become a booking", () => {
       session_failed: "Paid after the payment provider had reported the payment failed",
       session_canceled: "Paid after the guest canceled the checkout",
       payment_mismatch: "A payment that didn't match its checkout",
+      session_redacted: "Paid after the checkout ended and the guest's details were cleared",
     };
     for (const [reason, title] of Object.entries(titles)) {
       expect(exceptionTitle(reason as FinalizationException["reason"]), reason).toBe(title);
     }
-    expect(new Set(Object.values(titles)).size).toBe(8);
+    expect(new Set(Object.values(titles)).size).toBe(9);
   });
 
   const refund = (

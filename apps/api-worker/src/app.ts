@@ -29,6 +29,7 @@ import { registerRefundsCreditsStaffRoutes } from "./routes/refunds-credits-staf
 import { registerStaffRoutes } from "./routes/staff.ts";
 import { registerStaffBookingRoutes } from "./routes/staff-booking.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
+import { registerTenantAccessStaffRoutes } from "./routes/tenant-access-staff.ts";
 import { registerWaiverPublicRoutes } from "./routes/waivers-public.ts";
 import { registerWaiverStaffRoutes } from "./routes/waivers-staff.ts";
 
@@ -182,6 +183,8 @@ export function createApp(deps: AppDeps = {}) {
   // Staff resend of a booking's email (G2.16b).
   registerBookingEmailStaffRoutes(app, deps);
   registerRefundsCreditsStaffRoutes(app, deps);
+  // Tenant access remainder (W3-G2.2b): invitations, support access, export, deletion request.
+  registerTenantAccessStaffRoutes(app, deps);
 
   // After every route: the cap's 413 on each operation with a request body.
   declarePayloadTooLarge(app);

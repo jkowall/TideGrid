@@ -12,7 +12,7 @@ Dated decisions that changed scope, wording, or process. Each entry records the 
 
 Under the same owner decision as W3-G2.3 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
 
-W3-G2.9 lands as migrations `0026` and `0027` and the [database contract](../../packages/database/README.md#refunds-and-credits-0026-and-0027). What it adds:
+W3-G2.9 lands as migrations `0027` and `0028` and the [database contract](../../packages/database/README.md#refunds-and-credits-0027-and-0028). What it adds:
 
 - **A pending refund state.** A refund the provider accepted and has not finished is `pending`, with its provider id, instead of staying `requested` (this closes the D3 (a) deferral above). The provider's own refund events settle it through the inbox (`refund.updated`, matched by TideGrid's key and checked against the refund's payment, amount, account, and provider id), and the sweep asks about it again once an hour.
 - **Refund exceptions after 24 hours.** A refund still requested or pending 24 hours after it was requested, or whose lookup the provider keeps refusing, is raised once for staff, as is a failure reported after a success. Staff read them at `GET /v1/staff/tenants/{tenantId}/refund-exceptions`.
@@ -28,6 +28,21 @@ Coordinator defaults, pending owner confirmation:
 - **D3: a canceled Stripe payment intent maps to a payment failure through its verified event** (`payment_intent.canceled` is `payment.failed`, with no new payment state).
 - **D4: who may do what.** Cancel and preview: owners and booking staff (`bookings.cancel`). Override and credit adjustment: owners only (`bookings.override`, `credits.adjust`). Refund exceptions: everyone with `payments.read`, finance included.
 
+### 2026-11-08: W3-G2.2b, tenant access remainder without managed OIDC and MFA (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
+
+On 2026-11-08 at 17:35 UTC the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That choice waives the Validation gate and the O-VAL-2 dependency for this goal, as a synthetic pull-forward into the demo build. Managed OIDC with MFA is left out, because it needs a provider account (O-PROVIDERS). Nothing live was touched: no provider calls, no deploys, and no new Worker bindings.
+
+The goal adds migration `0026_tenant_access_remainder.sql` (numbered at merge) and its API, described in the [database contract](../../packages/database/README.md#tenant-access-remainder-0026-w3-g22b). The owner has not answered the goal's open decisions, so these are coordinator defaults, pending owner confirmation:
+
+- **D1: support grants last at most 4 hours, and only an owner issues one.** One grant names one TideGrid support agent, a reason, and 15 to 240 minutes. Support reads only, never writes. It is masked by default: it reads what finance reads, without bookers' names and emails. An owner may choose to reveal personal data, which adds bookings with bookers and the staff list. Notes are never shown. Every request support makes that reaches the tenant, allowed or refused, is recorded in the tenant's audit history before it runs; a malformed request, refused before any tenant data is read, is not. Support agents are added by an owner-run database step, never by the runtime.
+- **D2: abandoned checkouts keep the booker's name and email for 30 days.** Then the cron replaces them with a fixed redaction. Abandoned means expired, failed, or canceled, with no booking and no successful payment. The database refuses a redaction under 30 days old. If a payment still succeeds later on a redacted checkout, it is refunded, never booked.
+- **D3: invitations need acceptance and last 7 days.** A person an owner adds is invited, not active, and has no access until they sign in and accept. An owner can send a lapsed or declined invitation again. Existing memberships count as accepted.
+- **D4: disabling signs a person out only when nothing else is left.** Disabling a staff identity revokes their sessions. Disabling a membership ends access to that tenant at once, and revokes the person's sessions only when it was their last active membership, so one operator cannot sign a person out of another. Withdrawing an invitation revokes nothing.
+- **D5: the data export is JSON, owners only, up to 10,000 rows per table.** It leaves out credentials, token hashes, provider idempotency keys, client addresses, email messages, and short-lived working state. Each export is recorded in the audit history first.
+- **D6: an account deletion request is recorded, not acted on.** An owner types the tenant's slug to confirm. The request goes on the outbox for TideGrid to follow up, and the owner may withdraw it until then. Deletion itself stays an owner-run operation, because the runtime never deletes.
+
+Console screens for these pieces are not built yet; the API is.
+
 ### 2026-11-08: W1-G215-REMINDERS, waiver reminders up to a completion cutoff (coordinator defaults pending owner confirmation)
 
 The second of the three waiver goals the owner pulled into the demo on 2026-11-08, under the [W1-G215-SIGNING entry](#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation), which quotes the owner. The goal's two open questions are owner decisions. The owner's message asked for the work to be done and did not answer them, so the coordinator's suggestions apply as defaults, pending owner confirmation:
@@ -36,6 +51,7 @@ The second of the three waiver goals the owner pulled into the demo on 2026-11-0
 - **D2: reminders do not count against the staff resend limits.** They are not delivery generations, so they never use up the five sends or hold a staff resend, and the limits never count them. A reminder still waits 10 minutes after the participant's last delivery generation to the same address.
 
 Migration `0025` and the service are in the [waiver contract](../../packages/domain-waivers/README.md#reminders-w1-g215-reminders). A new cron step queues due reminders before the email sweep, and is skipped while email is off. No SMS, no change to staff resends. Canonical: the [database README](../../packages/database/README.md#waiver-reminders-0025).
+
 ### 2026-11-08: W3-G2.5-TAX, per-location tax rates entered by each operator (synthetic pull-forward; coordinator default in place of the CPA's answer)
 
 The tracker held this goal until the Validation gate passed and the register recorded a CPA's per-location tax answer. At 17:35 UTC on 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That waives the Validation gate and the O-VAL-2 dependency as a synthetic pull-forward. About the open pilot questions, the owner then wrote on 2026-11-08 at 19:58 UTC: "I already gave answers to this one, so nothing is needed for the pilot." The owner has no accountant, so there is no CPA step.
@@ -80,6 +96,7 @@ Coordinator defaults, pending owner confirmation:
 - **D6, unknown ids** go to a platform table no runtime role can read, once per event id.
 
 Migrations `0021` and `0022` (provisional). Security review under rule R9, run under the owner's go to merge without asking him: no critical or high finding. One medium is recorded, not fixed: the queue is authenticated only by who may publish to it, so no producer but Cloudflare's subscription may be bound to it. The other findings are fixed or recorded in the [verification log](../verification-log.md). Canonical: the [database README](../../packages/database/README.md#email-events-0021-and-0022) and the [messaging README](../../packages/domain-messaging/README.md#email-events-w1-email-events).
+
 ### 2026-11-08: W1-G215-SIGNING, staff-assisted and QR waiver signing (owner pull-forward; coordinator defaults pending owner confirmation)
 
 The O-SCOPE entry below left items 4 to 6, waiver staff-assisted and QR signing, reminders, and guest renewal, as Core live gate work. On 2026-11-08 at 17:33 UTC the owner wrote: "Anyways, I just want all the work to be done for the next waves." The coordinator reads it as a pull-forward of those three Core live gate items into the demo, synthetic data only, each its own goal and pull request in order: W1-G215-SIGNING, W1-G215-REMINDERS, and W1-WAIVER-RENEWAL. The [demo build plan's G2.15 row](12-demo-build-plan.md#goal-sequence) now says so. This entry is the start gate for all three.

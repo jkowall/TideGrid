@@ -111,6 +111,7 @@ An event id the inbox already holds with a different body, in this tenant or ano
 | success | pending; open or expired | `confirmHold`; confirmed, possibly reacquired: payment succeeded, booking created, order paid, checkout confirmed | `confirmed`, `confirmed_reacquired` |
 | success | pending; open or expired | `confirmHold` reports `capacity_lost`: any capacity still held is released, payment succeeded, refund requested, exception raised, order void, checkout unfulfilled | `refund_required` |
 | success | pending; canceled | refund and exception (`session_canceled`) | `refund_required` |
+| success | any; expired, failed, or canceled, and its booker cleared by retention (W3-G2.2b) | refund and exception (`session_redacted`); the database refuses to confirm a redacted checkout | `refund_required` |
 | success | failed | refund and exception (`session_failed`): the provider had said it failed | `refund_required` |
 | success | succeeded | nothing | `already_succeeded` |
 | success | amount, currency, account, or provider id differs | exception `payment_mismatch`, no automatic refund, nothing else | `payment_mismatch` |

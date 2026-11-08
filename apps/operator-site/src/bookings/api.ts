@@ -372,6 +372,7 @@ const reasons = new Set([
   "session_failed",
   "session_canceled",
   "payment_mismatch",
+  "session_redacted",
 ]);
 
 function isException(e: Partial<FinalizationException> | null | undefined): boolean {

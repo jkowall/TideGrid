@@ -6,7 +6,7 @@
  * its idempotency key. Its state then moves only on the provider's answer
  * about that refund: a call's answer (`settleRefund`), or a verified refund
  * event in the inbox (`onRefundEvent`). requested may move to pending,
- * succeeded, or failed; pending to succeeded or failed (migration 0026).
+ * succeeded, or failed; pending to succeeded or failed (migration 0027).
  *
  * - succeeded: a cancellation refund reverses TideGrid's fee on the refunded
  *   eligible value, in proportion, in the same transaction (fee-ledger.ts).

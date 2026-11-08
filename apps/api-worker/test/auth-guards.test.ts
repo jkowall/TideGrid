@@ -241,6 +241,16 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/email-exceptions",
         // Exception resolution (W1-FIN-EXC).
         "/v1/staff/tenants/{tenantId}/finalization-exceptions/{exceptionId}/resolution",
+        // Tenant access remainder (W3-G2.2b).
+        "/v1/staff/tenants/{tenantId}/members/{userId}/status",
+        "/v1/staff/invitations",
+        "/v1/staff/invitations/{tenantId}/accept",
+        "/v1/staff/invitations/{tenantId}/decline",
+        "/v1/staff/tenants/{tenantId}/support-grants",
+        "/v1/staff/tenants/{tenantId}/support-grants/{grantId}/revoke",
+        "/v1/staff/tenants/{tenantId}/export",
+        "/v1/staff/tenants/{tenantId}/deletion-request",
+        "/v1/staff/tenants/{tenantId}/deletion-request/withdraw",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are

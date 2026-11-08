@@ -709,13 +709,18 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // takes its replay reason once.
         outbox_deliveries: ["INSERT", "SELECT"],
         outbox_dead_letters: ["INSERT", "SELECT"],
-        // Refunds and credits (0026, W3-G2.9): the ledgers are append-only;
+        // Refunds and credits (0027, W3-G2.9): the ledgers are append-only;
         // a credit account's balance is kept by its definer trigger.
         credit_accounts: ["INSERT", "SELECT"],
         credit_entries: ["INSERT", "SELECT"],
         fee_ledger_entries: ["INSERT", "SELECT"],
         refund_exceptions: ["INSERT", "SELECT"],
         payment_cancellations: ["INSERT", "SELECT"],
+        // Tenant access remainder (W3-G2.2b): support agents and grants only
+        // through app functions; a deletion request moves its state only.
+        support_agents: [],
+        support_access_grants: [],
+        tenant_deletion_requests: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -772,8 +777,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // delivery columns; a replay sets its reason.
         outbox_events: ["attempts", "available_at", "delivered_at", "last_error", "published_at"],
         outbox_dead_letters: ["replay_reason"],
-        // Refunds and credits (0026): a payment cancellation records its answer once.
+        // Refunds and credits (0027): a payment cancellation records its answer once.
         payment_cancellations: ["outcome_code", "state"],
+        // Tenant access remainder (W3-G2.2b): withdrawn once; a trigger stamps who and when.
+        tenant_deletion_requests: ["state"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

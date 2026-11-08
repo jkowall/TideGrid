@@ -7,7 +7,7 @@
  * counted on the original booking and is not charged again when redeemed, so
  * issuing credit reverses nothing.
  *
- * The arithmetic, in integer cents, checked again by the database (0026):
+ * The arithmetic, in integer cents, checked again by the database (0027):
  *
  *   eligible total    = order total - added tax - included tax
  *   eligible refunded = floor(refund x eligible total / order total)

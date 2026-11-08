@@ -1012,6 +1012,11 @@ export async function listExceptionsPage(
     before?: string;
     withBooker: boolean;
     /**
+     * The resolution's free-text note, for roles that read notes. Defaults to
+     * withBooker; support access sees the booker but never a note (W3-G2.2b).
+     */
+    withNote?: boolean;
+    /**
      * open: no resolution yet. resolved: the history (W1-FIN-EXC). Absent:
      * every exception, as G2.7's read lists them.
      */
@@ -1034,9 +1039,11 @@ export async function listExceptionsPage(
       : sql`and (e.created_at, e.id) < (
               select e2.created_at, e2.id from finalization_exceptions e2
                where e2.tenant_id = ${tenantId} and e2.id = ${query.before}::uuid)`;
+  const withNote = query.withNote ?? query.withBooker;
   const booker: RawBuilder<unknown> = query.withBooker
-    ? sql`, s.booker_name, s.booker_email, res.note as resolution_note`
+    ? sql`, s.booker_name, s.booker_email`
     : sql``;
+  const note: RawBuilder<unknown> = withNote ? sql`, res.note as resolution_note` : sql``;
   const status =
     query.status === "open"
       ? sql`and res.id is null`
@@ -1086,7 +1093,7 @@ export async function listExceptionsPage(
            res.id as resolution_id, res.reason_code as resolution_reason,
            res.resolved_by_user_id, rm.display_name as resolved_by_name,
            res.created_at as resolved_at
-           ${booker}
+           ${booker}${note}
       from finalization_exceptions e
       join checkout_sessions s on s.tenant_id = e.tenant_id and s.id = e.checkout_session_id
       join payments pay on pay.tenant_id = e.tenant_id and pay.id = e.payment_id
@@ -1146,7 +1153,7 @@ export async function listExceptionsPage(
           ? {
               id: r.resolution_id,
               reasonCode: r.resolution_reason,
-              ...(query.withBooker ? { note: r.resolution_note ?? null } : {}),
+              ...(withNote ? { note: r.resolution_note ?? null } : {}),
               resolvedBy: { userId: r.resolved_by_user_id, name: r.resolved_by_name },
               resolvedAt: iso(r.resolved_at),
             }
