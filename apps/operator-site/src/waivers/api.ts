@@ -190,3 +190,61 @@ export function newResendKey(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+export type AssistedMode = "staff_device" | "participant_qr";
+
+export type AssistedResult =
+  | { kind: "issued"; url: string; expiresAt: string }
+  | {
+      kind: "failed";
+      /** not_pending, trip_over, participant_changed, no_site, forbidden, signed_out, unreachable, unavailable */
+      reason: string;
+    };
+
+/**
+ * Start a staff-assisted signing (W1-G215-SIGNING) after staff checked who
+ * signs. Answers the signing page's address with a single-use token in its
+ * fragment: open it on this device, or draw it as a QR code. The address is
+ * kept in memory only, never logged or stored. Never throws.
+ */
+export async function startAssistedSigning(
+  tenantId: string,
+  requestId: string,
+  mode: AssistedMode,
+): Promise<AssistedResult> {
+  try {
+    const res = await call(
+      `${tenantPath(tenantId)}/waiver-requests/${encodeURIComponent(requestId)}/assisted-signing`,
+      {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ mode, identityChecked: true }),
+      },
+    );
+    if (res.ok) {
+      const body = (await res.json().catch(() => null)) as {
+        signing?: { url?: unknown; expiresAt?: unknown };
+      } | null;
+      const url = body?.signing?.url;
+      const expiresAt = body?.signing?.expiresAt;
+      return isString(url) &&
+        /^https?:\/\/[^#]+\/waiver#t=[A-Za-z0-9_-]{43}$/.test(url) &&
+        isInstant(expiresAt)
+        ? { kind: "issued", url, expiresAt: expiresAt as string }
+        : { kind: "failed", reason: "unavailable" };
+    }
+    const code = await errorCode(res);
+    const known: Record<string, string> = {
+      waiver_not_pending: "not_pending",
+      waiver_trip_over: "trip_over",
+      waiver_participant_changed: "participant_changed",
+      waiver_guest_site_unavailable: "no_site",
+    };
+    if (code && known[code]) return { kind: "failed", reason: known[code] as string };
+    if (res.status === 401) return { kind: "failed", reason: "signed_out" };
+    if (res.status === 403) return { kind: "failed", reason: "forbidden" };
+    return { kind: "failed", reason: "unavailable" };
+  } catch {
+    return { kind: "failed", reason: "unreachable" };
+  }
+}

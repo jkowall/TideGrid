@@ -8,6 +8,19 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-G215-SIGNING, staff-assisted and QR waiver signing (owner pull-forward; coordinator defaults pending owner confirmation)
+
+The O-SCOPE entry below left items 4 to 6, waiver staff-assisted and QR signing, reminders, and guest renewal, as Core live gate work. On 2026-11-08 at 17:33 UTC the owner wrote: "Anyways, I just want all the work to be done for the next waves." The coordinator reads it as a pull-forward of those three Core live gate items into the demo, synthetic data only, each its own goal and pull request in order: W1-G215-SIGNING, W1-G215-REMINDERS, and W1-WAIVER-RENEWAL. The [demo build plan's G2.15 row](12-demo-build-plan.md#goal-sequence) now says so. This entry is the start gate for all three.
+
+W1-G215-SIGNING lets staff start a signing at the dock, on their device or as a QR code the participant scans, with migration `0020` (provisional, claimed at merge) and its service in the [waiver contract](../../packages/domain-waivers/README.md#staff-assisted-and-qr-signing-w1-g215-signing). The owner gave no answer on the goal's open decisions, so these are coordinator defaults, pending owner confirmation:
+
+- **D1: a staff-started link lives 15 minutes and is single-use.** The session it opens lasts at most 15 minutes too. A new start replaces the request's earlier unused code; the emailed link keeps working.
+- **D2: staff tick that they checked who signs, and the evidence names them.** The match method is `staff_confirmed`, the staff member is recorded in the evidence and the PDF, and the database refuses a start by anyone but staff.
+- **D3: the signing page clears itself after 2 minutes idle.** On a staff-started session the page never stores the session, ends it after 2 minutes without a tap, key, or scroll, and ends it at Done after signing. On the staff device it offers no download.
+- **D4: the QR code is drawn with no new dependency.** It carries only the guest site's address and the token in the fragment, never a name or a booking detail.
+
+Not built: the generic dock QR with staff lookup, migration suppression, R2, and field encryption. Security review under rule R9: run under the owner's standing go of 2026-11-08 (results in the [verification log](../verification-log.md#2026-11-08)). Canonical: the [database README](../../packages/database/README.md#staff-assisted-waiver-signing-0020).
+
 ### 2026-11-08: W3-OPS-1, pilot infrastructure as code, plan only (synthetic pull-forward; owner decision; coordinator defaults pending owner confirmation)
 
 At 17:35 UTC on 2026-11-08 the owner chose "Code-only pilot pieces now" on a decision card. The option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." That waives the Validation gate and the O-VAL-2 dependency for this goal as a synthetic pull-forward. It allows Terraform written and checked with `terraform fmt` and `terraform validate` only: no plan against a real account, no state backend, no apply, no provider call.

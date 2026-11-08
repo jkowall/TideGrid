@@ -62,6 +62,13 @@ export const WaiverLinkRedeemRequest = z.object({
 });
 export type WaiverLinkRedeemRequest = z.infer<typeof WaiverLinkRedeemRequest>;
 
+export const WaiverAccessMethod = z
+  .enum(["email_link", "staff_device", "participant_qr"])
+  .describe(
+    "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer. Staff check who signs before a staff_device or participant_qr start",
+  );
+export type WaiverAccessMethod = z.infer<typeof WaiverAccessMethod>;
+
 export const WaiverSignedSummary = z.object({
   signedAt: Instant,
   signerName: z.string(),
@@ -106,6 +113,9 @@ export const WaiverSigning = z
     }),
     consent: z.object({ version: z.string(), text: z.string() }),
     sessionExpiresAt: Instant,
+    access: WaiverAccessMethod.describe(
+      "How this session's signer arrived. A staff-assisted session may be on a shared device: the page keeps nothing, and ends the session after signing or 2 minutes idle",
+    ),
     signed: WaiverSignedSummary.nullable(),
   })
   .describe("One request, as its signer sees it");
@@ -206,6 +216,7 @@ export const ParticipantWaiver = z.object({
           signedAt: Instant,
           signerName: z.string(),
           relationship: GuardianRelationship.nullable(),
+          method: WaiverAccessMethod,
         })
         .nullable(),
       delivery: z
@@ -300,6 +311,33 @@ export const WaiverResendResponse = z.object({
   }),
 });
 export type WaiverResendResponse = z.infer<typeof WaiverResendResponse>;
+
+export const WaiverAssistedStartRequest = z.object({
+  mode: z
+    .enum(["staff_device", "participant_qr"])
+    .describe(
+      "staff_device: open the signing page on this device; participant_qr: show a QR code the signer scans",
+    ),
+  identityChecked: z
+    .literal(true)
+    .describe(
+      "The staff member checked who signs: the participant, or for a minor, their parent or legal guardian. Recorded with the evidence",
+    ),
+});
+export type WaiverAssistedStartRequest = z.infer<typeof WaiverAssistedStartRequest>;
+
+export const WaiverAssistedStartResponse = z.object({
+  signing: z.object({
+    mode: z.enum(["staff_device", "participant_qr"]),
+    url: z
+      .url()
+      .describe(
+        "The guest site's signing page with a single-use token in its fragment: open it on this device, or draw it as a QR code. Never log or store it",
+      ),
+    expiresAt: Instant.describe("The link works once, until this instant (15 minutes at most)"),
+  }),
+});
+export type WaiverAssistedStartResponse = z.infer<typeof WaiverAssistedStartResponse>;
 
 // The booker's side, on the booking's management page --------------------------------
 

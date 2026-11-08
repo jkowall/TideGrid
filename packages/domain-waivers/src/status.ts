@@ -12,6 +12,7 @@ import {
   type GuardianRelationship,
   isUuid,
   type TenantTransaction,
+  type WaiverAccessMethod,
   type WaiverDeliveryKind,
   type WaiverRequestState,
   type WaiverRevokedReason,
@@ -74,6 +75,8 @@ export interface ParticipantWaiver {
       signedAt: Date;
       signerName: string;
       relationship: GuardianRelationship | null;
+      /** How the signer arrived: an emailed link, or a staff-assisted start. */
+      method: WaiverAccessMethod;
     };
     delivery: null | {
       generation: number;
@@ -123,6 +126,7 @@ interface Row {
   signed_at: Date | null;
   signer_name: string | null;
   guardian_relationship: GuardianRelationship | null;
+  access_method: WaiverAccessMethod | null;
   generation: number | null;
   kind: WaiverDeliveryKind | null;
   recipient_email: string | null;
@@ -155,6 +159,7 @@ async function rows(
            r.id as request_id, r.state, r.revoked_reason, r.required_signer,
            t.name as template_name, r.template_version, r.created_at as assigned_at,
            e.id as evidence_id, e.signed_at, e.signer_name, e.guardian_relationship,
+           e.access_method,
            d.generation, d.kind, d.recipient_email, d.created_at as queued_at, d.send_after,
            m.state as message_state,
            coalesce(m.sent_at, m.failed_at, m.canceled_at, m.last_attempt_at) as message_at,
@@ -276,6 +281,7 @@ async function assemble(
                       signedAt: row.signed_at,
                       signerName: row.signer_name,
                       relationship: row.guardian_relationship,
+                      method: row.access_method ?? "email_link",
                     }
                   : null,
               delivery:

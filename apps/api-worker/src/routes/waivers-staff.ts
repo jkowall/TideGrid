@@ -6,21 +6,25 @@ import {
   IdempotencyKey,
   TripParams,
   TripWaiversResponse,
+  WaiverAssistedStartRequest,
+  WaiverAssistedStartResponse,
   WaiverEvidenceParams,
   WaiverRequestParams,
   WaiverResendRequest,
   WaiverResendResponse,
 } from "@tidegrid/contracts";
 import { isUuid } from "@tidegrid/database";
+import { guestOriginFor } from "@tidegrid/domain-messaging";
 import {
   type BookingWaivers,
   listBookingWaivers,
   listTripWaivers,
   loadEvidenceDocument,
   sendWaiverRequest,
+  startAssistedSigning,
 } from "@tidegrid/domain-waivers";
 import type { AppDeps, AppEnv } from "../context.ts";
-import { deliverAfterCommit } from "../email.ts";
+import { deliverAfterCommit, deliverySettings } from "../email.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
 import { pdfResponse, waiverDeps } from "../waivers.ts";
@@ -30,6 +34,7 @@ const bookingWaiversPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/wa
 const tripWaiversPath = "/v1/staff/tenants/{tenantId}/trips/{tripId}/waivers";
 const resendPath = "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend";
 const documentPath = "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document";
+const assistedPath = "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing";
 
 const iso = (d: Date) => d.toISOString();
 
@@ -62,6 +67,7 @@ export function bookingWaiversJson(b: BookingWaivers): BookingWaiversJson {
                   signedAt: iso(p.request.signed.signedAt),
                   signerName: p.request.signed.signerName,
                   relationship: p.request.signed.relationship,
+                  method: p.request.signed.method,
                 }
               : null,
             delivery: p.request.delivery
@@ -104,6 +110,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     "/v1/staff/tenants/:tenantId/trips/:tripId/waivers",
     "/v1/staff/tenants/:tenantId/waiver-requests/:requestId/resend",
     "/v1/staff/tenants/:tenantId/waiver-evidence/:evidenceId/document",
+    "/v1/staff/tenants/:tenantId/waiver-requests/:requestId/assisted-signing",
   ]) {
     app.use(path, async (c, next) => {
       await next();
@@ -348,5 +355,116 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     );
     if (!doc) throw new Error("the document read produced nothing");
     return pdfResponse(c, doc.bytes, `waiver-${doc.reference}-${evidenceId.slice(0, 8)}.pdf`);
+  });
+
+  const assistedRoute = createRoute({
+    method: "post",
+    path: assistedPath,
+    tags: ["staff", "waivers"],
+    summary: "Start a staff-assisted signing: on this device, or as a QR code",
+    description: [
+      "Owners and booking staff, at the dock. The staff member first checks who signs (the participant, or for a minor, their parent or legal guardian) and says so. Answers the guest site's signing page with a single-use token in its fragment, for this request only: open it on this device (staff_device), or draw it as a QR code the signer scans (participant_qr). The code carries no name, address, or booking detail.",
+      "The link works once, for 15 minutes, never past the trip's end, and opens a session of at most 15 minutes. A new start ends the request's earlier unused code; the emailed link keeps working. The evidence records the mode, that staff confirmed the signer (staff_confirmed), and who started it. The raw token is in this response only, never stored or replayed, so the command takes no Idempotency-Key: a retry issues a new code and ends the old one.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: WaiverRequestParams,
+      body: {
+        required: true,
+        content: { "application/json": { schema: WaiverAssistedStartRequest } },
+      },
+    },
+    responses: {
+      201: {
+        content: { "application/json": { schema: WaiverAssistedStartResponse } },
+        description: "The signing link",
+      },
+      400: errorBody("Request did not match the contract, including identityChecked not true"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant or waiver request (waiver_request_not_found)"),
+      409: errorBody(
+        "The waiver is not waiting for a signature (waiver_not_pending); the trip has ended (waiver_trip_over); the participant's details changed who signs (waiver_participant_changed); or the operator has no working guest site address for the link (waiver_guest_site_unavailable)",
+      ),
+    },
+  });
+
+  app.openapi(assistedRoute, async (c) => {
+    const { tenantId, requestId } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const wdeps = waiverDeps(deps);
+    const settings = deliverySettings(c.env);
+    let issued: { url: string; expiresAt: string; mode: typeof input.mode } | undefined;
+    await withStaffTenant(c, deps, { tenantId, permission: "waivers.manage" }, async (trx, ctx) => {
+      if (!isUuid(requestId)) {
+        throw new ApiError(
+          404,
+          "waiver_request_not_found",
+          "No such waiver request for this tenant",
+        );
+      }
+      // The link opens on the operator's own guest site, as an emailed link does.
+      const tenant = await trx
+        .selectFrom("tenants")
+        .select("slug")
+        .where("id", "=", tenantId)
+        .executeTakeFirst();
+      const origin = tenant
+        ? await guestOriginFor(
+            trx,
+            tenantId,
+            tenant.slug,
+            settings.guestLinkOrigin,
+            settings.environment,
+          )
+        : null;
+      const started = await startAssistedSigning(trx, ctx, wdeps, {
+        requestId,
+        mode: input.mode,
+        identityChecked: input.identityChecked,
+      });
+      switch (started.kind) {
+        case "issued":
+          if (!origin) {
+            // Rolls the link back: nothing was issued.
+            throw new ApiError(
+              409,
+              "waiver_guest_site_unavailable",
+              "This operator's guest site has no working address for a signing link",
+            );
+          }
+          issued = {
+            url: `${origin}${started.path}`,
+            expiresAt: started.expiresAt.toISOString(),
+            mode: started.mode,
+          };
+          // The token is never stored: the transaction commits no answer.
+          return {};
+        case "not_found":
+          throw new ApiError(
+            404,
+            "waiver_request_not_found",
+            "No such waiver request for this tenant",
+          );
+        case "not_pending":
+          throw new ApiError(
+            409,
+            "waiver_not_pending",
+            "This waiver is not waiting for a signature",
+          );
+        case "trip_over":
+          throw new ApiError(409, "waiver_trip_over", "This trip has ended");
+        case "participant_changed":
+          throw new ApiError(
+            409,
+            "waiver_participant_changed",
+            "This person's details changed who signs; read the booking again",
+          );
+        case "identity_unchecked":
+          throw new ApiError(400, "validation_failed", "Check who signs first");
+      }
+    });
+    if (!issued) throw new Error("the assisted start produced nothing");
+    return c.json({ signing: issued } satisfies WaiverAssistedStartResponse, 201);
   });
 }

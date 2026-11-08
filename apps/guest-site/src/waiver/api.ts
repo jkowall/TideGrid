@@ -35,7 +35,7 @@ const timeoutMs = 15_000;
 async function send(
   path: string,
   init: {
-    method?: "GET" | "POST";
+    method?: "GET" | "POST" | "DELETE";
     body?: unknown;
     bearer?: string;
     accept?: string;
@@ -142,6 +142,15 @@ export async function sign(secret: string, body: WaiverSignRequest): Promise<Sig
   }
   const parsed = WaiverSessionResponse.safeParse(json);
   return parsed.success ? { kind: "ok", waiver: parsed.data.waiver } : { kind: "unreadable" };
+}
+
+/**
+ * End the session on the server: the shared-device cleanup after a
+ * staff-assisted signature or 2 minutes idle. Best effort: whatever the
+ * answer, the page has already forgotten the secret.
+ */
+export async function endSession(secret: string): Promise<void> {
+  await send("/v1/public/waiver-sessions/current", { method: "DELETE", bearer: secret });
 }
 
 /** The signed PDF, as recorded. */

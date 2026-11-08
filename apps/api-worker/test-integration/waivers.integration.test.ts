@@ -57,6 +57,8 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     STAFF_ORIGINS: CONSOLE,
     PAYMENT_PROVIDER: "fake",
     FAKE_PAYMENT_WEBHOOK_SECRET: TEST_FAKE_SECRET,
+    // Where a staff-started signing link opens: each fixture tenant's own guest host.
+    GUEST_LINK_ORIGIN: "https://{slug}.book.example.test",
   });
   const executionCtx = { waitUntil: () => {}, passThroughOnException: () => {}, props: {} };
 
@@ -636,5 +638,100 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
         (x) => x.status,
       ),
     ).toEqual(["not_needed", "not_needed"]);
+  });
+
+  it("starts a dock signing for staff only, once per code, and ends the session on request", async () => {
+    const p = await party(A);
+    const start = (as: string, requestId: string, body: unknown, tenantId = A.id) =>
+      request("POST", `${staffBase(tenantId)}/waiver-requests/${requestId}/assisted-signing`, {
+        origin: CONSOLE,
+        as,
+        body,
+      });
+    const qr = { mode: "participant_qr", identityChecked: true };
+    // Finance cannot start one; the other operator finds no such request.
+    expect((await start(A.finance, p.annRequest, qr)).status).toBe(403);
+    expect((await start(B.owner, p.annRequest, qr, B.id)).json.error?.code).toBe(
+      "waiver_request_not_found",
+    );
+    // The identity box is not optional.
+    expect(
+      (await start(A.staff, p.annRequest, { mode: "staff_device", identityChecked: false })).status,
+    ).toBe(400);
+    expect((await start(A.staff, p.annRequest, { mode: "staff_device" })).status).toBe(400);
+
+    const first = await start(A.staff, p.annRequest, qr);
+    expect(first.status).toBe(201);
+    expect(first.headers.get("cache-control")).toBe("no-store");
+    const signing = first.json.signing as { mode: string; url: string; expiresAt: string };
+    expect(signing.mode).toBe("participant_qr");
+    expect(signing.url).toMatch(
+      new RegExp(`^https://${A.host.replace(/\./g, "\\.")}/waiver#t=[A-Za-z0-9_-]{43}$`),
+    );
+    const minutes = (Date.parse(signing.expiresAt) - Date.now()) / 60000;
+    expect(minutes).toBeGreaterThan(14);
+    expect(minutes).toBeLessThanOrEqual(15);
+    const firstToken = signing.url.split("#t=")[1] ?? "";
+    // The token is stored only as a hash, and the audit trail never carries it.
+    const [stored] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.audit_events where tenant_id = ${A.id}
+         and after_state::text like ${`%${firstToken}%`}`;
+    expect(stored?.n).toBe(0);
+
+    // A second start supersedes the first code.
+    const second = await start(A.owner, p.annRequest, {
+      mode: "staff_device",
+      identityChecked: true,
+    });
+    expect(second.status).toBe(201);
+    const secondToken = (second.json.signing as { url: string }).url.split("#t=")[1] ?? "";
+    const stale = await request("POST", "/v1/public/waiver-sessions", {
+      origin: guestOf(A),
+      body: { token: firstToken },
+    });
+    expect(stale.status).toBe(409);
+    // Only at its own operator's site.
+    expect(
+      (
+        await request("POST", "/v1/public/waiver-sessions", {
+          origin: guestOf(B),
+          body: { token: secondToken },
+        })
+      ).json.error?.code,
+    ).toBe("waiver_link_invalid");
+    const opened = await request("POST", "/v1/public/waiver-sessions", {
+      origin: guestOf(A),
+      body: { token: secondToken },
+    });
+    expect(opened.status).toBe(201);
+    const secret = (opened.json as { sessionSecret: string }).sessionSecret;
+    expect((opened.json.waiver as { access: string }).access).toBe("staff_device");
+
+    // Ending the session: wrong site does nothing, right site ends it, a retry is fine.
+    const end = (origin: string) =>
+      request("DELETE", "/v1/public/waiver-sessions/current", { origin, bearer: secret });
+    await end(guestOf(B));
+    expect(
+      (
+        await request("GET", "/v1/public/waiver-sessions/current", {
+          origin: guestOf(A),
+          bearer: secret,
+        })
+      ).status,
+    ).toBe(200);
+    expect((await end(guestOf(A))).status).toBe(204);
+    expect((await end(guestOf(A))).status).toBe(204);
+    expect(
+      (
+        await request("GET", "/v1/public/waiver-sessions/current", {
+          origin: guestOf(A),
+          bearer: secret,
+        })
+      ).status,
+    ).toBe(401);
+
+    // An emailed link still opens as an email link.
+    const emailed = await openSession(A, p.kitToken);
+    expect((emailed.waiver as unknown as { access: string }).access).toBe("email_link");
   });
 });

@@ -14,6 +14,7 @@ import {
   recordAudit,
   type TenantContext,
   type TenantTransaction,
+  type WaiverAccessMethod,
   type WaiverRequestState,
   type WaiverSignerRole,
 } from "@tidegrid/database";
@@ -66,6 +67,11 @@ export interface SigningView {
   };
   consent: { version: string; text: string };
   sessionExpiresAt: Date;
+  /**
+   * How this session's signer arrived: an emailed link, or a staff-assisted
+   * start. The page treats a staff-assisted session as a shared device.
+   */
+  access: WaiverAccessMethod;
   signed: SignedSummary | null;
 }
 
@@ -140,6 +146,7 @@ function viewOf(
     },
     consent: { ...ESIGN_CONSENT },
     sessionExpiresAt: session.expiresAt,
+    access: session.access,
     signed,
   };
 }
@@ -373,16 +380,35 @@ export async function signWaiver(
   const { problems, signature } = validate(input, version, participant, request.required_signer);
   if (problems.length > 0) return { kind: "invalid", problems };
 
-  // The address the session's link was emailed to: the link names its
-  // message, and the message its delivery generation.
-  const { rows } = await sql<{ now: Date; recipient_email: string }>`
-    select now() as now, d.recipient_email
+  // How the signer arrived, from the session's own link: the address its
+  // email went to (the link names its message, and the message its delivery
+  // generation), or the staff member who started an assisted signing.
+  const { rows } = await sql<{
+    now: Date;
+    recipient_email: string | null;
+    mode: "staff_device" | "participant_qr" | null;
+    staff_id: string | null;
+    staff_name: string | null;
+  }>`
+    select now() as now, d.recipient_email, a.mode, a.actor_id as staff_id,
+           m.display_name as staff_name
       from waiver_signing_sessions s
       join guest_access_links l on l.tenant_id = s.tenant_id and l.id = s.access_link_id
-      join waiver_deliveries d on d.tenant_id = s.tenant_id and d.message_id = l.message_id
+      left join waiver_deliveries d
+        on d.tenant_id = s.tenant_id and l.message_id is not null and d.message_id = l.message_id
+      left join waiver_assisted_links a
+        on a.tenant_id = s.tenant_id and l.message_id is null and a.access_link_id = l.id
+      left join tenant_memberships m
+        on m.tenant_id = s.tenant_id and m.user_id::text = a.actor_id
      where s.tenant_id = ${ctx.tenantId} and s.id = ${session.id}`.execute(trx);
   const facts = rows[0];
-  if (!facts) throw new Error("a session's delivery was not found");
+  if (!facts || (facts.recipient_email === null && facts.mode === null)) {
+    throw new Error("a session's link has neither a delivery nor a staff-assisted start");
+  }
+  const assisted =
+    facts.mode !== null && facts.staff_id !== null
+      ? { mode: facts.mode, staffId: facts.staff_id, staffName: facts.staff_name }
+      : null;
   const signedAt = facts.now;
   const evidenceId = crypto.randomUUID();
   const signerName = expectedSigner(participant, request.required_signer) ?? signature;
@@ -403,7 +429,14 @@ export async function signWaiver(
     signedAtLocal: formatInstant(signedAt, booking.timeZone),
     evidenceId,
     requestId: request.id,
-    recipientMasked: maskEmail(facts.recipient_email),
+    arrival: assisted
+      ? {
+          kind: assisted.mode,
+          staff: assisted.staffName
+            ? `${assisted.staffName} (${assisted.staffId})`
+            : assisted.staffId,
+        }
+      : { kind: "email_link", recipientMasked: maskEmail(facts.recipient_email ?? "") },
     sourceIp: meta.sourceIp,
     userAgent: meta.userAgent,
   });
@@ -431,9 +464,10 @@ export async function signWaiver(
       acknowledgments: version.acknowledgments,
       consent_version: ESIGN_CONSENT.version,
       consent_text: ESIGN_CONSENT.text,
-      access_method: "email_link",
-      recipient_email: facts.recipient_email,
-      match_method: "signer_confirmed",
+      access_method: assisted ? assisted.mode : "email_link",
+      recipient_email: assisted ? null : facts.recipient_email,
+      match_method: assisted ? "staff_confirmed" : "signer_confirmed",
+      assisted_by: assisted ? assisted.staffId : null,
       source_ip: meta.sourceIp,
       user_agent: meta.userAgent,
       document,
@@ -464,6 +498,9 @@ export async function signWaiver(
       contentSha256: version.contentSha256,
       documentSha256,
       signerRole: request.required_signer,
+      accessMethod: assisted ? assisted.mode : "email_link",
+      matchMethod: assisted ? "staff_confirmed" : "signer_confirmed",
+      assistedBy: assisted ? assisted.staffId : null,
     },
   });
   await enqueueOutbox(trx, ctx, {

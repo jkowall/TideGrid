@@ -12,6 +12,7 @@ import type { JsonObject } from "@tidegrid/database";
 import { manageSession } from "@tidegrid/domain-booking";
 import {
   endedWaiverSession,
+  endWaiverSession,
   type GuestBookingWaivers,
   getSigningView,
   listGuestBookingWaivers,
@@ -117,6 +118,7 @@ export function signingJson(view: SigningView): WaiverSigning {
     waiver: view.waiver,
     consent: view.consent,
     sessionExpiresAt: view.sessionExpiresAt.toISOString(),
+    access: view.access,
     signed: view.signed
       ? {
           signedAt: view.signed.signedAt.toISOString(),
@@ -375,6 +377,31 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       );
     }
     return c.json({ waiver: outcome.waiver }, outcome.kind === "signed" ? 201 : 200);
+  });
+
+  const endRoute = createRoute({
+    method: "delete",
+    path: currentPath,
+    tags: ["public", "waivers"],
+    summary: "End the current signing session",
+    description:
+      "Resolves the browser Origin and needs the session's secret as a bearer token. Ends the session at once, so nothing on this device can read the waiver or the signed copy again. The signing page calls it after a staff-assisted signature, or after 2 minutes idle, on what may be a shared device. A signed waiver stays signed: the operator keeps the evidence and the PDF. An ended or unknown session answers 204 too, so a retry is safe.",
+    security: bearerSecurity,
+    responses: {
+      204: { description: "The session is ended" },
+      401: errorBody("No session secret (waiver_session_required)"),
+      404: errorBody("No operator at this address"),
+    },
+  });
+
+  app.openapi(endRoute, async (c) => {
+    const secret = sessionSecret(c);
+    await withPublicTenant(c, {}, async (trx, ctx) => {
+      const session = await loadWaiverSession(trx, ctx.tenantId, secret);
+      if (session) await endWaiverSession(trx, ctx, session);
+      return {};
+    });
+    return c.body(null, 204);
   });
 
   const documentRoute = createRoute({

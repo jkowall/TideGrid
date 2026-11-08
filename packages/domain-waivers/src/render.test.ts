@@ -29,7 +29,7 @@ function sampleWaiver(overrides: Partial<WaiverDocumentInput> = {}): WaiverDocum
     signedAtLocal: "Tuesday, October 6, 2026 at 3:04 PM EDT",
     evidenceId: "00000000-0000-4000-8000-000000000001",
     requestId: "00000000-0000-4000-8000-000000000002",
-    recipientMasked: maskEmail("zoe@example.test"),
+    arrival: { kind: "email_link", recipientMasked: maskEmail("zoe@example.test") },
     sourceIp: "203.0.113.7",
     userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
     ...overrides,

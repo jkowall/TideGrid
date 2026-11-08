@@ -104,3 +104,36 @@ export function resendFailureText(reason: string): string {
       return "TideGrid didn't send it. Try again in a moment.";
   }
 }
+
+/** How a signed waiver was reached, in words, for the signature line. */
+export function methodText(method: string | undefined): string {
+  if (method === "staff_device") return "with staff, on the operator's device";
+  if (method === "participant_qr") return "with staff, by QR code";
+  return "from the emailed link";
+}
+
+/** Whether staff can start a signing at the dock: the request waits for a signature. */
+export function canStartAssisted(waiver: ParticipantWaiver, role: StaffRole): boolean {
+  return canSendWaivers(role) && waiver.request?.state === "pending";
+}
+
+export function assistedFailureText(reason: string): string {
+  switch (reason) {
+    case "not_pending":
+      return "This waiver no longer needs a signature.";
+    case "trip_over":
+      return "This trip has ended, so its waiver takes no signature.";
+    case "participant_changed":
+      return "This person's details changed who signs. Close this and look at the booking again.";
+    case "no_site":
+      return "This operator's guest site has no working address yet, so there's nowhere to sign.";
+    case "forbidden":
+      return "Your role can't start a signing.";
+    case "signed_out":
+      return "You're signed out. Sign in again to start it.";
+    case "unreachable":
+      return "The console can't reach TideGrid. Check your connection, then try again.";
+    default:
+      return "TideGrid didn't start it. Try again in a moment.";
+  }
+}

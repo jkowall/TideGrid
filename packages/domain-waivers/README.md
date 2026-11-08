@@ -108,6 +108,17 @@ Before real evidence, the pilot moves documents to a private R2 bucket with obje
 
 `loadEvidenceDocument` hashes the bytes again on every read and throws `WaiverDocumentMismatchError` when they no longer match the recorded SHA-256, so bytes changed under the database's check (storage, a restore, or a dropped check) are never served; the API answers 500 and logs the error's name. The same check carries over to R2, where the database no longer guards the bytes.
 
+## Staff-assisted and QR signing (W1-G215-SIGNING)
+
+Pulled forward into the demo by the owner on 2026-11-08 ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation)). Migration `0020_waiver_staff_assisted.sql` (provisional number, claimed at merge) and `src/assisted.ts`. At the dock, a guest without the email, or a participant without an address, signs on the staff member's device or by scanning a QR code with their own phone.
+
+- **Staff start it, after checking who signs.** `startAssistedSigning` (`waivers.manage`, so owners and booking staff) takes one pending request, a mode (`staff_device` or `participant_qr`), and a ticked box that the staff member checked who signs (D2). It refuses a request that is not pending, a trip that is over, and a participant who left the booking or now needs another signer. Only a staff actor may start one; the database refuses any other.
+- **The link.** A `waiver_sign` link in the messaging module's `guest_access_links`, with no message: single-use, 15 minutes (D1), bound to the request's booking, participant, and subject like an emailed link. `waiver_assisted_links` records the mode, the staff member, the request id, and the tick, append-only for every role. The raw token goes back once, in the staff response, as `https://<guest site>/waiver#t=<token>`; only its hash is stored, and the audit row carries the link id, never the token. A new start supersedes the request's earlier unused assisted link, so one code at most works per request. It never touches the emailed link: a guest who signs from their email later is fine. A newer email's link supersedes an older assisted one.
+- **The QR code carries only that address.** The console draws it with no dependency (D4): byte mode, level M, versions 1 to 10, checked module by module against a reference encoder. No name, booking, or request id is in it.
+- **Redemption is unchanged.** The same explicit POST as an email link. A link with no message and no assisted record opens nothing. The session lasts at most 15 minutes, and its waiver says how the signer arrived (`access`).
+- **The evidence.** The database holds the access method and the match method to the session's link, for every writer: an emailed link must record `email_link`, `signer_confirmed`, and the address its delivery went to; an assisted link must record its mode, `staff_confirmed`, and its staff member in `assisted_by`, with no address. Anything else is refused (`waiver_evidence_method`). The PDF's signing record says how the signer arrived and adds an "Assisted by" line with the staff member's display name; an emailed waiver's PDF is unchanged. Staff reads show the method beside a signed waiver.
+- **Shared-device cleanup (D3).** On an assisted session the signing page keeps the session secret in memory only, never in `sessionStorage`. After 2 minutes with no tap, key, or scroll it ends the session (`DELETE /v1/public/waiver-sessions/current`) and clears the page. After signing on the staff device it offers no download, only Done, which ends the session and says to hand the device back; on the participant's own phone the download stays until Done. Ending a session never touches the evidence or the PDF.
+
 ## Status
 
 `listBookingWaivers` and `listTripWaivers` give each named participant one status, which the console shows as an icon and a label, never color alone:
@@ -142,6 +153,8 @@ Each also carries the request (state, signer, version, when assigned), the evide
 | `GET /v1/staff/tenants/{tenantId}/trips/{tripId}/waivers` | Owners and booking staff, for the roster. 404 `trip_not_found` |
 | `POST /v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend` | Owners and booking staff; `Idempotency-Key`; `{ reason }`. 201; 404 `waiver_request_not_found`; 409 `waiver_not_pending`, `waiver_no_address`, `waiver_resend_too_soon`, `waiver_resend_limit`, `waiver_resend_rate_limited`, `waiver_email_invalid`, `waiver_trip_over`; a refusal still commits what the send closed |
 | `GET /v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document` | Owners and booking staff. 200 `application/pdf`; 404 `waiver_evidence_not_found`; 500 if the stored bytes no longer match their hash |
+| `POST /v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing` | Owners and booking staff; `{ mode, identityChecked: true }`; no `Idempotency-Key`, since the answer holds a token that must not be stored. 201 `{ signing: { mode, url, expiresAt } }`; 400 when the box is not ticked; 404 `waiver_request_not_found`; 409 `waiver_not_pending`, `waiver_trip_over`, `waiver_participant_changed`, `waiver_guest_site_unavailable` (nothing is issued) |
+| `DELETE /v1/public/waiver-sessions/current` | Bearer session. 204, also for a session already ended or unknown, so a retry is safe. Ends the session; a signed waiver stays signed |
 
 Public routes resolve the tenant from the verified Origin, as `/v1/public/trips` does, and are rate limited per client address and operator. Every response is `Cache-Control: no-store`. Another tenant's id, an unknown one, and a malformed one answer the same 404 on staff routes. The contract is [packages/contracts/src/waivers.ts](../contracts/src/waivers.ts).
 
@@ -154,6 +167,8 @@ Public routes resolve the tenant from the verified Origin, as `/v1/public/trips`
 | request assigned | `waiver_request.assigned` | `waiver.request.assigned` |
 | generation sent | `waiver_request.sent`, `waiver_request.resent` (with the reason) | the messaging module's |
 | link redeemed | `waiver_access.redeemed` | |
+| assisted signing started | `waiver_access.assisted_started` (link id, mode) | |
+| session ended from the page | `waiver_access.signed_out` | |
 | signed | `waiver_request.signed` | `waiver.signed` |
 | revoked | `waiver_request.revoked` | `waiver.request.revoked` |
 | superseded | `waiver_request.superseded` | `waiver.request.superseded` |
@@ -166,7 +181,7 @@ The booking row (`FOR NO KEY UPDATE`, for assignment, revocation, and version mo
 
 Recorded as follow-ups; the demo leaves them out:
 
-- **Staff-assisted entry and QR.** Participant QR, the generic dock QR with staff lookup, staff-device signing and its shared-device cleanup, and recording the staff-assisted match method are G2.15 scope beyond the demo. Only `email_link` and `signer_confirmed` exist today.
+- **The generic dock QR with staff lookup.** One printed code at the dock that finds a guest's waiver by lookup is not built; participant QR and staff-device signing are (above).
 - **Reminders.** Scheduled reminders against a completion cutoff are not built; staff resend is the one follow-up send. The messaging module's `notBefore` is the seam.
 - **Guest self-service renewal.** A guest whose link expired or was used asks the operator to resend; a guest-initiated "email me a new link" needs the messaging module to say which subject a spent link named. The management page shows status but offers no resend; a corrected address there sends at once.
 - **A sixth address.** After five generations a corrected address gets no email (the old address's access still ends). Staff see the limit, and nothing resets the count.
@@ -183,4 +198,5 @@ Recorded as follow-ups; the demo leaves them out:
 - `pnpm --filter @tidegrid/domain-waivers test`: the PDF writer, wrapping and escaping, the canonical content, validation, and secrets.
 - `pnpm --filter @tidegrid/domain-waivers test:integration` (the throwaway PostgreSQL 17 from `tools/local-db/local-db.sh` (`pnpm test:local-db integration` runs every suite; see the [database README](../database/README.md#tests)), `TIDEGRID_EPHEMERAL_DB=1`): versions and their hashes, assignment through the real hooks, racing assignments, one-time redemption and two-tenant denial, signing and evidence immutability for every role, the guardian flow, corrections, resend limits, cancellation, and a version change mid-flight. `src/test-fixtures.ts` (exported as `@tidegrid/domain-waivers/testing`) books through the real checkout, names participants through the booking module, and reads links from the messaging module's fake mailbox.
 - `src/adversarial/` (the test specialist's suites, same command): assignment under racing hooks and party changes, webhook and sweep confirmations, and a participant added during a version move; links and sessions (one session per link, concurrent redemption, a redemption racing a correction, cancellation and supersede); email delivery (failures, in-flight emails at a correction or a signature, the resend limits at the database, a correction after the fifth generation); signing and evidence (guardians, a guardian renamed after signing, a signature racing a correction, versions and stale hashes, concurrent signatures, immutability for every role, forged evidence).
+- `src/adversarial/assisted-signing.integration.test.ts`: staff-assisted and QR signing across online and staff-assisted bookings through the webhook and the sweep, adults and guardians; replay, supersede, the 15 minutes, cancellation, participant change, and version supersede; the identity tick, a non-staff actor, and two tenants; sign-out keeping the evidence; and the database rules for every writer.
 - `apps/api-worker/test-integration/waivers.integration.test.ts`: every route from two tenants and each role, and the booker's view in the booking session. `waivers-adversarial.integration.test.ts`: link consumption only by POST, cross-session and cross-operator reach, the PDF's bytes, staff role and 404 rules, and no personal data in audit or outbox rows.

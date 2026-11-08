@@ -22,7 +22,7 @@ import {
 import { ContactActions } from "../Contact.tsx";
 import { useLinkClick } from "../navigation.tsx";
 import { useTitle } from "../States.tsx";
-import { downloadDocument, openSession, readSession, sign } from "./api.ts";
+import { downloadDocument, endSession, openSession, readSession, sign } from "./api.ts";
 import { clearStoredSession, loadStoredSession, storeSession, takeLinkToken } from "./session.ts";
 import "./waiver.css";
 
@@ -34,7 +34,16 @@ import "./waiver.css";
  * waiver, checks each acknowledgment, confirms who they are, consents to sign
  * electronically, types their name, and signs; and can download the signed
  * PDF. Every refusal has its own designed screen.
+ *
+ * Shared devices (W1-G215-SIGNING). A link staff started at the dock (on the
+ * operator's device, or a QR code) may open on a device someone else uses
+ * next. Then the page keeps the session's secret in memory only, never in
+ * storage; after a signature, or 2 minutes with no touch or key, it ends the
+ * session on the server and forgets the waiver, the form, and the secret.
  */
+
+/** How long a staff-assisted page waits, untouched, before it clears itself (decision D3). */
+export const SHARED_DEVICE_IDLE_MS = 2 * 60_000;
 
 type Phase =
   /**
@@ -46,6 +55,8 @@ type Phase =
   | { kind: "review"; secret: string; waiver: WaiverSigning }
   | { kind: "signed"; secret: string; waiver: WaiverSigning }
   | { kind: "stopped"; code: string };
+
+const sharedAccess = (waiver: WaiverSigning) => waiver.access !== "email_link";
 
 interface Stop {
   icon: IconName;
@@ -147,11 +158,27 @@ const stops: Record<string, Stop> = {
     title: "Too many tries",
     body: () => "Wait a minute, then try again.",
   },
+  device_cleared: {
+    icon: "check-circle",
+    tone: "ready",
+    title: "All done. Hand the device back",
+    body: (op) =>
+      `${op} has the signed waiver. This page has forgotten it, so the next person can sign safely.`,
+  },
+  device_idle: {
+    icon: "lock",
+    tone: "neutral",
+    title: "This page was cleared",
+    body: (op) =>
+      `Nobody used it for 2 minutes, so it forgot the waiver for privacy. Nothing more was signed. Ask the ${op} crew to start it again.`,
+  },
   unavailable,
 };
 
 /** Codes after which the stored session has nothing more to show. */
 const doneCodes = new Set([
+  "device_cleared",
+  "device_idle",
   "waiver_signed",
   "waiver_not_needed",
   "waiver_superseded",
@@ -525,12 +552,18 @@ function SignedView({
   secret,
   brand,
   headingRef,
+  onDone,
 }: {
   waiver: WaiverSigning;
   secret: string;
   brand: PublicBrand;
   headingRef: Ref<HTMLHeadingElement>;
+  /** On a shared device: forget everything and show the hand-back screen. */
+  onDone: () => void;
 }) {
+  const shared = sharedAccess(waiver);
+  // On the operator's own device the copy is not offered: the operator keeps it.
+  const offerCopy = waiver.access !== "staff_device";
   const linkClick = useLinkClick();
   const [downloading, setDownloading] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
@@ -561,18 +594,26 @@ function SignedView({
       headingRef={headingRef}
       actions={
         <>
-          <Button
-            variant="primary"
-            icon="receipt"
-            busy={downloading}
-            busyLabel="Preparing…"
-            onClick={() => void download()}
-          >
-            Download your signed copy
-          </Button>
-          <ButtonLink variant="ghost" icon="arrow-left" href="/" onClick={linkClick}>
-            Back to {brand.name}
-          </ButtonLink>
+          {offerCopy && (
+            <Button
+              variant={shared ? "secondary" : "primary"}
+              icon="receipt"
+              busy={downloading}
+              busyLabel="Preparing…"
+              onClick={() => void download()}
+            >
+              Download your signed copy
+            </Button>
+          )}
+          {shared ? (
+            <Button variant="primary" icon="check" onClick={onDone}>
+              Done
+            </Button>
+          ) : (
+            <ButtonLink variant="ghost" icon="arrow-left" href="/" onClick={linkClick}>
+              Back to {brand.name}
+            </ButtonLink>
+          )}
         </>
       }
     >
@@ -599,6 +640,11 @@ function SignedView({
             </dd>
           </div>
         </dl>
+      )}
+      {shared && (
+        <p className="waiver-fine-print">
+          Tap Done when you've finished. This page clears itself after 2 minutes either way.
+        </p>
       )}
       {downloadFailed && (
         <Notice tone="error" title="The copy didn't download">
@@ -686,14 +732,47 @@ export function WaiverPage({
     };
   }, [phase.kind, show, stop]);
 
+  // The shared-device cleanup: end the session on the server, forget the
+  // secret, the waiver, and the form (the phase change unmounts them).
+  const current = useRef(phase);
+  current.current = phase;
+  const clear = useCallback(
+    (code: "device_cleared" | "device_idle") => {
+      const now = current.current;
+      if (now.kind === "review" || now.kind === "signed") void endSession(now.secret);
+      clearStoredSession();
+      go({ kind: "stopped", code });
+    },
+    [go],
+  );
+
+  const shared = (phase.kind === "review" || phase.kind === "signed") && sharedAccess(phase.waiver);
+  useEffect(() => {
+    if (!shared) return;
+    let timer = setTimeout(() => clear("device_idle"), SHARED_DEVICE_IDLE_MS);
+    const touched = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => clear("device_idle"), SHARED_DEVICE_IDLE_MS);
+    };
+    const events = ["pointerdown", "keydown", "input", "scroll", "touchstart"] as const;
+    for (const e of events) window.addEventListener(e, touched, { passive: true, capture: true });
+    return () => {
+      clearTimeout(timer);
+      for (const e of events) window.removeEventListener(e, touched, { capture: true });
+    };
+  }, [shared, clear]);
+
   const open = async (token: string) => {
     setPhase({ kind: "start", token, opening: true, failed: false });
     const result = await openSession(token);
     if (result.kind === "ok") {
-      storeSession({
-        secret: result.value.secret,
-        expiresAt: result.value.waiver.sessionExpiresAt,
-      });
+      // A staff-assisted session may be on a shared device: memory only.
+      if (!sharedAccess(result.value.waiver)) {
+        storeSession({
+          secret: result.value.secret,
+          expiresAt: result.value.waiver.sessionExpiresAt,
+        });
+      }
       show(result.value.secret, result.value.waiver);
     } else if (result.kind === "refused" && (result.status === 429 || result.status >= 500)) {
       // Too many tries, or the server failed: the link was not spent. Keep
@@ -786,6 +865,7 @@ export function WaiverPage({
             secret={phase.secret}
             brand={brand}
             headingRef={heading}
+            onDone={() => clear("device_cleared")}
           />
         </div>
       );
