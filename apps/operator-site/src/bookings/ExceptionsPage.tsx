@@ -72,8 +72,12 @@ export function ExceptionsPage({
   /** Show older exceptions went with the last page: the first older one takes focus. */
   const focusExceptionId = useRef<string | null>(null);
 
+  /** Each first-page load starts a generation; an older page answers only its own. */
+  const generation = useRef(0);
+
   useEffect(() => {
     void attempt;
+    generation.current += 1;
     const controller = new AbortController();
     const retry = retryRequested.current;
     retryRequested.current = false;
@@ -116,11 +120,14 @@ export function ExceptionsPage({
   const loadOlder = () => {
     if (load.kind !== "ready" || !load.page.nextBefore) return;
     const before = load.page.nextBefore;
+    const asked = generation.current;
     // The page's counts say what loaded, not the last follow-up.
     setSaid("");
     setLoad({ ...load, more: "loading" });
     void loadExceptions(tenantId, { status: view, before }).then((result) => {
       setLoad((current) => {
+        // A change of Show or a reload since then: this page belongs to another list.
+        if (generation.current !== asked) return current;
         if (current.kind !== "ready" || current.page.nextBefore !== before) return current;
         if (result.kind !== "ok") return { ...current, more: "failed" };
         // The button the person pressed goes with the last page; the first

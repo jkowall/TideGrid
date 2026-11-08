@@ -472,6 +472,31 @@ describe("older exceptions", () => {
     await waitFor(() => expect(document.activeElement).toBe(first));
   });
 
+  it("drops an older open page that answers after Show changed, even with the same cursor", async () => {
+    const older = deferred();
+    const followed = { ...noCapacity, resolution: null };
+    api({
+      [route.exceptions()]: [
+        () => json(body([mismatch], mismatch.id)),
+        older.answer,
+        () => json(body([followed], mismatch.id)),
+      ],
+    });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Show older exceptions" }));
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "resolved" } });
+    await waitFor(() =>
+      expect(items().map(titleOf)).toEqual([
+        "Paid after the checkout ran out of time, and the seats were gone",
+      ]),
+    );
+    older.release(json(body([canceled, failedRefund], null)));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(items()).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Show older exceptions" })).toBeTruthy();
+  });
+
   it("keeps focus on Show older exceptions while older ones remain", async () => {
     api({
       [route.exceptions()]: [
