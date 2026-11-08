@@ -8,8 +8,10 @@
  * - participantAdded: assign the new participant.
  * - participantUpdated: a change of who must sign (minor or not), or a new
  *   name for the participant or for the guardian who signed, on a signed
- *   waiver, ends the request and assigns a new one; a corrected address on a
- *   pending request sends it there at once.
+ *   waiver, ends the request and assigns a new one; a new name on a pending
+ *   request ends its staff-assisted codes and sessions, which staff confirmed
+ *   by the old name; a corrected address on a pending request sends it there
+ *   at once.
  * - bookingCanceled: end every request on the booking.
  *
  * None of them refuses: confirmation and party changes never wait on waivers.
@@ -18,6 +20,7 @@ import type { TenantContext, TenantTransaction } from "@tidegrid/database";
 import type { BookingHooks, ParticipantUpdatedEvent } from "@tidegrid/domain-booking";
 import { sql } from "kysely";
 import { assignBookingWaivers, lockBookingForWaivers, requiredSignerFor } from "./assign.ts";
+import { endAssistedAccess } from "./assisted.ts";
 import { sendWaiverRequest } from "./delivery.ts";
 import type { WaiverDeps } from "./ports.ts";
 import { revokeBookingWaivers, revokeParticipantWaivers } from "./revoke.ts";
@@ -71,6 +74,19 @@ export async function onParticipantUpdated(
       participantIds: [event.participantId],
     });
     return;
+  }
+  // A pending request keeps its emailed link, but a staff-assisted code or
+  // session was confirmed against the old name, so it ends.
+  if (
+    live.state === "pending" &&
+    (event.changed.includes("name") || event.changed.includes(signerField))
+  ) {
+    await endAssistedAccess(
+      trx,
+      ctx.tenantId,
+      { id: live.id, booking_id: event.bookingId, participant_id: event.participantId },
+      { link: "withdrawn", session: "participant_changed" },
+    );
   }
   const addressField = participant.minor ? "guardianEmail" : "email";
   if (live.state === "pending" && event.changed.includes(addressField)) {

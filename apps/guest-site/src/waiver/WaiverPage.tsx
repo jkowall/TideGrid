@@ -908,8 +908,18 @@ export function WaiverPage({
             waiver={phase.waiver}
             secret={phase.secret}
             headingRef={heading}
-            onSigned={(waiver) => go({ kind: "signed", secret: phase.secret, waiver })}
-            onStopped={stop}
+            onSigned={(waiver) => {
+              // A reply that lands after the page was cleared is dropped, so
+              // a shared device never shows the signer's details again.
+              const now = current.current;
+              if (now.kind !== "review" || now.secret !== phase.secret) return;
+              go({ kind: "signed", secret: phase.secret, waiver });
+            }}
+            onStopped={(code) => {
+              const now = current.current;
+              if (now.kind !== "review" || now.secret !== phase.secret) return;
+              stop(code);
+            }}
           />
         </div>
       );

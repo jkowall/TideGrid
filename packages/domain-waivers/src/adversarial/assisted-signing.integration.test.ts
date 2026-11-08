@@ -144,7 +144,7 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
     world = openWorld(env, 12);
     deps = fixtureDeps();
     hooks = fixtureHooks();
-    A = await createWaiverFixture(world.admin, world.db, "wvsa", { days: 8 });
+    A = await createWaiverFixture(world.admin, world.db, "wvsa", { days: 10 });
     B = await createWaiverFixture(world.admin, world.db, "wvsb", { days: 2 });
     nextTrip = trips(A);
     staffA = await addStaff(A, "Dana Dock");
@@ -401,6 +401,59 @@ describe.skipIf(!env)("W1-G215-SIGNING adversarial: staff-assisted and QR signin
     );
     expect(await loadSessionFor(chopen.secret)).toBeNull();
     expect(await start(A.id, staffA, chreq, "staff_device")).toEqual({ kind: "not_pending" });
+
+    // A new name on a pending request: staff confirmed the old name, so its
+    // open session and its unused code end; the emailed link's session stays.
+    const renamed = await book(world, A, nextTrip(), 1, hooks);
+    const ro = "ro.renamed@example.test";
+    const rp = await name(world, A.id, renamed.bookingId, 1, adult("Ro Before", ro), hooks);
+    const rreq = (await liveRequest(world.admin, renamed.bookingId, rp)).id;
+    const remail = await openFor(world, A.id, rreq);
+    const ropen = await redeem(
+      world,
+      A.id,
+      (await issued(A.id, staffA, rreq, "participant_qr")).token,
+    );
+    if (ropen.kind !== "opened") throw new Error(JSON.stringify(ropen));
+    await name(world, A.id, renamed.bookingId, 1, adult("Ro After", ro), hooks);
+    expect((await liveRequest(world.admin, renamed.bookingId, rp)).id).toBe(rreq);
+    expect(await loadSessionFor(ropen.secret)).toBeNull();
+    const [ended] = await world.admin<{ revoked_reason: string }[]>`
+      select revoked_reason from public.waiver_signing_sessions where id = ${ropen.session.id}`;
+    expect(ended?.revoked_reason).toBe("participant_changed");
+    expect(await loadSessionFor(remail.secret)).not.toBeNull();
+    // An unused code ends too.
+    const rcode = await issued(A.id, staffA, rreq, "staff_device");
+    await name(world, A.id, renamed.bookingId, 1, adult("Ro Again", ro), hooks);
+    expect(await redeem(world, A.id, rcode.token)).not.toMatchObject({ kind: "opened" });
+
+    // The guardian's new name does the same for a minor's request.
+    const kid = await book(world, A, nextTrip(), 1, hooks);
+    const kp = await name(
+      world,
+      A.id,
+      kid.bookingId,
+      1,
+      minor("Kai Kid", { name: "Gus Guard", email: "gus.guard@example.test" }),
+      hooks,
+    );
+    const kreq = (await liveRequest(world.admin, kid.bookingId, kp)).id;
+    const kopen = await redeem(
+      world,
+      A.id,
+      (await issued(A.id, staffA, kreq, "staff_device")).token,
+    );
+    if (kopen.kind !== "opened") throw new Error(JSON.stringify(kopen));
+    await name(
+      world,
+      A.id,
+      kid.bookingId,
+      1,
+      minor("Kai Kid", { name: "Gia Guard", email: "gus.guard@example.test" }),
+      hooks,
+    );
+    expect(await loadSessionFor(kopen.secret)).toBeNull();
+    expect((await liveRequest(world.admin, kid.bookingId, kp)).id).toBe(kreq);
 
     // A new version moves unsigned work: the code for the old request opens nothing.
     const moved = await book(world, A, nextTrip(), 1, hooks);

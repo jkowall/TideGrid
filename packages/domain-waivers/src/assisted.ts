@@ -57,6 +57,36 @@ export type AssistedStartResult =
   | { kind: "identity_unchecked" };
 
 /**
+ * End a request's staff-assisted access: its unused assisted links, and the
+ * open sessions those links started. The emailed link and its session stay.
+ * Used when a new code replaces the old one, and when the signer's name
+ * changes, since the staff member confirmed the person by the old name.
+ */
+export async function endAssistedAccess(
+  trx: TenantTransaction,
+  tenantId: string,
+  request: { id: string; booking_id: string; participant_id: string },
+  reasons: { link: "superseded" | "withdrawn"; session: "superseded" | "participant_changed" },
+): Promise<void> {
+  await sql`
+    update guest_access_links l
+       set revoked_at = now(), revoked_reason = ${reasons.link}
+     where l.tenant_id = ${tenantId} and l.booking_id = ${request.booking_id}
+       and l.purpose = ${WAIVER_LINK_PURPOSE}
+       and l.participant_id = ${request.participant_id}
+       and l.subject_ref = ${waiverSubject(request.id)}
+       and l.message_id is null
+       and l.consumed_at is null and l.revoked_at is null`.execute(trx);
+  await sql`
+    update waiver_signing_sessions s
+       set revoked_at = now(), revoked_reason = ${reasons.session}
+      from waiver_assisted_links a
+     where s.tenant_id = ${tenantId} and s.request_id = ${request.id}
+       and s.revoked_at is null
+       and a.tenant_id = s.tenant_id and a.access_link_id = s.access_link_id`.execute(trx);
+}
+
+/**
  * Start a staff-assisted signing for one request, in the caller's staff
  * transaction. The caller holds `waivers.manage`.
  */
@@ -81,25 +111,13 @@ export async function startAssistedSigning(
     return { kind: "participant_changed" };
   }
   const subject = waiverSubject(request.id);
-  // One working code per request: the earlier unused assisted link ends.
-  await sql`
-    update guest_access_links l
-       set revoked_at = now(), revoked_reason = 'superseded'
-     where l.tenant_id = ${ctx.tenantId} and l.booking_id = ${request.booking_id}
-       and l.purpose = ${WAIVER_LINK_PURPOSE}
-       and l.participant_id = ${request.participant_id}
-       and l.subject_ref = ${subject}
-       and l.message_id is null
-       and l.consumed_at is null and l.revoked_at is null`.execute(trx);
-  // And a session an earlier code already opened, so one phone at most holds
-  // it. A session from the emailed link stays open.
-  await sql`
-    update waiver_signing_sessions s
-       set revoked_at = now(), revoked_reason = 'superseded'
-      from waiver_assisted_links a
-     where s.tenant_id = ${ctx.tenantId} and s.request_id = ${request.id}
-       and s.revoked_at is null
-       and a.tenant_id = s.tenant_id and a.access_link_id = s.access_link_id`.execute(trx);
+  // One working code per request: the earlier unused assisted link ends, and
+  // so does a session an earlier code already opened, so one phone at most
+  // holds it. A session from the emailed link stays open.
+  await endAssistedAccess(trx, ctx.tenantId, request, {
+    link: "superseded",
+    session: "superseded",
+  });
   const token = newAccessToken();
   const { rows } = await sql<{ id: string; expires_at: Date }>`
     insert into guest_access_links (tenant_id, booking_id, participant_id, purpose, subject_ref,

@@ -62,7 +62,7 @@ const json = (status: number, body: unknown) =>
 const refusal = (status: number, code: string) =>
   json(status, { error: { code, message: code, requestId: "r" } });
 
-function stubApi(answer: (call: Call) => Response): Call[] {
+function stubApi(answer: (call: Call) => Response | Promise<Response>): Call[] {
   const calls: Call[] = [];
   vi.stubGlobal(
     "fetch",
@@ -420,6 +420,52 @@ describe("the waiver page", () => {
         expect(screen.queryByText("Boating has risks.")).toBeNull();
         expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
         expect(window.sessionStorage.getItem("tidegrid.waiver.session")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("drops a signature reply that arrives after the page was cleared", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        // The headers arrive at once; the body only after the page is cleared.
+        let finish: () => void = () => {};
+        const body = JSON.stringify({ waiver: { ...signedWaiver(), access: "staff_device" } });
+        stubApi((call) => {
+          if (call.url.endsWith("/waiver-sessions")) {
+            return json(201, { sessionSecret: secret, waiver: waiver({ access: "staff_device" }) });
+          }
+          if (call.method === "DELETE") return new Response(null, { status: 204 });
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              finish = () => {
+                controller.enqueue(new TextEncoder().encode(body));
+                controller.close();
+              };
+            },
+          });
+          return new Response(stream, {
+            status: 201,
+            headers: { "content-type": "application/json" },
+          });
+        });
+        renderPage();
+        fireEvent.click(screen.getByRole("button", { name: "Open my waiver" }));
+        await screen.findByText("Boating has risks.");
+        for (const box of screen.getAllByRole("checkbox")) fireEvent.click(box);
+        fireEvent.change(screen.getByLabelText("Type your full name to sign"), {
+          target: { value: "Ann Adult" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Sign waiver" }));
+        await vi.advanceTimersByTimeAsync(121_000);
+        await screen.findByRole("heading", { name: "This page was cleared" });
+        finish();
+        // Let the body stream and the reply settle.
+        await new Promise((r) => setTimeout(r, 200));
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(screen.getByRole("heading", { name: "This page was cleared" })).toBeTruthy();
+        expect(screen.queryByRole("heading", { name: "Waiver signed" })).toBeNull();
+        expect(screen.queryByText("Ann Adult")).toBeNull();
       } finally {
         vi.useRealTimers();
       }
