@@ -4,6 +4,25 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### The 0014 resend residuals closed for direct writers (W1-0014-RESIDUALS), built November 8, 2026
+
+Goal branch `claude/project-thread-wqkheo`, from `main` at `c365545` and rebased onto `a55dc7e` (W1-FIN-EXC's `0018`), migration `0019_resend_residuals.sql` (provisional; `0018` belongs to W1-FIN-EXC) ([decision register](v2/06-decision-register.md#2026-11-08-w1-0014-residuals-the-0014-resend-residuals-closed-for-direct-writers-owner-go-coordinator-defaults-pending-owner-confirmation)).
+
+- **Closes**, from the 0014 entry's "Not proven, or open" list, for a writer with `tidegrid_app`'s credentials:
+  - "The two templates' keys are not pinned" (D4 C): closed for those two templates. A `booking_confirmation` or `booking_canceled` message under any key but its booking's original or a staff resend is refused (`email_messages_booking_key`), and an original must fit the booking's state (`email_messages_booking_state`). Case R1.
+  - "The eligibility refusals stay in the service" (D5 A): closed. A direct resend for the wrong state, after the trip, with a failed refund, or while the original is being sent is refused by the ledger and leaves nothing (R2). A direct confirmation resend waits for a cancellation in progress and is then refused (R3).
+  - "The waiver ledger's `send_after` hole" (D6): closed. A direct writer cannot bring a waiting waiver email due before its delivery's `send_after` (the new case in `sending-limits.integration.test.ts`).
+- **The holes, shown.** Without the migration, R1, R2, R3, R5 and the `send_after` case fail on a fresh container: each direct write is accepted.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `pnpm test:local-db integration`, every package, 999 passed and 2 skipped, in 323 s. `pnpm check` passed. Three existing tests changed: a claim case marks its first resend sent before the next, a binding case now fails earlier at the message (`email_messages_booking_key`), and the waiver re-add case moves its delivery's `send_after` before its email.
+- **Independent review** on the first draft: no blocker. Fixed: an original key taken early (a false cancellation notice that would leave the real one a duplicate), a narrower lock-wait probe in R3, and the email trigger added to R5's catalog check. Recorded, not fixed: below.
+- **Copilot review on PR 116**, three findings, all fixed: the in-progress check filtered outside its locking subquery, so PostgreSQL pushed the filter down and a claim of the original held open was skipped, not waited for (shown by the new R3b, which fails on the old query); a waiver email could move earlier while its delivery's insert was still open, so a delivery that is not yet visible now refuses the move; and R3 opens its gate in a `finally`. A second Copilot round found that the original's state check read the booking without a lock, so a confirmation could land after a cancellation's scan of pending emails; it now locks the booking `FOR SHARE` (new R3c, which fails without the lock). The full local run after the fixes: 1,008 passed, 2 skipped.
+- **Security review** (R9, under the owner's go to merge without asking him, 2026-11-08) on `27185cc`: nothing above low. No privilege, tenant isolation, or `search_path` issue; error messages carry ids and codes only. One low finding, recorded below. Info: a message of another template can still take an original's key (the accepted other-template residual), and two comments now say the trigger's locks are weaker than the service's.
+- **Still open.**
+  - A message of another template is not held: a writer can send a confirmation's text under a template name of its own, or a `booking_manage` link message, under any key, and each claim mints a management link.
+  - Eligibility is not decided again at the claim: a writer that cancels a booking by hand, skipping the cancel path's step that cancels pending confirmations, can let a queued confirmation resend go out.
+  - The `0015` give-back forgery (W1-RESEND-CLAIM's D5) is unchanged.
+  - A direct writer may leave the booking's earlier email of the template queued, so the original and a resend can go out close together (security review, low); the limits still count every resend.
+
 ### W1-FIN-EXC: staff resolve finalization exceptions, built November 8, 2026
 
 Staff mark a payment exception as followed up, with migration `0018` (provisional), inside the G2.12 row by the owner's O-SCOPE decision ([decision register](v2/06-decision-register.md#2026-11-08-w1-fin-exc-staff-resolve-finalization-exceptions-owner-go-coordinator-defaults-pending-owner-confirmation)). Built on `claude/project-thread-kwapj1` from `main` at `f8044a9`, and brought up to date with `main` at `bdbb0fb`. Not merged, not released, and `0018` is not on Neon main.
@@ -15,6 +34,7 @@ Staff mark a payment exception as followed up, with migration `0018` (provisiona
 - **Security review** (rule R9, the owner's go of 2026-11-08), on the branch rebased onto `c365545`: no findings. Checked tenant isolation (path tenant against membership, forced row-level security, composite keys), the role check, the note's reach (finance, audit, events, logs, the replay answer), money and booking state, append-only and the stamped author, the replay key, and rendering. One informational note, fixed in wording: the idempotency store keeps a hash of the request, note included, so the docs no longer say the note never enters it; its kept answer has no note.
 - **Copilot review.** Three findings on the console page, all fixed: a save updates the page as it is when the answer arrives, and focus moves only when it was lost.
 - **Rebased** onto `main` at `c365545`; the migration became `0018`, since the resend claim took `0017`.
+
 
 ### Staff resend limits held at the delivery claim (W1-RESEND-CLAIM), built November 8, 2026
 

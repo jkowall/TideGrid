@@ -656,7 +656,9 @@ describe.skipIf(!env)("adversarial: staff resend limits held by the database (00
       [
         "another tenant's booking",
         { bookingId: foreign.bookingId, generation: 1, message: { bookingId: b.bookingId } },
-        "23514:booking_email_resends_message",
+        // Its key names B's booking, its booking_id A's: since 0019 the
+        // message itself is refused, before any ledger row.
+        "23514:email_messages_booking_key",
       ],
       [
         "another tenant's message",

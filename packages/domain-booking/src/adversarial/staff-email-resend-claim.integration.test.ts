@@ -338,6 +338,10 @@ describe.skipIf(!env)("adversarial: staff resend limits held at the delivery cla
     const b = await book(world, A, tripsA.shared(), 1);
     const first = await serviceResend(A, b.bookingId, "confirmation");
     expect(await outcome(directClaim(A, first))).toBe("ok");
+    // Sent, so the next resend is not refused while it is in flight (0019).
+    await world.admin`update public.email_messages
+                         set state = 'sent', provider_message_id = ${`sent-${randomUUID()}`}
+                       where id = ${first}`;
     await pass(A, 11, { ledger: true });
     const second = await asSystem(world.db, A.id, (trx, ctx) =>
       directWrite(trx, ctx, b.bookingId, 2),
