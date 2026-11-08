@@ -760,6 +760,70 @@ describe("following an exception up (W1-FIN-EXC)", () => {
     expect(items()).toHaveLength(1);
   });
 
+  it("removes both of two saves that overlap, and leaves focus where the person moved it", async () => {
+    const first = deferred();
+    const second = deferred();
+    api({
+      [route.exceptions()]: () => json(body([noCapacity, mismatch, failedRefund])),
+      [route.resolveException(noCapacity.id)]: first.answer,
+      [route.resolveException(mismatch.id)]: second.answer,
+    });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(3));
+    for (const item of items().slice(0, 2)) {
+      fireEvent.click(markButton(item));
+      fireEvent.change(within(item).getByLabelText("How did you follow it up?"), {
+        target: { value: "no_action_needed" },
+      });
+      save(item);
+    }
+    const show = screen.getByLabelText("Show");
+    show.focus();
+    second.release(
+      json(
+        { exceptionId: mismatch.id, resolution: { ...resolution, reasonCode: "no_action_needed" } },
+        201,
+      ),
+    );
+    await waitFor(() => expect(items()).toHaveLength(2));
+    first.release(
+      json(
+        {
+          exceptionId: noCapacity.id,
+          resolution: { ...resolution, reasonCode: "no_action_needed" },
+        },
+        201,
+      ),
+    );
+    await waitFor(() => expect(items()).toHaveLength(1));
+    expect(document.getElementById(`exception-${failedRefund.id}`)).not.toBeNull();
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+    expect(document.activeElement).toBe(show);
+  });
+
+  it("says a late failure without taking focus from another control", async () => {
+    const answer = deferred();
+    api({
+      [route.exceptions()]: () => json(body([noCapacity])),
+      [route.resolveException(noCapacity.id)]: answer.answer,
+    });
+    renderPage();
+    await waitFor(() => expect(items()).toHaveLength(1));
+    const item = items()[0] as HTMLElement;
+    fireEvent.click(markButton(item));
+    fireEvent.change(reasonField(), { target: { value: "no_action_needed" } });
+    save(item);
+    const show = screen.getByLabelText("Show");
+    show.focus();
+    answer.release(apiError(409, "exception_already_resolved"));
+    await waitFor(() =>
+      expect(text(item.querySelector(".tg-field__error"))).toBe(
+        "Someone already marked this as followed up. Reload to see who.",
+      ),
+    );
+    expect(document.activeElement).toBe(show);
+  });
+
   it("puts focus back on the action when the form is canceled", async () => {
     api({ [route.exceptions()]: () => json(body([noCapacity])) });
     renderPage();

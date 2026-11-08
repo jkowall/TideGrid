@@ -142,20 +142,32 @@ export function ExceptionsPage({
    * An exception just followed up leaves the open list. Focus goes to the
    * next exception's heading, or the one before, or the page's heading.
    */
+  /** The exception after the one just followed up, to hand focus to. */
+  const nextAfterResolved = useRef<string | null>(null);
   const resolved = (exception: FinalizationException) => {
-    if (load.kind !== "ready") return;
-    const list = load.page.exceptions;
-    const at = list.findIndex((e) => e.id === exception.id);
-    const next = list[at + 1] ?? list[at - 1];
-    setLoad({
-      ...load,
-      page: { ...load.page, exceptions: list.filter((e) => e.id !== exception.id) },
+    // From the page as it is now, not as it was when the save began: another
+    // save, or older exceptions, may have landed while this one was pending.
+    setLoad((current) => {
+      if (current.kind !== "ready") return current;
+      const list = current.page.exceptions;
+      const at = list.findIndex((e) => e.id === exception.id);
+      if (at < 0) return current;
+      nextAfterResolved.current = (list[at + 1] ?? list[at - 1])?.id ?? null;
+      return {
+        ...current,
+        page: { ...current.page, exceptions: list.filter((e) => e.id !== exception.id) },
+      };
     });
     setSaid(
       `Marked as followed up: ${exceptionTitle(exception.reason)}. It's now under Followed up.`,
     );
+    // Only when focus went away with the item, never from where the person
+    // has moved it while the save was pending.
     requestAnimationFrame(() => {
-      const target = next ? document.getElementById(exceptionHeadingId(next.id)) : null;
+      const next = nextAfterResolved.current;
+      nextAfterResolved.current = null;
+      if (!focusIsLost()) return;
+      const target = next ? document.getElementById(exceptionHeadingId(next)) : null;
       (target ?? heading.current)?.focus();
     });
   };
@@ -447,6 +459,7 @@ function ResolveForm({
   const toggle = useRef<HTMLButtonElement>(null);
   const select = useRef<HTMLSelectElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  const form = useRef<HTMLFormElement>(null);
   /** One key per resolution: kept when the same one is sent again after a failure. */
   const key = useRef<{ request: string; key: string } | null>(null);
   const live = useRef(true);
@@ -518,11 +531,13 @@ function ResolveForm({
     if (result.reason === "key_reused") key.current = null;
     setSaid("");
     setProblem(resolveProblems[result.reason]);
-    select.current?.focus();
+    // The live region says the problem; focus moves to the reason only if it
+    // is still in this form or went nowhere, never from another control.
+    if (focusIsLost() || form.current?.contains(document.activeElement)) select.current?.focus();
   };
 
   return (
-    <form className="ex-resolve" onSubmit={(e) => void submit(e)} noValidate>
+    <form ref={form} className="ex-resolve" onSubmit={(e) => void submit(e)} noValidate>
       <SelectField
         ref={select}
         label="How did you follow it up?"
