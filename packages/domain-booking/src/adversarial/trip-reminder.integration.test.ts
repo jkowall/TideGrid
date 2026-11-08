@@ -10,6 +10,7 @@ import {
   EmailProviderUnavailableError,
   enqueueMessage,
   FakeEmailProvider,
+  sweepEmail,
 } from "@tidegrid/domain-messaging";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
@@ -25,6 +26,8 @@ import {
   deliveredToken,
   deliverMail,
   departIn,
+  FROM_ADDRESS,
+  LINK_ORIGIN,
   makeDue,
   messageOf,
   redeem,
@@ -249,35 +252,58 @@ describe.skipIf(!env)("the trip reminder (W3-G2.16-rest)", () => {
     }
   });
 
-  it("passes over a reminder whose booking is being changed, and sends the operator's other mail", async () => {
-    const b = await book(world, A, trips.shared(), 1);
-    const [reminder] = await reminderOf(b.bookingId);
-    if (!reminder) throw new Error("setup: no reminder");
+  it("passes over reminders whose bookings are being changed, and sends the operator's other mail", async () => {
+    // More busy reminders than the turn's limit, all due ahead of a ready confirmation.
+    const busy = [];
+    for (let n = 0; n < 3; n++) busy.push(await book(world, A, trips.shared(), 1));
+    const reminders = [];
+    for (const b of busy) {
+      const [reminder] = await reminderOf(b.bookingId);
+      if (!reminder) throw new Error("setup: no reminder");
+      reminders.push(reminder.id);
+    }
     await deliverMail(world, A.id);
-    // The reminder is the oldest due message; another booking's confirmation waits behind it.
     await world.admin`update public.email_messages set next_attempt_at = now() - interval '1 hour'
-                       where id = ${reminder.id}`;
-    const other = await book(world, A, trips.shared(), 1);
+                       where id in ${world.admin(reminders)}`;
+    const first = await book(world, A, trips.shared(), 1);
+    const second = await book(world, A, trips.shared(), 1);
+    const confirmationState = async (bookingId: string) => {
+      const [row] = await world.admin<{ state: string }[]>`
+        select state from public.email_messages
+         where booking_id = ${bookingId} and template = 'booking_confirmation'`;
+      return row?.state;
+    };
     const lock = await world.admin.reserve();
     try {
       await lock`begin`;
-      await lock`select id from public.bookings where id = ${b.bookingId} for no key update`;
-      // A turn of one: passing the reminder over does not use it up.
+      await lock`select id from public.bookings where id in ${lock(busy.map((b) => b.bookingId))}
+                  for no key update`;
+      // A turn of one: passing three reminders over does not use it up.
       const report = await deliverMail(world, A.id, world.mail, { limit: 1 });
-      expect(report.items.map((i) => i.messageId)).not.toContain(reminder.id);
+      for (const id of reminders) expect(report.items.map((i) => i.messageId)).not.toContain(id);
       expect(report.claimed).toBe(1);
-      const [confirmation] = await world.admin<{ state: string }[]>`
-        select state from public.email_messages
-         where booking_id = ${other.bookingId} and template = 'booking_confirmation'`;
-      expect(confirmation?.state).toBe("sent");
-      expect((await messageOf(world.admin, reminder.id)).state).toBe("queued");
+      expect(await confirmationState(first.bookingId)).toBe("sent");
+      // The sweep, in turns of one, reaches the next confirmation behind them too.
+      const swept = await sweepEmail(world.db, {
+        provider: world.mail,
+        fromAddress: FROM_ADDRESS,
+        guestLinkOrigin: LINK_ORIGIN,
+        environment: "local",
+        runId: "run-trip-reminder-sweep",
+        limit: 5,
+        turnMessages: 1,
+        tenantLimit: 1000,
+      });
+      expect(swept.claimed).toBeGreaterThanOrEqual(1);
+      expect(await confirmationState(second.bookingId)).toBe("sent");
+      for (const id of reminders) expect((await messageOf(world.admin, id)).state).toBe("queued");
     } finally {
       await lock`rollback`;
       lock.release();
     }
-    // Once the booking is free, the reminder goes out.
+    // Once the bookings are free, the reminders go out.
     await deliverMail(world, A.id);
-    expect((await messageOf(world.admin, reminder.id)).state).toBe("sent");
+    for (const id of reminders) expect((await messageOf(world.admin, id)).state).toBe("sent");
   });
 
   it("keeps the booking and its confirmation when only the reminder cannot be written", async () => {

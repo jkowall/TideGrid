@@ -653,11 +653,21 @@ async function tenantOrigin(
     : null;
 }
 
+/**
+ * How many messages one run may pass over (a reminder whose booking another
+ * transaction holds) before it ends. Independent of `limit`, so a turn of one
+ * still reaches the mail behind several busy reminders; a cancellation holds
+ * its booking for moments, so more than this at once means the run should end.
+ */
+const MAX_PASSED_PER_RUN = 50;
+
 async function deliverWithOrigin(
   db: Kysely<Database>,
   tenantId: string,
   options: DeliveryOptions,
   origin: string | null,
+  /** Messages already passed over this run; the sweep shares one set across a tenant's turns. */
+  passed: Set<string> = new Set(),
 ): Promise<TenantDeliveryReport> {
   const limit = deliveryLimit(options);
   const ctx = deliveryContext(tenantId, options);
@@ -675,7 +685,6 @@ async function deliverWithOrigin(
   };
   const clock = options.clock ?? Date.now;
   const reserve = (options.provider.sendTimeoutMs ?? 0) + DEADLINE_MARGIN_MS;
-  const passed = new Set<string>();
   for (let i = 0; i < limit; i++) {
     if (options.deadline !== undefined && clock() + reserve >= options.deadline) {
       report.stopped = "deadline";
@@ -685,10 +694,12 @@ async function deliverWithOrigin(
     if (claimed.kind === "none") break;
     if (claimed.kind === "passed") {
       // Passing a message over is not a claim: it does not use up the turn,
-      // so the sweep still sees a full turn when more mail is due. At most
-      // `limit` messages are passed over in one run.
+      // so the sweep still sees a full turn when more mail is due. The scan
+      // has its own bound, apart from `limit`: past MAX_PASSED_PER_RUN busy
+      // reminders the run ends, and the rest wait for the next run.
       passed.add(claimed.messageId);
-      if (passed.size <= limit) i -= 1;
+      if (passed.size >= MAX_PASSED_PER_RUN) break;
+      i -= 1;
       continue;
     }
     if (claimed.kind === "held") {
@@ -925,6 +936,7 @@ export async function sweepEmail(
   };
   const held = new Set<string>();
   const claimedBy = new Map<string, number>();
+  const passedBy = new Map<string, Set<string>>();
   /** Each tenant's link origin, resolved at its first turn and reused for the run. */
   const origins = new Map<string, string | null>();
   const contextOf = (tenantId: string): TenantContext => ({
@@ -950,7 +962,18 @@ export async function sweepEmail(
         origin = await tenantOrigin(db, tenantId, options);
         origins.set(tenantId, origin);
       }
-      const done = await deliverWithOrigin(db, tenantId, { ...options, limit, deadline }, origin);
+      let passed = passedBy.get(tenantId);
+      if (passed === undefined) {
+        passed = new Set();
+        passedBy.set(tenantId, passed);
+      }
+      const done = await deliverWithOrigin(
+        db,
+        tenantId,
+        { ...options, limit, deadline },
+        origin,
+        passed,
+      );
       claimedBy.set(tenantId, before + done.claimed);
       report.claimed += done.claimed;
       report.sent += done.sent;
