@@ -75,7 +75,7 @@ Build-time defaults, already applied: **D10(a)** step 9 by tree equality; **D12(
 | D6 | Sender: (a) a subdomain address; (b) the apex default `bookings@tidegrid.us`; (c) defer | (a): keeps a new DMARC policy off all `tidegrid.us` mail. C2 carries `bookings@mail.tidegrid.us` as a placeholder | P7 top |
 | D7 | Stripe-live placement: (a) a window after acceptance; (b) a staging Worker; (c) defer | (a): lowest setup cost; must not overlap P6 | P9 top |
 | D8 | Cutover today: (a) after acceptance, demo-harbor; (b) defer | (a) only if P6 has no fail; the platform row is permanent | P8 top |
-| D9 | GuestGateway opens one connection per call (12:169): (a) accept for owner-only traffic; (b) fix first | (a), with the P11 watch. SaaS stays deferred. Update, 2026-11-07: the fix is built, not released: `found` answers kept for 10 s ([decision register](../v2/06-decision-register.md#2026-11-07-guestgateway-keeps-found-answers-for-10-seconds-owner-request-coordinator-defaults-owner-decision-2026-11-08)) | P4.2, P10 |
+| D9 | GuestGateway opens one connection per call (12:169): (a) accept for owner-only traffic; (b) fix first | (a), with the P11 watch. SaaS stays deferred. Update, 2026-11-07: the fix is built, not released: `found` answers kept for 10 s ([decision register](../v2/06-decision-register.md#2026-11-07-guestgateway-keeps-found-answers-for-10-seconds-owner-request-coordinator-defaults-owner-decision-2026-11-08)). Update, 2026-11-08: released with the API in `b1461f3` ([verification log](../verification-log.md#o-rel-b1461f3-released-to-the-api-and-console-november-8-2026)) | P4.2, P10 |
 | D11 | External human review | (a) for test mode | top, P7 to P10 |
 | D15 | Webhook quick 2xx and IP allowlist (12:181): (a) accept inline, signature-only processing for the test-mode window; (b) land both first | (a) for synthetic test mode, risk recorded; (b) before any live-mode work | P9, before A11 |
 | D16 | Stripe key: (a) the existing `sk_test_`; (b) a new `rk_test_` | (a) unless `rk_test_` is confirmed to act through `Stripe-Account` | P9 top |
@@ -145,7 +145,7 @@ Rules for the day apply. Go/no-go: **D1** (Neon main as the preview database). T
 - Command it runs: `pnpm --filter @tidegrid/database neon:branch create pre-nov1-<sha7> --no-expiry --no-endpoint`, with `NEON_API_KEY` and `NEON_PROJECT_ID` passed to the child only.
 - Expect: `{"branchId": ...}` and nothing else. A branch with no endpoint has no connection string, so none is fetched or printed. The journal records the branch id and the UTC time, the point-in-time restore anchor.
 - Verify: the branch is listed in the Neon console with no compute.
-- Rollback: deleting the branch later takes its own approval. This is the only branch create today.
+- Rollback: deleting the branch later takes its own approval. This is the only branch create today. Update, 2026-11-08: `pre-nov1-e111043` was deleted on 2026-11-05, and the `nov1` journal still records it. So `nov1 db backup` now prints "a backup branch is already recorded; nothing to do" and makes no branch. For `0015` in the O-REL release, the only restore point was point-in-time restore of `main`; the Neon console showed a 6-hour history window ([decision register](../v2/06-decision-register.md#2026-11-08-o-rel-release-of-b1461f3-owner-decisions)).
 
 **P2.3 Migrate.** `nov1 db migrate --live --go A1`.
 - Expect: each file in its own transaction (`migrate.ts`), under the advisory lock, with `lock_timeout 5000 ms` and `statement_timeout 120000 ms` per file (08:190; override with `TIDEGRID_MIGRATE_LOCK_TIMEOUT_MS` and `TIDEGRID_MIGRATE_STATEMENT_TIMEOUT_MS`); the role assertions pass; `applied 12 migration(s)`, 0003 to 0014, with the G2.16b follow-up merged and Neon main at 0002 as `/v1/health` reported it on 2026-11-02 (more if a later migration lands).
@@ -362,7 +362,7 @@ nov1 evidence --ci <deployed sha>=<PR run merge sha>[,...] --out nov1-evidence.m
 - A booted b87e269 Worker against the upgraded schema: replaced by the committed b87e269 query set (P0.2), because booting it needs its tree and toolchain in CI.
 - `release` and `deploy:demo` refusing without `NOV1_GO`: outside the owned paths; Rule 1 stands in. A follow-up needs owner approval.
 - Guards in `packages/database/src/testing.ts` and `app-role.ts` that refuse a host recorded as main: proposed as a separate goal; the `nov1 db` refusals are the mitigation.
-- The G2.11 Stripe Element, bounce ingestion, the webhook quick 2xx and IP allowlist (D15), the GuestGateway connection fix (D9; built 2026-11-07, not released), and a per-hostname route command for SaaS.
+- The G2.11 Stripe Element, bounce ingestion, the webhook quick 2xx and IP allowlist (D15), the GuestGateway connection fix (D9; built 2026-11-07, not released; update, 2026-11-08: released with the API in `b1461f3`, [verification log](../verification-log.md#o-rel-b1461f3-released-to-the-api-and-console-november-8-2026)), and a per-hostname route command for SaaS.
 
 ## Owner inputs
 
