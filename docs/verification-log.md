@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### A guard on tenant-controlled email sender identity (W1-SENDER-GUARD), built November 8, 2026
+
+Guest email now shows "Brand Name via TideGrid" from the fixed TideGrid address, and one sender name rule applies in brand validation and in rendering ([decision register](v2/06-decision-register.md#2026-11-08-w1-sender-guard-a-guard-on-tenant-controlled-email-sender-identity-owner-go-coordinator-defaults-pending-owner-confirmation), coordinator defaults pending owner confirmation). The rule refuses names that read as TideGrid after lookalike folding, names made only of staff or mailbox words, a second relay, and characters outside a small Latin set. Email uses a brand's name only when it reads as the tenant's provisioned name. For both synthetic brands, the rendered subject and bodies match the old renderer byte for byte. No migration. Nothing was released. The local runs and the reviews below are coordinator-reported.
+
+- **Checks.** `pnpm check` passed. Contracts 215 and messaging 112 unit tests pass after the last fix.
+- **Independent review.** Accept with listed fixes. Digit words and filler words no longer let a staff name through.
+- **Security review.** One high finding, fixed: Latin letters the skeleton could not fold were dropped, so "TɨdeGrɨd" passed and could bind to a provisioned name. Any letter that does not fold to a to z is now refused.
+- **Three rechecks.** Each found a narrower bypass, and each fix has a test per name that failed before it. Seven Latin Roman numerals are now refused. "v!a" and "B!lling" no longer split around "!". A "!" or a digit at a word's edge no longer hides a staff word or "via" ("Support!", "Support1", "Harbor via1 Stripe"). The lead made the last fix. Residuals in the messaging README: the staff word list is hand-written, and "Harbor V!A!Stripe" still passes.
+- **Telemetry.** About three hours of agent time across build, two reviews, and four fix rounds. Token use and cost per checkpoint: missing.
+
 ### Pre-SaaS hostname items and the D-E11 and D-E12 sweep fixes (W1-SAAS-PREP), built November 8, 2026
 
 The hostname tooling is ready for Cloudflare for SaaS without calling it ([decision register](v2/06-decision-register.md#2026-11-08-w1-saas-prep-pre-saas-hostname-items-and-the-d-e11-and-d-e12-sweep-follow-ups-owner-go-coordinator-defaults-pending-owner-confirmation)). Demotion only on a definitive negative is an owner decision of November 8. The rest are coordinator defaults pending owner confirmation: no re-enable path, a renewal fixture, account-level refusals marked unverified until P10, proposed `route` and `release` admin commands that are dry runs unless `--apply`, a proposed [removal runbook](runbooks/hostname-removal.md), and fixes for D-E11 and D-E12 in the sweep. No provider call was made, no token was used, and nothing was released. The local runs and the reviews below are coordinator-reported.
