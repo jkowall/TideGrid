@@ -15,6 +15,7 @@ import {
   type GhWorld,
   ghFrom,
   greenWorld,
+  type JobFixture,
   jobsOf,
   type RunFixture,
   recorded7ef,
@@ -741,5 +742,87 @@ describe("review fixes", () => {
     expect(printed.join("\n")).toMatch(/could not run gh/);
     expect(deploys(execs)).toEqual([]);
     expect(ciEntries(deps)).toMatchObject([{ result: "refused", gate: "A4" }]);
+  });
+
+  it("lets a newer non-green dispatch block even when its head looks off main (a stale origin/main)", async () => {
+    const green = runOf({ head_sha: headSha, id: 1, created_at: "2026-11-08T09:00:00Z" });
+    const offHead = "f".repeat(40);
+    for (const newer of [
+      dispatchOf(headSha, offHead, { id: 2, conclusion: "failure" }),
+      dispatchOf(headSha, offHead, { id: 2, status: "in_progress", conclusion: null }),
+    ]) {
+      const { deps, printed } = withWorld(
+        {
+          runs: [green, newer],
+          jobs: { 1: jobsOf(green), 2: jobsOf(newer, { browser: { conclusion: "failure" } }) },
+        },
+        {
+          exec: (c) =>
+            c.cmd === "git" && c.args[0] === "merge-base" && c.args[2] === offHead
+              ? { code: 1, stdout: "" }
+              : undefined,
+        },
+      );
+      expect(await main(approveArgv, deps)).toBe(3);
+      expect(printed.join("\n")).toMatch(/\/runs\/2/);
+    }
+  });
+
+  it("refuses when a newer cancelled run's job record cannot be read, instead of calling it unstarted", async () => {
+    const green = runOf({ head_sha: headSha, id: 1, created_at: "2026-11-08T09:00:00Z" });
+    const stopped = dispatchOf(headSha, older, { id: 2, conclusion: "cancelled" });
+    const broken = { ...jobsOf(stopped)[0], head_sha: undefined } as unknown as JobFixture;
+    const { deps, printed } = withWorld({
+      runs: [green, stopped],
+      jobs: { 1: jobsOf(green), 2: [broken] },
+    });
+    expect(await main(approveArgv, deps)).toBe(3);
+    expect(printed.join("\n")).toMatch(/include a record nov1 cannot read/);
+  });
+
+  it("refuses when a run row cannot be read, instead of dropping it", async () => {
+    const green = runOf({ head_sha: headSha, id: 1, created_at: "2026-11-08T09:00:00Z" });
+    const odd = {
+      ...dispatchOf(headSha, older, { id: 2, conclusion: "failure" }),
+      run_attempt: undefined,
+    } as unknown as RunFixture;
+    const { deps, printed } = withWorld({ runs: [green, odd], jobs: { 1: jobsOf(green) } });
+    expect(await main(approveArgv, deps)).toBe(3);
+    expect(printed.join("\n")).toMatch(/includes a run nov1 cannot read/);
+  });
+
+  it("keeps a run's highest attempt when both queries return it", async () => {
+    // The head query sees attempt 1 green; the dispatch query, a moment later, sees attempt 2 failing.
+    const first = dispatchOf(headSha, headSha, { id: 5, created_at: "2026-11-08T10:00:00Z" });
+    const second = {
+      ...first,
+      run_attempt: 2,
+      conclusion: "failure",
+      run_started_at: "2026-11-08T11:00:00Z",
+    };
+    const push = runOf({ head_sha: headSha, id: 4, created_at: "2026-11-08T10:30:00Z" });
+    const gh = ghFrom({
+      runs: [],
+      jobs: { 4: jobsOf(push), 5: jobsOf(second, { checks: { conclusion: "failure" } }) },
+    });
+    const { deps, printed } = withWorld(
+      { runs: [], jobs: {} },
+      {
+        exec: (c) => {
+          if (c.cmd !== "gh") return undefined;
+          const q = c.args.join(" ");
+          if (q.includes("head_sha="))
+            return {
+              code: 0,
+              stdout: JSON.stringify({ total_count: 2, workflow_runs: [first, push] }),
+            };
+          if (q.includes("event=workflow_dispatch"))
+            return { code: 0, stdout: JSON.stringify({ total_count: 1, workflow_runs: [second] }) };
+          return gh(c);
+        },
+      },
+    );
+    expect(await main(approveArgv, deps)).toBe(3);
+    expect(printed.join("\n")).toMatch(/concluded failure: .*\/runs\/5$/m);
   });
 });

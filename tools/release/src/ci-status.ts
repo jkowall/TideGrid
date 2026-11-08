@@ -264,9 +264,15 @@ async function allRuns(
 
 async function jobsOf(deps: Deps, run: CiRun): Promise<CiJob[]> {
   const path = `repos/${ciRepo}/actions/runs/${run.id}/jobs`;
-  return listOf(await ghGet(deps, path, { filter: "latest", per_page: "100" }), "jobs", path)
-    .map(asJob)
-    .filter((j): j is CiJob => j !== null);
+  const rows = listOf(await ghGet(deps, path, { filter: "latest", per_page: "100" }), "jobs", path);
+  const jobs = rows.map(asJob);
+  // A record that cannot be read proves nothing, least of all that no job started.
+  if (jobs.some((j) => j === null)) {
+    throw new Refusal(
+      `GitHub's jobs for ${runUrl(run.id)} include a record nov1 cannot read. ${noOverride}`,
+    );
+  }
+  return jobs as CiJob[];
 }
 
 /**
@@ -330,16 +336,27 @@ export async function ciStatus(deps: Deps, sha: string): Promise<CiPass> {
     branch: "main",
     created: `>=${await dispatchWindow(deps, sha)}`,
   });
-  const runs = [...byHead, ...dispatches]
-    .map(asRun)
-    .filter((r): r is CiRun => r !== null)
-    .filter((r, i, all) => all.findIndex((o) => o.id === r.id) === i);
+  const parsed = [...byHead, ...dispatches].map(asRun);
+  // A row that cannot be read might be the newest word on the SHA, so it refuses.
+  if (parsed.some((r) => r === null)) {
+    throw new Refusal(`GitHub's runs list includes a run nov1 cannot read. ${noOverride}`);
+  }
+  // One entry per run: its highest attempt, the later observation on a tie.
+  const byId = new Map<number, CiRun>();
+  for (const r of parsed as CiRun[]) {
+    const seen = byId.get(r.id);
+    if (!seen || r.run_attempt >= seen.run_attempt) byId.set(r.id, r);
+  }
+  const runs = [...byId.values()];
   const short = sha.slice(0, 12);
   const none = `no CI run of ci.yml on main has tested ${short}: wait for its push run, or have the owner dispatch one (gh workflow run ci.yml --ref main -f sha=${sha})`;
   for (const run of candidateRuns(runs, sha)) {
     // A dispatch runs the workflow file at its head. Only a head on main
-    // carries main's guard step (security review F1: a tag named main).
-    if (run.event === "workflow_dispatch" && !(await onMain(deps, run.head_sha))) continue;
+    // carries main's guard step (security review F1: a tag named main), so a
+    // dispatch whose head is not on origin/main here never counts as a pass.
+    // It still blocks when it is not green: a stale origin/main could make a
+    // real dispatch look off main, and a newer failure must not be skipped.
+    const trusted = run.event !== "workflow_dispatch" || (await onMain(deps, run.head_sha));
     if (!knownStatus.has(run.status)) {
       throw new Refusal(`the newest CI run for ${short} is in an unknown state: ${runUrl(run.id)}`);
     }
@@ -362,6 +379,7 @@ export async function ciStatus(deps: Deps, sha: string): Promise<CiPass> {
         `the newest CI run for ${short} is not green on all four jobs (${problems.join("; ")}): ${runUrl(run.id)}`,
       );
     }
+    if (!trusted) continue;
     return {
       url: runUrl(run.id),
       via: run.event === "push" ? "push" : "dispatch",
