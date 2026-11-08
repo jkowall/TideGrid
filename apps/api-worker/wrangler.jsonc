@@ -33,8 +33,8 @@
     // Email (G2.16-live, C2): when on, EMAIL_PROVIDER and EMAIL_FROM_ADDRESS
     // are the lines right after this comment, and the send_email binding
     // follows "vars". Without them email is off and messages stay queued.
-    // The sender is the binding's one allowed address (D6; a placeholder
-    // until the owner names it). The recipient allowlist is the
+    // The sender is the binding's one allowed address (D6, named by the
+    // owner on 2026-11-08). The recipient allowlist is the
     // EMAIL_ALLOWED_RECIPIENTS secret.
     "EMAIL_PROVIDER": "cloudflare",
     "EMAIL_FROM_ADDRESS": "bookings@mail.tidegrid.us",
