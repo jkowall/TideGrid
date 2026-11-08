@@ -35,6 +35,20 @@ const isString = (v: unknown): v is string => typeof v === "string";
 const isInstant = (v: unknown) => isString(v) && !Number.isNaN(Date.parse(v));
 const isInstantOrNull = (v: unknown) => v === null || isInstant(v);
 
+const reportKinds = new Set(["bounced", "complained"]);
+
+/** A report, or none; an API older than W1-EMAIL-EVENTS sends no field, read as none. */
+function isReport(r: MessageStatus["deliveryReport"] | undefined): boolean {
+  return (
+    r === undefined ||
+    r === null ||
+    (reportKinds.has(r.kind) &&
+      (r.bounceType === null || r.bounceType === "hard" || r.bounceType === "soft") &&
+      (r.detailCode === null || isString(r.detailCode)) &&
+      isInstant(r.reportedAt))
+  );
+}
+
 function isMessage(m: Partial<MessageStatus> | null | undefined): boolean {
   return (
     !!m &&
@@ -44,6 +58,7 @@ function isMessage(m: Partial<MessageStatus> | null | undefined): boolean {
     Number.isSafeInteger(m.attempts) &&
     (m.failureCode === null || isString(m.failureCode)) &&
     typeof m.staffResend === "boolean" &&
+    isReport(m.deliveryReport) &&
     isInstant(m.createdAt) &&
     isInstantOrNull(m.sentAt) &&
     isInstantOrNull(m.failedAt) &&

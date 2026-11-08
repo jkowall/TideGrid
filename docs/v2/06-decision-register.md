@@ -8,6 +8,23 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: W1-EMAIL-EVENTS, a local consumer for email bounces and complaints (owner pull-forward; coordinator defaults pending owner confirmation)
+
+The plan's O-SCOPE item 7 held this goal until a dated owner entry placed a local consumer in demo scope or recorded a pull-forward. On 2026-11-08 the owner wrote: "Anyways, I just want all the work to be done for the next waves." and, about the threads' pull requests, "go ahead and merge them dont ask me to review them". This entry records that as the owner's pull-forward of W1-EMAIL-EVENTS into the demo: a local build against recorded event shapes. The live event subscription, the queue, and the account id secret stay owner steps. `packages/domain-messaging/README.md` calls bounce ingestion a Core live gate blocker; this goal builds the consumer and does not claim that gate.
+
+Start checks: (a) this entry; (c) the CONCURRENTLY mode is on `main`; (d) the sender guard is built. (b) is not met: O-P7's A9, the first real send with its `send()` id compared to an event's `payload.messageId`, has not run. The join form below is therefore unproven against the live service, and that check is still owed.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1, the join form.** Exact match after the adapter's own normalization (`normalizeCloudflareMessageId`), the rule applied when the id was stored at send. Revisit after A9.
+- **D2, a queue consumer, not a signed webhook.** The goal's recommended option was a signed webhook route. Cloudflare's documentation (read 2026-11-08) delivers Email Sending events only to a Cloudflare queue through an event subscription, with no webhook and no signature. So the API Worker consumes the queue (`EMAIL_EVENTS_QUEUE`), and checks each event's account (`EMAIL_EVENTS_ACCOUNT_ID`, a secret) and sending domain. No binding is added to the deployed configuration. The background jobs goal (W3-G2.3) adds its own queue consumer to the same Worker; the handler routes by queue name.
+- **D3, the message stays `sent`.** A bounce or complaint is an event joined to the message, shown to staff in place of "Sent", rather than a new message state, so the delivery rules, resend limits, and claims are untouched.
+- **D4, once.** The first bounce or complaint is applied; later ones are kept and not applied; a duplicate event id changes nothing.
+- **D5, only bounced and complained are kept.** Delivered, deferred, failed, and rejected events are acknowledged and dropped.
+- **D6, unknown ids** go to a platform table no runtime role can read, once per event id.
+
+Migrations `0020` and `0021` (provisional). Security review under rule R9 runs under the owner's go to merge without asking him. Canonical: the [database README](../../packages/database/README.md#email-events-0020-and-0021) and the [messaging README](../../packages/domain-messaging/README.md#email-events-w1-email-events).
+
 ### 2026-11-08: W1-0014-RESIDUALS, the 0014 resend residuals closed for direct writers (owner go; coordinator defaults pending owner confirmation)
 
 The owner placed this goal in scope on 2026-11-08 by choosing "Booking fixes and email limits" on the O-SCOPE card, whose option read: "Build staff fixing of stuck bookings, a cap on staff email resends, and three small email safety fixes. Waivers and bounce handling wait." The three fixes are the residuals the [verification log](../verification-log.md) recorded for `0014`, each reachable only by a writer with `tidegrid_app`'s credentials that skips the service. Migration `0019` (provisional; `0018` belongs to W1-FIN-EXC) closes them. Coordinator defaults, pending owner confirmation:
