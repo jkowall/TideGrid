@@ -8,6 +8,14 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-08: Staff sign-in through Cloudflare Access with Cloudflare's own second step (owner decision)
+
+The Stage 0 provider choice (below) picked Cloudflare-only staff sign-in with Google or Microsoft and two-step login, and required showing that a sign-in without a second step is refused for every identity provider. Cloudflare's documentation lists Okta, Microsoft Entra ID, generic OIDC, and generic SAML as the providers whose own multifactor login Access can check; Google is not among them. At 20:17 UTC on 2026-11-08 the owner chose "Cloudflare's own second step" on the card "Google sign-ins can't prove two-step to Cloudflare. How should those staff get a second step?": Access independent MFA (an authenticator app or a security key), required for every identity provider.
+
+- **Code (W3-G2.2b staff sign-in).** Every deployed environment (preview, staging, production) accepts Cloudflare Access only. The email sign-in link and its session cookie work in local development alone, decided by `ENVIRONMENT`, so no deployed variable turns them back on. A deployed request with no Access token answers 401 `access_required`, and the console then offers Access instead of the email form.
+- **Dashboard (owner-run).** Google and Microsoft Entra ID login methods, independent MFA on for the organization and the console application, and One-time PIN off for the console. The steps and the acceptance check are in the [staff sign-in runbook](../runbooks/staff-sign-in-access.md).
+- **What the code cannot check.** The Access application token carries no documented claim showing that independent MFA ran, so the API does not check it. The Access settings enforce it, and the runbook's check is the evidence the [security controls](08-build-hosting-and-operations.md#security-controls) ask for before an operator's first live booking.
+
 ### 2026-11-08: W3-G2.9, refunds, booking credit, and fee reversal (owner decision; coordinator defaults pending owner confirmation)
 
 Under the same owner decision as W3-G2.3 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
