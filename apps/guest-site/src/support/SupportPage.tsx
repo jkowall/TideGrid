@@ -7,8 +7,8 @@ import { useTitle } from "../States.tsx";
 import "./support.css";
 
 /**
- * The guest support pages (G2.14b, D1(a), a coordinator default pending
- * owner confirmation): /support and /offline. Every tenant value is text or a
+ * The guest support pages (G2.14b, D1(a), a coordinator default confirmed by
+ * the owner on 2026-11-08): /support and /offline. Every tenant value is text or a
  * validated link, as in the rest of the shell. The copy is synthetic demo
  * content; the support hours are the platform's proposed pilot hours.
  */

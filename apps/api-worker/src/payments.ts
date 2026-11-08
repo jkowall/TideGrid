@@ -22,7 +22,8 @@ import type { Bindings } from "./env.ts";
  * unset included (environment_unknown).
  *
  * The Stripe adapter (standing goal item 3, a coordinator default of
- * 2026-10-28 pending the owner) is built but off: no deployed configuration
+ * 2026-10-28; its D1 to D12 confirmed by the owner on 2026-11-08) is built but
+ * off: no deployed configuration
  * sets PAYMENT_PROVIDER=stripe. When it is set, both secrets must be present
  * and well formed; a live key is refused everywhere until the Core live gate,
  * and a test key is refused in production, so test cards can never confirm a

@@ -1,6 +1,6 @@
 /**
  * Fair turns for the cron's cross-tenant sweeps (pre-pilot hardening, item 5;
- * coordinator default D1 A, pending owner confirmation).
+ * coordinator default D1 A, confirmed by the owner on 2026-11-08).
  *
  * Each sweep's list function (0013) names its due tenants least recently
  * served first. `runFairSweep` then spends the run's budget in two kinds of
