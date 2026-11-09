@@ -278,7 +278,9 @@ CREATE TABLE public.external_settlements (
   CHECK (kind <> 'refund' OR (
     eligible_total <= order_total AND amount <= order_total
     AND eligible_amount = ((amount::bigint * eligible_total) / order_total)::integer
-    AND fee_amount = -(((eligible_amount::bigint * fee_bp) + 5000) / 10000)::integer))
+    -- The reversal is this refund's share, rounded half up, unless less is
+    -- left of the booking's fee (the trigger computes the cap).
+    AND fee_amount BETWEEN -(((eligible_amount::bigint * fee_bp) + 5000) / 10000)::integer AND 0))
 );
 CREATE INDEX external_settlements_booking_idx
   ON public.external_settlements (tenant_id, booking_id, created_at);
@@ -297,6 +299,7 @@ DECLARE
   b record;
   money_in bigint;
   refunded bigint;
+  left_to_reverse bigint;
 BEGIN
   NEW.created_at := now();
   NEW.actor_type := coalesce(app.setting_or_null('app.actor_type'), 'system');
@@ -360,6 +363,21 @@ BEGIN
   IF refunded + NEW.amount > b.total_amount THEN
     RAISE EXCEPTION 'refunds return at most what the booking cost'
       USING ERRCODE = '23514', CONSTRAINT = 'external_settlements_refund_limit';
+  END IF;
+  -- Rounding each refund on its own could reverse more than the fee on the
+  -- whole booking: the reversal is capped at what is left of that fee after
+  -- earlier reversals, card and external.
+  SELECT greatest(0, ((b.eligible_total::bigint * NEW.fee_bp + 5000) / 10000)
+           + (SELECT coalesce(sum(f.fee_amount), 0) FROM public.fee_ledger_entries f
+               WHERE f.tenant_id = NEW.tenant_id AND f.booking_id = NEW.booking_id)
+           + (SELECT coalesce(sum(x.fee_amount), 0) FROM public.external_settlements x
+               WHERE x.tenant_id = NEW.tenant_id AND x.booking_id = NEW.booking_id
+                 AND x.kind = 'refund'))
+    INTO left_to_reverse;
+  IF NEW.fee_amount IS DISTINCT FROM greatest(
+       -(((NEW.eligible_amount::bigint * NEW.fee_bp) + 5000) / 10000), -left_to_reverse) THEN
+    RAISE EXCEPTION 'an external refund reverses its share of the fee, at most what is left'
+      USING ERRCODE = '23514', CONSTRAINT = 'external_settlements_fee';
   END IF;
   RETURN NEW;
 END;
@@ -425,7 +443,8 @@ CREATE TRIGGER fee_assessments_rules BEFORE INSERT ON public.fee_assessments
   FOR EACH ROW EXECUTE FUNCTION app.check_fee_assessment();
 
 -- A card refund for a canceled booking, with the external refunds already
--- recorded against it, returns at most what the booking cost. The 0029 rules
+-- recorded against it, returns at most what the booking cost, and at most
+-- what a lost dispute left on the card. The 0029 rules
 -- check a card refund against the card payment only; this runs beside them,
 -- under the same payment lock the external refund takes.
 CREATE FUNCTION app.check_card_refund_with_external() RETURNS trigger
@@ -460,6 +479,15 @@ BEGIN
    WHERE x.tenant_id = NEW.tenant_id AND x.booking_id = booking AND x.kind = 'refund';
   IF card + external + NEW.amount > total THEN
     RAISE EXCEPTION 'refunds return at most what the booking cost, external refunds included'
+      USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_external_limit';
+  END IF;
+  -- A lost dispute already took its amount back from the card.
+  IF card + NEW.amount > (SELECT p.amount FROM public.payments p
+                           WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.payment_id)
+       - (SELECT coalesce(sum(d.amount), 0) FROM public.payment_disputes d
+           WHERE d.tenant_id = NEW.tenant_id AND d.payment_id = NEW.payment_id
+             AND d.status = 'lost') THEN
+    RAISE EXCEPTION 'a card refund returns at most what a lost dispute left on the card'
       USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_external_limit';
   END IF;
   RETURN NEW;

@@ -572,6 +572,10 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
       listExternalSettlements(trx, B.id, booked.bookingId),
     );
     expect(left?.refundable).toBe(Math.min(paid.amount - 4_000, paid.total));
+    // Nor may the guest cancel for a card refund of money the dispute took back.
+    expect(
+      await as(guestContext(B.id), (trx) => previewCancellation(trx, B.id, booked.bookingId)),
+    ).toMatchObject({ cancelable: false, refusal: "remedy_requires_operator" });
     expect(listed[0]?.closedAt).not.toBeNull();
     // Another tenant sees none of it.
     expect(await as(staffContext(A.id), (trx) => listDisputes(trx, A.id))).toEqual([]);
@@ -812,6 +816,34 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
     const refunds = await admin`
       select 1 from public.payment_refunds where payment_id = ${paid.id}`;
     expect(refunds).toHaveLength(0);
+  });
+
+  it("never reverses more fee than the whole booking's, however refunds round", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 2);
+    const paid = await paymentOf(booked.bookingId);
+    const fullFee = Math.round((paid.eligible * CORE_FEE_BP) / 10_000);
+    const staff = staffContext(A.id);
+    // One large refund, then small ones that each round up to a cent of fee.
+    const small = 37;
+    const amounts = [paid.total - small * 6, ...Array.from({ length: 6 }, () => small)];
+    const fees: number[] = [];
+    for (const amount of amounts) {
+      const made = await as(staff, (trx, c) =>
+        recordExternalSettlement(trx, c, {
+          bookingId: booked.bookingId,
+          kind: "refund",
+          tender: "cash",
+          amount,
+          reason: "Refunded in parts",
+          idempotencyKey: `external:${randomUUID()}`,
+        }),
+      );
+      if (made.kind !== "recorded") throw new Error(JSON.stringify(made));
+      fees.push(made.settlement.feeAmount ?? 0);
+    }
+    const reversed = fees.reduce((a, b) => a + b, 0);
+    expect(reversed).toBeGreaterThanOrEqual(-fullFee);
+    expect(reversed).toBeLessThanOrEqual(-fullFee + amounts.length);
   });
 
   it("runs the sweep: assesses, drafts invoices, and reads due payments, in fair turns", async () => {

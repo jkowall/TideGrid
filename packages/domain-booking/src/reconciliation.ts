@@ -394,6 +394,10 @@ export async function recordExternalSettlement(
     feeAmount: number;
   } | null = null;
   if (command.kind === "refund") {
+    // The booking's lock first, as the database's check takes it, so the
+    // fee left to reverse below cannot move before the insert.
+    await sql`select id from bookings where tenant_id = ${ctx.tenantId} and id = ${command.bookingId}
+                for no key update`.execute(trx);
     if (command.amount > order.total_amount) {
       return {
         kind: "refund_too_large",
@@ -405,10 +409,20 @@ export async function recordExternalSettlement(
       orderTotal: order.total_amount,
       eligibleTotal: order.eligible_total,
     });
+    // Rounding each refund on its own could reverse more than the fee on the
+    // whole booking, so the reversal is capped at what is left of it.
+    const { rows: left } = await sql<{ left: string }>`
+      select greatest(0, ((${order.eligible_total}::bigint * ${computed.feeBp} + 5000) / 10000)
+               + (select coalesce(sum(f.fee_amount), 0) from fee_ledger_entries f
+                   where f.tenant_id = ${ctx.tenantId} and f.booking_id = ${command.bookingId})
+               + (select coalesce(sum(x.fee_amount), 0) from external_settlements x
+                   where x.tenant_id = ${ctx.tenantId} and x.booking_id = ${command.bookingId}
+                     and x.kind = 'refund'))::text as left`.execute(trx);
     fee = {
       orderTotal: order.total_amount,
       eligibleTotal: order.eligible_total,
       ...computed,
+      feeAmount: Math.max(computed.feeAmount, -Number(left[0]?.left ?? 0)),
     };
   }
   await sql`savepoint external_settlement`.execute(trx);
