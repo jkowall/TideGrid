@@ -12,6 +12,7 @@ export {
   type PaymentCurrency,
   type PaymentProvider,
   type PaymentProviderName,
+  type ProviderDisputeStatus,
   type ProviderEventType,
   type ProviderPayment,
   type ProviderPaymentStatus,

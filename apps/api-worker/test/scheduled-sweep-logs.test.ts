@@ -66,6 +66,22 @@ vi.mock("@tidegrid/domain-booking", async (importOriginal) => ({
       stampFailures: 24,
     };
   }),
+  sweepReconciliation: vi.fn(async (_db, options) => {
+    options.onStampError?.("reconciliation-tenant", new Error("stamp"));
+    return {
+      tenants: 1,
+      assessed: 2,
+      invoiced: 3,
+      paymentsChecked: 4,
+      paymentsRaised: 5,
+      failedTenants: 0,
+      complete: false,
+      turns: 61,
+      passes: 62,
+      deferredTenants: 63,
+      stampFailures: 64,
+    };
+  }),
 }));
 vi.mock("@tidegrid/domain-messaging", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tidegrid/domain-messaging")>()),
@@ -170,6 +186,7 @@ describe("sweep logs (pre-pilot hardening, Part E)", () => {
       ["email", "email-tenant"],
       ["hostname", "hostname-tenant"],
       ["waiver_reminder", "reminder-tenant"],
+      ["reconciliation", "reconciliation-tenant"],
     ]) {
       expect(line(logged, `${job}_sweep_stamp_failed`)).toMatchObject({
         level: "error",
@@ -195,6 +212,16 @@ describe("sweep logs (pre-pilot hardening, Part E)", () => {
       "tidegrid.checkout_sweep.pass_count": 22,
       "tidegrid.checkout_sweep.deferred_tenant_count": 23,
       "tidegrid.checkout_sweep.stamp_failure_count": 24,
+    });
+    expect(line(logged, "reconciliation_sweep")).toMatchObject({
+      "tidegrid.reconciliation_sweep.assessed_count": 2,
+      "tidegrid.reconciliation_sweep.invoiced_count": 3,
+      "tidegrid.reconciliation_sweep.payments_checked_count": 4,
+      "tidegrid.reconciliation_sweep.payments_raised_count": 5,
+      "tidegrid.reconciliation_sweep.turn_count": 61,
+      "tidegrid.reconciliation_sweep.pass_count": 62,
+      "tidegrid.reconciliation_sweep.deferred_tenant_count": 63,
+      "tidegrid.reconciliation_sweep.stamp_failure_count": 64,
     });
     expect(line(logged, "email_sweep")).toMatchObject({
       "tidegrid.email_sweep.turn_count": 31,

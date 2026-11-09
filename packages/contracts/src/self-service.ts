@@ -75,7 +75,7 @@ export type ManageLinkAccepted = z.infer<typeof ManageLinkAccepted>;
 export const CancellationRefusal = z
   .enum(["already_canceled", "trip_departed", "remedy_requires_operator"])
   .describe(
-    "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues",
+    "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues, or the operator already refunded money outside the card flow and decides the rest",
   );
 
 export const CancellationTerms = z

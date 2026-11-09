@@ -559,7 +559,11 @@ export type ProviderEventType =
   | "payment.failed"
   /** A refund the provider reports on (0029, W3-G2.9). */
   | "refund.updated"
+  /** A dispute on a TideGrid payment (0031, W3-G2.10). */
+  | "dispute.updated"
   | "other";
+/** A dispute's status as a provider event reports it (0031). */
+export type ProviderDisputeStatus = "needs_response" | "under_review" | "won" | "lost" | "closed";
 /** A refund's status as a provider event reports it (0029). */
 export type ProviderRefundStatus = "pending" | "succeeded" | "failed";
 export type InboxProcessingState = "received" | "processed";
@@ -608,6 +612,10 @@ export interface ProviderEventsTable {
   refund_status: FixedDefault<ProviderRefundStatus | null>;
   refund_key: FixedDefault<string | null>;
   refund_failure_code: FixedDefault<string | null>;
+  // Dispute events (0031, W3-G2.10).
+  dispute_ref: FixedDefault<string | null>;
+  dispute_status: FixedDefault<ProviderDisputeStatus | null>;
+  dispute_reason: FixedDefault<string | null>;
 }
 
 export interface CheckoutSessionsTable {
@@ -706,6 +714,8 @@ export interface PaymentsTable {
   succeeded_at: Stamp;
   failed_at: Stamp;
   updated_at: Stamped;
+  /** When the reconciliation sweep last read the provider (0031); the trigger stamps it. */
+  checked_at: ColumnType<Date | null, never, Date | string>;
 }
 
 export interface PaymentRefundsTable {
@@ -1284,7 +1294,14 @@ interface WaiverTables {
 }
 
 /** The cron's cross-tenant sweeps that take fair turns (0013). */
-export type SweepName = "hold" | "checkout" | "email" | "hostname" | "outbox" | "waiver_reminder";
+export type SweepName =
+  | "hold"
+  | "checkout"
+  | "email"
+  | "hostname"
+  | "outbox"
+  | "waiver_reminder"
+  | "reconciliation";
 
 /**
  * When a sweep last started a turn for a tenant (0013, pre-pilot hardening).
@@ -1401,6 +1418,13 @@ export interface Database
   payment_cancellations: PaymentCancellationsTable;
   // Tenant access remainder (W3-G2.2b).
   tenant_deletion_requests: TenantDeletionRequestsTable;
+  // External payment and reconciliation (0031, W3-G2.10).
+  payment_disputes: PaymentDisputesTable;
+  external_settlements: ExternalSettlementsTable;
+  fee_assessments: FeeAssessmentsTable;
+  billing_plans: BillingPlansTable;
+  fee_invoices: FeeInvoicesTable;
+  payment_reconciliation_exceptions: PaymentReconciliationExceptionsTable;
 }
 
 /** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
@@ -1524,6 +1548,115 @@ export interface PaymentCancellationsTable {
   created_at: Stamped;
   settled_at: Stamp;
   updated_at: Stamped;
+}
+
+/** A provider dispute on a TideGrid payment (0031). Moves only with its verified events. */
+export interface PaymentDisputesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  payment_id: Fixed<string>;
+  provider: Fixed<PaymentProviderName>;
+  dispute_ref: Fixed<string>;
+  amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  reason: Fixed<string>;
+  status: ColumnType<ProviderDisputeStatus, ProviderDisputeStatus, ProviderDisputeStatus>;
+  opened_event_id: Fixed<string>;
+  last_event_id: ColumnType<string, string, string>;
+  created_at: Stamped;
+  updated_at: Stamped;
+  closed_at: Stamp;
+}
+
+export type ExternalSettlementKind = "payment" | "refund";
+export type ExternalTender = "cash" | "check" | "other";
+
+/** Cash, check, or other tender staff record against a booking (0031). Append-only. */
+export interface ExternalSettlementsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  kind: Fixed<ExternalSettlementKind>;
+  tender: Fixed<ExternalTender>;
+  amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  reason: Fixed<string>;
+  tender_reference: FixedDefault<string | null>;
+  idempotency_key: Fixed<string>;
+  order_total: FixedDefault<number | null>;
+  eligible_total: FixedDefault<number | null>;
+  eligible_amount: FixedDefault<number | null>;
+  fee_bp: FixedDefault<number | null>;
+  fee_amount: FixedDefault<number | null>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+export type FeeAssessmentBasis = "trip_completed" | "canceled";
+
+/** TideGrid's fee on a closed booking's eligible value, once (0031). Append-only. */
+export interface FeeAssessmentsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  basis: Fixed<FeeAssessmentBasis>;
+  order_total: Fixed<number>;
+  eligible_total: Fixed<number>;
+  fee_bp: Fixed<number>;
+  fee_amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** What TideGrid bills a tenant (0031). Written by TideGrid only, never changed. */
+export interface BillingPlansTable {
+  tenant_id: TenantColumn;
+  monthly_fee: Fixed<number>;
+  annual_minimum: Fixed<number>;
+  starts_on: Fixed<string>;
+  time_zone: Fixed<string>;
+  currency: FixedDefault<"USD">;
+  created_at: Stamped;
+}
+
+/** One draft invoice per plan month (0031). The database checks every figure. */
+export interface FeeInvoicesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  period_start: Fixed<string>;
+  contract_month: Fixed<number>;
+  subscription_amount: Fixed<number>;
+  variable_amount: Fixed<number>;
+  carried_in: Fixed<number>;
+  variable_billed: Fixed<number>;
+  carried_out: Fixed<number>;
+  true_up_amount: Fixed<number>;
+  total_amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  state: ColumnType<"draft", "draft" | undefined, never>;
+  created_at: Stamped;
+}
+
+export type PaymentReconciliationReason =
+  | "succeeded_without_event"
+  | "failed_without_event"
+  | "missing_at_provider"
+  | "amount_mismatch";
+
+/** A provider reading that disagrees with a pending payment (0031). Append-only. */
+export interface PaymentReconciliationExceptionsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  payment_id: Fixed<string>;
+  reason: Fixed<PaymentReconciliationReason>;
+  provider_status: FixedDefault<string | null>;
+  provider_amount: FixedDefault<number | null>;
+  created_at: Stamped;
 }
 
 export type { Generated, GeneratedAlways };

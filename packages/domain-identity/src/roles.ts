@@ -37,7 +37,11 @@ export type AccessRole = StaffRole | SupportRole;
  * booking credit (`bookings.cancel`, W3-G2.9); only owners override the
  * policy, with a reason (`bookings.override`), and adjust a booker's credit
  * balance (`credits.adjust`). Finance reads refunds and their exceptions
- * (`payments.read`) and changes none.
+ * (`payments.read`) and changes none. External money (W3-G2.10): owners and
+ * booking staff record cash, check, or other tender a guest paid
+ * (`payments.record`); only owners record money paid back outside the card
+ * flow (`payments.refund_external`). Owners and finance read TideGrid's fee
+ * invoices (`fees.read`); finance still changes nothing.
  */
 export type Permission =
   | "members.read"
@@ -69,7 +73,11 @@ export type Permission =
   // access, export the tenant's data, and ask for the account's deletion.
   | "support.manage"
   | "data.export"
-  | "account.manage";
+  | "account.manage"
+  // External payment and reconciliation (W3-G2.10).
+  | "payments.record"
+  | "payments.refund_external"
+  | "fees.read";
 
 const matrix: Record<AccessRole, readonly Permission[]> = {
   owner: [
@@ -93,6 +101,9 @@ const matrix: Record<AccessRole, readonly Permission[]> = {
     "support.manage",
     "data.export",
     "account.manage",
+    "payments.record",
+    "payments.refund_external",
+    "fees.read",
   ],
   booking_staff: [
     "catalog.read",
@@ -106,15 +117,17 @@ const matrix: Record<AccessRole, readonly Permission[]> = {
     "messages.resend",
     "exceptions.resolve",
     "bookings.cancel",
+    "payments.record",
   ],
-  finance: ["audit.read", "catalog.read", "payments.read"],
-  support_masked: ["audit.read", "catalog.read", "payments.read"],
+  finance: ["audit.read", "catalog.read", "payments.read", "fees.read"],
+  support_masked: ["audit.read", "catalog.read", "payments.read", "fees.read"],
   support_unmasked: [
     "audit.read",
     "catalog.read",
     "payments.read",
     "bookings.read",
     "members.read",
+    "fees.read",
   ],
 };
 

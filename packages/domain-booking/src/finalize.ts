@@ -44,6 +44,7 @@ import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
 import { enqueueConfirmationEmail, enqueueReminderEmail } from "./emails.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
+import { type DisputeEventOutcome, onDisputeEvent } from "./reconciliation.ts";
 import {
   onRefundEvent,
   type RefundEventOutcome,
@@ -77,7 +78,9 @@ export type ProcessOutcome =
   /** An event type checkout does not act on. */
   | "ignored_event_type"
   /** A refund event (W3-G2.9). */
-  | RefundEventOutcome;
+  | RefundEventOutcome
+  /** A dispute event (W3-G2.10). */
+  | DisputeEventOutcome;
 
 export interface ProcessResult {
   outcome: ProcessOutcome;
@@ -173,7 +176,9 @@ export async function processProviderEvent(
         ? await onFailure(trx, ctx, event)
         : event.eventType === "refund.updated"
           ? result(await onRefundEvent(trx, ctx, event))
-          : result("ignored_event_type");
+          : event.eventType === "dispute.updated"
+            ? result(await onDisputeEvent(trx, ctx, event))
+            : result("ignored_event_type");
   await markInboxProcessed(trx, ctx.tenantId, event.id, outcome.outcome);
   return outcome;
 }

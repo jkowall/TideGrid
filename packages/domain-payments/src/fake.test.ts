@@ -63,6 +63,7 @@ describe("the fake provider", () => {
       occurredAt: new Date(1_759_665_600_000),
       payment: { ref: paymentRef, amount: 12_345, currency: "USD", clientReference },
       refund: null,
+      dispute: null,
     });
     expect(parseFakeEventBody(body({ type: "payment.failed" }))?.type).toBe("payment.failed");
     // Anything else is recorded as other, without a payment.
@@ -74,6 +75,39 @@ describe("the fake provider", () => {
     expect(parseFakeEventBody(body({}, { client_reference: null }))?.payment?.clientReference).toBe(
       null,
     );
+  });
+
+  it("reads its own dispute events, and refuses a malformed one (W3-G2.10)", () => {
+    const dispute = (object: Record<string, unknown> = {}) =>
+      body(
+        { type: "dispute.updated" },
+        {
+          object: "dispute",
+          id: "fdp_abcdefghijklmnop",
+          payment: paymentRef,
+          amount: 2_500,
+          currency: "usd",
+          status: "needs_response",
+          reason: "fraudulent",
+          ...object,
+        },
+      );
+    expect(parseFakeEventBody(dispute())).toMatchObject({
+      type: "dispute.updated",
+      payment: { ref: paymentRef, amount: 2_500, currency: "USD", clientReference: null },
+      refund: null,
+      dispute: { ref: "fdp_abcdefghijklmnop", status: "needs_response", reason: "fraudulent" },
+    });
+    for (const bad of [
+      { status: "warning_closed" },
+      { currency: "eur" },
+      { amount: 0 },
+      { reason: "Not A Code" },
+      { object: "charge" },
+      { payment: "nope" },
+    ]) {
+      expect(parseFakeEventBody(dispute(bad)), JSON.stringify(bad)).toBeNull();
+    }
   });
 
   it("refuses bodies that are not its own envelope", () => {

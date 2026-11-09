@@ -8,6 +8,28 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-09: W3-G2.10, external payment and reconciliation (owner decision; coordinator defaults pending owner confirmation)
+
+Under the same owner decision as W3-G2.9 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
+
+W3-G2.10 lands as migrations `0031` and `0032` and the [database contract](../../packages/database/README.md#external-payment-and-reconciliation-0031-and-0032). What it adds:
+
+- **External money.** Staff record cash, check, or other tender against a booking, as a payment or a refund, with a reason and an idempotency key. A refund returns at most the money that came in and at most what the booking cost, and reverses TideGrid's fee on its eligible share, as a card refund does.
+- **Fee assessment.** TideGrid's 1.5% fee on a booking's eligible value (taxes excluded), once, when the booking closes: its trip ended, or it was canceled. Refunds reverse their share on their own, so the fee base is the net managed value [docs/v2/03](03-commercial-model.md) describes.
+- **Invoices.** One draft per billing month from the fee ledgers, with the subscription, a negative balance carried forward against later variable fees only, and the annual-minimum true-up in the 12th month of each contract year. The database checks every figure.
+- **Disputes.** The provider's dispute events (Stripe's `charge.dispute.*`) become a neutral `dispute.updated` event through `verifyWebhook` and the inbox, as every other event does. Staff see each dispute, its status, amount, reason code, and booking. Nothing else changes.
+- **Pending payments past their hold** are read at the provider, as D1 below says.
+- **The month's reconciliation.** Per booking: value assessed, value refunded, external money, and fee entries, with the totals and the fee ledgers' own total as the control total, and the share of closed bookings' value received against the 98% target.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: a reading never settles a payment (proposed; the goal gave no default).** A payment still pending an hour after its checkout's hold ended is read at the provider once an hour for 7 days. The reading never confirms a booking, fails a payment, or refunds anything. When it disagrees (paid, will never be paid, missing, or another amount), it is raised once per reason for staff, and the payment waits for the provider's verified event, which the provider redelivers or staff resend from its dashboard. This keeps the verified-event invariant whole: only an event that passed `verifyWebhook` moves a payment, and the database already refuses a payment state change without an event id. So the owner was not asked first.
+- **D2: who may do what.** Record an external payment: owners and booking staff (`payments.record`). Record an external refund: owners only (`payments.refund_external`). Disputes, payment readings, and a booking's external money: everyone with `payments.read`. The month's reconciliation and fee invoices: owners, finance, and support (`fees.read`).
+- **D3: when and on what the fee is assessed.** At the close point, on the booking's eligible value, by the assessment's own time; a refund in a later month reverses in that month. Credit redemption, trip cards, and tips are out of scope.
+- **D4: billing months and invoices.** Months in the billing plan's time zone (UTC without a plan). An invoice is drafted an hour after its month ends and stays a draft until a billing tool exists. Plans are written by TideGrid only, through the admin connection.
+- **D5: the check schedule.** Hourly, for 7 days after the payment was created; fee assessment looks back 35 days, so a missed run catches up.
+- **D6: disputes are shown, nothing more.** A lost dispute does not yet reverse TideGrid's fee; that is a known gap for the owner to decide with the billing tool.
+
 ### 2026-11-08: W3-G2.16-rest, trip reminders a day before departure, code only (synthetic pull-forward; coordinator defaults pending owner confirmation)
 
 The second pull request of W3-G2.16-rest, under the same owner card as the [first](#2026-11-08-w3-g216-rest-per-operator-sender-domains-and-suppression-code-only-synthetic-pull-forward-coordinator-defaults-pending-owner-confirmation). Waiver reminders were already built (W1-G215-REMINDERS); this adds the booking's own reminder. No migration, no deploy, no send beyond the recipient allowlist.

@@ -727,6 +727,14 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         tenant_deletion_requests: ["INSERT", "SELECT"],
         // Waiver send-count resets (0028).
         waiver_send_resets: ["INSERT", "SELECT"],
+        // Payment reconciliation (0031, W3-G2.10): append-only, except a
+        // dispute, which moves its status with each verified event.
+        payment_disputes: ["INSERT", "SELECT"],
+        external_settlements: ["INSERT", "SELECT"],
+        fee_assessments: ["INSERT", "SELECT"],
+        billing_plans: ["INSERT", "SELECT"],
+        fee_invoices: ["INSERT", "SELECT"],
+        payment_reconciliation_exceptions: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -754,7 +762,13 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // transition; triggers stamp the times and check the evidence.
         checkout_sessions: ["state"],
         orders: ["status"],
-        payments: ["failed_event_id", "provider_payment_id", "state", "succeeded_event_id"],
+        payments: [
+          "checked_at",
+          "failed_event_id",
+          "provider_payment_id",
+          "state",
+          "succeeded_event_id",
+        ],
         payment_refunds: ["checked_at", "failure_code", "provider_refund_id", "state"],
         provider_events: ["outcome", "processing_state"],
         // Guest self-service (lane 1, G2.11c): a participant's details may be
@@ -787,6 +801,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         payment_cancellations: ["outcome_code", "state"],
         // Tenant access remainder (W3-G2.2b): withdrawn once; a trigger stamps who and when.
         tenant_deletion_requests: ["state"],
+        // Payment reconciliation (0031): a dispute moves with its verified events.
+        payment_disputes: ["last_event_id", "status"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

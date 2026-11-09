@@ -184,6 +184,53 @@ function parseFakeRefundEvent(
       key: idempotency_key,
       failureCode: status === "failed" ? (failure_code ?? "refund_failed") : null,
     },
+    dispute: null,
+  };
+}
+
+/**
+ * A fake dispute event (W3-G2.10): what a test or the demo controls send to
+ * show a chargeback. The fake never opens one on its own.
+ */
+function parseFakeDisputeEvent(
+  id: string,
+  created: number,
+  account: string,
+  data: unknown,
+): Omit<ProviderEventFields, "payloadSha256"> | null {
+  const obj = isRecord(data) ? data.object : undefined;
+  if (!isRecord(obj) || obj.object !== "dispute") return null;
+  const { id: ref, payment, amount, currency, status, reason } = obj;
+  if (
+    typeof ref !== "string" ||
+    !/^[A-Za-z0-9_]{3,255}$/.test(ref) ||
+    typeof payment !== "string" ||
+    !fakePaymentRefPattern.test(payment) ||
+    typeof amount !== "number" ||
+    !Number.isInteger(amount) ||
+    amount < 1 ||
+    amount > 100_000_000 ||
+    currency !== "usd" ||
+    (status !== "needs_response" &&
+      status !== "under_review" &&
+      status !== "won" &&
+      status !== "lost" &&
+      status !== "closed") ||
+    typeof reason !== "string" ||
+    !/^[a-z][a-z0-9_]{0,63}$/.test(reason)
+  ) {
+    return null;
+  }
+  return {
+    provider: "fake",
+    eventId: id,
+    type: "dispute.updated",
+    providerType: "dispute.updated",
+    accountRef: account,
+    occurredAt: new Date(created * 1000),
+    payment: { ref: payment, amount, currency: "USD", clientReference: null },
+    refund: null,
+    dispute: { ref, status, reason },
   };
 }
 
@@ -214,6 +261,7 @@ export function parseFakeEventBody(
     return null;
   }
   if (type === "refund.updated") return parseFakeRefundEvent(id, created, account, data);
+  if (type === "dispute.updated") return parseFakeDisputeEvent(id, created, account, data);
   const kind = type === "payment.succeeded" || type === "payment.failed" ? type : "other";
   let payment: VerifiedProviderEvent["payment"] = null;
   if (kind !== "other") {
@@ -250,6 +298,7 @@ export function parseFakeEventBody(
     payment,
     // The fake settles refunds at once and sends no refund events.
     refund: null,
+    dispute: null,
   };
 }
 interface PaymentRow {

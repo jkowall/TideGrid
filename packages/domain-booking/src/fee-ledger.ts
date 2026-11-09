@@ -72,6 +72,10 @@ export async function reverseFeeForRefund(
        and r.state = 'succeeded' and r.reason = 'booking_canceled'`.execute(trx);
   const row = rows[0];
   if (!row || row.total_amount <= 0) return null;
+  // The booking's lock, as an external refund takes it before reading what
+  // is left of the fee (W3-G2.10), so the two reversals never interleave.
+  await sql`select id from bookings where tenant_id = ${ctx.tenantId} and id = ${row.booking_id}
+              for no key update`.execute(trx);
   const computed = feeReversalFor({
     refundAmount: row.amount,
     orderTotal: row.total_amount,

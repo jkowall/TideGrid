@@ -35,6 +35,7 @@ import {
   type CreatePaymentInput,
   type PaymentCurrency,
   type PaymentProvider,
+  type ProviderDisputeStatus,
   type ProviderEventFields,
   type ProviderPayment,
   type ProviderPaymentStatus,
@@ -74,6 +75,7 @@ const liveKeyPattern = /^(sk|rk|pk)_live_/;
 export const stripeAccountPattern = /^acct_[A-Za-z0-9]{1,64}$/;
 export const stripePaymentIntentPattern = /^pi_[A-Za-z0-9]{1,250}$/;
 export const stripeRefundPattern = /^re_[A-Za-z0-9]{1,250}$/;
+export const stripeDisputePattern = /^(dp|du)_[A-Za-z0-9]{1,250}$/;
 export const stripeEventIdPattern = /^evt_[A-Za-z0-9]{1,250}$/;
 const chargePattern = /^ch_[A-Za-z0-9]{1,250}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -89,6 +91,40 @@ const refundEventTypes = new Set([
   "refund.failed",
   "charge.refund.updated",
 ]);
+
+/** The Stripe event types that report a dispute (W3-G2.10). */
+const disputeEventTypes = new Set([
+  "charge.dispute.created",
+  "charge.dispute.updated",
+  "charge.dispute.closed",
+  "charge.dispute.funds_withdrawn",
+  "charge.dispute.funds_reinstated",
+]);
+
+/**
+ * Stripe's dispute statuses, neutral (https://docs.stripe.com/api/disputes/object).
+ * An inquiry (warning_*) that closes never became a chargeback: closed.
+ * prevented: the card network stopped it before it was filed: closed.
+ */
+function disputeStatusOf(status: unknown): ProviderDisputeStatus | null {
+  switch (status) {
+    case "warning_needs_response":
+    case "needs_response":
+      return "needs_response";
+    case "warning_under_review":
+    case "under_review":
+      return "under_review";
+    case "won":
+      return "won";
+    case "lost":
+      return "lost";
+    case "warning_closed":
+    case "prevented":
+      return "closed";
+    default:
+      return null;
+  }
+}
 
 /**
  * Stripe error codes about the key, the platform, or the connected account,
@@ -481,6 +517,35 @@ function parseStripeEvent(
           : null,
     };
   }
+  // A dispute names the disputed payment intent; whether TideGrid took that
+  // payment is decided when the event is processed, by its id. A dispute on a
+  // charge with no payment intent is not one of TideGrid's: recorded as other.
+  let dispute: VerifiedProviderEvent["dispute"] = null;
+  if (
+    intent.object === "dispute" &&
+    disputeEventTypes.has(type) &&
+    typeof intent.payment_intent === "string"
+  ) {
+    const { id: ref, status, amount, currency, payment_intent, reason } = intent;
+    const mapped = disputeStatusOf(status);
+    if (
+      typeof ref !== "string" ||
+      !stripeDisputePattern.test(ref) ||
+      mapped === null ||
+      !isAmount(amount) ||
+      amount < 1 ||
+      currency !== "usd" ||
+      !stripePaymentIntentPattern.test(payment_intent)
+    ) {
+      // Refused so Stripe retries and the webhook alarm fires: a dispute is
+      // money leaving, never recorded as other and ignored.
+      return null;
+    }
+    kind = "dispute.updated";
+    payment = { ref: payment_intent, amount, currency: "USD", clientReference: null };
+    // Only Stripe's reason code, never the cardholder's evidence.
+    dispute = { ref, status: mapped, reason: safeCode(reason) ?? "unknown" };
+  }
   if (ours && (type === "payment_intent.succeeded" || type === "payment_intent.canceled")) {
     const succeeded = type === "payment_intent.succeeded";
     const ref = intent.id;
@@ -521,6 +586,7 @@ function parseStripeEvent(
       occurredAt: new Date(created * 1000),
       payment,
       refund,
+      dispute,
     },
     projection,
   };

@@ -48,6 +48,15 @@ vi.mock("@tidegrid/domain-booking", async (importOriginal) => ({
     failedRefunds: 0,
     complete: true,
   })),
+  sweepReconciliation: vi.fn(async () => ({
+    tenants: 0,
+    assessed: 0,
+    invoiced: 0,
+    paymentsChecked: 0,
+    paymentsRaised: 0,
+    failedTenants: 0,
+    complete: true,
+  })),
 }));
 // Retention (W3-G2.2b) runs last and touches no network here.
 vi.mock("@tidegrid/domain-identity", async (importOriginal) => ({
