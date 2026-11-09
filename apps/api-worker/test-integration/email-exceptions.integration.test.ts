@@ -174,11 +174,12 @@ describe.skipIf(!env)("the email exceptions list: the API (W1-EMAIL-EXC)", () =>
       runId: `run-${randomUUID()}`,
     });
 
-  /** The booking's queued messages, oldest first. */
+  /** The booking's queued messages, oldest first, without the trip reminder waiting for its day. */
   async function queued(bookingId: string): Promise<string[]> {
     const rows = await admin<{ id: string }[]>`
       select id from public.email_messages
-       where booking_id = ${bookingId} and state = 'queued' order by created_at, id`;
+       where booking_id = ${bookingId} and state = 'queued' and template <> 'booking_reminder'
+       order by created_at, id`;
     return rows.map((r) => r.id);
   }
 

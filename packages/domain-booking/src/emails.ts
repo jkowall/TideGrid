@@ -15,6 +15,9 @@ import {
   DEFAULT_LINK_TTL_SECONDS,
   type EmailBlock,
   enqueueMessage,
+  TRIP_REMINDER_LEAD_HOURS,
+  TRIP_REMINDER_MIN_NOTICE_HOURS,
+  TRIP_REMINDER_TEMPLATE,
 } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { type BookingDetailView, getBookingDetail } from "./console.ts";
@@ -37,6 +40,8 @@ export const MANAGE_LINK_TEMPLATE = { key: "booking_manage_link", version: 1 } a
 /** Version 2: the refund is on its way, not already back (review M1). */
 export const CANCELED_TEMPLATE = { key: "booking_canceled", version: 2 } as const;
 export const REFUND_FAILED_TEMPLATE = { key: "booking_refund_failed", version: 1 } as const;
+/** The trip reminder, a day before departure (W3-G2.16-rest). */
+export const REMINDER_TEMPLATE = { key: TRIP_REMINDER_TEMPLATE, version: 1 } as const;
 
 /** A management link lasts three days once sent. */
 export const MANAGE_LINK_TTL_SECONDS = DEFAULT_LINK_TTL_SECONDS;
@@ -218,6 +223,72 @@ export async function enqueueManageLinkEmail(
       path: MANAGE_PATH,
       ttlSeconds: MANAGE_LINK_TTL_SECONDS,
     },
+  });
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
+}
+
+/**
+ * The trip reminder, written with the confirmation and sent a day before the
+ * trip leaves, once per booking. A booking made within two days of
+ * departure gets none: its confirmation is recent enough to be the reminder.
+ * The delivery job checks again when it is due (see domain-messaging's
+ * reminders.ts), and a cancellation cancels it.
+ *
+ * Its words are rendered now, as every message's are: a later change to the
+ * trip's meeting point or the operator's brand is not in it.
+ */
+export async function enqueueReminderEmail(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+): Promise<{ messageId: string; duplicate: boolean } | null> {
+  const { rows } = await sql<{ due: Date; worth: boolean }>`
+    select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
+           t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS})
+             > now() + make_interval(hours => ${TRIP_REMINDER_MIN_NOTICE_HOURS}) as worth
+      from bookings b
+      join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
+     where b.tenant_id = ${ctx.tenantId} and b.id = ${bookingId}`.execute(trx);
+  const timing = rows[0];
+  if (!timing) throw new Error("a booking for email was not found");
+  if (!timing.worth) return null;
+  const detail = await detailFor(trx, ctx.tenantId, bookingId);
+  const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
+  const blocks: EmailBlock[] = [
+    { kind: "heading", text: "Your trip is coming up" },
+    {
+      kind: "paragraph",
+      text: clean(
+        `Hi ${firstName(detail.booker.name)}. A reminder of booking ${detail.reference}: ${detail.trip.productName}, ${when}.`,
+        2000,
+      ),
+    },
+    { kind: "details", rows: tripRows(detail) },
+    {
+      kind: "paragraph",
+      text: "Use the button to see your booking or to name everyone in your party.",
+    },
+    { kind: "action", label: "Manage your booking", href: "access_link" },
+    { kind: "note", text: linkNote },
+    { kind: "note", text: demoNote },
+  ];
+  const result = await enqueueMessage(trx, ctx, {
+    dedupeKey: `booking.reminder:${bookingId}`,
+    template: REMINDER_TEMPLATE.key,
+    templateVersion: REMINDER_TEMPLATE.version,
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
+    bookingId,
+    content: {
+      subject: subject("Trip reminder", detail),
+      preview: singleLine(`See you ${when}.`, 200),
+      blocks,
+    },
+    accessLink: {
+      purpose: "booking_manage",
+      path: MANAGE_PATH,
+      ttlSeconds: MANAGE_LINK_TTL_SECONDS,
+    },
+    notBefore: timing.due,
   });
   return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }

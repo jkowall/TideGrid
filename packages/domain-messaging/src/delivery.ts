@@ -69,6 +69,7 @@ import {
 } from "./adapter.ts";
 import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
+import { REMINDER_TOO_LATE, TRIP_REMINDER_TEMPLATE, tripReminderTiming } from "./reminders.ts";
 import { fillLinkSlot } from "./render.ts";
 import { ADDRESS_SUPPRESSED, isSuppressed, type SenderPolicy, senderAddressFor } from "./sender.ts";
 
@@ -246,6 +247,7 @@ interface ClaimedRow {
 type Claimed =
   | { kind: "none" }
   | { kind: "held"; reason: DeliveryHold }
+  | { kind: "passed"; messageId: string }
   | { kind: "ready"; row: ClaimedRow; url: string | null }
   | { kind: "failed"; messageId: string; attempt: number; code: string }
   | { kind: "canceled"; messageId: string; attempt: number; code: string };
@@ -339,8 +341,14 @@ async function claimOne(
   ctx: TenantContext,
   options: DeliveryOptions,
   origin: string | null,
+  /** Messages this run passed over (a reminder whose booking was busy); never selected again. */
+  passed: ReadonlySet<string> = new Set(),
 ): Promise<Claimed> {
   const lease = options.leaseSeconds ?? DEFAULT_LEASE_SECONDS;
+  const notPassed =
+    passed.size === 0
+      ? sql``
+      : sql`and m.id not in (${sql.join([...passed].map((id) => sql`${id}::uuid`))})`;
   return inTenantTransaction(db, ctx, async (trx) => {
     // The tenant's resend lock first, before any message lock, as a staff
     // resend takes it (0014), so a claim and a resend never deadlock and the
@@ -387,9 +395,9 @@ async function claimOne(
     // A staff resend that must wait for its limits is left in the queue, and
     // the claim takes the next message instead.
     const { rows } = await sql<
-      Omit<ClaimedRow, "from_address"> & { state: string; resend: boolean }
+      Omit<ClaimedRow, "from_address"> & { state: string; resend: boolean; template: string }
     >`
-      select id, attempts, state, booking_id, participant_id, subject_ref, to_email, to_name,
+      select id, attempts, state, template, booking_id, participant_id, subject_ref, to_email, to_name,
              from_name, reply_to, subject, html_body, text_body, link_purpose, link_path,
              link_ttl_seconds, link_slot, starts_with(dedupe_key, ${RESEND_KEY_PREFIX}) as resend
         from email_messages m
@@ -401,6 +409,7 @@ async function claimOne(
                     select 1 from app.booking_resend_claim_refusal(m.tenant_id, m.id, clock_timestamp()) r
                      where r.code in (${RESEND_WAIT_CODES[0]}, ${RESEND_WAIT_CODES[1]}))
                   else true end
+         ${notPassed}
        order by next_attempt_at, id
        limit 1
        for update skip locked`.execute(trx);
@@ -453,6 +462,29 @@ async function claimOne(
         attempt: found.attempts,
         code: OUTCOME_UNKNOWN,
       } as const;
+    }
+    // A trip reminder (W3-G2.16-rest) is only worth sending before the trip
+    // leaves; a retry can wait for hours, so the claim checks again. After
+    // the lapsed-lease rule, so an attempt that may have gone out ends as
+    // outcome_unknown, not as unsent. No link is revoked: the queued row has
+    // none, and a lapsed one's link, if its email arrived, keeps working.
+    if (found.template === TRIP_REMINDER_TEMPLATE) {
+      const timing = await tripReminderTiming(trx, ctx.tenantId, found.booking_id);
+      // The booking is being changed (a cancellation, say): pass the reminder
+      // over in this run, and go on to the operator's other mail.
+      if (timing === "busy") return { kind: "passed", messageId: found.id } as const;
+      if (timing === "too_late") {
+        await sql`
+          update email_messages set state = 'canceled', last_error_code = ${REMINDER_TOO_LATE}
+           where tenant_id = ${ctx.tenantId} and id = ${found.id}
+             and state in ('queued', 'sending')`.execute(trx);
+        return {
+          kind: "canceled",
+          messageId: found.id,
+          attempt: found.attempts,
+          code: REMINDER_TOO_LATE,
+        } as const;
+      }
     }
     const { rows: claimed } = await sql<{ attempts: number }>`
       update email_messages
@@ -621,11 +653,21 @@ async function tenantOrigin(
     : null;
 }
 
+/**
+ * How many messages one run may pass over (a reminder whose booking another
+ * transaction holds) before it ends. Independent of `limit`, so a turn of one
+ * still reaches the mail behind several busy reminders; a cancellation holds
+ * its booking for moments, so more than this at once means the run should end.
+ */
+const MAX_PASSED_PER_RUN = 50;
+
 async function deliverWithOrigin(
   db: Kysely<Database>,
   tenantId: string,
   options: DeliveryOptions,
   origin: string | null,
+  /** Messages already passed over this run; the sweep shares one set across a tenant's turns. */
+  passed: Set<string> = new Set(),
 ): Promise<TenantDeliveryReport> {
   const limit = deliveryLimit(options);
   const ctx = deliveryContext(tenantId, options);
@@ -648,8 +690,18 @@ async function deliverWithOrigin(
       report.stopped = "deadline";
       break;
     }
-    const claimed = await claimOne(db, ctx, options, origin);
+    const claimed = await claimOne(db, ctx, options, origin, passed);
     if (claimed.kind === "none") break;
+    if (claimed.kind === "passed") {
+      // Passing a message over is not a claim: it does not use up the turn,
+      // so the sweep still sees a full turn when more mail is due. The scan
+      // has its own bound, apart from `limit`: past MAX_PASSED_PER_RUN busy
+      // reminders the run ends, and the rest wait for the next run.
+      passed.add(claimed.messageId);
+      if (passed.size >= MAX_PASSED_PER_RUN) break;
+      i -= 1;
+      continue;
+    }
     if (claimed.kind === "held") {
       report.held = claimed.reason;
       break;
@@ -884,6 +936,7 @@ export async function sweepEmail(
   };
   const held = new Set<string>();
   const claimedBy = new Map<string, number>();
+  const passedBy = new Map<string, Set<string>>();
   /** Each tenant's link origin, resolved at its first turn and reused for the run. */
   const origins = new Map<string, string | null>();
   const contextOf = (tenantId: string): TenantContext => ({
@@ -909,7 +962,18 @@ export async function sweepEmail(
         origin = await tenantOrigin(db, tenantId, options);
         origins.set(tenantId, origin);
       }
-      const done = await deliverWithOrigin(db, tenantId, { ...options, limit, deadline }, origin);
+      let passed = passedBy.get(tenantId);
+      if (passed === undefined) {
+        passed = new Set();
+        passedBy.set(tenantId, passed);
+      }
+      const done = await deliverWithOrigin(
+        db,
+        tenantId,
+        { ...options, limit, deadline },
+        origin,
+        passed,
+      );
       claimedBy.set(tenantId, before + done.claimed);
       report.claimed += done.claimed;
       report.sent += done.sent;

@@ -42,7 +42,7 @@ import {
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
-import { enqueueConfirmationEmail } from "./emails.ts";
+import { enqueueConfirmationEmail, enqueueReminderEmail } from "./emails.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import {
   onRefundEvent,
@@ -434,6 +434,28 @@ async function book(
         ...(typeof code === "string" ? { code } : {}),
       },
       topic: "booking.confirmation_email_failed",
+      payload: { bookingId: booking.id },
+    });
+  }
+  // The trip reminder (W3-G2.16-rest), a day before departure, under its own
+  // savepoint for the same reason: it never undoes the booking, and a
+  // failure here leaves the confirmation queued.
+  await sql`savepoint reminder_email`.execute(trx);
+  try {
+    await enqueueReminderEmail(trx, ctx, booking.id);
+    await sql`release savepoint reminder_email`.execute(trx);
+  } catch (error) {
+    await sql`rollback to savepoint reminder_email`.execute(trx);
+    const code = (error as { code?: unknown } | null)?.code;
+    await record(trx, ctx, {
+      action: "booking.reminder_email_failed",
+      subjectType: "booking",
+      subjectId: booking.id,
+      after: {
+        error: error instanceof Error ? error.name : "unknown",
+        ...(typeof code === "string" ? { code } : {}),
+      },
+      topic: "booking.reminder_email_failed",
       payload: { bookingId: booking.id },
     });
   }

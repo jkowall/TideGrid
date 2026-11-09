@@ -612,7 +612,9 @@ describe.skipIf(!env)("the Stripe adapter through the API over the recorded fixt
       select m.template, m.state from public.email_messages m
         join public.bookings b on b.tenant_id = m.tenant_id and b.id = m.booking_id
         join public.payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
-       where p.provider = 'stripe' and p.provider_payment_id = ${opened.paymentRef}`;
+       where p.provider = 'stripe' and p.provider_payment_id = ${opened.paymentRef}
+         and m.template <> 'booking_reminder'`;
+    // A trip reminder, if the trip is far enough out for one, waits for its day (W3-G2.16-rest).
     expect(mail).toEqual([{ template: "booking_confirmation", state: "sent" }]);
     expect(logged("email_delivery")).toBe(true);
   });

@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-08
 
+### Trip reminders a day before departure (W3-G2.16-rest, second part), built November 8, 2026
+
+Goal branch `claude/project-thread-wqkheo`, from `main` at `4b57878` (after the first part merged as PR 129). No migration ([decision register](v2/06-decision-register.md#2026-11-08-w3-g216-rest-trip-reminders-a-day-before-departure-code-only-synthetic-pull-forward-coordinator-defaults-pending-owner-confirmation)). No send, no deploy.
+
+- **Built.** One reminder email per booking, written with the confirmation and due 24 hours before departure, with a management link; none for a booking made within two days of departure; canceled with the booking; canceled unsent at claim when the booking or trip was canceled or the trip leaves within 2 hours, and left for a later run while a cancellation holds the booking. The console names it "Trip reminder" and shows "Scheduled" until it is due.
+- **Acceptance, for this part.** Scheduled reminders run through the existing delivery job (`trip-reminder.integration.test.ts`, ten cases); the goal's other three conditions were met by the first part.
+- **Checks.** `pnpm typecheck`, `pnpm lint`, `pnpm test`, and `pnpm check:docs` pass. `pnpm test:local-db integration` on the local PostgreSQL 17 container: 1,127 passed, 2 skipped (after merging main with PRs 130, 131, and 133). Existing tests that list a booking's email now leave the reminder out, or accept it when the trip is far enough away.
+- **Reviews.** Independent and security review (R9): no critical or high finding. Fixed: a lapsed reminder attempt near departure ends as `outcome_unknown` and revokes no link (M1); the claim waits for a cancellation in progress (L1); the email makes no claim about earlier links (L2); two days' notice (L3); boundary and lapsed-attempt tests (L4). Recorded: other suites ignore the reminder (L5); a trip moved earlier keeps its reminder's due time (nothing moves trips today).
+- **Owner steps.** None for this part.
+
 ### Demo guest app journeys (W1N-JOURNEYS), built November 8, 2026
 
 Goal branch `claude/project-thread-bqlorn`, from `main` at `d2d68be`, under the owner's go of 22:16 UTC ([decision register](v2/06-decision-register.md#2026-11-08-demo-guest-app-pulled-forward-into-the-demo-owner-decision)). No migration, no API, contract, or guest site change.
