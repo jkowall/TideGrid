@@ -57,7 +57,9 @@ export type DisputeEventOutcome =
   /** The event names a TideGrid payment but not as the payment is. */
   | "dispute_mismatch"
   /** No payment of this tenant matches: not a sale TideGrid made. */
-  | "unmatched_dispute";
+  | "unmatched_dispute"
+  /** Older than the event already applied; nothing changed. */
+  | "dispute_stale";
 
 const closedStatuses = new Set<ProviderDisputeStatus>(["won", "lost", "closed"]);
 
@@ -89,7 +91,10 @@ export async function onDisputeEvent(
   if (!payment) return "unmatched_dispute";
   if (
     payment.account_ref !== event.accountRef ||
-    payment.state !== "succeeded" ||
+    // A pending payment counts: a dispute means the money moved, even when
+    // the payment's own event has not arrived. Recording it changes nothing
+    // about the payment.
+    (payment.state !== "succeeded" && payment.state !== "pending") ||
     event.currency !== payment.currency ||
     event.amount < 1 ||
     event.amount > payment.amount
@@ -101,8 +106,9 @@ export async function onDisputeEvent(
     payment_id: string;
     amount: number;
     status: ProviderDisputeStatus;
+    last_event_id: string;
   }>`
-    select id, payment_id, amount, status from payment_disputes
+    select id, payment_id, amount, status, last_event_id from payment_disputes
      where tenant_id = ${ctx.tenantId} and provider = ${event.provider}
        and dispute_ref = ${dispute.ref}
        for update`.execute(trx);
@@ -132,6 +138,13 @@ export async function onDisputeEvent(
   }
   if (prior.payment_id !== payment.id || prior.amount !== event.amount) return "dispute_mismatch";
   if (closedStatuses.has(prior.status)) return "dispute_already_closed";
+  const { rows: order } = await sql<{ stale: boolean }>`
+    select coalesce(n.provider_created_at < o.provider_created_at, o.provider_created_at is not null)
+             as stale
+      from provider_events n, provider_events o
+     where n.tenant_id = ${ctx.tenantId} and n.id = ${event.id}
+       and o.tenant_id = ${ctx.tenantId} and o.id = ${prior.last_event_id}`.execute(trx);
+  if (order[0]?.stale) return "dispute_stale";
   await sql`
     update payment_disputes set status = ${dispute.status}, last_event_id = ${event.id}
      where tenant_id = ${ctx.tenantId} and id = ${prior.id}`.execute(trx);
@@ -424,6 +437,14 @@ export async function recordExternalSettlement(
       }
     }
     if (e.code === "23514" && e.constraint_name === "external_settlements_refund_limit") {
+      // The same command may have just committed under this key, which the
+      // limit counted first: replay it rather than refuse.
+      const raced = await settlementByKey(trx, ctx.tenantId, command.idempotencyKey);
+      if (raced) {
+        return sameSettlement(raced, command)
+          ? { kind: "recorded", settlement: settlementView(raced), replayed: true }
+          : { kind: "key_reused" };
+      }
       return {
         kind: "refund_too_large",
         refundable: await refundable(trx, ctx.tenantId, command.bookingId),
@@ -1081,6 +1102,11 @@ export async function sweepReconciliation(
   });
   // A payment read once per run.
   const checked = new Map<string, Set<string>>();
+  // The run's budget also bounds work inside a turn, so a slow provider never
+  // holds one tenant's turn, and the jobs after this one, for long.
+  const budgetMs = options.budgetMs ?? 10_000;
+  const startedAt = clock();
+  const overBudget = () => clock() - startedAt >= budgetMs;
   const fair = await runFairSweep({
     listTenants: async () => {
       const { rows } = await sql<{ tenant_id: string }>`
@@ -1092,8 +1118,9 @@ export async function sweepReconciliation(
     },
     tenantLimit,
     stamp: (tenantId) => recordSweepTurn(db, contextOf(tenantId), "reconciliation"),
-    budgetMs: options.budgetMs ?? 10_000,
+    budgetMs,
     clock,
+    startedAt,
     turn: async (tenantId) => {
       const ctx = contextOf(tenantId);
       let units = 0;
@@ -1106,6 +1133,10 @@ export async function sweepReconciliation(
       more ||= assessment.more;
       // Catch up at most a year of months a turn.
       for (let i = 0; i < 12; i++) {
+        if (overBudget()) {
+          more = true;
+          break;
+        }
         const invoice = await inTenantTransaction(db, ctx, (trx) => issueNextInvoice(trx, ctx));
         if (!invoice) break;
         report.invoiced += 1;
@@ -1120,6 +1151,10 @@ export async function sweepReconciliation(
           paymentsDueCheck(trx, tenantId, provider.name, batchSize + 1, [...seen]),
         );
         for (const paymentId of due.slice(0, batchSize)) {
+          if (overBudget()) {
+            more = true;
+            break;
+          }
           seen.add(paymentId);
           const result = await checkPendingPayment(db, provider, ctx, paymentId);
           report.paymentsChecked += 1;

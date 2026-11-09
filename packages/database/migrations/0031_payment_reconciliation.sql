@@ -161,27 +161,42 @@ CREATE FUNCTION app.check_payment_dispute() RETURNS trigger
   AS $$
 DECLARE
   e record;
+  prior_at timestamptz;
 BEGIN
-  SELECT x.event_type, x.provider, x.dispute_ref, x.dispute_status, x.amount
+  -- The event names this dispute, its status, its amount, and this payment
+  -- on its own account: a genuine event about another payment, another
+  -- amount, or another reason never supports the row.
+  SELECT x.event_type, x.provider, x.dispute_ref, x.dispute_status, x.dispute_reason, x.amount,
+         x.currency, x.payment_ref, x.account_ref, x.provider_created_at
     INTO e FROM public.provider_events x
    WHERE x.tenant_id = NEW.tenant_id AND x.id = NEW.last_event_id;
   IF NOT FOUND OR e.event_type <> 'dispute.updated' OR e.provider <> NEW.provider
-     OR e.dispute_ref <> NEW.dispute_ref OR e.dispute_status <> NEW.status THEN
+     OR e.dispute_ref <> NEW.dispute_ref OR e.dispute_status <> NEW.status
+     OR e.amount IS DISTINCT FROM NEW.amount OR e.currency IS DISTINCT FROM NEW.currency
+     OR NOT EXISTS (
+       SELECT 1 FROM public.payments p
+        WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.payment_id
+          AND p.provider = e.provider AND p.provider_payment_id = e.payment_ref
+          AND p.account_ref = e.account_ref
+     ) THEN
     RAISE EXCEPTION 'a dispute moves only as its verified dispute event says'
       USING ERRCODE = '23514', CONSTRAINT = 'payment_disputes_event';
   END IF;
   IF TG_OP = 'INSERT' THEN
-    IF NEW.opened_event_id IS DISTINCT FROM NEW.last_event_id THEN
+    IF NEW.opened_event_id IS DISTINCT FROM NEW.last_event_id
+       OR e.dispute_reason IS DISTINCT FROM NEW.reason THEN
       RAISE EXCEPTION 'a dispute opens with the event that reported it'
         USING ERRCODE = '23514', CONSTRAINT = 'payment_disputes_event';
     END IF;
+    -- A pending payment counts too: a dispute means the money moved, even
+    -- when the payment's own event has not arrived (D1). Recording it changes
+    -- nothing about the payment.
     IF NOT EXISTS (
       SELECT 1 FROM public.payments p
        WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.payment_id
-         AND p.provider = NEW.provider AND p.state = 'succeeded'
-         AND NEW.amount <= p.amount
+         AND p.state IN ('succeeded', 'pending') AND NEW.amount <= p.amount
     ) THEN
-      RAISE EXCEPTION 'a dispute is on a succeeded payment, for at most its amount'
+      RAISE EXCEPTION 'a dispute is on a succeeded or pending payment, for at most its amount'
         USING ERRCODE = '23514', CONSTRAINT = 'payment_disputes_payment';
     END IF;
     NEW.created_at := now();
@@ -204,6 +219,13 @@ BEGIN
   END IF;
   IF OLD.status IN ('won', 'lost', 'closed') THEN
     RAISE EXCEPTION 'dispute % is closed as %', OLD.id, OLD.status
+      USING ERRCODE = '23514', CONSTRAINT = 'payment_disputes_transition';
+  END IF;
+  -- An event older than the one applied never moves the dispute back.
+  SELECT x.provider_created_at INTO prior_at FROM public.provider_events x
+   WHERE x.tenant_id = OLD.tenant_id AND x.id = OLD.last_event_id;
+  IF prior_at IS NOT NULL AND (e.provider_created_at IS NULL OR e.provider_created_at < prior_at) THEN
+    RAISE EXCEPTION 'dispute event is older than the one applied'
       USING ERRCODE = '23514', CONSTRAINT = 'payment_disputes_transition';
   END IF;
   NEW.updated_at := now();

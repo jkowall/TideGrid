@@ -80,12 +80,13 @@ function disputeEventBody(input: {
   paymentRef: string;
   amount: number;
   status: "needs_response" | "under_review" | "won" | "lost" | "closed";
+  createdMs?: number;
 }): string {
   return JSON.stringify({
     id: fakeEventId(),
     object: "event",
     type: "dispute.updated",
-    created: Math.floor(Date.now() / 1000),
+    created: Math.floor((input.createdMs ?? Date.now()) / 1000),
     account: input.accountRef,
     data: {
       object: {
@@ -503,7 +504,12 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
     const disputeRef = `fdp_${randomUUID().replace(/-/g, "")}`;
     const deliver = async (
       status: "needs_response" | "under_review" | "won" | "lost" | "closed",
-      overrides: { amount?: number; paymentRef?: string; disputeRef?: string } = {},
+      overrides: {
+        amount?: number;
+        paymentRef?: string;
+        disputeRef?: string;
+        createdMs?: number;
+      } = {},
     ) => {
       const body = disputeEventBody({
         accountRef: B.accountRef,
@@ -511,6 +517,7 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
         paymentRef: overrides.paymentRef ?? paid.ref,
         amount: overrides.amount ?? 4_000,
         status,
+        ...(overrides.createdMs === undefined ? {} : { createdMs: overrides.createdMs }),
       });
       const event = await verifiedFakeEvent(payments, body);
       return handleVerifiedEvent(runtime.db, payments, event, { requestId: `req-${randomUUID()}` });
@@ -533,6 +540,10 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
       }),
     ]);
     expect(await deliver("under_review")).toMatchObject({ outcome: "dispute_updated" });
+    // An older event delivered late never moves it back.
+    expect(await deliver("needs_response", { createdMs: Date.now() - 3_600_000 })).toMatchObject({
+      outcome: "dispute_stale",
+    });
     // A disputed amount that differs, a larger one, an unknown payment: nothing moves.
     expect(await deliver("won", { amount: 3_999 })).toMatchObject({
       outcome: "dispute_mismatch",
