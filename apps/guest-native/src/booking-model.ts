@@ -2,6 +2,7 @@ import {
   type AvailableTrip,
   BookerDetails,
   type CheckoutSession,
+  type FakePaymentControlResponse,
   type GuestParticipantWaiver,
   type PolicyOutcome,
   type PolicyTerms,
@@ -21,7 +22,7 @@ import {
   todayIn,
 } from "@tidegrid/design-system/format";
 import type { QuoteBody } from "./booking-api.ts";
-import type { Failure } from "./http.ts";
+import { type Failure, outcomeUnknown, type Result } from "./http.ts";
 
 /**
  * The booking journey's rules and words, apart from React. A port of the
@@ -335,6 +336,45 @@ const pollDelaysMs = [500, 1_000, 1_500, 2_000, 3_000, 5_000];
 export function pollDelay(attempt: number): number {
   return pollDelaysMs[Math.min(attempt, pollDelaysMs.length - 1)] ?? 5_000;
 }
+
+/**
+ * Where a test payment's event stands, as the screen knows it. The demo's fake
+ * provider never retries a delivery on its own: the only way a settled
+ * payment's event reaches the booking again is the guest sending the same
+ * settle, which redelivers the stored event and can't charge twice. Until the
+ * screen knows the event arrived, that path has to stay open, past the hold's
+ * end, and the checkout must not be canceled under it: a cancel would close
+ * the checkout with nothing left to deliver the event, so a settled payment
+ * would get neither a booking nor a refund.
+ *
+ * - `none`: no test payment sent for this checkout.
+ * - `delivered`: the provider's event reached the webhook.
+ * - `undelivered`: the payment settled, but the webhook answered with an error.
+ * - `unknown`: no readable answer, so the payment may have settled with its
+ *   event undelivered.
+ */
+export type PaymentDelivery = "none" | "delivered" | "undelivered" | "unknown";
+
+/** What one settle's answer says about the event, given what was known before it. */
+export function afterSettle(
+  before: PaymentDelivery,
+  r: Result<Pick<FakePaymentControlResponse, "delivery">>,
+): PaymentDelivery {
+  if (r.kind === "ok") {
+    return r.value.delivery !== null && r.value.delivery.status >= 500
+      ? "undelivered"
+      : "delivered";
+  }
+  // A lost answer may hide a settled payment whose delivery failed. It can't
+  // undo a delivery already made, nor confirm one that failed.
+  if (outcomeUnknown(r)) return before === "none" ? "unknown" : before;
+  // A definite refusal settled nothing new: what was known still holds.
+  return before;
+}
+
+/** The same settle must be sent again before anything else ends the checkout. */
+export const mustResend = (delivery: PaymentDelivery) =>
+  delivery === "undelivered" || delivery === "unknown";
 
 /** A checkout's short reference for support, from its id: "3BA66E4F". */
 export function shortReference(sessionId: string): string {
