@@ -239,7 +239,13 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
     expect((await request("POST", own.settlements, { as: A.owner, body: payment })).status).toBe(
       400,
     );
-    for (const bad of [{ reason: "two\nlines" }, { amount: 0 }, { tender: "card" }]) {
+    for (const bad of [
+      { reason: "two\nlines" },
+      { reason: "   " },
+      { tenderReference: " " },
+      { amount: 0 },
+      { tender: "card" },
+    ]) {
       const res = await request("POST", own.settlements, {
         as: A.owner,
         key: `k-${randomUUID()}`,
@@ -352,6 +358,7 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
       (await request("GET", `${own.report}?month=${month?.m}`, { as: B.bookingStaff })).status,
     ).toBe(403);
     expect((await request("GET", `${own.report}?month=2026-13`, { as: B.owner })).status).toBe(400);
+    expect((await request("GET", `${own.report}?month=0000-01`, { as: B.owner })).status).toBe(400);
     expect((await request("GET", own.report, { as: B.owner })).status).toBe(400);
 
     await admin`

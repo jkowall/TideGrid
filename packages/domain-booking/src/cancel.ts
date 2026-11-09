@@ -94,6 +94,9 @@ interface TermsRow {
   after_cutoff_remedy: PolicyRemedy;
   after_cutoff_refund_bp: number | null;
   cancellation_text: string;
+  order_total: number;
+  /** Refunds staff recorded outside the card flow (W3-G2.10). */
+  external_refunded: number;
 }
 
 /** Half up to the cent, as the database computes it. */
@@ -112,7 +115,11 @@ function termsOf(bookingId: string, row: TermsRow): CancellationTerms {
         ? "trip_departed"
         : remedy === "credit"
           ? "remedy_requires_operator"
-          : null;
+          : // Money already went back outside the card flow (W3-G2.10), so
+            // the policy's refund would count it twice: the operator decides.
+            bp > 0 && row.external_refunded > 0
+            ? "remedy_requires_operator"
+            : null;
   return {
     bookingId,
     reference: row.reference,
@@ -147,7 +154,11 @@ async function termsRow(
            now() >= t.starts_at as departed,
            now() as as_of,
            v.before_cutoff_remedy, v.before_cutoff_refund_bp,
-           v.after_cutoff_remedy, v.after_cutoff_refund_bp, v.cancellation_text
+           v.after_cutoff_remedy, v.after_cutoff_refund_bp, v.cancellation_text,
+           o.total_amount as order_total,
+           coalesce((select sum(x.amount) from external_settlements x
+                      where x.tenant_id = b.tenant_id and x.booking_id = b.id
+                        and x.kind = 'refund'), 0)::int as external_refunded
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
@@ -509,6 +520,15 @@ export async function staffCancelBooking(
   }
   if (refundFor(terms.paidAmount, applied.refundBp) !== input.expectedAmount) {
     return { kind: "terms_changed", terms };
+  }
+  // Card and external refunds together return at most what the booking cost
+  // (W3-G2.10); the database checks the same bound.
+  const cardRefund = applied.remedy === "credit" ? 0 : input.expectedAmount;
+  if (cardRefund > 0 && cardRefund + row.external_refunded > row.order_total) {
+    return {
+      kind: "override_invalid",
+      message: `External refunds of ${row.external_refunded} cents were recorded; a card refund may return at most ${Math.max(0, row.order_total - row.external_refunded)} cents. Choose credit, a smaller refund with a reason, or no refund`,
+    };
   }
   const cancellation = await applyCancellation(
     trx,

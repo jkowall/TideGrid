@@ -14853,7 +14853,7 @@
                                 "remedy_requires_operator",
                                 null
                               ],
-                              "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues"
+                              "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues, or the operator already refunded money outside the card flow and decides the rest"
                             },
                             "remedy": {
                               "type": "string",
@@ -15498,7 +15498,7 @@
                             "remedy_requires_operator",
                             null
                           ],
-                          "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues"
+                          "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues, or the operator already refunded money outside the card flow and decides the rest"
                         },
                         "remedy": {
                           "type": "string",
@@ -16370,7 +16370,7 @@
                                 "remedy_requires_operator",
                                 null
                               ],
-                              "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues"
+                              "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues, or the operator already refunded money outside the card flow and decides the rest"
                             },
                             "remedy": {
                               "type": "string",
@@ -27462,7 +27462,7 @@
                                 "remedy_requires_operator",
                                 null
                               ],
-                              "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues"
+                              "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues, or the operator already refunded money outside the card flow and decides the rest"
                             },
                             "remedy": {
                               "type": "string",
@@ -30359,7 +30359,7 @@
           {
             "schema": {
               "type": "string",
-              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "pattern": "^2\\d{3}-(0[1-9]|1[0-2])$",
               "description": "YYYY-MM, in the billing plan's time zone (UTC without one)"
             },
             "required": true,

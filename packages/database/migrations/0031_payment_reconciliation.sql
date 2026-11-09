@@ -317,9 +317,13 @@ BEGIN
     INTO refunded
     FROM public.payment_refunds r
    WHERE r.tenant_id = NEW.tenant_id AND r.payment_id = b.payment_id;
+  -- A lost dispute took its amount back from the card payment.
   SELECT (SELECT CASE WHEN p.state = 'succeeded' THEN p.amount ELSE 0 END
             FROM public.payments p
            WHERE p.tenant_id = NEW.tenant_id AND p.id = b.payment_id)
+         - (SELECT coalesce(sum(d.amount), 0) FROM public.payment_disputes d
+             WHERE d.tenant_id = NEW.tenant_id AND d.payment_id = b.payment_id
+               AND d.status = 'lost')
          - refunded
          + coalesce(sum(s.amount) FILTER (WHERE s.kind = 'payment'), 0)
          - coalesce(sum(s.amount) FILTER (WHERE s.kind = 'refund'), 0),
@@ -397,6 +401,50 @@ END;
 $$;
 CREATE TRIGGER fee_assessments_rules BEFORE INSERT ON public.fee_assessments
   FOR EACH ROW EXECUTE FUNCTION app.check_fee_assessment();
+
+-- A card refund for a canceled booking, with the external refunds already
+-- recorded against it, returns at most what the booking cost. The 0029 rules
+-- check a card refund against the card payment only; this runs beside them,
+-- under the same payment lock the external refund takes.
+CREATE FUNCTION app.check_card_refund_with_external() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+DECLARE
+  total integer;
+  card bigint;
+  external bigint;
+  booking uuid;
+BEGIN
+  IF NEW.reason = 'unfulfilled_payment' THEN
+    RETURN NEW;
+  END IF;
+  PERFORM 1 FROM public.payments p
+    WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.payment_id
+      FOR NO KEY UPDATE;
+  SELECT b.id, o.total_amount INTO booking, total
+    FROM public.bookings b
+    JOIN public.orders o ON o.tenant_id = b.tenant_id AND o.id = b.order_id
+   WHERE b.tenant_id = NEW.tenant_id AND b.payment_id = NEW.payment_id;
+  IF NOT FOUND THEN
+    RETURN NEW;
+  END IF;
+  SELECT coalesce(sum(r.amount), 0) INTO card
+    FROM public.payment_refunds r
+   WHERE r.tenant_id = NEW.tenant_id AND r.payment_id = NEW.payment_id
+     AND r.state IN ('requested', 'pending', 'succeeded');
+  SELECT coalesce(sum(x.amount), 0) INTO external
+    FROM public.external_settlements x
+   WHERE x.tenant_id = NEW.tenant_id AND x.booking_id = booking AND x.kind = 'refund';
+  IF card + external + NEW.amount > total THEN
+    RAISE EXCEPTION 'refunds return at most what the booking cost, external refunds included'
+      USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_external_limit';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER payment_refunds_with_external BEFORE INSERT ON public.payment_refunds
+  FOR EACH ROW EXECUTE FUNCTION app.check_card_refund_with_external();
 
 -- 5. Billing plans and fee invoices ------------------------------------------------------
 
@@ -656,7 +704,9 @@ CREATE INDEX scheduled_trips_ends_at_idx ON public.scheduled_trips (ends_at) INC
 --   ago or more, not checked within the hour, created within 7 days;
 --   a booking closed within 35 days with no fee assessment;
 --   a billing plan whose next month has ended.
-CREATE FUNCTION app.reconciliation_tenants(p_limit integer)
+--   p_provider names the provider whose payments the caller can read; null
+--   leaves payments out, so a tenant is never listed for readings nobody makes.
+CREATE FUNCTION app.reconciliation_tenants(p_limit integer, p_provider text)
   RETURNS TABLE (tenant_id uuid)
   LANGUAGE sql STABLE SECURITY DEFINER
   SET search_path = pg_catalog, pg_temp
@@ -667,6 +717,7 @@ CREATE FUNCTION app.reconciliation_tenants(p_limit integer)
         JOIN public.checkout_sessions s
           ON s.tenant_id = p.tenant_id AND s.id = p.checkout_session_id
        WHERE p.state = 'pending' AND p.provider_payment_id IS NOT NULL
+         AND p.provider = p_provider
          AND p.created_at > pg_catalog.now() - interval '7 days'
          AND (p.checked_at IS NULL OR p.checked_at <= pg_catalog.now() - interval '1 hour')
          AND s.expires_at <= pg_catalog.now() - interval '1 hour'
@@ -741,6 +792,7 @@ GRANT UPDATE (status, last_event_id) ON public.payment_disputes TO tidegrid_app;
 
 REVOKE ALL ON FUNCTION app.check_payment_dispute() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_external_settlement() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_card_refund_with_external() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_fee_assessment() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_billing_plan() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_fee_invoice() FROM PUBLIC;
@@ -748,5 +800,5 @@ REVOKE ALL ON FUNCTION app.stamp_payment_check() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_payment_reconciliation_exception() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.fee_ledger_total(uuid, timestamptz, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.fee_ledger_total(uuid, timestamptz, timestamptz) TO tidegrid_app;
-REVOKE ALL ON FUNCTION app.reconciliation_tenants(integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app.reconciliation_tenants(integer) TO tidegrid_app;
+REVOKE ALL ON FUNCTION app.reconciliation_tenants(integer, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.reconciliation_tenants(integer, text) TO tidegrid_app;

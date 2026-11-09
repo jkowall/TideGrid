@@ -33,6 +33,7 @@ import {
   listExternalSettlements,
   listFeeInvoices,
   listPaymentReconciliationExceptions,
+  previewCancellation,
   previewStaffCancellation,
   reconciliationReport,
   recordExternalSettlement,
@@ -554,6 +555,12 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
     listed = await as(staffContext(B.id), (trx) => listDisputes(trx, B.id));
     expect(listed).toHaveLength(1);
     expect(listed[0]).toMatchObject({ status: "lost", open: false });
+    // The lost dispute took 4,000 back, so a refund outside the card flow may
+    // return at most what is left.
+    const left = await as(staffContext(B.id), (trx) =>
+      listExternalSettlements(trx, B.id, booked.bookingId),
+    );
+    expect(left?.refundable).toBe(Math.min(paid.amount - 4_000, paid.total));
     expect(listed[0]?.closedAt).not.toBeNull();
     // Another tenant sees none of it.
     expect(await as(staffContext(A.id), (trx) => listDisputes(trx, A.id))).toEqual([]);
@@ -747,6 +754,53 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
     // Another tenant's month is empty.
     const other = await as(staffContext(A.id), (trx) => reconciliationReport(trx, A.id, "2000-01"));
     expect(other).toMatchObject({ rows: [], ledgerFeeTotal: 0, controlTotalsMatch: true });
+  });
+
+  it("never lets a card refund stack on an external refund past the booking's total", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 2);
+    const paid = await paymentOf(booked.bookingId);
+    const staff = staffContext(A.id);
+    const before = await as(staff, (trx) => previewStaffCancellation(trx, A.id, booked.bookingId));
+    const policyRefund = before?.refund?.amount ?? 0;
+    expect(policyRefund).toBeGreaterThan(0);
+    // Enough cash back that the policy's card refund would pass the total by a cent.
+    const cash = paid.total - policyRefund + 1;
+    const recorded = await as(staff, (trx, c) =>
+      recordExternalSettlement(trx, c, {
+        bookingId: booked.bookingId,
+        kind: "refund",
+        tender: "cash",
+        amount: cash,
+        reason: "Refunded at the dock",
+        idempotencyKey: `external:${randomUUID()}`,
+      }),
+    );
+    expect(recorded.kind).toBe("recorded");
+    // The guest may no longer cancel for the policy's refund: the operator decides.
+    const guest = await as(guestContext(A.id), (trx) =>
+      previewCancellation(trx, A.id, booked.bookingId),
+    );
+    expect(guest).toMatchObject({ cancelable: false, refusal: "remedy_requires_operator" });
+    // Staff taking the policy's refund are refused; no refund, with a reason, is fine.
+    const policy = await as(staff, (trx, c) =>
+      staffCancelBooking(trx, c, {
+        bookingId: booked.bookingId,
+        choice: { kind: "policy", remedy: before?.terms.remedy ?? "full_refund" },
+        expectedAmount: policyRefund,
+      }),
+    );
+    expect(policy).toMatchObject({ kind: "override_invalid" });
+    const none = await as(staff, (trx, c) =>
+      staffCancelBooking(trx, c, {
+        bookingId: booked.bookingId,
+        choice: { kind: "override", remedy: "none", refundBp: 0, reason: "Refunded in cash" },
+        expectedAmount: 0,
+      }),
+    );
+    expect(none.kind).toBe("canceled");
+    const refunds = await admin`
+      select 1 from public.payment_refunds where payment_id = ${paid.id}`;
+    expect(refunds).toHaveLength(0);
   });
 
   it("runs the sweep: assesses, drafts invoices, and reads due payments, in fair turns", async () => {

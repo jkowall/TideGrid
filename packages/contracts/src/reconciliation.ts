@@ -29,12 +29,14 @@ export const ExternalSettlementRequest = z.object({
   amount: Cents.min(1).max(100_000_000),
   reason: z
     .string()
+    .trim()
     .min(1)
     .max(500)
     .regex(noControl, "Control characters are not allowed")
     .describe("Why; kept on the record and in the audit history"),
   tenderReference: z
     .string()
+    .trim()
     .min(1)
     .max(100)
     .regex(noControl, "Control characters are not allowed")
@@ -132,7 +134,7 @@ export type PaymentReconciliationExceptionsResponse = z.infer<
 export const ReconciliationQuery = z.object({
   month: z
     .string()
-    .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+    .regex(/^2\d{3}-(0[1-9]|1[0-2])$/)
     .describe("YYYY-MM, in the billing plan's time zone (UTC without one)"),
 });
 export type ReconciliationQuery = z.infer<typeof ReconciliationQuery>;

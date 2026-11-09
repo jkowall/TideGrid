@@ -303,12 +303,15 @@ async function settlementByKey(trx: TenantTransaction, tenantId: string, key: st
   return rows[0];
 }
 
-/** What a refund may still return: the lower of the money in and what the booking cost, less refunds. */
+/**
+ * What a refund may still return: the lower of the money in (less any lost
+ * dispute) and what the booking cost, less refunds.
+ */
 async function refundable(trx: TenantTransaction, tenantId: string, bookingId: string) {
   const { rows } = await sql<{ refundable: number }>`
     select greatest(0, least(
              coalesce(case when p.state = 'succeeded' then p.amount end, 0) - coalesce(r.refunded, 0)
-               + coalesce(s.paid, 0) - coalesce(s.refunded, 0),
+               - coalesce(d.lost, 0) + coalesce(s.paid, 0) - coalesce(s.refunded, 0),
              o.total_amount - coalesce(r.refunded, 0) - coalesce(s.refunded, 0)))::int as refundable
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
@@ -317,6 +320,11 @@ async function refundable(trx: TenantTransaction, tenantId: string, bookingId: s
         select sum(x.amount) as refunded from payment_refunds x
          where x.tenant_id = b.tenant_id and x.payment_id = b.payment_id
            and x.state in ('requested', 'pending', 'succeeded')) r on true
+      left join lateral (
+        -- A lost dispute took its amount back from the card payment.
+        select sum(x.amount) as lost from payment_disputes x
+         where x.tenant_id = b.tenant_id and x.payment_id = b.payment_id
+           and x.status = 'lost') d on true
       left join lateral (
         select sum(x.amount) filter (where x.kind = 'payment') as paid,
                sum(x.amount) filter (where x.kind = 'refund') as refunded
@@ -702,7 +710,12 @@ export async function checkPendingPayment(
   if (found?.state !== "pending" || found.provider_payment_id === null) {
     return { kind: "not_pending" };
   }
-  if (found.provider !== provider.name) return { kind: "unknown" };
+  if (found.provider !== provider.name) {
+    // Another provider's payment: this sweep cannot read it, so it is stamped
+    // and waits its hour instead of holding the tenant in every run's list.
+    await inTenantTransaction(db, ctx, (trx) => stampPaymentCheck(trx, ctx.tenantId, paymentId));
+    return { kind: "unknown" };
+  }
   let reading: Awaited<ReturnType<PaymentProvider["retrievePayment"]>>;
   try {
     reading = await provider.retrievePayment({
@@ -764,6 +777,7 @@ async function stampPaymentCheck(trx: TenantTransaction, tenantId: string, payme
 async function paymentsDueCheck(
   trx: TenantTransaction,
   tenantId: string,
+  providerName: PaymentProviderName,
   limit: number,
   excluding: readonly string[],
 ): Promise<string[]> {
@@ -771,7 +785,7 @@ async function paymentsDueCheck(
     select p.id from payments p
       join checkout_sessions s on s.tenant_id = p.tenant_id and s.id = p.checkout_session_id
      where p.tenant_id = ${tenantId} and p.state = 'pending'
-       and p.provider_payment_id is not null
+       and p.provider = ${providerName} and p.provider_payment_id is not null
        and p.created_at > now() - make_interval(days => ${PAYMENT_CHECK_DAYS})
        and (p.checked_at is null or p.checked_at <= now() - interval '1 hour')
        and s.expires_at <= now() - interval '1 hour'
@@ -894,7 +908,8 @@ export async function reconciliationReport(
   tenantId: string,
   month: string,
 ): Promise<ReconciliationReport> {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new RangeError("month is YYYY-MM");
+  if (!/^2\d{3}-(0[1-9]|1[0-2])$/.test(month))
+    throw new RangeError("month is YYYY-MM, 2000 to 2999");
   const start = `${month}-01`;
   const { rows: zones } = await sql<{ time_zone: string }>`
     select coalesce((select time_zone::text from billing_plans where tenant_id = ${tenantId}),
@@ -1069,7 +1084,10 @@ export async function sweepReconciliation(
   const fair = await runFairSweep({
     listTenants: async () => {
       const { rows } = await sql<{ tenant_id: string }>`
-        select tenant_id from app.reconciliation_tenants(${tenantLimit})`.execute(db);
+        select tenant_id
+          from app.reconciliation_tenants(${tenantLimit}, ${options.provider?.name ?? null})`.execute(
+        db,
+      );
       return rows.map((r) => r.tenant_id);
     },
     tenantLimit,
@@ -1094,15 +1112,16 @@ export async function sweepReconciliation(
         units += 1;
         if (i === 11) more = true;
       }
-      if (options.provider) {
+      const provider = options.provider;
+      if (provider) {
         const seen = checked.get(tenantId) ?? new Set<string>();
         checked.set(tenantId, seen);
         const due = await inTenantTransaction(db, ctx, (trx) =>
-          paymentsDueCheck(trx, tenantId, batchSize + 1, [...seen]),
+          paymentsDueCheck(trx, tenantId, provider.name, batchSize + 1, [...seen]),
         );
         for (const paymentId of due.slice(0, batchSize)) {
           seen.add(paymentId);
-          const result = await checkPendingPayment(db, options.provider, ctx, paymentId);
+          const result = await checkPendingPayment(db, provider, ctx, paymentId);
           report.paymentsChecked += 1;
           if (result.kind === "raised") report.paymentsRaised += 1;
           units += 1;
