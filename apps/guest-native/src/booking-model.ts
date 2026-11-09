@@ -349,7 +349,8 @@ export function pollDelay(attempt: number): number {
  *
  * - `none`: no test payment sent for this checkout.
  * - `delivered`: the provider's event reached the webhook.
- * - `undelivered`: the payment settled, but the webhook answered with an error.
+ * - `undelivered`: the payment settled, but the webhook didn't accept its
+ *   event (a refusal, an error, or no delivery made), so it wasn't recorded.
  * - `unknown`: no readable answer, so the payment may have settled with its
  *   event undelivered.
  */
@@ -361,9 +362,9 @@ export function afterSettle(
   r: Result<Pick<FakePaymentControlResponse, "delivery">>,
 ): PaymentDelivery {
   if (r.kind === "ok") {
-    return r.value.delivery !== null && r.value.delivery.status >= 500
-      ? "undelivered"
-      : "delivered";
+    // Only the webhook's 2xx records the event: a 4xx refuses it before recording.
+    const status = r.value.delivery?.status;
+    return status !== undefined && status >= 200 && status < 300 ? "delivered" : "undelivered";
   }
   // A lost answer may hide a settled payment whose delivery failed. It can't
   // undo a delivery already made, nor confirm one that failed.

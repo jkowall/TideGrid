@@ -363,6 +363,16 @@ describe("a test payment's event", () => {
     expect(mustResend(afterSettle("none", network))).toBe(true);
   });
 
+  it("counts only a delivery the webhook accepted", () => {
+    // The webhook refuses a bad signature, source, or size before recording the event.
+    for (const status of [400, 403, 404, 413, 500, 503]) {
+      expect(afterSettle("none", settled(status))).toBe("undelivered");
+    }
+    // Null means the delivery was held back, so nothing was recorded either.
+    expect(afterSettle("none", { kind: "ok", value: { delivery: null } })).toBe("undelivered");
+    expect(afterSettle("undelivered", settled(200))).toBe("delivered");
+  });
+
   it("keeps a failed delivery owed through retries that settle nothing", () => {
     let d = afterSettle("none", settled(503));
     expect(d).toBe("undelivered");
@@ -382,7 +392,6 @@ describe("a test payment's event", () => {
   it("lets a definite refusal or a delivered event end the checkout as usual", () => {
     expect(afterSettle("none", refused(429, "rate_limited"))).toBe("none");
     expect(afterSettle("none", settled(200))).toBe("delivered");
-    expect(afterSettle("none", { kind: "ok", value: { delivery: null } })).toBe("delivered");
     // A lost answer to a later send can't undo a delivery already made.
     expect(afterSettle("delivered", network)).toBe("delivered");
     expect(mustResend("none")).toBe(false);
@@ -398,6 +407,15 @@ describe("a test payment's event", () => {
     const back = source.slice(source.indexOf("const back = "), source.indexOf("Alert.alert("));
     expect(back).toContain("if (mustResend(delivery.current))");
     expect(source).toContain("disabled={working || left <= 0 || resend}");
+    // An owed or unknown event frees the pay buttons at once, rather than waiting on a read.
+    const pay = source.slice(
+      source.indexOf("const pay = "),
+      source.indexOf("const resendFirst = "),
+    );
+    const owed = pay.indexOf("if (!definiteRefusal && mustResend(delivery.current))");
+    expect(owed).toBeGreaterThan(-1);
+    expect(owed).toBeLessThan(pay.indexOf("watch("));
+    expect(pay.slice(owed, pay.indexOf("return;", owed))).toContain("setWaiting(null)");
   });
 });
 

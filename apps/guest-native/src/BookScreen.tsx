@@ -389,6 +389,27 @@ export function BookScreen({
       if (!still()) return;
       // A lost answer keeps resending open past the hold's end, as a failed delivery does.
       setDelivery(afterSettle(delivery.current, r));
+      const definiteRefusal = r.kind === "refused" && !outcomeUnknown(r);
+      if (!definiteRefusal && mustResend(delivery.current)) {
+        // Settled with its event not recorded, or maybe: only the same settle can tell.
+        // Stop any read started when the hold ran out, and free the pay buttons.
+        polls.current += 1;
+        setWaiting(null);
+        setNotice(
+          r.kind === "network"
+            ? {
+                kind: "notice",
+                title: "We couldn't reach the booking service",
+                body: "Check your connection, then press the same button again. It can't charge twice.",
+              }
+            : {
+                kind: "notice",
+                title: "The test payment hasn't reached your booking yet",
+                body: "Press the same button again. It can't charge twice.",
+              },
+        );
+        return;
+      }
       if (r.kind === "network") {
         setNotice({
           kind: "notice",
@@ -415,18 +436,6 @@ export function BookScreen({
           kind: "notice",
           title: "We couldn't confirm the test payment",
           body: `${r.status === 429 ? "Wait a minute, then" : "Wait a moment, then"} press the same button again. It can't charge twice.`,
-        });
-        return;
-      }
-      if (delivery.current === "undelivered") {
-        // Settled, but its event didn't reach the booking: sending again redelivers it.
-        // Stop any read started when the hold ran out, and free the pay buttons.
-        polls.current += 1;
-        setWaiting(null);
-        setNotice({
-          kind: "notice",
-          title: "The test payment hasn't reached your booking yet",
-          body: "Press the same button again. It can't charge twice.",
         });
         return;
       }
