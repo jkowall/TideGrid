@@ -274,7 +274,9 @@ export function BookScreen({
     const mine = polls.current;
     const still = () => alive.current && epoch.current === step && polls.current === mine;
     setStalled(false);
-    setWaiting(label);
+    // While the payment's event is owed, reading never holds the pay buttons:
+    // only sending it again can move the checkout, and the hold's end may not have reached the server yet.
+    setWaiting(mustResend(delivery.current) ? null : label);
     void (async () => {
       let lateUntil: number | null = null;
       for (let i = 0; ; i++) {

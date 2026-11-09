@@ -416,6 +416,9 @@ describe("a test payment's event", () => {
     expect(owed).toBeGreaterThan(-1);
     expect(owed).toBeLessThan(pay.indexOf("watch("));
     expect(pay.slice(owed, pay.indexOf("return;", owed))).toContain("setWaiting(null)");
+    // A read started by the hold's end or by Check again leaves the pay buttons free while it is owed.
+    const watch = source.slice(source.indexOf("const watch = "), source.indexOf("const hold = "));
+    expect(watch).toContain("setWaiting(mustResend(delivery.current) ? null : label)");
   });
 });
 
