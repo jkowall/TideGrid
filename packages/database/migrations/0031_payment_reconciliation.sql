@@ -260,7 +260,8 @@ CREATE TABLE public.external_settlements (
   order_total integer CHECK (order_total BETWEEN 1 AND 100000000),
   eligible_total integer CHECK (eligible_total BETWEEN 0 AND 100000000),
   eligible_amount integer CHECK (eligible_amount BETWEEN 0 AND 100000000),
-  fee_bp integer CHECK (fee_bp BETWEEN 0 AND 10000),
+  -- TideGrid's Core fee, 1.5% (docs/v2/03); the only rate there is.
+  fee_bp integer CHECK (fee_bp = 150),
   -- Negative or zero: a refund lowers what TideGrid bills.
   fee_amount integer CHECK (fee_amount BETWEEN -100000000 AND 0),
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -399,7 +400,8 @@ CREATE TABLE public.fee_assessments (
   basis text NOT NULL CHECK (basis IN ('trip_completed', 'canceled')),
   order_total integer NOT NULL CHECK (order_total BETWEEN 0 AND 100000000),
   eligible_total integer NOT NULL CHECK (eligible_total BETWEEN 0 AND 100000000),
-  fee_bp integer NOT NULL CHECK (fee_bp BETWEEN 0 AND 10000),
+  -- TideGrid's Core fee, 1.5% (docs/v2/03); the only rate there is.
+  fee_bp integer NOT NULL CHECK (fee_bp = 150),
   fee_amount integer NOT NULL CHECK (fee_amount BETWEEN 0 AND 100000000),
   currency text NOT NULL DEFAULT 'USD' CHECK (currency = 'USD'),
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -444,7 +446,12 @@ CREATE TRIGGER fee_assessments_rules BEFORE INSERT ON public.fee_assessments
 
 -- A card refund for a canceled booking, with the external refunds already
 -- recorded against it, returns at most what the booking cost, and at most
--- what a lost dispute left on the card. The 0029 rules
+-- what a lost dispute left on the card, and at most the money still held.
+-- An unfulfilled payment's refund is exempt: 0029 requires the full amount,
+-- and it is requested in the transaction that records the success. Should a
+-- lost dispute already stand on it, the provider refuses to refund a
+-- disputed charge, so the refund fails and the finalization exception stays
+-- with staff, who see the dispute beside it. The 0029 rules
 -- check a card refund against the card payment only; this runs beside them,
 -- under the same payment lock the external refund takes.
 CREATE FUNCTION app.check_card_refund_with_external() RETURNS trigger
@@ -488,6 +495,19 @@ BEGIN
            WHERE d.tenant_id = NEW.tenant_id AND d.payment_id = NEW.payment_id
              AND d.status = 'lost') THEN
     RAISE EXCEPTION 'a card refund returns at most what a lost dispute left on the card'
+      USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_external_limit';
+  END IF;
+  -- And at most the money still held across card and external tender: what
+  -- came in, less lost disputes and every refund so far.
+  IF card + external + NEW.amount >
+       (SELECT CASE WHEN p.state = 'succeeded' THEN p.amount ELSE 0 END FROM public.payments p
+         WHERE p.tenant_id = NEW.tenant_id AND p.id = NEW.payment_id)
+       + (SELECT coalesce(sum(x.amount), 0) FROM public.external_settlements x
+           WHERE x.tenant_id = NEW.tenant_id AND x.booking_id = booking AND x.kind = 'payment')
+       - (SELECT coalesce(sum(d.amount), 0) FROM public.payment_disputes d
+           WHERE d.tenant_id = NEW.tenant_id AND d.payment_id = NEW.payment_id
+             AND d.status = 'lost') THEN
+    RAISE EXCEPTION 'a card refund returns at most the money still held'
       USING ERRCODE = '23514', CONSTRAINT = 'payment_refunds_external_limit';
   END IF;
   RETURN NEW;

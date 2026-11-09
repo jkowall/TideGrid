@@ -395,6 +395,15 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
     await expect(insert(open.bookingId, openPaid.total, openPaid.eligible)).rejects.toMatchObject({
       code: "23514",
     });
+    // The rate is TideGrid's Core fee, never another: a zero fee is refused.
+    await expect(
+      as(sys, (trx) =>
+        sql`insert into fee_assessments (tenant_id, booking_id, basis, order_total, eligible_total,
+              fee_bp, fee_amount)
+            values (${A.id}, ${ended.bookingId}, 'trip_completed', ${endedPaid.total},
+              ${endedPaid.eligible}, 0, 0)`.execute(trx),
+      ),
+    ).rejects.toMatchObject({ code: "23514", constraint_name: "fee_assessments_fee_bp_check" });
   });
 
   it("drafts each ended month's invoice from the ledgers, carries a negative balance, and trues up the year", async () => {
@@ -577,6 +586,31 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
       await as(guestContext(B.id), (trx) => previewCancellation(trx, B.id, booked.bookingId)),
     ).toMatchObject({ cancelable: false, refusal: "remedy_requires_operator" });
     expect(listed[0]?.closedAt).not.toBeNull();
+    // Cash back for everything the dispute left: no money is held now, so even
+    // a card refund within what the dispute left on the card is refused.
+    const rest = left?.refundable ?? 0;
+    expect(rest).toBeGreaterThan(0);
+    const cashBack = await as(staffContext(B.id), (trx, c) =>
+      recordExternalSettlement(trx, c, {
+        bookingId: booked.bookingId,
+        kind: "refund",
+        tender: "cash",
+        amount: rest,
+        reason: "Returned the rest in cash",
+        idempotencyKey: `external:${randomUUID()}`,
+      }),
+    );
+    expect(cashBack.kind).toBe("recorded");
+    const bp = 1000;
+    expect(Math.floor((paid.amount * bp + 5000) / 10000)).toBeLessThanOrEqual(paid.amount - 4_000);
+    const stacked = await as(staffContext(B.id), (trx, c) =>
+      staffCancelBooking(trx, c, {
+        bookingId: booked.bookingId,
+        choice: { kind: "override", remedy: "percent_refund", refundBp: bp, reason: "Goodwill" },
+        expectedAmount: Math.floor((paid.amount * bp + 5000) / 10000),
+      }),
+    );
+    expect(stacked).toMatchObject({ kind: "override_invalid" });
     // Another tenant sees none of it.
     expect(await as(staffContext(A.id), (trx) => listDisputes(trx, A.id))).toEqual([]);
 

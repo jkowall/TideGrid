@@ -104,6 +104,8 @@ interface TermsRow {
   external_refunded: number;
   /** What lost disputes took back from the card (W3-G2.10). */
   lost_disputed: number;
+  /** Payments staff recorded outside the card flow (W3-G2.10). */
+  external_paid: number;
 }
 
 /** Half up to the cent, as the database computes it. */
@@ -169,7 +171,10 @@ async function termsRow(
                         and x.kind = 'refund'), 0)::int as external_refunded,
            coalesce((select sum(d.amount) from payment_disputes d
                       where d.tenant_id = b.tenant_id and d.payment_id = b.payment_id
-                        and d.status = 'lost'), 0)::int as lost_disputed
+                        and d.status = 'lost'), 0)::int as lost_disputed,
+           coalesce((select sum(x.amount) from external_settlements x
+                      where x.tenant_id = b.tenant_id and x.booking_id = b.id
+                        and x.kind = 'payment'), 0)::int as external_paid
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
@@ -535,7 +540,13 @@ export async function staffCancelBooking(
   // Card and external refunds together return at most what the booking cost
   // (W3-G2.10); the database checks the same bound.
   const cardRefund = applied.remedy === "credit" ? 0 : input.expectedAmount;
-  const cardLimit = Math.min(row.order_total - row.external_refunded, row.paid - row.lost_disputed);
+  // At most what the booking cost, at most what is left on the card, and at
+  // most the money still held across card and external tender together.
+  const cardLimit = Math.min(
+    row.order_total - row.external_refunded,
+    row.paid - row.lost_disputed,
+    row.paid + row.external_paid - row.lost_disputed - row.external_refunded,
+  );
   if (cardRefund > 0 && cardRefund > cardLimit) {
     return {
       kind: "override_invalid",

@@ -288,6 +288,18 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
     // Reading: payments.read roles; another tenant sees nothing.
     const after = await request("GET", own.settlements, { as: A.bookingStaff });
     expect(after.json.settlements.map((s: Json) => s.kind)).toEqual(["payment", "refund"]);
+    expect(after.json.settlements[1]).toMatchObject({
+      reason: "Short trip",
+      tenderReference: "CHK-77",
+    });
+    // Finance reads payments but not bookings: the free text may name the guest.
+    const masked = await request("GET", own.settlements, { as: A.finance });
+    expect(masked.json.settlements[1]).toMatchObject({
+      amount: 900,
+      reason: null,
+      tenderReference: null,
+    });
+    expect(JSON.stringify(masked.json)).not.toContain("Short trip");
     expect((await request("GET", own.settlements, { as: B.owner })).status).toBe(404);
   });
 

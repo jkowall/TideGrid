@@ -29178,7 +29178,7 @@
           "bookings"
         ],
         "summary": "Money recorded outside the card flow for this booking",
-        "description": "Every role that reads payments (payments.read). Cash, check, and other tender recorded against the booking, oldest first, and what a refund may still return.",
+        "description": "Every role that reads payments (payments.read). Cash, check, and other tender recorded against the booking, oldest first, and what a refund may still return. The reason and tender reference are shown only to roles that read bookings.",
         "security": [
           {
             "accessJwt": []
@@ -29244,13 +29244,18 @@
                             "description": "Integer US cents"
                           },
                           "reason": {
-                            "type": "string"
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "Why it was recorded. Null for a role that does not read bookings (masked support): free text may name the guest"
                           },
                           "tenderReference": {
                             "type": [
                               "string",
                               "null"
-                            ]
+                            ],
+                            "description": "A check or receipt number. Null when there is none, and for a role that does not read bookings"
                           },
                           "eligibleAmount": {
                             "type": [
@@ -29545,13 +29550,18 @@
                           "description": "Integer US cents"
                         },
                         "reason": {
-                          "type": "string"
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "Why it was recorded. Null for a role that does not read bookings (masked support): free text may name the guest"
                         },
                         "tenderReference": {
                           "type": [
                             "string",
                             "null"
-                          ]
+                          ],
+                          "description": "A check or receipt number. Null when there is none, and for a role that does not read bookings"
                         },
                         "eligibleAmount": {
                           "type": [

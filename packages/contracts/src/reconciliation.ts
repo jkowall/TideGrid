@@ -50,8 +50,18 @@ export const ExternalSettlement = z.object({
   kind: z.enum(["payment", "refund"]),
   tender: z.enum(["cash", "check", "other"]),
   amount: Cents,
-  reason: z.string(),
-  tenderReference: z.string().nullable(),
+  reason: z
+    .string()
+    .nullable()
+    .describe(
+      "Why it was recorded. Null for a role that does not read bookings (masked support): free text may name the guest",
+    ),
+  tenderReference: z
+    .string()
+    .nullable()
+    .describe(
+      "A check or receipt number. Null when there is none, and for a role that does not read bookings",
+    ),
   eligibleAmount: Cents.nullable().describe(
     "For a refund: the eligible booking value it returned, which leaves TideGrid's fee base",
   ),

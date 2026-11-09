@@ -21,9 +21,10 @@ import {
   reconciliationReport,
   recordExternalSettlement,
 } from "@tidegrid/domain-booking";
+import { can } from "@tidegrid/domain-identity";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
-import { withStaffTenant } from "../staff-tenant.ts";
+import { type StaffTenantContext, withStaffTenant } from "../staff-tenant.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const settlementsPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/external-settlements";
@@ -36,6 +37,18 @@ const notFound = () => new ApiError(404, "booking_not_found", "No such booking f
 
 /** JSON-safe copy: the domain's views hold only strings, numbers, booleans, and nulls. */
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+/**
+ * A settlement's reason and tender reference are free text that may name the
+ * guest, so only a role that reads bookings sees them; masked support does not.
+ */
+const shown = <T extends { reason: string | null; tenderReference: string | null }>(
+  ctx: StaffTenantContext,
+  settlement: T,
+): T =>
+  can(ctx.access.role, "bookings.read")
+    ? settlement
+    : { ...settlement, reason: null, tenderReference: null };
 
 /**
  * External payment and reconciliation (W3-G2.10). Another tenant's booking,
@@ -63,7 +76,7 @@ export function registerReconciliationStaffRoutes(app: OpenAPIHono<AppEnv>, deps
     tags: ["staff", "bookings"],
     summary: "Money recorded outside the card flow for this booking",
     description:
-      "Every role that reads payments (payments.read). Cash, check, and other tender recorded against the booking, oldest first, and what a refund may still return.",
+      "Every role that reads payments (payments.read). Cash, check, and other tender recorded against the booking, oldest first, and what a refund may still return. The reason and tender reference are shown only to roles that read bookings.",
     security: staffSecurity,
     request: { params: BookingParams },
     responses: {
@@ -83,11 +96,14 @@ export function registerReconciliationStaffRoutes(app: OpenAPIHono<AppEnv>, deps
       c,
       deps,
       { tenantId, permission: "payments.read", snapshot: true },
-      async (trx) => {
+      async (trx, ctx) => {
         if (!isUuid(bookingId)) throw notFound();
         const listed = await listExternalSettlements(trx, tenantId, bookingId);
         if (!listed) throw notFound();
-        return plain(listed);
+        return plain({
+          ...listed,
+          settlements: listed.settlements.map((settlement) => shown(ctx, settlement)),
+        });
       },
     );
     return c.json(body as ExternalSettlementsResponse, 200);
@@ -170,7 +186,10 @@ export function registerReconciliationStaffRoutes(app: OpenAPIHono<AppEnv>, deps
           );
         }
         const listed = await listExternalSettlements(trx, tenantId, bookingId);
-        return plain({ settlement: recorded.settlement, refundable: listed?.refundable ?? 0 });
+        return plain({
+          settlement: shown(ctx, recorded.settlement),
+          refundable: listed?.refundable ?? 0,
+        });
       },
     );
     if (replayed) c.header("Idempotent-Replayed", "true");
