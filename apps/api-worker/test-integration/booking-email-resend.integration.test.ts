@@ -181,7 +181,8 @@ describe.skipIf(!env)("staff resend of a booking's email: the API (G2.16b)", () 
 
   async function messageCount(bookingId: string) {
     const [row] = await admin<{ n: number }[]>`
-      select count(*)::int as n from public.email_messages where booking_id = ${bookingId}`;
+      select count(*)::int as n from public.email_messages
+       where booking_id = ${bookingId} and template <> 'booking_reminder'`;
     return row?.n ?? 0;
   }
 
@@ -270,11 +271,15 @@ describe.skipIf(!env)("staff resend of a booking's email: the API (G2.16b)", () 
     expect(await auditCount(b.bookingId)).toBe(1);
 
     const after = await request("GET", own.messages, { as: A.bookingStaff });
-    expect(after.json.messages.map((m: Json) => [m.id, m.staffResend])).toEqual([
-      [expect.any(String), false],
-      [sent.json.message.id, true],
+    // The trip reminder (W3-G2.16-rest), when the trip is far enough out for
+    // one, waits for its day; it is not part of the resend's story.
+    const listed = after.json.messages.filter((m: Json) => m.template !== "booking_reminder");
+    expect(listed.map((m: Json) => [m.template, m.staffResend])).toEqual([
+      ["booking_confirmation", false],
+      ["booking_confirmation", true],
     ]);
-    const lifted = new Date(Date.parse(after.json.messages[1].createdAt) + 10 * 60_000);
+    expect(listed[1].id).toBe(sent.json.message.id);
+    const lifted = new Date(Date.parse(listed[1].createdAt) + 10 * 60_000);
     expect(after.json.resend).toEqual({
       kind: "confirmation",
       allowed: false,

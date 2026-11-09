@@ -241,7 +241,13 @@ describe.skipIf(!env)("adversarial: staff reads of participants and email delive
       const mailbox = await get(own.messages, who);
       expect(mailbox.status, who).toBe(200);
       expect(mailbox.headers.get("cache-control")).toBe("no-store");
-      expect(mailbox.json.messages).toHaveLength(1);
+      // The confirmation, then, for a trip far enough out, the trip reminder
+      // waiting for its day (W3-G2.16-rest).
+      const [first, ...rest] = mailbox.json.messages as Json[];
+      expect([first?.template, first?.state]).toEqual(["booking_confirmation", "sent"]);
+      expect(rest.map((m) => [m.template, m.state])).toEqual(
+        rest.length === 0 ? [] : [["booking_reminder", "queued"]],
+      );
       for (const m of mailbox.json.messages as Json[]) {
         expect(Object.keys(m).sort()).toEqual(STATUS_KEYS);
       }

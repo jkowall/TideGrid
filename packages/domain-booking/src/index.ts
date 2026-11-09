@@ -112,9 +112,11 @@ export {
   enqueueCancellationEmail,
   enqueueConfirmationEmail,
   enqueueManageLinkEmail,
+  enqueueReminderEmail,
   MANAGE_LINK_TEMPLATE,
   MANAGE_LINK_TTL_SECONDS,
   MANAGE_PATH,
+  REMINDER_TEMPLATE,
 } from "./emails.ts";
 // Finalization exception resolution (W1-FIN-EXC).
 export {

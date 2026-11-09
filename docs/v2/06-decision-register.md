@@ -30,6 +30,20 @@ Coordinator defaults, pending owner confirmation:
 - **D5: the check schedule.** Hourly, for 7 days after the payment was created; fee assessment looks back 35 days, so a missed run catches up.
 - **D6: disputes are shown, nothing more.** A lost dispute does not yet reverse TideGrid's fee; that is a known gap for the owner to decide with the billing tool.
 
+### 2026-11-08: W3-G2.16-rest, trip reminders a day before departure, code only (synthetic pull-forward; coordinator defaults pending owner confirmation)
+
+The second pull request of W3-G2.16-rest, under the same owner card as the [first](#2026-11-08-w3-g216-rest-per-operator-sender-domains-and-suppression-code-only-synthetic-pull-forward-coordinator-defaults-pending-owner-confirmation). Waiver reminders were already built (W1-G215-REMINDERS); this adds the booking's own reminder. No migration, no deploy, no send beyond the recipient allowlist.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D7, one trip reminder per booking, 24 hours before departure.** Written with the confirmation and sent by the existing delivery job when due, with a fresh management link. A booking made within two days of departure gets none, since its confirmation is recent enough.
+- **D8, never late.** The delivery job checks again when it picks the reminder up: a canceled booking or trip, or a trip leaving within 2 hours (the waiver reminders' cutoff), cancels it unsent (`reminder_too_late`). Canceling a booking cancels its waiting reminder at once, and a reminder is never picked up while a cancellation is in progress.
+- **D9, staff see it.** The booking's Email card lists it as "Trip reminder", "Scheduled" until it is due. Staff cannot turn reminders off per operator yet (proposed follow-up, with operator-set timing).
+
+Independent and security review (R9): no critical or high finding. Fixed: a lapsed reminder attempt near departure now ends as `outcome_unknown` rather than canceled, and revokes no link (M1); the claim waits for a cancellation in progress (L1); the email no longer says earlier links stopped working (L2); no reminder for a booking made within two days (L3); tests for the boundary and the lapsed attempt (L4). Recorded: tests outside the reminder suite ignore the reminder (L5).
+
+Canonical: the [messaging README](../../packages/domain-messaging/README.md#trip-reminders-w3-g216-rest).
+
 ### 2026-11-08: W1-WAIVER-RENEWAL, guest link renewal, a staff reset of the five sends, and a shared-address flag (coordinator defaults pending owner confirmation)
 
 The third of the three waiver goals the owner pulled into the demo on 2026-11-08, under the [W1-G215-SIGNING entry](#2026-11-08-w1-g215-signing-staff-assisted-and-qr-waiver-signing-owner-pull-forward-coordinator-defaults-pending-owner-confirmation), where the owner wrote: "Anyways, I just want all the work to be done for the next waves." The owner did not answer the three open choices, so the coordinator's recommended defaults apply until the owner confirms them:

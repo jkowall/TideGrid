@@ -74,7 +74,7 @@ describe("a booking's email (G2.16b)", () => {
               attempts: 0,
               sentAt: null,
               lastAttemptAt: null,
-              nextAttemptAt: "2026-11-04T15:05:00.000Z",
+              nextAttemptAt: "2026-11-02T16:59:00.000Z",
             }),
           ],
         }),

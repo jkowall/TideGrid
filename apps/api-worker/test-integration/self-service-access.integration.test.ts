@@ -151,7 +151,8 @@ describe.skipIf(!env)("adversarial: guest booking access through the API", () =>
   async function messages(bookingId: string) {
     return admin<{ id: string; template: string; state: string; to_email: string }[]>`
       select id, template, state, to_email from public.email_messages
-       where booking_id = ${bookingId} order by created_at, id`;
+       where booking_id = ${bookingId} and template <> 'booking_reminder'
+       order by created_at, id`;
   }
 
   /** A confirmed booking, its confirmation delivered, and the link it carries. */
