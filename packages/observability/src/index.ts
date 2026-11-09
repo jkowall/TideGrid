@@ -140,6 +140,18 @@ export interface RequestAttributes {
   "tidegrid.waiver_reminder_sweep.pass_count"?: number;
   "tidegrid.waiver_reminder_sweep.deferred_tenant_count"?: number;
   "tidegrid.waiver_reminder_sweep.stamp_failure_count"?: number;
+  /** Reconciliation sweep (W3-G2.10). Counts only. */
+  "tidegrid.reconciliation_sweep.tenant_count"?: number;
+  "tidegrid.reconciliation_sweep.assessed_count"?: number;
+  "tidegrid.reconciliation_sweep.invoiced_count"?: number;
+  "tidegrid.reconciliation_sweep.payments_checked_count"?: number;
+  "tidegrid.reconciliation_sweep.payments_raised_count"?: number;
+  "tidegrid.reconciliation_sweep.failed_tenant_count"?: number;
+  "tidegrid.reconciliation_sweep.complete"?: boolean;
+  "tidegrid.reconciliation_sweep.turn_count"?: number;
+  "tidegrid.reconciliation_sweep.pass_count"?: number;
+  "tidegrid.reconciliation_sweep.deferred_tenant_count"?: number;
+  "tidegrid.reconciliation_sweep.stamp_failure_count"?: number;
 }
 
 const allowedKeys = new Set<keyof RequestAttributes>([
@@ -268,6 +280,18 @@ const allowedKeys = new Set<keyof RequestAttributes>([
   "tidegrid.waiver_reminder_sweep.pass_count",
   "tidegrid.waiver_reminder_sweep.deferred_tenant_count",
   "tidegrid.waiver_reminder_sweep.stamp_failure_count",
+  // Reconciliation sweep (W3-G2.10).
+  "tidegrid.reconciliation_sweep.tenant_count",
+  "tidegrid.reconciliation_sweep.assessed_count",
+  "tidegrid.reconciliation_sweep.invoiced_count",
+  "tidegrid.reconciliation_sweep.payments_checked_count",
+  "tidegrid.reconciliation_sweep.payments_raised_count",
+  "tidegrid.reconciliation_sweep.failed_tenant_count",
+  "tidegrid.reconciliation_sweep.complete",
+  "tidegrid.reconciliation_sweep.turn_count",
+  "tidegrid.reconciliation_sweep.pass_count",
+  "tidegrid.reconciliation_sweep.deferred_tenant_count",
+  "tidegrid.reconciliation_sweep.stamp_failure_count",
 ]);
 
 const tokenLike = /^[A-Za-z0-9_-]{24,}$/;

@@ -82,9 +82,22 @@ export type CanceledPayment =
  * retry after a declined attempt (Stripe's `payment_intent.payment_failed`)
  * must not report that attempt as `payment.failed`. `refund.updated` reports
  * the status of a refund TideGrid created, which carries its idempotency key
- * (W3-G2.9). Every other event is `other`, recorded and ignored.
+ * (W3-G2.9). `dispute.updated` reports a dispute (a chargeback) on a payment
+ * TideGrid took (W3-G2.10). Every other event is `other`, recorded and ignored.
  */
-export type ProviderEventType = "payment.succeeded" | "payment.failed" | "refund.updated" | "other";
+export type ProviderEventType =
+  | "payment.succeeded"
+  | "payment.failed"
+  | "refund.updated"
+  | "dispute.updated"
+  | "other";
+
+/**
+ * A dispute's status, neutral across providers (W3-G2.10). `needs_response`
+ * and `under_review` are open; `won`, `lost`, and `closed` (an inquiry that
+ * ended without a chargeback) are final.
+ */
+export type ProviderDisputeStatus = "needs_response" | "under_review" | "won" | "lost" | "closed";
 
 declare const verified: unique symbol;
 
@@ -118,6 +131,17 @@ export interface VerifiedProviderEvent {
     readonly status: "pending" | "succeeded" | "failed";
     readonly key: string;
     readonly failureCode: string | null;
+  } | null;
+  /**
+   * Present for dispute events: the provider's dispute id, its neutral status,
+   * and its reason code. The payment is the disputed one, and its amount is
+   * the disputed amount. Never the provider's whole dispute object, which
+   * carries the cardholder's evidence.
+   */
+  readonly dispute: {
+    readonly ref: string;
+    readonly status: ProviderDisputeStatus;
+    readonly reason: string;
   } | null;
   /**
    * SHA-256, hex, of the raw body for the fake; for Stripe, a canonical
@@ -240,6 +264,7 @@ export function verifiedEvent(fields: ProviderEventFields): VerifiedProviderEven
   const at = fields.occurredAt === null ? null : timeOf(fields.occurredAt);
   const payment = fields.payment === null ? null : freeze({ ...fields.payment });
   const refund = fields.refund === null ? null : freeze({ ...fields.refund });
+  const dispute = fields.dispute === null ? null : freeze({ ...fields.dispute });
   const event = freeze({
     provider: fields.provider,
     eventId: fields.eventId,
@@ -251,6 +276,7 @@ export function verifiedEvent(fields: ProviderEventFields): VerifiedProviderEven
     },
     payment,
     refund,
+    dispute,
     payloadSha256: fields.payloadSha256,
   }) as VerifiedProviderEvent;
   mark(event);

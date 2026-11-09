@@ -29171,6 +29171,1702 @@
         }
       }
     },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/external-settlements": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Money recorded outside the card flow for this booking",
+        "description": "Every role that reads payments (payments.read). Cash, check, and other tender recorded against the booking, oldest first, and what a refund may still return.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The booking's external settlements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settlements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "payment",
+                              "refund"
+                            ]
+                          },
+                          "tender": {
+                            "type": "string",
+                            "enum": [
+                              "cash",
+                              "check",
+                              "other"
+                            ]
+                          },
+                          "amount": {
+                            "type": "integer",
+                            "description": "Integer US cents"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "tenderReference": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "eligibleAmount": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "For a refund: the eligible booking value it returned, which leaves TideGrid's fee base"
+                          },
+                          "feeAmount": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "For a refund: TideGrid's fee reversed, zero or negative"
+                          },
+                          "recordedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "recordedBy": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "description": "The staff member's user id"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind",
+                          "tender",
+                          "amount",
+                          "reason",
+                          "tenderReference",
+                          "eligibleAmount",
+                          "feeAmount",
+                          "recordedAt",
+                          "recordedBy"
+                        ]
+                      },
+                      "description": "Oldest first"
+                    },
+                    "refundable": {
+                      "type": "integer",
+                      "description": "What a refund may still return: the lower of the money in and what the booking cost, less refunds so far"
+                    }
+                  },
+                  "required": [
+                    "settlements",
+                    "refundable"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Record cash, check, or other tender against this booking",
+        "description": "A payment: owners and booking staff (payments.record). A refund: owners only (payments.refund_external). Recorded with a reason, kept with the record and in the audit history. Changes no card payment and moves no money: it records money that already changed hands.\n\nA refund returns at most the money that came in and at most what the booking cost, less refunds so far (409 external_refund_too_large), and reverses TideGrid's fee on its eligible share. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "payment",
+                      "refund"
+                    ],
+                    "description": "payment: money the guest paid outside the card flow. refund: money paid back outside it (owners only)"
+                  },
+                  "tender": {
+                    "type": "string",
+                    "enum": [
+                      "cash",
+                      "check",
+                      "other"
+                    ]
+                  },
+                  "amount": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000000,
+                    "description": "Integer US cents"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "Why; kept on the record and in the audit history"
+                  },
+                  "tenderReference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "A check or receipt number, when there is one"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "tender",
+                  "amount",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settlement": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "payment",
+                            "refund"
+                          ]
+                        },
+                        "tender": {
+                          "type": "string",
+                          "enum": [
+                            "cash",
+                            "check",
+                            "other"
+                          ]
+                        },
+                        "amount": {
+                          "type": "integer",
+                          "description": "Integer US cents"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "tenderReference": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "eligibleAmount": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "description": "For a refund: the eligible booking value it returned, which leaves TideGrid's fee base"
+                        },
+                        "feeAmount": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "description": "For a refund: TideGrid's fee reversed, zero or negative"
+                        },
+                        "recordedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "recordedBy": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "description": "The staff member's user id"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "tender",
+                        "amount",
+                        "reason",
+                        "tenderReference",
+                        "eligibleAmount",
+                        "feeAmount",
+                        "recordedAt",
+                        "recordedBy"
+                      ]
+                    },
+                    "refundable": {
+                      "type": "integer",
+                      "description": "Integer US cents"
+                    }
+                  },
+                  "required": [
+                    "settlement",
+                    "refundable"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The refund is larger than allowed (external_refund_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/disputes": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Card payments the cardholder disputed",
+        "description": "Every role that reads payments (payments.read). Disputes (chargebacks) the payment provider reported through its verified events, newest first, at most 100: status, amount, the network's reason code, the payment, and its booking. An open dispute needs the operator's answer in the provider's own dashboard; TideGrid shows it and changes nothing.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The disputes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "disputes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "needs_response",
+                              "under_review",
+                              "won",
+                              "lost",
+                              "closed"
+                            ],
+                            "description": "needs_response and under_review are open. won, lost, and closed (an inquiry that never became a chargeback) are final"
+                          },
+                          "open": {
+                            "type": "boolean"
+                          },
+                          "amount": {
+                            "type": "integer",
+                            "description": "The disputed amount"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "description": "The card network's reason code, as the provider reports it"
+                          },
+                          "openedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "closedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "payment": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "amount"
+                            ]
+                          },
+                          "booking": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "reference": {
+                                "type": "string",
+                                "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                                "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "reference"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "status",
+                          "open",
+                          "amount",
+                          "reason",
+                          "openedAt",
+                          "updatedAt",
+                          "closedAt",
+                          "payment",
+                          "booking"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "disputes"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/payment-reconciliation-exceptions": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Pending payments the provider disagrees about",
+        "description": "Every role that reads payments (payments.read). A payment still pending past its checkout's hold is looked up at the provider about once an hour for 7 days. When the provider says it was paid, will never be paid, does not exist, or has another amount, the reading is listed here once, newest first, at most 100. Nothing is changed by a reading: a booking confirms, and a payment fails, only from the provider's verified event.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The readings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exceptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "succeeded_without_event",
+                              "failed_without_event",
+                              "missing_at_provider",
+                              "amount_mismatch"
+                            ],
+                            "description": "What the payment provider said about a payment TideGrid still holds as pending, past its checkout's hold: it was paid, it will never be paid, it does not exist, or its amount differs. Nothing was changed: only the provider's verified event confirms or fails a payment"
+                          },
+                          "providerStatus": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "providerAmount": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "description": "Integer US cents"
+                          },
+                          "raisedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "open": {
+                            "type": "boolean",
+                            "description": "Still pending: no verified event has settled the payment"
+                          },
+                          "payment": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "checkedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "state",
+                              "amount",
+                              "checkedAt"
+                            ]
+                          },
+                          "checkoutSessionId": {
+                            "type": "string",
+                            "format": "uuid"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "reason",
+                          "providerStatus",
+                          "providerAmount",
+                          "raisedAt",
+                          "open",
+                          "payment",
+                          "checkoutSessionId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "exceptions"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/reconciliation": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "The month's reconciliation",
+        "description": "Owners, finance, and support (fees.read). Every booking with fee or external-money activity in the month: eligible value assessed when it closed, eligible value refunded, money recorded outside the card flow, and TideGrid's fee entries. Then the totals, the fee ledgers' own total as the control total, and whether they match.\n\nAlso the share of the closed bookings' value received by card or recorded externally, against the 98% target in the commercial model.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "description": "YYYY-MM, in the billing plan's time zone (UTC without one)"
+            },
+            "required": true,
+            "description": "YYYY-MM, in the billing plan's time zone (UTC without one)",
+            "name": "month",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The reconciliation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "month": {
+                      "type": "string"
+                    },
+                    "timeZone": {
+                      "type": "string"
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "bookingId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "reference": {
+                            "type": "string",
+                            "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                            "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "assessedValue": {
+                            "type": "integer",
+                            "description": "Eligible value of the bookings that closed this month"
+                          },
+                          "refundedValue": {
+                            "type": "integer",
+                            "description": "Eligible value refunded this month, by card or externally"
+                          },
+                          "externalPaid": {
+                            "type": "integer",
+                            "description": "Integer US cents"
+                          },
+                          "externalRefunded": {
+                            "type": "integer",
+                            "description": "Integer US cents"
+                          },
+                          "feeAmount": {
+                            "type": "integer",
+                            "description": "TideGrid's fee entries this month: assessments less reversals"
+                          }
+                        },
+                        "required": [
+                          "bookingId",
+                          "reference",
+                          "state",
+                          "assessedValue",
+                          "refundedValue",
+                          "externalPaid",
+                          "externalRefunded",
+                          "feeAmount"
+                        ]
+                      }
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "assessedValue": {
+                          "type": "integer",
+                          "description": "Eligible value of the bookings that closed this month"
+                        },
+                        "refundedValue": {
+                          "type": "integer",
+                          "description": "Eligible value refunded this month, by card or externally"
+                        },
+                        "externalPaid": {
+                          "type": "integer",
+                          "description": "Integer US cents"
+                        },
+                        "externalRefunded": {
+                          "type": "integer",
+                          "description": "Integer US cents"
+                        },
+                        "feeAmount": {
+                          "type": "integer",
+                          "description": "TideGrid's fee entries this month: assessments less reversals"
+                        },
+                        "netManagedValue": {
+                          "type": "integer",
+                          "description": "assessedValue less refundedValue"
+                        }
+                      },
+                      "required": [
+                        "assessedValue",
+                        "refundedValue",
+                        "externalPaid",
+                        "externalRefunded",
+                        "feeAmount",
+                        "netManagedValue"
+                      ]
+                    },
+                    "ledgerFeeTotal": {
+                      "type": "integer",
+                      "description": "The fee ledgers' own total for the month, summed apart"
+                    },
+                    "controlTotalsMatch": {
+                      "type": "boolean",
+                      "description": "The rows add up to the ledger"
+                    },
+                    "receivedShareBp": {
+                      "type": "integer",
+                      "description": "Of the bookings that closed this month, the share of their value received by card or recorded externally, in basis points"
+                    },
+                    "shortBookings": {
+                      "type": "integer",
+                      "description": "Closed bookings with less received than they cost"
+                    },
+                    "meetsTarget": {
+                      "type": "boolean",
+                      "description": "receivedShareBp is at least 9,800 (98%)"
+                    }
+                  },
+                  "required": [
+                    "month",
+                    "timeZone",
+                    "rows",
+                    "totals",
+                    "ledgerFeeTotal",
+                    "controlTotalsMatch",
+                    "receivedShareBp",
+                    "shortBookings",
+                    "meetsTarget"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/fee-invoices": {
+      "get": {
+        "tags": [
+          "staff"
+        ],
+        "summary": "TideGrid's fee invoices to this operator",
+        "description": "Owners, finance, and support (fees.read). One draft per billing month, newest first: the subscription, the month's variable fee from the fee ledgers, a negative balance carried forward against later variable fees only, and the annual-minimum true-up in the 12th month of each contract year. Drafts only: sending waits on TideGrid's billing tool.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The invoices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invoices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "month": {
+                            "type": "string",
+                            "description": "YYYY-MM, in the billing plan's time zone"
+                          },
+                          "contractMonth": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 12
+                          },
+                          "subscriptionAmount": {
+                            "type": "integer",
+                            "description": "Integer US cents"
+                          },
+                          "variableAmount": {
+                            "type": "integer",
+                            "description": "The month's fee ledger total; negative after large refunds"
+                          },
+                          "carriedIn": {
+                            "type": "integer",
+                            "description": "A negative balance from earlier months, zero or less"
+                          },
+                          "variableBilled": {
+                            "type": "integer",
+                            "description": "Integer US cents"
+                          },
+                          "carriedOut": {
+                            "type": "integer",
+                            "description": "Integer US cents"
+                          },
+                          "trueUpAmount": {
+                            "type": "integer",
+                            "description": "The annual minimum's shortfall, in the 12th contract month only"
+                          },
+                          "totalAmount": {
+                            "type": "integer",
+                            "description": "Integer US cents"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "draft"
+                            ],
+                            "description": "Not sent: sending waits on TideGrid's billing tool"
+                          },
+                          "issuedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "month",
+                          "contractMonth",
+                          "subscriptionAmount",
+                          "variableAmount",
+                          "carriedIn",
+                          "variableBilled",
+                          "carriedOut",
+                          "trueUpAmount",
+                          "totalAmount",
+                          "state",
+                          "issuedAt"
+                        ]
+                      },
+                      "description": "Newest month first"
+                    }
+                  },
+                  "required": [
+                    "invoices"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/staff/tenants/{tenantId}/members/{userId}/status": {
       "post": {
         "tags": [

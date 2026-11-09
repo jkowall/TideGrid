@@ -271,6 +271,7 @@ describe("Stripe event mapping", () => {
       occurredAt: new Date(Math.floor(nowMs / 1000) * 1000),
       payment: { ref, amount: 5000, currency: "USD", clientReference: reference },
       refund: null,
+      dispute: null,
       payloadSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(Object.isFrozen(event)).toBe(true);
@@ -394,6 +395,65 @@ describe("Stripe event mapping", () => {
       await fixture.event("refund.updated", { ...object, status: "mystery" }),
     );
     expect(odd).toEqual({ kind: "rejected", reason: "payload_invalid" });
+  });
+
+  it("maps a dispute on a payment intent to dispute.updated, with only its id, status, and reason code (W3-G2.10)", async () => {
+    const { fixture, verify, intent } = harness();
+    const { ref } = await intent();
+    fixture.succeed(ref);
+    const dispute = {
+      id: "dp_TestFixture0000000000002",
+      object: "dispute",
+      amount: 2500,
+      currency: "usd",
+      payment_intent: ref,
+      charge: "ch_TestFixture0000000000002",
+      reason: "fraudulent",
+      status: "needs_response",
+      evidence: { customer_name: "Synthetic Guest", uncategorized_text: "secret words" },
+    };
+    for (const [type, status, want] of [
+      ["charge.dispute.created", "warning_needs_response", "needs_response"],
+      ["charge.dispute.created", "needs_response", "needs_response"],
+      ["charge.dispute.updated", "warning_under_review", "under_review"],
+      ["charge.dispute.funds_withdrawn", "under_review", "under_review"],
+      ["charge.dispute.closed", "won", "won"],
+      ["charge.dispute.closed", "lost", "lost"],
+      ["charge.dispute.closed", "warning_closed", "closed"],
+      ["charge.dispute.closed", "prevented", "closed"],
+    ] as const) {
+      const event = accepted(await verify(await fixture.event(type, { ...dispute, status })));
+      expect(event, `${type} ${status}`).toMatchObject({
+        type: "dispute.updated",
+        providerType: type,
+        payment: { ref, amount: 2500, currency: "USD", clientReference: null },
+        refund: null,
+        dispute: { ref: dispute.id, status: want, reason: "fraudulent" },
+      });
+      expect(Object.keys(event.dispute ?? {}).sort()).toEqual(["reason", "ref", "status"]);
+      // The cardholder's evidence never travels with the event.
+      expect(JSON.stringify(event)).not.toContain("Synthetic Guest");
+    }
+    // An anomaly on a dispute that names a payment intent is refused, so
+    // Stripe retries and the webhook alarm fires.
+    for (const odd of [
+      { status: "mystery" },
+      { currency: "eur" },
+      { amount: 0 },
+      { id: "not_a_dispute" },
+      { payment_intent: "pi_" },
+    ]) {
+      const result = await verify(
+        await fixture.event("charge.dispute.updated", { ...dispute, ...odd }),
+      );
+      expect(result, JSON.stringify(odd)).toEqual({ kind: "rejected", reason: "payload_invalid" });
+    }
+    // Another dispute type, such as a funds change on an object that is not a
+    // dispute, is recorded as other.
+    const other = accepted(
+      await verify(await fixture.event("charge.dispute.updated", fixture.charge(ref))),
+    );
+    expect(other).toMatchObject({ type: "other", payment: null, dispute: null });
   });
 
   it("records an intent TideGrid did not make as other", async () => {

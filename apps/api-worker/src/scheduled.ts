@@ -1,5 +1,5 @@
 import { createDb, publishOutbox, runDeliveryCleanup } from "@tidegrid/database";
-import { sweepCheckouts } from "@tidegrid/domain-booking";
+import { sweepCheckouts, sweepReconciliation } from "@tidegrid/domain-booking";
 import {
   type CustomHostnameProvider,
   HostnameSweepFault,
@@ -27,14 +27,19 @@ function errorAttributes(error: unknown): Record<string, unknown> {
 
 /**
  * Scheduled work for the API Worker, run by the cron trigger in wrangler.jsonc.
- * Seven jobs, in order, on one connection:
+ * Eight jobs, in order, on one connection:
  *
  * 1. The hold sweep expires capacity holds whose instant has passed, across
  *    tenants, one tenant transaction at a time.
  * 2. The checkout sweep (G2.7) expires open checkouts past their instant,
  *    processes inbox events a failed request left received, and sends refunds
  *    whose outcome is unknown again with their idempotency keys, a canceled
- *    booking's refund included.
+ *    booking's refund included. Then the reconciliation sweep (W3-G2.10)
+ *    records TideGrid's fee on bookings that closed, drafts the fee invoice
+ *    of any billing month that ended, and reads the provider about pending
+ *    payments past their checkout's hold. A reading never changes a payment:
+ *    one that disagrees is listed for staff, and only the provider's
+ *    verified event confirms or fails a payment.
  * 3. The waiver reminder sweep (W1-G215-REMINDERS) queues the reminders
  *    unsigned waivers are due, before the email sweep sends them. Skipped
  *    when email is off. Then the email sweep (lane 1, the G2.16 shim) sends due messages, retries
@@ -150,6 +155,48 @@ export async function runScheduled(
       });
     } catch (error) {
       checkoutLog.error("checkout_sweep_failed", {
+        ...errorAttributes(error),
+        duration_ms: Date.now() - started,
+      });
+      throw error;
+    }
+
+    const reconciliationLog = createLogger(
+      { ...base, "event.name": "reconciliation_sweep" },
+      options.log,
+    );
+    started = Date.now();
+    try {
+      const report = await sweepReconciliation(handle.db, {
+        runId,
+        provider: paymentProvider(env, handle.db),
+        onTenantError: (tenantId, error) =>
+          reconciliationLog.error("reconciliation_sweep_tenant_failed", {
+            "tidegrid.tenant_id": tenantId,
+            ...errorAttributes(error),
+          }),
+        onStampError: (tenantId, error) =>
+          reconciliationLog.error("reconciliation_sweep_stamp_failed", {
+            "tidegrid.tenant_id": tenantId,
+            ...errorAttributes(error),
+          }),
+      });
+      reconciliationLog.info("reconciliation_sweep", {
+        "tidegrid.reconciliation_sweep.tenant_count": report.tenants,
+        "tidegrid.reconciliation_sweep.assessed_count": report.assessed,
+        "tidegrid.reconciliation_sweep.invoiced_count": report.invoiced,
+        "tidegrid.reconciliation_sweep.payments_checked_count": report.paymentsChecked,
+        "tidegrid.reconciliation_sweep.payments_raised_count": report.paymentsRaised,
+        "tidegrid.reconciliation_sweep.failed_tenant_count": report.failedTenants,
+        "tidegrid.reconciliation_sweep.turn_count": report.turns,
+        "tidegrid.reconciliation_sweep.pass_count": report.passes,
+        "tidegrid.reconciliation_sweep.deferred_tenant_count": report.deferredTenants,
+        "tidegrid.reconciliation_sweep.stamp_failure_count": report.stampFailures,
+        "tidegrid.reconciliation_sweep.complete": report.complete,
+        duration_ms: Date.now() - started,
+      });
+    } catch (error) {
+      reconciliationLog.error("reconciliation_sweep_failed", {
         ...errorAttributes(error),
         duration_ms: Date.now() - started,
       });

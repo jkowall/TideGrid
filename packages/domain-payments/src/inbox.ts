@@ -1,5 +1,6 @@
 import type {
   InboxProcessingState,
+  ProviderDisputeStatus,
   ProviderEventType,
   ProviderRefundStatus,
   TenantContext,
@@ -41,6 +42,12 @@ export interface InboxEvent {
     status: ProviderRefundStatus;
     key: string;
     failureCode: string | null;
+  } | null;
+  /** Present for dispute.updated events (W3-G2.10). */
+  dispute: {
+    ref: string;
+    status: ProviderDisputeStatus;
+    reason: string;
   } | null;
 }
 
@@ -92,11 +99,15 @@ interface InboxRow {
   refund_status: ProviderRefundStatus | null;
   refund_key: string | null;
   refund_failure_code: string | null;
+  dispute_ref: string | null;
+  dispute_status: ProviderDisputeStatus | null;
+  dispute_reason: string | null;
 }
 
 const inboxColumns = sql`id, provider, event_id, event_type, provider_type, account_ref,
   payment_ref, client_reference, amount, currency, payload_sha256, processing_state, outcome,
-  refund_ref, refund_status, refund_key, refund_failure_code`;
+  refund_ref, refund_status, refund_key, refund_failure_code,
+  dispute_ref, dispute_status, dispute_reason`;
 
 function toInboxEvent(row: InboxRow): InboxEvent {
   return {
@@ -122,6 +133,10 @@ function toInboxEvent(row: InboxRow): InboxEvent {
             failureCode: row.refund_failure_code,
           }
         : null,
+    dispute:
+      row.dispute_ref !== null && row.dispute_status !== null && row.dispute_reason !== null
+        ? { ref: row.dispute_ref, status: row.dispute_status, reason: row.dispute_reason }
+        : null,
   };
 }
 
@@ -141,17 +156,20 @@ export async function recordProviderEvent(
   if (!isVerifiedProviderEvent(event)) throw new UnverifiedProviderEventError();
   const payment = event.payment;
   const refund = event.refund;
+  const dispute = event.dispute;
   const { rows } = await sql<{ id: string }>`
     insert into provider_events (
       tenant_id, provider, event_id, event_type, provider_type, account_ref, payment_ref,
       client_reference, amount, currency, provider_created_at, payload_sha256,
-      refund_ref, refund_status, refund_key, refund_failure_code)
+      refund_ref, refund_status, refund_key, refund_failure_code,
+      dispute_ref, dispute_status, dispute_reason)
     values (
       ${ctx.tenantId}, ${event.provider}, ${event.eventId}, ${event.type}, ${event.providerType},
       ${event.accountRef}, ${payment?.ref ?? null}, ${payment?.clientReference ?? null},
       ${payment?.amount ?? null}, ${payment?.currency ?? null}, ${event.occurredAt},
       ${event.payloadSha256}, ${refund?.ref ?? null}, ${refund?.status ?? null},
-      ${refund?.key ?? null}, ${refund?.failureCode ?? null})
+      ${refund?.key ?? null}, ${refund?.failureCode ?? null}, ${dispute?.ref ?? null},
+      ${dispute?.status ?? null}, ${dispute?.reason ?? null})
     on conflict (provider, event_id) do nothing
     returning id`.execute(trx);
   const inserted = rows[0];

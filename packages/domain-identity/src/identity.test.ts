@@ -35,8 +35,14 @@ describe("role permissions", () => {
       "messages.resend",
       "exceptions.resolve",
       "bookings.cancel",
+      "payments.record",
     ]);
-    expect(permissionsFor("finance")).toEqual(["audit.read", "catalog.read", "payments.read"]);
+    expect(permissionsFor("finance")).toEqual([
+      "audit.read",
+      "catalog.read",
+      "payments.read",
+      "fees.read",
+    ]);
   });
 
   it("lets only owners and booking staff read and write a booking's notes, never finance", () => {
@@ -100,6 +106,15 @@ describe("role permissions", () => {
     expect(StaffRole.options.filter((r) => can(r, "credits.adjust"))).toEqual(["owner"]);
   });
 
+  it("lets owners and booking staff record external money, owners alone pay it back (W3-G2.10)", () => {
+    expect(StaffRole.options.filter((r) => can(r, "payments.record"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
+    expect(StaffRole.options.filter((r) => can(r, "payments.refund_external"))).toEqual(["owner"]);
+    expect(StaffRole.options.filter((r) => can(r, "fees.read"))).toEqual(["owner", "finance"]);
+  });
+
   it("keeps support access, export, and the deletion request with owners (W3-G2.2b)", () => {
     for (const permission of ["support.manage", "data.export", "account.manage"] as const) {
       expect(StaffRole.options.filter((r) => can(r, permission))).toEqual(["owner"]);
@@ -114,6 +129,7 @@ describe("role permissions", () => {
       "payments.read",
       "bookings.read",
       "members.read",
+      "fees.read",
     ]);
     for (const role of ["support_masked", "support_unmasked"] as const) {
       expect(permissionsFor(role).filter((p) => !p.endsWith(".read"))).toEqual([]);

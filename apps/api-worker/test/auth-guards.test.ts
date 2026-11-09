@@ -254,6 +254,12 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/export",
         "/v1/staff/tenants/{tenantId}/deletion-request",
         "/v1/staff/tenants/{tenantId}/deletion-request/withdraw",
+        // External payment and reconciliation (W3-G2.10).
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/external-settlements",
+        "/v1/staff/tenants/{tenantId}/disputes",
+        "/v1/staff/tenants/{tenantId}/payment-reconciliation-exceptions",
+        "/v1/staff/tenants/{tenantId}/reconciliation",
+        "/v1/staff/tenants/{tenantId}/fee-invoices",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are

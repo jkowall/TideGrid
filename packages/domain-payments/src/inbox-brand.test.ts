@@ -266,6 +266,7 @@ describe("the inbox's runtime brand", () => {
     expect(Object.keys(event).sort()).toEqual(
       [
         "accountRef",
+        "dispute",
         "eventId",
         "occurredAt",
         "payloadSha256",

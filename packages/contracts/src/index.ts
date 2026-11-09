@@ -197,6 +197,8 @@ export * from "./participants.ts";
 export * from "./pricing.ts";
 // Problem details for the guest commands (W1-GUEST-API).
 export * from "./problems.ts";
+// External payment and reconciliation (W3-G2.10).
+export * from "./reconciliation.ts";
 export * from "./references.ts";
 // Refunds, booking credit, and staff cancellation (W3-G2.9).
 export * from "./refunds-credits.ts";

@@ -52,6 +52,9 @@ const needsAttention = new Set([
   "refund_succeeded_after_failure",
   "refund_mismatch",
   "unmatched_refund",
+  // A chargeback the operator must answer, or one that names a payment wrongly (W3-G2.10).
+  "dispute_opened",
+  "dispute_mismatch",
 ]);
 /** Provider events are small; Stripe's largest are well under this. */
 export const MAX_WEBHOOK_BYTES = 64 * 1024;
