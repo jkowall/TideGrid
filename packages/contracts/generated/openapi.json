@@ -5052,8 +5052,7 @@
                         "addOns",
                         "fees",
                         "taxes",
-                        "policy",
-                        "deposit"
+                        "policy"
                       ],
                       "description": "What the operator sells for one bookable trip, under its current versions"
                     }
@@ -5627,7 +5626,7 @@
                             "balanceAmount",
                             "balanceDueAt"
                           ],
-                          "description": "Null when the booking pays in full at checkout"
+                          "description": "Null, or absent from an API older than W3-G2.8, when the booking pays in full at checkout"
                         },
                         "policy": {
                           "type": "object",
@@ -5790,7 +5789,6 @@
                         "taxes",
                         "promotion",
                         "totals",
-                        "deposit",
                         "policy",
                         "quotedAt",
                         "expiresAt"
@@ -6340,7 +6338,7 @@
                             "balanceAmount",
                             "balanceDueAt"
                           ],
-                          "description": "Null when the booking pays in full at checkout"
+                          "description": "Null, or absent from an API older than W3-G2.8, when the booking pays in full at checkout"
                         },
                         "policy": {
                           "type": "object",
@@ -6503,7 +6501,6 @@
                         "taxes",
                         "promotion",
                         "totals",
-                        "deposit",
                         "policy",
                         "quotedAt",
                         "expiresAt"
@@ -8420,8 +8417,7 @@
                         "addOns",
                         "fees",
                         "taxes",
-                        "policy",
-                        "deposit"
+                        "policy"
                       ],
                       "description": "What the operator sells for one bookable trip, under its current versions"
                     }
@@ -24723,8 +24719,7 @@
                         "addOns",
                         "fees",
                         "taxes",
-                        "policy",
-                        "deposit"
+                        "policy"
                       ],
                       "description": "What the operator sells for one bookable trip, under its current versions"
                     }
@@ -25418,7 +25413,7 @@
                             "balanceAmount",
                             "balanceDueAt"
                           ],
-                          "description": "Null when the booking pays in full at checkout"
+                          "description": "Null, or absent from an API older than W3-G2.8, when the booking pays in full at checkout"
                         },
                         "policy": {
                           "type": "object",
@@ -25581,7 +25576,6 @@
                         "taxes",
                         "promotion",
                         "totals",
-                        "deposit",
                         "policy",
                         "quotedAt",
                         "expiresAt"

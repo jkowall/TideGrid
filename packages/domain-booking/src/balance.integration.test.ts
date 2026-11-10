@@ -23,6 +23,7 @@ import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { handleVerifiedEvent } from "./finalize.ts";
 import {
+  BALANCE_PAYMENT_REUSE_HOURS,
   cancelBooking,
   changeBalanceDueDate,
   ensureBalanceProviderPayment,
@@ -366,6 +367,25 @@ describe.skipIf(!env)("private-charter deposits and balances (W3-G2.8)", () => {
          and state = 'queued'`;
     expect(queued[0]?.n).toBe(0);
     expect(await balanceOf(booked.bookingId)).toMatchObject({ state: "canceled", owed: 0 });
+  });
+
+  it("replaces an open card payment older than the provider remembers its key", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, charterTrip(), 2, {
+      charter: true,
+    });
+    const first = await payBalance(booked.bookingId);
+    await admin.begin(async (tx) => {
+      await tx`set local session_replication_role = replica`;
+      await tx`update public.balance_payments
+                  set created_at = now() - make_interval(hours => ${BALANCE_PAYMENT_REUSE_HOURS + 1})
+                where id = ${first.opened.paymentId}`;
+    });
+    const second = await payBalance(booked.bookingId);
+    expect(second.opened).toMatchObject({ reused: false, amount: TOTAL - DEPOSIT });
+    expect(second.opened.paymentId).not.toBe(first.opened.paymentId);
+    const [old] = await admin<{ state: string }[]>`
+      select state from public.balance_payments where id = ${first.opened.paymentId}`;
+    expect(old?.state).toBe("abandoned");
   });
 
   it("refuses a balance payment for anything but what is owed", async () => {

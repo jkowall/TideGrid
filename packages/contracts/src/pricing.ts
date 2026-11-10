@@ -175,7 +175,8 @@ export const TripOffer = z
     fees: z.array(OfferFee).describe("Mandatory fees added to every booking"),
     taxes: z.array(OfferTaxRate),
     policy: PolicyTerms,
-    deposit: OfferDeposit,
+    // Optional so a client built after W3-G2.8 still reads an older API: absent means in full.
+    deposit: OfferDeposit.optional(),
   })
   .describe("What the operator sells for one bookable trip, under its current versions");
 export type TripOffer = z.infer<typeof TripOffer>;
@@ -322,7 +323,11 @@ export const Quote = z
     taxes: z.array(QuoteTax).describe("Per rate, summed over the lines"),
     promotion: QuotePromotion.nullable(),
     totals: QuoteTotals,
-    deposit: QuoteDeposit.nullable().describe("Null when the booking pays in full at checkout"),
+    deposit: QuoteDeposit.nullable()
+      .optional()
+      .describe(
+        "Null, or absent from an API older than W3-G2.8, when the booking pays in full at checkout",
+      ),
     policy: PolicyTerms,
     quotedAt: Instant,
     expiresAt: Instant.describe("Checkout must start before this instant or ask for a new quote"),

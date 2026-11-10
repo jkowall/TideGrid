@@ -47,6 +47,8 @@ import { record } from "./views.ts";
 
 /** Balance link emails staff may send for one booking in an hour. */
 export const MAX_BALANCE_LINKS_PER_HOUR = 3;
+/** A pending balance payment is reused for this long, well inside the provider's idempotency window. */
+export const BALANCE_PAYMENT_REUSE_HOURS = 12;
 /** A reminder due sooner than this after it is written is not written: the guest just heard from us. */
 export const BALANCE_REMINDER_MIN_NOTICE_HOURS = 1;
 
@@ -267,12 +269,26 @@ export async function openBalancePayment(
   }
   const account = await getPaymentAccount(trx, ctx.tenantId, input.provider);
   if (account?.status !== "active") return { kind: "payments_unavailable" };
-  const { rows: open } = await sql<{ id: string; amount: number; provider: string }>`
-    select id, amount, provider from balance_payments
+  const { rows: open } = await sql<{
+    id: string;
+    amount: number;
+    provider: string;
+    fresh: boolean;
+  }>`
+    select id, amount, provider,
+           created_at > now() - make_interval(hours => ${BALANCE_PAYMENT_REUSE_HOURS}) as fresh
+      from balance_payments
      where tenant_id = ${ctx.tenantId} and booking_id = ${input.bookingId} and state = 'pending'
        for update`.execute(trx);
   const current = open[0];
-  if (current && current.amount === balance.owed && current.provider === input.provider) {
+  // Reused only while the provider still remembers its idempotency key
+  // (Stripe keeps one about a day); an older one is replaced by a new one.
+  if (
+    current &&
+    current.fresh &&
+    current.amount === balance.owed &&
+    current.provider === input.provider
+  ) {
     return { kind: "opened", paymentId: current.id, amount: current.amount, reused: true };
   }
   if (current) {
@@ -372,7 +388,9 @@ export async function ensureBalanceProviderPayment(
       }
     });
   } else if (row.provider_payment_id !== created.paymentRef) {
-    throw new Error("the provider returned another payment for a balance payment's key");
+    // The provider forgot the key and made another payment: refuse it, so the
+    // guest opens a new balance payment rather than paying an unrecorded one.
+    return { kind: "unavailable", reason: "provider_key_expired" };
   }
   return {
     kind: "ready",

@@ -2,6 +2,7 @@
 
 // Private-charter deposits and balances (W3-G2.8).
 export {
+  BALANCE_PAYMENT_REUSE_HOURS,
   BALANCE_REMINDER_MIN_NOTICE_HOURS,
   type BalancePaymentEventOutcome,
   type ChangeDueDateResult,
