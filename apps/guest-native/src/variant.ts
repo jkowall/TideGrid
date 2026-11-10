@@ -15,6 +15,8 @@ export const Variant = z.strictObject({
   iosBundleId: z.string().regex(/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*){2,}$/),
   androidPackage: z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){2,}$/),
   guestOrigin: z.url({ protocol: /^https$/ }),
+  /** The Android icon's background: the operator's primary color. */
+  iconBackground: z.string().regex(/^#[0-9a-f]{6}$/),
 });
 export type Variant = z.infer<typeof Variant>;
 

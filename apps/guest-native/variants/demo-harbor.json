@@ -3,5 +3,6 @@
   "appName": "Demo Harbor",
   "iosBundleId": "us.tidegrid.demo.harbor",
   "androidPackage": "us.tidegrid.demo.harbor",
-  "guestOrigin": "https://demo-harbor.book.tidegrid.us"
+  "guestOrigin": "https://demo-harbor.book.tidegrid.us",
+  "iconBackground": "#0b3c5d"
 }
