@@ -231,12 +231,14 @@ async function listMoves(
  * What moving this booking now would do: whether it may move without an
  * override, and the trips of its product it could move to, soonest first,
  * each with whether it would take the booking now. Null when the booking is
- * not this tenant's. Read-only and advisory: only the move decides.
+ * not this tenant's. Read-only and advisory: only the move decides. With
+ * `forGuest`, only departures on sale are listed.
  */
 export async function previewReschedule(
   trx: TenantTransaction,
   tenantId: string,
   bookingId: string,
+  view: { forGuest?: boolean } = {},
 ): Promise<ReschedulePreview | null> {
   if (!isUuid(bookingId)) return null;
   const row = await bookingRow(trx, tenantId, bookingId);
@@ -256,6 +258,11 @@ export async function previewReschedule(
        limit ${MAX_RESCHEDULE_OPTIONS}`.execute(trx);
     for (const trip of trips) {
       const issue = await issueFor(trx, tenantId, row, trip);
+      // A guest sees only departures on sale, as the public catalog shows them,
+      // never the operator's drafts, closed dates, or blackouts.
+      if (view.forGuest && (issue === "trip_unavailable" || issue === "trip_canceled")) {
+        continue;
+      }
       options.push({
         tripId: trip.id,
         startsAt: iso(trip.starts_at),

@@ -11,6 +11,7 @@ import type { FakePaymentProvider } from "@tidegrid/domain-payments";
 import { createPolicyVersion } from "@tidegrid/domain-pricing";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { auditLedger } from "./adversarial/harness.ts";
 import {
   cancelBooking,
   previewCancellation,
@@ -144,6 +145,25 @@ describe.skipIf(!env)("moving a whole booking to another trip (W3-G2.11-rest)", 
     expect(preview.moves).toEqual([]);
   });
 
+  it("shows a guest only departures on sale, and staff every one with its reason", async () => {
+    const from = tripsA.shared();
+    const closed = tripsA.shared();
+    const booked = await confirmBooking(runtime.db, payments, A, from, 1);
+    await admin`update public.scheduled_trips set sales_state = 'closed' where id = ${closed}`;
+    const staff = await as(staffContext(A.id), (trx) =>
+      previewReschedule(trx, A.id, booked.bookingId),
+    );
+    expect(staff?.options.find((o) => o.tripId === closed)).toMatchObject({
+      available: false,
+      issue: "trip_unavailable",
+    });
+    const guest = await as(guestContext(A.id), (trx) =>
+      previewReschedule(trx, A.id, booked.bookingId, { forGuest: true }),
+    );
+    expect(guest?.options.some((o) => o.tripId === closed)).toBe(false);
+    expect(guest?.options.length).toBeGreaterThan(0);
+  });
+
   it("moves a booking: new seats taken, old seats back, email and audit, once", async () => {
     const from = tripsA.shared();
     const to = tripsA.shared();
@@ -213,6 +233,8 @@ describe.skipIf(!env)("moving a whole booking to another trip (W3-G2.11-rest)", 
     );
     expect(preview?.moves).toEqual([moved.move]);
     expect(preview?.tripId).toBe(to);
+    // The adversarial ledger audit reads a moved booking as consistent.
+    expect(await auditLedger(admin, [A.id])).toEqual([]);
   });
 
   it("moves twice, then cancels: the last move's hold is released", async () => {

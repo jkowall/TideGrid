@@ -17334,7 +17334,7 @@
           "manage"
         ],
         "summary": "What moving the booking now would do",
-        "description": "Needs the booking session. Whether the guest may move the booking now (before its policy's change cutoff, and before the trip leaves), the policy's reschedule text, and the other departures of the same trip it could move to, soonest first, each with whether it would take the whole party now. The price does not change. Read-only and advisory.",
+        "description": "Needs the booking session. Whether the guest may move the booking now (before its policy's change cutoff, and before the trip leaves), the policy's reschedule text, and the other departures of the same trip it could move to, soonest first, each with whether it would take the whole party now; only departures on sale are listed. The price does not change. Read-only and advisory. Rate limited per client address and tenant.",
         "security": [
           {
             "manageSession": []
@@ -17605,6 +17605,40 @@
           },
           "404": {
             "description": "No active tenant hostname matches the origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address for this operator (rate_limited)",
             "content": {
               "application/json": {
                 "schema": {

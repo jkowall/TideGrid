@@ -662,7 +662,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["public", "manage"],
     summary: "What moving the booking now would do",
     description:
-      "Needs the booking session. Whether the guest may move the booking now (before its policy's change cutoff, and before the trip leaves), the policy's reschedule text, and the other departures of the same trip it could move to, soonest first, each with whether it would take the whole party now. The price does not change. Read-only and advisory.",
+      "Needs the booking session. Whether the guest may move the booking now (before its policy's change cutoff, and before the trip leaves), the policy's reschedule text, and the other departures of the same trip it could move to, soonest first, each with whether it would take the whole party now; only departures on sale are listed. The price does not change. Read-only and advisory. Rate limited per client address and tenant.",
     security: sessionSecurity,
     responses: {
       200: {
@@ -671,12 +671,16 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       },
       401: errorBody("No session (session_required), or it has ended (session_expired)"),
       404: errorBody("No active tenant hostname matches the origin"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
     },
   });
 
   app.openapi(reschedulePreviewRoute, async (c) => {
-    const { body } = await withManageSession(c, {}, async (trx, ctx, session) => {
-      const preview = await previewReschedule(trx, ctx.tenantId, session.bookingId);
+    // Limited like a command: it reads every option's capacity.
+    const { body } = await withManageSession(c, { limit: true }, async (trx, ctx, session) => {
+      const preview = await previewReschedule(trx, ctx.tenantId, session.bookingId, {
+        forGuest: true,
+      });
       if (!preview) throw bookingGone();
       return { preview: previewJson(preview) };
     });

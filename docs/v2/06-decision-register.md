@@ -35,10 +35,11 @@ Coordinator defaults, pending owner confirmation:
 - **D2: only another trip of the same product.** Moving to a different trip type would change the price and the policy, so it is a cancellation and a new booking.
 - **D3: the new trip must be on sale for the party now,** by the same rules as a new hold: published, before its booking cutoff, clear of blackouts, and with room. Staff use the same rules; there is no override of capacity or of the booking cutoff.
 - **D4: a private charter with a balance still owed** moves only to a trip that leaves after the balance's due date; otherwise staff move the due date first.
+- **D5: the cancellation cutoff follows the trip the booking is on now.** After an owner moves a booking past its cutoff to a later trip, the guest's cancellation terms are those of the new trip, so a full refund may be open again. The owner chooses that when overriding; keeping the first trip's cutoff instead is a later change if the owner prefers it.
 
 Not built: console and guest-site screens (the API carries it), moving part of a party, and moves of pooled equipment or trip-card units, which do not exist yet.
 
-Known gaps: a waiver reminder already sent for the old trip's 72-hour or 24-hour slot is not sent again for the new trip, and the old trip's reminder email, if it was already sent, is not taken back.
+Known gaps: a waiver reminder already sent for the old trip's 72-hour or 24-hour slot is not sent again for the new trip; a waiver link sent before the move still expires when the old trip ends, and waiver emails already sent name the old date (staff send the waiver again); the checkout page's own status still names the trip the guest first booked (the booking page shows the new one); and the old trip's reminder email, if it was already sent, is not taken back. The tenant data export also gains the deposit and balance tables from W3-G2.8, which it had missed, and the moves.
 
 ### 2026-11-10: W3-G2.8, private-charter deposits and balances, code only (owner go; coordinator defaults pending owner confirmation)
 

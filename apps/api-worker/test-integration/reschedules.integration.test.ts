@@ -224,7 +224,7 @@ describe.skipIf(!env)("moving a booking through the API (W3-G2.11-rest)", () => 
     const to = preview.json.preview.options.find((o: Json) => o.available).tripId as string;
 
     const key = randomUUID();
-    const body = { fromTripId: b.tripId, toTripId: to };
+    const body = { fromTripId: b.tripId, toTripId: to, overrideReason: "please" };
     const moved = await request("POST", "/v1/public/manage/reschedule", {
       ...guest(b.session, key),
       body,
@@ -232,6 +232,9 @@ describe.skipIf(!env)("moving a booking through the API (W3-G2.11-rest)", () => 
     expect(moved.status).toBe(200);
     expect(moved.json.move).toMatchObject({ fromTripId: b.tripId, toTripId: to, by: "guest" });
     expect(moved.json.booking).toMatchObject({ reference: b.reference, state: "confirmed" });
+
+    // An override in a guest's body is not part of the contract and changes nothing.
+    expect(moved.json.move.overridden).toBe(false);
 
     const replay = await request("POST", "/v1/public/manage/reschedule", {
       ...guest(b.session, key),
@@ -288,7 +291,8 @@ describe.skipIf(!env)("moving a booking through the API (W3-G2.11-rest)", () => 
       ...guest(token, randomUUID()),
       body: { ...body, overrideReason: "please" },
     });
-    expect(sneaky.status).not.toBe(200);
+    expect(sneaky.status).toBe(409);
+    expect(sneaky.json.error.code).toBe("reschedule_cutoff_passed");
 
     const path = `/v1/staff/tenants/${A.id}/bookings/${made.bookingId}/reschedule`;
     const desk = await request("POST", path, { as: A.bookingStaff, key: randomUUID(), body });
