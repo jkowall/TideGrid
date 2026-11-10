@@ -42,7 +42,31 @@ env:
   ROOT: infra/terraform/environments/${{ inputs.environment }}
 
 jobs:
+  # No secrets. The same repository guards as infra.yml, on this exact
+  # commit, before anyone is asked to approve the plan.
+  guards:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Repository guards
+        run: |
+          bad=$(git ls-files infra | grep -E '(\.tfstate(\..*)?|\.tfvars(\.json)?|backend\.hcl|\.terraform/)' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::committed state, tfvars, or backend settings: $bad"; exit 1
+          fi
+          if grep -rnE 'resource +"neon_role"' infra/terraform; then
+            echo "::error::Terraform must not create a Neon role"; exit 1
+          fi
+          if grep -rnE 'resource +"cloudflare_(workers_script|worker_version|workers_deployment|worker|workers_custom_domain|queue_consumer)"' infra/terraform; then
+            echo "::error::Worker scripts, versions, deployments, custom domains, and queue consumers belong to Wrangler"; exit 1
+          fi
+
   plan:
+    needs: guards
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
