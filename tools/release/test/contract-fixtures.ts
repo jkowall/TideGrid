@@ -145,6 +145,7 @@ export function offerResponse(over: OfferOver = {}): TripOfferResponse {
     addOns: [],
     fees: [],
     taxes: [],
+    deposit: { kind: "none" },
     policy: policyTerms(over.policyVersion ?? 1),
   };
   return TripOfferResponse.parse({ offer });
@@ -190,6 +191,7 @@ export function quoteResponse(over: QuoteOver = {}): QuoteResponse {
       total: 6500,
       amountDueNow: 6500,
     },
+    deposit: null,
     policy: policyTerms(over.policyVersion ?? 1),
     quotedAt,
     expiresAt,

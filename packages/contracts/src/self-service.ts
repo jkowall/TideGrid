@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  BookingBalance,
   BookingCancellation,
   BookingExtra,
   BookingOrder,
@@ -9,7 +10,7 @@ import {
   BookingState,
 } from "./bookings.ts";
 import { TripSummary } from "./catalog.ts";
-import { PaymentProviderName } from "./checkout.ts";
+import { CheckoutPaymentRead, PaymentProviderName } from "./checkout.ts";
 import { ParticipantList } from "./participants.ts";
 
 /**
@@ -133,6 +134,9 @@ export const ManagedBooking = z
     }),
     refund: BookingRefund.nullable(),
     cancellation: BookingCancellation.nullable(),
+    balance: BookingBalance.nullable()
+      .optional()
+      .describe("A private charter's deposit and balance (W3-G2.8); null when paid in full"),
     policy: z.object({
       version: z.number().int().min(1),
       cancellationText: z.string(),
@@ -365,3 +369,15 @@ export const BookingEmailResendResponse = z.object({
   }),
 });
 export type BookingEmailResendResponse = z.infer<typeof BookingEmailResendResponse>;
+
+// Balance payment (W3-G2.8) ------------------------------------------------------------
+
+export const BalancePaymentResponse = z
+  .object({
+    amount: Cents.describe("What this payment charges: exactly what the booking owes now"),
+    payment: CheckoutPaymentRead,
+  })
+  .describe(
+    "What the guest needs to pay a private charter's balance at the provider. Only a verified provider event marks it paid; read the booking again after paying",
+  );
+export type BalancePaymentResponse = z.infer<typeof BalancePaymentResponse>;

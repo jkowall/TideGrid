@@ -104,6 +104,8 @@ interface QuoteRow {
   party_size: number;
   policy_version: number;
   total_amount: number;
+  /** The deposit checkout charges, when the booking does not pay in full (W3-G2.8). */
+  deposit_amount: number | null;
   /** Whole seconds the quote still holds its price, by the database clock; negative once lapsed. */
   remaining: number;
 }
@@ -146,7 +148,7 @@ export async function createCheckoutSession(
   // after the database wrote it. The checkout must end by then too, so its
   // hold lasts the shorter of the checkout window and what is left.
   const { rows: quotes } = await sql<QuoteRow>`
-    select id, trip_id, product_id, party_size, policy_version, total_amount,
+    select id, trip_id, product_id, party_size, policy_version, total_amount, deposit_amount,
            floor(extract(epoch from
              least(expires_at, created_at + interval '30 minutes') - now()))::int as remaining
       from quotes
@@ -166,7 +168,8 @@ export async function createCheckoutSession(
   if (input.acceptedPolicyVersion !== quote.policy_version) {
     return { kind: "policy_not_accepted", policyVersion: quote.policy_version };
   }
-  if (quote.total_amount < input.minimumAmount) {
+  // The deposit, when there is one, is what the provider charges now.
+  if ((quote.deposit_amount ?? quote.total_amount) < input.minimumAmount) {
     return { kind: "amount_too_small", minimum: input.minimumAmount };
   }
   const account = await getPaymentAccount(trx, ctx.tenantId, input.provider);
@@ -221,16 +224,20 @@ export async function createCheckoutSession(
       from capacity_holds h
      where h.tenant_id = ${ctx.tenantId} and h.id = ${hold.id}`.execute(trx);
 
-  const { rows: orders } = await sql<{ id: string; total_amount: number }>`
+  const { rows: orders } = await sql<{
+    id: string;
+    total_amount: number;
+    deposit_amount: number | null;
+  }>`
     insert into orders (tenant_id, checkout_session_id, quote_id, trip_id, product_id,
       party_size, policy_version, currency, subtotal_amount, discount_amount, fee_amount,
-      tax_amount, included_tax_amount, total_amount)
+      tax_amount, included_tax_amount, total_amount, deposit_amount, balance_due_at)
     select q.tenant_id, ${sessionId}, q.id, q.trip_id, q.product_id, q.party_size,
            q.policy_version, q.currency, q.subtotal_amount, q.discount_amount, q.fee_amount,
-           q.tax_amount, q.included_tax_amount, q.total_amount
+           q.tax_amount, q.included_tax_amount, q.total_amount, q.deposit_amount, q.balance_due_at
       from quotes q
      where q.tenant_id = ${ctx.tenantId} and q.id = ${quote.id}
-    returning id, total_amount`.execute(trx);
+    returning id, total_amount, deposit_amount`.execute(trx);
   const order = orders[0];
   if (!order) throw new Error("order insert returned no row");
   // Service, add-on, fee, and discount lines keep their quote line numbers;
@@ -269,7 +276,8 @@ export async function createCheckoutSession(
       provider: input.provider,
       account_ref: account.accountRef,
       idempotency_key: `checkout_payment:${paymentId}`,
-      amount: order.total_amount,
+      // A private charter with a deposit pays the deposit now (W3-G2.8).
+      amount: order.deposit_amount ?? order.total_amount,
       currency: "USD",
     })
     .execute();
@@ -287,7 +295,8 @@ export async function createCheckoutSession(
       holdId: hold.id,
       orderId: order.id,
       paymentId,
-      amount: order.total_amount,
+      amount: order.deposit_amount ?? order.total_amount,
+      ...(order.deposit_amount === null ? {} : { orderTotal: order.total_amount }),
       expiresAt: view.expiresAt,
       // A staff-assisted checkout records how the guest reached staff and
       // what staff attested in place of the guest's own acceptance (G2.12d).

@@ -180,6 +180,8 @@ export const AuditEventListResponse = z.object({
 });
 export type AuditEventListResponse = z.infer<typeof AuditEventListResponse>;
 
+// Private-charter deposits and balances (W3-G2.8).
+export * from "./balances.ts";
 // Console booking views (G2.12b).
 export * from "./bookings.ts";
 export * from "./brand.ts";

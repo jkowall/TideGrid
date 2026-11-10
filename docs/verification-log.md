@@ -2,6 +2,16 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-10
+
+### Private-charter deposits and balances (W3-G2.8), built November 10, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, from `main` at `adba2ec`, migration `0033_deposits_balances.sql` (renumbered at merge to the next free number if needed), under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). No provider call, no deploy.
+
+- **Built.** Deposit terms on charter price lists; the deposit and due date on the quote and order; checkout charges the deposit; the balance computed by the database; guest card payment of the balance from the booking page, marked paid only by a verified event; reminders 7 days and 1 day before the due date, dropped once settled; staff move the due date with a reason and email the balance link (3 an hour); a guest's refund cancellation of a deposit booking goes to the operator.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `balance.integration.test.ts` (9 cases: quote and checkout, shared trips untouched, card payment with a decline then success, external payment and an abandoned payment that succeeds late, due date moves with reminders and append-only history, the link limit, the guest's cancellation sent to the operator, a staff cancellation that refunds at most the deposit and closes the balance, and the database refusing a wrong amount, a second open payment, and DELETE) and `balances.integration.test.ts` (3 cases through the API: the guest pays through the webhook; owners only move the due date, finance and other tenants refused, idempotent replay; the link limit). `pnpm check` passed. Existing tests changed: the privilege catalog, route lists, and contract fixtures add the new fields and routes.
+- **Still open.** The coordinator defaults D1 to D5 await the owner. No screens yet for deposit terms or the balance in the console and guest site. A balance paid by card is refunded at the provider and recorded as an external refund.
+
 ## 2026-11-09
 
 ### External payment and reconciliation (W3-G2.10), built November 9, 2026

@@ -41,6 +41,11 @@ import {
   type VerifiedProviderEvent,
 } from "@tidegrid/domain-payments";
 import { type Kysely, sql } from "kysely";
+import {
+  type BalancePaymentEventOutcome,
+  enqueueBalanceReminders,
+  onBalancePaymentEvent,
+} from "./balance.ts";
 import { ownerRefFor } from "./checkout.ts";
 import { enqueueConfirmationEmail, enqueueReminderEmail } from "./emails.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
@@ -80,7 +85,9 @@ export type ProcessOutcome =
   /** A refund event (W3-G2.9). */
   | RefundEventOutcome
   /** A dispute event (W3-G2.10). */
-  | DisputeEventOutcome;
+  | DisputeEventOutcome
+  /** A private charter's balance payment (W3-G2.8). */
+  | BalancePaymentEventOutcome;
 
 export interface ProcessResult {
   outcome: ProcessOutcome;
@@ -250,7 +257,7 @@ async function onSuccess(
   hooks: BookingHooks,
 ): Promise<ProcessResult> {
   const locked = await lockCheckout(trx, ctx, event);
-  if (locked.kind === "unmatched") return result("unmatched_payment");
+  if (locked.kind === "unmatched") return balanceOrUnmatched(trx, ctx, event, "succeeded");
   if (locked.kind === "mismatch") return mismatch(trx, ctx, event, locked.payment);
   const { session, payment } = locked;
   const ids = { checkoutSessionId: session.id };
@@ -287,6 +294,19 @@ async function onSuccess(
     case "unfulfilled":
       throw new Error(`checkout ${session.id} is ${session.state} with a pending payment`);
   }
+}
+
+/** An event no checkout payment matches may be a balance payment's (W3-G2.8). */
+async function balanceOrUnmatched(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  event: InboxEvent,
+  kind: "succeeded" | "failed",
+): Promise<ProcessResult> {
+  const balance = await onBalancePaymentEvent(trx, ctx, event, kind);
+  return balance
+    ? result(balance.outcome, { bookingId: balance.bookingId })
+    : result("unmatched_payment");
 }
 
 /** A verified success whose amount, currency, account, or id is not the payment's. */
@@ -464,6 +484,27 @@ async function book(
       payload: { bookingId: booking.id },
     });
   }
+  // A private charter's balance reminders (W3-G2.8), under their own
+  // savepoint for the same reason.
+  await sql`savepoint balance_reminders`.execute(trx);
+  try {
+    await enqueueBalanceReminders(trx, ctx, booking.id);
+    await sql`release savepoint balance_reminders`.execute(trx);
+  } catch (error) {
+    await sql`rollback to savepoint balance_reminders`.execute(trx);
+    const code = (error as { code?: unknown } | null)?.code;
+    await record(trx, ctx, {
+      action: "booking.balance_reminder_email_failed",
+      subjectType: "booking",
+      subjectId: booking.id,
+      after: {
+        error: error instanceof Error ? error.name : "unknown",
+        ...(typeof code === "string" ? { code } : {}),
+      },
+      topic: "booking.balance_reminder_email_failed",
+      payload: { bookingId: booking.id },
+    });
+  }
   // Lane 1 contract: in-transaction work other modules attach to a new
   // booking (waiver assignment, G2.15) commits or rolls back with it.
   const { rows: products } = await sql<{ product_id: string }>`
@@ -577,7 +618,7 @@ async function onFailure(
   event: InboxEvent,
 ): Promise<ProcessResult> {
   const locked = await lockCheckout(trx, ctx, event);
-  if (locked.kind === "unmatched") return result("unmatched_payment");
+  if (locked.kind === "unmatched") return balanceOrUnmatched(trx, ctx, event, "failed");
   // Nothing moved on a failure, so a mismatched one is recorded and left alone.
   if (locked.kind === "mismatch") return result("payment_mismatch");
   const { session, payment } = locked;

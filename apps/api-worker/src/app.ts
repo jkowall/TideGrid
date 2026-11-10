@@ -11,6 +11,7 @@ import { ApiError } from "./errors.ts";
 import { requireConsoleGateway } from "./gateway.ts";
 import { allowedOrigin } from "./hostnames/cors.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
+import { registerBalanceStaffRoutes } from "./routes/balances-staff.ts";
 import { registerBookingEmailStaffRoutes } from "./routes/booking-email-staff.ts";
 import { registerBookingStaffRoutes } from "./routes/bookings-staff.ts";
 import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
@@ -185,6 +186,7 @@ export function createApp(deps: AppDeps = {}) {
   registerBookingEmailStaffRoutes(app, deps);
   registerRefundsCreditsStaffRoutes(app, deps);
   registerReconciliationStaffRoutes(app, deps);
+  registerBalanceStaffRoutes(app, deps);
   // Tenant access remainder (W3-G2.2b): invitations, support access, export, deletion request.
   registerTenantAccessStaffRoutes(app, deps);
 

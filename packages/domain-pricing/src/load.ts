@@ -1,5 +1,6 @@
-import { isUuid, type TenantTransaction } from "@tidegrid/database";
+import { type DepositKind, isUuid, type TenantTransaction } from "@tidegrid/database";
 import { findAvailableTrips, listTrips } from "@tidegrid/domain-catalog";
+import { type DepositTerms, NO_DEPOSIT } from "./deposit.ts";
 import type {
   AddOnItem,
   ChargeBasis,
@@ -19,6 +20,26 @@ import type {
  * row-level security is the backstop. "Current" is the highest version.
  */
 
+/** A price list version's deposit columns as terms (0033). */
+export function depositTermsOf(row: {
+  deposit_kind: DepositKind;
+  deposit_amount: number | null;
+  deposit_bp: number | null;
+  balance_due_days: number | null;
+}): DepositTerms {
+  if (
+    row.deposit_kind === "fixed" &&
+    row.deposit_amount !== null &&
+    row.balance_due_days !== null
+  ) {
+    return { kind: "fixed", amount: row.deposit_amount, balanceDueDays: row.balance_due_days };
+  }
+  if (row.deposit_kind === "percent" && row.deposit_bp !== null && row.balance_due_days !== null) {
+    return { kind: "percent", bp: row.deposit_bp, balanceDueDays: row.balance_due_days };
+  }
+  return NO_DEPOSIT;
+}
+
 /** postgres.js reads a date column as a Date at UTC midnight of that date. */
 export function dateOnly(value: Date | string): string {
   return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10);
@@ -31,7 +52,14 @@ export async function loadPriceList(
 ): Promise<PriceList | null> {
   const head = await trx
     .selectFrom("price_list_versions")
-    .select(["version", "product_kind"])
+    .select([
+      "version",
+      "product_kind",
+      "deposit_kind",
+      "deposit_amount",
+      "deposit_bp",
+      "balance_due_days",
+    ])
     .where("tenant_id", "=", tenantId)
     .where("product_id", "=", productId)
     .orderBy("version", "desc")
@@ -75,6 +103,7 @@ export async function loadPriceList(
     charter,
     fees,
     addOns,
+    deposit: depositTermsOf(head),
   };
 }
 

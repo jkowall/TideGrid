@@ -288,6 +288,10 @@ A guest gets one reminder a day before the trip leaves, with a fresh management 
 - **Residuals.** The words are rendered when the booking is made, as every message's are, so a later change to the meeting point or the operator's brand is not in it. Nothing in the app moves a trip's departure today; if that is built, the move must re-time or cancel the booking's reminder (a trip moved earlier keeps the old due time, and the claim's cutoff check is then the only guard).
 - **Tests.** `packages/domain-booking/src/adversarial/trip-reminder.integration.test.ts` (written and due a day ahead, sent with a working link, written at 49 hours out and not at 47, canceled with the booking, canceled at claim within two hours of departure and for an already canceled booking, a lapsed attempt near departure ending as `outcome_unknown` or canceled by provider with its issued link still live, a reminder whose booking is locked passed over while other mail goes out, and a reminder that cannot be written leaving the booking and its confirmation in place), and the console's model tests.
 
+## Balance reminders (W3-G2.8)
+
+Two templates for private-charter balances: `booking_balance_reminder`, due 7 days and 1 day before the balance's due date, and `booking_balance_link`, which staff send on request. When one is claimed, `balanceEmailTiming` checks the booking again: nothing owed any more (paid, canceled, or the trip left) cancels it unsent with `balance_settled`, and a booking held by another change is left for a later run. Neither states the amount, which may change after it is written; the link shows it.
+
 ## Provider revalidation (W3-G2.16-rest)
 
 Docs/v2/08 asks the email provider to support US customer data, deletion, export, and audit. Cloudflare Email (the owner's choice, 2026-11-08), read from Cloudflare's documentation on 2026-11-08. It has not been confirmed with Cloudflare.

@@ -4966,6 +4966,79 @@
                             "text"
                           ],
                           "description": "The product's policy version in force, which the guest accepts before paying"
+                        },
+                        "deposit": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "none"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "fixed"
+                                  ]
+                                },
+                                "amount": {
+                                  "type": "integer",
+                                  "description": "The deposit charged at booking"
+                                },
+                                "balanceDueDays": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 365,
+                                  "description": "Days before the trip"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "amount",
+                                "balanceDueDays"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "percent"
+                                  ]
+                                },
+                                "bp": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points of the booking's total"
+                                },
+                                "balanceDueDays": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 365,
+                                  "description": "Days before the trip"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "bp",
+                                "balanceDueDays"
+                              ]
+                            }
+                          ],
+                          "description": "Private charters only. A booking made on or after the due date, or whose deposit would be the whole total, pays in full"
                         }
                       },
                       "required": [
@@ -4979,7 +5052,8 @@
                         "addOns",
                         "fees",
                         "taxes",
-                        "policy"
+                        "policy",
+                        "deposit"
                       ],
                       "description": "What the operator sells for one bookable trip, under its current versions"
                     }
@@ -5514,7 +5588,7 @@
                             },
                             "amountDueNow": {
                               "type": "integer",
-                              "description": "What checkout charges for this quote"
+                              "description": "What checkout charges for this quote: the deposit, or the total"
                             }
                           },
                           "required": [
@@ -5527,6 +5601,33 @@
                             "amountDueNow"
                           ],
                           "description": "Every total is the sum of the lines above it"
+                        },
+                        "deposit": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "amount": {
+                              "type": "integer",
+                              "description": "Charged at checkout"
+                            },
+                            "balanceAmount": {
+                              "type": "integer",
+                              "description": "Left to pay after the deposit"
+                            },
+                            "balanceDueAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When the balance is due; nothing is charged automatically"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "balanceAmount",
+                            "balanceDueAt"
+                          ],
+                          "description": "Null when the booking pays in full at checkout"
                         },
                         "policy": {
                           "type": "object",
@@ -5689,6 +5790,7 @@
                         "taxes",
                         "promotion",
                         "totals",
+                        "deposit",
                         "policy",
                         "quotedAt",
                         "expiresAt"
@@ -6199,7 +6301,7 @@
                             },
                             "amountDueNow": {
                               "type": "integer",
-                              "description": "What checkout charges for this quote"
+                              "description": "What checkout charges for this quote: the deposit, or the total"
                             }
                           },
                           "required": [
@@ -6212,6 +6314,33 @@
                             "amountDueNow"
                           ],
                           "description": "Every total is the sum of the lines above it"
+                        },
+                        "deposit": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "amount": {
+                              "type": "integer",
+                              "description": "Charged at checkout"
+                            },
+                            "balanceAmount": {
+                              "type": "integer",
+                              "description": "Left to pay after the deposit"
+                            },
+                            "balanceDueAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When the balance is due; nothing is charged automatically"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "balanceAmount",
+                            "balanceDueAt"
+                          ],
+                          "description": "Null when the booking pays in full at checkout"
                         },
                         "policy": {
                           "type": "object",
@@ -6374,6 +6503,7 @@
                         "taxes",
                         "promotion",
                         "totals",
+                        "deposit",
                         "policy",
                         "quotedAt",
                         "expiresAt"
@@ -6909,7 +7039,7 @@
                         },
                         "amount": {
                           "type": "integer",
-                          "description": "What the payment charges: the quote's total"
+                          "description": "What the payment charges: the quote's total, or its deposit for a private charter that takes one"
                         },
                         "currency": {
                           "type": "string",
@@ -7284,7 +7414,7 @@
                         },
                         "amount": {
                           "type": "integer",
-                          "description": "What the payment charges: the quote's total"
+                          "description": "What the payment charges: the quote's total, or its deposit for a private charter that takes one"
                         },
                         "currency": {
                           "type": "string",
@@ -7506,7 +7636,7 @@
                         },
                         "amount": {
                           "type": "integer",
-                          "description": "What the payment charges: the quote's total"
+                          "description": "What the payment charges: the quote's total, or its deposit for a private charter that takes one"
                         },
                         "currency": {
                           "type": "string",
@@ -8204,6 +8334,79 @@
                             "text"
                           ],
                           "description": "The product's policy version in force, which the guest accepts before paying"
+                        },
+                        "deposit": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "none"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "fixed"
+                                  ]
+                                },
+                                "amount": {
+                                  "type": "integer",
+                                  "description": "The deposit charged at booking"
+                                },
+                                "balanceDueDays": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 365,
+                                  "description": "Days before the trip"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "amount",
+                                "balanceDueDays"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "percent"
+                                  ]
+                                },
+                                "bp": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points of the booking's total"
+                                },
+                                "balanceDueDays": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 365,
+                                  "description": "Days before the trip"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "bp",
+                                "balanceDueDays"
+                              ]
+                            }
+                          ],
+                          "description": "Private charters only. A booking made on or after the due date, or whose deposit would be the whole total, pays in full"
                         }
                       },
                       "required": [
@@ -8217,7 +8420,8 @@
                         "addOns",
                         "fees",
                         "taxes",
-                        "policy"
+                        "policy",
+                        "deposit"
                       ],
                       "description": "What the operator sells for one bookable trip, under its current versions"
                     }
@@ -8400,7 +8604,7 @@
                         },
                         "amount": {
                           "type": "integer",
-                          "description": "What the payment charges: the quote's total"
+                          "description": "What the payment charges: the quote's total, or its deposit for a private charter that takes one"
                         },
                         "currency": {
                           "type": "string",
@@ -11906,6 +12110,145 @@
                             "settledAt"
                           ]
                         },
+                        "balance": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "paid",
+                                "scheduled",
+                                "due",
+                                "overdue",
+                                "canceled"
+                              ],
+                              "description": "paid: nothing owed. scheduled: owed, before the first reminder. due: owed, within 7 days of the due date. overdue: owed, past the due date; nothing cancels the booking. canceled: the booking was canceled"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "description": "The booking's total"
+                            },
+                            "deposit": {
+                              "type": "integer",
+                              "description": "Charged at checkout"
+                            },
+                            "paidIn": {
+                              "type": "integer",
+                              "description": "Deposit paid, balance payments, and external payments staff recorded"
+                            },
+                            "owed": {
+                              "type": "integer",
+                              "description": "Left to pay; zero once paid or canceled"
+                            },
+                            "overpaid": {
+                              "type": "integer",
+                              "description": "Money in above the total, which staff return"
+                            },
+                            "dueAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When the balance is due: the newest staff change, else the booking's"
+                            },
+                            "originalDueAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "payments": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "amount": {
+                                    "type": "integer",
+                                    "description": "Integer US cents"
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "pending",
+                                      "succeeded",
+                                      "failed",
+                                      "abandoned"
+                                    ]
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "succeededAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "amount",
+                                  "state",
+                                  "createdAt",
+                                  "succeededAt"
+                                ]
+                              }
+                            },
+                            "dueChanges": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "dueAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "reason": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "Staff's reason; null for a reader without booking access, and for the guest"
+                                  },
+                                  "changedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "dueAt",
+                                  "reason",
+                                  "changedAt"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "currency",
+                            "total",
+                            "deposit",
+                            "paidIn",
+                            "owed",
+                            "overpaid",
+                            "dueAt",
+                            "originalDueAt",
+                            "payments",
+                            "dueChanges"
+                          ],
+                          "description": "A private charter's balance; null or absent when the booking paid in full"
+                        },
                         "timeline": {
                           "type": "array",
                           "items": {
@@ -14728,6 +15071,145 @@
                           ],
                           "description": "The terms the cancellation applied; the refund's state is in refund"
                         },
+                        "balance": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "paid",
+                                "scheduled",
+                                "due",
+                                "overdue",
+                                "canceled"
+                              ],
+                              "description": "paid: nothing owed. scheduled: owed, before the first reminder. due: owed, within 7 days of the due date. overdue: owed, past the due date; nothing cancels the booking. canceled: the booking was canceled"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "description": "The booking's total"
+                            },
+                            "deposit": {
+                              "type": "integer",
+                              "description": "Charged at checkout"
+                            },
+                            "paidIn": {
+                              "type": "integer",
+                              "description": "Deposit paid, balance payments, and external payments staff recorded"
+                            },
+                            "owed": {
+                              "type": "integer",
+                              "description": "Left to pay; zero once paid or canceled"
+                            },
+                            "overpaid": {
+                              "type": "integer",
+                              "description": "Money in above the total, which staff return"
+                            },
+                            "dueAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When the balance is due: the newest staff change, else the booking's"
+                            },
+                            "originalDueAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "payments": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "amount": {
+                                    "type": "integer",
+                                    "description": "Integer US cents"
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "pending",
+                                      "succeeded",
+                                      "failed",
+                                      "abandoned"
+                                    ]
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "succeededAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "amount",
+                                  "state",
+                                  "createdAt",
+                                  "succeededAt"
+                                ]
+                              }
+                            },
+                            "dueChanges": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "dueAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "reason": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "Staff's reason; null for a reader without booking access, and for the guest"
+                                  },
+                                  "changedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "dueAt",
+                                  "reason",
+                                  "changedAt"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "currency",
+                            "total",
+                            "deposit",
+                            "paidIn",
+                            "owed",
+                            "overpaid",
+                            "dueAt",
+                            "originalDueAt",
+                            "payments",
+                            "dueChanges"
+                          ],
+                          "description": "A private charter's deposit and balance (W3-G2.8); null when paid in full"
+                        },
                         "policy": {
                           "type": "object",
                           "properties": {
@@ -16245,6 +16727,145 @@
                           ],
                           "description": "The terms the cancellation applied; the refund's state is in refund"
                         },
+                        "balance": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "paid",
+                                "scheduled",
+                                "due",
+                                "overdue",
+                                "canceled"
+                              ],
+                              "description": "paid: nothing owed. scheduled: owed, before the first reminder. due: owed, within 7 days of the due date. overdue: owed, past the due date; nothing cancels the booking. canceled: the booking was canceled"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "description": "The booking's total"
+                            },
+                            "deposit": {
+                              "type": "integer",
+                              "description": "Charged at checkout"
+                            },
+                            "paidIn": {
+                              "type": "integer",
+                              "description": "Deposit paid, balance payments, and external payments staff recorded"
+                            },
+                            "owed": {
+                              "type": "integer",
+                              "description": "Left to pay; zero once paid or canceled"
+                            },
+                            "overpaid": {
+                              "type": "integer",
+                              "description": "Money in above the total, which staff return"
+                            },
+                            "dueAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When the balance is due: the newest staff change, else the booking's"
+                            },
+                            "originalDueAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "payments": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "amount": {
+                                    "type": "integer",
+                                    "description": "Integer US cents"
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "pending",
+                                      "succeeded",
+                                      "failed",
+                                      "abandoned"
+                                    ]
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "succeededAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "amount",
+                                  "state",
+                                  "createdAt",
+                                  "succeededAt"
+                                ]
+                              }
+                            },
+                            "dueChanges": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "dueAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "reason": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "Staff's reason; null for a reader without booking access, and for the guest"
+                                  },
+                                  "changedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "dueAt",
+                                  "reason",
+                                  "changedAt"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "currency",
+                            "total",
+                            "deposit",
+                            "paidIn",
+                            "owed",
+                            "overpaid",
+                            "dueAt",
+                            "originalDueAt",
+                            "payments",
+                            "dueChanges"
+                          ],
+                          "description": "A private charter's deposit and balance (W3-G2.8); null when paid in full"
+                        },
                         "policy": {
                           "type": "object",
                           "properties": {
@@ -16816,6 +17437,261 @@
           },
           "429": {
             "description": "Three link emails in the last hour (link_email_rate_limited), or too many requests (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/manage/balance-payment": {
+      "post": {
+        "tags": [
+          "public",
+          "manage"
+        ],
+        "summary": "Pay a private charter's balance",
+        "description": "Needs the booking session. Opens a card payment for exactly what the booking owes now, or returns the open one when the balance has not changed; one for an older balance is abandoned. Returns what the browser pays with. Only a verified provider event marks it paid: read the booking again after paying. Nothing is ever charged without the guest.\n\n409 nothing_owed when the booking paid in full, owes nothing, was canceled, or its trip has left; 409 amount_too_small when what is left is below the provider's smallest charge (staff record it instead). Never cached; keep the client secret out of URLs and logs.",
+        "security": [
+          {
+            "manageSession": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What to pay with",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "amount": {
+                      "type": "integer",
+                      "description": "What this payment charges: exactly what the booking owes now"
+                    },
+                    "payment": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string",
+                          "enum": [
+                            "fake",
+                            "stripe"
+                          ],
+                          "description": "fake is the demo provider; stripe replaces it before any live booking"
+                        },
+                        "paymentRef": {
+                          "type": "string",
+                          "description": "The provider's payment id"
+                        },
+                        "clientSecret": {
+                          "type": "string",
+                          "description": "What the guest's browser passes to the provider to pay. Not stored by TideGrid; keep it out of URLs and logs"
+                        },
+                        "stripe": {
+                          "type": "object",
+                          "properties": {
+                            "publishableKey": {
+                              "type": "string",
+                              "pattern": "^pk_test_[A-Za-z0-9]{24,247}$",
+                              "description": "The platform's Stripe publishable key, test mode only"
+                            },
+                            "account": {
+                              "type": "string",
+                              "pattern": "^acct_[A-Za-z0-9]{1,64}$",
+                              "description": "The operator's connected account the payment was created on"
+                            }
+                          },
+                          "required": [
+                            "publishableKey",
+                            "account"
+                          ],
+                          "description": "Present only when the provider is stripe: what the browser mounts the card form with"
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "paymentRef",
+                        "clientSecret"
+                      ],
+                      "description": "What the guest needs to pay at the provider, read again with the checkout secret"
+                    }
+                  },
+                  "required": [
+                    "amount",
+                    "payment"
+                  ],
+                  "description": "What the guest needs to pay a private charter's balance at the provider. Only a verified provider event marks it paid; read the booking again after paying"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session (session_required), or it has ended (session_expired)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nothing is owed (nothing_owed), or too little to charge (amount_too_small)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address for this operator (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Payments are not configured, or under Stripe the card form is not (payments_unavailable); or the provider did not answer (payment_provider_unavailable)",
             "content": {
               "application/json": {
                 "schema": {
@@ -23761,6 +24637,79 @@
                             "text"
                           ],
                           "description": "The product's policy version in force, which the guest accepts before paying"
+                        },
+                        "deposit": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "none"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "fixed"
+                                  ]
+                                },
+                                "amount": {
+                                  "type": "integer",
+                                  "description": "The deposit charged at booking"
+                                },
+                                "balanceDueDays": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 365,
+                                  "description": "Days before the trip"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "amount",
+                                "balanceDueDays"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "percent"
+                                  ]
+                                },
+                                "bp": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 9999,
+                                  "description": "Basis points of the booking's total"
+                                },
+                                "balanceDueDays": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 365,
+                                  "description": "Days before the trip"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "bp",
+                                "balanceDueDays"
+                              ]
+                            }
+                          ],
+                          "description": "Private charters only. A booking made on or after the due date, or whose deposit would be the whole total, pays in full"
                         }
                       },
                       "required": [
@@ -23774,7 +24723,8 @@
                         "addOns",
                         "fees",
                         "taxes",
-                        "policy"
+                        "policy",
+                        "deposit"
                       ],
                       "description": "What the operator sells for one bookable trip, under its current versions"
                     }
@@ -24429,7 +25379,7 @@
                             },
                             "amountDueNow": {
                               "type": "integer",
-                              "description": "What checkout charges for this quote"
+                              "description": "What checkout charges for this quote: the deposit, or the total"
                             }
                           },
                           "required": [
@@ -24442,6 +25392,33 @@
                             "amountDueNow"
                           ],
                           "description": "Every total is the sum of the lines above it"
+                        },
+                        "deposit": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "amount": {
+                              "type": "integer",
+                              "description": "Charged at checkout"
+                            },
+                            "balanceAmount": {
+                              "type": "integer",
+                              "description": "Left to pay after the deposit"
+                            },
+                            "balanceDueAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When the balance is due; nothing is charged automatically"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "balanceAmount",
+                            "balanceDueAt"
+                          ],
+                          "description": "Null when the booking pays in full at checkout"
                         },
                         "policy": {
                           "type": "object",
@@ -24604,6 +25581,7 @@
                         "taxes",
                         "promotion",
                         "totals",
+                        "deposit",
                         "policy",
                         "quotedAt",
                         "expiresAt"
@@ -30842,6 +31820,791 @@
           },
           "404": {
             "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/balance/due-date": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Move a balance's due date",
+        "description": "Owners only. Moves when a private charter's balance is due, with a reason kept with the change and in the audit history. The reminders for the old date are canceled and new ones are written for the new date (7 days and 1 day before). The new date must be before the trip starts; it may be in the past, which makes the balance overdue now.\n\nIdempotent by key. 409 no_balance when the booking paid in full at checkout or was canceled; 422 invalid_due_date when the date is not before the trip.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "dueAt": {
+                    "type": "string",
+                    "maxLength": 40,
+                    "format": "date-time",
+                    "description": "The new due date; before the trip starts"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "Why the date moved. Kept with the change and in the audit history"
+                  }
+                },
+                "required": [
+                  "dueAt",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The balance with its new due date",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "paid",
+                            "scheduled",
+                            "due",
+                            "overdue",
+                            "canceled"
+                          ],
+                          "description": "paid: nothing owed. scheduled: owed, before the first reminder. due: owed, within 7 days of the due date. overdue: owed, past the due date; nothing cancels the booking. canceled: the booking was canceled"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        },
+                        "total": {
+                          "type": "integer",
+                          "description": "The booking's total"
+                        },
+                        "deposit": {
+                          "type": "integer",
+                          "description": "Charged at checkout"
+                        },
+                        "paidIn": {
+                          "type": "integer",
+                          "description": "Deposit paid, balance payments, and external payments staff recorded"
+                        },
+                        "owed": {
+                          "type": "integer",
+                          "description": "Left to pay; zero once paid or canceled"
+                        },
+                        "overpaid": {
+                          "type": "integer",
+                          "description": "Money in above the total, which staff return"
+                        },
+                        "dueAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "When the balance is due: the newest staff change, else the booking's"
+                        },
+                        "originalDueAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "payments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "amount": {
+                                "type": "integer",
+                                "description": "Integer US cents"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "pending",
+                                  "succeeded",
+                                  "failed",
+                                  "abandoned"
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "succeededAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "amount",
+                              "state",
+                              "createdAt",
+                              "succeededAt"
+                            ]
+                          }
+                        },
+                        "dueChanges": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "dueAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "reason": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "Staff's reason; null for a reader without booking access, and for the guest"
+                              },
+                              "changedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "dueAt",
+                              "reason",
+                              "changedAt"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "currency",
+                        "total",
+                        "deposit",
+                        "paidIn",
+                        "owed",
+                        "overpaid",
+                        "dueAt",
+                        "originalDueAt",
+                        "payments",
+                        "dueChanges"
+                      ],
+                      "description": "A private charter's deposit and balance (W3-G2.8)"
+                    }
+                  },
+                  "required": [
+                    "balance"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The booking has no balance (no_balance)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The due date is not before the trip (invalid_due_date), or idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/balance/link": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Email the guest the balance link",
+        "description": "Owners and booking staff. Emails the booker, at the address on file, a link to their booking where they pay what is owed now. At most 3 an hour per booking.\n\nIdempotent by key. 409 nothing_owed when nothing is owed, the booking was canceled, or its trip has left; 409 booking_email_off when this environment sends no email (nothing stored for the key); 429 balance_link_rate_limited past the hourly limit.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued; it goes out at once, or with the next delivery run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "accepted"
+                      ]
+                    },
+                    "messageId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "The email, as the booking's email history lists it"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "messageId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Nothing is owed (nothing_owed), or email is off here (booking_email_off)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Three links went out in the last hour (balance_link_rate_limited)",
             "content": {
               "application/json": {
                 "schema": {

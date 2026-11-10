@@ -6,6 +6,7 @@ import {
 } from "@tidegrid/database";
 import { sql } from "kysely";
 import { normalizePromotionCode } from "./compute.ts";
+import { type DepositTerms, NO_DEPOSIT } from "./deposit.ts";
 import type { Discount } from "./terms.ts";
 import {
   isPromotionCode,
@@ -79,6 +80,7 @@ export async function createPriceListVersion(
       version,
       product_kind: product.kind,
       reason: input.reason,
+      ...depositColumns(input.deposit ?? NO_DEPOSIT),
     })
     .execute();
   const base = {
@@ -146,9 +148,19 @@ export async function createPriceListVersion(
       charterAmount: input.charter?.amount ?? null,
       fees: (input.fees ?? []).map((f) => ({ code: f.code, unitAmount: f.unitAmount })),
       addOns: (input.addOns ?? []).map((a) => ({ code: a.code, unitAmount: a.unitAmount })),
+      ...(input.deposit && input.deposit.kind !== "none" ? { deposit: { ...input.deposit } } : {}),
     },
   });
   return { kind: "created", version };
+}
+
+function depositColumns(terms: DepositTerms) {
+  return {
+    deposit_kind: terms.kind,
+    deposit_amount: terms.kind === "fixed" ? terms.amount : null,
+    deposit_bp: terms.kind === "percent" ? terms.bp : null,
+    balance_due_days: terms.kind === "none" ? null : terms.balanceDueDays,
+  };
 }
 
 /** Appends a product's next policy version. */
