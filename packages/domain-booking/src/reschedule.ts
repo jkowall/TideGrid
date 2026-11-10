@@ -34,7 +34,12 @@ import {
 } from "@tidegrid/domain-inventory";
 import { cancelMessage } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
-import { enqueueReminderEmail, enqueueRescheduledEmail, REMINDER_TEMPLATE } from "./emails.ts";
+import {
+  enqueueReminderEmail,
+  enqueueRescheduledEmail,
+  REMINDER_TEMPLATE,
+  RESCHEDULED_TEMPLATE,
+} from "./emails.ts";
 import { iso, record } from "./views.ts";
 
 /** At most this many trips are offered to move to, soonest first. */
@@ -251,7 +256,7 @@ export async function previewReschedule(
         from scheduled_trips t
        where t.tenant_id = ${tenantId} and t.product_id = ${row.product_id}
          and t.id <> ${row.trip_id}
-         and t.sales_state <> 'canceled'
+         and ${view.forGuest ? sql`t.sales_state = 'published'` : sql`t.sales_state <> 'canceled'`}
          and t.starts_at > now()
          and t.starts_at < now() + make_interval(days => ${RESCHEDULE_HORIZON_DAYS})
        order by t.starts_at, t.id
@@ -466,11 +471,13 @@ export async function rescheduleBooking(
     },
   });
 
-  // The reminder waiting for the old trip's day would name the old time.
+  // The reminder waiting for the old trip's day, and an earlier move's notice
+  // not yet sent, would name a time the booking no longer has.
   const { rows: reminders } = await sql<{ id: string }>`
     select id from email_messages
      where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
-       and template = ${REMINDER_TEMPLATE.key} and state in ('queued', 'sending')
+       and template in (${REMINDER_TEMPLATE.key}, ${RESCHEDULED_TEMPLATE.key})
+       and state in ('queued', 'sending')
      order by id`.execute(trx);
   for (const message of reminders) {
     await cancelMessage(trx, ctx, message.id, { code: "booking_moved", revokeLinks: false });

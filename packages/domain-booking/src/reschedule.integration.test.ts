@@ -6,6 +6,7 @@ import {
   type TenantTransaction,
 } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
+import { acquireHold, confirmHold, releaseHold } from "@tidegrid/domain-inventory";
 import { tripAllocator } from "@tidegrid/domain-inventory/testing";
 import type { FakePaymentProvider } from "@tidegrid/domain-payments";
 import { createPolicyVersion } from "@tidegrid/domain-pricing";
@@ -253,6 +254,15 @@ describe.skipIf(!env)("moving a whole booking to another trip (W3-G2.11-rest)", 
     });
     expect(second).toMatchObject({ kind: "moved", move: { by: "staff" } });
     expect([await seatsUsed(t1), await seatsUsed(t2), await seatsUsed(t3)]).toEqual([0, 0, 2]);
+    // The first move's notice, not yet sent, named a time the booking no longer has.
+    const notices = await admin<{ state: string; last_error_code: string | null }[]>`
+      select state, last_error_code from public.email_messages
+       where booking_id = ${booked.bookingId} and template = 'booking_rescheduled'
+       order by created_at, id`;
+    expect(notices).toEqual([
+      { state: "canceled", last_error_code: "booking_moved" },
+      { state: "queued", last_error_code: null },
+    ]);
     const terms = await as(guestContext(A.id), (trx) =>
       previewCancellation(trx, A.id, booked.bookingId),
     );
@@ -426,6 +436,48 @@ describe.skipIf(!env)("moving a whole booking to another trip (W3-G2.11-rest)", 
           .execute(),
       ),
     ).rejects.toMatchObject({ code: "23514" });
+    // A move whose new hold is given back before the booking takes it leaves the
+    // booking holding no seats: refused at commit.
+    await expect(
+      as(ctx, async (trx, c) => {
+        const id = randomUUID();
+        const ownerRef = `booking_reschedule:${id}`;
+        const got = await acquireHold(trx, c, {
+          ownerRef,
+          tripId: to,
+          partySize: 1,
+          ttlSeconds: 60,
+        });
+        if (got.kind !== "acquired") throw new Error(got.kind);
+        await confirmHold(trx, c, { holdId: got.hold.id, ownerRef });
+        await trx
+          .insertInto("booking_reschedules")
+          .values({
+            id,
+            tenant_id: A.id,
+            booking_id: booked.bookingId,
+            from_trip_id: from,
+            to_trip_id: to,
+            from_hold_id: hold,
+            to_hold_id: got.hold.id,
+          })
+          .execute();
+        await releaseHold(trx, c, { holdId: got.hold.id, ownerRef, reason: "test" });
+        await trx
+          .updateTable("bookings")
+          .set({ trip_id: to, hold_id: got.hold.id })
+          .where("tenant_id", "=", A.id)
+          .where("id", "=", booked.bookingId)
+          .execute();
+        const [old] = await admin<{ owner_ref: string }[]>`
+          select owner_ref from public.capacity_holds where id = ${hold}`;
+        await releaseHold(trx, c, { holdId: hold, ownerRef: old?.owner_ref ?? "", reason: "test" });
+      }),
+    ).rejects.toMatchObject({ code: "23514", constraint_name: "booking_reschedules_applied" });
+    expect(await bookingNow(booked.bookingId)).toMatchObject({
+      trip_id: from,
+      hold_state: "confirmed",
+    });
     await expect(
       as(ctx, (trx) =>
         trx.deleteFrom("booking_reschedules").where("tenant_id", "=", A.id).execute(),

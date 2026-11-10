@@ -193,7 +193,8 @@ END;
 $$;
 
 -- Checked at commit: a moved booking gave its old seats back, so a move never
--- holds two trips at once once it commits.
+-- holds two trips at once once it commits, and still holds its new ones
+-- (released only with a cancellation), so it never holds none.
 CREATE FUNCTION app.check_rescheduled_released() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -204,8 +205,11 @@ BEGIN
      WHERE h.tenant_id = NEW.tenant_id AND h.id = NEW.from_hold_id AND h.state <> 'released'
   ) OR NOT EXISTS (
     SELECT 1 FROM public.bookings b
+      JOIN public.capacity_holds h ON h.tenant_id = b.tenant_id AND h.id = b.hold_id
      WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id
        AND b.hold_id = NEW.to_hold_id AND b.trip_id = NEW.to_trip_id
+       -- Still holding its new seats, unless it was canceled since.
+       AND (h.state = 'confirmed' OR b.state = 'canceled')
   ) THEN
     RAISE EXCEPTION 'move % must leave its booking on the new hold with the old one released',
       NEW.id
