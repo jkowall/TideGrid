@@ -176,8 +176,15 @@ export async function getManagedBooking(
   const party = await listParticipants(trx, tenantId, bookingId);
   const terms = await previewCancellation(trx, tenantId, bookingId);
   if (!party || !terms) return null;
+  // Staff's reasons for moving a due date are theirs, not the guest's.
+  const balance = booking.balance
+    ? {
+        ...booking.balance,
+        dueChanges: booking.balance.dueChanges.map((c) => ({ ...c, reason: null })),
+      }
+    : null;
   return {
-    booking: { ...booking, booker: booking.booker },
+    booking: { ...booking, booker: booking.booker, balance },
     policy: {
       version: terms.policyVersion,
       cancellationText: terms.policyText,

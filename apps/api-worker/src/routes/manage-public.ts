@@ -1,5 +1,6 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  BalancePaymentResponse,
   CancelBookingRequest,
   CancelBookingResponse,
   CancellationTermsResponse,
@@ -15,6 +16,7 @@ import {
   ParticipantInput,
   ParticipantPosition,
   ParticipantResponse,
+  StripeElementConfig,
 } from "@tidegrid/contracts";
 import {
   claimIdempotencyKey,
@@ -31,9 +33,11 @@ import {
   type CancellationTerms,
   cancelBooking,
   checkoutSecretPattern,
+  ensureBalanceProviderPayment,
   getManagedBooking,
   type ManagedBookingView,
   manageSession,
+  openBalancePayment,
   openManageSession,
   openManageSessionFromCheckout,
   previewCancellation,
@@ -57,6 +61,7 @@ import {
   resolvePublicTenant,
   withPublicTenant,
 } from "../public-tenant.ts";
+import { stripePublishableKey } from "./checkout-public.ts";
 import { errorBody } from "./responses.ts";
 
 const redeemPath = "/v1/public/booking-access";
@@ -67,6 +72,7 @@ const participantPath = "/v1/public/manage/participants/{position}";
 const cancellationPath = "/v1/public/manage/cancellation";
 const linkEmailPath = "/v1/public/manage/link-email";
 const endPath = "/v1/public/manage/session/end";
+const balancePaymentPath = "/v1/public/manage/balance-payment";
 
 const sessionSecurity = [{ manageSession: [] }];
 
@@ -79,6 +85,26 @@ const sessionRequired = () =>
 const sessionExpired = () =>
   new ApiError(401, "session_expired", "This booking session has ended; open your link again");
 const bookingGone = () => new ApiError(404, "booking_not_found", "No such booking at this address");
+
+/** The card form's account for a balance payment under Stripe (W3-G2.8), as checkout's. */
+async function balanceStripeElement(
+  c: Context<AppEnv>,
+  ctx: TenantContext,
+  paymentId: string,
+  publishableKey: string,
+): Promise<StripeElementConfig | null> {
+  const row = await inTenantTransaction(getDb(c), ctx, (trx) =>
+    trx
+      .selectFrom("balance_payments")
+      .select("account_ref")
+      .where("tenant_id", "=", ctx.tenantId)
+      .where("id", "=", paymentId)
+      .where("provider", "=", "stripe")
+      .executeTakeFirst(),
+  );
+  const parsed = StripeElementConfig.safeParse({ publishableKey, account: row?.account_ref });
+  return parsed.success ? parsed.data : null;
+}
 
 /** The session token from `Authorization: Bearer <token>`; never accepted in a URL. */
 function bearer(c: Context<AppEnv>): string {
@@ -126,6 +152,7 @@ function managedJson(view: ManagedBookingView): ManagedBooking {
     },
     refund: b.refund,
     cancellation: b.cancellation,
+    balance: b.balance,
     policy: view.policy,
     participants: view.party,
     partyEditable: view.partyEditable,
@@ -661,6 +688,109 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     });
     deliverAfterCommit(c, deps, ctx.tenantId);
     return c.json({ status: "accepted" as const }, 202);
+  });
+
+  const balancePaymentRoute = createRoute({
+    method: "post",
+    path: balancePaymentPath,
+    tags: ["public", "manage"],
+    summary: "Pay a private charter's balance",
+    description: [
+      "Needs the booking session. Opens a card payment for exactly what the booking owes now, or returns the open one when the balance has not changed; one for an older balance is abandoned. Returns what the browser pays with. Only a verified provider event marks it paid: read the booking again after paying. Nothing is ever charged without the guest.",
+      "409 nothing_owed when the booking paid in full, owes nothing, was canceled, or its trip has left; 409 amount_too_small when what is left is below the provider's smallest charge (staff record it instead). Never cached; keep the client secret out of URLs and logs.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    responses: {
+      200: {
+        content: { "application/json": { schema: BalancePaymentResponse } },
+        description: "What to pay with",
+      },
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "Nothing is owed (nothing_owed), too little to charge (amount_too_small), or the balance changed while the payment was being prepared (balance_changed)",
+      ),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+      503: errorBody(
+        "Payments are not configured, or under Stripe the card form is not (payments_unavailable); or the provider did not answer (payment_provider_unavailable)",
+      ),
+    },
+  });
+
+  app.openapi(balancePaymentRoute, async (c) => {
+    c.header("Cache-Control", "no-store");
+    const provider = providerFor(c, deps);
+    if (!provider) {
+      throw new ApiError(503, "payments_unavailable", "Payments are not configured here");
+    }
+    const publishableKey = provider.name === "stripe" ? stripePublishableKey(c.env) : null;
+    if (provider.name === "stripe" && !publishableKey) {
+      throw new ApiError(503, "payments_unavailable", "The card form is not configured here");
+    }
+    const { body, ctx } = await withManageSession(
+      c,
+      { limit: true },
+      async (trx, txCtx, session) => {
+        const opened = await openBalancePayment(trx, txCtx, {
+          bookingId: session.bookingId,
+          provider: provider.name,
+          minimumAmount: provider.minimumAmount("USD"),
+        });
+        switch (opened.kind) {
+          case "opened":
+            return { paymentId: opened.paymentId, amount: opened.amount };
+          case "not_found":
+            throw bookingGone();
+          case "nothing_owed":
+            throw new ApiError(409, "nothing_owed", "Nothing is owed on this booking");
+          case "amount_too_small":
+            throw new ApiError(
+              409,
+              "amount_too_small",
+              "What is left is too small to pay by card; contact the operator",
+            );
+          case "payments_unavailable":
+            throw new ApiError(503, "payments_unavailable", "Payments are not configured here");
+        }
+      },
+    );
+    // Outside any transaction, as for checkout.
+    const ready = await ensureBalanceProviderPayment(getDb(c), provider, ctx, body.paymentId);
+    if (ready.kind === "not_open") {
+      // Canceled, or the balance changed, while the provider answered.
+      throw new ApiError(409, "balance_changed", "The balance changed; read the booking again");
+    }
+    if (ready.kind !== "ready") {
+      c.get("log").warn("payment_provider_unavailable", {
+        "event.name": "payment_provider_unavailable",
+        "tidegrid.tenant_id": ctx.tenantId,
+        "error.type": ready.kind === "unavailable" ? ready.reason : ready.kind,
+      });
+      throw new ApiError(
+        503,
+        "payment_provider_unavailable",
+        "The payment provider did not answer; try again later",
+      );
+    }
+    const stripe =
+      ready.provider === "stripe" && publishableKey
+        ? await balanceStripeElement(c, ctx, body.paymentId, publishableKey)
+        : null;
+    if (ready.provider === "stripe" && !stripe) {
+      throw new ApiError(503, "payments_unavailable", "The card form is not configured here");
+    }
+    return c.json(
+      {
+        amount: body.amount,
+        payment: {
+          provider: ready.provider,
+          paymentRef: ready.paymentRef,
+          clientSecret: ready.clientSecret,
+          ...(stripe ? { stripe } : {}),
+        },
+      },
+      200,
+    );
   });
 
   const endRoute = createRoute({

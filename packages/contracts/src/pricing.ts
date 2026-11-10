@@ -136,6 +136,26 @@ export const OfferTaxRate = z.object({
   inclusive: z.boolean().describe("Included in prices rather than added to them"),
 });
 
+/** How a booking pays (W3-G2.8): in full, or a deposit now and the balance by a due date. */
+export const OfferDeposit = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("none") }),
+    z.object({
+      kind: z.literal("fixed"),
+      amount: Cents.describe("The deposit charged at booking"),
+      balanceDueDays: z.number().int().min(1).max(365).describe("Days before the trip"),
+    }),
+    z.object({
+      kind: z.literal("percent"),
+      bp: z.number().int().min(1).max(9999).describe("Basis points of the booking's total"),
+      balanceDueDays: z.number().int().min(1).max(365).describe("Days before the trip"),
+    }),
+  ])
+  .describe(
+    "Private charters only. A booking made on or after the due date, or whose deposit would be the whole total, pays in full",
+  );
+export type OfferDeposit = z.infer<typeof OfferDeposit>;
+
 export const TripOffer = z
   .object({
     tripId: Uuid,
@@ -155,6 +175,8 @@ export const TripOffer = z
     fees: z.array(OfferFee).describe("Mandatory fees added to every booking"),
     taxes: z.array(OfferTaxRate),
     policy: PolicyTerms,
+    // Optional so a client built after W3-G2.8 still reads an older API: absent means in full.
+    deposit: OfferDeposit.optional(),
   })
   .describe("What the operator sells for one bookable trip, under its current versions");
 export type TripOffer = z.infer<typeof TripOffer>;
@@ -275,9 +297,18 @@ export const QuoteTotals = z
     tax: Cents.describe("Taxes added on top of prices"),
     includedTax: Cents.describe("Taxes already inside prices; informational"),
     total: Cents.describe("subtotal - discount + fees + tax"),
-    amountDueNow: Cents.describe("What checkout charges for this quote"),
+    amountDueNow: Cents.describe("What checkout charges for this quote: the deposit, or the total"),
   })
   .describe("Every total is the sum of the lines above it");
+
+export const QuoteDeposit = z
+  .object({
+    amount: Cents.describe("Charged at checkout"),
+    balanceAmount: Cents.describe("Left to pay after the deposit"),
+    balanceDueAt: Instant.describe("When the balance is due; nothing is charged automatically"),
+  })
+  .describe("A private charter's deposit and balance (W3-G2.8)");
+export type QuoteDeposit = z.infer<typeof QuoteDeposit>;
 
 export const Quote = z
   .object({
@@ -292,6 +323,11 @@ export const Quote = z
     taxes: z.array(QuoteTax).describe("Per rate, summed over the lines"),
     promotion: QuotePromotion.nullable(),
     totals: QuoteTotals,
+    deposit: QuoteDeposit.nullable()
+      .optional()
+      .describe(
+        "Null, or absent from an API older than W3-G2.8, when the booking pays in full at checkout",
+      ),
     policy: PolicyTerms,
     quotedAt: Instant,
     expiresAt: Instant.describe("Checkout must start before this instant or ask for a new quote"),

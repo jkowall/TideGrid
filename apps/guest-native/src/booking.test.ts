@@ -88,6 +88,7 @@ function offer(kind: "shared_seat" | "private_charter" = "shared_seat"): TripOff
     ],
     fees: [],
     taxes: [],
+    deposit: { kind: "none" },
     policy: {
       version: 3,
       changeCutoffMinutes: 1440,

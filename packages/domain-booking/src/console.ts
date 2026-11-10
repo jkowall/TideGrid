@@ -10,6 +10,7 @@
  * checkout secret's hash, a client key, an idempotency key, a payload hash,
  * or a provider's raw payload, and provider payment ids leave masked.
  */
+
 import {
   type ActorType,
   type BookingChannel,
@@ -31,6 +32,7 @@ import {
   type TripSalesState,
 } from "@tidegrid/database";
 import { type RawBuilder, sql } from "kysely";
+import { type BalanceView, getBookingBalance } from "./balance-read.ts";
 import { iso, isoOrNull } from "./views.ts";
 
 // Views ------------------------------------------------------------------------------
@@ -200,6 +202,8 @@ export interface BookingDetailView {
     requestedAt: string;
     settledAt: string | null;
   } | null;
+  /** A private charter's balance (W3-G2.8); null when it paid in full. */
+  balance: BalanceView | null;
   timeline: { kind: TimelineKind; at: string }[];
 }
 
@@ -848,6 +852,9 @@ export async function getBookingDetail(
       succeededAt: isoOrNull(row.succeeded_at),
     },
     refund,
+    balance: await getBookingBalance(trx, tenantId, bookingId, {
+      withReasons: options.withBooker,
+    }),
     timeline,
   };
 }

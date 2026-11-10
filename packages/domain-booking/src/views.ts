@@ -67,7 +67,7 @@ export async function loadSessionView(
   const { rows } = await sql<ViewRow>`
     select s.id, s.state, s.state = 'open' and s.expires_at <= now() as lapsed,
            s.quote_id, s.trip_id, s.party_size, s.expires_at, s.created_at,
-           o.total_amount, o.currency, b.reference,
+           p.amount as total_amount, o.currency, b.reference,
            r.state as refund_state, r.amount as refund_amount
       from checkout_sessions s
       join orders o on o.tenant_id = s.tenant_id and o.checkout_session_id = s.id

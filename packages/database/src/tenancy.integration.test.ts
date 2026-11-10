@@ -735,6 +735,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         billing_plans: ["INSERT", "SELECT"],
         fee_invoices: ["INSERT", "SELECT"],
         payment_reconciliation_exceptions: ["INSERT", "SELECT"],
+        // Deposits and balances (0033, W3-G2.8): a due date change is
+        // append-only; a balance payment moves with verified events.
+        balance_due_changes: ["INSERT", "SELECT"],
+        balance_payments: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -803,6 +807,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         tenant_deletion_requests: ["state"],
         // Payment reconciliation (0031): a dispute moves with its verified events.
         payment_disputes: ["last_event_id", "status"],
+        // Deposits and balances (0033): a balance payment's transition and evidence.
+        balance_payments: ["failed_event_id", "provider_payment_id", "state", "succeeded_event_id"],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

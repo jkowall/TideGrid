@@ -85,7 +85,9 @@ export const CheckoutSession = z
     quoteId: Uuid,
     tripId: Uuid,
     partySize: z.number().int().min(1),
-    amount: Cents.describe("What the payment charges: the quote's total"),
+    amount: Cents.describe(
+      "What the payment charges: the quote's total, or its deposit for a private charter that takes one",
+    ),
     currency: z.literal("USD"),
     expiresAt: Instant.describe(
       "Pay before this instant. The seats are held until then; a later payment is booked only if they are still free, and refunded otherwise",

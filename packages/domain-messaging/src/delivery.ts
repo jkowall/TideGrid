@@ -69,7 +69,15 @@ import {
 } from "./adapter.ts";
 import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
-import { REMINDER_TOO_LATE, TRIP_REMINDER_TEMPLATE, tripReminderTiming } from "./reminders.ts";
+import {
+  BALANCE_LINK_TEMPLATE,
+  BALANCE_REMINDER_TEMPLATE,
+  BALANCE_SETTLED,
+  balanceEmailTiming,
+  REMINDER_TOO_LATE,
+  TRIP_REMINDER_TEMPLATE,
+  tripReminderTiming,
+} from "./reminders.ts";
 import { fillLinkSlot } from "./render.ts";
 import { ADDRESS_SUPPRESSED, isSuppressed, type SenderPolicy, senderAddressFor } from "./sender.ts";
 
@@ -483,6 +491,25 @@ async function claimOne(
           messageId: found.id,
           attempt: found.attempts,
           code: REMINDER_TOO_LATE,
+        } as const;
+      }
+    }
+    // A balance email (W3-G2.8) is only worth sending while something is
+    // owed: one whose balance was paid, or whose booking was canceled, since
+    // it was written is canceled as balance_settled, with no provider call.
+    if (found.template === BALANCE_REMINDER_TEMPLATE || found.template === BALANCE_LINK_TEMPLATE) {
+      const timing = await balanceEmailTiming(trx, ctx.tenantId, found.booking_id);
+      if (timing === "busy") return { kind: "passed", messageId: found.id } as const;
+      if (timing === "settled") {
+        await sql`
+          update email_messages set state = 'canceled', last_error_code = ${BALANCE_SETTLED}
+           where tenant_id = ${ctx.tenantId} and id = ${found.id}
+             and state in ('queued', 'sending')`.execute(trx);
+        return {
+          kind: "canceled",
+          messageId: found.id,
+          attempt: found.attempts,
+          code: BALANCE_SETTLED,
         } as const;
       }
     }

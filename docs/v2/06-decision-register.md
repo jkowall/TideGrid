@@ -19,6 +19,29 @@ At 16:46 UTC on 2026-11-10 the owner chose "Accept all as recommended" on the ca
 - **W3-OPS-1 D5 stays open.** Production's waiver evidence lock period is a legal retention choice, asked again before production holds a real waiver.
 - **Environments.** The same day the owner said "you can set those up anytime you want on cloudflare". Staging is set up now on the existing account. The production Neon project waits until a pilot is close, to keep Neon spending low.
 
+### 2026-11-10: W3-G2.8, private-charter deposits and balances, code only (owner go; coordinator defaults pending owner confirmation)
+
+On 2026-11-10 the owner wrote "lets start wave 3 and fix the other things waiting on me", and the coordinator passed it on as a go for the rest of the Wave 3 code-only work. The same limits as W3-G2.9 and W3-G2.10 below apply: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed.
+
+W3-G2.8 lands as migration `0033` and the [database contract](../../packages/database/README.md#deposits-and-balances-0033), with [docs/v2/02](02-product-scope.md#private-charter-deposit-and-balance) as the scope. What it adds:
+
+- **Deposit terms.** A private charter's price list version takes no deposit (the default), a fixed amount, or a percentage, with one balance due a whole number of days before the trip. The quote shows the total, the deposit, what is left, and the due date before the guest pays; checkout charges the deposit. The quote and the order keep the deposit and due date, so later price list changes never rewrite a booking.
+- **Paying in full anyway.** A booking pays in full when its terms take no deposit, when the deposit would be the whole total or nothing, or when the due date has already come at the quote.
+- **The balance.** The database computes what came in (the deposit, card payments of the balance, and external payments) and what is owed. Staff see it on the booking with a state: paid, scheduled, due (within 7 days of the due date), overdue, or canceled. The guest sees it on their booking page and pays it there by card, for exactly what is owed. Only a verified provider event marks a balance payment paid. Nothing is charged without the guest, and nothing cancels a booking for an unpaid balance.
+- **Staff.** Owners move the due date with a reason (`bookings.override`); owners and booking staff email the guest the balance link, at most 3 an hour (`messages.resend`); a balance paid in cash, check, or otherwise is recorded as an external payment (W3-G2.10).
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: reminders 7 days and 1 day before the due date.** Each is checked when it is due and dropped when nothing is owed any more. They move with the due date.
+- **D2: a percentage deposit is a share of the booking's total, taxes and fees included.** docs/v2/02 says "of the charter price"; taking the total keeps the deposit and the balance in the same terms the guest sees, and a deposit that leaves the taxes all in the balance would surprise them.
+- **D3: an overdue balance only shows.** The booking stays confirmed; staff decide what to do.
+- **D4: a refund cancellation of a deposit booking goes to the operator.** docs/v2/02 leaves "whether a private-charter deposit is refundable" open, so the guest's own cancellation of a deposit booking is refused when the policy would refund (`remedy_requires_operator`), and staff cancel it with the console's choices (W3-G2.9).
+- **D5: refunds of a balance paid by card are outside TideGrid for now.** A staff card refund returns at most the deposit payment; the rest is returned at the provider and recorded as an external refund. A guest who pays twice shows as overpaid for staff to return.
+
+Not built: a staff screen for deposit terms (they are set through the pricing service, as other price list terms are today), console and guest-site screens for the balance (the API carries it), and the seed's charters keep paying in full.
+
+Known gaps from review, to close before an operator takes balances live: a dispute on a balance card payment is not matched to it (it is recorded as unmatched, and the money still counts as paid in); a balance payment that was replaced or whose booking was canceled is not canceled at the provider, so a tab left open can still pay it (the money shows as overpaid for staff to return); and an overpayment above the booking's total cannot yet be recorded as returned, because external refunds stop at the total (it is returned at the provider and stays shown as overpaid).
+
 ### 2026-11-09: W3-G2.10, external payment and reconciliation (owner decision; coordinator defaults pending owner confirmation)
 
 Under the same owner decision as W3-G2.9 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.

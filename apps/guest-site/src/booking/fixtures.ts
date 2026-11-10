@@ -106,6 +106,7 @@ export const offer: TripOffer = {
     { name: "County surtax", ratePpm: 10_000, inclusive: false },
     { name: "State sales tax", ratePpm: 60_000, inclusive: false },
   ],
+  deposit: { kind: "none" },
   policy,
 };
 
@@ -165,6 +166,7 @@ export const charterOffer: TripOffer = {
   fees: [
     { code: "fuel", name: "Fuel surcharge", unitAmount: 7500, basis: "per_booking", taxable: true },
   ],
+  deposit: { kind: "none" },
   policy: {
     ...policy,
     changeCutoffMinutes: 10_080,
@@ -337,6 +339,7 @@ export function sharedQuote(options: { promotion?: boolean; quoteId?: string } =
         }
       : null,
     totals,
+    deposit: null,
     policy,
     quotedAt,
     expiresAt,
@@ -404,6 +407,7 @@ export function charterQuote(): Quote {
       total: 136_425,
       amountDueNow: 136_425,
     },
+    deposit: null,
     policy: charterOffer.policy,
     quotedAt,
     expiresAt,

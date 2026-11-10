@@ -55,3 +55,39 @@ export async function tripReminderTiming(
       as found`.execute(trx);
   return exists[0]?.found === true ? "busy" : "too_late";
 }
+
+/** A private charter's balance reminder (W3-G2.8), 7 days and 1 day before the due date. */
+export const BALANCE_REMINDER_TEMPLATE = "booking_balance_reminder";
+/** The balance link staff send on request (W3-G2.8). */
+export const BALANCE_LINK_TEMPLATE = "booking_balance_link";
+/** Days before the due date each balance reminder goes out (D1, coordinator default). */
+export const BALANCE_REMINDER_LEAD_DAYS = [7, 1] as const;
+/** Why a balance email was canceled at claim: nothing is owed, or the booking was canceled. */
+export const BALANCE_SETTLED = "balance_settled";
+
+/**
+ * Whether a balance email for this booking may go out now: `settled` when
+ * nothing is owed, the booking was canceled, its trip has left, or the
+ * booking is gone; `busy` when another transaction holds the booking (a
+ * cancellation, a payment recorded), so the run passes it over.
+ */
+export async function balanceEmailTiming(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string | null,
+): Promise<"ok" | "settled" | "busy"> {
+  if (bookingId === null) return "settled";
+  const { rows } = await sql<{ ok: boolean }>`
+    select b.state = 'confirmed' and t.starts_at > now()
+           and coalesce((select x.owed from app.booking_balance(b.tenant_id, b.id) x), 0) > 0 as ok
+      from bookings b
+      join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}
+       for share of b skip locked`.execute(trx);
+  const row = rows[0];
+  if (row) return row.ok === true ? "ok" : "settled";
+  const { rows: exists } = await sql<{ found: boolean }>`
+    select exists (select 1 from bookings where tenant_id = ${tenantId} and id = ${bookingId})
+      as found`.execute(trx);
+  return exists[0]?.found === true ? "busy" : "settled";
+}

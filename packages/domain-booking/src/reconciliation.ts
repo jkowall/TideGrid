@@ -324,7 +324,8 @@ async function refundable(trx: TenantTransaction, tenantId: string, bookingId: s
   const { rows } = await sql<{ refundable: number }>`
     select greatest(0, least(
              coalesce(case when p.state = 'succeeded' then p.amount end, 0) - coalesce(r.refunded, 0)
-               - coalesce(d.lost, 0) + coalesce(s.paid, 0) - coalesce(s.refunded, 0),
+               - coalesce(d.lost, 0) + coalesce(s.paid, 0) - coalesce(s.refunded, 0)
+               + coalesce(bp.paid, 0),
              o.total_amount - coalesce(r.refunded, 0) - coalesce(s.refunded, 0)))::int as refundable
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
@@ -343,6 +344,11 @@ async function refundable(trx: TenantTransaction, tenantId: string, bookingId: s
                sum(x.amount) filter (where x.kind = 'refund') as refunded
           from external_settlements x
          where x.tenant_id = b.tenant_id and x.booking_id = b.id) s on true
+      left join lateral (
+        -- Card payments of a charter's balance (W3-G2.8).
+        select sum(x.amount) as paid from balance_payments x
+         where x.tenant_id = b.tenant_id and x.booking_id = b.id
+           and x.state = 'succeeded') bp on true
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
   return rows[0]?.refundable ?? 0;
 }
@@ -1017,7 +1023,10 @@ export async function reconciliationReport(
                         where b.tenant_id = a.tenant_id and b.id = a.booking_id), 0)
              + coalesce((select sum(x.amount) from external_settlements x
                           where x.tenant_id = a.tenant_id and x.booking_id = a.booking_id
-                            and x.kind = 'payment'), 0) as received
+                            and x.kind = 'payment'), 0)
+             + coalesce((select sum(x.amount) from balance_payments x
+                          where x.tenant_id = a.tenant_id and x.booking_id = a.booking_id
+                            and x.state = 'succeeded'), 0) as received
         from fee_assessments a, bounds
        where a.tenant_id = ${tenantId} and a.created_at >= bounds.f and a.created_at < bounds.u
     )

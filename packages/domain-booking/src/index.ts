@@ -1,4 +1,31 @@
 // Guest self-service (lane 1, G2.11c): cancellation, management, and email.
+
+// Private-charter deposits and balances (W3-G2.8).
+export {
+  BALANCE_PAYMENT_REUSE_HOURS,
+  BALANCE_REMINDER_MIN_NOTICE_HOURS,
+  type BalancePaymentEventOutcome,
+  type ChangeDueDateResult,
+  cancelQueuedBalanceEmails,
+  changeBalanceDueDate,
+  type EnsureBalancePaymentResult,
+  enqueueBalanceReminders,
+  ensureBalanceProviderPayment,
+  MAX_BALANCE_LINKS_PER_HOUR,
+  type OpenBalancePaymentResult,
+  onBalancePaymentEvent,
+  openBalancePayment,
+  type SendBalanceLinkResult,
+  sendBalanceLink,
+} from "./balance.ts";
+export {
+  BALANCE_DUE_WINDOW_DAYS,
+  type BalanceDueChangeView,
+  type BalancePaymentView,
+  type BalanceState,
+  type BalanceView,
+  getBookingBalance,
+} from "./balance-read.ts";
 export {
   type CancelBookingResult,
   type CancellationRecord,

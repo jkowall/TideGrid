@@ -340,7 +340,15 @@ export interface PriceListVersionsTable extends TermsAuthor {
   currency: InsertDefault<"USD">;
   created_txid: CreatedTxid;
   reason: Insert<string>;
+  /** A charter's deposit terms (0033, W3-G2.8); `none` pays in full. */
+  deposit_kind: InsertDefault<DepositKind>;
+  deposit_amount: InsertDefault<number | null>;
+  deposit_bp: InsertDefault<number | null>;
+  balance_due_days: InsertDefault<number | null>;
 }
+
+/** How a charter's booking pays (0033): in full, a fixed deposit, or a percentage of the total. */
+export type DepositKind = "none" | "fixed" | "percent";
 
 export interface PriceListItemsTable {
   tenant_id: TenantColumn;
@@ -451,6 +459,9 @@ export interface QuotesTable {
   tax_amount: Insert<number>;
   included_tax_amount: Insert<number>;
   total_amount: Insert<number>;
+  /** The deposit checkout charges, and when the balance is due; null pays in full (0033). */
+  deposit_amount: InsertDefault<number | null>;
+  balance_due_at: ColumnType<Date | null, Date | string | null | undefined, never>;
   quoted_at: Instant;
   expires_at: Instant;
   created_at: CreatedAt;
@@ -667,6 +678,9 @@ export interface OrdersTable {
   tax_amount: Fixed<number>;
   included_tax_amount: Fixed<number>;
   total_amount: Fixed<number>;
+  /** The quote's deposit and balance due instant (0033); null paid in full. */
+  deposit_amount: FixedDefault<number | null>;
+  balance_due_at: ColumnType<Date | null, Date | string | null | undefined, never>;
   status: ColumnType<OrderStatus, "pending" | undefined, OrderStatus>;
   created_at: Stamped;
   created_txid: CreatedTxid;
@@ -1425,6 +1439,8 @@ export interface Database
   billing_plans: BillingPlansTable;
   fee_invoices: FeeInvoicesTable;
   payment_reconciliation_exceptions: PaymentReconciliationExceptionsTable;
+  balance_due_changes: BalanceDueChangesTable;
+  balance_payments: BalancePaymentsTable;
 }
 
 /** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
@@ -1657,6 +1673,44 @@ export interface PaymentReconciliationExceptionsTable {
   provider_status: FixedDefault<string | null>;
   provider_amount: FixedDefault<number | null>;
   created_at: Stamped;
+}
+
+/** A staff move of a booking's balance due date (0033, W3-G2.8). Append-only; the newest wins. */
+export interface BalanceDueChangesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  due_at: ColumnType<Date, Date | string, never>;
+  reason: Fixed<string>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+export type BalancePaymentState = "pending" | "succeeded" | "failed" | "abandoned";
+
+/** A card payment of a booking's balance (0033). Moves only as its trigger allows. */
+export interface BalancePaymentsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  provider: Fixed<PaymentProviderName>;
+  account_ref: Fixed<string>;
+  idempotency_key: Fixed<string>;
+  provider_payment_id: ColumnType<string | null, never, string>;
+  amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  state: ColumnType<BalancePaymentState, "pending" | undefined, BalancePaymentState>;
+  succeeded_event_id: ColumnType<string | null, never, string>;
+  failed_event_id: ColumnType<string | null, never, string>;
+  created_at: Stamped;
+  provider_recorded_at: Stamp;
+  succeeded_at: Stamp;
+  failed_at: Stamp;
+  updated_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
 }
 
 export type { Generated, GeneratedAlways };

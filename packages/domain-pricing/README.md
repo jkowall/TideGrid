@@ -104,6 +104,10 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 
 `tools/seed/src/pricing.ts` gives every demo product a price list and a policy before the catalog seed publishes it, and gives each operator its tax rates and one promotion code. Demo Harbor adds a state and a county tax and offers `HARBOR10`, 10% off any trip. Demo Reef's prices include a general excise tax and it offers `REEF25`, $25 off its dive and its snorkel sail. Reruns add nothing.
 
+## Deposits (W3-G2.8)
+
+`deposit.ts`. A charter's price list version may carry `deposit` terms: `{ kind: "none" }` (the default), `{ kind: "fixed", amount, balanceDueDays }`, or `{ kind: "percent", bp, balanceDueDays }`, where the percentage is of the booking's total (D2 in the [decision register](../../docs/v2/06-decision-register.md#decision-log)). `depositFor` gives the deposit, what is left, and the due date (whole days of 24 hours before the trip), or null when the booking pays in full: no terms, a deposit of nothing or the whole total, or a due date already come. The database computes the same (`app.deposit_for`, 0033) and refuses a quote that disagrees. The offer shows the terms; the quote shows `deposit` and sets `amountDueNow` to it. A shared-seat version refuses deposit terms (`deposit_not_allowed`).
+
 ## Deferred and known gaps
 
 - Deposits and balances (G2.8), refunds, credits, and applying policy remedies (G2.9 and G2.11), equipment rentals (G3.2), trip cards and credit as tender (G3.5), and tips (G3.4) are not in a quote yet. The order (G2.7) copies a quote's lines.

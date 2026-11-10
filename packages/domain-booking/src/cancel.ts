@@ -38,6 +38,8 @@ import { sql } from "kysely";
 import { ownerRefFor } from "./checkout.ts";
 import { appendCreditEntry, creditBalanceForBooking, ensureCreditAccount } from "./credits.ts";
 import {
+  BALANCE_LINK_EMAIL,
+  BALANCE_REMINDER_EMAIL,
   CONFIRMATION_TEMPLATE,
   enqueueCancellationEmail,
   MANAGE_LINK_TEMPLATE,
@@ -106,6 +108,10 @@ interface TermsRow {
   lost_disputed: number;
   /** Payments staff recorded outside the card flow (W3-G2.10). */
   external_paid: number;
+  /** A private charter that took a deposit (W3-G2.8). */
+  has_deposit: boolean;
+  /** Card payments of a charter's balance that succeeded (W3-G2.8). */
+  balance_paid: number;
 }
 
 /** Half up to the cent, as the database computes it. */
@@ -129,7 +135,12 @@ function termsOf(bookingId: string, row: TermsRow): CancellationTerms {
             // So would a refund of what a lost dispute already took back.
             bp > 0 && (row.external_refunded > 0 || row.lost_disputed > 0)
             ? "remedy_requires_operator"
-            : null;
+            : // A deposit and a balance (W3-G2.8): whether a deposit comes back is
+              // the operator's call (docs/v2/02), and a balance paid later is not
+              // the card payment the policy refunds.
+              bp > 0 && row.has_deposit
+              ? "remedy_requires_operator"
+              : null;
   return {
     bookingId,
     reference: row.reference,
@@ -174,7 +185,11 @@ async function termsRow(
                         and d.status = 'lost'), 0)::int as lost_disputed,
            coalesce((select sum(x.amount) from external_settlements x
                       where x.tenant_id = b.tenant_id and x.booking_id = b.id
-                        and x.kind = 'payment'), 0)::int as external_paid
+                        and x.kind = 'payment'), 0)::int as external_paid,
+           o.deposit_amount is not null as has_deposit,
+           coalesce((select sum(bp.amount) from balance_payments bp
+                      where bp.tenant_id = b.tenant_id and bp.booking_id = b.id
+                        and bp.state = 'succeeded'), 0)::int as balance_paid
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
@@ -545,7 +560,7 @@ export async function staffCancelBooking(
   const cardLimit = Math.min(
     row.order_total - row.external_refunded,
     row.paid - row.lost_disputed,
-    row.paid + row.external_paid - row.lost_disputed - row.external_refunded,
+    row.paid + row.external_paid + row.balance_paid - row.lost_disputed - row.external_refunded,
   );
   if (cardRefund > 0 && cardRefund > cardLimit) {
     return {
@@ -711,12 +726,21 @@ async function applyCancellation(
     select id from email_messages
      where tenant_id = ${tenantId} and booking_id = ${bookingId}
        and template in (${CONFIRMATION_TEMPLATE.key}, ${MANAGE_LINK_TEMPLATE.key},
-                        ${REMINDER_TEMPLATE.key})
+                        ${REMINDER_TEMPLATE.key}, ${BALANCE_REMINDER_EMAIL.key},
+                        ${BALANCE_LINK_EMAIL.key})
        and state in ('queued', 'sending')
      order by id`.execute(trx);
   for (const message of pending) {
     await cancelMessage(trx, ctx, message.id, { code: "booking_canceled", revokeLinks: false });
   }
+  // A balance payment still open (W3-G2.8) is abandoned: nothing more is
+  // asked of a canceled booking. One the guest pays anyway is recorded, and
+  // shows on the balance as overpaid, money staff return (balance-read.ts).
+  await sql`
+    update balance_payments set state = 'abandoned'
+     where tenant_id = ${tenantId} and booking_id = ${bookingId} and state = 'pending'`.execute(
+    trx,
+  );
   await enqueueCancellationEmail(trx, ctx, bookingId);
   await hooks.bookingCanceled?.(trx, ctx, {
     bookingId,
