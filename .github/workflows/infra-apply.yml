@@ -116,6 +116,9 @@ jobs:
           terraform -chdir="$ROOT" show -json "$RUNNER_TEMP/env.tfplan" > "$RUNNER_TEMP/plan.json"
           jq -r '.resource_changes[] | select(.mode == "managed") | select(.change.actions != ["no-op"]) | "\(.change.actions | join("+"))\t\(.address)"' \
             "$RUNNER_TEMP/plan.json" > "$RUNNER_TEMP/changes.txt"
+          # Output changes count too, so an output-only plan still applies.
+          jq -r '(.output_changes // {}) | to_entries[] | select(.value.actions != ["no-op"]) | "\(.value.actions | join("+"))\toutput.\(.key)"' \
+            "$RUNNER_TEMP/plan.json" >> "$RUNNER_TEMP/changes.txt"
           count=$(wc -l < "$RUNNER_TEMP/changes.txt")
           echo "changes=$count" >> "$GITHUB_OUTPUT"
           {
@@ -126,7 +129,7 @@ jobs:
             sed 's/\t/ | /; s/^/| /; s/$/ |/' "$RUNNER_TEMP/changes.txt"
           } >> "$GITHUB_STEP_SUMMARY"
           # Runbook rule: no destroy or replace without a separate go.
-          if grep -q 'delete' "$RUNNER_TEMP/changes.txt"; then
+          if grep -v $'\toutput\.' "$RUNNER_TEMP/changes.txt" | grep -q 'delete'; then
             echo "::error::the plan deletes or replaces something; stop and ask the owner"; exit 1
           fi
 
@@ -198,14 +201,25 @@ jobs:
           AWS_REQUEST_CHECKSUM_CALCULATION: when_required
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
-          if terraform -chdir="$ROOT" state pull > "$RUNNER_TEMP/before.tfstate" 2>/dev/null && [ -s "$RUNNER_TEMP/before.tfstate" ]; then
-            aws s3 cp "$RUNNER_TEMP/before.tfstate" \
-              "s3://tidegrid-terraform-state/backups/${{ inputs.environment }}/$(date -u +%Y%m%dT%H%M%SZ)-run${{ github.run_id }}.tfstate" \
-              --endpoint-url "https://${TF_VAR_cloudflare_account_id}.r2.cloudflarestorage.com" --region auto --only-show-errors
-          else
-            echo "no state yet (first apply)"
+          # Fail closed: skip the copy only when the state object is
+          # confirmed missing (first apply); any other read error stops here.
+          r2="https://${TF_VAR_cloudflare_account_id}.r2.cloudflarestorage.com"
+          src="s3://tidegrid-terraform-state/tidegrid/${{ inputs.environment }}.tfstate"
+          set +e
+          head=$(aws s3api head-object --bucket tidegrid-terraform-state \
+            --key "tidegrid/${{ inputs.environment }}.tfstate" \
+            --endpoint-url "$r2" --region auto 2>&1)
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ]; then
+            if printf '%s' "$head" | grep -qE '\(404\)|Not Found|NoSuchKey'; then
+              echo "no state yet (first apply)"; exit 0
+            fi
+            echo "::error::could not read the state object; not applying without a backup"; exit 1
           fi
-          rm -f "$RUNNER_TEMP/before.tfstate"
+          aws s3 cp "$src" \
+            "s3://tidegrid-terraform-state/backups/${{ inputs.environment }}/$(date -u +%Y%m%dT%H%M%SZ)-run${{ github.run_id }}.tfstate" \
+            --endpoint-url "$r2" --region auto --only-show-errors
 
       - name: Apply the saved plan
         run: terraform -chdir="$ROOT" apply -lock-timeout=5m "$RUNNER_TEMP/plan/env.tfplan"
