@@ -42,6 +42,8 @@ export const MANAGE_LINK_TEMPLATE = { key: "booking_manage_link", version: 1 } a
 /** Version 2: the refund is on its way, not already back (review M1). */
 export const CANCELED_TEMPLATE = { key: "booking_canceled", version: 2 } as const;
 export const REFUND_FAILED_TEMPLATE = { key: "booking_refund_failed", version: 1 } as const;
+/** A booking moved to another trip (W3-G2.11-rest). */
+export const RESCHEDULED_TEMPLATE = { key: "booking_rescheduled", version: 1 } as const;
 /** The trip reminder, a day before departure (W3-G2.16-rest). */
 export const REMINDER_TEMPLATE = { key: TRIP_REMINDER_TEMPLATE, version: 1 } as const;
 
@@ -255,6 +257,7 @@ export async function enqueueReminderEmail(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
+  options: ComposeOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   const { rows } = await sql<{ due: Date; worth: boolean }>`
     select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
@@ -287,7 +290,8 @@ export async function enqueueReminderEmail(
     { kind: "note", text: demoNote },
   ];
   const result = await enqueueMessage(trx, ctx, {
-    dedupeKey: `booking.reminder:${bookingId}`,
+    // A moved booking's reminder (W3-G2.11-rest) names the move in its key.
+    dedupeKey: options.dedupeKey ?? `booking.reminder:${bookingId}`,
     template: REMINDER_TEMPLATE.key,
     templateVersion: REMINDER_TEMPLATE.version,
     to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
@@ -438,6 +442,58 @@ export async function enqueueCancellationEmail(
     to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
     bookingId,
     content: { subject: subject(`Booking ${detail.reference} canceled`, detail), blocks },
+  });
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
+}
+
+/**
+ * A booking moved to another trip (W3-G2.11-rest), in the moving
+ * transaction, once per move: the new time and place, the old time for
+ * reference, and a fresh management link. The price did not change.
+ */
+export async function enqueueRescheduledEmail(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+  move: { rescheduleId: string; fromStartsAt: string },
+): Promise<{ messageId: string; duplicate: boolean }> {
+  const detail = await detailFor(trx, ctx.tenantId, bookingId);
+  const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
+  const was = tripWhen(move.fromStartsAt, detail.trip.timeZone);
+  const blocks: EmailBlock[] = [
+    { kind: "heading", text: "Your booking has moved" },
+    {
+      kind: "paragraph",
+      text: clean(
+        `Hi ${firstName(detail.booker.name)}. Booking ${detail.reference} is now for ${detail.trip.productName}, ${when}. It was for ${was}.`,
+        2000,
+      ),
+    },
+    { kind: "details", rows: tripRows(detail) },
+    {
+      kind: "paragraph",
+      text: "The price is unchanged: nothing more was charged and nothing was refunded.",
+    },
+    { kind: "action", label: "Manage your booking", href: "access_link" },
+    { kind: "note", text: linkNote },
+    { kind: "note", text: demoNote },
+  ];
+  const result = await enqueueMessage(trx, ctx, {
+    dedupeKey: `booking.rescheduled:${move.rescheduleId}`,
+    template: RESCHEDULED_TEMPLATE.key,
+    templateVersion: RESCHEDULED_TEMPLATE.version,
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
+    bookingId,
+    content: {
+      subject: subject(`Booking ${detail.reference} moved`, detail),
+      preview: singleLine(`Now ${when}.`, 200),
+      blocks,
+    },
+    accessLink: {
+      purpose: "booking_manage",
+      path: MANAGE_PATH,
+      ttlSeconds: MANAGE_LINK_TTL_SECONDS,
+    },
   });
   return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }

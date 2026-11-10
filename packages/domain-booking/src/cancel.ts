@@ -35,7 +35,6 @@ import {
 import { releaseHold } from "@tidegrid/domain-inventory";
 import { cancelMessage } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
-import { ownerRefFor } from "./checkout.ts";
 import { appendCreditEntry, creditBalanceForBooking, ensureCreditAccount } from "./credits.ts";
 import {
   BALANCE_LINK_EMAIL,
@@ -44,6 +43,7 @@ import {
   enqueueCancellationEmail,
   MANAGE_LINK_TEMPLATE,
   REMINDER_TEMPLATE,
+  RESCHEDULED_TEMPLATE,
 } from "./emails.ts";
 import { feeReversalFor } from "./fee-ledger.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
@@ -670,9 +670,16 @@ async function applyCancellation(
     }
   }
 
+  // The hold's owner is whoever took it: the checkout, or the booking's last
+  // move to another trip (W3-G2.11-rest).
+  const { rows: holdOwner } = await sql<{ owner_ref: string }>`
+    select owner_ref from capacity_holds
+     where tenant_id = ${tenantId} and id = ${row.hold_id}`.execute(trx);
+  const ownerRef = holdOwner[0]?.owner_ref;
+  if (!ownerRef) throw new Error("a canceled booking's hold was not found");
   const released = await releaseHold(trx, ctx, {
     holdId: row.hold_id,
-    ownerRef: ownerRefFor(row.checkout_session_id),
+    ownerRef,
     reason: holdReason,
   });
   if (released.kind !== "released") {
@@ -727,7 +734,7 @@ async function applyCancellation(
      where tenant_id = ${tenantId} and booking_id = ${bookingId}
        and template in (${CONFIRMATION_TEMPLATE.key}, ${MANAGE_LINK_TEMPLATE.key},
                         ${REMINDER_TEMPLATE.key}, ${BALANCE_REMINDER_EMAIL.key},
-                        ${BALANCE_LINK_EMAIL.key})
+                        ${BALANCE_LINK_EMAIL.key}, ${RESCHEDULED_TEMPLATE.key})
        and state in ('queued', 'sending')
      order by id`.execute(trx);
   for (const message of pending) {

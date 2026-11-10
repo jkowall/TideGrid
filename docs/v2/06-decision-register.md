@@ -19,6 +19,28 @@ At 16:46 UTC on 2026-11-10 the owner chose "Accept all as recommended" on the ca
 - **W3-OPS-1 D5 stays open.** Production's waiver evidence lock period is a legal retention choice, asked again before production holds a real waiver.
 - **Environments.** The same day the owner said "you can set those up anytime you want on cloudflare". Staging is set up now on the existing account. The production Neon project waits until a pilot is close, to keep Neon spending low.
 
+### 2026-11-10: W3-G2.11-rest, moving a whole booking to another trip, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the first part of W3-G2.11-rest; removing a participant, participant invitations, profile changes, and the two-tenant and browser checks for them follow in their own pull request.
+
+It lands as migration `0034` and the [database contract](../../packages/database/README.md#rescheduling-0034), with [docs/v2/02](02-product-scope.md#customer-and-staff-changes) as the scope. What it adds:
+
+- **A move is one transaction.** Seats on the new trip are taken first, by a hold the move owns and confirms at once; then the booking points at the new trip and its old seats go back on sale. If the new trip has no room, nothing changes. The database refuses a booking whose trip or hold changes without its move row, and at commit checks that the old seats were given back.
+- **Who may move it.** The guest, from their booking page, and owners and booking staff (`bookings.reschedule`), before the policy's change cutoff. At or after the cutoff only an owner, with a reason (`bookings.override`); the database refuses an override from anyone but staff. No one moves a booking after its trip has left.
+- **Email.** The guest is emailed the new time with a fresh link to the booking. The trip reminder waiting for the old day is canceled (`booking_moved`) and a new one is written for the new trip.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: the booking keeps the price it was sold at.** A move neither charges nor refunds, even when the new trip's price list would ask more or less today. docs/v2/02 asks for "accept and pay a price increase or choose the configured remedy for a price decrease"; that needs priced moves with a payment or a refund inside the move, and is left for a later step.
+- **D2: only another trip of the same product.** Moving to a different trip type would change the price and the policy, so it is a cancellation and a new booking.
+- **D3: the new trip must be on sale for the party now,** by the same rules as a new hold: published, before its booking cutoff, clear of blackouts, and with room. Staff use the same rules; there is no override of capacity or of the booking cutoff.
+- **D4: a private charter with a balance still owed** moves only to a trip that leaves after the balance's due date; otherwise staff move the due date first.
+- **D5: the cancellation cutoff follows the trip the booking is on now.** After an owner moves a booking past its cutoff to a later trip, the guest's cancellation terms are those of the new trip, so a full refund may be open again. The owner chooses that when overriding; keeping the first trip's cutoff instead is a later change if the owner prefers it.
+
+Not built: console and guest-site screens (the API carries it), moving part of a party, and moves of pooled equipment or trip-card units, which do not exist yet.
+
+Known gaps: a waiver reminder already sent for the old trip's 72-hour or 24-hour slot is not sent again for the new trip; a waiver link sent before the move still expires when the old trip ends, and waiver emails already sent name the old date (staff send the waiver again); the checkout page's own status still names the trip the guest first booked (the booking page shows the new one); and the old trip's reminder email, if it was already sent, is not taken back. The tenant data export also gains the deposit and balance tables from W3-G2.8, which it had missed, and the moves.
+
 ### 2026-11-10: W3-G2.8, private-charter deposits and balances, code only (owner go; coordinator defaults pending owner confirmation)
 
 On 2026-11-10 the owner wrote "lets start wave 3 and fix the other things waiting on me", and the coordinator passed it on as a go for the rest of the Wave 3 code-only work. The same limits as W3-G2.9 and W3-G2.10 below apply: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed.

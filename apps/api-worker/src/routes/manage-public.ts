@@ -5,6 +5,7 @@ import {
   CancelBookingResponse,
   CancellationTermsResponse,
   CheckoutSessionParams,
+  GuestRescheduleResponse,
   IdempotencyKey,
   type ManagedBooking,
   ManagedBookingResponse,
@@ -16,6 +17,8 @@ import {
   ParticipantInput,
   ParticipantPosition,
   ParticipantResponse,
+  ReschedulePreviewResponse,
+  RescheduleRequest,
   StripeElementConfig,
 } from "@tidegrid/contracts";
 import {
@@ -41,9 +44,11 @@ import {
   openManageSession,
   openManageSessionFromCheckout,
   previewCancellation,
+  previewReschedule,
   putParticipant,
   renewManageLink,
   requestManageLink,
+  rescheduleBooking,
   settleRefund,
 } from "@tidegrid/domain-booking";
 import { type GuestSession, revokeGuestSession } from "@tidegrid/domain-messaging";
@@ -62,6 +67,7 @@ import {
   withPublicTenant,
 } from "../public-tenant.ts";
 import { stripePublishableKey } from "./checkout-public.ts";
+import { previewJson, rescheduleRefusal } from "./reschedules-staff.ts";
 import { errorBody } from "./responses.ts";
 
 const redeemPath = "/v1/public/booking-access";
@@ -73,6 +79,7 @@ const cancellationPath = "/v1/public/manage/cancellation";
 const linkEmailPath = "/v1/public/manage/link-email";
 const endPath = "/v1/public/manage/session/end";
 const balancePaymentPath = "/v1/public/manage/balance-payment";
+const reschedulePath = "/v1/public/manage/reschedule";
 
 const sessionSecurity = [{ manageSession: [] }];
 
@@ -647,6 +654,102 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     }
     if (!replayed) deliverAfterCommit(c, deps, ctx.tenantId);
     return c.json(result, 200);
+  });
+
+  const reschedulePreviewRoute = createRoute({
+    method: "get",
+    path: reschedulePath,
+    tags: ["public", "manage"],
+    summary: "What moving the booking now would do",
+    description:
+      "Needs the booking session. Whether the guest may move the booking now (before its policy's change cutoff, and before the trip leaves), the policy's reschedule text, and the other departures of the same trip it could move to, soonest first, each with whether it would take the whole party now; only departures on sale are listed. The price does not change. Read-only and advisory. Rate limited per client address and tenant.",
+    security: sessionSecurity,
+    responses: {
+      200: {
+        content: { "application/json": { schema: ReschedulePreviewResponse } },
+        description: "The preview",
+      },
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+    },
+  });
+
+  app.openapi(reschedulePreviewRoute, async (c) => {
+    // Limited like a command: it reads every option's capacity.
+    const { body } = await withManageSession(c, { limit: true }, async (trx, ctx, session) => {
+      const preview = await previewReschedule(trx, ctx.tenantId, session.bookingId, {
+        forGuest: true,
+      });
+      if (!preview) throw bookingGone();
+      return { preview: previewJson(preview) };
+    });
+    return c.json(body as ReschedulePreviewResponse, 200);
+  });
+
+  const rescheduleRoute = createRoute({
+    method: "post",
+    path: reschedulePath,
+    tags: ["public", "manage"],
+    summary: "Move the booking to another departure",
+    description: [
+      "Needs the booking session and an Idempotency-Key. Before the policy's change cutoff, the guest moves the whole booking to another departure of the same trip. One transaction: the seats on the new departure are taken first, then the booking moves and its old seats go back on sale; if the new departure has no room, nothing changes. The price does not change. The guest is emailed the new time.",
+      "fromTripId is the departure the guest saw the booking on; if it is on another now, nothing changes (409 booking_changed). A repeat of the same move answers 200 with the booking as it stands.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    request: {
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      body: { required: true, content: { "application/json": { schema: RescheduleRequest } } },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: GuestRescheduleResponse } },
+        description: "The moved booking",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), it is past its change cutoff (reschedule_cutoff_passed), it is no longer on fromTripId (booking_changed), the trip is not another departure of the same trip (trip_not_eligible), or that departure can't take the party now (trip_unavailable)",
+      ),
+      422: errorBody("idempotency_key_reused"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+    },
+  });
+
+  app.openapi(rescheduleRoute, async (c) => {
+    const input = c.req.valid("json");
+    const key = c.req.valid("header")["idempotency-key"];
+    let moved = false;
+    const { body, replayed, ctx } = await withManageSession(
+      c,
+      {
+        idempotency: {
+          scope: "public.manage.reschedule.create",
+          key,
+          route: reschedulePath,
+          body: input,
+        },
+      },
+      async (trx, txCtx, session) => {
+        const result = await rescheduleBooking(trx, txCtx, {
+          bookingId: session.bookingId,
+          fromTripId: input.fromTripId,
+          toTripId: input.toTripId,
+        });
+        if (result.kind !== "moved" && result.kind !== "already_moved") {
+          throw rescheduleRefusal(result, bookingGone);
+        }
+        moved = result.kind === "moved";
+        return {
+          booking: await managedBody(trx, txCtx.tenantId, session.bookingId),
+          move: JSON.parse(JSON.stringify(result.move)),
+        };
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    if (moved) deliverAfterCommit(c, deps, ctx.tenantId);
+    return c.json(body as GuestRescheduleResponse, 200);
   });
 
   const linkEmailRoute = createRoute({

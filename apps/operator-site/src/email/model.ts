@@ -21,6 +21,7 @@ const templateNames: Record<string, string> = {
   booking_reminder: "Trip reminder",
   booking_canceled: "Cancellation notice",
   booking_refund_failed: "Refund problem notice",
+  booking_rescheduled: "Booking moved notice",
 };
 
 /** What an email was, by its template; a template the console does not know is a booking email. */
@@ -127,6 +128,7 @@ export const failureCopy: Record<MessageFailureCode, string> = {
   resent: "Replaced by a newer email before it went out.",
   reminder_too_late:
     "Not sent: by the time it was due, the booking was canceled or the trip was about to leave.",
+  booking_moved: "Not sent: the booking moved to another trip, so a new reminder replaced it.",
 };
 
 const knownCodes = new Set<string>(MESSAGE_FAILURE_CODES);
@@ -136,6 +138,7 @@ const linkTemplates = new Set([
   "booking_confirmation",
   "booking_manage_link",
   "booking_reminder",
+  "booking_rescheduled",
   "waiver_request",
 ]);
 

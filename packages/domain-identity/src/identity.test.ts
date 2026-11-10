@@ -36,6 +36,7 @@ describe("role permissions", () => {
       "exceptions.resolve",
       "bookings.cancel",
       "payments.record",
+      "bookings.reschedule",
     ]);
     expect(permissionsFor("finance")).toEqual([
       "audit.read",
@@ -113,6 +114,13 @@ describe("role permissions", () => {
     ]);
     expect(StaffRole.options.filter((r) => can(r, "payments.refund_external"))).toEqual(["owner"]);
     expect(StaffRole.options.filter((r) => can(r, "fees.read"))).toEqual(["owner", "finance"]);
+  });
+
+  it("lets owners and booking staff move a booking, owners alone past its cutoff (W3-G2.11-rest)", () => {
+    expect(StaffRole.options.filter((r) => can(r, "bookings.reschedule"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
   });
 
   it("keeps support access, export, and the deletion request with owners (W3-G2.2b)", () => {

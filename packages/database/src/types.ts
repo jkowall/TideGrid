@@ -758,8 +758,9 @@ export interface BookingsTable {
   checkout_session_id: Fixed<string>;
   order_id: Fixed<string>;
   payment_id: Fixed<string>;
-  hold_id: Fixed<string>;
-  trip_id: Fixed<string>;
+  /** Moves with the trip, only with its reschedule row (0034, W3-G2.11-rest). */
+  hold_id: ColumnType<string, string, string>;
+  trip_id: ColumnType<string, string, string>;
   party_size: Fixed<number>;
   /** Copied from its checkout by a trigger (0012), whatever the insert names. */
   source: FixedDefault<BookingSource>;
@@ -1440,6 +1441,7 @@ export interface Database
   fee_invoices: FeeInvoicesTable;
   payment_reconciliation_exceptions: PaymentReconciliationExceptionsTable;
   balance_due_changes: BalanceDueChangesTable;
+  booking_reschedules: BookingReschedulesTable;
   balance_payments: BalancePaymentsTable;
 }
 
@@ -1682,6 +1684,24 @@ export interface BalanceDueChangesTable {
   booking_id: Fixed<string>;
   due_at: ColumnType<Date, Date | string, never>;
   reason: Fixed<string>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** A whole booking's move to another trip of its product (0034, W3-G2.11-rest). Append-only. */
+export interface BookingReschedulesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  from_trip_id: Fixed<string>;
+  to_trip_id: Fixed<string>;
+  from_hold_id: Fixed<string>;
+  to_hold_id: Fixed<string>;
+  /** Set by the trigger from the database clock. */
+  before_cutoff: ColumnType<boolean, boolean | undefined, never>;
+  override_reason: ColumnType<string | null, string | null | undefined, never>;
   created_at: Stamped;
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;
