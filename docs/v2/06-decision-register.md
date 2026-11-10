@@ -8,6 +8,17 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-10: Refunds, reconciliation, and pilot infrastructure defaults confirmed; Terraform state in R2 (owner decision)
+
+At 16:46 UTC on 2026-11-10 the owner chose "Accept all as recommended" on the card "Accept my recommended answers on refunds, payment checks and infrastructure?", whose option read: "Stuck refunds flagged after 24h, credit never expires, only owners refund cash, a provider lookup never moves money, and infra records stay on Cloudflare (no AWS)."
+
+- **W3-G2.9 D1 to D4** (entry below) are owner decisions as written.
+- **W3-G2.10 D1 to D6** (entry below) are owner decisions as written.
+- **W3-OPS-1 D1, D3, D4, and D6** (entry below) are owner decisions as written.
+- **W3-OPS-1 D2 is replaced.** Terraform state lives in a private R2 bucket, `tidegrid-terraform-state`, in the existing Cloudflare account, through the S3 backend with `use_lockfile`, instead of an S3 bucket in a new AWS account. R2 has no version history, so each apply copies the current state into the same bucket first. Applies run from the [`infra-apply` workflow](../../.github/workflows/infra-apply.yml) with the owner's approval of each plan and each apply ([apply runbook](../runbooks/terraform-apply.md)).
+- **W3-OPS-1 D5 stays open.** Production's waiver evidence lock period is a legal retention choice, asked again before production holds a real waiver.
+- **Environments.** The same day the owner said "you can set those up anytime you want on cloudflare". Staging is set up now on the existing account. The production Neon project waits until a pilot is close, to keep Neon spending low.
+
 ### 2026-11-09: W3-G2.10, external payment and reconciliation (owner decision; coordinator defaults pending owner confirmation)
 
 Under the same owner decision as W3-G2.9 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
