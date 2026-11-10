@@ -17619,7 +17619,7 @@
             }
           },
           "409": {
-            "description": "Nothing is owed (nothing_owed), or too little to charge (amount_too_small)",
+            "description": "Nothing is owed (nothing_owed), too little to charge (amount_too_small), or the balance changed while the payment was being prepared (balance_changed)",
             "content": {
               "application/json": {
                 "schema": {

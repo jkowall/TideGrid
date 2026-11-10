@@ -221,6 +221,19 @@ describe.skipIf(!env)("private-charter deposits and balances (W3-G2.8)", () => {
       balanceEmailTiming(trx, A.id, booked.bookingId),
     );
     expect(timing).toBe("settled");
+
+    // The balance paid by card counts as money that may be returned outside the card flow.
+    const refund = await as(staffContext(A.id), (trx, c) =>
+      recordExternalSettlement(trx, c, {
+        bookingId: booked.bookingId,
+        kind: "refund",
+        tender: "other",
+        amount: 50_000,
+        reason: "Balance returned at the provider",
+        idempotencyKey: `external:${randomUUID()}`,
+      }),
+    );
+    expect(refund.kind).toBe("recorded");
   });
 
   it("counts an external payment, and abandons a card payment for an older balance", async () => {
@@ -292,10 +305,29 @@ describe.skipIf(!env)("private-charter deposits and balances (W3-G2.8)", () => {
     expect(moved.balance.dueChanges).toEqual([
       expect.objectContaining({ dueAt: dueAt.toISOString(), reason: "Guest asked for more time" }),
     ]);
+    const firstMove = moved.balance.dueChanges.length;
+    expect(firstMove).toBe(1);
     if (before.length > 0) {
       const old = await admin<{ state: string }[]>`
         select state from public.email_messages where id in ${admin(before.map((r) => r.id))}`;
       expect(old.every((m) => m.state === "canceled")).toBe(true);
+    }
+    // Moving the date back to the original writes fresh reminders, not the canceled ones.
+    const original = await as(staff, (trx) => getBookingBalance(trx, A.id, booked.bookingId));
+    const back = await as(staff, (trx, c) =>
+      changeBalanceDueDate(trx, c, {
+        bookingId: booked.bookingId,
+        dueAt: new Date(original?.originalDueAt ?? 0),
+        reason: "Back to the original date",
+      }),
+    );
+    expect(back.kind).toBe("changed");
+    if (before.length > 0) {
+      const fresh = await admin<{ n: number }[]>`
+        select count(*)::int as n from public.email_messages
+         where booking_id = ${booked.bookingId} and template = 'booking_balance_reminder'
+           and state = 'queued'`;
+      expect(fresh[0]?.n).toBe(before.length);
     }
     // The guest's view leaves staff's reason out.
     const guestView = await as(guestContext(A.id), (trx) =>

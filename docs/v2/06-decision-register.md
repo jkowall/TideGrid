@@ -40,7 +40,7 @@ Coordinator defaults, pending owner confirmation:
 
 Not built: a staff screen for deposit terms (they are set through the pricing service, as other price list terms are today), console and guest-site screens for the balance (the API carries it), and the seed's charters keep paying in full.
 
-Known gaps from review, to close before an operator takes balances live: a dispute on a balance card payment is not matched to it (it is recorded as unmatched, and the money still counts as paid in); a balance payment that was replaced or whose booking was canceled is not canceled at the provider, so a tab left open can still pay it (the money shows as overpaid for staff to return); and moving the due date also drops a balance link email still waiting to go out.
+Known gaps from review, to close before an operator takes balances live: a dispute on a balance card payment is not matched to it (it is recorded as unmatched, and the money still counts as paid in); a balance payment that was replaced or whose booking was canceled is not canceled at the provider, so a tab left open can still pay it (the money shows as overpaid for staff to return); and an overpayment above the booking's total cannot yet be recorded as returned, because external refunds stop at the total (it is returned at the provider and stays shown as overpaid).
 
 ### 2026-11-09: W3-G2.10, external payment and reconciliation (owner decision; coordinator defaults pending owner confirmation)
 

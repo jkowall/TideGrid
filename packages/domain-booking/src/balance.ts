@@ -74,8 +74,10 @@ export async function enqueueBalanceReminders(
   ctx: TenantContext,
   bookingId: string,
 ): Promise<number> {
-  const { rows } = await sql<{ due_at: Date; worth: boolean[] }>`
+  const { rows } = await sql<{ due_at: Date; generation: number; worth: boolean[] }>`
     select x.due_at,
+           (select count(*)::int from balance_due_changes c
+             where c.tenant_id = ${ctx.tenantId} and c.booking_id = ${bookingId}) as generation,
            array[${sql.join(
              BALANCE_REMINDER_LEAD_DAYS.map(
                (days) =>
@@ -93,7 +95,9 @@ export async function enqueueBalanceReminders(
     if (!row.worth[i]) continue;
     const done = await enqueueBalanceEmail(trx, ctx, bookingId, {
       kind: "reminder",
-      dedupeKey: `booking.balance_reminder:${bookingId}:${due.toISOString()}:${days}`,
+      // Each due date change is a new generation: moving the date back to one
+      // used before writes new reminders, not the canceled ones.
+      dedupeKey: `booking.balance_reminder:${bookingId}:${row.generation}:${due.toISOString()}:${days}`,
       notBefore: new Date(due.getTime() - days * 86_400_000),
     });
     if (!done.duplicate) written += 1;
@@ -101,7 +105,12 @@ export async function enqueueBalanceReminders(
   return written;
 }
 
-/** Cancel the booking's balance emails still waiting to go out (a due date moved, or the booking was canceled). */
+/**
+ * Cancel the booking's balance emails still waiting to go out or being sent:
+ * reminders when the due date moved (a link staff asked for stays), every one
+ * when the booking was canceled. Waits for a delivery run that holds one, as
+ * a cancellation does, so none is sent with an old date.
+ */
 export async function cancelQueuedBalanceEmails(
   trx: TenantTransaction,
   ctx: TenantContext,
@@ -111,10 +120,10 @@ export async function cancelQueuedBalanceEmails(
   const { rows } = await sql<{ id: string }>`
     select id from email_messages
      where tenant_id = ${ctx.tenantId} and booking_id = ${bookingId}
-       and template in (${BALANCE_REMINDER_TEMPLATE}, ${BALANCE_LINK_TEMPLATE})
-       and state = 'queued'
-     order by id
-       for update skip locked`.execute(trx);
+       and template in (${BALANCE_REMINDER_TEMPLATE},
+                        ${code === "booking_canceled" ? BALANCE_LINK_TEMPLATE : BALANCE_REMINDER_TEMPLATE})
+       and state in ('queued', 'sending')
+     order by id`.execute(trx);
   let canceled = 0;
   for (const message of rows) {
     const done = await cancelMessage(trx, ctx, message.id, { code });
@@ -371,8 +380,16 @@ export async function ensureBalanceProviderPayment(
       return { kind: "unavailable", reason: "unavailable" };
     throw err;
   }
-  if (row.provider_payment_id === null) {
-    await inTenantTransaction(db, ctx, async (trx) => {
+  // The payment may have been abandoned (the booking canceled, or the balance
+  // changed) while the provider answered: hand the guest nothing to pay then.
+  const stillOpen = await inTenantTransaction(db, ctx, async (trx) => {
+    const { rows: now } = await sql<{ state: string }>`
+      select bp.state from bookings b
+        join balance_payments bp on bp.tenant_id = b.tenant_id and bp.booking_id = b.id
+       where b.tenant_id = ${ctx.tenantId} and bp.id = ${row.id}
+         for no key update of b`.execute(trx);
+    if (now[0]?.state !== "pending") return false;
+    if (row.provider_payment_id === null) {
       const recorded = await sql`
         update balance_payments set provider_payment_id = ${created.paymentRef}
          where tenant_id = ${ctx.tenantId} and id = ${row.id} and provider_payment_id is null`.execute(
@@ -386,8 +403,11 @@ export async function ensureBalanceProviderPayment(
           after: { providerPaymentId: created.paymentRef },
         });
       }
-    });
-  } else if (row.provider_payment_id !== created.paymentRef) {
+    }
+    return true;
+  });
+  if (!stillOpen) return { kind: "not_open" };
+  if (row.provider_payment_id !== null && row.provider_payment_id !== created.paymentRef) {
     // The provider forgot the key and made another payment: refuse it, so the
     // guest opens a new balance payment rather than paying an unrecorded one.
     return { kind: "unavailable", reason: "provider_key_expired" };

@@ -541,7 +541,9 @@ CREATE FUNCTION app.check_balance_due_change() RETURNS trigger
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
-  NEW.created_at := now();
+  -- The wall clock, not the transaction's start: the change is stamped after
+  -- the booking's lock, so the newest change sorts last.
+  NEW.created_at := clock_timestamp();
   NEW.actor_type := coalesce(app.setting_or_null('app.actor_type'), 'system');
   NEW.actor_id := app.setting_or_null('app.actor_id');
   NEW.request_id := app.setting_or_null('app.request_id');

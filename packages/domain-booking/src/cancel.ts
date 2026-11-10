@@ -110,6 +110,8 @@ interface TermsRow {
   external_paid: number;
   /** A private charter that took a deposit (W3-G2.8). */
   has_deposit: boolean;
+  /** Card payments of a charter's balance that succeeded (W3-G2.8). */
+  balance_paid: number;
 }
 
 /** Half up to the cent, as the database computes it. */
@@ -184,7 +186,10 @@ async function termsRow(
            coalesce((select sum(x.amount) from external_settlements x
                       where x.tenant_id = b.tenant_id and x.booking_id = b.id
                         and x.kind = 'payment'), 0)::int as external_paid,
-           o.deposit_amount is not null as has_deposit
+           o.deposit_amount is not null as has_deposit,
+           coalesce((select sum(bp.amount) from balance_payments bp
+                      where bp.tenant_id = b.tenant_id and bp.booking_id = b.id
+                        and bp.state = 'succeeded'), 0)::int as balance_paid
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
@@ -555,7 +560,7 @@ export async function staffCancelBooking(
   const cardLimit = Math.min(
     row.order_total - row.external_refunded,
     row.paid - row.lost_disputed,
-    row.paid + row.external_paid - row.lost_disputed - row.external_refunded,
+    row.paid + row.external_paid + row.balance_paid - row.lost_disputed - row.external_refunded,
   );
   if (cardRefund > 0 && cardRefund > cardLimit) {
     return {

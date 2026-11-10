@@ -707,7 +707,9 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       },
       401: errorBody("No session (session_required), or it has ended (session_expired)"),
       404: errorBody("No active tenant hostname matches the origin"),
-      409: errorBody("Nothing is owed (nothing_owed), or too little to charge (amount_too_small)"),
+      409: errorBody(
+        "Nothing is owed (nothing_owed), too little to charge (amount_too_small), or the balance changed while the payment was being prepared (balance_changed)",
+      ),
       429: errorBody("Too many requests from this address for this operator (rate_limited)"),
       503: errorBody(
         "Payments are not configured, or under Stripe the card form is not (payments_unavailable); or the provider did not answer (payment_provider_unavailable)",
@@ -754,6 +756,10 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     );
     // Outside any transaction, as for checkout.
     const ready = await ensureBalanceProviderPayment(getDb(c), provider, ctx, body.paymentId);
+    if (ready.kind === "not_open") {
+      // Canceled, or the balance changed, while the provider answered.
+      throw new ApiError(409, "balance_changed", "The balance changed; read the booking again");
+    }
     if (ready.kind !== "ready") {
       c.get("log").warn("payment_provider_unavailable", {
         "event.name": "payment_provider_unavailable",
