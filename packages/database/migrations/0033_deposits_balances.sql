@@ -33,7 +33,7 @@
 ALTER TABLE public.price_list_versions
   ADD COLUMN deposit_kind text NOT NULL DEFAULT 'none'
     CHECK (deposit_kind IN ('none', 'fixed', 'percent')),
-  ADD COLUMN deposit_amount integer CHECK (deposit_amount BETWEEN 1 AND 100000000),
+  ADD COLUMN deposit_amount integer CHECK (deposit_amount BETWEEN 1 AND 10000000),
   ADD COLUMN deposit_bp integer CHECK (deposit_bp BETWEEN 1 AND 9999),
   ADD COLUMN balance_due_days integer CHECK (balance_due_days BETWEEN 1 AND 365),
   ADD CONSTRAINT price_list_versions_deposit CHECK (

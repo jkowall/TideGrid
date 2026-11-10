@@ -730,7 +730,7 @@ async function applyCancellation(
   }
   // A balance payment still open (W3-G2.8) is abandoned: nothing more is
   // asked of a canceled booking. One the guest pays anyway is recorded, and
-  // shows as money staff return.
+  // shows on the balance as overpaid, money staff return (balance-read.ts).
   await sql`
     update balance_payments set state = 'abandoned'
      where tenant_id = ${tenantId} and booking_id = ${bookingId} and state = 'pending'`.execute(

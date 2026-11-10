@@ -367,6 +367,15 @@ describe.skipIf(!env)("private-charter deposits and balances (W3-G2.8)", () => {
          and state = 'queued'`;
     expect(queued[0]?.n).toBe(0);
     expect(await balanceOf(booked.bookingId)).toMatchObject({ state: "canceled", owed: 0 });
+
+    // The guest pays from a tab still open: the money is shown for staff to return.
+    const late = await settle(open.ready.paymentRef, "succeeded");
+    expect(late).toMatchObject({ kind: "processed", outcome: "balance_paid" });
+    expect(await balanceOf(booked.bookingId)).toMatchObject({
+      state: "canceled",
+      owed: 0,
+      overpaid: TOTAL - DEPOSIT,
+    });
   });
 
   it("replaces an open card payment older than the provider remembers its key", async () => {

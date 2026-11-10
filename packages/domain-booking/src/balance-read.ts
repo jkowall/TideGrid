@@ -48,7 +48,11 @@ export interface BalanceView {
   paidIn: number;
   /** What is left to pay; zero once paid. */
   owed: number;
-  /** Money in above the total, when the guest paid twice; staff return it. */
+  /**
+   * Money staff return: what came in above the total (the guest paid twice),
+   * or, on a canceled booking, a balance payment that succeeded after the
+   * cancellation, whichever is more.
+   */
   overpaid: number;
   /** When the balance is due: the newest staff change, else the booking's own. */
   dueAt: string;
@@ -68,6 +72,7 @@ interface BalanceRow {
   paid_in: string;
   owed: string;
   canceled: boolean;
+  late_paid: string;
   overdue: boolean;
   in_window: boolean;
 }
@@ -87,6 +92,10 @@ export async function getBookingBalance(
     select x.total_amount, x.deposit_amount, x.due_at, x.original_due_at,
            x.paid_in::text as paid_in, x.owed::text as owed,
            b.state = 'canceled' as canceled,
+           (select coalesce(sum(bp.amount), 0) from balance_payments bp
+             where bp.tenant_id = b.tenant_id and bp.booking_id = b.id
+               and bp.state = 'succeeded' and b.canceled_at is not null
+               and bp.succeeded_at >= b.canceled_at)::text as late_paid,
            now() >= x.due_at as overdue,
            now() >= x.due_at - make_interval(hours => ${BALANCE_DUE_WINDOW_DAYS * 24}) as in_window
       from bookings b
@@ -130,7 +139,7 @@ export async function getBookingBalance(
     deposit: row.deposit_amount,
     paidIn,
     owed: row.canceled ? 0 : owed,
-    overpaid: Math.max(0, paidIn - row.total_amount),
+    overpaid: Math.max(paidIn - row.total_amount, Number(row.late_paid), 0),
     dueAt: iso(row.due_at),
     originalDueAt: iso(row.original_due_at),
     payments: payments.map((p) => ({
