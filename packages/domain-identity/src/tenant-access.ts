@@ -574,6 +574,10 @@ export const EXPORT_TABLES = [
   "bookings",
   "booking_participants",
   "booking_cancellations",
+  // Deposits and balances (W3-G2.8) and moves (W3-G2.11-rest).
+  "balance_payments",
+  "balance_due_changes",
+  "booking_reschedules",
   "booking_notes",
   "finalization_exceptions",
   "finalization_exception_resolutions",

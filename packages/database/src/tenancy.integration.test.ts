@@ -739,6 +739,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // append-only; a balance payment moves with verified events.
         balance_due_changes: ["INSERT", "SELECT"],
         balance_payments: ["INSERT", "SELECT"],
+        // Rescheduling (0034, W3-G2.11-rest): append-only moves.
+        booking_reschedules: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -778,7 +780,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // Guest self-service (lane 1, G2.11c): a participant's details may be
         // corrected, and a booking may move to canceled with its cancellation.
         booking_participants: ["email", "full_name", "guardian_email", "guardian_name", "is_minor"],
-        bookings: ["state"],
+        bookings: ["hold_id", "state", "trip_id"],
         // A message's delivery moves, a link is used or revoked, a session is revoked.
         email_messages: [
           "attempts",

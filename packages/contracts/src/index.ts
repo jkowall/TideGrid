@@ -204,6 +204,8 @@ export * from "./reconciliation.ts";
 export * from "./references.ts";
 // Refunds, booking credit, and staff cancellation (W3-G2.9).
 export * from "./refunds-credits.ts";
+// Moving a whole booking to another trip (W3-G2.11-rest).
+export * from "./reschedules.ts";
 export * from "./self-service.ts";
 // Staff-assisted booking (G2.12d).
 export * from "./staff-booking.ts";

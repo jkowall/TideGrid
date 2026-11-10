@@ -41,7 +41,10 @@ export type AccessRole = StaffRole | SupportRole;
  * booking staff record cash, check, or other tender a guest paid
  * (`payments.record`); only owners record money paid back outside the card
  * flow (`payments.refund_external`). Owners and finance read TideGrid's fee
- * invoices (`fees.read`); finance still changes nothing.
+ * invoices (`fees.read`); finance still changes nothing. Owners and booking
+ * staff move a booking to another trip of its product before its change
+ * cutoff (`bookings.reschedule`, W3-G2.11-rest); after the cutoff only an
+ * owner, with a reason (`bookings.override`).
  */
 export type Permission =
   | "members.read"
@@ -77,7 +80,9 @@ export type Permission =
   // External payment and reconciliation (W3-G2.10).
   | "payments.record"
   | "payments.refund_external"
-  | "fees.read";
+  | "fees.read"
+  // Moving a booking to another trip (W3-G2.11-rest).
+  | "bookings.reschedule";
 
 const matrix: Record<AccessRole, readonly Permission[]> = {
   owner: [
@@ -104,6 +109,7 @@ const matrix: Record<AccessRole, readonly Permission[]> = {
     "payments.record",
     "payments.refund_external",
     "fees.read",
+    "bookings.reschedule",
   ],
   booking_staff: [
     "catalog.read",
@@ -118,6 +124,7 @@ const matrix: Record<AccessRole, readonly Permission[]> = {
     "exceptions.resolve",
     "bookings.cancel",
     "payments.record",
+    "bookings.reschedule",
   ],
   finance: ["audit.read", "catalog.read", "payments.read", "fees.read"],
   support_masked: ["audit.read", "catalog.read", "payments.read", "fees.read"],

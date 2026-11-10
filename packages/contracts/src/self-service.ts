@@ -232,7 +232,7 @@ export const MessageStatus = z
       .string()
       .nullable()
       .describe(
-        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error, deadline_reached (the run ran out of time before sending it; it retries); from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), delivery_failed (the provider could not deliver it; not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), address_suppressed (this operator suppressed the address after a hard bounce or a spam complaint, so TideGrid did not send it), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, resent: a newer email replaced it, or reminder_too_late: a trip reminder whose booking was canceled or whose trip was about to leave) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically",
+        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error, deadline_reached (the run ran out of time before sending it; it retries); from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), delivery_failed (the provider could not deliver it; not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), address_suppressed (this operator suppressed the address after a hard bounce or a spam complaint, so TideGrid did not send it), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, resent: a newer email replaced it, or reminder_too_late: a trip reminder whose booking was canceled or whose trip was about to leave, or booking_moved: a trip reminder for the trip the booking moved away from) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically",
       ),
     provider: z.enum(["fake", "cloudflare"]).nullable(),
     staffResend: z
@@ -273,6 +273,7 @@ export const MESSAGE_FAILURE_CODES = [
   "booking_canceled",
   "resent",
   "reminder_too_late",
+  "booking_moved",
 ] as const;
 export type MessageFailureCode = (typeof MESSAGE_FAILURE_CODES)[number];
 

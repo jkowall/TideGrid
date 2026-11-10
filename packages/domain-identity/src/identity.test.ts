@@ -115,6 +115,13 @@ describe("role permissions", () => {
     expect(StaffRole.options.filter((r) => can(r, "fees.read"))).toEqual(["owner", "finance"]);
   });
 
+  it("lets owners and booking staff move a booking, owners alone past its cutoff (W3-G2.11-rest)", () => {
+    expect(StaffRole.options.filter((r) => can(r, "bookings.reschedule"))).toEqual([
+      "owner",
+      "booking_staff",
+    ]);
+  });
+
   it("keeps support access, export, and the deletion request with owners (W3-G2.2b)", () => {
     for (const permission of ["support.manage", "data.export", "account.manage"] as const) {
       expect(StaffRole.options.filter((r) => can(r, permission))).toEqual(["owner"]);

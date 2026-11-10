@@ -144,6 +144,7 @@ export {
   MANAGE_LINK_TTL_SECONDS,
   MANAGE_PATH,
   REMINDER_TEMPLATE,
+  RESCHEDULED_TEMPLATE,
 } from "./emails.ts";
 // Finalization exception resolution (W1-FIN-EXC).
 export {
@@ -260,6 +261,20 @@ export {
   type RefundExceptionView,
   raiseRefundException,
 } from "./refunds.ts";
+// Moving a whole booking to another trip (W3-G2.11-rest).
+export {
+  MAX_RESCHEDULE_OPTIONS,
+  previewReschedule,
+  RESCHEDULE_HORIZON_DAYS,
+  type RescheduleInput,
+  type RescheduleOption,
+  type ReschedulePreview,
+  type RescheduleRecord,
+  type RescheduleRefusal,
+  type RescheduleResult,
+  rescheduleBooking,
+  type TripOptionIssue,
+} from "./reschedule.ts";
 export {
   type BookingSearchField,
   type BookingSearchOutcome,
