@@ -110,7 +110,7 @@ jobs:
           echo "$RUNNER_TEMP/terraform" >> "$GITHUB_PATH"
 
       - name: Init against the state bucket in Cloudflare R2
-        # Owner decision pending (D2, 2026-11-10 recommendation): state lives
+        # Owner decision 2026-11-10 (replaces D2): state lives
         # in a private R2 bucket in the same account instead of a new AWS
         # account. R2 encrypts at rest and supports the conditional writes
         # use_lockfile needs. It has no version history, so a copy of the
