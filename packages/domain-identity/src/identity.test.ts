@@ -36,6 +36,7 @@ describe("role permissions", () => {
       "exceptions.resolve",
       "bookings.cancel",
       "payments.record",
+      "bookings.reschedule",
     ]);
     expect(permissionsFor("finance")).toEqual([
       "audit.read",
