@@ -3,5 +3,6 @@
   "appName": "Demo Reef",
   "iosBundleId": "us.tidegrid.demo.reef",
   "androidPackage": "us.tidegrid.demo.reef",
-  "guestOrigin": "https://demo-reef.book.tidegrid.us"
+  "guestOrigin": "https://demo-reef.book.tidegrid.us",
+  "iconBackground": "#006d77"
 }

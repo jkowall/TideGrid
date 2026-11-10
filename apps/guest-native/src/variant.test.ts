@@ -16,9 +16,26 @@ describe("variants", () => {
       const tenant = JSON.parse(readFileSync(new URL(`${slug}.json`, tenantsDir), "utf8")) as {
         slug: string;
         previewHostname: string;
+        brand: { colors: { primary: string } };
       };
       expect(variant?.slug).toBe(tenant.slug);
       expect(variant?.guestOrigin).toBe(`https://${tenant.previewHostname}`);
+      expect(variant?.iconBackground).toBe(tenant.brand.colors.primary.toLowerCase());
+    }
+  });
+
+  it("each variant has its store icons", () => {
+    for (const slug of Object.keys(variants)) {
+      for (const name of ["icon.png", "adaptive-foreground.png"]) {
+        const png = readFileSync(new URL(`../assets/${slug}/${name}`, import.meta.url));
+        // PNG signature, then the IHDR width and height: 1024 by 1024.
+        expect(png.subarray(1, 4).toString("latin1"), `${slug}/${name}`).toBe("PNG");
+        expect(png.readUInt32BE(16)).toBe(1024);
+        expect(png.readUInt32BE(20)).toBe(1024);
+      }
+      // Apple refuses an app icon with transparency: color type 2 is RGB without alpha.
+      const icon = readFileSync(new URL(`../assets/${slug}/icon.png`, import.meta.url));
+      expect(icon[25], `${slug} icon color type`).toBe(2);
     }
   });
 
