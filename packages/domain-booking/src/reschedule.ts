@@ -416,6 +416,20 @@ export async function rescheduleBooking(
     throw new Error(`a move's new hold did not confirm: ${confirmed.kind}`);
   }
 
+  // The reminder waiting for the old trip's day, and an earlier move's notice
+  // not yet sent, would name a time the booking no longer has. Canceled now,
+  // once the move is sure, and before the booking's hold changes: that update
+  // takes the booking's row FOR UPDATE, and a delivery holding one of these
+  // messages waits for the booking's key, so the messages are locked first.
+  const { rows: reminders } = await sql<{ id: string }>`
+    select id from email_messages
+     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
+       and template in (${REMINDER_TEMPLATE.key}, ${RESCHEDULED_TEMPLATE.key})
+       and state in ('queued', 'sending')
+     order by id`.execute(trx);
+  for (const message of reminders) {
+    await cancelMessage(trx, ctx, message.id, { code: "booking_moved", revokeLinks: false });
+  }
   const { rows: inserted } = await sql<{
     created_at: Date | string;
     before_cutoff: boolean;
@@ -471,17 +485,6 @@ export async function rescheduleBooking(
     },
   });
 
-  // The reminder waiting for the old trip's day, and an earlier move's notice
-  // not yet sent, would name a time the booking no longer has.
-  const { rows: reminders } = await sql<{ id: string }>`
-    select id from email_messages
-     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
-       and template in (${REMINDER_TEMPLATE.key}, ${RESCHEDULED_TEMPLATE.key})
-       and state in ('queued', 'sending')
-     order by id`.execute(trx);
-  for (const message of reminders) {
-    await cancelMessage(trx, ctx, message.id, { code: "booking_moved", revokeLinks: false });
-  }
   await enqueueReminderEmail(trx, ctx, input.bookingId, {
     dedupeKey: `booking.reminder:${input.bookingId}:${rescheduleId}`,
   });

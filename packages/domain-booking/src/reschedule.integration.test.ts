@@ -9,7 +9,7 @@ import type {} from "@tidegrid/database/global-setup";
 import { acquireHold, confirmHold, releaseHold } from "@tidegrid/domain-inventory";
 import { tripAllocator } from "@tidegrid/domain-inventory/testing";
 import type { FakePaymentProvider } from "@tidegrid/domain-payments";
-import { createPolicyVersion } from "@tidegrid/domain-pricing";
+import { createPolicyVersion, createPriceListVersion } from "@tidegrid/domain-pricing";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { auditLedger } from "./adversarial/harness.ts";
@@ -345,6 +345,50 @@ describe.skipIf(!env)("moving a whole booking to another trip (W3-G2.11-rest)", 
     ]);
     expect(swapped.map((r) => r.kind)).toEqual(["moved", "moved"]);
     expect([await seatsUsed(p), await seatsUsed(q)]).toEqual([1, 1]);
+  });
+
+  it("moves a charter with a balance owed only to a trip that leaves after it is due", async () => {
+    const D = await createCheckoutFixture(admin, runtime.db, "rsc-d", { days: 8 });
+    const ctx: TenantContext = { tenantId: D.id, actorType: "system", actorId: "test" };
+    await inTenantTransaction(runtime.db, ctx, async (trx) => {
+      const made = await createPriceListVersion(trx, ctx, {
+        productId: D.products.charter,
+        charter: { name: "Whole boat", amount: 100_000, taxable: true },
+        deposit: { kind: "fixed", amount: 20_000, balanceDueDays: 1 },
+        reason: "deposit terms",
+      });
+      if (made.kind !== "created") throw new Error(JSON.stringify(made));
+    });
+    const trips = D.trips.charter;
+    const [early, booked_on, later] = [trips[0], trips[4], trips[6]];
+    if (!early || !booked_on || !later) throw new Error("no trips");
+    const booked = await confirmBooking(runtime.db, payments, D, booked_on, 2, { charter: true });
+    const [order] = await admin<{ deposit_amount: number | null }[]>`
+      select o.deposit_amount from public.bookings b join public.orders o on o.id = b.order_id
+       where b.id = ${booked.bookingId}`;
+    expect(order?.deposit_amount).toBe(20_000);
+    // Due a day before its trip: a trip four days earlier leaves before that.
+    const preview = await as(guestContext(D.id), (trx) =>
+      previewReschedule(trx, D.id, booked.bookingId),
+    );
+    expect(preview?.options.find((o) => o.tripId === early)).toMatchObject({
+      available: false,
+      issue: "balance_due_after_trip",
+    });
+    expect(
+      await move(staffContext(D.id), {
+        bookingId: booked.bookingId,
+        fromTripId: booked_on,
+        toTripId: early,
+      }),
+    ).toEqual({ kind: "trip_unavailable", issue: "balance_due_after_trip" });
+    expect((await bookingNow(booked.bookingId)).trip_id).toBe(booked_on);
+    const moved = await move(staffContext(D.id), {
+      bookingId: booked.bookingId,
+      fromTripId: booked_on,
+      toTripId: later,
+    });
+    expect(moved.kind).toBe("moved");
   });
 
   it("past the cutoff only staff with a reason move it; a guest cannot override", async () => {
