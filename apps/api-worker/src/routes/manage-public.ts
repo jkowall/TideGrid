@@ -684,7 +684,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["public", "manage"],
     summary: "Correct the booker's own name and email",
     description: [
-      "Needs the booking session and an Idempotency-Key. The booker's name and email as they should be, on a confirmed booking whose trip has not left. At most 3 corrections a booking in 24 hours, whoever makes them.",
+      "Needs the booking session and an Idempotency-Key. The booker's name and email as they should be, on a confirmed booking whose trip has not left. At most 3 corrections by the guest a booking in 24 hours; staff are not limited, so they can always restore it.",
       "When the email changes: links sent to the old address stop working, every other session on this booking ends (this one stays open), the trip and balance reminders not yet sent go to the new address instead, the old address gets a notice with the new one partly hidden and no link, and the new address gets a fresh link. A name-only change sends nothing.",
       "Sending the details already on the booking changes nothing and answers 200 with change null.",
     ].join("\n\n"),

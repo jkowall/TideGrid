@@ -6,7 +6,7 @@ import { ManagedBooking } from "./self-service.ts";
  * Correcting the booker's own name and email on a confirmed booking
  * (W3-G2.11-rest). The booker does it from the booking session; owners and
  * booking staff do it from the console. Only before the trip leaves, and at
- * most 3 times a booking in 24 hours. An email change ends the old address's
+ * most 3 times a booking in 24 hours by the guest; staff are not limited. An email change ends the old address's
  * links and the booking's other sessions, moves the trip and balance
  * reminders to the new address, tells the old address (without a link), and
  * sends the new address a fresh link.

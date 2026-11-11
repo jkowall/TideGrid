@@ -321,32 +321,53 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
     }
   });
 
-  it("allows 3 corrections a booking in 24 hours, in the service and in the database", async () => {
+  it("allows the guest 3 corrections a day, in the service and the database, and never locks out staff", async () => {
     const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    const taker = await openFromCheckout(A, booked);
+    const guestAs = sessionCtx(A.id, taker.sessionId);
     for (let i = 1; i <= MAX_CONTACT_CHANGES_PER_DAY; i += 1) {
-      const done = await change(staffContext(A.id), {
+      const done = await change(guestAs, {
         bookingId: booked.bookingId,
-        name: `Name ${i}`,
-        email: "booker@example.test",
+        name: "Taken Over",
+        email: `taker${i}@example.test`,
+        keepSessionId: taker.sessionId,
       });
       expect(done.kind).toBe("changed");
     }
     expect(
-      await change(staffContext(A.id), {
+      await change(guestAs, {
         bookingId: booked.bookingId,
-        name: "Name 4",
-        email: "booker@example.test",
+        name: "Taken Over",
+        email: "taker4@example.test",
+        keepSessionId: taker.sessionId,
       }),
     ).toEqual({ kind: "limit_reached" });
-    // A writer that skips the service is refused by the database.
+    // A guest writer that skips the service is refused by the database.
     expect(
       await failure(
-        as(staffContext(A.id), (trx) =>
+        as(guestAs, (trx) =>
           sql`update checkout_sessions set booker_name = 'Name 4'
                where id = ${booked.checkoutSessionId}`.execute(trx),
         ),
       ),
     ).toEqual({ code: "23514", constraint: "booking_contact_changes_limit" });
+
+    // Staff restore the booking regardless, which ends the taker's session,
+    // and the checkout's secret no longer opens one.
+    const restored = await change(staffContext(A.id), {
+      bookingId: booked.bookingId,
+      name: "Fixture Booker",
+      email: "booker@example.test",
+    });
+    expect(restored.kind).toBe("changed");
+    expect(await as(guestContext(A.id), (trx) => manageSession(trx, A.id, taker.token))).toBeNull();
+    const reopened = await as(guestContext(A.id), (trx, c) =>
+      openManageSessionFromCheckout(trx, c, {
+        checkoutSessionId: booked.checkoutSessionId,
+        secret: booked.secret,
+      }),
+    );
+    expect(reopened).toEqual({ kind: "window_closed" });
   });
 
   it("refuses a canceled booking, a departed trip, and another tenant", async () => {
@@ -459,6 +480,75 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
         )
       ).code,
     ).toBe("42501");
+  });
+
+  it("names its own change when another committed while it waited, and leaves the replaced address nothing", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 2, {
+      booker: { name: "Old One", email: "old@example.test" },
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let started!: () => void;
+    const begun = new Promise<void>((r) => {
+      started = r;
+    });
+    // The first transaction starts, then waits; the second runs and commits.
+    const first = staffContext(A.id);
+    const pending = inTenantTransaction(runtime.db, first, async (trx) => {
+      await sql`select now()`.execute(trx);
+      started();
+      await gate;
+      return changeBookerContact(trx, first, {
+        bookingId: booked.bookingId,
+        name: "Old One",
+        email: "aaa@example.test",
+      });
+    });
+    await begun;
+    const second = await change(staffContext(A.id), {
+      bookingId: booked.bookingId,
+      name: "Old One",
+      email: "bbb@example.test",
+    });
+    release();
+    const firstResult = await pending;
+    if (firstResult.kind !== "changed" || second.kind !== "changed") throw new Error("not changed");
+    expect(firstResult.change.contactChangeId).not.toBe(second.change.contactChangeId);
+
+    // Nothing is left to go to bbb@ but the notice that it was replaced; aaa@
+    // gets its link and the reminder.
+    const rows = await messages(booked.bookingId);
+    const live = rows.filter((m) => m.state === "queued");
+    expect(live.filter((m) => m.to_email === "bbb@example.test").map((m) => m.template)).toEqual([
+      "booking_contact_changed",
+    ]);
+    expect(
+      live
+        .filter((m) => m.to_email === "aaa@example.test")
+        .map((m) => m.template)
+        .sort(),
+    ).toEqual(["booking_manage_link", "booking_reminder"]);
+  });
+
+  it("rewrites a reminder due within the next day for the same moment", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    const due = new Date(Date.now() + 3 * 3600_000);
+    await admin`update public.email_messages set next_attempt_at = ${due}
+                 where booking_id = ${booked.bookingId} and template = 'booking_reminder'`;
+    const done = await change(staffContext(A.id), {
+      bookingId: booked.bookingId,
+      name: "Fixture Booker",
+      email: "soon@example.test",
+    });
+    expect(done.kind).toBe("changed");
+    const moved = (await messages(booked.bookingId)).filter(
+      (m) => m.template === "booking_reminder" && m.state === "queued",
+    );
+    expect(moved).toHaveLength(1);
+    expect(moved[0]?.to_email).toBe("soon@example.test");
+    expect(moved[0]?.next_attempt_at.getTime()).toBe(due.getTime());
   });
 
   it("masks an address to its first letters and its last domain part", () => {

@@ -6,7 +6,7 @@
  *
  * - The checkout's booker fields change. The database checks the shape (only
  *   those two fields, confirmed, before the trip leaves, at most 3 a booking
- *   in 24 hours) and writes the history row itself (migration 0037). The
+ *   in 24 hours by the guest) and writes the history row itself (0037). The
  *   history says who changed which field, never the addresses.
  * - On an email change, everything that would still reach the old address
  *   stops: its unused management links are revoked, the booker's email not
@@ -14,7 +14,9 @@
  *   session ends except the one making the change. The trip and balance
  *   reminders that were canceled are written again to the new address. The
  *   old address gets a notice with a masked new address and no link; the new
- *   address gets a fresh management link.
+ *   address gets a fresh management link. The checkout's own secret no
+ *   longer opens a session afterwards (manage.ts), so whoever held it on the
+ *   old device cannot come back that way.
  * - A name-only change sends nothing; email already queued keeps the old
  *   name in its greeting.
  *
@@ -27,6 +29,7 @@
 import { isUuid, type TenantContext, type TenantTransaction } from "@tidegrid/database";
 import {
   BALANCE_REMINDER_TEMPLATE,
+  cancelMessage,
   revokeAccessLinks,
   revokeGuestSessions,
 } from "@tidegrid/domain-messaging";
@@ -40,7 +43,11 @@ import {
 } from "./emails.ts";
 import { iso, record } from "./views.ts";
 
-/** Corrections one booking may have in 24 hours, whoever makes them (0037). */
+/**
+ * Corrections the guest may make to one booking in 24 hours (0037). Staff
+ * and support are not limited, so they can always restore a booking someone
+ * took over with a leaked link.
+ */
 export const MAX_CONTACT_CHANGES_PER_DAY = 3;
 
 export interface BookerContactChangeRecord {
@@ -155,40 +162,50 @@ export async function changeBookerContact(
   const emailChanged = email !== before.booker_email;
   if (!nameChanged && !emailChanged) return { kind: "unchanged" };
 
-  const { rows: recent } = await sql<{ n: number }>`
-    select count(*)::int as n from booking_contact_changes
-     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
-       and created_at > now() - interval '24 hours'`.execute(trx);
-  if ((recent[0]?.n ?? 0) >= MAX_CONTACT_CHANGES_PER_DAY) return { kind: "limit_reached" };
+  if (ctx.actorType === "guest") {
+    const { rows: recent } = await sql<{ n: number }>`
+      select count(*)::int as n from booking_contact_changes
+       where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
+         and actor_type = 'guest' and created_at > now() - interval '24 hours'`.execute(trx);
+    if ((recent[0]?.n ?? 0) >= MAX_CONTACT_CHANGES_PER_DAY) return { kind: "limit_reached" };
+  }
 
   // Under the booking's lock, the trip's start, the count, and this update
   // agree with the trigger's own checks, which write the history row.
   await sql`
     update checkout_sessions set booker_name = ${name}, booker_email = ${email}
      where tenant_id = ${tenantId} and id = ${sessionId}`.execute(trx);
+  // The trigger names its row in this transaction's settings: never find it
+  // by time, as a correction that waited on the lock would find another's.
   const { rows: written } = await sql<ChangeRow>`
     select id, name_changed, email_changed, actor_type, created_at
       from booking_contact_changes
-     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
-     order by created_at desc, id desc
-     limit 1`.execute(trx);
+     where tenant_id = ${tenantId}
+       and id = nullif(current_setting('app.contact_change_id', true), '')::uuid`.execute(trx);
   const change = written[0];
   if (!change) throw new Error("a contact change's row was not written");
   const contactChangeId = change.id;
 
   let rewritten = 0;
   if (emailChanged) {
-    // The booker's management email not yet sent, locked before the links
-    // are revoked so that the same messages are canceled as are rewritten:
-    // a delivery in progress finishes first, and one that finished is not
-    // rewritten.
-    const { rows: pending } = await sql<{ id: string; template: string }>`
-      select id, template from email_messages
+    // The booker's management email not yet sent, locked and canceled here
+    // with the links it carried, whenever it was written: a correction that
+    // committed while this one waited on the checkout's lock may have queued
+    // email to the address this one replaces. A delivery in progress
+    // finishes first, and one that finished is not rewritten.
+    const { rows: pending } = await sql<{ id: string; template: string; next_attempt_at: Date }>`
+      select id, template, next_attempt_at from email_messages
        where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
          and link_purpose = 'booking_manage' and participant_id is null
          and state in ('queued', 'sending')
        order by id
          for update`.execute(trx);
+    for (const message of pending) {
+      await cancelMessage(trx, ctx, message.id, {
+        code: "recipient_changed",
+        linkReason: "recipient_changed",
+      });
+    }
     await revokeAccessLinks(trx, ctx, {
       bookingId: input.bookingId,
       purpose: "booking_manage",
@@ -200,9 +217,12 @@ export async function changeBookerContact(
       exceptSessionId: keep,
     });
     const templates = new Set(pending.map((m) => m.template));
-    if (templates.has(REMINDER_TEMPLATE.key)) {
+    const reminder = pending.find((m) => m.template === REMINDER_TEMPLATE.key);
+    if (reminder) {
+      // At the moment the canceled one was due, however close that is now.
       const done = await enqueueReminderEmail(trx, ctx, input.bookingId, {
         dedupeKey: `booking.reminder:${input.bookingId}:contact:${contactChangeId}`,
+        at: new Date(reminder.next_attempt_at),
       });
       if (done && !done.duplicate) rewritten += 1;
     }

@@ -9,7 +9,8 @@
 -- 1. Only the name and the email change, nothing else on the checkout.
 -- 2. The checkout is confirmed, its booking is confirmed (not canceled), its
 --    trip has not started, and the booker was never redacted.
--- 3. At most 3 corrections a booking in 24 hours, whoever makes them.
+-- 3. At most 3 corrections by the guest a booking in 24 hours. Staff and
+--    support are not limited, so they can always restore a booking.
 -- 4. Every correction writes a row to booking_contact_changes, from the
 --    transaction's actor: who changed which field, never the addresses.
 --
@@ -49,7 +50,9 @@ BEGIN
     RAISE EXCEPTION 'a contact change is written by correcting the checkout''s booker'
       USING ERRCODE = '42501', CONSTRAINT = 'booking_contact_changes_source';
   END IF;
-  NEW.created_at := now();
+  -- The statement's own time, not the transaction's: two corrections that
+  -- queue on the checkout's lock are ordered as they happened.
+  NEW.created_at := clock_timestamp();
   NEW.actor_type := coalesce(app.setting_or_null('app.actor_type'), 'system');
   NEW.actor_id := app.setting_or_null('app.actor_id');
   NEW.request_id := app.setting_or_null('app.request_id');
@@ -93,6 +96,7 @@ CREATE FUNCTION app.check_booker_contact_change() RETURNS trigger
 DECLARE
   b record;
   recent integer;
+  change_id uuid;
 BEGIN
   IF (pg_catalog.to_jsonb(NEW) - ARRAY['booker_name', 'booker_email', 'updated_at'])
        IS DISTINCT FROM
@@ -118,17 +122,25 @@ BEGIN
     RAISE EXCEPTION 'booking %''s trip has started; its booker no longer changes', b.id
       USING ERRCODE = '23514', CONSTRAINT = 'checkout_sessions_booker_contact';
   END IF;
-  SELECT count(*)::integer INTO recent FROM public.booking_contact_changes c
-   WHERE c.tenant_id = OLD.tenant_id AND c.booking_id = b.id
-     AND c.created_at > now() - interval '24 hours';
-  IF recent >= 3 THEN
-    RAISE EXCEPTION 'booking % had 3 contact corrections in the last 24 hours', b.id
-      USING ERRCODE = '23514', CONSTRAINT = 'booking_contact_changes_limit';
+  -- The limit is the guest's: staff restoring a booking someone took over
+  -- with a leaked link must never be locked out by that person's changes.
+  IF coalesce(app.setting_or_null('app.actor_type'), 'system') = 'guest' THEN
+    SELECT count(*)::integer INTO recent FROM public.booking_contact_changes c
+     WHERE c.tenant_id = OLD.tenant_id AND c.booking_id = b.id AND c.actor_type = 'guest'
+       AND c.created_at > now() - interval '24 hours';
+    IF recent >= 3 THEN
+      RAISE EXCEPTION 'booking % had 3 contact corrections by the guest in the last 24 hours', b.id
+        USING ERRCODE = '23514', CONSTRAINT = 'booking_contact_changes_limit';
+    END IF;
   END IF;
   INSERT INTO public.booking_contact_changes (tenant_id, booking_id, name_changed, email_changed)
   VALUES (OLD.tenant_id, b.id,
           NEW.booker_name IS DISTINCT FROM OLD.booker_name,
-          NEW.booker_email IS DISTINCT FROM OLD.booker_email);
+          NEW.booker_email IS DISTINCT FROM OLD.booker_email)
+  RETURNING id INTO change_id;
+  -- The writer reads which row is its own from this transaction's setting,
+  -- never by time: another correction may have committed in between.
+  PERFORM pg_catalog.set_config('app.contact_change_id', change_id::text, true);
   NEW.updated_at := now();
   RETURN NEW;
 END;

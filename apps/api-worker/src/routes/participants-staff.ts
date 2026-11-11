@@ -345,8 +345,8 @@ export function registerParticipantStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
     tags: ["staff", "bookings"],
     summary: "Correct the booker's name and email",
     description: [
-      "Owners and booking staff (bookings.reschedule). The booker's name and email as they should be, on a confirmed booking whose trip has not left. At most 3 corrections a booking in 24 hours, whoever makes them. The history keeps who changed which field, never the values.",
-      "When the email changes: links sent to the old address stop working, the booker's open sessions end, the trip and balance reminders not yet sent go to the new address instead, the old address gets a notice with the new one partly hidden and no link, and the new address gets a fresh link. A balance link staff sent and that has not gone out is canceled; send it again. A name-only change sends nothing.",
+      "Owners and booking staff (bookings.reschedule). The booker's name and email as they should be, on a confirmed booking whose trip has not left. Staff are not limited (the guest is, to 3 a day), so they can always restore a booking someone took over with a leaked link. The history keeps who changed which field, never the values.",
+      "When the email changes: links sent to the old address stop working, the booker's open sessions end and the checkout's secret no longer opens one, the trip and balance reminders not yet sent go to the new address instead, the old address gets a notice with the new one partly hidden and no link, and the new address gets a fresh link. A balance link staff sent and that has not gone out is canceled; send it again. A name-only change sends nothing.",
       "Idempotent by key. Sending the details already on the booking changes nothing and answers 200 with change null.",
     ].join("\n\n"),
     security: staffSecurity,

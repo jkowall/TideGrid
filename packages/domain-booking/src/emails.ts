@@ -130,6 +130,15 @@ export interface ComposeOptions {
   dedupeKey?: string;
 }
 
+export interface ReminderOptions extends ComposeOptions {
+  /**
+   * Due at this moment instead of a day before the trip, with no minimum
+   * notice: a reminder rewritten for a corrected address (W3-G2.11-rest)
+   * keeps the moment the one it replaces had.
+   */
+  at?: Date;
+}
+
 /**
  * The confirmation, in the confirming transaction: receipt, trip, party, and
  * the management link, once per booking.
@@ -259,7 +268,7 @@ export async function enqueueReminderEmail(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
-  options: ComposeOptions = {},
+  options: ReminderOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   const { rows } = await sql<{ due: Date; worth: boolean }>`
     select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
@@ -270,7 +279,7 @@ export async function enqueueReminderEmail(
      where b.tenant_id = ${ctx.tenantId} and b.id = ${bookingId}`.execute(trx);
   const timing = rows[0];
   if (!timing) throw new Error("a booking for email was not found");
-  if (!timing.worth) return null;
+  if (!options.at && !timing.worth) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
   const blocks: EmailBlock[] = [
@@ -308,7 +317,7 @@ export async function enqueueReminderEmail(
       path: MANAGE_PATH,
       ttlSeconds: MANAGE_LINK_TTL_SECONDS,
     },
-    notBefore: timing.due,
+    notBefore: options.at ?? timing.due,
   });
   return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }

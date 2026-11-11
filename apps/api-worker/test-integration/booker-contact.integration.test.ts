@@ -254,7 +254,7 @@ describe.skipIf(!env)("booker contact corrections through the API (W3-G2.11-rest
     ).toBe(true);
   });
 
-  it("refuses a malformed request, no session, and a fourth correction in a day", async () => {
+  it("refuses a malformed request, no session, and a guest's fourth correction in a day", async () => {
     const b = await booked(A, 1);
     const bad = await request("PUT", "/v1/public/manage/booker", {
       ...guest(b.session, randomUUID()),
@@ -286,6 +286,13 @@ describe.skipIf(!env)("booker contact corrections through the API (W3-G2.11-rest
     });
     expect(limited.status).toBe(429);
     expect(limited.json.error.code).toBe("contact_change_limit_reached");
+    // Staff are not limited.
+    const desk = await request("PUT", staffPath(A, b.bookingId), {
+      as: A.owner,
+      key: randomUUID(),
+      body: { name: "Name 5", email: "booker@example.test" },
+    });
+    expect(desk.status).toBe(200);
   });
 
   it("lets owners and booking staff correct it, and refuses finance and another tenant", async () => {
