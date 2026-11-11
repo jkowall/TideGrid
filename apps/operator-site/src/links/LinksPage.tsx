@@ -1,4 +1,9 @@
-import { type ImportantLink, isImportantLinkUrl, type Membership } from "@tidegrid/contracts";
+import {
+  type ImportantLink,
+  ImportantLinkInput,
+  isImportantLinkUrl,
+  type Membership,
+} from "@tidegrid/contracts";
 import {
   Button,
   CheckboxField,
@@ -111,8 +116,13 @@ export function LinksPage({
     setSaid(message);
     setLoad((current) => {
       if (current.kind !== "ready") return current;
-      const others = current.page.links.filter((l) => l.id !== link.id);
-      return { kind: "ready", page: { ...current.page, links: [...others, link] } };
+      // In place, so a link keeps its place among links at the same position,
+      // as the API orders them (position, then when added). A new one goes last.
+      const found = current.page.links.some((l) => l.id === link.id);
+      const links = found
+        ? current.page.links.map((l) => (l.id === link.id ? link : l))
+        : [...current.page.links, link];
+      return { kind: "ready", page: { ...current.page, links } };
     });
   };
 
@@ -156,7 +166,12 @@ export function LinksPage({
     );
   }
 
-  const { links, products } = load.page;
+  const { links, products, catalogLoaded } = load.page;
+  /** Another owner changed a link meanwhile: read the list again when the dialog closes. */
+  const reload = () => {
+    retryRequested.current = false;
+    setAttempt((n) => n + 1);
+  };
   const active = links.filter((l) => l.status === "active").sort((a, b) => a.position - b.position);
   const archived = links.filter((l) => l.status === "archived");
   const full = active.length >= maxActiveLinks;
@@ -182,7 +197,7 @@ export function LinksPage({
           </Button>
           {full && (
             <p className="links-hint">
-              {tenantName} has {maxActiveLinks} links, the most it can keep. Archive one to add
+              {tenantName} has {maxActiveLinks} links, the most it can show. Archive one to add
               another.
             </p>
           )}
@@ -195,6 +210,14 @@ export function LinksPage({
       <p className="tg-visually-hidden" role="status">
         {said}
       </p>
+      {!catalogLoaded && (
+        <Notice tone="warning" title="The trip names didn't load">
+          <p>
+            Links show, but the trips each one shows on are named "A trip", and they can't be
+            changed until the page loads them. Reload the page to try again.
+          </p>
+        </Notice>
+      )}
 
       {active.length === 0 ? (
         <EmptyState icon="external" title="No links for guests yet">
@@ -216,14 +239,14 @@ export function LinksPage({
                     onClick={() => setEditing(link)}
                     aria-describedby={rowId(link.id)}
                   >
-                    Change
+                    Change <span className="tg-visually-hidden">{link.label}</span>
                   </Button>
                   <Button
                     icon="lock"
                     onClick={() => setArchiving(link)}
                     aria-describedby={rowId(link.id)}
                   >
-                    Archive
+                    Archive <span className="tg-visually-hidden">{link.label}</span>
                   </Button>
                 </div>
               )}
@@ -250,10 +273,12 @@ export function LinksPage({
           tenantId={tenantId}
           link={editing === "new" ? null : editing}
           products={products}
+          catalogLoaded={catalogLoaded}
           nextPosition={active.length === 0 ? 0 : Math.min(999, (active.at(-1)?.position ?? 0) + 1)}
-          onClose={() => {
+          onClose={(stale) => {
             const from = editing === "new" ? addButtonId : rowId(editing.id);
             setEditing(null);
+            if (stale) return reload();
             requestAnimationFrame(() => document.getElementById(from)?.focus());
           }}
           onSaved={(link, added) => {
@@ -266,9 +291,10 @@ export function LinksPage({
         <ArchiveDialog
           tenantId={tenantId}
           link={archiving}
-          onClose={() => {
+          onClose={(stale) => {
             const from = rowId(archiving.id);
             setArchiving(null);
+            if (stale) return reload();
             requestAnimationFrame(() => document.getElementById(from)?.focus());
           }}
           onArchived={(link) => {
@@ -325,7 +351,7 @@ const saveProblems: Record<SaveFailure, string> = {
   unavailable: "TideGrid isn't responding right now. Save again in a moment.",
   key_reused: "The link changed while it was being sent. Save again.",
   archived: "This link was archived, so it can't change. Add a new one instead.",
-  limit: `An operator keeps at most ${maxActiveLinks} links. Archive one, then add this one.`,
+  limit: `An operator shows at most ${maxActiveLinks} links and keeps at most 500, archived ones included. Archive one if ${maxActiveLinks} are showing; at 500, no more can be added.`,
   unknown_product: "One of the chosen trips isn't this operator's any more. Reload the page.",
 };
 
@@ -344,6 +370,9 @@ export function formProblems(form: {
   const label = form.label.trim();
   if (!label) problems.label = "Give the link a name.";
   else if ([...label].length > labelLimit) problems.label = `Use at most ${labelLimit} characters.`;
+  else if (!ImportantLinkInput.shape.label.safeParse(label).success) {
+    problems.label = "Remove hidden or control characters from the name.";
+  }
   const url = form.url.trim();
   if (!url) problems.url = "Enter the address.";
   else if (!url.startsWith("https://")) problems.url = "Use an address that starts with https://.";
@@ -351,8 +380,11 @@ export function formProblems(form: {
     problems.url =
       "Use a public https address with a site name, not an IP address, a local name, or a user name and password.";
   }
-  if ([...form.description.trim()].length > noteLimit) {
+  const note = form.description.trim();
+  if ([...note].length > noteLimit) {
     problems.description = `Use at most ${noteLimit} characters.`;
+  } else if (note && !ImportantLinkInput.shape.description.safeParse(note).success) {
+    problems.description = "Remove hidden or control characters from the note.";
   }
   if (!form.everyTrip && form.productIds.length === 0)
     problems.products = "Choose at least one trip.";
@@ -370,6 +402,7 @@ function LinkDialog({
   tenantId,
   link,
   products,
+  catalogLoaded,
   nextPosition,
   onClose,
   onSaved,
@@ -377,8 +410,10 @@ function LinkDialog({
   tenantId: string;
   link: ImportantLink | null;
   products: LinkProduct[];
+  catalogLoaded: boolean;
   nextPosition: number;
-  onClose: () => void;
+  /** `stale`: the API said the link changed meanwhile, so the page reads the list again. */
+  onClose: (stale?: boolean) => void;
   onSaved: (link: ImportantLink, added: boolean) => void;
 }) {
   const [label, setLabel] = useState(link?.label ?? "");
@@ -393,14 +428,17 @@ function LinkDialog({
   const key = useRef<{ body: string; key: string } | null>(null);
   const first = useRef<HTMLInputElement>(null);
   const formId = useId();
-  const tripsId = useId();
-  // A product the link names that the catalog no longer lists still shows, so it can be removed.
+  const [stale, setStale] = useState(false);
+  // A product the link named when the dialog opened that the catalog no
+  // longer lists stays a choice, so unticking it can be undone.
   const choices = [
     ...products,
-    ...productIds
+    ...(link?.productIds ?? [])
       .filter((id) => !products.some((p) => p.id === id))
       .map((id) => ({ id, name: "A trip no longer listed" })),
   ];
+  /** Without the trip names, the link keeps the trips it has. */
+  const tripsLocked = !catalogLoaded;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -412,7 +450,9 @@ function LinkDialog({
       (k) => problems[k],
     );
     if (firstProblem) {
-      document.getElementById(`${formId}-${firstProblem}`)?.focus();
+      // The trips' problem is on the "Every trip" box, which is always there.
+      const target = firstProblem === "products" ? "every" : firstProblem;
+      document.getElementById(`${formId}-${target}`)?.focus();
       return;
     }
     const input = {
@@ -431,20 +471,21 @@ function LinkDialog({
     setBusy(false);
     if (result.kind === "saved") return onSaved(result.link, link === null);
     if (result.reason === "key_reused") key.current = null;
+    if (result.reason === "archived" || result.reason === "not_found") setStale(true);
     setProblem(saveProblems[result.reason]);
   };
 
   return (
     <Dialog
       title={link ? `Change ${link.label}` : "Add a link"}
-      onClose={onClose}
+      onClose={() => onClose(stale)}
       dismissible={!busy}
       initialFocus={first}
       restoreFocus={false}
       className="links-dialog"
       footer={
         <>
-          <Button onClick={onClose} disabled={busy}>
+          <Button onClick={() => onClose(stale)} disabled={busy}>
             Cancel
           </Button>
           <Button
@@ -498,26 +539,29 @@ function LinkDialog({
           error={shown.description}
           onChange={(e) => setDescription(e.target.value)}
         />
-        <fieldset
-          className="links-form__trips"
-          aria-describedby={shown.products ? `${tripsId}-error` : undefined}
-        >
+        <fieldset className="links-form__trips">
           <legend className="tg-field__label">Shows on</legend>
           <CheckboxField
             id={`${formId}-every`}
             label="Every trip"
             checked={everyTrip}
+            disabled={tripsLocked}
+            hint={
+              tripsLocked
+                ? "The trip names didn't load, so the trips this link shows on stay as they are."
+                : undefined
+            }
+            error={shown.products}
             onChange={(e) => setEveryTrip(e.target.checked)}
           />
-          {!everyTrip && (
+          {!everyTrip && !tripsLocked && (
             <div className="links-form__products">
               {choices.length === 0 ? (
                 <p className="links-hint">This operator has no trips to choose yet.</p>
               ) : (
-                choices.map((p, i) => (
+                choices.map((p) => (
                   <CheckboxField
                     key={p.id}
-                    id={i === 0 ? `${formId}-products` : undefined}
                     label={p.name}
                     checked={productIds.includes(p.id)}
                     onChange={(e) =>
@@ -529,12 +573,6 @@ function LinkDialog({
                 ))
               )}
             </div>
-          )}
-          {shown.products && (
-            <p className="tg-field__error" id={`${tripsId}-error`}>
-              <Icon name="x-octagon" />
-              <span>{shown.products}</span>
-            </p>
           )}
         </fieldset>
         <TextField
@@ -559,7 +597,8 @@ function ArchiveDialog({
 }: {
   tenantId: string;
   link: ImportantLink;
-  onClose: () => void;
+  /** `stale`: the link was archived or removed meanwhile, so the page reads the list again. */
+  onClose: (stale?: boolean) => void;
   onArchived: (link: ImportantLink) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -575,6 +614,8 @@ function ArchiveDialog({
     const result = await archiveLink(tenantId, link.id, key.current);
     setBusy(false);
     if (result.kind === "saved") return onArchived(result.link);
+    // Another owner archived it already: that is what was asked, so show the list as it is now.
+    if (result.reason === "archived") return onClose(true);
     if (result.reason === "key_reused") key.current = newIdempotencyKey();
     setProblem(saveProblems[result.reason]);
   };
@@ -583,14 +624,14 @@ function ArchiveDialog({
     <Dialog
       title={`Archive ${link.label}?`}
       tone="danger"
-      onClose={onClose}
+      onClose={() => onClose()}
       dismissible={!busy}
       initialFocus={cancel}
       describedBy={explainId}
       restoreFocus={false}
       footer={
         <>
-          <Button ref={cancel} onClick={onClose} disabled={busy}>
+          <Button ref={cancel} onClick={() => onClose()} disabled={busy}>
             Keep it
           </Button>
           <Button

@@ -1,4 +1,9 @@
-import { type GuestImportantLink, isImportantLinkUrl, type PublicBrand } from "@tidegrid/contracts";
+import {
+  type GuestImportantLink,
+  importantLinkHost,
+  isImportantLinkUrl,
+  type PublicBrand,
+} from "@tidegrid/contracts";
 import { ButtonLink, Icon } from "@tidegrid/design-system/components";
 import { type ReactNode, useEffect, useState } from "react";
 import { ContactActions } from "../Contact.tsx";
@@ -56,7 +61,8 @@ function PolicyLink({
  * parking map or a packing list. Each names the site it opens, as on the
  * booking page, and opens in a new tab without telling that site where the
  * guest came from. Shown only when there are some; a link that fails the
- * address rule is never shown.
+ * address rule is never shown, and the site named is worked out here from the
+ * address itself, never taken from the answer.
  */
 function SiteLinks({ brand }: { brand: PublicBrand }) {
   const [links, setLinks] = useState<GuestImportantLink[]>([]);
@@ -76,10 +82,13 @@ function SiteLinks({ brand }: { brand: PublicBrand }) {
             <a href={l.url} target="_blank" rel="noopener noreferrer external">
               {l.label}
               <Icon name="external" />
-              <span className="tg-visually-hidden"> (opens {l.host} in a new tab)</span>
+              <span className="tg-visually-hidden">
+                {" "}
+                (opens {importantLinkHost(l.url)} in a new tab)
+              </span>
             </a>
             <span className="support-site-links__host" aria-hidden="true">
-              Opens {l.host}
+              Opens {importantLinkHost(l.url)}
             </span>
             {l.description && <span className="support-site-links__note">{l.description}</span>}
           </li>

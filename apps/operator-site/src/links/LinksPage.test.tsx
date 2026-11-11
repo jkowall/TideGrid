@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { membership } from "../bookings/fixtures.ts";
 import { routeOf } from "../ConsoleShell.tsx";
 import { NavigationProvider } from "../navigation.tsx";
+import { canManageLinks } from "../roles.ts";
 import { formProblems, LinksPage, shownOn } from "./LinksPage.tsx";
 
 const tenantId = membership("owner").tenantId;
@@ -111,7 +112,7 @@ describe("Important links in the console (W3-G2.14b-rest)", () => {
     renderPage("booking_staff");
     await loaded();
     expect(screen.queryByRole("button", { name: "Add a link" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Change/ })).toBeNull();
     expect(screen.getByText(/Only owners change these links/)).toBeTruthy();
   });
 
@@ -185,7 +186,7 @@ describe("Important links in the console (W3-G2.14b-rest)", () => {
     });
     renderPage();
     await loaded();
-    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive Fishing license" }));
     expect(screen.getByText(/Guests stop seeing it right away/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Archive link" }));
     await waitFor(() => expect(screen.getByText(/Archived Fishing license/)).toBeTruthy());
@@ -242,5 +243,148 @@ describe("shownOn", () => {
     expect(shownOn({ productIds: [reef, "gone"] }, [{ id: reef, name: "Reef snorkel" }])).toBe(
       "Reef snorkel, A trip",
     );
+  });
+});
+
+describe("Important links, after review (W3-G2.14b-rest)", () => {
+  it("still shows the links when the trips fail to load, and keeps a link's trips", async () => {
+    const scoped = link({ productIds: [reef] });
+    const sent = stub([scoped], {
+      [`GET ${base}/catalog`]: () => {
+        throw new TypeError("network");
+      },
+      [`PUT ${base}/important-links/${scoped.id}`]: () =>
+        Response.json({ link: { ...scoped, description: "New note" } }),
+    });
+    renderPage();
+    await loaded();
+    expect(screen.getByText("The trip names didn't load")).toBeTruthy();
+    expect(screen.getByText(/Shows on: A trip/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Change Fishing license" }));
+    const every = screen.getByLabelText("Every trip") as HTMLInputElement;
+    expect(every.disabled).toBe(true);
+    expect(every.checked).toBe(false);
+    fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "New note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByText("Saved Fishing license.")).toBeTruthy());
+    const put = sent.find((s) => s.method === "PUT");
+    expect((put?.body as { productIds?: unknown } | undefined)?.productIds).toEqual([reef]);
+    expect(put?.key).toBeTruthy();
+  });
+
+  it("keeps a link among others at its position after a change", async () => {
+    const first = link({ id: "11111111-1111-4111-8111-111111111111", label: "First" });
+    const second = link({ id: "22222222-2222-4222-8222-222222222222", label: "Second" });
+    stub([first, second], {
+      [`PUT ${base}/important-links/${first.id}`]: () =>
+        Response.json({ link: { ...first, description: "Changed" } }),
+    });
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: "Change First" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByText("Saved First.")).toBeTruthy());
+    const titles = [...document.querySelectorAll(".links-list .links-item__title")].map(
+      (t) => t.textContent,
+    );
+    expect(titles).toEqual(["First", "Second"]);
+  });
+
+  it("sends the same key when the same change is sent again, and a new one for a new change", async () => {
+    let calls = 0;
+    const current = link();
+    const sent = stub([current], {
+      [`PUT ${base}/important-links/${current.id}`]: () => {
+        calls += 1;
+        return new Response("down", { status: 503 });
+      },
+    });
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: "Change Fishing license" }));
+    const save = () => fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    save();
+    await waitFor(() => expect(calls).toBe(1));
+    await waitFor(() => expect(screen.getByText(/isn't responding/)).toBeTruthy());
+    save();
+    await waitFor(() => expect(calls).toBe(2));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "License" } });
+    save();
+    await waitFor(() => expect(calls).toBe(3));
+    const keys = sent.filter((s) => s.method === "PUT").map((s) => s.key);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
+
+  it("reads the list again when another owner archived the link first", async () => {
+    const current = link();
+    let reads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init: RequestInit = {}) => {
+        if (init.method === "POST") {
+          return Response.json(
+            { error: { code: "important_link_archived", message: "archived" } },
+            { status: 409 },
+          );
+        }
+        if (input === `${base}/important-links`) {
+          reads += 1;
+          return Response.json({
+            links: [reads === 1 ? current : { ...current, status: "archived" }],
+          });
+        }
+        return Response.json({ locations: [], boats: [], products: [], schedules: [] });
+      }),
+    );
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: "Archive Fishing license" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive link" }));
+    await waitFor(() => expect(screen.getByText("No links for guests yet")).toBeTruthy());
+    expect(reads).toBe(2);
+    expect(screen.getByText(/Archived links \(1\)/)).toBeTruthy();
+  });
+
+  it("puts the trips' problem on the Every trip box and moves focus there", async () => {
+    stub([]);
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: "Add a link" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Map" } });
+    fireEvent.change(screen.getByLabelText("Address"), {
+      target: { value: "https://example.org/map" },
+    });
+    const every = screen.getByLabelText("Every trip");
+    fireEvent.click(every);
+    fireEvent.click(screen.getByRole("button", { name: "Add link" }));
+    expect(document.activeElement).toBe(every);
+    expect(every.getAttribute("aria-invalid")).toBe("true");
+    const described = every.getAttribute("aria-describedby") ?? "";
+    expect(document.getElementById(described)?.textContent).toContain("Choose at least one trip.");
+  });
+
+  it("refuses a name with hidden characters before sending", () => {
+    expect(
+      formProblems({
+        label: "Map\u200b",
+        url: "https://example.org/",
+        description: "",
+        everyTrip: true,
+        productIds: [],
+        position: "0",
+      }).label,
+    ).toBe("Remove hidden or control characters from the name.");
+  });
+
+  it("shows the page to every role in the navigation", () => {
+    for (const role of ["owner", "booking_staff", "finance"] as const) {
+      expect(canManageLinks(role)).toBe(role === "owner");
+    }
   });
 });

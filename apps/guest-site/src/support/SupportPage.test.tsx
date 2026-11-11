@@ -247,6 +247,29 @@ describe("the help page's important links (W3-G2.14b-rest)", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/v1\/public\/important-links$/);
   });
 
+  it("names the site the address opens, whatever host the answer gives", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: string) =>
+        Response.json({
+          links: [
+            {
+              label: "Parks",
+              url: "https://evil.example.com/x",
+              host: "parks.gov",
+              description: null,
+            },
+          ],
+        }),
+      ),
+    );
+    shell("/support");
+    const heading = await screen.findByRole("heading", { name: /Important links/ });
+    const section = heading.closest("section") as HTMLElement;
+    expect(section.textContent).toContain("Opens evil.example.com");
+    expect(section.textContent).not.toContain("parks.gov");
+  });
+
   it("shows no section when the operator has none or the list does not load", async () => {
     const fetchMock = vi.fn(async () => new Response("down", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);

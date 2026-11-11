@@ -24,6 +24,8 @@ export interface LinkProduct {
 export interface LinksPage {
   links: ImportantLink[];
   products: LinkProduct[];
+  /** False when the operator's trips did not load: links still show, but their trips can't be changed. */
+  catalogLoaded: boolean;
 }
 
 const isString = (v: unknown): v is string => typeof v === "string";
@@ -48,9 +50,12 @@ const linksPath = (tenantId: string) => `${tenantPath(tenantId)}/important-links
 /** The operator's links and its products, for naming the trips a link shows on. */
 export async function loadLinks(tenantId: string, signal?: AbortSignal): Promise<Read<LinksPage>> {
   try {
+    // The catalog is caught on its own, so a failure there never hides the links.
     const [linksRes, catalogRes] = await Promise.all([
       call(linksPath(tenantId), { headers: { accept: "application/json" } }, signal),
-      call(`${tenantPath(tenantId)}/catalog`, { headers: { accept: "application/json" } }, signal),
+      call(`${tenantPath(tenantId)}/catalog`, { headers: { accept: "application/json" } }, signal)
+        .then((res) => res)
+        .catch(() => null),
     ]);
     if (!linksRes.ok) return { kind: "failed", reason: await failureOf(linksRes) };
     const body = (await linksRes
@@ -61,15 +66,19 @@ export async function loadLinks(tenantId: string, signal?: AbortSignal): Promise
     }
     // Without the catalog, links still show; their trips are named "a trip".
     let products: LinkProduct[] = [];
-    if (catalogRes.ok) {
+    let catalogLoaded = false;
+    if (catalogRes?.ok) {
       const catalog = (await catalogRes
         .json()
         .catch(() => null)) as Partial<CatalogResponse> | null;
-      products = (Array.isArray(catalog?.products) ? catalog.products : [])
-        .filter((p) => isString(p?.id) && isString(p.name))
-        .map((p) => ({ id: p.id, name: p.name }));
+      if (Array.isArray(catalog?.products)) {
+        catalogLoaded = true;
+        products = catalog.products
+          .filter((p) => isString(p?.id) && isString(p.name))
+          .map((p) => ({ id: p.id, name: p.name }));
+      }
     }
-    return { kind: "ok", value: { links: body.links, products } };
+    return { kind: "ok", value: { links: body.links, products, catalogLoaded } };
   } catch {
     return { kind: "failed", reason: signal?.aborted ? "unavailable" : "unreachable" };
   }
