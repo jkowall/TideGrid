@@ -116,7 +116,10 @@ export function LinksPage({
       // The saved link's row, or the add button; the heading when neither is
       // there (an archived link, or a list that failed to load again).
       const element = target === headingTarget ? null : document.getElementById(target);
-      (element ?? heading.current)?.focus();
+      element?.focus();
+      // A row that can't take focus (such as one folded away in the archived
+      // list because another owner archived it meanwhile) leaves it to the heading.
+      if (!element || document.activeElement !== element) heading.current?.focus();
       return;
     }
     if (!focusHeadingOnLoad.current) return;
