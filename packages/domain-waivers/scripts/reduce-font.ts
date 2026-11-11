@@ -5,15 +5,24 @@
  *
  *   node scripts/reduce-font.ts /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
  *
- * The output is deterministic for one input font.
+ * The output is deterministic for one input font. The committed file came
+ * from DejaVu Sans 2.37, and the script refuses any other source file.
  */
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { FALLBACK_RANGES } from "../src/fallback-ranges.ts";
 import { parseTrueType, subsetTrueType } from "../src/truetype.ts";
 
 const source = process.argv[2];
 if (!source) throw new Error("usage: node scripts/reduce-font.ts <DejaVuSans.ttf>");
-const font = parseTrueType(new Uint8Array(readFileSync(source)));
+// SHA-256 of DejaVuSans.ttf from DejaVu Sans 2.37 (Debian fonts-dejavu-core).
+const SOURCE_SHA256 = "ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280";
+const bytes = readFileSync(source);
+const sha = createHash("sha256").update(bytes).digest("hex");
+if (sha !== SOURCE_SHA256) {
+  throw new Error(`expected DejaVu Sans 2.37 (sha256 ${SOURCE_SHA256}), got ${sha}`);
+}
+const font = parseTrueType(new Uint8Array(bytes));
 const glyphs: number[] = [];
 for (const [cp, glyph] of font.cmap) {
   if (FALLBACK_RANGES.some(([from, to]) => cp >= from && cp <= to)) glyphs.push(glyph);

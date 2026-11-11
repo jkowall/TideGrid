@@ -173,8 +173,11 @@ describe("renderWaiverPdf", () => {
     expect(pdf).toContain("/ToUnicode");
     // The signature: Latin letters WinAnsi has stay in Helvetica, the rest in
     // the subset, slanted like the oblique face; Chinese keeps the question mark.
-    expect(pdf).toMatch(/\/F3 18 Tf 1 0 0 1 [\d.]+ [\d.]+ Tm \(ukasz \) Tj/);
-    expect(pdf).toMatch(/\/F4 18 Tf 1 0 0\.21 1 [\d.]+ [\d.]+ Tm <[0-9A-F]+> Tj/);
+    // One text object, slanted as a whole, so each piece starts where the
+    // viewer finished drawing the one before.
+    expect(pdf).toMatch(
+      /BT 1 0 0\.21 1 [\d.]+ [\d.]+ Tm\n\/F4 18 Tf <[0-9A-F]{4}> Tj\n\/F1 18 Tf \(ukasz \) Tj\n\/F4 18 Tf <[0-9A-F]{4}> Tj\n/,
+    );
     expect(pdf).toContain("( ?)");
     // Each fallback character maps back to its Unicode, so the text can be searched.
     for (const cp of ["Ł", "Ż", "Д", "λ"].map((c) => c.codePointAt(0) as number)) {
@@ -191,6 +194,13 @@ describe("renderWaiverPdf", () => {
     expect(font.numGlyphs).toBeLessThan(used + 10);
     for (let g = 1; g < font.numGlyphs; g++) expect(hasOutline(font, g)).toBe(true);
     expect(bytes.length).toBeLessThan(60_000);
+  });
+
+  it("strokes fallback text in a bold run and fills the rest as usual", () => {
+    const pdf = ascii(renderWaiverPdf(sampleWaiver({ operatorName: "Łódź Charters" })));
+    expect(pdf).toMatch(
+      /q [\d.]+ w\nBT 1 0 0 1 [\d.]+ [\d.]+ Tm\n2 Tr \/F4 [\d.]+ Tf <[0-9A-F]{4}> Tj\n0 Tr \/F2 [\d.]+ Tf \(\\363d\) Tj\n2 Tr \/F4 [\d.]+ Tf <[0-9A-F]{4}> Tj\n0 Tr \/F2 [\d.]+ Tf \( Charters\) Tj\nET Q/,
+    );
   });
 
   it("masks an address to its first character and domain", () => {

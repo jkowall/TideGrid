@@ -8,7 +8,7 @@
  *
  * A character WinAnsi lacks, in a name or a typed signature, is drawn with
  * an embedded copy of DejaVu Sans holding only the glyphs the document uses
- * (fallback-font.ts names the alphabets). A document that needs none embeds
+ * (fallback-ranges.ts names the alphabets). A document that needs none embeds
  * nothing, so its bytes are as they always were. A character outside those
  * alphabets shows a question mark.
  */
@@ -308,6 +308,8 @@ function segments(text: string, used: Map<number, number>): Segment[] {
 }
 
 const FALLBACK_KEY = "F4";
+/** DejaVu Sans's capital height (1493 of 2048 units), in 1/1000 em. */
+const DEJAVU_CAP_HEIGHT = 729;
 /** The slant Helvetica-Oblique has, for fallback text in an oblique run. */
 const OBLIQUE_SKEW = 0.21;
 
@@ -316,24 +318,27 @@ function textRun(t: PdfText, used: Map<number, number>, cid: (g: number) => numb
   if (parts.every((p) => p.glyphs === null)) {
     return `BT /${fontKeys[t.font]} ${num(t.size)} Tf 1 0 0 1 ${num(t.x)} ${num(t.y)} Tm ${pdfString(t.text)} Tj ET`;
   }
+  // One text object for the whole run, so each piece starts exactly where the
+  // viewer finished drawing the last one, with no widths estimated here. An
+  // oblique run slants the whole object and sets its WinAnsi pieces in upright
+  // Helvetica, which is how Helvetica-Oblique is drawn; a bold run strokes the
+  // fallback outlines as well as filling them.
+  const oblique = t.font === "oblique";
+  const plain = oblique ? fontKeys.regular : fontKeys[t.font];
+  const bold = t.font === "bold";
+  const size = num(t.size);
   const out: string[] = [];
-  let x = t.x;
+  if (bold) out.push(`q ${num(t.size * 0.03)} w`);
+  out.push(`BT 1 0 ${oblique ? num(OBLIQUE_SKEW) : "0"} 1 ${num(t.x)} ${num(t.y)} Tm`);
   for (const p of parts) {
     if (p.glyphs === null) {
-      out.push(
-        `BT /${fontKeys[t.font]} ${num(t.size)} Tf 1 0 0 1 ${num(x)} ${num(t.y)} Tm ${pdfString(p.text)} Tj ET`,
-      );
+      out.push(`${bold ? "0 Tr " : ""}/${plain} ${size} Tf ${pdfString(p.text)} Tj`);
     } else {
       const hex = p.glyphs.map((g) => cid(g).toString(16).toUpperCase().padStart(4, "0")).join("");
-      const skew = t.font === "oblique" ? num(OBLIQUE_SKEW) : "0";
-      const show = `/${FALLBACK_KEY} ${num(t.size)} Tf 1 0 ${skew} 1 ${num(x)} ${num(t.y)} Tm <${hex}> Tj`;
-      // Bold is drawn by stroking the outline as well as filling it.
-      out.push(
-        t.font === "bold" ? `q ${num(t.size * 0.03)} w BT 2 Tr ${show} ET Q` : `BT ${show} ET`,
-      );
+      out.push(`${bold ? "2 Tr " : ""}/${FALLBACK_KEY} ${size} Tf <${hex}> Tj`);
     }
-    x += textWidth(p.text, t.font, t.size);
   }
+  out.push(bold ? "ET Q" : "ET");
   return out.join("\n");
 }
 
@@ -438,7 +443,7 @@ function fallbackObjects(
   return [
     `<< /Type /Font /Subtype /Type0 /BaseFont /${name} /Encoding /Identity-H /DescendantFonts [${first + 1} 0 R] /ToUnicode ${first + 4} 0 R >>`,
     `<< /Type /Font /Subtype /CIDFontType2 /BaseFont /${name} /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ${first + 2} 0 R /CIDToGIDMap /Identity /DW 1000 /W [${widths}] >>`,
-    `<< /Type /FontDescriptor /FontName /${name} /Flags 32 /FontBBox [${x1} ${y1} ${x2} ${y2}] /ItalicAngle 0 /Ascent ${scale(font.ascent)} /Descent ${scale(font.descent)} /CapHeight ${scale(font.ascent)} /StemV 80 /FontFile2 ${first + 3} 0 R >>`,
+    `<< /Type /FontDescriptor /FontName /${name} /Flags 32 /FontBBox [${x1} ${y1} ${x2} ${y2}] /ItalicAngle 0 /Ascent ${scale(font.ascent)} /Descent ${scale(font.descent)} /CapHeight ${DEJAVU_CAP_HEIGHT} /StemV 80 /FontFile2 ${first + 3} 0 R >>`,
     `<< /Length ${encoded.length} /Length1 ${file.length} /Filter /ASCII85Decode >>\nstream\n${encoded}\nendstream`,
     `<< /Length ${cmap.length} >>\nstream\n${cmap}endstream`,
   ];

@@ -2,10 +2,12 @@
  * Just enough TrueType for the waiver PDF to show names and typed
  * signatures outside WinAnsi: read a font's tables, find a character's glyph
  * and advance width, and write a copy that keeps only the glyphs a document
- * uses. Glyph ids never change, so the PDF can name glyphs by id
- * (Identity-H with an identity CID-to-glyph map). Pure and deterministic;
- * runs in Workers and Node. No hinting, shaping, or layout tables are kept:
- * the scripts the PDF draws this way need none (see `fallbackScripts`).
+ * uses. `subsetTrueType` keeps glyph ids; `compactTrueType` renumbers the
+ * kept glyphs from 1 and says which new id each old one got, so the PDF can
+ * name glyphs by id (Identity-H with an identity CID-to-glyph map). Pure and
+ * deterministic; runs in Workers and Node. The hinting programs (cvt, fpgm,
+ * prep) are kept; no shaping or layout tables are: the alphabets the PDF
+ * draws this way need none (see `fallback-ranges.ts`).
  */
 
 export interface TrueTypeFont {
