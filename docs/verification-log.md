@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-11
 
+### Correcting the booker's contact details (W3-G2.11-rest, last part), built November 11, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, from `main` at `d58cae3`, migration `0037_booker_contact_changes.sql`, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data and the fake provider only; no provider call, no deploy.
+
+- **Built.** The booker (booking page session) or owners and booking staff (`bookings.reschedule`) correct the booker's name and email on a confirmed booking before its trip leaves, at most 3 times a booking a day. The database allows only that shape of change to the checkout and writes an append-only history of who changed which field, never the values. An email change revokes the old address's links, cancels the booker's email not yet sent, ends the booking's other sessions, rewrites the trip and balance reminders to the new address, tells the old address without a link, and sends the new address a fresh link. API: `PUT /v1/public/manage/booker` and `PUT /v1/staff/tenants/{tenantId}/bookings/{bookingId}/booker`, both with an Idempotency-Key.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `booker-contact.integration.test.ts` in domain-booking (7 cases: the full email change with the old link refused, the other session ended and this one kept, the reminder rewritten for the same moment, the notice without a link or the full address, a fresh link to the new address, history, audit, and outbox without values; a name-only change sending nothing and the same details answering unchanged; staff ending every session and a charter's balance reminders moving; the daily limit in the service and in the database; a canceled booking, a departed trip, and another tenant refused in the service and the database; the database refusing another column alongside the booker and any direct write to the history; the masking) and in the API (4 cases: the guest's change, replay, a reused key with another body, sessions, the mail; a malformed body, no key, no session, the fourth change; booking staff, finance, a non-member, and another tenant; a canceled booking). The route guard and OpenAPI listing tests cover the two new routes. Full integration suites passed: database 72, domain-messaging 99, domain-booking 307, domain-waivers 75, api-worker 383. `pnpm check` passed.
+- **Not built.** A form on the booking page and in the console.
+
 ### Participant page and Send link button (W3-G2.11-rest, third part, guest site), built November 11, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, from `main` at `7ec754d`. No migration, no API change. Synthetic data only.

@@ -1,0 +1,468 @@
+import { randomUUID } from "node:crypto";
+import {
+  createDb,
+  inTenantTransaction,
+  type TenantContext,
+  type TenantTransaction,
+} from "@tidegrid/database";
+import type {} from "@tidegrid/database/global-setup";
+import { tripAllocator } from "@tidegrid/domain-inventory/testing";
+import {
+  deliverTenantMessages,
+  FakeEmailProvider,
+  redeemAccessLink,
+} from "@tidegrid/domain-messaging";
+import type { FakePaymentProvider } from "@tidegrid/domain-payments";
+import { createPriceListVersion } from "@tidegrid/domain-pricing";
+import { sql } from "kysely";
+import postgres from "postgres";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { maskEmail } from "./emails.ts";
+import {
+  type ChangeBookerContactInput,
+  cancelBooking,
+  changeBookerContact,
+  getManagedBooking,
+  listBookerContactChanges,
+  MAX_CONTACT_CHANGES_PER_DAY,
+  openManageSessionFromCheckout,
+  previewCancellation,
+} from "./index.ts";
+import { manageSession } from "./manage.ts";
+import {
+  type CheckoutFixture,
+  confirmBooking,
+  createCheckoutFixture,
+  fakeProvider,
+  guestContext,
+} from "./test-fixtures.ts";
+
+type Sql = ReturnType<typeof postgres>;
+
+const env = inject("integrationDb");
+
+function staffContext(tenantId: string): TenantContext {
+  return {
+    tenantId,
+    actorType: "staff",
+    actorId: `user:${randomUUID()}`,
+    requestId: `req-${randomUUID()}`,
+    sourceIp: null,
+  };
+}
+
+async function failure(p: Promise<unknown>): Promise<{ code?: string; constraint?: string }> {
+  try {
+    await p;
+  } catch (err) {
+    const e = err as { code?: string; constraint_name?: string; cause?: unknown };
+    const inner = (e.code ? e : (e.cause ?? e)) as { code?: string; constraint_name?: string };
+    return {
+      ...(inner.code ? { code: inner.code } : {}),
+      ...(inner.constraint_name ? { constraint: inner.constraint_name } : {}),
+    };
+  }
+  throw new Error("expected a database error");
+}
+
+describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)", () => {
+  let admin: Sql;
+  let runtime: ReturnType<typeof createDb>;
+  let payments: FakePaymentProvider;
+  let mail: FakeEmailProvider;
+  let A: CheckoutFixture;
+  let B: CheckoutFixture;
+  let tripsA: ReturnType<typeof tripAllocator>;
+
+  const as = <T>(
+    ctx: TenantContext,
+    fn: (trx: TenantTransaction, ctx: TenantContext) => Promise<T>,
+  ): Promise<T> => inTenantTransaction(runtime.db, ctx, (trx) => fn(trx, ctx));
+  const sessionCtx = (tenantId: string, sessionId: string): TenantContext => ({
+    ...guestContext(tenantId),
+    actorId: `guest_session:${sessionId}`,
+  });
+  const change = (ctx: TenantContext, input: ChangeBookerContactInput) =>
+    as(ctx, (trx, c) => changeBookerContact(trx, c, input));
+  const deliver = (tenant: CheckoutFixture) =>
+    deliverTenantMessages(runtime.db, tenant.id, {
+      provider: mail,
+      fromAddress: "bookings@tidegrid.test",
+      guestLinkOrigin: "http://{slug}.book.localhost:5301",
+      environment: "local",
+      runId: `run-${randomUUID()}`,
+    });
+  async function openFromCheckout(
+    tenant: CheckoutFixture,
+    booked: { checkoutSessionId: string; secret: string },
+  ) {
+    const opened = await as(guestContext(tenant.id), (trx, c) =>
+      openManageSessionFromCheckout(trx, c, {
+        checkoutSessionId: booked.checkoutSessionId,
+        secret: booked.secret,
+      }),
+    );
+    if (opened.kind !== "opened") throw new Error(`not opened: ${opened.kind}`);
+    return opened.session;
+  }
+  async function mailTo(tenant: CheckoutFixture, to: string) {
+    const inbox = await mail.listMailbox(tenant.id);
+    return Promise.all(
+      inbox.filter((m) => m.to === to).map((m) => mail.getMailboxMessage(tenant.id, m.id)),
+    );
+  }
+  const manageToken = (html: string | undefined) =>
+    /\/manage#t=([A-Za-z0-9_-]{43})/.exec(html ?? "")?.[1];
+  async function messages(bookingId: string) {
+    return admin<
+      {
+        template: string;
+        to_email: string;
+        state: string;
+        last_error_code: string | null;
+        next_attempt_at: Date;
+        dedupe_key: string;
+      }[]
+    >`
+      select template, to_email, state, last_error_code, next_attempt_at, dedupe_key
+        from public.email_messages where booking_id = ${bookingId} order by created_at, id`;
+  }
+
+  beforeAll(async () => {
+    if (!env) return;
+    admin = postgres(env.adminUrl, { max: 2, onnotice: () => {} });
+    runtime = createDb(env.runtimeUrl, { max: 8 });
+    payments = fakeProvider(runtime.db);
+    mail = new FakeEmailProvider({ db: runtime.db, environment: "local" });
+    A = await createCheckoutFixture(admin, runtime.db, "bkc-a", { days: 12 });
+    B = await createCheckoutFixture(admin, runtime.db, "bkc-b");
+    tripsA = tripAllocator(A);
+    // The first trips are too close for a reminder or a balance due a day before.
+    for (let i = 0; i < 3; i += 1) {
+      tripsA.shared();
+      tripsA.charter();
+    }
+    for (const t of [A, B]) {
+      await admin`insert into public.tenant_hostnames (hostname, tenant_id, kind, status, verified_at)
+        values (${`${t.slug}.book.localhost`}, ${t.id}, 'preview', 'active', now())`;
+    }
+    const sys: TenantContext = { tenantId: A.id, actorType: "system", actorId: "test" };
+    const created = await as(sys, (trx, c) =>
+      createPriceListVersion(trx, c, {
+        productId: A.products.charter,
+        charter: { name: "Whole boat", amount: 100_000, taxable: true },
+        deposit: { kind: "fixed", amount: 20_000, balanceDueDays: 1 },
+        reason: "deposit terms",
+      }),
+    );
+    if (created.kind !== "created") throw new Error(JSON.stringify(created));
+  });
+
+  afterAll(async () => {
+    await runtime?.end();
+    await admin?.end({ timeout: 5 });
+  });
+
+  it("moves the booking to the new address, ends the old one's access, and tells it", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 2, {
+      booker: { name: "Bea Typo", email: "bea@exmaple.test" },
+    });
+    // The confirmation goes out with its link; the reminder waits for its day.
+    await deliver(A);
+    const [confirmation] = await mailTo(A, "bea@exmaple.test");
+    const oldLink = manageToken(confirmation?.html);
+    expect(oldLink).toBeDefined();
+    const before = await messages(booked.bookingId);
+    const reminder = before.find((m) => m.template === "booking_reminder");
+    expect(reminder?.state).toBe("queued");
+
+    // Two sessions: the one making the change, and another from earlier.
+    const acting = await openFromCheckout(A, booked);
+    const other = await openFromCheckout(A, booked);
+
+    const result = await change(sessionCtx(A.id, acting.sessionId), {
+      bookingId: booked.bookingId,
+      name: "  Bea Booker ",
+      email: "Bea@Example.test",
+      keepSessionId: acting.sessionId,
+    });
+    expect(result).toMatchObject({
+      kind: "changed",
+      change: { nameChanged: true, emailChanged: true, by: "guest" },
+    });
+
+    // The booking reads the new details.
+    const view = await as(guestContext(A.id), (trx) =>
+      getManagedBooking(trx, A.id, booked.bookingId),
+    );
+    expect(view?.booking.booker).toEqual({ name: "Bea Booker", email: "bea@example.test" });
+
+    // The acting session stays; the other ends; the old link no longer opens.
+    expect(
+      await as(guestContext(A.id), (trx) => manageSession(trx, A.id, acting.token)),
+    ).not.toBeNull();
+    expect(await as(guestContext(A.id), (trx) => manageSession(trx, A.id, other.token))).toBeNull();
+    const redeemed = await as(guestContext(A.id), (trx, c) =>
+      redeemAccessLink(trx, c, { token: oldLink as string, purpose: "booking_manage" }),
+    );
+    expect(redeemed.kind).not.toBe("redeemed");
+
+    // The old reminder is canceled; a new one waits for the same moment at the new address.
+    const after = await messages(booked.bookingId);
+    const reminders = after.filter((m) => m.template === "booking_reminder");
+    expect(reminders).toHaveLength(2);
+    expect(reminders[0]).toMatchObject({
+      to_email: "bea@exmaple.test",
+      state: "canceled",
+      last_error_code: "recipient_changed",
+    });
+    expect(reminders[1]).toMatchObject({ to_email: "bea@example.test", state: "queued" });
+    expect(reminders[1]?.next_attempt_at.getTime()).toBe(reminder?.next_attempt_at.getTime());
+
+    // The old address hears of the change, without a link or the full new address.
+    await deliver(A);
+    const oldInbox = await mailTo(A, "bea@exmaple.test");
+    const notice = oldInbox.find((m) => m?.subject.includes("email address changed"));
+    expect(notice).toBeDefined();
+    expect(notice?.html).not.toContain("#t=");
+    expect(notice?.html).not.toContain("bea@example.test");
+    expect(notice?.text).toContain(maskEmail("bea@example.test"));
+    // The new address gets a link that opens the booking.
+    const newInbox = await mailTo(A, "bea@example.test");
+    const fresh = manageToken(newInbox.find((m) => m?.subject.startsWith("Your link"))?.html);
+    expect(fresh).toBeDefined();
+
+    // The history says who changed which field, never the values; so does the audit.
+    const history = await as(guestContext(A.id), (trx) =>
+      listBookerContactChanges(trx, A.id, booked.bookingId),
+    );
+    expect(history).toHaveLength(1);
+    const [row] = await admin<{ actor_type: string; actor_id: string }[]>`
+      select actor_type, actor_id from public.booking_contact_changes
+       where booking_id = ${booked.bookingId}`;
+    expect(row).toEqual({ actor_type: "guest", actor_id: `guest_session:${acting.sessionId}` });
+    const audit = await admin<{ before_state: unknown; after_state: unknown }[]>`
+      select before_state, after_state from public.audit_events
+       where tenant_id = ${A.id} and subject_id = ${booked.bookingId}
+         and action = 'booking.booker_contact_changed'`;
+    expect(audit).toHaveLength(1);
+    expect(JSON.stringify(audit)).not.toMatch(/bea@|Bea /);
+    const outbox = await admin<{ payload: unknown }[]>`
+      select payload from public.outbox_events
+       where tenant_id = ${A.id} and topic = 'booking.booker_contact_changed'
+         and aggregate_id = ${booked.bookingId}`;
+    expect(outbox).toHaveLength(1);
+    expect(JSON.stringify(outbox)).not.toMatch(/bea@|Bea /);
+  });
+
+  it("changes only the name without sending anything, and answers the same details as unchanged", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1, {
+      booker: { name: "Cal Wrong", email: "cal@example.test" },
+    });
+    const queuedBefore = (await messages(booked.bookingId)).length;
+    const session = await openFromCheckout(A, booked);
+    const done = await change(sessionCtx(A.id, session.sessionId), {
+      bookingId: booked.bookingId,
+      name: "Cal Right",
+      email: "cal@example.test",
+      keepSessionId: session.sessionId,
+    });
+    expect(done).toMatchObject({
+      kind: "changed",
+      change: { nameChanged: true, emailChanged: false },
+    });
+    expect(await messages(booked.bookingId)).toHaveLength(queuedBefore);
+    expect(
+      await as(guestContext(A.id), (trx) => manageSession(trx, A.id, session.token)),
+    ).not.toBeNull();
+
+    const again = await change(sessionCtx(A.id, session.sessionId), {
+      bookingId: booked.bookingId,
+      name: "Cal Right",
+      email: "CAL@example.test",
+    });
+    expect(again).toEqual({ kind: "unchanged" });
+    const history = await as(guestContext(A.id), (trx) =>
+      listBookerContactChanges(trx, A.id, booked.bookingId),
+    );
+    expect(history).toHaveLength(1);
+  });
+
+  it("lets staff correct it, ending every guest session, and moves a charter's balance reminders", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.charter(), 4, {
+      charter: true,
+      booker: { name: "Dee Deposit", email: "dee@example.test" },
+    });
+    const before = (await messages(booked.bookingId)).filter(
+      (m) => m.template === "booking_balance_reminder" && m.state === "queued",
+    );
+    expect(before.length).toBeGreaterThan(0);
+    const session = await openFromCheckout(A, booked);
+
+    const done = await change(staffContext(A.id), {
+      bookingId: booked.bookingId,
+      name: "Dee Deposit",
+      email: "dee.new@example.test",
+    });
+    expect(done).toMatchObject({ kind: "changed", change: { by: "staff", emailChanged: true } });
+    expect(
+      await as(guestContext(A.id), (trx) => manageSession(trx, A.id, session.token)),
+    ).toBeNull();
+
+    const after = (await messages(booked.bookingId)).filter(
+      (m) => m.template === "booking_balance_reminder",
+    );
+    const moved = after.filter((m) => m.to_email === "dee.new@example.test");
+    expect(moved.map((m) => m.next_attempt_at.getTime()).sort()).toEqual(
+      before.map((m) => m.next_attempt_at.getTime()).sort(),
+    );
+    for (const m of after.filter((x) => x.to_email === "dee@example.test")) {
+      expect(m).toMatchObject({ state: "canceled", last_error_code: "recipient_changed" });
+    }
+  });
+
+  it("allows 3 corrections a booking in 24 hours, in the service and in the database", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    for (let i = 1; i <= MAX_CONTACT_CHANGES_PER_DAY; i += 1) {
+      const done = await change(staffContext(A.id), {
+        bookingId: booked.bookingId,
+        name: `Name ${i}`,
+        email: "booker@example.test",
+      });
+      expect(done.kind).toBe("changed");
+    }
+    expect(
+      await change(staffContext(A.id), {
+        bookingId: booked.bookingId,
+        name: "Name 4",
+        email: "booker@example.test",
+      }),
+    ).toEqual({ kind: "limit_reached" });
+    // A writer that skips the service is refused by the database.
+    expect(
+      await failure(
+        as(staffContext(A.id), (trx) =>
+          sql`update checkout_sessions set booker_name = 'Name 4'
+               where id = ${booked.checkoutSessionId}`.execute(trx),
+        ),
+      ),
+    ).toEqual({ code: "23514", constraint: "booking_contact_changes_limit" });
+  });
+
+  it("refuses a canceled booking, a departed trip, and another tenant", async () => {
+    const canceled = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    const g = guestContext(A.id);
+    const terms = await as(g, (trx) => previewCancellation(trx, A.id, canceled.bookingId));
+    if (!terms) throw new Error("no terms");
+    const done = await as(g, (trx, c) =>
+      cancelBooking(trx, c, {
+        bookingId: canceled.bookingId,
+        expectedRefundAmount: terms.refundAmount,
+      }),
+    );
+    expect(done.kind).toBe("canceled");
+    const input = (bookingId: string) => ({
+      bookingId,
+      name: "Someone Else",
+      email: "else@example.test",
+    });
+    expect(await change(staffContext(A.id), input(canceled.bookingId))).toEqual({
+      kind: "not_confirmed",
+    });
+    expect(
+      await failure(
+        as(staffContext(A.id), (trx) =>
+          sql`update checkout_sessions set booker_name = 'Someone Else'
+               where id = ${canceled.checkoutSessionId}`.execute(trx),
+        ),
+      ),
+    ).toEqual({ code: "23514", constraint: "checkout_sessions_booker_contact" });
+
+    const gone = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    await admin`
+      with t as (select date_trunc('minute', now()) - interval '400 days' as s)
+      update public.scheduled_trips st
+         set starts_at = t.s, ends_at = t.s + make_interval(mins => st.duration_minutes),
+             boat_free_at = t.s + (st.boat_free_at - st.starts_at),
+             local_date = (t.s at time zone st.time_zone)::date,
+             local_start_time = (t.s at time zone st.time_zone)::time(0)
+        from t, public.bookings b
+       where b.id = ${gone.bookingId} and st.id = b.trip_id`;
+    expect(await change(staffContext(A.id), input(gone.bookingId))).toEqual({
+      kind: "trip_departed",
+    });
+    expect(
+      await failure(
+        as(staffContext(A.id), (trx) =>
+          sql`update checkout_sessions set booker_email = 'else@example.test'
+               where id = ${gone.checkoutSessionId}`.execute(trx),
+        ),
+      ),
+    ).toEqual({ code: "23514", constraint: "checkout_sessions_booker_contact" });
+
+    // Another operator's booking is simply not found, and its checkout is invisible.
+    const theirs = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    expect(await change(staffContext(B.id), input(theirs.bookingId))).toEqual({
+      kind: "not_found",
+    });
+    const touched = await as(staffContext(B.id), (trx) =>
+      sql`update checkout_sessions set booker_name = 'Someone Else'
+           where id = ${theirs.checkoutSessionId}`.execute(trx),
+    );
+    expect(Number(touched.numAffectedRows ?? 0)).toBe(0);
+  });
+
+  it("checks the shape in the database: only the booker, and the history only from the trigger", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    // Any other column alongside the booker is refused.
+    expect(
+      await failure(
+        as(staffContext(A.id), (trx) =>
+          sql`update checkout_sessions set booker_name = 'X Y', state = 'canceled'
+               where id = ${booked.checkoutSessionId}`.execute(trx),
+        ),
+      ),
+    ).toEqual({ code: "23514", constraint: "checkout_sessions_immutable" });
+    // The runtime cannot write the history directly, nor change or delete it.
+    expect(
+      await failure(
+        as(staffContext(A.id), (trx) =>
+          sql`insert into booking_contact_changes (booking_id, name_changed, email_changed)
+              values (${booked.bookingId}, true, false)`.execute(trx),
+        ),
+      ),
+    ).toEqual({ code: "42501", constraint: "booking_contact_changes_source" });
+    const done = await change(staffContext(A.id), {
+      bookingId: booked.bookingId,
+      name: "Fixed Name",
+      email: "booker@example.test",
+    });
+    expect(done.kind).toBe("changed");
+    expect(
+      (
+        await failure(
+          as(staffContext(A.id), (trx) =>
+            sql`update booking_contact_changes set name_changed = false
+                 where booking_id = ${booked.bookingId}`.execute(trx),
+          ),
+        )
+      ).code,
+    ).toBeDefined();
+    expect(
+      (
+        await failure(
+          as(staffContext(A.id), (trx) =>
+            sql`delete from booking_contact_changes where booking_id = ${booked.bookingId}`.execute(
+              trx,
+            ),
+          ),
+        )
+      ).code,
+    ).toBe("42501");
+  });
+
+  it("masks an address to its first letters and its last domain part", () => {
+    expect(maskEmail("ava.guest@example.test")).toBe("a•••@e•••.test");
+    expect(maskEmail("x@mail.co.uk")).toBe("x•••@m•••.uk");
+  });
+});

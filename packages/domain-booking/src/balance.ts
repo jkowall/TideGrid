@@ -73,6 +73,8 @@ export async function enqueueBalanceReminders(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
+  /** Rewrites after a booker's email change (W3-G2.11-rest) name the change. */
+  options: { keyTag?: string } = {},
 ): Promise<number> {
   const { rows } = await sql<{ due_at: Date; generation: number; worth: boolean[] }>`
     select x.due_at,
@@ -97,7 +99,7 @@ export async function enqueueBalanceReminders(
       kind: "reminder",
       // Each due date change is a new generation: moving the date back to one
       // used before writes new reminders, not the canceled ones.
-      dedupeKey: `booking.balance_reminder:${bookingId}:${row.generation}:${due.toISOString()}:${days}`,
+      dedupeKey: `booking.balance_reminder:${bookingId}:${row.generation}:${due.toISOString()}:${days}${options.keyTag ? `:${options.keyTag}` : ""}`,
       notBefore: new Date(due.getTime() - days * 86_400_000),
     });
     if (!done.duplicate) written += 1;

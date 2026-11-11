@@ -497,6 +497,15 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 - **Events.** Audit `participant.invited` and outbox `booking.participant.invited` `{ bookingId, participantId, position, recipient }`, where `recipient` is `participant` or `guardian`; never an address. The participant's own change is recorded as `participant.updated`, with the session as the actor.
 - **Known gaps.** The guest site has the page (`/participant`) and a Send link button on the booking page; the console has no button yet, as it has no party editor. An empty place cannot be invited by email alone (D1). The participant's page does not show their waiver. A participant cannot ask for a new link themselves (D4).
 
+## Correcting the booker's contact details (W3-G2.11-rest)
+
+`booker-contact.ts`; database contract in [0037](../database/README.md#booker-contact-corrections-0037); defaults in the [decision register](../../docs/v2/06-decision-register.md#decision-log).
+
+- **`changeBookerContact`** sets the booker's name and email on a confirmed booking, in one transaction: it locks the checkout and then the booking, as cancellation and moves do, and updates the checkout, whose trigger writes the history row. Refusals: `not_found`, `not_confirmed`, `trip_departed`, and `limit_reached` (3 a booking in 24 hours; the database holds the same limit). The same details again answer `unchanged` and send nothing. `listBookerContactChanges` reads the history.
+- **An email change.** The booker's management email not yet sent is locked, then the old address's links are revoked and that email canceled (`recipient_changed`, through `revokeAccessLinks`), and every other management session ends (`keepSessionId` keeps the guest's own; staff keep none). The trip reminder and balance reminders that were canceled are written again for the new address, at the same moment. The old address gets `booking_contact_changed` (version 1: no link, the new address masked by `maskEmail`), and the new address a fresh management link.
+- **Events.** Audit `booking.booker_contact_changed` and outbox `booking.booker_contact_changed` `{ bookingId, contactChangeId, nameChanged, emailChanged }`; never the values.
+- **Known gaps.** No form on the booking page or in the console yet. A name-only change leaves queued email greeting the old name. A management link or staff balance link not yet sent is canceled rather than moved (D4).
+
 ## Deferred and known gaps
 
 - **Staff-assisted booking (G2.12d).** Staff cannot cancel a confirmed booking, refund, enter participants, correct the booker's address, override the cutoff, sales state, capacity, or price, or record cash, check, or complimentary bookings. A mistyped booker address sends the management link to whoever holds it; the read-back and its attestation reduce that, nothing removes it.

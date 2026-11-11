@@ -46,6 +46,8 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["GET", `/v1/staff/tenants/${tenant}/email-exceptions`],
     // Exception resolution (W1-FIN-EXC).
     ["POST", `/v1/staff/tenants/${tenant}/finalization-exceptions/${someId}/resolution`],
+    // Correcting the booker's contact details (W3-G2.11-rest).
+    ["PUT", `/v1/staff/tenants/${tenant}/bookings/${someId}/booker`],
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -98,6 +100,20 @@ describe("staff authentication fails closed before touching the database", () =>
     const res = await SELF.fetch(`http://localhost${path}`);
     expect(res.status).toBe(401);
     expect(await errorCode(res)).toBe("unauthenticated");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects a booker correction without the console origin", async () => {
+    const res = await SELF.fetch(
+      `http://localhost/v1/staff/tenants/${tenant}/bookings/${someId}/booker`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json", origin: "https://evil.example" },
+        body: JSON.stringify({ name: "A B", email: "a@example.test" }),
+      },
+    );
+    expect(res.status).toBe(403);
+    expect(await errorCode(res)).toBe("origin_not_allowed");
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });
@@ -226,6 +242,9 @@ describe("contract", () => {
         // Participant invitations and their own details (W3-G2.11-rest).
         "/v1/public/manage/participants/{position}/invitation",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/invitation",
+        // Correcting the booker's contact details (W3-G2.11-rest).
+        "/v1/public/manage/booker",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/booker",
         "/v1/public/participant-access",
         "/v1/public/participant/profile",
         "/v1/public/participant/session/end",
