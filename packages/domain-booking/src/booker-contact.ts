@@ -34,8 +34,8 @@ import {
   revokeGuestSessions,
 } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
-import { enqueueBalanceReminders } from "./balance.ts";
 import {
+  enqueueBalanceEmail,
   enqueueContactChangedEmail,
   enqueueManageLinkEmail,
   enqueueReminderEmail,
@@ -65,7 +65,9 @@ export type ChangeBookerContactResult =
   | { kind: "not_found" }
   | { kind: "not_confirmed" }
   | { kind: "trip_departed" }
-  | { kind: "limit_reached" };
+  | { kind: "limit_reached" }
+  /** The guest session making the change ended while it waited. Nothing changed. */
+  | { kind: "session_ended" };
 
 export interface ChangeBookerContactInput {
   bookingId: string;
@@ -157,6 +159,16 @@ export async function changeBookerContact(
   if (!row) throw new Error("a located booking was not found");
   if (row.state !== "confirmed") return { kind: "not_confirmed" };
   if (row.departed) return { kind: "trip_departed" };
+  // The guest's session again, now that the checkout is locked: staff who
+  // restored the booking while this request waited ended it, and a request
+  // from an ended session must not undo their change.
+  if (keep !== null) {
+    const { rows: live } = await sql<{ id: string }>`
+      select id from guest_sessions
+       where tenant_id = ${tenantId} and id = ${keep} and booking_id = ${input.bookingId}
+         and revoked_at is null and expires_at > now()`.execute(trx);
+    if (live.length === 0) return { kind: "session_ended" };
+  }
 
   const nameChanged = name !== before.booker_name;
   const emailChanged = email !== before.booker_email;
@@ -216,7 +228,6 @@ export async function changeBookerContact(
       purpose: "booking_manage",
       exceptSessionId: keep,
     });
-    const templates = new Set(pending.map((m) => m.template));
     const reminder = pending.find((m) => m.template === REMINDER_TEMPLATE.key);
     if (reminder) {
       // At the moment the canceled one was due, however close that is now.
@@ -226,10 +237,14 @@ export async function changeBookerContact(
       });
       if (done && !done.duplicate) rewritten += 1;
     }
-    if (templates.has(BALANCE_REMINDER_TEMPLATE)) {
-      rewritten += await enqueueBalanceReminders(trx, ctx, input.bookingId, {
-        keyTag: `contact.${contactChangeId}`,
+    // Each balance reminder at its own moment too, a retry's included.
+    for (const message of pending.filter((m) => m.template === BALANCE_REMINDER_TEMPLATE)) {
+      const done = await enqueueBalanceEmail(trx, ctx, input.bookingId, {
+        kind: "reminder",
+        dedupeKey: `booking.balance_reminder:${input.bookingId}:contact.${contactChangeId}:${message.id}`,
+        notBefore: new Date(message.next_attempt_at),
       });
+      if (!done.duplicate) rewritten += 1;
     }
     await enqueueContactChangedEmail(trx, ctx, input.bookingId, {
       contactChangeId,

@@ -134,7 +134,7 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
     runtime = createDb(env.runtimeUrl, { max: 8 });
     payments = fakeProvider(runtime.db);
     mail = new FakeEmailProvider({ db: runtime.db, environment: "local" });
-    A = await createCheckoutFixture(admin, runtime.db, "bkc-a", { days: 12 });
+    A = await createCheckoutFixture(admin, runtime.db, "bkc-a", { days: 16 });
     B = await createCheckoutFixture(admin, runtime.db, "bkc-b");
     tripsA = tripAllocator(A);
     // The first trips are too close for a reminder or a balance due a day before.
@@ -293,6 +293,15 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
       charter: true,
       booker: { name: "Dee Deposit", email: "dee@example.test" },
     });
+    // One reminder is due in half an hour (a retry, or a date staff moved):
+    // it moves for that moment, not the schedule's.
+    const soon = new Date(Date.now() + 30 * 60_000);
+    await admin`
+      update public.email_messages set next_attempt_at = ${soon}
+       where id = (select id from public.email_messages
+                    where booking_id = ${booked.bookingId}
+                      and template = 'booking_balance_reminder'
+                    order by next_attempt_at limit 1)`;
     const before = (await messages(booked.bookingId)).filter(
       (m) => m.template === "booking_balance_reminder" && m.state === "queued",
     );
@@ -530,6 +539,50 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
         .map((m) => m.template)
         .sort(),
     ).toEqual(["booking_manage_link", "booking_reminder"]);
+  });
+
+  it("refuses a guest correction whose session staff ended while it waited", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1, {
+      booker: { name: "Real Booker", email: "real@example.test" },
+    });
+    const taker = await openFromCheckout(A, booked);
+    // Staff hold the checkout's lock while restoring the booking; the guest's
+    // request arrives meanwhile and waits behind it.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let restored!: () => void;
+    const restoring = new Promise<void>((r) => {
+      restored = r;
+    });
+    const staff = staffContext(A.id);
+    const desk = inTenantTransaction(runtime.db, staff, async (trx) => {
+      const done = await changeBookerContact(trx, staff, {
+        bookingId: booked.bookingId,
+        name: "Real Booker",
+        email: "real.new@example.test",
+      });
+      restored();
+      await gate;
+      return done;
+    });
+    await restoring;
+    const guestAs = sessionCtx(A.id, taker.sessionId);
+    const late = change(guestAs, {
+      bookingId: booked.bookingId,
+      name: "Taker",
+      email: "taker@example.test",
+      keepSessionId: taker.sessionId,
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    release();
+    expect((await desk).kind).toBe("changed");
+    expect(await late).toEqual({ kind: "session_ended" });
+    const view = await as(guestContext(A.id), (trx) =>
+      getManagedBooking(trx, A.id, booked.bookingId),
+    );
+    expect(view?.booking.booker.email).toBe("real.new@example.test");
   });
 
   it("rewrites a reminder due within the next day for the same moment", async () => {

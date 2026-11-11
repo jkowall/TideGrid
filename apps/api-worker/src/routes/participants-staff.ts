@@ -59,6 +59,12 @@ export function bookerContactRefusal(
         "trip_departed",
         "This trip has departed; the booker's details no longer change",
       );
+    case "session_ended":
+      return new ApiError(
+        401,
+        "session_expired",
+        "This booking session has ended; open your link again",
+      );
     case "limit_reached":
       return new ApiError(
         429,
