@@ -443,6 +443,59 @@ describe("opening the booking", () => {
     expect(meet?.querySelector(".manage-block")).toBeNull();
   });
 
+  it("lists the operator's important links beside the trip, each naming the site it opens", async () => {
+    await openedFromLink(
+      {},
+      {
+        booking: managedBooking({
+          importantLinks: [
+            {
+              label: "Fishing license",
+              url: "https://licenses.example.org/buy",
+              host: "licenses.example.org",
+              description: "Buy a one-day license before you board.",
+            },
+            {
+              label: "Not a real link",
+              url: "javascript:alert(1)",
+              host: "javascript",
+              description: null,
+            },
+            {
+              label: "Parking map",
+              url: "https://maps.example.com/dock",
+              host: "maps.example.com",
+              description: null,
+            },
+          ],
+        }),
+      },
+    );
+    const trip = card("The trip");
+    const links = [...trip.querySelectorAll<HTMLAnchorElement>(".manage-links a")];
+    expect(links.map((a) => [text(a), a.getAttribute("href"), a.target, a.rel])).toEqual([
+      [
+        "Fishing license (opens licenses.example.org in a new tab)",
+        "https://licenses.example.org/buy",
+        "_blank",
+        "noopener noreferrer external",
+      ],
+      [
+        "Parking map (opens maps.example.com in a new tab)",
+        "https://maps.example.com/dock",
+        "_blank",
+        "noopener noreferrer external",
+      ],
+    ]);
+    expect(text(trip.querySelector(".manage-links-title"))).toContain("Important links from");
+    expect(text(trip.querySelector(".manage-links li"))).toContain("Buy a one-day license");
+  });
+
+  it("shows no important links section when the operator has none", async () => {
+    await openedFromLink();
+    expect(card("The trip").querySelector(".manage-links")).toBeNull();
+  });
+
   it("shows the receipt as the order holds it, the total paid, and says the payment was a test", async () => {
     await openedFromLink();
     expect(receiptRows()).toEqual([

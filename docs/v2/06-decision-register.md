@@ -8,6 +8,25 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.14b-rest, part 1, an operator's Important links, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The tracker's W3-G2.14b-rest also covers custom hostnames on an operator's domain, TXT reuse, the D15 narrowings, and the sweep of unattached pending hostnames; those need a real operator domain or the owner's rule and are not in this part.
+
+It lands as migration `0041` and the [database contract](../../packages/database/README.md#important-links-0041). It builds the "Important links" section of docs/v2/02's brand configuration. What it adds:
+
+- **Owners manage a short list of links.** In the console API (`/v1/staff/tenants/{tenantId}/important-links`), an owner adds, changes, reorders, and archives named HTTPS links with an optional note, for every trip or for named products (a fishing-license page for fishing trips). Every role reads them. Each change is audited.
+- **Guests see the ones for their trip.** The booking page shows the links for every trip and for the booking's product beside the meeting point. Each says which site it opens and opens in a new tab. A public endpoint lists the links for every trip, for the coming PWA and native screens.
+- **Every writer is held to the rules.** The database refuses an address that is not https with a host name (no IP address, user name, or password), another operator's product, a change to an archived link, and a 26th active link. Nothing is deleted.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only change links** (the catalog permission). Booking staff and finance read them.
+- **D2: at most 25 active links an operator (500 in all, archived ones included), 20 products a link**, a name of 60 characters and a note of 200.
+- **D3: https only, public-looking host names only.** No `http`, IP address, user name and password, port outside 1 to 65535, or name kept for local networks or special use (`.local`, `.localhost`, `.internal`, `.home.arpa`, `.test`, and the like) in the address, and no hidden direction or zero-width characters in the address, name, or note. This keeps out the obvious ways to point at a local network or carry credentials, but a public name can still lead anywhere, so it is not a guarantee: TideGrid never fetches these pages itself, only the guest's browser does, and it does not check what a page says, as docs/v2/02 says. Guests see the host (with any port other than 443) before they open a link.
+- **D4: archive, never delete.** An archived link is final; to bring one back an owner adds it again. The audit keeps what each link said.
+
+Not built yet: a console screen (the API is ready), a site-wide links page on the guest site, and links in the confirmation email.
+
 ### 2026-11-11: W3-G2.13, part 1, checking a standard CSV import without importing it, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The standard CSV import is the tracker's G2.13. Its file format is the [draft](drafts/standard-csv-import.md) from W1-CSV-DEF (the 2026-11-08 entry below), still proposed and not approved by the owner. As the coordinator directed, this goal builds against that draft as a coordinator default, so every column, code, and total below is pending the owner's approval of the draft.

@@ -194,6 +194,7 @@ export * from "./checkout.ts";
 export * from "./console.ts";
 // The tenant-wide staff email exceptions list (W1-EMAIL-EXC).
 export * from "./email-exceptions.ts";
+export * from "./important-links.ts";
 // Money movements for a date range (W3-G2.12-rest).
 export * from "./imports.ts";
 // Capacity and holds (G2.6).

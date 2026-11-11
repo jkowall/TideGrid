@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-11
 
+### An operator's Important links (W3-G2.14b-rest, part 1), built November 11, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0041_important_links.sql`, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.
+
+- **Built.** Owners add, change, reorder, and archive named HTTPS links for every trip or named products (`/v1/staff/tenants/{tenantId}/important-links`); every role reads them. Guests see the ones for their booking's product beside the meeting point on the booking page, each naming the site it opens, and the site's links for every trip from `GET /v1/public/important-links`.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `important-links.integration.test.ts` (4 cases: add, replay, change, archive, and the audit; bad addresses, another operator's product, booking staff and finance refused, two tenants; guests' links by product and position, archived ones hidden, an unknown site refused; the database's rules for a direct writer: ports, names kept for local networks, hidden characters, archived is final, no DELETE, and the limits of 25 active and 500 in all), the tenancy privileges test, and `packages/contracts/src/important-links.test.ts` (49 cases for the address rule, the host shown to guests against the browser's own `URL().host`, and the name and note rules). Guest site: `ManagePage.test.tsx` (the links, their new-tab and opener attributes, the host named, a bad address dropped, and no section without links).
+- **Reviews.** An independent and a security review found nothing high or medium. Fixed from them: one order for owners and guests (position, then when added); ports limited to 1 to 65535 and shown to guests unless 443; names kept for local networks refused; the database refuses the same hidden characters as the contract; 500 links in all; the public list is not cached, so archiving shows at once; archive maps a refusal like the other writes.
+- **Still open.** The coordinator defaults D1 to D4 await the owner. No console screen and no guest-app page yet, so G2.14b-rest is not done.
+
 ### Checking a standard CSV import batch without importing it (W3-G2.13, part 1), built November 11, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, migration `0040_import_runs.sql`, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Built against the [draft import format](v2/drafts/standard-csv-import.md), a coordinator default pending the owner's approval. Synthetic data only; no provider call, no deploy.

@@ -11,6 +11,7 @@ import {
 } from "./bookings.ts";
 import { TripSummary } from "./catalog.ts";
 import { CheckoutPaymentRead, PaymentProviderName } from "./checkout.ts";
+import { GuestImportantLink } from "./important-links.ts";
 import { ParticipantList } from "./participants.ts";
 
 /**
@@ -150,6 +151,12 @@ export const ManagedBooking = z
       .boolean()
       .describe("True while the party can still be named: confirmed and not departed"),
     cancellationTerms: CancellationTerms,
+    importantLinks: z
+      .array(GuestImportantLink)
+      .optional()
+      .describe(
+        "The operator's important links for this booking's product, by position (W3-G2.14b-rest)",
+      ),
   })
   .describe("One booking as its guest may see it: their own details, the receipt, and the party");
 export type ManagedBooking = z.infer<typeof ManagedBooking>;
