@@ -756,10 +756,16 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
       select count(*)::int as n from public.waiver_deliveries where request_id = ${requestId}`;
     expect(count?.n).toBe(2);
     // The audit names the booker's resend apart from the person's own renewal.
-    const [audit] = await admin<{ n: number }[]>`
-      select count(*)::int as n from public.audit_events
+    const audits = await admin<{ actor_type: string; actor_id: string | null }[]>`
+      select actor_type, actor_id from public.audit_events
        where subject_id = ${requestId} and action = 'waiver_request.resent_by_booker'`;
-    expect(audit?.n).toBe(1);
+    expect(audits).toHaveLength(1);
+    // It names the booking session that asked, as lane 1's manage commands do.
+    expect(audits[0]?.actor_type).toBe("guest");
+    expect(audits[0]?.actor_id).toMatch(/^guest_session:[0-9a-f-]{36}$/);
+    const [stamped] = await admin<{ actor_id: string | null }[]>`
+      select actor_id from public.waiver_deliveries where request_id = ${requestId} and generation = 2`;
+    expect(stamped?.actor_id).toBe(audits[0]?.actor_id);
     const third = await bookingSession(A, booked);
     // A name the place no longer has, then a missing name.
     expect(codeOf(await resend({ position: 1, name: "Someone Else" }, { bearer: third }))).toEqual([

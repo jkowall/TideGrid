@@ -594,7 +594,11 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           "This booking session has ended; open your link again",
         );
       }
-      const sent = await resendWaiverForBooker(trx, ctx, wdeps, {
+      // Record the session as the actor, as lane 1's manage commands do, so
+      // the delivery and the audit name which booking session asked.
+      const actor = `guest_session:${session.sessionId}`;
+      await sql`select set_config('app.actor_id', ${actor}, true)`.execute(trx);
+      const sent = await resendWaiverForBooker(trx, { ...ctx, actorId: actor }, wdeps, {
         bookingId: session.bookingId,
         position,
         name,
