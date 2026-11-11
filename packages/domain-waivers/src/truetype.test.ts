@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { fallbackFont, fallbackGlyph, fallbackWidth } from "./fallback-font.ts";
-import { advanceWidth, compactTrueType, hasOutline, parseTrueType } from "./truetype.ts";
+import {
+  advanceWidth,
+  compactTrueType,
+  components,
+  hasOutline,
+  parseTrueType,
+} from "./truetype.ts";
 
 /** The sum every TrueType file's 32-bit words come to once its head is adjusted. */
 function wholeSum(bytes: Uint8Array): number {
@@ -74,6 +80,11 @@ describe("compactTrueType", () => {
     const small = parseTrueType(bytes);
     for (const id of glyphOf.values()) expect(id).toBeLessThan(small.numGlyphs);
     expect(hasOutline(small, glyphOf.get(composite as number) as number)).toBe(true);
+    // Every kept glyph's parts, as stored in the new glyf, are its old parts renumbered.
+    for (const [old, now] of glyphOf) {
+      expect(components(small, now)).toEqual(components(font, old).map((c) => glyphOf.get(c)));
+    }
+    expect(components(small, glyphOf.get(composite as number) as number).length).toBeGreaterThan(1);
     expect(wholeSum(bytes)).toBe(0xb1b0afba);
   });
 

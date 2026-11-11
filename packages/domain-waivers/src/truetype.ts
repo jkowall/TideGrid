@@ -146,8 +146,8 @@ export function hasOutline(font: TrueTypeFont, glyph: number): boolean {
   return to > from;
 }
 
-/** The glyphs a composite glyph is built from. */
-function components(font: TrueTypeFont, glyph: number): number[] {
+/** The glyphs a composite glyph is built from, in order; none for a simple glyph. */
+export function components(font: TrueTypeFont, glyph: number): number[] {
   const [from, to] = glyphRange(font, glyph);
   if (to <= from) return [];
   const glyf = table(font, "glyf").dv;
