@@ -23,7 +23,7 @@ import {
   timestampMs,
   type Value,
 } from "./spec.ts";
-import { instantsFor, isKnownZone, localDateAt } from "./zone-time.ts";
+import { instantsFor, isKnownZone, localDateAt, offsetAt } from "./zone-time.ts";
 
 export interface ProductInfo {
   id: string;
@@ -60,8 +60,16 @@ export interface TripInfo {
 export interface ImportLookup {
   products(ids: readonly string[]): Promise<Map<string, ProductInfo>>;
   boats(ids: readonly string[]): Promise<Map<string, BoatInfo>>;
-  /** Trips not canceled on these boats that end after `fromMs` and start before `toMs`. */
+  /** Trips, canceled ones included, on these boats that end after `fromMs` and start before `toMs`. */
   liveTrips(boatIds: readonly string[], fromMs: number, toMs: number): Promise<TripInfo[]>;
+  /**
+   * Positions of departures that the database's zone data reads differently
+   * from the runtime's (the two ship separately), so the database would refuse them.
+   */
+  zoneMismatches(
+    zone: string,
+    departures: readonly { startsAtMs: number; local: string; offsetMinutes: number }[],
+  ): Promise<Set<number>>;
 }
 
 export interface ImportManifest {
@@ -415,12 +423,12 @@ function readManifest(
     const item = (record.fields[at("item")] ?? "").trim();
     const target = (record.fields[at("file")] ?? "").trim();
     const value = (record.fields[at("value")] ?? "").trim();
-    row.key = target ? `${item}|${target}` : item;
     if (hasControl(item + target + value)) {
       report.add(file, row, null, "invalid_type", "Control characters are not allowed.");
       fatal = true;
       continue;
     }
+    row.key = target ? `${item}|${target}` : item;
     if (target === "") {
       if (!(MANIFEST_ITEMS as readonly string[]).includes(item)) {
         report.add(
@@ -606,6 +614,7 @@ interface TripPlan {
   startMs: number;
   freeAtMs: number;
   localDate: string;
+  localTime: string;
   capacity: number;
   existing: TripInfo | null;
 }
@@ -912,7 +921,40 @@ export async function validateImport(
       continue;
     }
     const freeAtMs = startMs + (product.durationMinutes + product.turnaroundMinutes) * MINUTE_MS;
-    plans.push({ row, product, boat, startMs, freeAtMs, localDate, capacity, existing: null });
+    plans.push({
+      row,
+      product,
+      boat,
+      startMs,
+      freeAtMs,
+      localDate,
+      localTime,
+      capacity,
+      existing: null,
+    });
+  }
+  // The database must read each start the same way, or it would refuse the trip.
+  if (plans.length > 0) {
+    const zone = manifest.operatorTimeZone;
+    const mismatched = await lookup.zoneMismatches(
+      zone,
+      plans.map((p) => ({
+        startsAtMs: p.startMs,
+        local: `${p.localDate} ${p.localTime}`,
+        offsetMinutes: offsetAt(zone, p.startMs),
+      })),
+    );
+    plans.forEach((plan, i) => {
+      if (!mismatched.has(i)) return;
+      report.add(
+        "trips.csv",
+        plan.row,
+        "time_zone",
+        "zone_mismatch",
+        "The database's time zone data reads this local time differently; the trip cannot be placed until they agree.",
+        plan.localDate,
+      );
+    });
   }
   // The same departure under two source ids.
   const sameDeparture = new Map<string, TripPlan[]>();
@@ -948,18 +990,64 @@ export async function validateImport(
     live = await lookup.liveTrips([...new Set(open.map((p) => p.boat.id))], from, to);
   }
   // A canceled departure still holds its product, boat, and start, so a row
-  // naming it is refused; it never blocks another trip on the boat.
-  const canceled = live.filter((t) => t.salesState === "canceled");
-  live = live.filter((t) => t.salesState !== "canceled");
+  // naming it is refused; it never blocks another trip on the boat. Lookups
+  // are by key, and overlaps by a binary search over each boat's trips sorted
+  // by start, so a large batch against many trips stays near-linear.
+  const departureKey = (product: string, boat: string, startMs: number) =>
+    `${product}|${boat}|${startMs}`;
+  const canceledKeys = new Set<string>();
+  const liveByKey = new Map<string, TripInfo>();
+  const liveByBoat = new Map<string, TripInfo[]>();
+  for (const t of live) {
+    const k = departureKey(t.productId, t.boatId, t.startsAtMs);
+    if (t.salesState === "canceled") {
+      canceledKeys.add(k);
+      continue;
+    }
+    liveByKey.set(k, t);
+    const list = liveByBoat.get(t.boatId);
+    if (list) list.push(t);
+    else liveByBoat.set(t.boatId, [t]);
+  }
+  // Per boat: trips by start, with the latest boat-free time so far.
+  const boatIndex = new Map<string, { trips: TripInfo[]; maxFree: number[] }>();
+  for (const [boatId, trips] of liveByBoat) {
+    trips.sort((a, c) => a.startsAtMs - c.startsAtMs);
+    const maxFree: number[] = [];
+    trips.forEach((t, i) => {
+      maxFree.push(Math.max(t.boatFreeAtMs, i > 0 ? (maxFree[i - 1] as number) : t.boatFreeAtMs));
+    });
+    boatIndex.set(boatId, { trips, maxFree });
+  }
+  /** A live trip on the boat, other than `except`, that is out between start and free. */
+  const clashWith = (
+    boatId: string,
+    startMs: number,
+    freeAtMs: number,
+    except: TripInfo | null,
+  ): TripInfo | null => {
+    const index = boatIndex.get(boatId);
+    if (!index) return null;
+    // The last trip starting before `freeAtMs`.
+    let lo = 0;
+    let hi = index.trips.length - 1;
+    let last = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if ((index.trips[mid] as TripInfo).startsAtMs < freeAtMs) {
+        last = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    for (let j = last; j >= 0 && (index.maxFree[j] as number) > startMs; j -= 1) {
+      const t = index.trips[j] as TripInfo;
+      if (t !== except && t.boatFreeAtMs > startMs) return t;
+    }
+    return null;
+  };
   for (const plan of open) {
-    if (
-      canceled.some(
-        (t) =>
-          t.boatId === plan.boat.id &&
-          t.productId === plan.product.id &&
-          t.startsAtMs === plan.startMs,
-      )
-    ) {
+    const k = departureKey(plan.product.id, plan.boat.id, plan.startMs);
+    if (canceledKeys.has(k)) {
       report.add(
         "trips.csv",
         plan.row,
@@ -970,12 +1058,7 @@ export async function validateImport(
       );
       continue;
     }
-    const same = live.find(
-      (t) =>
-        t.boatId === plan.boat.id &&
-        t.productId === plan.product.id &&
-        t.startsAtMs === plan.startMs,
-    );
+    const same = liveByKey.get(k) ?? null;
     if (same) {
       if (n(plan.row, "seat_capacity") !== undefined && same.seatCapacity !== plan.capacity) {
         report.add(
@@ -992,14 +1075,7 @@ export async function validateImport(
       plan.capacity = same.seatCapacity;
       plan.freeAtMs = same.boatFreeAtMs;
     }
-    const clash = live.find(
-      (t) =>
-        t.boatId === plan.boat.id &&
-        t.id !== same?.id &&
-        t.startsAtMs < plan.freeAtMs &&
-        plan.startMs < t.boatFreeAtMs,
-    );
-    if (clash) {
+    if (clashWith(plan.boat.id, plan.startMs, plan.freeAtMs, same)) {
       report.add(
         "trips.csv",
         plan.row,

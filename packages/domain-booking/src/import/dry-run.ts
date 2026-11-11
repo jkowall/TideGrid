@@ -119,6 +119,23 @@ export function importLookup(trx: TenantTransaction, tenantId: string): ImportLo
         }),
       );
     },
+    // As catalog generation does: values travel as text, so the driver never
+    // reads a wall-clock time in the process's zone.
+    async zoneMismatches(zone, departures) {
+      if (departures.length === 0) return new Set();
+      const { rows } = await sql<{ position: number }>`
+        select (d.n - 1)::int as position
+          from unnest(
+                 ${departures.map((d) => new Date(d.startsAtMs).toISOString())}::text[],
+                 ${departures.map((d) => d.local)}::text[],
+                 ${departures.map((d) => d.offsetMinutes)}::int[]
+               ) with ordinality as d(starts_at, local_start, start_offset, n)
+         where pg_catalog.timezone(${zone}, d.starts_at::timestamptz) <> d.local_start::timestamp
+            or extract(epoch from pg_catalog.timezone(${zone}, d.starts_at::timestamptz)
+                 - pg_catalog.timezone('UTC', d.starts_at::timestamptz)) / 60 <> d.start_offset
+      `.execute(trx);
+      return new Set(rows.map((r) => r.position));
+    },
   };
 }
 

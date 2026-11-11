@@ -54,7 +54,16 @@ BEGIN
     RAISE EXCEPTION 'only an owner of this operator runs an import'
       USING ERRCODE = '42501', CONSTRAINT = 'import_runs_owner';
   END IF;
-  -- A batch keeps one source system across its runs.
+  -- A batch keeps one source system across its runs. Runs of one batch take
+  -- turns (the same lock runImportDryRun takes), and read afresh after the
+  -- lock only under READ COMMITTED.
+  IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'import runs are written only under READ COMMITTED, not %',
+      pg_catalog.current_setting('transaction_isolation')
+      USING ERRCODE = '25001';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(
+    'import_runs:' || NEW.tenant_id::text || ':' || NEW.batch_id));
   IF EXISTS (SELECT 1 FROM public.import_runs r
               WHERE r.tenant_id = NEW.tenant_id AND r.batch_id = NEW.batch_id
                 AND r.source_system <> NEW.source_system) THEN

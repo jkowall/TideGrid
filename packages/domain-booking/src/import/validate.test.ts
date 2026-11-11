@@ -50,6 +50,9 @@ const lookup = (trips: TripInfo[] = []): ImportLookup => ({
   async liveTrips() {
     return trips;
   },
+  async zoneMismatches() {
+    return new Set<number>();
+  },
 });
 
 const NOW = Date.parse("2027-03-02T12:00:00Z");
@@ -277,6 +280,21 @@ PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
     // The booking goes too, and its other payment with it.
     expect(at("bookings.csv", 4)).toEqual(["refund_exceeds_payments"]);
     expect(at("payments.csv", 4)).toEqual(["parent_rejected"]);
+  });
+
+  it("refuses a trip the database's zone data reads differently, with its bookings", async () => {
+    const disagreeing: ImportLookup = {
+      ...lookup(),
+      async zoneMismatches() {
+        return new Set([0]);
+      },
+    };
+    const run = await validateImport(sample(), disagreeing, NOW);
+    const at = (file: string, line: number) =>
+      run.issues.filter((i) => i.file === file && i.line === line).map((i) => i.code);
+    expect(at("trips.csv", 2)).toEqual(["zone_mismatch"]);
+    expect(at("bookings.csv", 2)).toEqual(["parent_rejected"]);
+    expect(at("trips.csv", 3)).toEqual([]);
   });
 
   it("refuses a canceled departure and a card number in the manifest", async () => {
