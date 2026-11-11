@@ -181,9 +181,13 @@ export function textWidth(text: string, font: PdfFont, size: number): number {
   return (units * size) / 1000;
 }
 
-/** Spaces the PDF cannot show, such as the no-break spaces dates use, become plain spaces. */
+/**
+ * Spaces the PDF cannot show, such as the no-break spaces dates use, become
+ * plain spaces. Text is composed first (NFC), so a letter typed as a base
+ * letter and a combining accent is drawn, and measured, as the one letter.
+ */
 export function plainSpaces(text: string): string {
-  return text.replace(/[  -​  　]/g, " ");
+  return text.normalize("NFC").replace(/[  -​  　]/g, " ");
 }
 
 /**
@@ -316,7 +320,7 @@ const OBLIQUE_SKEW = 0.21;
 function textRun(t: PdfText, used: Map<number, number>, cid: (g: number) => number): string {
   const parts = segments(t.text, used);
   if (parts.every((p) => p.glyphs === null)) {
-    return `BT /${fontKeys[t.font]} ${num(t.size)} Tf 1 0 0 1 ${num(t.x)} ${num(t.y)} Tm ${pdfString(t.text)} Tj ET`;
+    return `BT /${fontKeys[t.font]} ${num(t.size)} Tf 1 0 0 1 ${num(t.x)} ${num(t.y)} Tm ${pdfString(t.text.normalize("NFC"))} Tj ET`;
   }
   // One text object for the whole run, so each piece starts exactly where the
   // viewer finished drawing the last one, with no widths estimated here. An

@@ -203,6 +203,21 @@ describe("renderWaiverPdf", () => {
     );
   });
 
+  it("draws a letter typed with a combining accent as the composed letter", () => {
+    const sig = "Mai\u0308a Example";
+    const pdf = ascii(
+      renderWaiverPdf(
+        sampleWaiver({
+          participant: { name: sig, minor: false },
+          signer: { role: "participant", name: sig, relationship: null },
+          signatureText: sig,
+        }),
+      ),
+    );
+    expect(pdf).toContain("(Ma\\357a Example)");
+    expect(pdf).not.toContain("FontFile2");
+  });
+
   it("masks an address to its first character and domain", () => {
     expect(maskEmail("pat@example.test")).toBe("p•••@example.test");
     expect(maskEmail("broken")).toBe("•••");
