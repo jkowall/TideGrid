@@ -93,6 +93,7 @@ export function sameCriteria(a: SearchCriteria | null, b: SearchCriteria | null)
 const sourceLead: Record<ListSource, string> = {
   direct: "Online bookings",
   staff_assisted: "Staff bookings",
+  complimentary: "Complimentary bookings",
 };
 
 /**

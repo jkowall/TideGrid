@@ -67,11 +67,12 @@ export async function loadSessionView(
   const { rows } = await sql<ViewRow>`
     select s.id, s.state, s.state = 'open' and s.expires_at <= now() as lapsed,
            s.quote_id, s.trip_id, s.party_size, s.expires_at, s.created_at,
-           p.amount as total_amount, o.currency, b.reference,
+           coalesce(p.amount, 0) as total_amount, o.currency, b.reference,
            r.state as refund_state, r.amount as refund_amount
       from checkout_sessions s
       join orders o on o.tenant_id = s.tenant_id and o.checkout_session_id = s.id
-      join payments p on p.tenant_id = s.tenant_id and p.checkout_session_id = s.id
+      -- A complimentary checkout (0039) has no payment and charges nothing.
+      left join payments p on p.tenant_id = s.tenant_id and p.checkout_session_id = s.id
       left join bookings b on b.tenant_id = s.tenant_id and b.checkout_session_id = s.id
       left join payment_refunds r on r.tenant_id = s.tenant_id and r.payment_id = p.id
      where s.tenant_id = ${tenantId} and s.id = ${sessionId}

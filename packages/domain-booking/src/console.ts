@@ -35,6 +35,7 @@ import {
 } from "@tidegrid/database";
 import { type RawBuilder, sql } from "kysely";
 import { type BalanceView, getBookingBalance } from "./balance-read.ts";
+import type { ComplimentaryReason } from "./checkout.ts";
 import { iso, isoOrNull } from "./views.ts";
 
 // Views ------------------------------------------------------------------------------
@@ -56,7 +57,8 @@ export interface ExtraView {
 }
 
 export interface PaymentStatusView {
-  state: PaymentState;
+  /** complimentary: an owner booked it at no charge, so there is no payment (0039). */
+  state: PaymentState | "complimentary";
   refund: { state: RefundState; amount: number } | null;
 }
 
@@ -98,6 +100,19 @@ export interface DayBookingView {
   total: number;
   currency: "USD";
   payment: PaymentStatusView;
+}
+
+/**
+ * An owner's grant, as a booking's detail shows it. The note is text a person
+ * typed: present only where the booker is (roles that hold bookings.read).
+ */
+export interface ComplimentaryView {
+  reasonCode: ComplimentaryReason;
+  note?: string | null;
+  waivedAmount: number;
+  currency: "USD";
+  grantedAt: string;
+  grantedBy: { userId: string; displayName: string } | null;
 }
 
 export interface TripTimingView extends TripSummaryView {
@@ -188,6 +203,7 @@ export interface BookingDetailView {
       total: number;
     };
   };
+  /** Null on a complimentary booking, which has no payment (0039). */
   payment: {
     provider: PaymentProviderName;
     state: PaymentState;
@@ -196,7 +212,9 @@ export interface BookingDetailView {
     providerReference: string | null;
     createdAt: string;
     succeededAt: string | null;
-  };
+  } | null;
+  /** The owner's grant on a complimentary booking (0039); null on a paid one. */
+  complimentary: ComplimentaryView | null;
   refund: {
     state: RefundState;
     amount: number;
@@ -355,7 +373,7 @@ export function offsetDateTime(instant: Date | string, offsetMinutes: number): s
 }
 
 function paymentStatus(row: {
-  payment_state: PaymentState;
+  payment_state: PaymentState | "complimentary";
   refund_state: RefundState | null;
   refund_amount: number | null;
 }): PaymentStatusView {
@@ -569,13 +587,14 @@ export async function listDayBookings(
     select b.id, b.reference, b.trip_id, b.state, b.source, s.channel, b.party_size,
            b.confirmed_at, p.kind as product_kind,
            o.id as order_id, o.total_amount,
-           pay.state as payment_state, r.state as refund_state, r.amount as refund_amount
+           coalesce(pay.state, 'complimentary') as payment_state,
+           r.state as refund_state, r.amount as refund_amount
            ${bookerColumn}
       from bookings b
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
       join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
-      join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
+      left join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       left join payment_refunds r on r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
      where b.tenant_id = ${tenantId} and t.local_date = ${query.date}::date
@@ -636,7 +655,7 @@ export async function getBookingDetail(
 ): Promise<BookingDetailView | null> {
   if (!isUuid(bookingId)) return null;
   const booker: RawBuilder<unknown> = options.withBooker
-    ? sql`s.booker_name, s.booker_email,`
+    ? sql`s.booker_name, s.booker_email, g.note as g_note,`
     : sql``;
   const { rows } = await sql<
     TimingRow & {
@@ -676,12 +695,18 @@ export async function getBookingDetail(
       tax_amount: number;
       included_tax_amount: number;
       total_amount: number;
-      provider: PaymentProviderName;
-      payment_state: PaymentState;
-      payment_amount: number;
+      provider: PaymentProviderName | null;
+      payment_state: PaymentState | null;
+      payment_amount: number | null;
       provider_payment_id: string | null;
-      payment_created_at: Date | string;
+      payment_created_at: Date | string | null;
       succeeded_at: Date | string | null;
+      g_reason_code: ComplimentaryReason | null;
+      g_note?: string | null;
+      g_waived_amount: number | null;
+      g_created_at: Date | string | null;
+      g_actor_id: string | null;
+      g_actor_name: string | null;
       refund_state: RefundState | null;
       refund_amount: number | null;
       failure_code: string | null;
@@ -707,17 +732,24 @@ export async function getBookingDetail(
            pay.provider, pay.state as payment_state, pay.amount as payment_amount,
            pay.provider_payment_id, pay.created_at as payment_created_at, pay.succeeded_at,
            r.state as refund_state, r.amount as refund_amount, r.failure_code,
-           r.created_at as refund_created_at, r.settled_at as refund_settled_at
+           r.created_at as refund_created_at, r.settled_at as refund_settled_at,
+           g.reason_code as g_reason_code, g.waived_amount as g_waived_amount,
+           g.created_at as g_created_at, g.actor_id as g_actor_id,
+           gm.display_name as g_actor_name
       from bookings b
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
       ${tripJoins}
       join locations l on l.tenant_id = p.tenant_id and l.id = p.location_id
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
-      join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
+      left join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       left join payment_refunds r on r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
       left join booking_cancellations c on c.tenant_id = b.tenant_id and c.booking_id = b.id
       left join tenant_memberships m on m.tenant_id = s.tenant_id and m.user_id = s.opened_by
+      left join complimentary_grants g
+        on g.tenant_id = b.tenant_id and g.checkout_session_id = b.checkout_session_id
+      left join tenant_memberships gm
+        on gm.tenant_id = g.tenant_id and gm.user_id::text = g.actor_id
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}::uuid`.execute(trx);
   const row = rows[0];
   if (!row) return null;
@@ -844,15 +876,35 @@ export async function getBookingDetail(
         total: row.total_amount,
       },
     },
-    payment: {
-      provider: row.provider,
-      state: row.payment_state,
-      amount: row.payment_amount,
-      currency: "USD",
-      providerReference: maskProviderReference(row.provider_payment_id),
-      createdAt: iso(row.payment_created_at),
-      succeededAt: isoOrNull(row.succeeded_at),
-    },
+    payment:
+      row.provider !== null &&
+      row.payment_state !== null &&
+      row.payment_amount !== null &&
+      row.payment_created_at !== null
+        ? {
+            provider: row.provider,
+            state: row.payment_state,
+            amount: row.payment_amount,
+            currency: "USD",
+            providerReference: maskProviderReference(row.provider_payment_id),
+            createdAt: iso(row.payment_created_at),
+            succeededAt: isoOrNull(row.succeeded_at),
+          }
+        : null,
+    complimentary:
+      row.g_reason_code !== null && row.g_waived_amount !== null && row.g_created_at !== null
+        ? {
+            reasonCode: row.g_reason_code,
+            ...(options.withBooker ? { note: row.g_note ?? null } : {}),
+            waivedAmount: row.g_waived_amount,
+            currency: "USD",
+            grantedAt: iso(row.g_created_at),
+            grantedBy:
+              row.g_actor_id !== null && row.g_actor_name !== null
+                ? { userId: row.g_actor_id, displayName: row.g_actor_name }
+                : null,
+          }
+        : null,
     refund,
     balance: await getBookingBalance(trx, tenantId, bookingId, {
       withReasons: options.withBooker,
@@ -934,10 +986,11 @@ export async function getTripRoster(
     refund_amount: number | null;
   }>`
     select b.id, b.reference, b.source, s.channel, b.party_size, b.order_id, s.booker_name,
-           pay.state as payment_state, r.state as refund_state, r.amount as refund_amount
+           coalesce(pay.state, 'complimentary') as payment_state,
+           r.state as refund_state, r.amount as refund_amount
       from bookings b
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
-      join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
+      left join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       left join payment_refunds r on r.tenant_id = b.tenant_id and r.payment_id = b.payment_id
      where b.tenant_id = ${tenantId} and b.trip_id = ${tripId}::uuid
        and b.state = 'confirmed'

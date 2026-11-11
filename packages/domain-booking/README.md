@@ -516,6 +516,14 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 - **Who sees what.** `typedReferences` (roles with `bookings.read`) reads the check or receipt numbers staff typed, which can name a guest; otherwise they are null. `maskProviderReferences` (TideGrid support) masks provider ids with `maskProviderReference`.
 - **CSV.** `renderMoneyExport` writes `moneyExportColumns` (contracts), one row per entry and a total row, with the entry count in the last column (Entries). Signed amounts use `csvSignedMoney`. No guest's name or email is read.
 
+## Complimentary bookings (W3-G2.12-rest)
+
+`bookComplimentary(trx, ctx, input)` in `staff-checkout.ts`. Coordinator defaults D1 to D5, pending owner confirmation, are in the [decision register](../../docs/v2/06-decision-register.md#decision-log).
+
+- **One transaction.** The staff quote checks, then `createCheckoutSession` with `complimentary` (the grant in place of the payment, audited with the code and amount but not the note), `confirmHold`, and `createBooking` with no payment. The result is `booked` with the booking, its reference, and the amount waived, or the staff checkout's refusals plus `complimentary_deposit`.
+- **Reads.** Lists, the roster, search, and the day report show payment state `complimentary` and zero money; the booking detail has `payment: null` and `complimentary` (reason, amount, when, who, and the note only for roles that see the booker).
+- **Cancel, fees, changes.** `termsOf` gives remedy none; a staff override is `override_invalid`. Reconciliation assesses a zero fee. Moves and party changes run as usual and move no money.
+
 ## Deferred and known gaps
 
 - **Staff-assisted booking (G2.12d).** Staff cannot cancel a confirmed booking, refund, enter participants, correct the booker's address, override the cutoff, sales state, capacity, or price, or record cash, check, or complimentary bookings. A mistyped booker address sends the management link to whoever holds it; the read-back and its attestation reduce that, nothing removes it.

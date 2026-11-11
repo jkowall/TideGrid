@@ -380,6 +380,36 @@ async function book(
   hooks: BookingHooks,
 ): Promise<ProcessResult> {
   await markSucceeded(trx, ctx, event, payment);
+  const booking = await createBooking(
+    trx,
+    ctx,
+    session,
+    { orderId: payment.order_id, paymentId: payment.id },
+    reacquired,
+    hooks,
+  );
+  return result(reacquired ? "confirmed_reacquired" : "confirmed", {
+    checkoutSessionId: session.id,
+    bookingId: booking.id,
+  });
+}
+
+/**
+ * The booking for a checkout whose hold is confirmed: the booking row, the
+ * order paid, the checkout confirmed, audit and events, the emails, and the
+ * bookingConfirmed hook. A paid booking names its succeeded payment; a
+ * complimentary one (W3-G2.12-rest) names none, and the database checks its
+ * owner's grant in place of the payment (0039).
+ */
+export async function createBooking(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  session: Pick<SessionRow, "id" | "state" | "hold_id" | "trip_id" | "party_size">,
+  money: { orderId: string; paymentId: string | null },
+  reacquired: boolean,
+  hooks: BookingHooks,
+): Promise<{ id: string; reference: string }> {
+  const payment = { order_id: money.orderId, id: money.paymentId };
   let booking: { id: string; reference: string } | undefined;
   for (let attempt = 0; attempt < 5 && !booking; attempt++) {
     const { rows } = await sql<{ id: string; reference: string }>`
@@ -520,10 +550,7 @@ async function book(
     partySize: session.party_size,
     reacquired,
   });
-  return result(reacquired ? "confirmed_reacquired" : "confirmed", {
-    checkoutSessionId: session.id,
-    bookingId: booking.id,
-  });
+  return booking;
 }
 
 /**

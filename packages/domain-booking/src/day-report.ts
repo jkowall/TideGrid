@@ -69,7 +69,12 @@ export interface DayReportRow extends DayReportMoney {
   bookings: number;
   /** The party's size, or 0 for a canceled booking. */
   guests: number;
-  paymentState: PaymentState;
+  /**
+   * complimentary: an owner booked it at no charge (0039). Its money columns
+   * are zero, since nothing was sold for money; the waived value is on the
+   * booking's own detail.
+   */
+  paymentState: PaymentState | "complimentary";
   /** The latest refund's state, or null when there is none. */
   refundState: RefundState | null;
   pendingRefund: { count: number; amount: number };
@@ -112,7 +117,7 @@ interface ReportRow {
   tax_amount: number;
   included_tax_amount: number;
   total_amount: number;
-  payment_state: PaymentState;
+  payment_state: PaymentState | "complimentary";
   refund_state: RefundState | null;
   refunded: number;
   pending_count: number;
@@ -180,7 +185,7 @@ export async function buildDayReport(
            t.starts_at,
            o.subtotal_amount, o.discount_amount, o.fee_amount, o.tax_amount,
            o.included_tax_amount, o.total_amount,
-           pay.state as payment_state,
+           coalesce(pay.state, 'complimentary') as payment_state,
            rf.refund_state, rf.refunded, rf.pending_count, rf.pending_amount,
            statement_timestamp() as generated_at
            ${bookerColumns}
@@ -189,7 +194,7 @@ export async function buildDayReport(
       join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
       join boats bt on bt.tenant_id = t.tenant_id and bt.id = t.boat_id
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
-      join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
+      left join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       cross join lateral (
         select (array_agg(r.state order by r.created_at desc, r.id desc))[1] as refund_state,
                coalesce(sum(r.amount) filter (where r.state = 'succeeded'), 0)::int as refunded,
@@ -206,7 +211,9 @@ export async function buildDayReport(
   if (rows.length > limit) return { kind: "too_large" };
 
   const reportRows = rows.map((r): DayReportRow => {
-    const total = r.total_amount;
+    // A complimentary booking sold nothing for money: every money column is zero.
+    const comp = r.payment_state === "complimentary";
+    const total = comp ? 0 : r.total_amount;
     return {
       bookingId: r.id,
       reference: r.reference,
@@ -227,14 +234,14 @@ export async function buildDayReport(
       // leaves the counts, as the day list's counts do.
       bookings: r.state === "canceled" ? 0 : 1,
       guests: r.state === "canceled" ? 0 : r.party_size,
-      gross: r.subtotal_amount,
-      discounts: r.discount_amount,
-      fees: r.fee_amount,
-      taxes: r.tax_amount,
+      gross: comp ? 0 : r.subtotal_amount,
+      discounts: comp ? 0 : r.discount_amount,
+      fees: comp ? 0 : r.fee_amount,
+      taxes: comp ? 0 : r.tax_amount,
       total,
       refunds: r.refunded,
       net: total - r.refunded,
-      includedTax: r.included_tax_amount,
+      includedTax: comp ? 0 : r.included_tax_amount,
       paymentState: r.payment_state,
       refundState: r.refund_state,
       pendingRefund: { count: r.pending_count, amount: r.pending_amount },

@@ -810,7 +810,7 @@ function BookingRows({
                 {/* Who took it (G2.12e), outside the facts so the columns stay;
                     a guest's own booking, or a source this console does not
                     know yet, shows none. */}
-                {b.source === "staff_assisted" && (
+                {(b.source === "staff_assisted" || b.source === "complimentary") && (
                   <p className="bk-row__source">
                     <VisuallyHidden>Source: </VisuallyHidden>
                     <StatusBadge tone="neutral" icon="user">

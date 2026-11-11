@@ -126,12 +126,15 @@ export const ManagedBooking = z
     party: BookingParty,
     extras: z.array(BookingExtra),
     order: BookingOrder,
-    payment: z.object({
-      provider: PaymentProviderName,
-      state: z.enum(["pending", "succeeded", "failed"]),
-      amount: Cents,
-      currency: z.literal("USD"),
-    }),
+    payment: z
+      .object({
+        provider: PaymentProviderName,
+        state: z.enum(["pending", "succeeded", "failed"]),
+        amount: Cents,
+        currency: z.literal("USD"),
+      })
+      .nullable()
+      .describe("Null when the operator booked it complimentary: nothing was charged"),
     refund: BookingRefund.nullable(),
     cancellation: BookingCancellation.nullable(),
     balance: BookingBalance.nullable()

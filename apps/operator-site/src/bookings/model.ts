@@ -72,12 +72,14 @@ export function readTrip(search: string): string | undefined {
 }
 
 /** The sources the day list filters by (G2.12e): the API's own values. */
-export type ListSource = "direct" | "staff_assisted";
+export type ListSource = "direct" | "staff_assisted" | "complimentary";
 
 /** `?source=` from the address, when it is exactly one of the API's sources. */
 export function readSource(search: string): ListSource | undefined {
   const value = new URLSearchParams(search).get("source");
-  return value === "direct" || value === "staff_assisted" ? value : undefined;
+  return value === "direct" || value === "staff_assisted" || value === "complimentary"
+    ? value
+    : undefined;
 }
 
 /** The Source control's choices; the empty value is every source. */
@@ -85,12 +87,14 @@ export const sourceFilterOptions: readonly { value: "" | ListSource; label: stri
   { value: "", label: "All sources" },
   { value: "direct", label: "Online, by the guest" },
   { value: "staff_assisted", label: "Staff bookings" },
+  { value: "complimentary", label: "Complimentary" },
 ];
 
 const bookingNouns: Record<ListSource | "all", [string, string]> = {
   all: ["booking", "bookings"],
   direct: ["online booking", "online bookings"],
   staff_assisted: ["staff booking", "staff bookings"],
+  complimentary: ["complimentary booking", "complimentary bookings"],
 };
 
 /** The plural noun for a source's bookings: "bookings", "staff bookings", "online bookings". */
@@ -176,6 +180,9 @@ export function paymentCopy(payment: BookingPaymentStatus): StatusCopy {
     }
   }
   switch (payment.state) {
+    // An owner booked it at no charge (W3-G2.12-rest): there is no payment.
+    case "complimentary":
+      return { label: "Complimentary", tone: "info", icon: "tag" };
     case "succeeded":
       return { label: "Paid", tone: "ready", icon: "credit-card" };
     case "pending":
@@ -183,6 +190,19 @@ export function paymentCopy(payment: BookingPaymentStatus): StatusCopy {
     case "failed":
       return { label: "Payment failed", tone: "blocked", icon: "x-octagon" };
   }
+}
+
+const complimentaryReasons: Record<string, string> = {
+  service_recovery: "Making up for a problem",
+  staff_or_crew: "Staff or crew",
+  partner_or_media: "Partner or media",
+  charity_or_donation: "Charity or donation",
+  other: "Other",
+};
+
+/** An owner's reason for a complimentary booking, in words; an unknown code reads as itself. */
+export function complimentaryReasonText(code: string): string {
+  return Object.hasOwn(complimentaryReasons, code) ? (complimentaryReasons[code] ?? code) : code;
 }
 
 /** Booking states. A guest may cancel within policy since lane 1 (G2.11c). */

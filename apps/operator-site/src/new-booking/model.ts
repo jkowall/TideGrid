@@ -56,6 +56,7 @@ export function dayTripTakesBooking(trip: BookableTrip, now: Date): boolean {
 
 /** "Staff booking, phone": how a booking's source reads beside it. */
 export function sourceText(source: string | undefined, channel: BookingChannel | null | undefined) {
+  if (source === "complimentary") return "Complimentary, booked by an owner";
   if (source !== "staff_assisted") return "Online, by the guest";
   // A channel this console does not know reads as a plain staff booking.
   const label = channel && Object.hasOwn(channelLabels, channel) ? channelLabels[channel] : null;

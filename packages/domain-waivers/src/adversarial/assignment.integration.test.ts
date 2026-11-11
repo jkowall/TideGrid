@@ -10,8 +10,9 @@
  *   retried hook creates and sends nothing.
  * - The booking-source matrix: a booking confirmed by the webhook route and one
  *   the checkout sweep confirmed from a received event assign identically, and
- *   so does a staff-assisted booking on each path (G2.12d). Imported bookings
- *   do not exist yet (a recorded gap).
+ *   so does a staff-assisted booking on each path (G2.12d), and an owner's
+ *   complimentary booking, which has no payment (W3-G2.12-rest). Imported
+ *   bookings do not exist yet (a recorded gap).
  * - A participant assigned while a publish that moves unsigned work commits.
  */
 import { randomUUID } from "node:crypto";
@@ -20,6 +21,7 @@ import type {} from "@tidegrid/database/global-setup";
 import {
   type BookingConfirmedEvent,
   type BookingHooks,
+  bookComplimentary,
   createCheckoutSession,
   ensureProviderPayment,
   handleVerifiedEvent,
@@ -543,6 +545,53 @@ describe.skipIf(!env)("G2.15 adversarial: assignment", () => {
     ]);
     expect(await shape(viaWebhook.id)).toEqual(directShape);
     expect(await shape(viaSweep.id)).toEqual(directShape);
+
+    // An owner's complimentary booking (W3-G2.12-rest): no payment, the same
+    // assignment, through the same confirmation hook. Its own trip: ten seats
+    // hold three parties of three.
+    const ownerId = randomUUID();
+    await world.admin`insert into public.staff_users (id, email, display_name)
+      values (${ownerId}, ${`wva-owner-${ownerId.slice(0, 8)}@example.test`}, 'Owner')`;
+    await world.admin`insert into public.tenant_memberships (tenant_id, user_id, role, display_name)
+      values (${T.id}, ${ownerId}, 'owner', 'Olive Owner')`;
+    const ownerCtx: TenantContext = {
+      tenantId: T.id,
+      actorType: "staff",
+      actorId: ownerId,
+      requestId: `req-${randomUUID()}`,
+      sourceIp: null,
+    };
+    const compTrip = nextTrip();
+    const compQuote = await inTenantTransaction(world.db, ownerCtx, (trx) =>
+      createQuote(trx, ownerCtx, {
+        tripId: compTrip,
+        party: { kind: "tickets", tickets: [{ code: "adult", quantity: 3 }] },
+        addOns: [],
+        promotionCode: null,
+        now: new Date(),
+      }),
+    );
+    if (compQuote.kind !== "created") throw new Error(JSON.stringify(compQuote));
+    const comped = await inTenantTransaction(world.db, ownerCtx, (trx) =>
+      bookComplimentary(
+        trx,
+        ownerCtx,
+        {
+          quoteId: compQuote.quote.quoteId,
+          acceptedPolicyVersion: compQuote.quote.policy.version,
+          booker: { name: "Synthetic Friend", email: "synthetic.friend@example.test" },
+          channel: "walk_up",
+          attestations: { policyToldToGuest: true, emailReadBack: true },
+          complimentary: { reasonCode: "staff_or_crew", note: null },
+        },
+        hooks,
+      ),
+    );
+    if (comped.kind !== "booked") throw new Error(JSON.stringify(comped));
+    const [compRow] = await world.admin<{ source: string; payment_id: string | null }[]>`
+      select source, payment_id from public.bookings where id = ${comped.bookingId}`;
+    expect(compRow).toEqual({ source: "complimentary", payment_id: null });
+    expect(await shape(comped.bookingId)).toEqual(directShape);
   }, 240_000);
 
   it("moves a participant assigned while a publish that moves unsigned work commits to the new version too", async () => {

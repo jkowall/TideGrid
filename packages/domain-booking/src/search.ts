@@ -61,7 +61,10 @@ export interface BookingSearchView {
   guests: number;
   total: number;
   currency: "USD";
-  payment: { state: PaymentState; refund: { state: RefundState; amount: number } | null };
+  payment: {
+    state: PaymentState | "complimentary";
+    refund: { state: RefundState; amount: number } | null;
+  };
 }
 
 export type BookingSearchOutcome =
@@ -124,7 +127,7 @@ interface SearchRow {
   starts_at: Date | string;
   sales_state: TripSalesState;
   total_amount: number;
-  payment_state: PaymentState;
+  payment_state: PaymentState | "complimentary";
   refund_state: RefundState | null;
   refund_amount: number | null;
   booker_name?: string;
@@ -263,7 +266,7 @@ export async function searchBookings(
                  to_char(t1.local_date, 'YYYY-MM-DD') as local_date,
                  to_char(t1.local_start_time, 'HH24:MI') as local_start_time,
                  t1.starts_at, t1.sales_state,
-                 o.total_amount, pay.state as payment_state,
+                 o.total_amount, coalesce(pay.state, 'complimentary') as payment_state,
                  r.state as refund_state, r.amount as refund_amount
                  ${bookerColumns}
             from scheduled_trips t1
@@ -271,7 +274,7 @@ export async function searchBookings(
             join products p on p.tenant_id = t1.tenant_id and p.id = t1.product_id
             join boats bt on bt.tenant_id = t1.tenant_id and bt.id = t1.boat_id
             join orders o on o.tenant_id = pb.tenant_id and o.id = pb.order_id
-            join payments pay on pay.tenant_id = pb.tenant_id and pay.id = pb.payment_id
+            left join payments pay on pay.tenant_id = pb.tenant_id and pay.id = pb.payment_id
             -- The latest refund only, so a payment refunded in parts never repeats its booking.
             left join lateral (
               select r1.state, r1.amount from payment_refunds r1

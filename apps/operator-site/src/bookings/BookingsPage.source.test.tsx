@@ -177,7 +177,7 @@ describe("filtering by source (G2.12e)", () => {
       within(select)
         .getAllByRole("option")
         .map((o) => text(o)),
-    ).toEqual(["All sources", "Online, by the guest", "Staff bookings"]);
+    ).toEqual(["All sources", "Online, by the guest", "Staff bookings", "Complimentary"]);
     expect(select.value).toBe("");
 
     select.focus();

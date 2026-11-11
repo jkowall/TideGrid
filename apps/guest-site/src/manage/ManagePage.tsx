@@ -612,10 +612,16 @@ function BookingView({
             Receipt
           </h2>
           <Ledger caption="Receipt in US dollars" hideCaption rows={orderRows(booking.order)} />
-          <p className="manage-quiet">
-            Paid with a test payment ({formatMoney(booking.payment.amount)}). This is a demo: no
-            real card was charged.
-          </p>
+          {booking.payment ? (
+            <p className="manage-quiet">
+              Paid with a test payment ({formatMoney(booking.payment.amount)}). This is a demo: no
+              real card was charged.
+            </p>
+          ) : (
+            <p className="manage-quiet">
+              Complimentary: your host booked this trip for you at no charge.
+            </p>
+          )}
           {booking.refund && (
             <p className="manage-refund">
               <Icon name="receipt" />

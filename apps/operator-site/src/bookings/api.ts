@@ -101,10 +101,19 @@ function isExtras(extras: unknown): boolean {
 }
 
 const paymentStates = new Set(["pending", "succeeded", "failed"]);
+/** A list's or roster's charge state: a payment's, or complimentary with none (W3-G2.12-rest). */
+const chargeStates = new Set([...paymentStates, "complimentary"]);
+const complimentaryReasons = new Set([
+  "service_recovery",
+  "staff_or_crew",
+  "partner_or_media",
+  "charity_or_donation",
+  "other",
+]);
 const refundStates = new Set(["requested", "pending", "succeeded", "failed"]);
 
 export function isPaymentStatus(p: Partial<BookingPaymentStatus> | null | undefined): boolean {
-  if (!paymentStates.has(p?.state as string)) return false;
+  if (!chargeStates.has(p?.state as string)) return false;
   const refund = p?.refund;
   return refund === null || (refundStates.has(refund?.state as string) && isInt(refund?.amount));
 }
@@ -264,11 +273,17 @@ function isDetail(b: Partial<BookingDetail> | null | undefined): b is BookingDet
       totals?.includedTax,
       totals?.total,
     ].every(isInt) &&
-    (b.payment?.provider === "fake" || b.payment?.provider === "stripe") &&
-    paymentStates.has(b.payment.state) &&
-    isInt(b.payment.amount) &&
-    isStringOrNull(b.payment.providerReference) &&
-    isInstantOrNull(b.payment.succeededAt) &&
+    // A complimentary booking has no payment and the owner's grant instead.
+    (b.payment === null
+      ? b.source === "complimentary" &&
+        complimentaryReasons.has(b.complimentary?.reasonCode as string) &&
+        isInt(b.complimentary?.waivedAmount) &&
+        isInstant(b.complimentary?.grantedAt)
+      : (b.payment?.provider === "fake" || b.payment?.provider === "stripe") &&
+        paymentStates.has(b.payment.state) &&
+        isInt(b.payment.amount) &&
+        isStringOrNull(b.payment.providerReference) &&
+        isInstantOrNull(b.payment.succeededAt)) &&
     (b.refund === null ||
       (refundStates.has(b.refund?.state as string) &&
         isInt(b.refund?.amount) &&

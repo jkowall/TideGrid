@@ -432,7 +432,9 @@ describe("the payment", () => {
 
   it("names Stripe when Stripe took the payment", async () => {
     const stripe = bookingDetail();
-    stripe.payment = { ...stripe.payment, provider: "stripe", providerReference: "pi_••••9zXy" };
+    const paid = stripe.payment;
+    if (!paid) throw new Error("the fixture is a paid booking");
+    stripe.payment = { ...paid, provider: "stripe", providerReference: "pi_••••9zXy" };
     api({ [route.booking(bookingId)]: answer("owner", stripe) });
     renderDetail("owner");
     await loaded();
@@ -445,8 +447,10 @@ describe("the payment", () => {
 
   it("says when a payment has no reference or time yet", async () => {
     const waiting = bookingDetail();
+    const paid = waiting.payment;
+    if (!paid) throw new Error("the fixture is a paid booking");
     waiting.payment = {
-      ...waiting.payment,
+      ...paid,
       state: "pending",
       providerReference: null,
       succeededAt: null,
@@ -459,6 +463,31 @@ describe("the payment", () => {
     expect(facts["Provider reference"]).toBe("Not recorded yet");
     expect("Received" in facts).toBe(false);
     expect(card("Payment").querySelector(".bd-code")).toBeNull();
+  });
+
+  it("shows a complimentary booking's grant in place of a payment (W3-G2.12-rest)", async () => {
+    const comp = bookingDetail();
+    comp.source = "complimentary";
+    comp.payment = null;
+    comp.complimentary = {
+      reasonCode: "other",
+      note: "Skipper's niece",
+      waivedAmount: 13109,
+      currency: "USD",
+      grantedAt: "2026-10-06T18:16:00.000Z",
+      grantedBy: { userId: "8d0a2c1e-3b4f-4a5e-9c6d-7e8f9a0b1c2d", displayName: "Olive Owner" },
+    };
+    api({ [route.booking(bookingId)]: answer("owner", comp) });
+    renderDetail("owner");
+    await loaded();
+    const facts = terms(card("Payment"));
+    expect(facts.Status).toBe("Complimentary");
+    expect(facts.Waived).toBe("$131.09");
+    expect(facts.Reason).toBe("Other");
+    expect(facts.Note).toBe("Skipper's niece");
+    expect(facts["Granted by"]).toMatch(/^Olive Owner, /);
+    expect("Method" in facts).toBe(false);
+    expect(screen.getByText(/Booked complimentary by an owner, at no charge\./)).toBeTruthy();
   });
 
   it("shows a refund that was made: its status, amount, and when it was asked for and settled", async () => {

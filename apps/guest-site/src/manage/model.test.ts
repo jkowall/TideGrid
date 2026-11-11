@@ -116,7 +116,7 @@ describe("the fixtures", () => {
       orderTotals.total,
     );
     expect(orderTotals.total).toBe(paid);
-    expect(managedBooking().payment.amount).toBe(paid);
+    expect(managedBooking().payment?.amount).toBe(paid);
   });
 
   it("round half up, to the cent, when the policy gives back part", () => {

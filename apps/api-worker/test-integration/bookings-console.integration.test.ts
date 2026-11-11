@@ -1387,7 +1387,7 @@ describe.skipIf(!env)("G2.12b console booking reads through the API", () => {
       succeededAt: iso(truth.succeeded_at),
     });
     expect(fx.rich.amount).toBe(totals.total);
-    expectMasked(booking.payment.providerReference, truth.provider_payment_id);
+    expectMasked(booking.payment?.providerReference, truth.provider_payment_id);
     expect(res.text).not.toContain(truth.provider_payment_id);
     // Checkout opened, paid, confirmed: oldest first, from the stored instants.
     expect(booking.timeline).toMatchObject([
