@@ -5,7 +5,7 @@
 -- only this way:
 --
 -- 1. An active owner of the tenant, signed in as staff, writes a grant for an
---    open staff checkout of their own (0012), on its pending order, for the
+--    open staff checkout (0012), on its pending order, for the
 --    order's whole total, with a reason code (a note is required for other).
 --    The database checks the membership, so no other role or actor can.
 -- 2. The checkout then has no payment, ever: a grant is refused once a
@@ -72,6 +72,12 @@ BEGIN
     RAISE EXCEPTION 'only an owner of this operator books a guest complimentary'
       USING ERRCODE = '42501', CONSTRAINT = 'complimentary_grants_owner';
   END IF;
+  -- The checks below read afresh after the lock only under READ COMMITTED.
+  IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'complimentary grants are written only under READ COMMITTED, not %',
+      pg_catalog.current_setting('transaction_isolation')
+      USING ERRCODE = '25000';
+  END IF;
   PERFORM 1 FROM public.checkout_sessions s
     WHERE s.tenant_id = NEW.tenant_id AND s.id = NEW.checkout_session_id
       FOR NO KEY UPDATE;
@@ -136,6 +142,28 @@ END;
 $$;
 CREATE TRIGGER payments_not_complimentary BEFORE INSERT ON public.payments
   FOR EACH ROW EXECUTE FUNCTION app.check_payment_not_complimentary();
+
+-- Nor any money recorded outside the card flow. A complimentary booking owes
+-- nothing, and an external refund on one would reverse a TideGrid fee that was
+-- never assessed (its fee is zero, below), leaving the operator's fee negative.
+-- A booking's source never changes, so reading it needs no lock.
+CREATE FUNCTION app.check_settlement_not_complimentary() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.bookings b
+              WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id
+                AND b.source = 'complimentary') THEN
+    RAISE EXCEPTION 'booking % is complimentary; it takes no money', NEW.booking_id
+      USING ERRCODE = '23514', CONSTRAINT = 'external_settlements_complimentary';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER external_settlements_not_complimentary
+  BEFORE INSERT ON public.external_settlements
+  FOR EACH ROW EXECUTE FUNCTION app.check_settlement_not_complimentary();
 
 -- 3. Bookings -------------------------------------------------------------------
 
@@ -567,6 +595,7 @@ $$;
 
 REVOKE ALL ON FUNCTION app.check_complimentary_grant() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_payment_not_complimentary() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_settlement_not_complimentary() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.stamp_booking_source() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_booking() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.check_checkout_session() FROM PUBLIC;

@@ -43,6 +43,7 @@ import {
   listTripBookings,
   openStaffCheckout,
   previewCancellation,
+  recordExternalSettlement,
   searchBookings,
   staffCancelBooking,
 } from "./index.ts";
@@ -496,6 +497,35 @@ describe.skipIf(!env)("complimentary bookings (W3-G2.12-rest)", () => {
       select order_total, eligible_total, fee_amount from public.fee_assessments
        where booking_id = ${result.bookingId}`;
     expect(fee).toEqual({ order_total: 0, eligible_total: 0, fee_amount: 0 });
+  });
+
+  it("takes no money recorded outside the card flow, so its fee can never go below zero", async () => {
+    const result = await booked(A, ownerA, tripsA.shared(), 2);
+    for (const kind of ["payment", "refund"] as const) {
+      const refused = await asStaff(A.id, ownerA, (trx, ctx) =>
+        recordExternalSettlement(trx, ctx, {
+          bookingId: result.bookingId,
+          kind,
+          tender: "cash",
+          amount: 1000,
+          reason: "Cash at the dock",
+          tenderReference: null,
+          idempotencyKey: `comp-ext-${randomUUID()}`,
+        }),
+      );
+      expect(refused).toEqual({ kind: "complimentary" });
+      // The database refuses it for every writer, not only the service.
+      expect(
+        await failure(
+          asStaff(A.id, ownerA, (trx) =>
+            sql`insert into external_settlements (tenant_id, booking_id, kind, tender, amount,
+                  reason, idempotency_key)
+                values (${A.id}, ${result.bookingId}, ${kind}, 'cash', 1000, 'Cash at the dock',
+                  ${`comp-ext-${randomUUID()}`})`.execute(trx),
+          ),
+        ),
+      ).toEqual({ code: "23514", constraint: "external_settlements_complimentary" });
+    }
   });
 
   it("shows the grant in place of the payment, and calls it complimentary everywhere", async () => {

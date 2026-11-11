@@ -248,6 +248,8 @@ export interface ExternalSettlementView {
 export type ExternalSettlementResult =
   | { kind: "recorded"; settlement: ExternalSettlementView; replayed: boolean }
   | { kind: "not_found" }
+  /** A complimentary booking takes no money, in or out (0039). */
+  | { kind: "complimentary" }
   /** A refund would return more than came in, or more than the booking cost. */
   | { kind: "refund_too_large"; refundable: number }
   /** The key was used for another command. */
@@ -386,13 +388,19 @@ export async function recordExternalSettlement(
       ? { kind: "recorded", settlement: settlementView(prior), replayed: true }
       : { kind: "key_reused" };
   }
-  const { rows: bookings } = await sql<{ total_amount: number; eligible_total: number }>`
-    select o.total_amount, o.total_amount - o.tax_amount - o.included_tax_amount as eligible_total
+  const { rows: bookings } = await sql<{
+    total_amount: number;
+    eligible_total: number;
+    source: string;
+  }>`
+    select o.total_amount, o.total_amount - o.tax_amount - o.included_tax_amount as eligible_total,
+           b.source
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
      where b.tenant_id = ${ctx.tenantId} and b.id = ${command.bookingId}`.execute(trx);
   const order = bookings[0];
   if (!order) return { kind: "not_found" };
+  if (order.source === "complimentary") return { kind: "complimentary" };
   let fee: {
     orderTotal: number;
     eligibleTotal: number;
