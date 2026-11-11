@@ -14443,7 +14443,7 @@
             }
           },
           "409": {
-            "description": "The booking was canceled (booking_canceled), or its trip has departed (trip_departed)",
+            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), or another correction landed a moment ago (booking_changed; read the booking again and retry)",
             "content": {
               "application/json": {
                 "schema": {
@@ -19801,7 +19801,7 @@
             }
           },
           "409": {
-            "description": "The booking was canceled (booking_canceled), or its trip has departed (trip_departed)",
+            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), or another correction landed a moment ago (booking_changed; read the booking again and retry)",
             "content": {
               "application/json": {
                 "schema": {
