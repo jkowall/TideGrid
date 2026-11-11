@@ -1797,8 +1797,14 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
     expect([late.status, late.json.error?.code]).toEqual([409, "override_exceeds_boat"]);
 
     // An override never makes one party larger than the trip's own capacity.
-    const empty = tripsA.shared();
-    const huge = await quote(A.id, A.owner, { ...tickets(empty, 11), capacityOverride: true });
-    expect(huge.status).not.toBe(201);
+    // A 5-seat trip on the 20-guest boat: 6 is within the product's party
+    // limit and the boat, but past the trip's own capacity.
+    const small = tripsA.shared();
+    await admin`update public.scheduled_trips set seat_capacity = 5 where id = ${small}`;
+    const six = await quote(A.id, A.owner, { ...tickets(small, 6), capacityOverride: true });
+    expect(six.status).not.toBe(201);
+    expect(
+      (await quote(A.id, A.owner, { ...tickets(small, 5), capacityOverride: true })).status,
+    ).toBe(201);
   });
 });

@@ -317,11 +317,11 @@ BEGIN
                          greatest(0, trip.boat_capacity - trip.seat_capacity));
     END IF;
     -- A party change's new hold, taken in place of its booking's larger one
-    -- that it released, never adds seats, so it fits wherever the old one
-    -- did: on a trip already past its capacity by an override, a guest can
-    -- still give up a place. Only on insert, once per change (a hold's owner
-    -- reference is unique on its trip), and only for fewer seats than the
-    -- released hold took.
+    -- that it released, never adds seats: on a trip already past its
+    -- capacity by an override, a guest can still give up a place. Only on
+    -- insert, once per change (a hold's owner reference is unique on its
+    -- trip), for fewer seats than the released hold took, and only up to what
+    -- the trip's overrides allowed in all, never past the boat.
     IF TG_OP = 'INSERT' AND NEW.kind = 'seats'
        AND NEW.owner_ref LIKE 'booking\_party\_change:%' THEN
       SELECT true INTO shrinks
@@ -337,7 +337,14 @@ BEGIN
        AND h.trip_id = NEW.trip_id
        AND h.state IN ('active', 'confirmed')
        AND h.id <> NEW.id;
-    IF NOT coalesce(shrinks, false) AND taken + NEW.seats > trip.seat_capacity + allowance THEN
+    IF coalesce(shrinks, false) THEN
+      SELECT greatest(allowance, least(coalesce(sum(o.extra_seats), 0),
+                                       greatest(0, trip.boat_capacity - trip.seat_capacity)))::integer
+        INTO allowance
+        FROM public.capacity_overrides o
+       WHERE o.tenant_id = NEW.tenant_id AND o.trip_id = NEW.trip_id;
+    END IF;
+    IF taken + NEW.seats > trip.seat_capacity + allowance THEN
       RAISE EXCEPTION 'trip % has % of % seats taken (% more allowed by an override); % more do not fit',
         NEW.trip_id, taken, trip.seat_capacity, allowance, NEW.seats
         USING ERRCODE = '23514', CONSTRAINT = 'capacity_holds_capacity';

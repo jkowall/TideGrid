@@ -327,9 +327,13 @@ describe.skipIf(!env)("giving up a place in a shared-seat party (W3-G2.11-rest)"
     await confirmBooking(runtime.db, payments, A, trip, 5);
     await admin.begin(async (tx) => {
       await tx`set local session_replication_role = replica`;
+      const ref = `checkout_session:${randomUUID()}`;
+      await tx`insert into public.capacity_overrides
+          (tenant_id, trip_id, owner_ref, extra_seats, reason_code, actor_type, actor_id)
+        values (${A.id}, ${trip}, ${ref}, 3, 'make_good', 'staff', 'owner')`;
       await tx`insert into public.capacity_holds
           (tenant_id, trip_id, owner_ref, kind, party_size, seats, state, expires_at, confirmed_at)
-        values (${A.id}, ${trip}, ${`checkout_session:${randomUUID()}`}, 'seats', 3, 3,
+        values (${A.id}, ${trip}, ${ref}, 'seats', 3, 3,
                 'confirmed', now() + interval '10 minutes', now())`;
     });
     expect(await seatsUsed(trip)).toBe(13);

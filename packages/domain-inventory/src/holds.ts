@@ -370,26 +370,31 @@ async function overrideAllowance(
 const notePattern = /^[^\u0000-\u001f\u007f]{1,500}$/;
 
 /**
- * Whether this new hold is a party change's, in place of its booking's larger
- * hold that the change released (0038): giving up a place never adds seats,
- * so it fits on a trip an owner's override took past its capacity. The
- * database holds the same rule.
+ * Seats past the trip's capacity a party change's new hold may take, in place
+ * of its booking's larger hold that the change released (0038): giving up a
+ * place never adds seats, so on a trip owners' overrides took past its
+ * capacity it fits within what those overrides allowed in all, never past the
+ * boat. Zero for any other hold. The database holds the same rule.
  */
-async function replacesLargerHold(
+async function replacementAllowance(
   trx: TenantTransaction,
   tenantId: string,
-  tripId: string,
+  trip: TripSaleRow,
   input: AcquireHoldInput,
   seats: number,
-): Promise<boolean> {
-  if (!input.ownerRef.startsWith("booking_party_change:")) return false;
-  const { rows } = await sql<{ ok: boolean }>`
-    select true as ok from booking_party_changes c
+): Promise<number> {
+  if (trip.product_kind !== "shared_seat") return 0;
+  if (!input.ownerRef.startsWith("booking_party_change:")) return 0;
+  const { rows } = await sql<{ extra: number }>`
+    select coalesce((select sum(o.extra_seats) from capacity_overrides o
+                      where o.tenant_id = ${tenantId} and o.trip_id = ${trip.trip_id}), 0)::int as extra
+      from booking_party_changes c
       join capacity_holds f on f.tenant_id = c.tenant_id and f.id = c.from_hold_id
-     where c.tenant_id = ${tenantId} and c.trip_id = ${tripId}
+     where c.tenant_id = ${tenantId} and c.trip_id = ${trip.trip_id}
        and ${input.ownerRef} = 'booking_party_change:' || c.id::text
        and f.state = 'released' and f.seats > ${seats}`.execute(trx);
-  return rows.length > 0;
+  const extra = rows[0]?.extra ?? 0;
+  return Math.min(extra, Math.max(0, trip.boat_capacity - trip.seat_capacity));
 }
 
 /** Seats of the trip's holds in a counted state. Call after expiring due holds. */
@@ -524,7 +529,7 @@ export async function acquireHold(
   let overridden: { overrideId: string; extraSeats: number } | null = null;
   if (
     shortfall > 0 &&
-    !(await replacesLargerHold(trx, ctx.tenantId, trip.trip_id, input, needed))
+    shortfall > (await replacementAllowance(trx, ctx.tenantId, trip, input, needed))
   ) {
     if (!input.override) {
       return { kind: "insufficient_capacity", remaining: Math.max(0, trip.seat_capacity - taken) };
