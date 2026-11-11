@@ -581,6 +581,8 @@ export const EXPORT_TABLES = [
   "booking_reschedules",
   "booking_party_changes",
   "booking_contact_changes",
+  // Owners' capacity overrides (W3-G2.12-rest).
+  "capacity_overrides",
   "booking_notes",
   "finalization_exceptions",
   "finalization_exception_resolutions",

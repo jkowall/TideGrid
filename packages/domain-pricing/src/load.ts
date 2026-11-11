@@ -296,6 +296,60 @@ export interface FindTripOptions {
    * instead, so the guest's own hold never takes the trip off sale for them.
    */
   ownHold?: OwnHoldSale;
+  /**
+   * Set only for an owner's capacity override (W3-G2.12-rest): the seats the
+   * boat itself still has, when the trip passes every other rule a hold must
+   * pass. It decides whether the trip is on sale and is the capacity the
+   * quote counts, so a full trip can be quoted up to its boat.
+   */
+  overrideRoom?: OwnHoldSale;
+}
+
+interface SaleRow {
+  location_id: string;
+  min_party_size: number;
+  max_party_size: number;
+  local_start_time: string;
+  start_utc_offset_minutes: number;
+}
+
+/**
+ * A trip whose sale rules the caller already checked, with the capacity it
+ * counts, read from the staff calendar, which lists every trip in any state,
+ * timed exactly as the availability listing times it.
+ */
+async function staffListed(
+  trx: TenantTransaction,
+  tenantId: string,
+  tripId: string,
+  row: SaleRow,
+  localDate: string,
+  remaining: number,
+): Promise<TripForSale> {
+  const staff = (await listTrips(trx, tenantId, { from: localDate, to: localDate })).find(
+    (t) => t.tripId === tripId,
+  );
+  if (!staff) return { kind: "not_on_sale" };
+  return {
+    kind: "on_sale",
+    trip: {
+      tripId,
+      productId: staff.productId,
+      productKind: staff.productKind,
+      productName: staff.productName,
+      locationId: row.location_id,
+      minPartySize: row.min_party_size,
+      maxPartySize: row.max_party_size,
+      capacityRemaining: remaining,
+      timeZone: staff.timeZone,
+      localDate: staff.localDate,
+      localStartTime: staff.localStartTime,
+      exactLocalStartTime: row.local_start_time,
+      startsAt: staff.startsAt,
+      startsAtLocal: staff.startsAtLocal,
+      startOffsetMinutes: row.start_utc_offset_minutes,
+    },
+  };
 }
 
 /**
@@ -332,6 +386,11 @@ export async function findTripForSale(
     .executeTakeFirst();
   if (!row) return { kind: "not_found" };
   const localDate = dateOnly(row.local_date);
+  if (options.overrideRoom) {
+    const room = await options.overrideRoom(row.min_party_size);
+    if (room === null || room < row.min_party_size) return { kind: "not_on_sale" };
+    return staffListed(trx, tenantId, tripId, row, localDate, room);
+  }
   const listed = await findAvailableTrips(trx, tenantId, {
     from: localDate,
     to: localDate,
@@ -346,32 +405,7 @@ export async function findTripForSale(
     // have room for the smallest party: a held charter, or the last seats.
     const remaining = await options.ownHold(row.min_party_size);
     if (remaining === null || remaining < row.min_party_size) return { kind: "not_on_sale" };
-    // The staff calendar lists every trip in any state, timed exactly as the
-    // availability listing times it; the sale rules were just checked.
-    const staff = (await listTrips(trx, tenantId, { from: localDate, to: localDate })).find(
-      (t) => t.tripId === tripId,
-    );
-    if (!staff) return { kind: "not_on_sale" };
-    return {
-      kind: "on_sale",
-      trip: {
-        tripId,
-        productId: staff.productId,
-        productKind: staff.productKind,
-        productName: staff.productName,
-        locationId: row.location_id,
-        minPartySize: row.min_party_size,
-        maxPartySize: row.max_party_size,
-        capacityRemaining: remaining,
-        timeZone: staff.timeZone,
-        localDate: staff.localDate,
-        localStartTime: staff.localStartTime,
-        exactLocalStartTime: row.local_start_time,
-        startsAt: staff.startsAt,
-        startsAtLocal: staff.startsAtLocal,
-        startOffsetMinutes: row.start_utc_offset_minutes,
-      },
-    };
+    return staffListed(trx, tenantId, tripId, row, localDate, remaining);
   }
   return {
     kind: "on_sale",

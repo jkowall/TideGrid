@@ -20,6 +20,7 @@ import {
 } from "@tidegrid/database";
 import {
   acquireHold,
+  type CapacityOverrideRequest,
   DEFAULT_HOLD_TTL_SECONDS,
   MIN_HOLD_TTL_SECONDS,
   type NotBookableReason,
@@ -78,6 +79,12 @@ export interface CreateCheckoutInput {
    * member's own input, kept on the session and in the audit row.
    */
   staff?: StaffCheckoutDetails;
+  /**
+   * An owner's capacity override (W3-G2.12-rest): when the trip is full, the
+   * hold may take the seats it lacks, up to the boat. Only openStaffCheckout
+   * sets it; the database refuses it for anyone but an active owner.
+   */
+  capacityOverride?: CapacityOverrideRequest;
 }
 
 export interface StaffCheckoutDetails {
@@ -95,7 +102,9 @@ export type CreateCheckoutResult =
   | { kind: "payments_unavailable" }
   | { kind: "too_many_checkouts"; limit: number }
   | { kind: "not_bookable"; reason: NotBookableReason }
-  | { kind: "insufficient_capacity"; remaining: number };
+  | { kind: "insufficient_capacity"; remaining: number }
+  /** Even an override cannot fit the party: the boat has boatRemaining seats left. */
+  | { kind: "override_exceeds_boat"; boatRemaining: number };
 
 interface QuoteRow {
   id: string;
@@ -197,6 +206,7 @@ export async function createCheckoutSession(
     tripId: quote.trip_id,
     partySize: quote.party_size,
     ttlSeconds,
+    ...(input.capacityOverride ? { override: input.capacityOverride } : {}),
   });
   switch (held.kind) {
     case "acquired":
@@ -205,6 +215,8 @@ export async function createCheckoutSession(
       return { kind: "not_bookable", reason: held.reason };
     case "insufficient_capacity":
       return { kind: "insufficient_capacity", remaining: held.remaining };
+    case "override_exceeds_boat":
+      return { kind: "override_exceeds_boat", boatRemaining: held.boatRemaining };
     case "trip_not_found":
       // The quote's trip is a foreign key; it cannot vanish.
       throw new Error("a quote's trip was not found");

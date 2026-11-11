@@ -267,6 +267,9 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
                 [{ code: "insufficient_capacity", subject: null }],
                 created.remaining,
               );
+            case "override_exceeds_boat":
+              // A guest checkout never asks for an override.
+              throw new Error("a guest checkout returned an override refusal");
           }
         },
       );

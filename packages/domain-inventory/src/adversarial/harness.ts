@@ -257,7 +257,13 @@ export interface TripUsage {
 }
 
 const usageColumns = (admin: Sql) => admin`
-  select t.id as trip_id, t.tenant_id, t.seat_capacity, p.kind as product_kind, t.sales_state,
+  select t.id as trip_id, t.tenant_id,
+         case when exists (select 1 from public.capacity_overrides o
+                           where o.tenant_id = t.tenant_id and o.trip_id = t.id)
+              then (select b.guest_capacity from public.boats b
+                     where b.tenant_id = t.tenant_id and b.id = t.boat_id)
+              else t.seat_capacity end as seat_capacity,
+         p.kind as product_kind, t.sales_state,
          coalesce(sum(h.seats) filter (where h.state in ('active', 'confirmed')), 0)::int as counted,
          count(h.id) filter (where h.state in ('active', 'confirmed'))::int as counted_holds,
          count(h.id) filter (where h.kind = 'whole_boat'
@@ -317,7 +323,11 @@ export async function usageOfTenants(
   return rows.map(toUsage);
 }
 
-/** Trips that break the capacity invariant: oversold, or more than one counted charter hold. */
+/**
+ * Trips that break the capacity invariant: oversold, or more than one counted
+ * charter hold. A trip with an owner's capacity override (0038) is held to its
+ * boat's guest capacity instead of its seat capacity.
+ */
 export function oversold(rows: readonly TripUsage[]): TripUsage[] {
   return rows.filter(
     (r) =>

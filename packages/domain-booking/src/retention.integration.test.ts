@@ -142,6 +142,34 @@ describe.skipIf(!env)("retention of abandoned checkouts", () => {
     await age(failed.id, 40);
     await age(confirmed.checkoutSessionId, 40);
 
+    // An owner's capacity override on the abandoned checkout, whose note names
+    // the guest (W3-G2.12-rest). Written directly: the override comes before
+    // its hold, and this hold already exists.
+    const overrideNote = async (sessionId: string) => {
+      const [row] = await admin<{ note: string | null; redacted: boolean }[]>`
+        select o.note, o.note_redacted_at is not null as redacted
+          from public.capacity_overrides o
+         where o.owner_ref = ${`checkout_session:${sessionId}`}`;
+      return row;
+    };
+    await admin.begin(async (tx) => {
+      await tx`set local session_replication_role = replica`;
+      for (const s of [expired.id, recent.id]) {
+        await tx`insert into public.capacity_overrides
+            (tenant_id, trip_id, owner_ref, extra_seats, reason_code, note, actor_type, actor_id)
+          select c.tenant_id, c.trip_id, ${`checkout_session:${s}`}, 1, 'other',
+                 'Gone Guest family', 'staff', 'owner'
+            from public.checkout_sessions c where c.id = ${s}`;
+      }
+    });
+    // Only the retention job clears a note: nothing else changes the row.
+    expect(
+      await failure(
+        admin`update public.capacity_overrides set extra_seats = 2
+               where owner_ref = ${`checkout_session:${expired.id}`}`,
+      ),
+    ).toEqual({ code: "42501" });
+
     // The runtime cannot write the booker itself.
     expect(
       await failure(
@@ -167,6 +195,8 @@ describe.skipIf(!env)("retention of abandoned checkouts", () => {
       });
     }
     expect(await booker(recent.id)).toMatchObject({ booker_name: "Gone Guest", redacted: false });
+    expect(await overrideNote(expired.id)).toEqual({ note: null, redacted: true });
+    expect(await overrideNote(recent.id)).toEqual({ note: "Gone Guest family", redacted: false });
     expect(await booker(confirmed.checkoutSessionId)).toMatchObject({
       booker_name: "Kept Guest",
       redacted: false,

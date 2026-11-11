@@ -80,6 +80,7 @@ describe.skipIf(!env)("a trip's sale state without the guest's own hold", () => 
       kind: "seats",
       notBookable: null,
       remaining: 0,
+      boatRemaining: expect.any(Number),
     });
     expect(
       (await sale(A.id, trip, { partySize: 1, exceptOwnerRef: mine.ownerRef }))?.remaining,

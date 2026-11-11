@@ -175,8 +175,10 @@ export async function createQuote(
   trx: TenantTransaction,
   ctx: TenantContext,
   input: CreateQuoteInput,
+  /** An owner's capacity override passes overrideRoom (W3-G2.12-rest); nothing else does. */
+  options: FindTripOptions = {},
 ): Promise<CreateQuoteResult> {
-  const found = await findTripForSale(trx, ctx.tenantId, input.tripId, input.now);
+  const found = await findTripForSale(trx, ctx.tenantId, input.tripId, input.now, options);
   if (found.kind === "not_found") return { kind: "trip_not_found" };
   if (found.kind === "not_on_sale") return { kind: "trip_not_on_sale" };
   const trip = found.trip;

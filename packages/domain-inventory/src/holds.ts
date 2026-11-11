@@ -76,14 +76,37 @@ export type NotBookableReason =
   | "party_size_out_of_range";
 
 export type AcquireHoldResult =
-  | { kind: "acquired"; hold: Hold }
+  /** override: the owner's override written for this hold, when the trip was full. */
+  | { kind: "acquired"; hold: Hold; override: { overrideId: string; extraSeats: number } | null }
   /** This owner already holds this trip; the first result, in its current state. */
   | { kind: "existing"; hold: Hold }
   /** This owner already holds this trip for a different party size. */
   | { kind: "owner_conflict"; hold: Hold }
   | { kind: "trip_not_found" }
   | { kind: "not_bookable"; reason: NotBookableReason }
-  | { kind: "insufficient_capacity"; remaining: number };
+  | { kind: "insufficient_capacity"; remaining: number }
+  /**
+   * An override was asked for, but the party does not fit even past the
+   * trip's capacity: the boat itself is full (boatRemaining seats left on it),
+   * or the trip is a private charter, which cannot be overridden.
+   */
+  | { kind: "override_exceeds_boat"; boatRemaining: number };
+
+/** Why an owner let one booking past a full trip (0038). */
+export const CAPACITY_OVERRIDE_REASONS = [
+  "regular_guest",
+  "group_kept_together",
+  "captain_approved",
+  "make_good",
+  "other",
+] as const;
+export type CapacityOverrideReason = (typeof CAPACITY_OVERRIDE_REASONS)[number];
+
+export interface CapacityOverrideRequest {
+  reasonCode: CapacityOverrideReason;
+  /** Required for other; at most 500 characters, no control characters. */
+  note?: string | null;
+}
 
 export interface AcquireHoldInput {
   ownerRef: string;
@@ -91,6 +114,13 @@ export interface AcquireHoldInput {
   partySize: number;
   /** Between MIN_HOLD_TTL_SECONDS and MAX_HOLD_TTL_SECONDS; never past departure. */
   ttlSeconds: number;
+  /**
+   * An owner's override (W3-G2.12-rest): when the trip is full, this hold may
+   * take the seats it lacks past the trip's capacity, up to the boat's guest
+   * capacity. Written only when needed, for exactly the shortfall. The
+   * database refuses it for anyone but an active owner.
+   */
+  override?: CapacityOverrideRequest;
 }
 
 export type CapacityLostReason = NotBookableReason | "no_capacity";
@@ -162,6 +192,8 @@ interface TripSaleRow {
   trip_id: string;
   sales_state: TripSalesState;
   seat_capacity: number;
+  /** The boat's guest capacity: no override passes it. */
+  boat_capacity: number;
   product_kind: ProductKind;
   product_status: ProductSalesStatus;
   min_party_size: number;
@@ -261,7 +293,7 @@ async function loadTripSale(
 ): Promise<TripSaleRow | undefined> {
   const instant = at === undefined ? sql`now()` : sql`${at}::timestamptz`;
   const { rows } = await sql<TripSaleRow>`
-    select t.id as trip_id, t.sales_state, t.seat_capacity,
+    select t.id as trip_id, t.sales_state, t.seat_capacity, b.guest_capacity as boat_capacity,
            p.kind as product_kind, p.sales_status as product_status,
            p.min_party_size, p.max_party_size,
            l.status as location_status, b.status as boat_status,
@@ -313,6 +345,56 @@ function holdShape(trip: TripSaleRow, partySize: number): { kind: HoldKind; seat
   return trip.product_kind === "shared_seat"
     ? { kind: "seats", seats: partySize }
     : { kind: "whole_boat", seats: trip.seat_capacity };
+}
+
+/**
+ * Seats past the trip's capacity this owner's hold may take: its override's,
+ * never past the boat. Zero without one, and always on a charter (0038).
+ */
+async function overrideAllowance(
+  trx: TenantTransaction,
+  tenantId: string,
+  trip: TripSaleRow,
+  ownerRef: string,
+): Promise<number> {
+  if (trip.product_kind !== "shared_seat") return 0;
+  const { rows } = await sql<{ extra_seats: number }>`
+    select extra_seats from capacity_overrides
+     where tenant_id = ${tenantId} and trip_id = ${trip.trip_id} and owner_ref = ${ownerRef}`.execute(
+    trx,
+  );
+  return Math.min(rows[0]?.extra_seats ?? 0, Math.max(0, trip.boat_capacity - trip.seat_capacity));
+}
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+const notePattern = /^[^\u0000-\u001f\u007f]{1,500}$/;
+
+/**
+ * Seats past the trip's capacity a party change's new hold may take, in place
+ * of its booking's larger hold that the change released (0038): giving up a
+ * place never adds seats, so on a trip owners' overrides took past its
+ * capacity it fits within what those overrides allowed in all, never past the
+ * boat. Zero for any other hold. The database holds the same rule.
+ */
+async function replacementAllowance(
+  trx: TenantTransaction,
+  tenantId: string,
+  trip: TripSaleRow,
+  input: AcquireHoldInput,
+  seats: number,
+): Promise<number> {
+  if (trip.product_kind !== "shared_seat") return 0;
+  if (!input.ownerRef.startsWith("booking_party_change:")) return 0;
+  const { rows } = await sql<{ extra: number }>`
+    select coalesce((select sum(o.extra_seats) from capacity_overrides o
+                      where o.tenant_id = ${tenantId} and o.trip_id = ${trip.trip_id}), 0)::int as extra
+      from booking_party_changes c
+      join capacity_holds f on f.tenant_id = c.tenant_id and f.id = c.from_hold_id
+     where c.tenant_id = ${tenantId} and c.trip_id = ${trip.trip_id}
+       and ${input.ownerRef} = 'booking_party_change:' || c.id::text
+       and f.state = 'released' and f.seats > ${seats}`.execute(trx);
+  const extra = rows[0]?.extra ?? 0;
+  return Math.min(extra, Math.max(0, trip.boat_capacity - trip.seat_capacity));
 }
 
 /** Seats of the trip's holds in a counted state. Call after expiring due holds. */
@@ -443,8 +525,26 @@ export async function acquireHold(
 
   const taken = await seatsCounted(trx, ctx.tenantId, trip.trip_id);
   const needed = holdShape(trip, input.partySize).seats;
-  if (taken + needed > trip.seat_capacity) {
-    return { kind: "insufficient_capacity", remaining: Math.max(0, trip.seat_capacity - taken) };
+  const shortfall = taken + needed - trip.seat_capacity;
+  let overridden: { overrideId: string; extraSeats: number } | null = null;
+  if (
+    shortfall > 0 &&
+    shortfall > (await replacementAllowance(trx, ctx.tenantId, trip, input, needed))
+  ) {
+    if (!input.override) {
+      return { kind: "insufficient_capacity", remaining: Math.max(0, trip.seat_capacity - taken) };
+    }
+    // Past the trip's capacity only on a shared-seat trip, and never past the boat.
+    const boatRoom = trip.product_kind === "shared_seat" ? trip.boat_capacity - taken : 0;
+    if (needed > boatRoom) {
+      return { kind: "override_exceeds_boat", boatRemaining: Math.max(0, boatRoom) };
+    }
+    overridden = await writeOverride(trx, ctx, {
+      tripId: trip.trip_id,
+      ownerRef: input.ownerRef,
+      extraSeats: shortfall,
+      request: input.override,
+    });
   }
 
   // The expiry is the database's: now plus the TTL, never past departure.
@@ -471,6 +571,7 @@ export async function acquireHold(
       partySize: hold.partySize,
       seats: hold.seats,
       expiresAt: hold.expiresAt,
+      ...(overridden ? { capacityOverrideId: overridden.overrideId } : {}),
     },
   });
   await enqueueOutbox(trx, ctx, {
@@ -479,7 +580,55 @@ export async function acquireHold(
     aggregateId: hold.id,
     payload: eventPayload(row),
   });
-  return { kind: "acquired", hold };
+  return { kind: "acquired", hold, override: overridden };
+}
+
+/**
+ * Write an owner's override for one hold not yet taken, audited with its
+ * reason code (the note stays in its row, as free text that can name a guest).
+ */
+async function writeOverride(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: { tripId: string; ownerRef: string; extraSeats: number; request: CapacityOverrideRequest },
+): Promise<{ overrideId: string; extraSeats: number }> {
+  const { reasonCode } = input.request;
+  if (!CAPACITY_OVERRIDE_REASONS.includes(reasonCode)) {
+    throw new RangeError("an override's reason is one of CAPACITY_OVERRIDE_REASONS");
+  }
+  const note = input.request.note?.trim() || null;
+  if (note !== null && !notePattern.test(note)) {
+    throw new RangeError("an override's note is 1 to 500 characters, with no control characters");
+  }
+  if (reasonCode === "other" && note === null) {
+    throw new RangeError("an override for another reason needs a note");
+  }
+  const { rows } = await sql<{ id: string }>`
+    insert into capacity_overrides (tenant_id, trip_id, owner_ref, extra_seats, reason_code, note)
+    values (${ctx.tenantId}, ${input.tripId}, ${input.ownerRef}, ${input.extraSeats},
+            ${reasonCode}, ${note})
+    returning id`.execute(trx);
+  const id = rows[0]?.id;
+  if (!id) throw new Error("override insert returned no row");
+  await recordAudit(trx, ctx, {
+    action: "capacity.overridden",
+    subjectType: "scheduled_trip",
+    subjectId: input.tripId,
+    before: null,
+    after: {
+      capacityOverrideId: id,
+      ownerRef: input.ownerRef,
+      extraSeats: input.extraSeats,
+      reasonCode,
+    },
+  });
+  await enqueueOutbox(trx, ctx, {
+    topic: "inventory.capacity.overridden",
+    aggregateType: "scheduled_trip",
+    aggregateId: input.tripId,
+    payload: { tripId: input.tripId, capacityOverrideId: id, extraSeats: input.extraSeats },
+  });
+  return { overrideId: id, extraSeats: input.extraSeats };
 }
 
 /**
@@ -546,7 +695,8 @@ export async function confirmHold(
     return { kind: "capacity_lost", hold: toHold(current), reason: "trip_unavailable" };
   }
   const taken = await seatsCounted(trx, ctx.tenantId, trip.trip_id);
-  if (taken + current.seats > trip.seat_capacity) {
+  const allowance = await overrideAllowance(trx, ctx.tenantId, trip, current.owner_ref);
+  if (taken + current.seats > trip.seat_capacity + allowance) {
     return { kind: "capacity_lost", hold: toHold(current), reason: "no_capacity" };
   }
   const { rows } = await sql<HoldRow>`
@@ -778,6 +928,11 @@ export interface TripSaleView {
   notBookable: NotBookableReason | null;
   /** Seats left, every live hold counted except the excepted owner's. */
   remaining: number;
+  /**
+   * Seats left on the boat itself, the same holds counted: what an owner's
+   * override could still sell on a shared-seat trip (0038). 0 on a charter.
+   */
+  boatRemaining: number;
 }
 
 /**
@@ -816,6 +971,8 @@ export async function getTripSale(
     kind: holdShape(trip, 1).kind,
     notBookable: notBookable(trip, input.partySize),
     remaining: Math.max(0, trip.seat_capacity - taken),
+    boatRemaining:
+      trip.product_kind === "shared_seat" ? Math.max(0, trip.boat_capacity - taken) : 0,
   };
 }
 
