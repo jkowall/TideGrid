@@ -746,6 +746,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         // Booker contact corrections (0037, W3-G2.11-rest): append-only, and
         // written only by the checkout's own trigger.
         booking_contact_changes: ["INSERT", "SELECT"],
+        // Capacity overrides (0038, W3-G2.12-rest): append-only, owners only.
+        capacity_overrides: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

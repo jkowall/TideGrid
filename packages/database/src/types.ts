@@ -1450,6 +1450,7 @@ export interface Database
   booking_party_changes: BookingPartyChangesTable;
   balance_payments: BalancePaymentsTable;
   booking_contact_changes: BookingContactChangesTable;
+  capacity_overrides: CapacityOverridesTable;
 }
 
 /** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
@@ -1745,6 +1746,32 @@ export interface BookingContactChangesTable {
   booking_id: Fixed<string>;
   name_changed: Fixed<boolean>;
   email_changed: Fixed<boolean>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+export type CapacityOverrideReasonCode =
+  | "regular_guest"
+  | "group_kept_together"
+  | "captain_approved"
+  | "make_good"
+  | "other";
+
+/**
+ * An owner's capacity override for one hold (0038, W3-G2.12-rest). Append-only,
+ * except that the retention job clears an abandoned checkout's note.
+ */
+export interface CapacityOverridesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  trip_id: Fixed<string>;
+  owner_ref: Fixed<string>;
+  extra_seats: Fixed<number>;
+  reason_code: Fixed<CapacityOverrideReasonCode>;
+  note: ColumnType<string | null, string | null | undefined, never>;
+  note_redacted_at: ColumnType<Date | null, never, never>;
   created_at: Stamped;
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;

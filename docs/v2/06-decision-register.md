@@ -8,6 +8,26 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.12-rest, an owner's capacity override with a reason, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. Second part of W3-G2.12-rest, after the money report (the entry below).
+
+It lands as migration `0038` and the [database contract](../../packages/database/README.md#capacity-overrides-0038). It covers the tracker's "the role D1 names can override capacity with a reason code, audited, with no race beyond the override". It changes the capacity hold trigger, so it was reviewed against the no-oversell guarantee. What it adds:
+
+- **An owner books one more party onto a full trip.** In the console API, an owner prices the party on a full shared-seat trip with `capacityOverride: true`, then opens the staff checkout with a `capacityOverride` and a reason code. That one booking may take the seats it lacks past the trip's capacity. Nothing else changes: the payment is still the verified provider event, and the booking counts like any other.
+- **Never past the boat.** A trip's seat capacity is often below the boat's licensed guest capacity (crew, gear, comfort). The override only sells into that gap, never beyond the boat, and never on a private charter, which already takes the whole boat.
+- **No race beyond it.** The override names that one booking's hold and the exact seats it lacks at that moment. Every other booking still counts against the trip's capacity, under the same trip lock as before, so once the overridden booking lands the trip is full to everyone else.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only** (the tracker's recommendation). Booking staff, finance, and support cannot, and the database checks it from the owner's membership, not only the API.
+- **D2: reason codes.** `regular_guest`, `group_kept_together` (the rest of a party already booked), `captain_approved`, `make_good` (making up for an earlier problem), and `other`, which needs a short note. The audit history records the code and who; the note stays with the override, because it can name a guest. For the same reason the 30-day retention job clears the note of an abandoned checkout's override when it clears that checkout's booker; the override itself stays.
+- **D3: the boat is the hard limit.** No override passes the boat's guest capacity, whatever the reason.
+- **D4: only when needed.** The override is written only if the trip is actually full for the party, and for exactly the seats it lacks, so asking for one on a trip with room changes nothing.
+- **D5: owner-booked only.** Guests never get an override; it exists only on the staff-assisted checkout.
+
+Giving up a place still works on a trip past its capacity, for every booking on it: a party change's smaller hold fits wherever the larger one it replaces did, since it never adds seats (the database holds that rule too). Known limits: moving an overridden booking uses the ordinary rules, so a move to a full trip is refused; while an overridden booking counts, the trip's capacity cannot be set below the seats held, so lowering it, or raising it by less than the overshoot, is refused; an override never lets one party be larger than the trip's own capacity (the quote and checkout both refuse it); the boat limit is checked when the hold is taken, not again if the boat's guest capacity is later lowered; and there is no console button yet (the API is ready for it).
+
 ### 2026-11-11: W3-G2.12-rest, money movements for a date range, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the first part of W3-G2.12-rest; the tracker's other parts follow (a capacity override, complimentary bookings), the booker email correction is already in (the entry above), staff cancel and refund came with W3-G2.9, and imported records come with W3-G2.13.

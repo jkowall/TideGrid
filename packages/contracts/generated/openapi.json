@@ -32106,7 +32106,7 @@
             }
           },
           "403": {
-            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "description": "The role cannot create bookings (forbidden), only an owner may override capacity (capacity_override_forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
             "content": {
               "application/json": {
                 "schema": {
@@ -32217,7 +32217,7 @@
           "bookings"
         ],
         "summary": "Price a party for a staff booking and keep the quote",
-        "description": "Owners and booking staff (bookings.create). Prices the party, add-ons, and optional promotion code on the server under the current versions, as the guest's quote does, and stores an immutable quote recorded as the staff member's. No price override. The tenant comes from the path and the membership, never from the Origin. Idempotent by key: a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422.",
+        "description": "Owners and booking staff (bookings.create). Prices the party, add-ons, and optional promotion code on the server under the current versions, as the guest's quote does, and stores an immutable quote recorded as the staff member's. No price override. An owner may send capacityOverride: true to price a party on a full shared-seat trip against the room left on the boat (W3-G2.12-rest); anyone else sending it answers 403 capacity_override_forbidden. The tenant comes from the path and the membership, never from the Origin. Idempotent by key: a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422.",
         "security": [
           {
             "accessJwt": []
@@ -32353,6 +32353,13 @@
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{2,31}$",
                     "description": "Promotion code; case does not matter"
+                  },
+                  "capacityOverride": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ],
+                    "description": "Owners only (W3-G2.12-rest). Price the party on a full shared-seat trip, counting the room left on the boat rather than in the trip's capacity. The checkout then needs a capacityOverride with a reason"
                   }
                 },
                 "required": [
@@ -32965,7 +32972,7 @@
             }
           },
           "403": {
-            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "description": "The role cannot create bookings (forbidden), only an owner may override capacity (capacity_override_forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
             "content": {
               "application/json": {
                 "schema": {
@@ -33144,7 +33151,7 @@
           "bookings"
         ],
         "summary": "Open a staff-assisted checkout for a guest",
-        "description": "Owners and booking staff (bookings.create). Takes a quote this tenant's staff created and charges its stored total, never an amount the client sends. Holds the quote's party on the trip under the same rules and lock as a guest's checkout, so the two never oversell, and writes the immutable order and a pending payment. The database records the checkout as staff_assisted and the signed-in staff member as its opener; neither can be sent.\n\nStaff attest that they told the guest the policy of the quote's version and read the email address back to them, which cannot be changed later. The confirmation email, with the management link and waiver requests, goes to that address once the payment is verified.\n\nIdempotent by key: a retry with the same key and body returns the same checkout with `Idempotent-Replayed: true` and creates the provider payment if an earlier attempt could not. A 503 payment_provider_unavailable means the checkout exists: retry the same request. At most 3 open checkouts per staff member at a time. The response carries no payment secret.",
+        "description": "Owners and booking staff (bookings.create). Takes a quote this tenant's staff created and charges its stored total, never an amount the client sends. Holds the quote's party on the trip under the same rules and lock as a guest's checkout, so the two never oversell, and writes the immutable order and a pending payment. An owner may send a capacityOverride with a reason code: when the trip is full, this one booking may take the seats it lacks past the trip's capacity, never past the boat's guest capacity, and the override is recorded and audited; every other booking still counts against the trip's capacity. Anyone else sending one answers 403 capacity_override_forbidden. The database records the checkout as staff_assisted and the signed-in staff member as its opener; neither can be sent.\n\nStaff attest that they told the guest the policy of the quote's version and read the email address back to them, which cannot be changed later. The confirmation email, with the management link and waiver requests, goes to that address once the payment is verified.\n\nIdempotent by key: a retry with the same key and body returns the same checkout with `Idempotent-Replayed: true` and creates the provider payment if an earlier attempt could not. A 503 payment_provider_unavailable means the checkout exists: retry the same request. At most 3 open checkouts per staff member at a time. The response carries no payment secret.",
         "security": [
           {
             "accessJwt": []
@@ -33246,6 +33253,33 @@
                       "emailReadBack"
                     ],
                     "description": "What staff confirm before opening the checkout. Both are required"
+                  },
+                  "capacityOverride": {
+                    "type": "object",
+                    "properties": {
+                      "reasonCode": {
+                        "type": "string",
+                        "enum": [
+                          "regular_guest",
+                          "group_kept_together",
+                          "captain_approved",
+                          "make_good",
+                          "other"
+                        ],
+                        "description": "regular_guest: a regular the owner makes room for. group_kept_together: the rest of a party already booked. captain_approved: the captain agreed to carry more. make_good: making up for an earlier problem. other: say why in the note"
+                      },
+                      "note": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "description": "Required for other. Kept with the override, never in the audit history"
+                      }
+                    },
+                    "required": [
+                      "reasonCode"
+                    ],
+                    "description": "Owners only. When the trip is full, this booking may take the seats it lacks past the trip's capacity, never past the boat's guest capacity. Recorded with the reason, who, and when; written only when the trip is actually full"
                   }
                 },
                 "required": [
@@ -33509,7 +33543,7 @@
             }
           },
           "403": {
-            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "description": "The role cannot create bookings (forbidden), only an owner may override capacity (capacity_override_forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
             "content": {
               "application/json": {
                 "schema": {
@@ -33577,7 +33611,7 @@
             }
           },
           "409": {
-            "description": "quote_expired, quote_already_used, trip_not_bookable, insufficient_capacity, party_size_out_of_range, or payments_unavailable",
+            "description": "quote_expired, quote_already_used, trip_not_bookable, insufficient_capacity, party_size_out_of_range, payments_unavailable, or override_exceeds_boat (an owner's override cannot fit the party on the boat)",
             "content": {
               "application/json": {
                 "schema": {
@@ -34030,7 +34064,7 @@
             }
           },
           "403": {
-            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "description": "The role cannot create bookings (forbidden), only an owner may override capacity (capacity_override_forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
             "content": {
               "application/json": {
                 "schema": {
@@ -34392,7 +34426,7 @@
             }
           },
           "403": {
-            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "description": "The role cannot create bookings (forbidden), only an owner may override capacity (capacity_override_forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
             "content": {
               "application/json": {
                 "schema": {
@@ -34760,7 +34794,7 @@
             }
           },
           "403": {
-            "description": "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "description": "The role cannot create bookings (forbidden), only an owner may override capacity (capacity_override_forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
             "content": {
               "application/json": {
                 "schema": {

@@ -30,6 +30,7 @@ import {
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
+import type { CapacityOverrideRequest } from "@tidegrid/domain-inventory";
 import type { PaymentProviderName } from "@tidegrid/domain-payments";
 import { sql } from "kysely";
 import {
@@ -50,6 +51,8 @@ export interface OpenStaffCheckoutInput extends StaffCheckoutDetails {
   provider: PaymentProviderName;
   minimumAmount: number;
   ttlSeconds?: number;
+  /** An owner's capacity override for a full trip (W3-G2.12-rest). */
+  capacityOverride?: CapacityOverrideRequest;
 }
 
 /** How a staff member is counted for the open-checkout limit. Never a client address. */
@@ -98,6 +101,7 @@ export async function openStaffCheckout(
     minimumAmount: input.minimumAmount,
     ...(input.ttlSeconds === undefined ? {} : { ttlSeconds: input.ttlSeconds }),
     staff: { channel: input.channel, attestations: input.attestations },
+    ...(input.capacityOverride ? { capacityOverride: input.capacityOverride } : {}),
   });
 }
 

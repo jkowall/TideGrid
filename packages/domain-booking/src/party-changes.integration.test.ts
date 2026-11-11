@@ -318,6 +318,40 @@ describe.skipIf(!env)("giving up a place in a shared-seat party (W3-G2.11-rest)"
     expect(audits?.n).toBe(0);
   });
 
+  it("gives up a place on a trip an owner's override took past its capacity (W3-G2.12-rest)", async () => {
+    // 10 seats on a 20-guest boat: two parties of 5 fill it, and an owner's
+    // override let a third party of 3 in (written directly here: the override
+    // path itself is tested in domain-inventory).
+    const trip = tripsA.shared();
+    const first = await confirmBooking(runtime.db, payments, A, trip, 5);
+    await confirmBooking(runtime.db, payments, A, trip, 5);
+    await admin.begin(async (tx) => {
+      await tx`set local session_replication_role = replica`;
+      await tx`insert into public.capacity_holds
+          (tenant_id, trip_id, owner_ref, kind, party_size, seats, state, expires_at, confirmed_at)
+        values (${A.id}, ${trip}, ${`checkout_session:${randomUUID()}`}, 'seats', 3, 3,
+                'confirmed', now() + interval '10 minutes', now())`;
+    });
+    expect(await seatsUsed(trip)).toBe(13);
+    // Giving up a place never adds seats, so it goes through: 12 counted.
+    const removed = await remove(guestContext(A.id), {
+      bookingId: first.bookingId,
+      position: 5,
+      partySize: 5,
+    });
+    expect(removed.kind).toBe("removed");
+    expect(await seatsUsed(trip)).toBe(12);
+    expect(await bookingNow(first.bookingId)).toMatchObject({ party_size: 4, hold_party: 4 });
+    // Nothing else gets in: the trip is still past its capacity.
+    await expect(
+      admin.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${A.id}, true)`;
+        await tx`insert into public.capacity_holds (tenant_id, trip_id, owner_ref, party_size, expires_at)
+          values (${A.id}, ${trip}, ${`checkout_session:${randomUUID()}`}, 1, now() + interval '10 minutes')`;
+      }),
+    ).rejects.toMatchObject({ constraint_name: "capacity_holds_capacity" });
+  });
+
   it("past the cutoff: refuses the guest, lets staff with a reason, and the database agrees", async () => {
     const trip = tripsL.shared();
     const booked = await confirmBooking(runtime.db, payments, L, trip, 3);

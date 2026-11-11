@@ -1,13 +1,13 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   IdempotencyKey,
-  QuoteCreateRequest,
   QuoteProblemCode,
   QuoteResponse,
   StaffCheckoutCreateRequest,
   StaffCheckoutCreateResponse,
   StaffCheckoutParams,
   StaffCheckoutResponse,
+  StaffQuoteCreateRequest,
   StaffTenantParams,
   StaffTestPaymentRequest,
   StaffTestPaymentResponse,
@@ -28,6 +28,7 @@ import {
   staffCheckoutPaymentRef,
   staffViewOf,
 } from "@tidegrid/domain-booking";
+import { getTripSale } from "@tidegrid/domain-inventory";
 import { type FakeEvent, ProviderUnavailableError } from "@tidegrid/domain-payments";
 import { createQuote, getTripOffer, type QuoteProblem } from "@tidegrid/domain-pricing";
 import { sql } from "kysely";
@@ -36,7 +37,7 @@ import { getDb } from "../db.ts";
 import { ApiError } from "../errors.ts";
 import { deliverFakeEvent } from "../fake-delivery.ts";
 import { cancelPaymentAfterCommit, fakeProviderFor, providerFor } from "../payments.ts";
-import { withStaffTenant } from "../staff-tenant.ts";
+import { type StaffTenantContext, withStaffTenant } from "../staff-tenant.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const offerPath = "/v1/staff/tenants/{tenantId}/trips/{tripId}/offer";
@@ -130,6 +131,26 @@ function checkoutRefused(created: Exclude<CreateCheckoutResult, { kind: "created
         "insufficient_capacity",
         `Only ${created.remaining} seat(s) are left on this trip`,
       );
+    case "override_exceeds_boat":
+      return new ApiError(
+        409,
+        "override_exceeds_boat",
+        `Even past the trip's capacity this party does not fit: ${created.boatRemaining} seat(s) are left on the boat`,
+      );
+  }
+}
+
+/**
+ * A capacity override is the owner's alone (W3-G2.12-rest, D1); the database
+ * refuses anyone else's too (0038).
+ */
+function requireOwnerForOverride(ctx: StaffTenantContext) {
+  if (ctx.access.role !== "owner") {
+    throw new ApiError(
+      403,
+      "capacity_override_forbidden",
+      "Only an owner can let a booking past a full trip",
+    );
   }
 }
 
@@ -144,7 +165,7 @@ const commonRefusals = {
   400: errorBody("Request did not match the contract, or the Idempotency-Key is missing"),
   401: errorBody("Not signed in"),
   403: errorBody(
-    "The role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+    "The role cannot create bookings (forbidden), only an owner may override capacity (capacity_override_forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
   ),
 };
 
@@ -215,12 +236,15 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "Price a party for a staff booking and keep the quote",
     description:
-      "Owners and booking staff (bookings.create). Prices the party, add-ons, and optional promotion code on the server under the current versions, as the guest's quote does, and stores an immutable quote recorded as the staff member's. No price override. The tenant comes from the path and the membership, never from the Origin. Idempotent by key: a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422.",
+      "Owners and booking staff (bookings.create). Prices the party, add-ons, and optional promotion code on the server under the current versions, as the guest's quote does, and stores an immutable quote recorded as the staff member's. No price override. An owner may send capacityOverride: true to price a party on a full shared-seat trip against the room left on the boat (W3-G2.12-rest); anyone else sending it answers 403 capacity_override_forbidden. The tenant comes from the path and the membership, never from the Origin. Idempotent by key: a retry with the same key and body replays the first response with `Idempotent-Replayed: true`; the same key with another body answers 422.",
     security: staffSecurity,
     request: {
       params: StaffTenantParams,
       headers: idempotencyHeader,
-      body: { required: true, content: { "application/json": { schema: QuoteCreateRequest } } },
+      body: {
+        required: true,
+        content: { "application/json": { schema: StaffQuoteCreateRequest } },
+      },
     },
     responses: {
       201: {
@@ -257,13 +281,37 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         },
       },
       async (trx, ctx) => {
-        const created = await createQuote(trx, ctx, {
-          tripId: input.tripId,
-          party: input.party,
-          addOns: input.addOns,
-          promotionCode: input.promotionCode ?? null,
-          now: now(),
-        });
+        if (input.capacityOverride) requireOwnerForOverride(ctx);
+        const at = now();
+        const created = await createQuote(
+          trx,
+          ctx,
+          {
+            tripId: input.tripId,
+            party: input.party,
+            addOns: input.addOns,
+            promotionCode: input.promotionCode ?? null,
+            now: at,
+          },
+          input.capacityOverride
+            ? {
+                // The room left on the boat, when every other sale rule holds
+                // for this party: an override never lets one party be larger
+                // than the trip's own capacity, which the hold refuses too.
+                overrideRoom: async (minPartySize) => {
+                  const guests =
+                    input.party.kind === "tickets"
+                      ? input.party.tickets.reduce((n, t) => n + t.quantity, 0)
+                      : input.party.guests;
+                  const sale = await getTripSale(trx, ctx.tenantId, input.tripId, {
+                    partySize: Math.max(minPartySize, guests),
+                    at,
+                  });
+                  return sale && sale.notBookable === null ? sale.boatRemaining : null;
+                },
+              }
+            : {},
+        );
         switch (created.kind) {
           case "created":
             return { quote: created.quote };
@@ -288,7 +336,7 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     tags: ["staff", "bookings"],
     summary: "Open a staff-assisted checkout for a guest",
     description: [
-      "Owners and booking staff (bookings.create). Takes a quote this tenant's staff created and charges its stored total, never an amount the client sends. Holds the quote's party on the trip under the same rules and lock as a guest's checkout, so the two never oversell, and writes the immutable order and a pending payment. The database records the checkout as staff_assisted and the signed-in staff member as its opener; neither can be sent.",
+      "Owners and booking staff (bookings.create). Takes a quote this tenant's staff created and charges its stored total, never an amount the client sends. Holds the quote's party on the trip under the same rules and lock as a guest's checkout, so the two never oversell, and writes the immutable order and a pending payment. An owner may send a capacityOverride with a reason code: when the trip is full, this one booking may take the seats it lacks past the trip's capacity, never past the boat's guest capacity, and the override is recorded and audited; every other booking still counts against the trip's capacity. Anyone else sending one answers 403 capacity_override_forbidden. The database records the checkout as staff_assisted and the signed-in staff member as its opener; neither can be sent.",
       "Staff attest that they told the guest the policy of the quote's version and read the email address back to them, which cannot be changed later. The confirmation email, with the management link and waiver requests, goes to that address once the payment is verified.",
       `Idempotent by key: a retry with the same key and body returns the same checkout with \`Idempotent-Replayed: true\` and creates the provider payment if an earlier attempt could not. A 503 payment_provider_unavailable means the checkout exists: retry the same request. At most ${MAX_OPEN_CHECKOUTS_PER_CLIENT} open checkouts per staff member at a time. The response carries no payment secret.`,
     ].join("\n\n"),
@@ -311,7 +359,7 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         "No such tenant, or no such staff quote for it (quote_not_found); a guest's quote reads the same",
       ),
       409: errorBody(
-        "quote_expired, quote_already_used, trip_not_bookable, insufficient_capacity, party_size_out_of_range, or payments_unavailable",
+        "quote_expired, quote_already_used, trip_not_bookable, insufficient_capacity, party_size_out_of_range, payments_unavailable, or override_exceeds_boat (an owner's override cannot fit the party on the boat)",
       ),
       422: errorBody("policy_not_accepted, payment_amount_too_small, or idempotency_key_reused"),
       429: errorBody("Too many open checkouts for this staff member (too_many_checkouts)"),
@@ -344,6 +392,7 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         },
       },
       async (trx, ctx) => {
+        if (input.capacityOverride) requireOwnerForOverride(ctx);
         const created = await openStaffCheckout(trx, ctx, {
           quoteId: input.quoteId,
           acceptedPolicyVersion: input.acceptedPolicyVersion,
@@ -352,6 +401,14 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
           attestations: input.attestations,
           provider: provider.name,
           minimumAmount: provider.minimumAmount("USD"),
+          ...(input.capacityOverride
+            ? {
+                capacityOverride: {
+                  reasonCode: input.capacityOverride.reasonCode,
+                  note: input.capacityOverride.note ?? null,
+                },
+              }
+            : {}),
         });
         if (created.kind !== "created") throw checkoutRefused(created);
         return { checkout: viewJson(staffViewOf(created.session, input.channel)) };
