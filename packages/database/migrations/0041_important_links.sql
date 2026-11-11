@@ -12,23 +12,31 @@
 -- An archived link is final; a new one is added instead. Every writer is held
 -- to the same rules: an https address with a host name (no user name,
 -- password, or IP address), short text without control characters, at most
--- 20 products, each one of the tenant's own, and at most 25 active links a
--- tenant, counted under a per-tenant lock.
+-- 20 products, each one of the tenant's own, and at most 25 active links
+-- (500 in all, archived ones included) a tenant, counted under a per-tenant
+-- lock.
 
 CREATE TABLE public.important_links (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL DEFAULT app.current_tenant_id() REFERENCES public.tenants (id),
   label text NOT NULL
-    CHECK (char_length(label) BETWEEN 1 AND 60 AND label !~ '[[:cntrl:]]' AND label = btrim(label)),
+    CHECK (char_length(label) BETWEEN 1 AND 60 AND label !~ '[[:cntrl:]\u0080-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]'
+      AND label !~ '^[[:space:]\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]|[[:space:]\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]$'),
   -- https, a host name ending in a letters-only label (so never an IP
-  -- address or a bare name like localhost), an optional port, and nothing
-  -- before the host: no user name or password.
+  -- address or a bare name like localhost) that is not a name reserved for
+  -- local or special use (.local, .internal, .home.arpa, .test, and so on),
+  -- an optional port from 1 to 65535, and nothing before the host: no user
+  -- name or password. No control, space, line or paragraph separator,
+  -- direction-changing, or zero-width character anywhere. The same rule as
+  -- isImportantLinkUrl in @tidegrid/contracts.
   url text NOT NULL
-    CHECK (char_length(url) BETWEEN 12 AND 2048 AND url !~ '[[:cntrl:][:space:]]'
-      AND url ~ '^https://[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,63}(?::[0-9]{1,5})?(?:[/?#].*)?$'),
+    CHECK (char_length(url) BETWEEN 12 AND 2048 AND url !~ '[[:cntrl:][:space:]   -   　\u0080-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]'
+      AND url ~ '^https://[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,63}(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?#].*)?$'
+      AND lower(substring(url FROM '^https://([^/?#:]+)')) !~ '(^|\.)(localhost|localdomain|local|internal|intranet|lan|home|corp|private|test|invalid|example|onion|arpa|alt)$'),
   description text
     CHECK (description IS NULL OR (char_length(description) BETWEEN 1 AND 200
-      AND description !~ '[[:cntrl:]]')),
+      AND description !~ '[[:cntrl:]\u0080-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]'
+      AND description ~ '[^[:space:]\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]')),
   -- Null: every trip. Otherwise the products whose bookings show it.
   product_ids uuid[]
     CHECK (product_ids IS NULL OR (cardinality(product_ids) BETWEEN 1 AND 20
@@ -52,6 +60,7 @@ CREATE FUNCTION app.check_important_link() RETURNS trigger
   AS $$
 DECLARE
   active_count integer;
+  total_count integer;
 BEGIN
   IF TG_OP = 'UPDATE' THEN
     IF NEW.id <> OLD.id OR NEW.tenant_id <> OLD.tenant_id OR NEW.created_at <> OLD.created_at
@@ -88,6 +97,15 @@ BEGIN
   IF NEW.status = 'active' AND (TG_OP = 'INSERT' OR OLD.status <> 'active') THEN
     PERFORM pg_catalog.pg_advisory_xact_lock(
       pg_catalog.hashtext('important_links:' || NEW.tenant_id::text));
+    -- Archived links are kept, so the whole list is bounded too.
+    IF TG_OP = 'INSERT' THEN
+      SELECT count(*) INTO total_count FROM public.important_links l
+       WHERE l.tenant_id = NEW.tenant_id;
+      IF total_count >= 500 THEN
+        RAISE EXCEPTION 'an operator keeps at most 500 important links, archived ones included'
+          USING ERRCODE = '23514', CONSTRAINT = 'important_links_total';
+      END IF;
+    END IF;
     SELECT count(*) INTO active_count FROM public.important_links l
      WHERE l.tenant_id = NEW.tenant_id AND l.status = 'active' AND l.id <> NEW.id;
     IF active_count >= 25 THEN

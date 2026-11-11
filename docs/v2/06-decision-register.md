@@ -21,8 +21,8 @@ It lands as migration `0041` and the [database contract](../../packages/database
 Coordinator defaults, pending owner confirmation:
 
 - **D1: owners only change links** (the catalog permission). Booking staff and finance read them.
-- **D2: at most 25 active links an operator, 20 products a link**, a name of 60 characters and a note of 200.
-- **D3: https only, host names only.** No `http`, IP address, or user name and password in the address, so a link cannot quietly point at a local network or carry credentials. TideGrid does not check what the page says, as docs/v2/02 says.
+- **D2: at most 25 active links an operator (500 in all, archived ones included), 20 products a link**, a name of 60 characters and a note of 200.
+- **D3: https only, public-looking host names only.** No `http`, IP address, user name and password, port outside 1 to 65535, or name kept for local networks or special use (`.local`, `.localhost`, `.internal`, `.home.arpa`, `.test`, and the like) in the address, and no hidden direction or zero-width characters in the address, name, or note. This keeps out the obvious ways to point at a local network or carry credentials, but a public name can still lead anywhere, so it is not a guarantee: TideGrid never fetches these pages itself, only the guest's browser does, and it does not check what a page says, as docs/v2/02 says. Guests see the host (with any port other than 443) before they open a link.
 - **D4: archive, never delete.** An archived link is final; to bring one back an owner adds it again. The audit keeps what each link said.
 
 Not built yet: a console screen (the API is ready), a site-wide links page on the guest site, and links in the confirmation email.

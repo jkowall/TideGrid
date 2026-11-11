@@ -858,8 +858,8 @@ function ImportantLinks({
     <div className="manage-links">
       <h3 className="manage-links-title">Important links from {operator}</h3>
       <ul className="manage-links-list">
-        {shown.map((l) => (
-          <li key={`${l.url} ${l.label}`}>
+        {shown.map((l, i) => (
+          <li key={i}>
             <a href={l.url} target="_blank" rel="noopener noreferrer external">
               {l.label}
               <Icon name="external" />

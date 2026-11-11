@@ -45276,7 +45276,7 @@
           "catalog"
         ],
         "summary": "Add an important link",
-        "description": "Owners only. An https address with a host name (no IP address, user name, or password), a name of up to 60 characters, an optional note of up to 200, every trip or up to 20 of the operator's products, and a position. At most 25 active links. Idempotent by key.",
+        "description": "Owners only. An https address with a host name (no IP address, user name, password, or name kept for local networks such as .local or .internal) and a port from 1 to 65535 if any, a name of up to 60 characters, an optional note of up to 200, every trip or up to 20 of the operator's products, and a position. At most 25 active links and 500 in all. Idempotent by key.",
         "security": [
           {
             "accessJwt": []
@@ -45581,7 +45581,7 @@
             }
           },
           "409": {
-            "description": "The link is archived (important_link_archived), the operator already has 25 active links (important_links_limit), or a product is not the operator's (important_link_unknown_product)",
+            "description": "The link is archived (important_link_archived), the operator already has 25 active links or 500 in all (important_links_limit), or a product is not the operator's (important_link_unknown_product)",
             "content": {
               "application/json": {
                 "schema": {
@@ -46007,7 +46007,7 @@
             }
           },
           "409": {
-            "description": "The link is archived (important_link_archived), the operator already has 25 active links (important_links_limit), or a product is not the operator's (important_link_unknown_product)",
+            "description": "The link is archived (important_link_archived), the operator already has 25 active links or 500 in all (important_links_limit), or a product is not the operator's (important_link_unknown_product)",
             "content": {
               "application/json": {
                 "schema": {

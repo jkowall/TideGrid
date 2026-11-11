@@ -48,7 +48,6 @@ describe.skipIf(!env)("important links through the API (W3-G2.14b-rest)", () => 
   let payments: FakePaymentProvider;
   let A: Tenant;
   let B: Tenant;
-  let tripsA: ReturnType<typeof tripAllocator>;
   const kid = `kid-${randomUUID().slice(0, 8)}`;
 
   const bindings = () => ({
@@ -156,7 +155,6 @@ describe.skipIf(!env)("important links through the API (W3-G2.14b-rest)", () => 
     ]);
     A = await tenant(a, "linkapi-a");
     B = await tenant(b, "linkapi-b");
-    tripsA = tripAllocator(A);
     const pair = await generateKeyPair("RS256", { extractable: true });
     signingKey = pair.privateKey;
     const jwk = { ...(await exportJWK(pair.publicKey)), kid, alg: "RS256", use: "sig" };
@@ -361,6 +359,50 @@ describe.skipIf(!env)("important links through the API (W3-G2.14b-rest)", () => 
       ),
     ).rejects.toThrow(/permission denied/);
 
+    // The same address and text rules as the contract.
+    for (const [label, url] of [
+      ["Raw", "https://ok.example.com:99999/"],
+      ["Raw", "https://ok.example.com:0/"],
+      ["Raw", "https://printer.local/"],
+      ["Raw", "https://router.home.arpa/"],
+      ["Raw", "https://metadata.google.internal/"],
+      ["Raw", "https://ok.example.com/a\u0085b"],
+      ["Raw", "https://ok.example.com/a\u2028b"],
+      ["Raw", "https://ok.example.com/a\u00a0b"],
+      ["Raw\u202e", "https://ok.example.com/"],
+      ["Raw\u200b", "https://ok.example.com/"],
+      ["Raw\u00a0", "https://ok.example.com/"],
+    ] as const) {
+      await expect(
+        write(
+          (tx) => tx`insert into public.important_links (tenant_id, label, url, position)
+            values (${A.id}, ${label}, ${url}, 0)`,
+        ),
+      ).rejects.toThrow(/check constraint/);
+    }
+    await expect(
+      write(
+        (tx) => tx`insert into public.important_links (tenant_id, label, url, description, position)
+          values (${A.id}, 'Raw', 'https://ok.example.com/', '   ', 0)`,
+      ),
+    ).rejects.toThrow(/check constraint/);
+
+    // Archived is final, and nothing starts archived.
+    await expect(
+      write(
+        (tx) => tx`insert into public.important_links (tenant_id, label, url, position, status)
+          values (${A.id}, 'Raw', 'https://ok.example.com/', 0, 'archived')`,
+      ),
+    ).rejects.toThrow(/starts active/);
+    await write(
+      (tx) => tx`update public.important_links set status = 'archived' where id = ${row?.id ?? ""}`,
+    );
+    await expect(
+      write(
+        (tx) => tx`update public.important_links set status = 'active' where id = ${row?.id ?? ""}`,
+      ),
+    ).rejects.toThrow(/does not change/);
+
     // At most 25 active links a tenant.
     const own = await createCheckoutFixture(admin, runtime.db, "linkapi-d", { days: 1 });
     const D = await tenant(own, "linkapi-d");
@@ -370,6 +412,26 @@ describe.skipIf(!env)("important links through the API (W3-G2.14b-rest)", () => 
     }
     const over = await add(D, link({ label: "One too many" }));
     expect([over.status, over.json.error?.code]).toEqual([409, "important_links_limit"]);
+
+    // And 500 in all, archived ones included.
+    const writeD = (sql: (tx: Sql) => Promise<unknown>) =>
+      rt.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${D.id}, true)`;
+        return sql(tx as unknown as Sql);
+      });
+    await writeD(
+      (tx) => tx`update public.important_links set status = 'archived' where tenant_id = ${D.id}`,
+    );
+    await writeD(async (tx) => {
+      for (let i = 25; i < 500; i += 1) {
+        await tx`insert into public.important_links (tenant_id, label, url, position)
+          values (${D.id}, ${`Old ${i}`}, 'https://ok.example.com/', 0)`;
+        await tx`update public.important_links set status = 'archived'
+          where tenant_id = ${D.id} and label = ${`Old ${i}`}`;
+      }
+    });
+    const full = await add(D, link({ label: "Five hundred and one" }));
+    expect([full.status, full.json.error?.code]).toEqual([409, "important_links_limit"]);
     await rt.end({ timeout: 5 });
   });
 });

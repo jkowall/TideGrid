@@ -53,7 +53,7 @@ function saved(result: ImportantLinkResult) {
       throw new ApiError(
         409,
         "important_links_limit",
-        "An operator keeps at most 25 active important links; archive one first",
+        "An operator keeps at most 25 active important links, and 500 in all with archived ones",
       );
     case "unknown_product":
       throw new ApiError(
@@ -70,7 +70,7 @@ const responses = {
   403: errorBody("Role does not allow this"),
   404: errorBody("No such tenant or link"),
   409: errorBody(
-    "The link is archived (important_link_archived), the operator already has 25 active links (important_links_limit), or a product is not the operator's (important_link_unknown_product)",
+    "The link is archived (important_link_archived), the operator already has 25 active links or 500 in all (important_links_limit), or a product is not the operator's (important_link_unknown_product)",
   ),
   422: errorBody("idempotency_key_reused"),
 };
@@ -117,7 +117,7 @@ export function registerImportantLinkRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
     tags: ["staff", "catalog"],
     summary: "Add an important link",
     description:
-      "Owners only. An https address with a host name (no IP address, user name, or password), a name of up to 60 characters, an optional note of up to 200, every trip or up to 20 of the operator's products, and a position. At most 25 active links. Idempotent by key.",
+      "Owners only. An https address with a host name (no IP address, user name, password, or name kept for local networks such as .local or .internal) and a port from 1 to 65535 if any, a name of up to 60 characters, an optional note of up to 200, every trip or up to 20 of the operator's products, and a position. At most 25 active links and 500 in all. Idempotent by key.",
     security: staffSecurity,
     request: {
       params: StaffTenantParams,
@@ -284,7 +284,8 @@ export function registerImportantLinkRoutes(app: OpenAPIHono<AppEnv>, deps: AppD
       },
       (trx) => guestImportantLinks(trx, tenantId, null),
     );
-    c.header("Cache-Control", "private, max-age=60");
+    // Not cached, so an archived link disappears at once, as the archive route says.
+    c.header("Cache-Control", "no-store");
     c.header("Vary", "Origin");
     return c.json({ links }, 200);
   });

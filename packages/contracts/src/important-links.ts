@@ -14,32 +14,53 @@ export const MAX_IMPORTANT_LINK_PRODUCTS = 20;
 
 /**
  * https, a host name ending in a letters-only label (never an IP address or a
- * bare name such as localhost), an optional port, then a path, query, or
- * fragment. Nothing before the host, so no user name or password. The same
- * pattern as the database's check.
+ * bare name such as localhost), an optional port from 1 to 65535, then a
+ * path, query, or fragment. Nothing before the host, so no user name or
+ * password. The same pattern as the database's check.
  */
 const IMPORTANT_LINK_URL =
-  /^https:\/\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,63}(?::[0-9]{1,5})?(?:[/?#].*)?$/;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to find them.
-const CONTROL_OR_SPACE = /[\u0000-\u0020\u007f-\u009f\u2028\u2029]/;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to find them.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+  /^https:\/\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,63}(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?#].*)?$/;
+/** Names reserved for local networks or special use; a link never points at one. */
+const RESERVED_HOST =
+  /(?:^|\.)(?:localhost|localdomain|local|internal|intranet|lan|home|corp|private|test|invalid|example|onion|arpa|alt)$/;
+/**
+ * Control characters, line and paragraph separators, and characters that
+ * change text direction or take no width. The database refuses the same set.
+ */
+const INVISIBLE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to find them.
+  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
+const SPACE = /\s/;
+/** At least one character that is not a space. */
+const VISIBLE = /[^\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/;
+/** The spaces the database also refuses at either end of a name. */
+const EDGE_SPACE =
+  /^[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]|[\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]$/;
 
 /** True for an address an important link may hold. */
 export function isImportantLinkUrl(value: string): boolean {
   return (
     value.length >= 12 &&
     value.length <= 2048 &&
-    !CONTROL_OR_SPACE.test(value) &&
-    IMPORTANT_LINK_URL.test(value)
+    !INVISIBLE.test(value) &&
+    !SPACE.test(value) &&
+    IMPORTANT_LINK_URL.test(value) &&
+    !RESERVED_HOST.test(importantLinkHost(value).replace(/:.*$/, ""))
   );
 }
 
-/** The host a guest is told the link opens, lowercased, without the port. */
+/**
+ * The host a guest is told the link opens, lowercased, with its port unless
+ * the port is the usual 443 (as the browser's URL host shows it).
+ */
 export function importantLinkHost(url: string): string {
   const rest = url.slice("https://".length);
-  const end = rest.search(/[/?#:]/);
-  return (end === -1 ? rest : rest.slice(0, end)).toLowerCase();
+  const end = rest.search(/[/?#]/);
+  const host = (end === -1 ? rest : rest.slice(0, end)).toLowerCase();
+  const colon = host.indexOf(":");
+  if (colon === -1) return host;
+  const port = host.slice(colon + 1);
+  return port === "443" ? host.slice(0, colon) : `${host.slice(0, colon)}:${port}`;
 }
 
 const Label = z
@@ -47,15 +68,18 @@ const Label = z
   .min(1)
   .max(60)
   .refine(
-    (v) => v === v.trim() && !CONTROL.test(v),
-    "No leading or trailing spaces or control characters",
+    (v) => !EDGE_SPACE.test(v) && !INVISIBLE.test(v),
+    "No leading or trailing spaces, control characters, or hidden direction marks",
   )
   .describe("The link's name, as guests see it");
 const Description = z
   .string()
   .min(1)
   .max(200)
-  .refine((v) => !CONTROL.test(v), "No control characters")
+  .refine(
+    (v) => VISIBLE.test(v) && !INVISIBLE.test(v),
+    "Some text, without control characters or hidden direction marks",
+  )
   .describe("An optional short note under the name");
 const Url = z
   .string()

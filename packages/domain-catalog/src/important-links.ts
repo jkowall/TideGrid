@@ -12,7 +12,7 @@ import { sql } from "kysely";
  * guests, for every trip or for named products (docs/v2/02). Owners add,
  * edit, reorder, and archive them; nothing is deleted. The database checks
  * every writer (0041): the address rule, the text limits, the products being
- * the tenant's own, and at most 25 active links.
+ * the tenant's own, and at most 25 active links (500 in all).
  */
 
 interface LinkRow {
@@ -51,7 +51,10 @@ const COLUMNS = [
   "updated_at",
 ] as const;
 
-/** Every link of the tenant: active ones by position, then archived ones, newest first. */
+/**
+ * Every link of the tenant: active ones first, then archived ones, each by
+ * position, then by when it was added. Guests see active ones in the same order.
+ */
 export async function listImportantLinks(
   trx: TenantTransaction,
   tenantId: string,
@@ -62,7 +65,7 @@ export async function listImportantLinks(
     .where("tenant_id", "=", tenantId)
     .orderBy(sql`case when status = 'active' then 0 else 1 end`)
     .orderBy("position")
-    .orderBy("updated_at", "desc")
+    .orderBy("created_at")
     .orderBy("id")
     .execute();
   return rows.map((r) => toLink(r as LinkRow));
@@ -112,7 +115,9 @@ export type ImportantLinkResult =
 function refusal(err: unknown): ImportantLinkResult | null {
   const e = err as { code?: string; constraint_name?: string; constraint?: string };
   const constraint = e.constraint_name ?? e.constraint;
-  if (constraint === "important_links_limit") return { kind: "limit_reached" };
+  if (constraint === "important_links_limit" || constraint === "important_links_total") {
+    return { kind: "limit_reached" };
+  }
   if (constraint === "important_links_products") return { kind: "unknown_product" };
   if (constraint === "important_links_archived") return { kind: "archived" };
   return null;
@@ -242,14 +247,17 @@ export async function archiveImportantLink(
   const before = await lockLink(trx, ctx.tenantId, linkId);
   if (!before) return { kind: "not_found" };
   if (before.status === "archived") return { kind: "archived" };
-  const row = await trx
-    .updateTable("important_links")
-    .set({ status: "archived", updated_at: new Date() })
-    .where("tenant_id", "=", ctx.tenantId)
-    .where("id", "=", linkId)
-    .returning(COLUMNS)
-    .executeTakeFirstOrThrow();
-  const link = toLink(row as LinkRow);
+  const out = await guarded(trx, () =>
+    trx
+      .updateTable("important_links")
+      .set({ status: "archived", updated_at: new Date() })
+      .where("tenant_id", "=", ctx.tenantId)
+      .where("id", "=", linkId)
+      .returning(COLUMNS)
+      .executeTakeFirstOrThrow(),
+  );
+  if (isResult(out)) return out;
+  const link = toLink(out as LinkRow);
   await recordAudit(trx, ctx, {
     action: "important_link.archived",
     subjectType: "important_link",

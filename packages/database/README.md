@@ -438,10 +438,10 @@ W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import:
 
 W3-G2.14b-rest, part 1. `important_links` holds an operator's named HTTPS links for guests: a label (1 to 60 characters), an address, an optional note (up to 200), the products it applies to (`product_ids`, null for every trip, at most 20), a position, and `active` or `archived`. Configuration, not evidence: the runtime may SELECT, INSERT, and UPDATE the editable columns; DELETE and TRUNCATE are refused for every role. Forced row-level security.
 
-- **The address.** https, a host name ending in a letters-only label (never an IP address or a bare name such as `localhost`), an optional port, nothing before the host (so no user name or password), no spaces or control characters, at most 2,048 characters. The same pattern is in the contract (`isImportantLinkUrl`).
+- **The address.** https, a host name ending in a letters-only label (never an IP address or a bare name such as `localhost`) that is not kept for local networks or special use (`.local`, `.internal`, `.home.arpa`, `.test`, and the like), an optional port from 1 to 65535, nothing before the host (so no user name or password), no spaces, control, direction-changing, or zero-width characters, at most 2,048 characters. Names and notes refuse the same hidden characters, a name has no space at either end, and a note is not only spaces. The contract (`isImportantLinkUrl`) holds the same rule, with the character ranges spelled out the same way.
 - **Products.** Each named product must be one of the tenant's own, once (`important_links_products`, 23503).
 - **Archived is final.** An archived link changes no more, and a link starts active (`important_links_archived`). Its id, tenant, and creation stay as they were (`important_links_identity`). The trigger stamps who changed it and when.
-- **At most 25 active a tenant**, counted under a per-tenant advisory lock (`important_links_limit`).
+- **At most 25 active a tenant, and 500 in all with archived ones**, counted under a per-tenant advisory lock (`important_links_limit`, `important_links_total`).
 
 ## Indexes built concurrently (no-transaction files)
 
