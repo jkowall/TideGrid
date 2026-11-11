@@ -21,7 +21,7 @@ import {
   inZone,
   todayIn,
 } from "@tidegrid/design-system/format";
-import type { QuoteBody } from "./booking-api.ts";
+import type { QuoteBody, TestPaymentOutcome } from "./booking-api.ts";
 import { type Failure, outcomeUnknown, type Result } from "./http.ts";
 
 /**
@@ -376,6 +376,18 @@ export function afterSettle(
 /** The same settle must be sent again before anything else ends the checkout. */
 export const mustResend = (delivery: PaymentDelivery) =>
   delivery === "undelivered" || delivery === "unknown";
+
+/**
+ * Whether this outcome may be sent now. While the event is owed, only the
+ * outcome already sent: a lost first request means nothing settled, so the
+ * other outcome would settle as the guest's new choice, while an arrived one
+ * replays its first outcome, and the guest can't tell which happened.
+ */
+export const maySend = (
+  delivery: PaymentDelivery,
+  sent: TestPaymentOutcome | null,
+  outcome: TestPaymentOutcome,
+) => !mustResend(delivery) || sent === null || sent === outcome;
 
 /** A checkout's short reference for support, from its id: "3BA66E4F". */
 export function shortReference(sessionId: string): string {

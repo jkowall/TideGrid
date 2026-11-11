@@ -20,6 +20,7 @@ import {
   checkoutTrouble,
   initialSelection,
   linkTokenFrom,
+  maySend,
   mustResend,
   partyLimits,
   partyProblem,
@@ -388,6 +389,19 @@ describe("a test payment's event", () => {
     d = afterSettle(d, settled(200));
     expect(d).toBe("delivered");
     expect(mustResend(d)).toBe(false);
+  });
+
+  it("allows only the outcome already sent while its event is owed", () => {
+    // A decline whose request was lost before it reached the provider: nothing
+    // settled. Sending success now would settle a payment the guest can't
+    // tell apart from a replayed decline, so only the decline may follow.
+    const d = afterSettle("none", network);
+    expect(maySend(d, "fail", "fail")).toBe(true);
+    expect(maySend(d, "fail", "succeed")).toBe(false);
+    expect(maySend("undelivered", "succeed", "fail")).toBe(false);
+    // Once nothing is owed, either outcome may be chosen.
+    expect(maySend("none", null, "succeed")).toBe(true);
+    expect(maySend("delivered", "fail", "succeed")).toBe(true);
   });
 
   it("lets a definite refusal or a delivered event end the checkout as usual", () => {

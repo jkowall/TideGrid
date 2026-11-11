@@ -33,6 +33,7 @@ import {
   guests,
   initialSelection,
   isCharter,
+  maySend,
   mustResend,
   outcomeText,
   type PartyLimits,
@@ -138,6 +139,8 @@ export function BookScreen({
    */
   const delivery = useRef<PaymentDelivery>("none");
   const [resend, setResend] = useState(false);
+  /** The outcome last sent for this checkout: while its event is owed, only it may be sent again. */
+  const sent = useRef<TestPaymentOutcome | null>(null);
   const setDelivery = (next: PaymentDelivery) => {
     delivery.current = next;
     setResend(mustResend(next));
@@ -355,6 +358,7 @@ export function BookScreen({
       setInDoubt(false);
       paymentSent.current = false;
       setDelivery("none");
+      sent.current = null;
       const { session, payment } = r.value;
       if (payment && payment.provider !== "fake" && session.state === "open") {
         // The demo app pays only with the demo's test provider; give the seats back at once.
@@ -386,7 +390,9 @@ export function BookScreen({
     exclusive(outcome, async (still) => {
       setNotice(null);
       // Before sending: a lost or late answer may still have settled the payment.
+      if (!maySend(delivery.current, sent.current, outcome)) return;
       paymentSent.current = true;
+      sent.current = outcome;
       const r = await settleTestPayment(endpoint, payment, outcome);
       if (!still()) return;
       // A lost answer keeps resending open past the hold's end, as a failed delivery does.
@@ -783,7 +789,11 @@ export function BookScreen({
             }}
             color={color}
             busy={busy === "succeed" || waiting === "succeed"}
-            disabled={working || (left <= 0 && !resend)}
+            disabled={
+              working ||
+              (left <= 0 && !resend) ||
+              !maySend(delivery.current, sent.current, "succeed")
+            }
           />
           <Button
             action={{
@@ -793,7 +803,9 @@ export function BookScreen({
             color={color}
             kind="secondary"
             busy={busy === "fail" || waiting === "fail"}
-            disabled={working || (left <= 0 && !resend)}
+            disabled={
+              working || (left <= 0 && !resend) || !maySend(delivery.current, sent.current, "fail")
+            }
           />
           <Button
             action={{
