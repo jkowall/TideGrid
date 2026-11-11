@@ -11,6 +11,7 @@ import { ApiError } from "./errors.ts";
 import { requireConsoleGateway } from "./gateway.ts";
 import { allowedOrigin } from "./hostnames/cors.ts";
 import { registerAuthRoutes } from "./routes/auth.ts";
+import { registerBalanceStaffRoutes } from "./routes/balances-staff.ts";
 import { registerBookingEmailStaffRoutes } from "./routes/booking-email-staff.ts";
 import { registerBookingStaffRoutes } from "./routes/bookings-staff.ts";
 import { registerCatalogPublicRoutes } from "./routes/catalog-public.ts";
@@ -20,13 +21,17 @@ import { registerConsoleStaffRoutes } from "./routes/console-staff.ts";
 import { registerFakeEmailRoutes } from "./routes/fake-email.ts";
 import { registerFakeProviderRoutes } from "./routes/fake-provider.ts";
 import { registerHoldStaffRoutes } from "./routes/holds-staff.ts";
+import { registerImportantLinkRoutes } from "./routes/important-links.ts";
+import { registerImportStaffRoutes } from "./routes/imports-staff.ts";
 import { registerManagePublicRoutes } from "./routes/manage-public.ts";
+import { registerParticipantPublicRoutes } from "./routes/participant-public.ts";
 import { registerParticipantStaffRoutes } from "./routes/participants-staff.ts";
 import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.ts";
 import { registerPricingPublicRoutes } from "./routes/pricing-public.ts";
 import { registerPublicRoutes } from "./routes/public.ts";
 import { registerReconciliationStaffRoutes } from "./routes/reconciliation-staff.ts";
 import { registerRefundsCreditsStaffRoutes } from "./routes/refunds-credits-staff.ts";
+import { registerReschedulesStaffRoutes } from "./routes/reschedules-staff.ts";
 import { registerStaffRoutes } from "./routes/staff.ts";
 import { registerStaffBookingRoutes } from "./routes/staff-booking.ts";
 import { registerSystemRoutes } from "./routes/system.ts";
@@ -173,6 +178,7 @@ export function createApp(deps: AppDeps = {}) {
   // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
   registerParticipantStaffRoutes(app, deps);
   registerManagePublicRoutes(app, deps);
+  registerParticipantPublicRoutes(app, deps);
   registerFakeEmailRoutes(app);
   // Console completion (G2.12c): search, day totals and export, booking notes.
   registerConsoleStaffRoutes(app, deps);
@@ -184,9 +190,14 @@ export function createApp(deps: AppDeps = {}) {
   // Staff resend of a booking's email (G2.16b).
   registerBookingEmailStaffRoutes(app, deps);
   registerRefundsCreditsStaffRoutes(app, deps);
+  registerReschedulesStaffRoutes(app, deps);
   registerReconciliationStaffRoutes(app, deps);
+  registerBalanceStaffRoutes(app, deps);
   // Tenant access remainder (W3-G2.2b): invitations, support access, export, deletion request.
   registerTenantAccessStaffRoutes(app, deps);
+  // The standard CSV import's dry run (W3-G2.13).
+  registerImportStaffRoutes(app, deps);
+  registerImportantLinkRoutes(app, deps);
 
   // After every route: the cap's 413 on each operation with a request body.
   declarePayloadTooLarge(app);

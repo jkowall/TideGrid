@@ -18,11 +18,18 @@ const bookingViews = [
 const completionReads = [
   `/v1/staff/tenants/${tenant}/booking-day-totals?date=2026-10-06`,
   `/v1/staff/tenants/${tenant}/booking-day-export?date=2026-10-06`,
+  `/v1/staff/tenants/${tenant}/money-report?from=2026-10-01&to=2026-10-31`,
+  `/v1/staff/tenants/${tenant}/money-export?from=2026-10-01&to=2026-10-31`,
   `/v1/staff/tenants/${tenant}/bookings/${someId}/notes`,
 ];
 const completionWrites = [
   `/v1/staff/tenants/${tenant}/booking-searches`,
   `/v1/staff/tenants/${tenant}/bookings/${someId}/notes`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/balance/due-date`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/balance/link`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/reschedule`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/participants/2/removal`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/participants/2/invitation`,
 ];
 
 describe("the public entry hides staff and sign-in routes", () => {
@@ -41,6 +48,17 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["GET", `/v1/staff/tenants/${tenant}/email-exceptions`],
     // Exception resolution (W1-FIN-EXC).
     ["POST", `/v1/staff/tenants/${tenant}/finalization-exceptions/${someId}/resolution`],
+    // Correcting the booker's contact details (W3-G2.11-rest).
+    ["PUT", `/v1/staff/tenants/${tenant}/bookings/${someId}/booker`],
+    // Complimentary bookings (W3-G2.12-rest).
+    ["POST", `/v1/staff/tenants/${tenant}/complimentary-bookings`],
+    // The standard CSV import's dry run (W3-G2.13).
+    ["POST", `/v1/staff/tenants/${tenant}/import-dry-runs`],
+    // Important links (W3-G2.14b-rest).
+    ["GET", `/v1/staff/tenants/${tenant}/important-links`],
+    ["POST", `/v1/staff/tenants/${tenant}/important-links`],
+    ["PUT", `/v1/staff/tenants/${tenant}/important-links/${someId}`],
+    ["POST", `/v1/staff/tenants/${tenant}/important-links/${someId}/archive`],
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -93,6 +111,20 @@ describe("staff authentication fails closed before touching the database", () =>
     const res = await SELF.fetch(`http://localhost${path}`);
     expect(res.status).toBe(401);
     expect(await errorCode(res)).toBe("unauthenticated");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("rejects a booker correction without the console origin", async () => {
+    const res = await SELF.fetch(
+      `http://localhost/v1/staff/tenants/${tenant}/bookings/${someId}/booker`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json", origin: "https://evil.example" },
+        body: JSON.stringify({ name: "A B", email: "a@example.test" }),
+      },
+    );
+    expect(res.status).toBe(403);
+    expect(await errorCode(res)).toBe("origin_not_allowed");
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });
@@ -208,10 +240,32 @@ describe("contract", () => {
         "/v1/public/manage/cancellation",
         "/v1/public/manage/link-email",
         "/v1/public/manage/session/end",
+        // Deposits and balances (W3-G2.8).
+        "/v1/public/manage/balance-payment",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/balance/due-date",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/balance/link",
+        // Moving a booking to another trip (W3-G2.11-rest).
+        "/v1/public/manage/reschedule",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/reschedule",
+        // Giving up a place in a shared-seat party (W3-G2.11-rest).
+        "/v1/public/manage/participants/{position}/removal",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/removal",
+        // Participant invitations and their own details (W3-G2.11-rest).
+        "/v1/public/manage/participants/{position}/invitation",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/invitation",
+        // Correcting the booker's contact details (W3-G2.11-rest).
+        "/v1/public/manage/booker",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/booker",
+        "/v1/public/participant-access",
+        "/v1/public/participant/profile",
+        "/v1/public/participant/session/end",
         // Console completion (G2.12c).
         "/v1/staff/tenants/{tenantId}/booking-searches",
         "/v1/staff/tenants/{tenantId}/booking-day-totals",
         "/v1/staff/tenants/{tenantId}/booking-day-export",
+        // Money movements for a date range (W3-G2.12-rest).
+        "/v1/staff/tenants/{tenantId}/money-report",
+        "/v1/staff/tenants/{tenantId}/money-export",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes",
         // Waiver evidence (G2.15).
         "/v1/public/waiver-sessions",
@@ -219,6 +273,8 @@ describe("contract", () => {
         "/v1/public/waiver-sessions/current/signature",
         "/v1/public/waiver-sessions/current/document",
         "/v1/public/manage/waivers",
+        // The booker sends a person's waiver again (W3-G2.15-rest).
+        "/v1/public/manage/waivers/resend",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/waivers",
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/waivers",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend",
@@ -235,10 +291,13 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}",
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/cancel",
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/test-payment",
+        // Complimentary bookings (W3-G2.12-rest).
+        "/v1/staff/tenants/{tenantId}/complimentary-bookings",
         // Staff resend of a booking's email (G2.16b).
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/emails/resend",
         // Guest API follow-ups (W1-GUEST-API).
         "/v1/public/checkout-sessions/{checkoutSessionId}/payment",
+        "/v1/public/important-links",
         "/v1/public/checkout-sessions/{checkoutSessionId}/offer",
         // The tenant-wide email exceptions list (W1-EMAIL-EXC).
         "/v1/staff/tenants/{tenantId}/email-exceptions",
@@ -260,6 +319,11 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/payment-reconciliation-exceptions",
         "/v1/staff/tenants/{tenantId}/reconciliation",
         "/v1/staff/tenants/{tenantId}/fee-invoices",
+        // The standard CSV import's dry run (W3-G2.13).
+        "/v1/staff/tenants/{tenantId}/import-dry-runs",
+        "/v1/staff/tenants/{tenantId}/important-links",
+        "/v1/staff/tenants/{tenantId}/important-links/{linkId}",
+        "/v1/staff/tenants/{tenantId}/important-links/{linkId}/archive",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are
@@ -270,6 +334,8 @@ describe("contract", () => {
       "fakeClientSecret",
       // The guest's booking session (lane 1, G2.11c).
       "manageSession",
+      // An invited participant's own session (W3-G2.11-rest).
+      "participantSession",
       "sessionCookie",
       // The guest's waiver signing session (G2.15).
       "waiverSession",

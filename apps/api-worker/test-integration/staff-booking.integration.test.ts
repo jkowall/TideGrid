@@ -1724,4 +1724,152 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
     expect(canceled.length).toBeGreaterThan(2);
     for (const a of canceled) expect(a.actor_type).toBe("staff");
   });
+
+  it("W3-G2.12-rest: lets only an owner book one more party onto a full trip, up to the boat", async () => {
+    // A guest takes all ten seats of a trip on the twenty-guest boat.
+    const full = tripsA.shared();
+    const guestEight = await guestOpen(A, await quoteFor(runtime.db, A.id, full, 8));
+    expect(guestEight.status).toBe(201);
+    // Not even an owner, writing directly, can put an override on a guest's checkout.
+    await expect(
+      admin.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${A.id}, true),
+                        set_config('app.actor_type', 'staff', true),
+                        set_config('app.actor_id', ${A.ownerId}, true)`;
+        await tx`insert into public.capacity_overrides (tenant_id, trip_id, owner_ref, extra_seats, reason_code)
+          values (${A.id}, ${full}, ${`checkout_session:${guestEight.json.checkoutSession.id as string}`}, 1, 'make_good')`;
+      }),
+    ).rejects.toMatchObject({ constraint_name: "capacity_overrides_trip" });
+    expect((await guestOpen(A, await quoteFor(runtime.db, A.id, full, 2))).status).toBe(201);
+    const override = { reasonCode: "captain_approved" } as const;
+
+    // Booking staff may not ask, for a quote or a checkout.
+    const staffAsk = await quote(A.id, A.staff, { ...tickets(full, 3), capacityOverride: true });
+    expect([staffAsk.status, staffAsk.json.error?.code]).toEqual([
+      403,
+      "capacity_override_forbidden",
+    ]);
+    // The owner prices the party against the room on the boat.
+    const q = await staffQuote(A, A.owner, { ...tickets(full, 3), capacityOverride: true });
+    const staffOpen = await open(A.id, A.staff, {
+      ...openBody(q, booker("override")),
+      capacityOverride: override,
+    });
+    expect([staffOpen.status, staffOpen.json.error?.code]).toEqual([
+      403,
+      "capacity_override_forbidden",
+    ]);
+    // Without the override the trip is full, even for the owner.
+    const plain = await open(A.id, A.owner, openBody(q, booker("override")));
+    expect([plain.status, plain.json.error?.code]).toEqual([409, "insufficient_capacity"]);
+    // Other needs a note.
+    const noNote = await open(A.id, A.owner, {
+      ...openBody(q, booker("override")),
+      capacityOverride: { reasonCode: "other" },
+    });
+    expect(noNote.status).toBe(400);
+
+    const opened = await open(A.id, A.owner, {
+      ...openBody(q, booker("override")),
+      capacityOverride: override,
+    });
+    expect(opened.status, opened.text).toBe(201);
+    const { checkout } = StaffCheckoutCreateResponse.parse(opened.json);
+    const paid = await testPay(A.id, A.owner, checkout.id, "succeed");
+    expect(paid.status, paid.text).toBe(200);
+    expect(StaffTestPaymentResponse.parse(paid.json).delivery).toMatchObject({
+      status: 200,
+      outcome: "confirmed",
+    });
+    const [row] = await admin<{ extra_seats: number; reason_code: string; actor_id: string }[]>`
+      select extra_seats, reason_code, actor_id from public.capacity_overrides
+       where trip_id = ${full} and owner_ref = ${`checkout_session:${checkout.id}`}`;
+    expect(row).toEqual({ extra_seats: 3, reason_code: "captain_approved", actor_id: A.ownerId });
+
+    // Still full to everyone else, and a party the boat cannot take is refused.
+    const guestQuote = await quote(A.id, A.staff, tickets(full, 1));
+    expect(guestQuote.status).toBe(409);
+    const tooMany = await quote(A.id, A.owner, { ...tickets(full, 8), capacityOverride: true });
+    expect([tooMany.status, tooMany.json.error?.code]).toEqual([409, "insufficient_capacity"]);
+
+    // The boat's room (7 now) can go between a quote and its checkout: a
+    // party of 5 priced first is refused once another override took 3.
+    const five = await staffQuote(A, A.owner, { ...tickets(full, 5), capacityOverride: true });
+    const three = await staffQuote(A, A.owner, { ...tickets(full, 3), capacityOverride: true });
+    const took = await open(A.id, A.owner, {
+      ...openBody(three, booker("override-3")),
+      capacityOverride: { reasonCode: "make_good" },
+    });
+    expect(took.status, took.text).toBe(201);
+    const late = await open(A.id, A.owner, {
+      ...openBody(five, booker("override-5")),
+      capacityOverride: { reasonCode: "make_good" },
+    });
+    expect([late.status, late.json.error?.code]).toEqual([409, "override_exceeds_boat"]);
+
+    // An override never makes one party larger than the trip's own capacity.
+    // A 5-seat trip on the 20-guest boat: 6 is within the product's party
+    // limit and the boat, but past the trip's own capacity.
+    const small = tripsA.shared();
+    await admin`update public.scheduled_trips set seat_capacity = 5 where id = ${small}`;
+    const six = await quote(A.id, A.owner, { ...tickets(small, 6), capacityOverride: true });
+    expect(six.status).not.toBe(201);
+    expect(
+      (await quote(A.id, A.owner, { ...tickets(small, 5), capacityOverride: true })).status,
+    ).toBe(201);
+  });
+
+  it("W3-G2.12-rest: lets only an owner book a guest at no charge, with a reason", async () => {
+    const trip = tripsA.shared();
+    const path = `${base(A.id)}/complimentary-bookings`;
+    const comp = (as: string, body: unknown, k = key("comp")) =>
+      request("POST", path, { as, body, headers: { "idempotency-key": k } });
+    const grant = { reasonCode: "service_recovery" } as const;
+
+    const q = await staffQuote(A, A.owner, tickets(trip, 2));
+    // Booking staff may not give a booking away.
+    const staffTry = await comp(A.staff, {
+      ...openBody(q, booker("comp")),
+      complimentary: grant,
+    });
+    expect([staffTry.status, staffTry.json.error?.code], staffTry.text).toEqual([
+      403,
+      "complimentary_forbidden",
+    ]);
+    // Other needs a note.
+    const noNote = await comp(A.owner, {
+      ...openBody(q, booker("comp")),
+      complimentary: { reasonCode: "other" },
+    });
+    expect(noNote.status).toBe(400);
+
+    const k = key("comp");
+    const body = { ...openBody(q, booker("comp")), complimentary: grant };
+    const made = await comp(A.owner, body, k);
+    expect(made.status, made.text).toBe(201);
+    expect(made.json.booking).toMatchObject({
+      source: "complimentary",
+      waivedAmount: q.totals.total,
+    });
+    // A retry with the same key gives the same booking, not a second one.
+    const again = await comp(A.owner, body, k);
+    expect(again.status, again.text).toBe(201);
+    expect(again.json.booking.id).toBe(made.json.booking.id);
+
+    const [row] = await admin<{ source: string; payment_id: string | null; reason_code: string }[]>`
+      select b.source, b.payment_id, g.reason_code
+        from public.bookings b
+        join public.complimentary_grants g on g.checkout_session_id = b.checkout_session_id
+       where b.id = ${made.json.booking.id as string}`;
+    expect(row).toEqual({
+      source: "complimentary",
+      payment_id: null,
+      reason_code: "service_recovery",
+    });
+    const [payments] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.payments p
+        join public.bookings b on b.checkout_session_id = p.checkout_session_id
+       where b.id = ${made.json.booking.id as string}`;
+    expect(payments?.n).toBe(0);
+  });
 });

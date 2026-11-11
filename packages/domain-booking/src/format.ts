@@ -92,10 +92,14 @@ export function firstName(name: string): string {
  * taxes as the order holds them, then the total; taxes already inside the
  * prices are noted after it, not added.
  */
-export function receiptRows(order: {
-  lines: readonly OrderLineView[];
-  totals: { total: number; includedTax: number };
-}): { label: string; amount: string; strong?: boolean }[] {
+export function receiptRows(
+  order: {
+    lines: readonly OrderLineView[];
+    totals: { total: number; includedTax: number };
+  },
+  /** A complimentary booking (W3-G2.12-rest): its total is waived, nothing paid. */
+  complimentary = false,
+): { label: string; amount: string; strong?: boolean }[] {
   const rows: { label: string; amount: string; strong?: boolean }[] = [];
   for (const line of order.lines) {
     if (line.kind === "tax") {
@@ -108,7 +112,12 @@ export function receiptRows(order: {
       rows.push({ label: clean(label, 200), amount: money(line.amount) });
     }
   }
-  rows.push({ label: "Total paid", amount: money(order.totals.total), strong: true });
+  if (complimentary) {
+    rows.push({ label: "Total, complimentary", amount: money(order.totals.total) });
+    rows.push({ label: "You paid", amount: money(0), strong: true });
+  } else {
+    rows.push({ label: "Total paid", amount: money(order.totals.total), strong: true });
+  }
   if (order.totals.includedTax > 0) {
     rows.push({ label: "Includes taxes of", amount: money(order.totals.includedTax) });
   }

@@ -82,6 +82,7 @@ export function sharedOffer(over: Partial<TripOffer> = {}): TripOffer {
     fees: [],
     taxes: [{ name: "Sales tax", ratePpm: 70000, inclusive: false }],
     policy,
+    deposit: { kind: "none" },
     ...over,
   };
 }
@@ -151,6 +152,7 @@ export function quoteFor(over: Partial<Quote> = {}): Quote {
       total: 9630,
       amountDueNow: 9630,
     },
+    deposit: null,
     policy,
     quotedAt: "2026-11-04T17:00:00.000Z",
     expiresAt: "2026-11-04T17:30:00.000Z",

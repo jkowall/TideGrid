@@ -75,12 +75,17 @@ export interface Slot {
   participant: Participant | null;
 }
 
-export function slotsOf(partySize: number, participants: readonly Participant[]): Slot[] {
+/**
+ * The party's places with their participants. `places` is the API's list, which
+ * skips any place the party gave up (W3-G2.11-rest); without it, 1 to the party size.
+ */
+export function slotsOf(
+  partySize: number,
+  participants: readonly Participant[],
+  places: readonly number[] = Array.from({ length: partySize }, (_, i) => i + 1),
+): Slot[] {
   const byPlace = new Map(participants.map((p) => [p.position, p]));
-  return Array.from({ length: partySize }, (_, i) => ({
-    position: i + 1,
-    participant: byPlace.get(i + 1) ?? null,
-  }));
+  return places.map((position) => ({ position, participant: byPlace.get(position) ?? null }));
 }
 
 /** The booking with one participant saved: the place's old one replaced, or a new place. */
@@ -107,7 +112,11 @@ export function participantDetail(p: Participant): string {
 }
 
 /** The receipt, as the order holds it: trip price, extras, fees, discount, taxes, total. */
-export function orderRows(order: ManagedBooking["order"]): LedgerRow[] {
+export function orderRows(
+  order: ManagedBooking["order"],
+  /** A complimentary booking: its total is waived, nothing paid. */
+  complimentary = false,
+): LedgerRow[] {
   const rows: LedgerRow[] = [];
   for (const line of order.lines) {
     if (line.kind === "tax") {
@@ -135,10 +144,18 @@ export function orderRows(order: ManagedBooking["order"]): LedgerRow[] {
       kind: line.kind === "discount" ? "adjustment" : "item",
     });
   }
+  if (complimentary) {
+    rows.push({
+      id: "waived",
+      label: "Total, complimentary",
+      amount: formatMoney(order.totals.total),
+      kind: "note",
+    });
+  }
   rows.push({
     id: "total",
-    label: "Total paid",
-    amount: formatMoney(order.totals.total),
+    label: complimentary ? "You paid" : "Total paid",
+    amount: formatMoney(complimentary ? 0 : order.totals.total),
     kind: "total",
   });
   if (order.totals.includedTax > 0) {

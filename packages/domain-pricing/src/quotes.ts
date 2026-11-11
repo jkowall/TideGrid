@@ -16,6 +16,7 @@ import {
   priceQuote,
   type QuoteProblem,
 } from "./compute.ts";
+import { depositFor, NO_DEPOSIT } from "./deposit.ts";
 import {
   dateOnly,
   type FindTripOptions,
@@ -137,6 +138,7 @@ export async function getTripOffer(
       })),
       taxes: taxRates.map((r) => ({ name: r.name, ratePpm: r.ratePpm, inclusive: r.inclusive })),
       policy: policyTerms(policy, Date.parse(trip.startsAt)),
+      deposit: { ...(priceList.deposit ?? NO_DEPOSIT) },
     },
   };
 }
@@ -173,8 +175,10 @@ export async function createQuote(
   trx: TenantTransaction,
   ctx: TenantContext,
   input: CreateQuoteInput,
+  /** An owner's capacity override passes overrideRoom (W3-G2.12-rest); nothing else does. */
+  options: FindTripOptions = {},
 ): Promise<CreateQuoteResult> {
-  const found = await findTripForSale(trx, ctx.tenantId, input.tripId, input.now);
+  const found = await findTripForSale(trx, ctx.tenantId, input.tripId, input.now, options);
   if (found.kind === "not_found") return { kind: "trip_not_found" };
   if (found.kind === "not_on_sale") return { kind: "trip_not_on_sale" };
   const trip = found.trip;
@@ -211,6 +215,12 @@ export async function createQuote(
   }
   const priced = outcome.quote;
   const discount: PricedDiscount | null = priced.discount;
+  const deposit = depositFor(
+    priceList.deposit ?? NO_DEPOSIT,
+    priced.totals.total,
+    Date.parse(trip.startsAt),
+    input.now.getTime(),
+  );
 
   const { id } = await trx
     .insertInto("quotes")
@@ -236,6 +246,8 @@ export async function createQuote(
       tax_amount: priced.totals.tax,
       included_tax_amount: priced.totals.includedTax,
       total_amount: priced.totals.total,
+      deposit_amount: deposit?.amount ?? null,
+      balance_due_at: deposit?.balanceDueAt ?? null,
       quoted_at: input.now,
       expires_at: new Date(input.now.getTime() + QUOTE_TTL_MINUTES * 60_000),
     })
@@ -436,8 +448,16 @@ export async function getQuote(
       tax: head.tax_amount,
       includedTax: head.included_tax_amount,
       total: head.total_amount,
-      amountDueNow: head.total_amount,
+      amountDueNow: head.deposit_amount ?? head.total_amount,
     },
+    deposit:
+      head.deposit_amount === null || head.balance_due_at === null
+        ? null
+        : {
+            amount: head.deposit_amount,
+            balanceAmount: head.total_amount - head.deposit_amount,
+            balanceDueAt: instant(head.balance_due_at),
+          },
     policy: policyTerms(policy, new Date(head.trip_starts_at).getTime()),
     quotedAt: instant(head.quoted_at),
     expiresAt: instant(head.expires_at),

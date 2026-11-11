@@ -42,7 +42,7 @@ export const ParticipantPosition = z.coerce
   .int()
   .min(1)
   .max(500)
-  .describe("The participant's place in the party: 1 to the booking's party size");
+  .describe("The participant's place in the party: one of the party's places (`places`)");
 
 export const ParticipantGuardian = z
   .object({
@@ -103,6 +103,11 @@ export type Participant = z.infer<typeof Participant>;
 export const ParticipantList = z
   .object({
     partySize: z.number().int().min(1).describe("Places in the party: the most participants"),
+    places: z
+      .array(z.number().int().min(1).max(500))
+      .describe(
+        "The party's places now, in order, as many as the party size: 1 to the party size, less any place the party gave up, whose number is never used again",
+      ),
     participants: z
       .array(Participant)
       .describe("Named so far, by place; places without a participant are not listed"),

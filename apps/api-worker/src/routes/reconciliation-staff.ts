@@ -136,7 +136,9 @@ export function registerReconciliationStaffRoutes(app: OpenAPIHono<AppEnv>, deps
       401: errorBody("Not signed in"),
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or booking (booking_not_found)"),
-      409: errorBody("The refund is larger than allowed (external_refund_too_large)"),
+      409: errorBody(
+        "The refund is larger than allowed (external_refund_too_large), or the booking is complimentary (booking_complimentary)",
+      ),
       422: errorBody("idempotency_key_reused"),
     },
   });
@@ -177,6 +179,13 @@ export function registerReconciliationStaffRoutes(app: OpenAPIHono<AppEnv>, deps
         if (recorded.kind === "not_found") throw notFound();
         if (recorded.kind === "key_reused") {
           throw new ApiError(422, "idempotency_key_reused", "This key was used for another record");
+        }
+        if (recorded.kind === "complimentary") {
+          throw new ApiError(
+            409,
+            "booking_complimentary",
+            "This booking is complimentary: it takes no money, in or out",
+          );
         }
         if (recorded.kind === "refund_too_large") {
           throw new ApiError(

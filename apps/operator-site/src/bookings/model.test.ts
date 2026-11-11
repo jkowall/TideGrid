@@ -159,7 +159,7 @@ describe("the source an address names (G2.12e)", () => {
       "?source=",
       "?source=STAFF_ASSISTED",
       "?source=staff",
-      "?source=complimentary",
+      "?source=imported",
       "?source=direct%20",
       "?source=toString",
       "?source=__proto__",
@@ -169,12 +169,15 @@ describe("the source an address names (G2.12e)", () => {
     }
   });
 
-  it("offers every source, then the guest's own, then staff bookings", () => {
+  it("offers every source, then the guest's own, staff bookings, and complimentary ones", () => {
     expect(sourceFilterOptions).toEqual([
       { value: "", label: "All sources" },
       { value: "direct", label: "Online, by the guest" },
       { value: "staff_assisted", label: "Staff bookings" },
+      { value: "complimentary", label: "Complimentary" },
     ]);
+    expect(readSource("?source=complimentary")).toBe("complimentary");
+    expect(bookingsText(2, "complimentary")).toBe("2 complimentary bookings");
   });
 
   it("names the source in a count, and in none", () => {

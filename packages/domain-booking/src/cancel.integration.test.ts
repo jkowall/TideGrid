@@ -130,8 +130,11 @@ describe.skipIf(!env)("cancellation within policy, management, and booking email
 
   it("emails the confirmation with a working link, which opens a session once", async () => {
     const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 2);
+    // A trip close enough also queues its reminder (W3-G2.16-rest) in the same
+    // transaction, so read the confirmation by its template, not whichever row comes first.
     const [queued] = await admin<{ template: string; state: string; link_purpose: string }[]>`
-      select template, state, link_purpose from public.email_messages where booking_id = ${booked.bookingId}`;
+      select template, state, link_purpose from public.email_messages
+       where booking_id = ${booked.bookingId} and template = 'booking_confirmation'`;
     expect(queued).toEqual({
       template: "booking_confirmation",
       state: "queued",

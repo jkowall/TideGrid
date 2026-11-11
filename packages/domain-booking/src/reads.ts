@@ -28,7 +28,13 @@ export interface StaffBooking {
   confirmedAt: string;
   booker: { name: string; email: string };
   order: { id: string; status: OrderStatus; total: number; currency: "USD" };
-  payment: { id: string; provider: PaymentProviderName; state: PaymentState; amount: number };
+  /** Null on a complimentary booking, which has no payment (0039). */
+  payment: {
+    id: string;
+    provider: PaymentProviderName;
+    state: PaymentState;
+    amount: number;
+  } | null;
 }
 
 /** Largest page of a trip's bookings a caller may ask for. */
@@ -58,10 +64,10 @@ interface StaffBookingRow {
   order_id: string;
   order_status: OrderStatus;
   total_amount: number;
-  payment_id: string;
-  provider: PaymentProviderName;
-  payment_state: PaymentState;
-  amount: number;
+  payment_id: string | null;
+  provider: PaymentProviderName | null;
+  payment_state: PaymentState | null;
+  amount: number | null;
 }
 
 function toStaffBooking(r: StaffBookingRow): StaffBooking {
@@ -76,7 +82,10 @@ function toStaffBooking(r: StaffBookingRow): StaffBooking {
     confirmedAt: iso(r.confirmed_at),
     booker: { name: r.booker_name, email: r.booker_email },
     order: { id: r.order_id, status: r.order_status, total: r.total_amount, currency: "USD" },
-    payment: { id: r.payment_id, provider: r.provider, state: r.payment_state, amount: r.amount },
+    payment:
+      r.payment_id !== null && r.provider !== null && r.payment_state !== null && r.amount !== null
+        ? { id: r.payment_id, provider: r.provider, state: r.payment_state, amount: r.amount }
+        : null,
   };
 }
 
@@ -116,7 +125,7 @@ async function tripBookingRows(
       from bookings b
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
-      join payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
+      left join payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
      where b.tenant_id = ${tenantId} and b.trip_id = ${tripId}
        ${cursor}
      order by b.confirmed_at, b.id

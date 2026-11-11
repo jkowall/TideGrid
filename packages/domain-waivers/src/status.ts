@@ -210,6 +210,7 @@ async function rows(
            (r.required_signer = 'guardian' and cr.address is not null
             and exists (select 1 from booking_participants q
                          where q.tenant_id = b.tenant_id and q.booking_id = b.id
+                           and q.removed_at is null
                            and q.id <> p.id and not q.is_minor
                            and nullif(lower(btrim(q.email)), '') = cr.address)) as shared_address,
            (select json_agg(json_build_object(
@@ -229,6 +230,7 @@ async function rows(
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips st on st.tenant_id = b.tenant_id and st.id = b.trip_id
       left join booking_participants p on p.tenant_id = b.tenant_id and p.booking_id = b.id
+                                      and p.removed_at is null
       left join lateral (
         select x.id, x.state, x.revoked_reason, x.required_signer, x.template_id,
                x.template_version, x.created_at

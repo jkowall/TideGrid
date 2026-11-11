@@ -2,7 +2,10 @@
  * Booking participants (lane 1, G2.11c): who is coming, one per place in the
  * party, from 1 to the booking's party size. The guest names them through the
  * management link and corrects them in place; owners and booking staff read
- * them. Removing a participant is a later goal (it releases a seat).
+ * them. Giving up a place in a shared-seat party, and removing whoever was
+ * named there, is `removeParticipant` (party-changes.ts, W3-G2.11-rest): the
+ * place keeps its number and is never named again, and a removed participant
+ * is kept for the history that names them but no longer listed here.
  *
  * Personal data. Names and addresses go into the participant rows and the
  * responses that read them, never into audit rows, events, logs, or URLs:
@@ -16,7 +19,13 @@
  * these rows never wait behind a change that may itself wait for that job
  * (a hook that cancels a message being sent).
  */
-import { isUuid, type TenantContext, type TenantTransaction } from "@tidegrid/database";
+import {
+  type AccessRevocationReason,
+  isUuid,
+  type TenantContext,
+  type TenantTransaction,
+} from "@tidegrid/database";
+import { revokeAccessLinks, revokeGuestSessions } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { type BookingHooks, noBookingHooks, type ParticipantField } from "./hooks.ts";
 import { iso, record } from "./views.ts";
@@ -46,6 +55,12 @@ export interface ParticipantView {
 
 export interface ParticipantListView {
   partySize: number;
+  /**
+   * The places the party has now, in order: 1 to the party size, less any
+   * given up, whose numbers are never reused (W3-G2.11-rest). As many as the
+   * party size.
+   */
+  places: number[];
   participants: ParticipantView[];
 }
 
@@ -56,7 +71,9 @@ export type PutParticipantResult =
   | { kind: "booking_not_found" }
   | { kind: "booking_canceled" }
   | { kind: "trip_departed" }
-  | { kind: "position_out_of_range"; partySize: number };
+  | { kind: "position_out_of_range"; partySize: number }
+  /** The place was given up, and its number is not used again. */
+  | { kind: "place_removed" };
 
 interface ParticipantRow {
   id: string;
@@ -164,17 +181,55 @@ export async function listParticipants(
   bookingId: string,
 ): Promise<ParticipantListView | null> {
   if (!isUuid(bookingId)) return null;
-  const { rows: bookings } = await sql<{ party_size: number }>`
-    select party_size from bookings where tenant_id = ${tenantId} and id = ${bookingId}`.execute(
-    trx,
-  );
-  const booking = bookings[0];
-  if (!booking) return null;
-  const { rows } = await sql<ParticipantRow>`
-    select ${participantColumns} from booking_participants
+  // One statement, so the party size, the places given up, and the
+  // participants are read from one snapshot even under READ COMMITTED: a
+  // place given up meanwhile never shows a size and places that disagree.
+  const { rows } = await sql<
+    Partial<ParticipantRow> & { party_size: number; given_up: number[]; p_id: string | null }
+  >`
+    select b.party_size,
+           array(select c.position from booking_party_changes c
+                  where c.tenant_id = b.tenant_id and c.booking_id = b.id
+                  order by c.position)::int[] as given_up,
+           p.id as p_id, p.position, p.full_name, p.is_minor, p.email, p.guardian_name,
+           p.guardian_email, p.created_at, p.updated_at
+      from bookings b
+      left join booking_participants p
+        on p.tenant_id = b.tenant_id and p.booking_id = b.id and p.removed_at is null
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}
+     order by p.position`.execute(trx);
+  const first = rows[0];
+  if (!first) return null;
+  return {
+    partySize: first.party_size,
+    places: placesOf(first.party_size, first.given_up),
+    participants: rows
+      .filter((r) => r.p_id !== null)
+      .map((r) => toView({ ...(r as ParticipantRow), id: r.p_id as string })),
+  };
+}
+
+/** The places a booking's party gave up, by number (0035). */
+export async function placesGivenUp(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<number[]> {
+  const { rows } = await sql<{ position: number }>`
+    select position from booking_party_changes
      where tenant_id = ${tenantId} and booking_id = ${bookingId}
      order by position`.execute(trx);
-  return { partySize: booking.party_size, participants: rows.map(toView) };
+  return rows.map((r) => r.position);
+}
+
+/** The places a party of `partySize` has after giving up `givenUp`. */
+export function placesOf(partySize: number, givenUp: readonly number[]): number[] {
+  const gone = new Set(givenUp);
+  const places: number[] = [];
+  for (let place = 1; places.length < partySize; place++) {
+    if (!gone.has(place)) places.push(place);
+  }
+  return places;
 }
 
 /**
@@ -213,7 +268,9 @@ export async function putParticipant(
   if (!booking) return { kind: "booking_not_found" };
   if (booking.state !== "confirmed") return { kind: "booking_canceled" };
   if (booking.departed) return { kind: "trip_departed" };
-  if (input.position > booking.party_size) {
+  const givenUp = await placesGivenUp(trx, ctx.tenantId, input.bookingId);
+  if (givenUp.includes(input.position)) return { kind: "place_removed" };
+  if (input.position > booking.party_size + givenUp.length) {
     return { kind: "position_out_of_range", partySize: booking.party_size };
   }
 
@@ -283,5 +340,55 @@ export async function putParticipant(
     position: row.position,
     changed,
   });
+  // An invitation went to the address that changed (invitations.ts, 0036):
+  // its links, and every session of that participant but the one making
+  // this change, end.
+  if (changed.some((f) => f === "email" || f === "guardianEmail" || f === "isMinor")) {
+    await withdrawProfileAccess(trx, ctx, {
+      bookingId: input.bookingId,
+      participantId: row.id,
+      reason: "recipient_changed",
+      keepSessionId: actingSessionOf(ctx),
+    });
+  }
   return { kind: "updated", participant: toView(row), changed };
+}
+
+/** The guest session making a change, from its actor (`guest_session:<id>`), or null. */
+function actingSessionOf(ctx: TenantContext): string | null {
+  const match = /^guest_session:([0-9a-f-]{36})$/.exec(ctx.actorId ?? "");
+  return match?.[1] ?? null;
+}
+
+/**
+ * End a participant's invitation links, and their sessions (all but `keep`,
+ * the session making the change), and close any invitation not yet sent:
+ * when the address it went to changes (`recipient_changed`), the participant
+ * is removed (`withdrawn`), or the booking is canceled (`booking_canceled`,
+ * every participant's). Call it after the change's own rows are written.
+ */
+export async function withdrawProfileAccess(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: {
+    bookingId: string;
+    /** Omit for every participant of the booking. */
+    participantId?: string;
+    reason: Extract<AccessRevocationReason, "recipient_changed" | "withdrawn" | "booking_canceled">;
+    keepSessionId?: string | null;
+  },
+): Promise<void> {
+  const scope = input.participantId === undefined ? {} : { participantId: input.participantId };
+  await revokeAccessLinks(trx, ctx, {
+    bookingId: input.bookingId,
+    purpose: "participant_profile",
+    ...scope,
+    reason: input.reason,
+  });
+  await revokeGuestSessions(trx, ctx, {
+    bookingId: input.bookingId,
+    purpose: "participant_profile",
+    ...scope,
+    exceptSessionId: input.keepSessionId ?? null,
+  });
 }

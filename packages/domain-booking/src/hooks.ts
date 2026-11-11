@@ -29,6 +29,11 @@
  *   nothing is written. Use it sparingly, for a rule the guest can act on.
  * - `bookingCanceled` runs after the booking is canceled and its seats are
  *   released: stop reminders, revoke links. It must not refuse.
+ * - `participantRemoved` runs when a shared-seat party gives up the place a
+ *   participant was named at (W3-G2.11-rest), after the participant is
+ *   marked removed and before the booking's hold and party size change (that
+ *   update locks the booking's key, which a message delivery may wait on):
+ *   withdraw what was asked of that person. It must not refuse.
  * - Hooks run on the lock order of the change that calls them (checkout
  *   session, booking, payment, trip, hold). Lock only rows your own module
  *   owns, after those.
@@ -60,6 +65,11 @@ export interface ParticipantUpdatedEvent extends ParticipantEvent {
   changed: ParticipantField[];
 }
 
+export interface ParticipantRemovedEvent extends ParticipantEvent {
+  /** The party change that gave up the place. */
+  partyChangeId: string;
+}
+
 export interface BookingCanceledEvent {
   bookingId: string;
   cancellationId: string;
@@ -82,6 +92,11 @@ export interface BookingHooks {
     trx: TenantTransaction,
     ctx: TenantContext,
     event: ParticipantUpdatedEvent,
+  ): Promise<void>;
+  participantRemoved?(
+    trx: TenantTransaction,
+    ctx: TenantContext,
+    event: ParticipantRemovedEvent,
   ): Promise<void>;
   bookingCanceled?(
     trx: TenantTransaction,

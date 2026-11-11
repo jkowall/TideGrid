@@ -1,3 +1,4 @@
+import { type DepositTerms, NO_DEPOSIT, validDepositTerms } from "./deposit.ts";
 import type { ChargeBasis, Discount, PolicyRemedy, ProductKind } from "./terms.ts";
 
 /**
@@ -26,7 +27,9 @@ export type TermsProblem =
   | "invalid_window"
   | "invalid_products"
   | "invalid_location"
-  | "invalid_reason";
+  | "invalid_reason"
+  | "invalid_deposit"
+  | "deposit_not_allowed";
 
 const ITEM_CODE = /^[a-z][a-z0-9_]{0,31}$/;
 const PROMOTION_CODE = /^[A-Z0-9][A-Z0-9_-]{2,31}$/;
@@ -121,6 +124,8 @@ export interface PriceListInput {
   charter?: CharterInput | null;
   fees?: readonly FeeInput[];
   addOns?: readonly AddOnInput[];
+  /** A charter's deposit and balance due date (W3-G2.8); absent pays in full. */
+  deposit?: DepositTerms | null;
 }
 
 function pushOnce(problems: TermsProblem[], problem: TermsProblem): void {
@@ -196,6 +201,9 @@ export function validatePriceList(kind: ProductKind, input: PriceListInput): Ter
       pushOnce(problems, "invalid_date_range");
     }
   }
+  const deposit = input.deposit ?? NO_DEPOSIT;
+  if (deposit.kind !== "none" && kind !== "private_charter") problems.push("deposit_not_allowed");
+  else if (!validDepositTerms(deposit)) problems.push("invalid_deposit");
   return problems;
 }
 

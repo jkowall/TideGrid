@@ -248,6 +248,8 @@ export interface ExternalSettlementView {
 export type ExternalSettlementResult =
   | { kind: "recorded"; settlement: ExternalSettlementView; replayed: boolean }
   | { kind: "not_found" }
+  /** A complimentary booking takes no money, in or out (0039). */
+  | { kind: "complimentary" }
   /** A refund would return more than came in, or more than the booking cost. */
   | { kind: "refund_too_large"; refundable: number }
   /** The key was used for another command. */
@@ -324,11 +326,13 @@ async function refundable(trx: TenantTransaction, tenantId: string, bookingId: s
   const { rows } = await sql<{ refundable: number }>`
     select greatest(0, least(
              coalesce(case when p.state = 'succeeded' then p.amount end, 0) - coalesce(r.refunded, 0)
-               - coalesce(d.lost, 0) + coalesce(s.paid, 0) - coalesce(s.refunded, 0),
+               - coalesce(d.lost, 0) + coalesce(s.paid, 0) - coalesce(s.refunded, 0)
+               + coalesce(bp.paid, 0),
              o.total_amount - coalesce(r.refunded, 0) - coalesce(s.refunded, 0)))::int as refundable
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
-      join payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
+      -- None on a complimentary booking (0039): only money recorded outside the card flow.
+      left join payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
       left join lateral (
         select sum(x.amount) as refunded from payment_refunds x
          where x.tenant_id = b.tenant_id and x.payment_id = b.payment_id
@@ -343,6 +347,11 @@ async function refundable(trx: TenantTransaction, tenantId: string, bookingId: s
                sum(x.amount) filter (where x.kind = 'refund') as refunded
           from external_settlements x
          where x.tenant_id = b.tenant_id and x.booking_id = b.id) s on true
+      left join lateral (
+        -- Card payments of a charter's balance (W3-G2.8).
+        select sum(x.amount) as paid from balance_payments x
+         where x.tenant_id = b.tenant_id and x.booking_id = b.id
+           and x.state = 'succeeded') bp on true
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
   return rows[0]?.refundable ?? 0;
 }
@@ -379,13 +388,19 @@ export async function recordExternalSettlement(
       ? { kind: "recorded", settlement: settlementView(prior), replayed: true }
       : { kind: "key_reused" };
   }
-  const { rows: bookings } = await sql<{ total_amount: number; eligible_total: number }>`
-    select o.total_amount, o.total_amount - o.tax_amount - o.included_tax_amount as eligible_total
+  const { rows: bookings } = await sql<{
+    total_amount: number;
+    eligible_total: number;
+    source: string;
+  }>`
+    select o.total_amount, o.total_amount - o.tax_amount - o.included_tax_amount as eligible_total,
+           b.source
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
      where b.tenant_id = ${ctx.tenantId} and b.id = ${command.bookingId}`.execute(trx);
   const order = bookings[0];
   if (!order) return { kind: "not_found" };
+  if (order.source === "complimentary") return { kind: "complimentary" };
   let fee: {
     orderTotal: number;
     eligibleTotal: number;
@@ -527,7 +542,10 @@ export async function assessClosedBookings(
   }>`
     select b.id as booking_id,
            case when b.state = 'canceled' then 'canceled' else 'trip_completed' end as basis,
-           o.total_amount, o.total_amount - o.tax_amount - o.included_tax_amount as eligible_total
+           -- A complimentary booking (0039) is not in the fee base: zero, and nothing owed.
+           case when b.source = 'complimentary' then 0 else o.total_amount end as total_amount,
+           case when b.source = 'complimentary' then 0
+                else o.total_amount - o.tax_amount - o.included_tax_amount end as eligible_total
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
@@ -1017,7 +1035,10 @@ export async function reconciliationReport(
                         where b.tenant_id = a.tenant_id and b.id = a.booking_id), 0)
              + coalesce((select sum(x.amount) from external_settlements x
                           where x.tenant_id = a.tenant_id and x.booking_id = a.booking_id
-                            and x.kind = 'payment'), 0) as received
+                            and x.kind = 'payment'), 0)
+             + coalesce((select sum(x.amount) from balance_payments x
+                          where x.tenant_id = a.tenant_id and x.booking_id = a.booking_id
+                            and x.state = 'succeeded'), 0) as received
         from fee_assessments a, bounds
        where a.tenant_id = ${tenantId} and a.created_at >= bounds.f and a.created_at < bounds.u
     )

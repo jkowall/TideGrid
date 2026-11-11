@@ -250,12 +250,19 @@ describe("the navigation", () => {
       Exceptions: "page",
     });
     // The nav lists the sections, in order; the owner also sees Email
-    // exceptions (W1-EMAIL-EXC).
+    // exceptions (W1-EMAIL-EXC). Every role sees Important links (W3-G2.14b-rest).
     expect(
       within(nav())
         .getAllByRole("link")
         .map((a) => text(a)),
-    ).toEqual(["Overview", "Calendar", "Bookings", "Exceptions", "Email exceptions"]);
+    ).toEqual([
+      "Overview",
+      "Calendar",
+      "Bookings",
+      "Exceptions",
+      "Email exceptions",
+      "Important links",
+    ]);
   });
 
   it("shows a page that is not part of the console without asking for anything", async () => {

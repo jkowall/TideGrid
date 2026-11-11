@@ -180,6 +180,10 @@ export const AuditEventListResponse = z.object({
 });
 export type AuditEventListResponse = z.infer<typeof AuditEventListResponse>;
 
+// Private-charter deposits and balances (W3-G2.8).
+export * from "./balances.ts";
+// Correcting the booker's own contact details (W3-G2.11-rest).
+export * from "./booker-contact.ts";
 // Console booking views (G2.12b).
 export * from "./bookings.ts";
 export * from "./brand.ts";
@@ -190,10 +194,16 @@ export * from "./checkout.ts";
 export * from "./console.ts";
 // The tenant-wide staff email exceptions list (W1-EMAIL-EXC).
 export * from "./email-exceptions.ts";
+export * from "./important-links.ts";
+// Money movements for a date range (W3-G2.12-rest).
+export * from "./imports.ts";
 // Capacity and holds (G2.6).
 export * from "./inventory.ts";
 // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
+export * from "./invitations.ts";
+export * from "./money-report.ts";
 export * from "./participants.ts";
+export * from "./party-changes.ts";
 export * from "./pricing.ts";
 // Problem details for the guest commands (W1-GUEST-API).
 export * from "./problems.ts";
@@ -202,6 +212,8 @@ export * from "./reconciliation.ts";
 export * from "./references.ts";
 // Refunds, booking credit, and staff cancellation (W3-G2.9).
 export * from "./refunds-credits.ts";
+// Moving a whole booking to another trip (W3-G2.11-rest).
+export * from "./reschedules.ts";
 export * from "./self-service.ts";
 // Staff-assisted booking (G2.12d).
 export * from "./staff-booking.ts";

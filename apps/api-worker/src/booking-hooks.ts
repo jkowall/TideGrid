@@ -8,12 +8,13 @@ import type { Bindings } from "./env.ts";
  * that every path confirming a booking or changing its party runs, inside its
  * own transaction: the payment webhook route (which the fake provider's
  * delivery also goes through), the checkout sweep in the cron, and the guest's
- * participant and cancellation routes.
+ * participant and cancellation routes, and the guest's and staff's routes that
+ * give up a place in a party.
  *
  * This is the one place to attach them. The waiver module (G2.15) returns its
  * hooks here, so a confirmed booking and an added participant get their waiver
- * assignments atomically on every path; a corrected participant follows, and
- * a canceled booking ends its waivers. Nothing else in the API changes.
+ * assignments atomically on every path; a corrected participant follows, a
+ * removed participant's waivers end, and a canceled booking ends its waivers. Nothing else in the API changes.
  */
 export function bookingHooks(_env: Bindings): BookingHooks {
   return createWaiverHooks(defaultWaiverDeps);

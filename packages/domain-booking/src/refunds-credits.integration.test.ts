@@ -23,6 +23,7 @@ import { FlakyProvider } from "./adversarial/harness.ts";
 import { handleVerifiedEvent } from "./finalize.ts";
 import {
   adjustCredit,
+  buildMoneyReport,
   CreditKeyReusedError,
   cancelBooking,
   cancelCheckoutSession,
@@ -489,6 +490,30 @@ describe.skipIf(!env)("refunds, fee reversal, and booking credit (W3-G2.9)", () 
       ),
     ).rejects.toThrow();
     expect(await balance()).toBe(preview.policyValue);
+
+    // The money report (W3-G2.12-rest) has the use and its reinstatement as
+    // separate kinds, on the later booking, each with its own signed amount.
+    const [today] = await admin<
+      { d: string }[]
+    >`select (now() at time zone 'UTC')::date::text as d`;
+    const day = today?.d ?? "";
+    const report = await as(ctx, (trx) =>
+      buildMoneyReport(trx, A.id, {
+        from: day,
+        to: day,
+        typedReferences: true,
+        maskProviderReferences: false,
+      }),
+    );
+    if (report.kind !== "ok") throw new Error(report.kind);
+    const onLater = (kind: string) =>
+      report.report.entries
+        .filter((e) => e.kind === kind && e.booking?.bookingId === later.bookingId)
+        .map((e) => e.credit)
+        .sort((x, y) => x - y);
+    expect(onLater("credit_used")).toEqual([-1000, -100]);
+    expect(onLater("credit_reinstated")).toEqual([1000]);
+    expect(report.report.controlTotalsMatch).toBe(true);
 
     // Staff correct the balance down, never below zero; a guest cannot.
     expect(

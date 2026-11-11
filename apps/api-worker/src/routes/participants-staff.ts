@@ -1,19 +1,134 @@
-import { createRoute, type OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  BookerContactRequest,
   BookingMessagesResponse,
+  IdempotencyKey,
+  ParticipantInvitationResponse,
   ParticipantListResponse,
+  ParticipantPosition,
+  StaffBookerContactResponse,
   StaffParticipantParams,
+  StaffRemoveParticipantRequest,
+  StaffRemoveParticipantResponse,
 } from "@tidegrid/contracts";
-import { listParticipants, resendAvailability } from "@tidegrid/domain-booking";
+import { isUuid } from "@tidegrid/database";
+import {
+  type ChangeBookerContactResult,
+  changeBookerContact,
+  inviteParticipant,
+  listParticipants,
+  type RemoveParticipantResult,
+  removeParticipant,
+  resendAvailability,
+} from "@tidegrid/domain-booking";
+import { can } from "@tidegrid/domain-identity";
 import { listBookingMessages } from "@tidegrid/domain-messaging";
+import { bookingHooksFor } from "../booking-hooks.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
+import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
 import { emailDelivery } from "./booking-email-staff.ts";
+import { invitationRefusal } from "./participant-public.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const participantsPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants";
 const messagesPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/messages";
+const removalPath =
+  "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/removal";
+const invitationPath =
+  "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/invitation";
+const bookerPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/booker";
+
+/**
+ * A refused booker correction as the API answers it, for guest and staff
+ * alike. `changed` and `unchanged` are the caller's.
+ */
+export function bookerContactRefusal(
+  result: Exclude<ChangeBookerContactResult, { kind: "changed" | "unchanged" }>,
+  notFoundError: () => ApiError,
+): ApiError {
+  switch (result.kind) {
+    case "not_found":
+      return notFoundError();
+    case "not_confirmed":
+      return new ApiError(409, "booking_canceled", "This booking was canceled");
+    case "trip_departed":
+      return new ApiError(
+        409,
+        "trip_departed",
+        "This trip has departed; the booker's details no longer change",
+      );
+    case "booking_changed":
+      return new ApiError(
+        409,
+        "booking_changed",
+        "The booker's details changed a moment ago; read the booking again and retry",
+      );
+    case "session_ended":
+      return new ApiError(
+        401,
+        "session_expired",
+        "This booking session has ended; open your link again",
+      );
+    case "limit_reached":
+      return new ApiError(
+        429,
+        "contact_change_limit_reached",
+        "This booking's contact details changed 3 times in the last 24 hours; try again tomorrow",
+      );
+  }
+}
+
+/**
+ * A refused party change as the API answers it, for guest and staff alike.
+ * `removed` and `already_removed` are the caller's.
+ */
+export function partyChangeRefusal(
+  result: Exclude<RemoveParticipantResult, { kind: "removed" | "already_removed" }>,
+  notFoundError: () => ApiError,
+): ApiError {
+  switch (result.kind) {
+    case "not_found":
+      return notFoundError();
+    case "not_confirmed":
+      return new ApiError(409, "booking_canceled", "This booking was canceled");
+    case "not_shared_seat":
+      return new ApiError(
+        409,
+        "party_change_not_allowed",
+        "A private charter's party does not take seats; no place can be given up",
+      );
+    case "trip_departed":
+      return new ApiError(409, "trip_departed", "This trip has departed; the party can't change");
+    case "past_cutoff":
+      return new ApiError(
+        409,
+        "party_change_cutoff_passed",
+        "This booking is past its change cutoff; only the operator can change the party now",
+      );
+    case "booking_changed":
+      return new ApiError(
+        409,
+        "booking_changed",
+        "The party is no longer the size you saw; read the booking again",
+      );
+    case "place_not_found":
+      return new ApiError(409, "place_not_found", "The party has no such place now");
+    case "last_place":
+      return new ApiError(
+        409,
+        "last_place",
+        "This is the only place left; cancel the booking instead",
+      );
+    case "trip_unavailable":
+      return new ApiError(
+        409,
+        "trip_unavailable",
+        `The trip can't keep the smaller party now (${result.issue})`,
+      );
+  }
+}
 
 /**
  * Staff read of a booking's participants (lane 1, G2.11c). Participants are
@@ -60,6 +175,260 @@ export function registerParticipantStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
       },
     );
     return c.json(body as ParticipantListResponse, 200);
+  });
+
+  app.use(
+    "/v1/staff/tenants/:tenantId/bookings/:bookingId/participants/:position/removal",
+    async (c, next) => {
+      c.header("Cache-Control", "no-store");
+      await next();
+      c.header("Cache-Control", "no-store");
+    },
+  );
+
+  const removalRoute = createRoute({
+    method: "post",
+    path: removalPath,
+    tags: ["staff", "bookings"],
+    summary: "Give up one place in a shared-seat party",
+    description: [
+      "Owners and booking staff (bookings.reschedule). The party shrinks by one: the participant named at the place, if any, is removed and their waivers withdrawn, and the seat goes back on sale, in one transaction on the same trip. The price does not change. Places keep their numbers; the place given up is never named again.",
+      "Before the policy's change cutoff anyone with bookings.reschedule may do it. At or after the cutoff it needs overrideReason, and overrideReason needs bookings.override (owners). Never after the trip has left, never the last place (cancel instead), and never on a private charter.",
+      "partySize is the size the caller saw; if it is another now, nothing changes. Idempotent by key; a repeat of the same change with another key answers 200 with the first change.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: StaffParticipantParams.extend({ position: ParticipantPosition }),
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      body: {
+        required: true,
+        content: { "application/json": { schema: StaffRemoveParticipantRequest } },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: StaffRemoveParticipantResponse } },
+        description: "The change",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this (an override needs bookings.override)"),
+      404: errorBody("No such tenant or booking (booking_not_found)"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), is a private charter (party_change_not_allowed), its trip has departed (trip_departed), it is past its cutoff without an override (party_change_cutoff_passed), the party is not partySize now (booking_changed), the party has no such place (place_not_found), it is the last place (last_place), or the trip can't keep the smaller party (trip_unavailable)",
+      ),
+      422: errorBody("idempotency_key_reused"),
+    },
+  });
+
+  app.openapi(removalRoute, async (c) => {
+    const { tenantId, bookingId, position } = c.req.valid("param");
+    const key = c.req.valid("header")["idempotency-key"];
+    const input = c.req.valid("json");
+    const overrideReason = input.overrideReason ?? null;
+    const notFound = () =>
+      new ApiError(404, "booking_not_found", "No such booking for this tenant");
+    let removed = false;
+    const answer = await withStaffTenant(
+      c,
+      deps,
+      {
+        tenantId,
+        permission: "bookings.reschedule",
+        idempotency: {
+          scope: "bookings.staff_participant_removal",
+          key,
+          route: removalPath,
+          params: { bookingId, position: String(position) },
+          body: input,
+          successStatus: 200,
+        },
+      },
+      async (trx, ctx) => {
+        if (overrideReason !== null && !can(ctx.access.role, "bookings.override")) {
+          throw new ApiError(403, "forbidden", "Only an owner changes a party against its policy");
+        }
+        if (!isUuid(bookingId)) throw notFound();
+        const result = await removeParticipant(
+          trx,
+          ctx,
+          { bookingId, position, partySize: input.partySize, overrideReason },
+          bookingHooksFor(c.env, deps),
+        );
+        if (result.kind === "removed") removed = true;
+        if (result.kind === "removed" || result.kind === "already_removed") {
+          return { change: JSON.parse(JSON.stringify(result.change)) };
+        }
+        throw partyChangeRefusal(result, notFound);
+      },
+    );
+    if (answer.replayed) c.header("Idempotent-Replayed", "true");
+    if (removed) deliverAfterCommit(c, deps, answer.ctx.tenantId);
+    return c.json(answer.body as StaffRemoveParticipantResponse, 200);
+  });
+
+  app.use(
+    "/v1/staff/tenants/:tenantId/bookings/:bookingId/participants/:position/invitation",
+    async (c, next) => {
+      c.header("Cache-Control", "no-store");
+      await next();
+      c.header("Cache-Control", "no-store");
+    },
+  );
+
+  const invitationRoute = createRoute({
+    method: "post",
+    path: invitationPath,
+    tags: ["staff", "bookings"],
+    summary: "Invite one participant to check their own details",
+    description: [
+      "Owners and booking staff (messages.resend). Emails the participant named at the place a link of their own, to the participant's own address on file, or a minor's guardian's; never to an address in the request. The link opens only that participant's details and the trip, and works once, for seven days or until the trip leaves. A newer invitation's link replaces an older unused one.",
+      "At most 3 invitations a person in 24 hours, and 20 a booking, whoever sends them. Idempotent by key.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: StaffParticipantParams.extend({ position: ParticipantPosition }),
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+    },
+    responses: {
+      202: {
+        content: { "application/json": { schema: ParticipantInvitationResponse } },
+        description: "Queued; it goes out after this request",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant or booking (booking_not_found)"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+      ),
+      422: errorBody(
+        "No such place in this party (position_out_of_range), or idempotency_key_reused",
+      ),
+      429: errorBody(
+        "Too many invitations for this person or booking today (invitation_limit_reached)",
+      ),
+    },
+  });
+
+  app.openapi(invitationRoute, async (c) => {
+    const { tenantId, bookingId, position } = c.req.valid("param");
+    const key = c.req.valid("header")["idempotency-key"];
+    const notFound = () =>
+      new ApiError(404, "booking_not_found", "No such booking for this tenant");
+    let invited = false;
+    const answer = await withStaffTenant(
+      c,
+      deps,
+      {
+        tenantId,
+        permission: "messages.resend",
+        idempotency: {
+          scope: "bookings.staff_participant_invitation",
+          key,
+          route: invitationPath,
+          params: { bookingId, position: String(position) },
+          body: {},
+          successStatus: 202,
+        },
+      },
+      async (trx, ctx) => {
+        if (!isUuid(bookingId)) throw notFound();
+        const result = await inviteParticipant(trx, ctx, { bookingId, position });
+        if (result.kind !== "invited") throw invitationRefusal(result, notFound);
+        invited = true;
+        return { status: "accepted" as const, recipient: result.recipient };
+      },
+    );
+    if (answer.replayed) c.header("Idempotent-Replayed", "true");
+    if (invited) deliverAfterCommit(c, deps, answer.ctx.tenantId);
+    return c.json(answer.body as ParticipantInvitationResponse, 202);
+  });
+
+  app.use("/v1/staff/tenants/:tenantId/bookings/:bookingId/booker", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    await next();
+    c.header("Cache-Control", "no-store");
+  });
+
+  const bookerRoute = createRoute({
+    method: "put",
+    path: bookerPath,
+    tags: ["staff", "bookings"],
+    summary: "Correct the booker's name and email",
+    description: [
+      "Owners and booking staff (bookings.reschedule). The booker's name and email as they should be, on a confirmed booking whose trip has not left. Staff are not limited (the guest is, to 3 a day), so they can always restore a booking someone took over with a leaked link. The history keeps who changed which field, never the values.",
+      "When the email changes: links sent to the old address stop working, the booker's open sessions end and the checkout's secret no longer opens one, the trip and balance reminders not yet sent go to the new address instead, the old address gets a notice with the new one partly hidden and no link, and the new address gets a fresh link. A balance link staff sent and that has not gone out is canceled; send it again. A name-only change sends nothing.",
+      "Idempotent by key. Sending the details already on the booking changes nothing and answers 200 with change null.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: StaffParticipantParams,
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      body: {
+        required: true,
+        content: { "application/json": { schema: BookerContactRequest } },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: StaffBookerContactResponse } },
+        description: "The change, or null when nothing changed",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant or booking (booking_not_found)"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), or another correction landed a moment ago (booking_changed; read the booking again and retry)",
+      ),
+      422: errorBody("idempotency_key_reused"),
+      429: errorBody(
+        "Three corrections already in the last 24 hours (contact_change_limit_reached)",
+      ),
+    },
+  });
+
+  app.openapi(bookerRoute, async (c) => {
+    const { tenantId, bookingId } = c.req.valid("param");
+    const key = c.req.valid("header")["idempotency-key"];
+    const input = c.req.valid("json");
+    const notFound = () =>
+      new ApiError(404, "booking_not_found", "No such booking for this tenant");
+    let changed = false;
+    const answer = await withStaffTenant(
+      c,
+      deps,
+      {
+        tenantId,
+        permission: "bookings.reschedule",
+        idempotency: {
+          scope: "bookings.staff_booker_contact",
+          key,
+          route: bookerPath,
+          params: { bookingId },
+          body: input,
+          successStatus: 200,
+        },
+      },
+      async (trx, ctx) => {
+        if (!isUuid(bookingId)) throw notFound();
+        const result = await changeBookerContact(trx, ctx, {
+          bookingId,
+          name: input.name,
+          email: input.email,
+        });
+        if (result.kind === "changed") {
+          changed = true;
+          return { change: JSON.parse(JSON.stringify(result.change)) };
+        }
+        if (result.kind === "unchanged") return { change: null };
+        throw bookerContactRefusal(result, notFound);
+      },
+    );
+    if (answer.replayed) c.header("Idempotent-Replayed", "true");
+    if (changed) deliverAfterCommit(c, deps, answer.ctx.tenantId);
+    return c.json(answer.body as StaffBookerContactResponse, 200);
   });
 
   app.use("/v1/staff/tenants/:tenantId/bookings/:bookingId/messages", async (c, next) => {

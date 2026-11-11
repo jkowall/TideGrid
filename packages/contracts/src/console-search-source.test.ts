@@ -4,11 +4,14 @@ import { BookingSearchRequest, BookingSearchResponse } from "./console.ts";
 /** Search by source (G2.12): a source narrows a search and is echoed in the answer. */
 
 describe("the search request's source", () => {
-  it.each(["direct", "staff_assisted"])("takes source %s alongside q", (source) => {
-    const parsed = BookingSearchRequest.safeParse({ q: "maya", source });
-    expect(parsed.success).toBe(true);
-    expect(parsed.data?.source).toBe(source);
-  });
+  it.each(["direct", "staff_assisted", "complimentary"])(
+    "takes source %s alongside q",
+    (source) => {
+      const parsed = BookingSearchRequest.safeParse({ q: "maya", source });
+      expect(parsed.success).toBe(true);
+      expect(parsed.data?.source).toBe(source);
+    },
+  );
 
   it("takes a source with dates only", () => {
     expect(BookingSearchRequest.safeParse({ from: "2026-11-01", source: "direct" }).success).toBe(
@@ -22,7 +25,7 @@ describe("the search request's source", () => {
   });
 
   it.each([
-    ["complimentary", "complimentary"],
+    ["an unknown source", "imported"],
     ["an empty string", ""],
     ["a different case", "STAFF_ASSISTED"],
     ["an array", ["direct"]],

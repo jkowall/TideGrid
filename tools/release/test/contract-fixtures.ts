@@ -145,6 +145,7 @@ export function offerResponse(over: OfferOver = {}): TripOfferResponse {
     addOns: [],
     fees: [],
     taxes: [],
+    deposit: { kind: "none" },
     policy: policyTerms(over.policyVersion ?? 1),
   };
   return TripOfferResponse.parse({ offer });
@@ -190,6 +191,7 @@ export function quoteResponse(over: QuoteOver = {}): QuoteResponse {
       total: 6500,
       amountDueNow: 6500,
     },
+    deposit: null,
     policy: policyTerms(over.policyVersion ?? 1),
     quotedAt,
     expiresAt,
@@ -347,7 +349,7 @@ export function managedBooking(over: ManagedOver = {}): ManagedBooking {
       cancellationText: "Cancel at least 24 hours before departure for a full refund.",
       cutoffAt: "2026-11-05T22:00:00.000Z",
     },
-    participants: { partySize: 1, participants: [] },
+    participants: { partySize: 1, places: [1], participants: [] },
     partyEditable: (over.state ?? "confirmed") === "confirmed",
     cancellationTerms: terms(paid, over.refundAmount ?? paid),
   };

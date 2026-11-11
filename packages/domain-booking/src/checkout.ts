@@ -20,6 +20,7 @@ import {
 } from "@tidegrid/database";
 import {
   acquireHold,
+  type CapacityOverrideRequest,
   DEFAULT_HOLD_TTL_SECONDS,
   MIN_HOLD_TTL_SECONDS,
   type NotBookableReason,
@@ -78,6 +79,35 @@ export interface CreateCheckoutInput {
    * member's own input, kept on the session and in the audit row.
    */
   staff?: StaffCheckoutDetails;
+  /**
+   * An owner's capacity override (W3-G2.12-rest): when the trip is full, the
+   * hold may take the seats it lacks, up to the boat. Only openStaffCheckout
+   * sets it; the database refuses it for anyone but an active owner.
+   */
+  capacityOverride?: CapacityOverrideRequest;
+  /**
+   * An owner's complimentary grant (W3-G2.12-rest): the checkout takes no
+   * payment, and the order's whole total is waived with a reason. Only
+   * bookComplimentary sets it, with `staff`; the database refuses it for
+   * anyone but an active owner, and on a deposit order.
+   */
+  complimentary?: ComplimentaryGrantRequest;
+}
+
+/** Why an owner books a guest at no charge (0039). */
+export const COMPLIMENTARY_REASONS = [
+  "service_recovery",
+  "staff_or_crew",
+  "partner_or_media",
+  "charity_or_donation",
+  "other",
+] as const;
+export type ComplimentaryReason = (typeof COMPLIMENTARY_REASONS)[number];
+
+export interface ComplimentaryGrantRequest {
+  reasonCode: ComplimentaryReason;
+  /** Required for other; 1 to 500 characters with no control characters. */
+  note: string | null;
 }
 
 export interface StaffCheckoutDetails {
@@ -95,7 +125,11 @@ export type CreateCheckoutResult =
   | { kind: "payments_unavailable" }
   | { kind: "too_many_checkouts"; limit: number }
   | { kind: "not_bookable"; reason: NotBookableReason }
-  | { kind: "insufficient_capacity"; remaining: number };
+  | { kind: "insufficient_capacity"; remaining: number }
+  /** Even an override cannot fit the party: the boat has boatRemaining seats left. */
+  | { kind: "override_exceeds_boat"; boatRemaining: number }
+  /** A deposit order is never complimentary: a charter's deposit and balance stay paid. */
+  | { kind: "complimentary_deposit" };
 
 interface QuoteRow {
   id: string;
@@ -104,6 +138,8 @@ interface QuoteRow {
   party_size: number;
   policy_version: number;
   total_amount: number;
+  /** The deposit checkout charges, when the booking does not pay in full (W3-G2.8). */
+  deposit_amount: number | null;
   /** Whole seconds the quote still holds its price, by the database clock; negative once lapsed. */
   remaining: number;
 }
@@ -146,7 +182,7 @@ export async function createCheckoutSession(
   // after the database wrote it. The checkout must end by then too, so its
   // hold lasts the shorter of the checkout window and what is left.
   const { rows: quotes } = await sql<QuoteRow>`
-    select id, trip_id, product_id, party_size, policy_version, total_amount,
+    select id, trip_id, product_id, party_size, policy_version, total_amount, deposit_amount,
            floor(extract(epoch from
              least(expires_at, created_at + interval '30 minutes') - now()))::int as remaining
       from quotes
@@ -166,11 +202,16 @@ export async function createCheckoutSession(
   if (input.acceptedPolicyVersion !== quote.policy_version) {
     return { kind: "policy_not_accepted", policyVersion: quote.policy_version };
   }
-  if (quote.total_amount < input.minimumAmount) {
+  const complimentary = input.complimentary ?? null;
+  if (complimentary && !input.staff) throw new TypeError("a complimentary checkout is a staff one");
+  if (complimentary && quote.deposit_amount !== null) return { kind: "complimentary_deposit" };
+  // The deposit, when there is one, is what the provider charges now. A
+  // complimentary checkout charges nothing, so it needs no account either.
+  if (!complimentary && (quote.deposit_amount ?? quote.total_amount) < input.minimumAmount) {
     return { kind: "amount_too_small", minimum: input.minimumAmount };
   }
-  const account = await getPaymentAccount(trx, ctx.tenantId, input.provider);
-  if (account?.status !== "active") return { kind: "payments_unavailable" };
+  const account = complimentary ? null : await getPaymentAccount(trx, ctx.tenantId, input.provider);
+  if (!complimentary && account?.status !== "active") return { kind: "payments_unavailable" };
 
   let clientKey: string | null = null;
   if (input.clientAddress) {
@@ -194,6 +235,7 @@ export async function createCheckoutSession(
     tripId: quote.trip_id,
     partySize: quote.party_size,
     ttlSeconds,
+    ...(input.capacityOverride ? { override: input.capacityOverride } : {}),
   });
   switch (held.kind) {
     case "acquired":
@@ -202,6 +244,8 @@ export async function createCheckoutSession(
       return { kind: "not_bookable", reason: held.reason };
     case "insufficient_capacity":
       return { kind: "insufficient_capacity", remaining: held.remaining };
+    case "override_exceeds_boat":
+      return { kind: "override_exceeds_boat", boatRemaining: held.boatRemaining };
     case "trip_not_found":
       // The quote's trip is a foreign key; it cannot vanish.
       throw new Error("a quote's trip was not found");
@@ -221,16 +265,20 @@ export async function createCheckoutSession(
       from capacity_holds h
      where h.tenant_id = ${ctx.tenantId} and h.id = ${hold.id}`.execute(trx);
 
-  const { rows: orders } = await sql<{ id: string; total_amount: number }>`
+  const { rows: orders } = await sql<{
+    id: string;
+    total_amount: number;
+    deposit_amount: number | null;
+  }>`
     insert into orders (tenant_id, checkout_session_id, quote_id, trip_id, product_id,
       party_size, policy_version, currency, subtotal_amount, discount_amount, fee_amount,
-      tax_amount, included_tax_amount, total_amount)
+      tax_amount, included_tax_amount, total_amount, deposit_amount, balance_due_at)
     select q.tenant_id, ${sessionId}, q.id, q.trip_id, q.product_id, q.party_size,
            q.policy_version, q.currency, q.subtotal_amount, q.discount_amount, q.fee_amount,
-           q.tax_amount, q.included_tax_amount, q.total_amount
+           q.tax_amount, q.included_tax_amount, q.total_amount, q.deposit_amount, q.balance_due_at
       from quotes q
      where q.tenant_id = ${ctx.tenantId} and q.id = ${quote.id}
-    returning id, total_amount`.execute(trx);
+    returning id, total_amount, deposit_amount`.execute(trx);
   const order = orders[0];
   if (!order) throw new Error("order insert returned no row");
   // Service, add-on, fee, and discount lines keep their quote line numbers;
@@ -258,21 +306,34 @@ export async function createCheckoutSession(
      where t.tenant_id = ${ctx.tenantId} and t.quote_id = ${quote.id}
      group by t.tenant_id, t.tax_rate_id, t.tax_rate_version, r.name, r.inclusive`.execute(trx);
 
-  const paymentId = crypto.randomUUID();
-  await trx
-    .insertInto("payments")
-    .values({
-      id: paymentId,
-      tenant_id: ctx.tenantId,
-      checkout_session_id: sessionId,
-      order_id: order.id,
-      provider: input.provider,
-      account_ref: account.accountRef,
-      idempotency_key: `checkout_payment:${paymentId}`,
-      amount: order.total_amount,
-      currency: "USD",
-    })
-    .execute();
+  let paymentId: string | null = null;
+  if (complimentary) {
+    // The owner's grant in place of a payment, for the order's whole total.
+    // The note stays out of the audit row and the event, as a booking note does.
+    await sql`
+      insert into complimentary_grants (tenant_id, checkout_session_id, order_id, waived_amount,
+        reason_code, note)
+      values (${ctx.tenantId}, ${sessionId}, ${order.id}, ${order.total_amount},
+              ${complimentary.reasonCode}, ${complimentary.note})`.execute(trx);
+  } else {
+    if (!account) throw new Error("a paid checkout has no payment account");
+    paymentId = crypto.randomUUID();
+    await trx
+      .insertInto("payments")
+      .values({
+        id: paymentId,
+        tenant_id: ctx.tenantId,
+        checkout_session_id: sessionId,
+        order_id: order.id,
+        provider: input.provider,
+        account_ref: account.accountRef,
+        idempotency_key: `checkout_payment:${paymentId}`,
+        // A private charter with a deposit pays the deposit now (W3-G2.8).
+        amount: order.deposit_amount ?? order.total_amount,
+        currency: "USD",
+      })
+      .execute();
+  }
 
   const view = await loadSessionView(trx, ctx.tenantId, sessionId);
   if (!view) throw new Error("checkout session vanished inside its own transaction");
@@ -287,7 +348,11 @@ export async function createCheckoutSession(
       holdId: hold.id,
       orderId: order.id,
       paymentId,
-      amount: order.total_amount,
+      amount: complimentary ? 0 : (order.deposit_amount ?? order.total_amount),
+      ...(order.deposit_amount === null ? {} : { orderTotal: order.total_amount }),
+      ...(complimentary
+        ? { complimentary: { reasonCode: complimentary.reasonCode, waived: order.total_amount } }
+        : {}),
       expiresAt: view.expiresAt,
       // A staff-assisted checkout records how the guest reached staff and
       // what staff attested in place of the guest's own acceptance (G2.12d).

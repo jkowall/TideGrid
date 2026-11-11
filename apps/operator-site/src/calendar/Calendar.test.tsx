@@ -971,6 +971,7 @@ describe("roles", () => {
         "All sources",
         "Online, by the guest",
         "Staff bookings",
+        "Complimentary",
       ]);
       const note = "Seat counts cover bookings from every source.";
       expect(screen.queryByText(note)).toBeNull();

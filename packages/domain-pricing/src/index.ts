@@ -20,6 +20,14 @@ export {
   type TaxTotal,
 } from "./compute.ts";
 export {
+  type DepositTerms,
+  depositFor,
+  NO_DEPOSIT,
+  type QuoteDeposit,
+  validDepositTerms,
+} from "./deposit.ts";
+export {
+  depositTermsOf,
   type FindTripOptions,
   findPromotion,
   findTripForSale,

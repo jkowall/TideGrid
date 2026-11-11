@@ -8,6 +8,248 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.15-rest, the booker sends a person's waiver email again, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The tracker's W3-G2.15-rest also covers the generic dock QR with staff lookup, waiver reuse across bookings, and suppressing waiver email for imported bookings; the first needs the owner's call on how staff look a guest up at the dock, the second needs verified customer identity and the owner's re-sign policy, and the third waits for the CSV import's commit step, so none is in this part.
+
+No migration: it reuses the guest renewal of `0028` and its database rules. It closes the [waiver module's](../../packages/domain-waivers/README.md#deferred-and-known-gaps) "Renewal from the management page" gap. What it adds:
+
+- **The booker can send a person's waiver again.** On the booking's management page, beside each named person whose waiver email went out and who hasn't signed, a "Send again" button sends the same email again (`POST /v1/public/manage/waivers/resend`, in the booking session). The page then says where it went, masked.
+- **Only where it went before.** The email goes to the address the latest one went to, never anywhere else. To send it somewhere new, the booker changes the address in Who's coming, which sends at once.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: it counts as the person's own renewal.** At most 3 a day for each person, shared with the "Email me a new link" requests from the signing page, inside the waiver's five sends, 10 minutes between emails to one address, and the operator's sending limits. The database holds the address and the 3 a day for every writer.
+- **D2: the new link replaces the old one,** as any resend does, so the booker can send it even while the last link still works: the booker can't see whether the email arrived. Nothing goes out while the latest email is still on its way.
+- **D3: the booker hears why it did not go.** The booker is signed in to the booking, so the answer names the reason (still on its way, sent in the last 10 minutes, held by a sending limit, sent as many times as allowed, nothing sent to this address yet, the party changed, no longer needed), where a guest's renewal from a link answers the same whatever happened. The page sends the person's name with their place, so a party changed in another tab sends nothing, and the audit records the booker's resend apart from the person's own renewal.
+- **D4: offered only for a waiting or failed email that went to an address.** Not for a signed waiver, one with no address yet (Who's coming handles it), one held by the sending limits (staff can send it once allowed), or one not yet sent by the operator.
+
+### 2026-11-11: W3-G2.14b-rest, part 1, an operator's Important links, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The tracker's W3-G2.14b-rest also covers custom hostnames on an operator's domain, TXT reuse, the D15 narrowings, and the sweep of unattached pending hostnames; those need a real operator domain or the owner's rule and are not in this part.
+
+It lands as migration `0041` and the [database contract](../../packages/database/README.md#important-links-0041). It builds the "Important links" section of docs/v2/02's brand configuration. What it adds:
+
+- **Owners manage a short list of links.** In the console API (`/v1/staff/tenants/{tenantId}/important-links`), an owner adds, changes, reorders, and archives named HTTPS links with an optional note, for every trip or for named products (a fishing-license page for fishing trips). Every role reads them. Each change is audited.
+- **Guests see the ones for their trip.** The booking page shows the links for every trip and for the booking's product beside the meeting point. Each says which site it opens and opens in a new tab. A public endpoint lists the links for every trip, for the coming PWA and native screens.
+- **Every writer is held to the rules.** The database refuses an address that is not https with a host name (no IP address, user name, or password), another operator's product, a change to an archived link, and a 26th active link. Nothing is deleted.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only change links** (the catalog permission). Booking staff and finance read them.
+- **D2: at most 25 active links an operator (500 in all, archived ones included), 20 products a link**, a name of 60 characters and a note of 200.
+- **D3: https only, public-looking host names only.** No `http`, IP address, user name and password, port outside 1 to 65535, or name kept for local networks or special use (`.local`, `.localhost`, `.internal`, `.home.arpa`, `.test`, and the like) in the address, and no hidden direction or zero-width characters in the address, name, or note. This keeps out the obvious ways to point at a local network or carry credentials, but a public name can still lead anywhere, so it is not a guarantee: TideGrid never fetches these pages itself, only the guest's browser does, and it does not check what a page says, as docs/v2/02 says. Guests see the host (with any port other than 443) before they open a link.
+- **D4: archive, never delete.** An archived link is final; to bring one back an owner adds it again. The audit keeps what each link said.
+
+Part 2 (same day) adds the console's Important links page, where owners change links and every role reads them, and a list of the links for every trip on the guest site's help page. Not built yet: links in the confirmation email, which docs/v2/02 does not require.
+
+### 2026-11-11: W3-G2.13, part 1, checking a standard CSV import without importing it, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The standard CSV import is the tracker's G2.13. Its file format is the [draft](drafts/standard-csv-import.md) from W1-CSV-DEF (the 2026-11-08 entry below), still proposed and not approved by the owner. As the coordinator directed, this goal builds against that draft as a coordinator default, so every column, code, and total below is pending the owner's approval of the draft.
+
+This first part is the dry run only. It lands as migration `0040` and the [database contract](../../packages/database/README.md#import-runs-0040). What it adds:
+
+- **An owner checks a batch.** In the console API (`POST /v1/staff/tenants/{tenantId}/import-dry-runs`), an owner sends the manifest and the batch's CSV files. Every row is checked against its column's type and the draft's rules, and against the operator's own products, boats, trips, and the seats already held on them, at the time of the check. The answer lists every refused row with a stable code, the accepted and refused rows per file, each declared control total beside the computed one, and the draft's `errors.csv`.
+- **Nothing from the files is written.** No trip, booking, customer, payment, or balance is created. What is kept is a record of the run: its batch, run number, source system, a hash of the files, whether it was clean, and its counts and totals. Names, emails, phones, and references never reach that record, the audit history, or the error report; the report shows them as `[withheld]`. A value that looks like a card number is refused and never shown.
+- **Toward the commit.** The run's hash leaves out the manifest's `batch_mode` and `run_number` rows, so a later commit of the same files can be matched to its clean dry run, as the draft proposes.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only.** The dry run reads the whole catalog and is the first step of a migration, so only owners run it; the database checks it too.
+- **D2: the draft as written**, with its two coordinator defaults (the booking key is source reference plus trip date; payments are external tender). One change: a product row whose name does not match the TideGrid product is refused as `product_name_mismatch`, a code the draft's list lacks; and `file_unreadable`, `missing_file`, `repeated_column`, `batch_mode_not_supported`, and `trip_canceled` (a row naming a departure canceled in TideGrid) are added for whole-file problems the draft does not name.
+- **D3: one batch, one source system.** Run numbers start at 1 and go up by one per run, never reused or skipped (`import_run_number_used`, which names the next number); a batch's later run from another source system is refused (`import_source_changed`). Runs of one batch take turns, so two at once cannot both pass.
+- **D4: size.** A batch is at most 4 MiB as sent, each file at most 2 million characters; a larger export is custom work under the draft. A run keeps its first 5,000 issues and counts all of them; the answer lists the first 500 and `errors.csv` the first 5,000. A message names at most 10 line numbers, and a repeated value at most 64 characters.
+- **D6: money before seats.** A booking's payments and refunds are judged by their totals for the booking, whatever their order in the file. A booking whose money does not balance is refused before it takes seats, so its seats stay free for the next booking, and its participants, payments, and waivers are refused with it.
+- **D5: what the draft's schema gaps mean here.** There are no customer, trip-card, or dollar-card tables yet, so a trip-card or dollar-card lot is refused as `module_disabled`, and a customer is matched only against the batch's own rows (two with the same email are flagged for review, never merged). Earlier batches are not consulted, because none can be committed yet.
+
+Not built yet: the commit (it needs the import capacity path that amends `app.check_capacity_hold`, which the draft's open question 12 leaves to the owner, and tables for imported bookings, customers, and balances), the final delta batch, operator review of customer matches, and a console screen. The owner's approval of the draft, and of question 12 in particular, is needed before the commit is built.
+
+### 2026-11-11: W3-G2.12-rest, an owner books a guest at no charge with a reason, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. Third and last part of W3-G2.12-rest, after the money report and the capacity override (the entries below).
+
+It lands as migration `0039` and the [database contract](../../packages/database/README.md#complimentary-bookings-0039). It covers the tracker's "complimentary bookings with a reason code, through the waiver matrix". It changes the booking, checkout, cancellation, and fee rules, so it was reviewed against the rule that every booking has its money evidence. What it adds:
+
+- **An owner books a guest at no charge.** In the console API (`POST /v1/staff/tenants/{tenantId}/complimentary-bookings`), an owner prices the party as for any staff booking, then books it with a reason code. The owner's grant takes the place of the payment: it waives the order's whole total, the order closes as settled by the grant, and the booking has no payment. Everything else is the same: the seats are held and confirmed like any booking, the booker gets the confirmation email, and the guests go through the same waiver steps (the waiver matrix test now books one).
+- **The grant is the evidence.** The database keeps one append-only grant for the checkout and its order, with the owner who gave it, the reason, the amount waived, and when. A booking has a payment or a grant, never both and never neither, and no payment can be taken on a checkout that has a grant.
+- **It shows as complimentary.** Lists, rosters, and search show "Complimentary" where the payment state would be. The booking's page shows the amount waived, the reason, and who granted it. The day report counts the booking with zero money.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only**, as for the capacity override. Booking staff, finance, and support cannot, and the database checks it from the owner's membership, not only the API.
+- **D2: reason codes.** `service_recovery` (making up for a problem), `staff_or_crew`, `partner_or_media`, `charity_or_donation`, and `other`, which needs a short note. The audit history records the code, the amount, and who; the note stays with the grant and is shown only to roles that see guests' details, because it can name a guest.
+- **D3: the whole order or nothing.** No partial discounts here (a discount is a pricing rule). A quote that would take a deposit is refused (`complimentary_deposit`), since there is no balance to collect.
+- **D4: cancelling gives nothing back.** Cancelling a complimentary booking frees the seats with no refund and no credit, whatever the policy says, and a staff override of the refund is refused.
+- **D5: no TideGrid fee.** The fee is a share of money taken, so a complimentary booking's fee is zero.
+- **D6: no money recorded outside the card flow.** Cash, check, or other money, in or out, cannot be recorded against a complimentary booking (`booking_complimentary`). There is nothing owed, and a refund recorded on one would reverse a TideGrid fee that was never charged.
+
+The guest's confirmation email and booking page say the booking is complimentary and that they paid $0.00, and the cancellation email says nothing was paid.
+
+Known limits: there is no console form yet (the API is ready for it); the staff checkout read does not show a complimentary checkout; the grant's note is not cleared by the 30-day retention job, since it belongs to a confirmed booking, like booking notes; the money report shows nothing for a complimentary booking, as no money moved; and changing the party size or moving the booking works as usual and charges nothing.
+
+### 2026-11-11: W3-G2.12-rest, an owner's capacity override with a reason, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. Second part of W3-G2.12-rest, after the money report (the entry below).
+
+It lands as migration `0038` and the [database contract](../../packages/database/README.md#capacity-overrides-0038). It covers the tracker's "the role D1 names can override capacity with a reason code, audited, with no race beyond the override". It changes the capacity hold trigger, so it was reviewed against the no-oversell guarantee. What it adds:
+
+- **An owner books one more party onto a full trip.** In the console API, an owner prices the party on a full shared-seat trip with `capacityOverride: true`, then opens the staff checkout with a `capacityOverride` and a reason code. That one booking may take the seats it lacks past the trip's capacity. Nothing else changes: the payment is still the verified provider event, and the booking counts like any other.
+- **Never past the boat.** A trip's seat capacity is often below the boat's licensed guest capacity (crew, gear, comfort). The override only sells into that gap, never beyond the boat, and never on a private charter, which already takes the whole boat.
+- **No race beyond it.** The override names that one booking's hold and the exact seats it lacks at that moment. Every other booking still counts against the trip's capacity, under the same trip lock as before, so once the overridden booking lands the trip is full to everyone else.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only** (the tracker's recommendation). Booking staff, finance, and support cannot, and the database checks it from the owner's membership, not only the API.
+- **D2: reason codes.** `regular_guest`, `group_kept_together` (the rest of a party already booked), `captain_approved`, `make_good` (making up for an earlier problem), and `other`, which needs a short note. The audit history records the code and who; the note stays with the override, because it can name a guest. For the same reason the 30-day retention job clears the note of an abandoned checkout's override when it clears that checkout's booker; the override itself stays.
+- **D3: the boat is the hard limit.** No override passes the boat's guest capacity, whatever the reason.
+- **D4: only when needed.** The override is written only if the trip is actually full for the party, and for exactly the seats it lacks, so asking for one on a trip with room changes nothing.
+- **D5: owner-booked only.** Guests never get an override; it exists only on the staff-assisted checkout.
+
+Giving up a place still works on a trip past its capacity, for every booking on it: a party change's smaller hold, in place of the larger one it released, may go past the trip's capacity up to what the trip's overrides allowed in all and never past the boat, since giving up a place never adds seats (the database holds that rule too). Known limits: moving an overridden booking uses the ordinary rules, so a move to a full trip is refused; while an overridden booking counts, the trip's capacity cannot be set below the seats held, so lowering it, or raising it by less than the overshoot, is refused; an override never lets one party be larger than the trip's own capacity (the quote and checkout both refuse it); the boat limit is checked when the hold is taken, not again if the boat's guest capacity is later lowered; and there is no console button yet (the API is ready for it).
+
+### 2026-11-11: W3-G2.12-rest, money movements for a date range, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the first part of W3-G2.12-rest; the tracker's other parts follow (a capacity override, complimentary bookings), the booker email correction is already in (the entry above), staff cancel and refund came with W3-G2.9, and imported records come with W3-G2.13.
+
+It covers the tracker's "financial exports have control totals that match the ledger", with [docs/v2/02](02-product-scope.md#reports-and-exports) as the scope. There is no migration. What it adds, in the API only:
+
+- **A money report for a date range.** Every entry in the money ledgers on the operator's business dates from and to: card and balance payments that succeeded, cash, check, and other money staff recorded, card refunds that succeeded, lost disputes, booking credit entries, and TideGrid's fee and its reversals. Totaled by kind, with money in, money out, credit, and fee.
+- **Its CSV export.** One row per entry, with its exact moment, kind, booking reference and source, tender, and the provider's or typed reference; then a total row. Operator, range, time zone, and generation time are on every row. Each export is in the audit history.
+- **Control totals.** In the same statement the database counts and sums each ledger a second time, apart from the rows, and computes the fee as the monthly invoice does. The report says whether the rows add up to them (`controlTotalsMatch`): that proves the export is whole and agrees with the invoice on the fee. It is not a tie to orders (the day export does that, by trip date), and it would not notice a ledger both sides leave out. The tests also check the totals against the tables read directly.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: by when the money moved, not by trip date.** A refund lands on the day it succeeded, not the day of the trip. The day export (by trip date) stays as it is for "how did Saturday's trips do".
+- **D2: the business day's zone.** The billing plan's time zone, else the one zone all the operator's active locations share, else UTC. The same rule as the monthly reconciliation, with the locations step added for an operator with no plan yet. The zone is read when the report runs, so adding a plan later (or changing the only location's zone) moves past entries near midnight to another date in later reports.
+- **D3: who.** Every role with `payments.read`: owners, booking staff, and finance (and TideGrid support under a grant). The report and export carry no guest's name or email, and every role gets the same columns. A check or receipt number staff typed is free text that can name a guest, so only owners and booking staff get it; for finance and support that cell is blank, as in the external payments list.
+- **D4: limits.** At most 92 days a report (about a quarter) and 5,000 entries; a bigger range is refused, never cut short, so the totals are always whole.
+- **D5: provider references in full for the operator.** The export carries the provider's payment, refund, and dispute ids unmasked for owners, booking staff, and finance, as docs/v2/02 asks ("Stripe charge and refund references"), so finance can match them to the provider's own reports. Dispute ids are added on the same reasoning. They are identifiers, not card data. TideGrid support sees them masked, as the console shows them. A typed reference is kept from running as a spreadsheet formula.
+
+Known limits: a dispute counts only when it closes as lost, on the day it closed, though the provider takes the money when it opens and returns it on a win; refunds the provider reported back after settling (`failed_after_success`, `succeeded_after_failure`) show as TideGrid recorded them, and they are listed for staff on the refund exceptions list, not in this report; the timestamp columns some ledgers are read by have no index, which is fine at pilot volume.
+
+Not built: the console screen (the API is ready for it); a range summary of bookings, guests, and occupancy by product, boat, and source; waiver completion, message delivery, and reconciliation exception reports; and balance payment refunds, which do not exist yet (W3-G2.8's known gaps).
+
+### 2026-11-11: W3-G2.11-rest, correcting the booker's contact details, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the last part of W3-G2.11-rest, after moves, giving up a place, and participant invitations (the entries below).
+
+It lands as migration `0037` and the [database contract](../../packages/database/README.md#booker-contact-corrections-0037), with [docs/v2/02](02-product-scope.md#guest-party-and-account-self-service) as the scope ("correct permitted contact and participant details"). Until now the booker's name and email were fixed at checkout, so a typo in the address meant the guest never got their confirmation, reminder, or links. What it adds:
+
+- **The booker or staff correct the booker's name and email.** From the booking page, or from the console API for owners and booking staff. The database allows exactly one shape of change to the checkout: only those two fields, on a confirmed booking whose trip has not left, at most 3 times a booking in 24 hours by the guest. It writes a history row for each change saying who changed which field, never the old or new values.
+- **An email change moves the booking to the new address.** Links sent to the old address stop working, the booking's other sessions end (the booker's own session making the change stays open), the trip and balance reminders not yet sent are rewritten to the new address for the same moment, the old address gets a short notice with the new address partly hidden and no link, and the new address gets a fresh link to the booking.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: who.** The booker, from their booking session, and owners and booking staff with `bookings.reschedule` (the permission for changing a booking's details). Finance and support cannot. No new permission.
+- **D2: when.** A confirmed booking, before its trip leaves. A canceled booking keeps the details it was canceled with.
+- **D3: an email change tells the old address and ends its access.** The notice carries no link and hides most of the new address (`a•••@e•••.test`), so whoever reads the old inbox learns a change happened and can reply to the operator, and nothing they could use. A change by staff ends every guest session, including the booker's, and after any email change the checkout's own secret (the hour-long "open your booking" right after paying) no longer opens one: only a link to the new address does.
+- **D4: email not yet sent moves.** The trip and balance reminders are rewritten for the new address, due at the same moment. Any other booking email with a link that has not gone out yet (a confirmation still retrying, a link the guest asked for, a "booking moved" notice, a balance link staff sent) is canceled, not moved: the new address already gets a fresh link, and staff can send the balance link again. A name-only change sends nothing; a queued reminder still greets the old name.
+- **D5: limit.** 3 corrections by the guest a booking in 24 hours, so a stolen booking link cannot keep moving the booking around. Staff and support are not limited, so they can always restore a booking someone took over.
+- **D6: history without the values.** The history, audit, and events record which fields changed and who changed them, never the addresses, so the audit log does not become a second copy of personal data. The current values live only on the checkout, as before.
+
+Also note: a booker's credit balance follows their email address (W3-G2.9), so after a correction the booking's future credit and the staff credit view use the new address's account. A booker who types someone else's address would point it there, which staff should keep in mind when correcting a booking by phone.
+
+Not built: a form on the booking page and in the console (the API is ready for both); confirming the new address before the change takes effect (the booker's session already proves control of the old one); and a change after the trip leaves.
+
+### 2026-11-11: W3-G2.11-rest, participant invitations, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the third part of W3-G2.11-rest, after moving a whole booking and giving up a place (the entries below); correcting the booker's own contact details follows in its own pull request.
+
+It lands as migration `0036` and the [database contract](../../packages/database/README.md#participant-invitations-0036), with [docs/v2/02](02-product-scope.md#guest-party-and-account-self-service) as the scope ("invite participants through participant-specific links"; "A participant can manage only their own profile"; "A participant invitation cannot be used to see another participant's answers or the booker's full payment method data"). What it adds:
+
+- **An invitation is a link of the participant's own.** The booker, from their booking page, or owners and booking staff (`messages.resend`, the permission for sending a booking's email) send the participant named at a place an email whose single-use link opens a session for that participant only. It shows their details, the trip, and where to meet; never the rest of the party, the booker's contact details, the booking reference, or the payment.
+- **It goes only to the address on file.** The participant's own email, or a minor's guardian's, never an address in the request. The database checks it again when the email is written.
+- **The participant corrects only their own details.** Their name and email, or a minor's name and guardian. The database refuses a participant's session that names a place, changes anyone else, or changes whether someone is a minor.
+- **Changing the address ends the old access.** When the booker, staff, or the participant changes the email an invitation went to, that person's other links and sessions end and an invitation not yet sent is withdrawn; the session making the change stays open. Removing the participant or canceling the booking ends them all.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: only a named participant with an address is invited.** The booker names the person at a place first, with an email (or a minor's guardian's), then invites them. Inviting an empty place by email alone, for the invitee to fill in their own name, is left for later; it would need a place held for someone not yet named.
+- **D2: limits.** At most 3 invitations a person in 24 hours and 20 a booking, counted together whoever sends them, on top of the usual sending limits. The limits count people, not addresses: a booker who changes a participant's email first can send to an address of their choosing, from the operator's sender, as waiver requests already allow. A per-address limit across the operator is left for later. The link works once, for seven days or until the trip leaves, whichever is first, and a newer invitation's link replaces an older unused one. A participant's session lasts an hour.
+- **D3: whether someone is a minor is the booker's to say.** The participant cannot change it; the booker or staff can. A minor's invitation goes to their guardian, who acts for them.
+- **D4: the participant asks the booker for a new link.** An expired or used invitation does not renew itself from the participant's page, unlike a waiver link, because the booker chose to invite them.
+- **D5: staff send with `messages.resend`,** which owners and booking staff hold; finance does not. No new permission.
+
+Not built: the guest-site page that the link opens (`/participant`) and an Invite button on the booking page and in the console, which follow in the next pull request before any release; the participant's waiver from the same page (the waiver email still carries its own link); and correcting the booker's contact details.
+
+Status, 2026-11-11: merged in pull request 142 (`7ec754d`). The guest-site `/participant` page and a Send link button on the booking page followed in the next pull request. The console has no party editor yet, so it has no Send link button; staff send through the API until it does.
+
+### 2026-11-11: W3-G2.11-rest, removing a participant from a shared-seat booking, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the second part of W3-G2.11-rest, after moving a whole booking (the 2026-11-10 entry below); participant invitations and profile changes follow in their own pull request.
+
+It lands as migration `0035` and the [database contract](../../packages/database/README.md#participant-removal-0035), with [docs/v2/02](02-product-scope.md#customer-and-staff-changes) as the scope ("remove shared-seat participants"; "Removing a participant releases their seat and equipment and applies the booking policy once"). What it adds:
+
+- **A place is given up in one transaction.** The party shrinks by one: whoever was named at that place is removed, their waiver request, link, and queued email end, and the seat goes back on sale. The booking gives back its hold and takes a smaller one on the same trip, under the trip's lock, so no one else can take the seat in between and nothing changes if the smaller hold is refused.
+- **Who may do it.** The guest, from their booking page, and owners and booking staff (`bookings.reschedule`, the permission for changing a booking's trip or party), before the policy's change cutoff. At or after the cutoff only an owner, with a reason (`bookings.override`); the database refuses an override from anyone but staff. Never after the trip has left.
+- **Places keep their numbers.** A party of 4 that gave up place 2 has places 1, 3, and 4, so a waiver, a message, or a roster line that names a place still names the same person. The removed participant's row is kept, marked removed, for that history.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: no money moves.** The booking keeps the price it was sold at: giving up a place neither refunds nor credits the seat. docs/v2/02 asks that removal "applies the booking policy once"; the payment allows one refund only, for the whole payment, and an order's lines do not say which ticket a person held, so a per-seat refund or credit is left for a later step, with the owner's rule for which ticket price goes back.
+- **D2: shared-seat bookings only.** A private charter's party takes the whole boat and its price does not depend on the party, so giving up a place frees no seat. Removing someone from a charter's party, without changing its size, is left for later.
+- **D3: the trip must still be on sale for the smaller party,** by the same rules as a new hold, as for a move (D3 of the 2026-11-10 entry): published, before its booking cutoff, and at or above the product's minimum party. When it is not, the answer is that the trip can't keep the smaller party, and nothing changes; staff can reopen sales first. This also means an owner's override past the change cutoff is refused once the trip's booking cutoff has passed, close to departure.
+- **D4: the last place is never given up.** A party of one cancels the booking instead, under the cancellation policy.
+- **D5: no email to the booker.** The booker sees the change on their booking page at once, and staff in the booking's history; the removed person's waiver email is withdrawn. A confirmation email of a party change is left for later.
+
+Not built: console and guest-site screens (the API carries it), adding a place, and pooled equipment and trip-card units, which do not exist yet.
+
+### 2026-11-10: Refunds, reconciliation, and pilot infrastructure defaults confirmed; Terraform state in R2 (owner decision)
+
+At 16:46 UTC on 2026-11-10 the owner chose "Accept all as recommended" on the card "Accept my recommended answers on refunds, payment checks and infrastructure?", whose option read: "Stuck refunds flagged after 24h, credit never expires, only owners refund cash, a provider lookup never moves money, and infra records stay on Cloudflare (no AWS)."
+
+- **W3-G2.9 D1 to D4** (entry below) are owner decisions as written.
+- **W3-G2.10 D1 to D6** (entry below) are owner decisions as written.
+- **W3-OPS-1 D1, D3, D4, and D6** (entry below) are owner decisions as written.
+- **W3-OPS-1 D2 is replaced.** Terraform state lives in a private R2 bucket, `tidegrid-terraform-state`, in the existing Cloudflare account, through the S3 backend with `use_lockfile`, instead of an S3 bucket in a new AWS account. R2 has no version history, so each apply copies the current state into the same bucket first. Applies run from the [`infra-apply` workflow](../../.github/workflows/infra-apply.yml) with the owner's approval of each plan and each apply ([apply runbook](../runbooks/terraform-apply.md)).
+- **W3-OPS-1 D5 stays open.** Production's waiver evidence lock period is a legal retention choice, asked again before production holds a real waiver.
+- **Environments.** The same day the owner said "you can set those up anytime you want on cloudflare". Staging is set up now on the existing account. The production Neon project waits until a pilot is close, to keep Neon spending low.
+
+### 2026-11-10: W3-G2.11-rest, moving a whole booking to another trip, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the first part of W3-G2.11-rest; removing a participant, participant invitations, profile changes, and the two-tenant and browser checks for them follow in their own pull request.
+
+It lands as migration `0034` and the [database contract](../../packages/database/README.md#rescheduling-0034), with [docs/v2/02](02-product-scope.md#customer-and-staff-changes) as the scope. What it adds:
+
+- **A move is one transaction.** Seats on the new trip are taken first, by a hold the move owns and confirms at once; then the booking points at the new trip and its old seats go back on sale. If the new trip has no room, nothing changes. The database refuses a booking whose trip or hold changes without its move row, and at commit checks that the old seats were given back.
+- **Who may move it.** The guest, from their booking page, and owners and booking staff (`bookings.reschedule`), before the policy's change cutoff. At or after the cutoff only an owner, with a reason (`bookings.override`); the database refuses an override from anyone but staff. No one moves a booking after its trip has left.
+- **Email.** The guest is emailed the new time with a fresh link to the booking. The trip reminder waiting for the old day is canceled (`booking_moved`) and a new one is written for the new trip.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: the booking keeps the price it was sold at.** A move neither charges nor refunds, even when the new trip's price list would ask more or less today. docs/v2/02 asks for "accept and pay a price increase or choose the configured remedy for a price decrease"; that needs priced moves with a payment or a refund inside the move, and is left for a later step.
+- **D2: only another trip of the same product.** Moving to a different trip type would change the price and the policy, so it is a cancellation and a new booking.
+- **D3: the new trip must be on sale for the party now,** by the same rules as a new hold: published, before its booking cutoff, clear of blackouts, and with room. Staff use the same rules; there is no override of capacity or of the booking cutoff.
+- **D4: a private charter with a balance still owed** moves only to a trip that leaves after the balance's due date; otherwise staff move the due date first.
+- **D5: the cancellation cutoff follows the trip the booking is on now.** After an owner moves a booking past its cutoff to a later trip, the guest's cancellation terms are those of the new trip, so a full refund may be open again. The owner chooses that when overriding; keeping the first trip's cutoff instead is a later change if the owner prefers it.
+
+Not built: console and guest-site screens (the API carries it), moving part of a party, and moves of pooled equipment or trip-card units, which do not exist yet.
+
+Known gaps: a waiver reminder already sent for the old trip's 72-hour or 24-hour slot is not sent again for the new trip; a waiver link sent before the move still expires when the old trip ends, and waiver emails already sent name the old date (staff send the waiver again); the checkout page's own status still names the trip the guest first booked (the booking page shows the new one); and the old trip's reminder email, if it was already sent, is not taken back. The tenant data export also gains the deposit and balance tables from W3-G2.8, which it had missed, and the moves.
+
+### 2026-11-10: W3-G2.8, private-charter deposits and balances, code only (owner go; coordinator defaults pending owner confirmation)
+
+On 2026-11-10 the owner wrote "lets start wave 3 and fix the other things waiting on me", and the coordinator passed it on as a go for the rest of the Wave 3 code-only work. The same limits as W3-G2.9 and W3-G2.10 below apply: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed.
+
+W3-G2.8 lands as migration `0033` and the [database contract](../../packages/database/README.md#deposits-and-balances-0033), with [docs/v2/02](02-product-scope.md#private-charter-deposit-and-balance) as the scope. What it adds:
+
+- **Deposit terms.** A private charter's price list version takes no deposit (the default), a fixed amount, or a percentage, with one balance due a whole number of days before the trip. The quote shows the total, the deposit, what is left, and the due date before the guest pays; checkout charges the deposit. The quote and the order keep the deposit and due date, so later price list changes never rewrite a booking.
+- **Paying in full anyway.** A booking pays in full when its terms take no deposit, when the deposit would be the whole total or nothing, or when the due date has already come at the quote.
+- **The balance.** The database computes what came in (the deposit, card payments of the balance, and external payments) and what is owed. Staff see it on the booking with a state: paid, scheduled, due (within 7 days of the due date), overdue, or canceled. The guest sees it on their booking page and pays it there by card, for exactly what is owed. Only a verified provider event marks a balance payment paid. Nothing is charged without the guest, and nothing cancels a booking for an unpaid balance.
+- **Staff.** Owners move the due date with a reason (`bookings.override`); owners and booking staff email the guest the balance link, at most 3 an hour (`messages.resend`); a balance paid in cash, check, or otherwise is recorded as an external payment (W3-G2.10).
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: reminders 7 days and 1 day before the due date.** Each is checked when it is due and dropped when nothing is owed any more. They move with the due date.
+- **D2: a percentage deposit is a share of the booking's total, taxes and fees included.** docs/v2/02 says "of the charter price"; taking the total keeps the deposit and the balance in the same terms the guest sees, and a deposit that leaves the taxes all in the balance would surprise them.
+- **D3: an overdue balance only shows.** The booking stays confirmed; staff decide what to do.
+- **D4: a refund cancellation of a deposit booking goes to the operator.** docs/v2/02 leaves "whether a private-charter deposit is refundable" open, so the guest's own cancellation of a deposit booking is refused when the policy would refund (`remedy_requires_operator`), and staff cancel it with the console's choices (W3-G2.9).
+- **D5: refunds of a balance paid by card are outside TideGrid for now.** A staff card refund returns at most the deposit payment; the rest is returned at the provider and recorded as an external refund. A guest who pays twice shows as overpaid for staff to return.
+
+Not built: a staff screen for deposit terms (they are set through the pricing service, as other price list terms are today), console and guest-site screens for the balance (the API carries it), and the seed's charters keep paying in full.
+
+Known gaps from review, to close before an operator takes balances live: a dispute on a balance card payment is not matched to it (it is recorded as unmatched, and the money still counts as paid in); a balance payment that was replaced or whose booking was canceled is not canceled at the provider, so a tab left open can still pay it (the money shows as overpaid for staff to return); and an overpayment above the booking's total cannot yet be recorded as returned, because external refunds stop at the total (it is returned at the provider and stays shown as overpaid).
+
 ### 2026-11-09: W3-G2.10, external payment and reconciliation (owner decision; coordinator defaults pending owner confirmation)
 
 Under the same owner decision as W3-G2.9 below: the owner chose "Code-only pilot pieces now" on a decision card at 17:35 UTC on 2026-11-08, whose option read: "Start the code-only pilot pieces now on fake data: background job queue, refunds and credits, infrastructure plans (no apply). No new accounts or money, just agent time and CI minutes." Synthetic data and the fake provider only; the Stripe adapter is tested against its recorded-shape fixture. No provider call, no new Worker binding, no deploy. No gate is claimed.
@@ -237,6 +479,8 @@ Not done: no code, no account, and no build. The goals are W1N-APP, W1N-JOURNEYS
 Status 2026-11-08: W1N-APP is built on branch `claude/project-thread-bqlorn` under the owner's go of 20:03 UTC: `apps/guest-native`, Expo SDK 58 and React Native 0.88, two variants, no API change. The app presents its variant's guest origin, because the API picks the operator from the Origin header, and it refuses any answer for another operator. The owner chose on 2026-11-08 to build on his own Mac with Xcode and Android Studio rather than Expo's cloud service. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
 
 Status 2026-11-08, later: W1N-JOURNEYS is built under the owner's go of 22:16 UTC. The app books a trip with the demo's test payment, shows the outcome, keeps each booking opened on the phone for its one-hour session in the platform's secure storage, and shows the booking with its waiver statuses. It uses the guest web app's own API calls; no API, contract, or guest site change. Two new Expo packages, expo-crypto and expo-secure-store, from the Expo SDK 58 set. Changing the party, canceling, Stripe's card form, push, and deep links stay out of the demo app. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
+
+Status 2026-11-11: W1N-TESTFLIGHT. Both demo variants are on TestFlight and Google Play internal testing, build 1, with the owner as the only tester, under his go of 2026-11-10. Store prep merged in PR 137. No App Review submission, no external testing, and no public listing. The first booking on a phone is still to come. Canonical: the [verification log](../verification-log.md#2026-11-11).
 
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)

@@ -42,6 +42,15 @@ Run from a clean checkout of `main` at the commit to apply, on the owner's machi
 8. `terraform -chdir=infra/terraform/environments/<environment> output wrangler_inputs` and put the names and ids into that environment's Wrangler configuration in a reviewed pull request. Wrangler must not bind a resource before it exists, so the Wrangler change merges after the apply.
 9. Delete the plan file. Record the evidence (commit, counts, time, no ids or hosts) in the [verification log](../verification-log.md).
 
+## From GitHub (staging, added 2026-11-10)
+
+The owner asked on 2026-11-10 for the Cloudflare setup to be done for him ("you can set those up anytime you want on cloudflare"). The [`infra-apply` workflow](../../.github/workflows/infra-apply.yml) runs the steps above from GitHub, so no laptop holds state or credentials. Staging only.
+
+- **State** lives in a private R2 bucket, `tidegrid-terraform-state`, in the existing Cloudflare account (owner decision 2026-11-10, replacing D2's S3 bucket). R2 has no version history, so the apply job copies the current state to `backups/<environment>/` in the same bucket before each apply.
+- **One-time owner setup.** Create the bucket and an R2 "Object Read & Write" token limited to it. Create a Cloudflare API token with Queues Edit, Workers R2 Storage Edit, and Notifications Edit on the account and Zone Read on `tidegrid.us`, expiring in 90 days. Create a Neon API key. In GitHub, create the environment `infra-staging` with the owner as required reviewer, the secrets `CLOUDFLARE_API_TOKEN`, `NEON_API_KEY`, `TF_STATE_ACCESS_KEY_ID`, `TF_STATE_SECRET_ACCESS_KEY`, and the variables `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`, `NEON_PROJECT_ID`, `ALERT_EMAIL`.
+- **Each run.** Dispatch `infra-apply` from `main` with the environment and `plan` or `apply`. The owner approves the plan job (it reads secrets), reads its summary (resource names and actions only, no values), then approves the apply job, which applies exactly that saved plan. A plan that deletes or replaces anything stops before the apply.
+- **After an apply,** the run summary lists the queue and bucket names. Bind them in that environment's Wrangler configuration in a reviewed pull request, after the apply, never before.
+
 ## Rollback
 
 - A bad change: revert the commit in a pull request, then plan and apply the revert under the same rules.

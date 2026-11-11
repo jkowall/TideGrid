@@ -111,7 +111,11 @@ export type BookingExtra = z.infer<typeof BookingExtra>;
 
 export const BookingPaymentStatus = z
   .object({
-    state: PaymentState.describe("The charge: succeeded once a verified provider event says so"),
+    state: z
+      .enum(["pending", "succeeded", "failed", "complimentary"])
+      .describe(
+        "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment",
+      ),
     refund: z
       .object({ state: RefundState, amount: Cents })
       .nullable()
@@ -298,6 +302,33 @@ export const BookingPayment = z.object({
 });
 export type BookingPayment = z.infer<typeof BookingPayment>;
 
+/** Why an owner booked a guest at no charge (W3-G2.12-rest). */
+export const ComplimentaryReason = z
+  .enum(["service_recovery", "staff_or_crew", "partner_or_media", "charity_or_donation", "other"])
+  .describe("Why the owner booked the guest at no charge; other carries a note");
+export type ComplimentaryReason = z.infer<typeof ComplimentaryReason>;
+
+export const BookingComplimentary = z
+  .object({
+    reasonCode: ComplimentaryReason,
+    note: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "Text the owner typed. Present only for roles that hold bookings.read; absent otherwise",
+      ),
+    waivedAmount: Cents.describe("The order's whole total, waived"),
+    currency: z.literal("USD"),
+    grantedAt: Instant,
+    grantedBy: z
+      .object({ userId: Uuid, displayName: z.string() })
+      .nullable()
+      .describe("The owner who granted it, as this operator names them"),
+  })
+  .describe("An owner's grant: the booking was complimentary, with no payment");
+export type BookingComplimentary = z.infer<typeof BookingComplimentary>;
+
 export const BookingRefund = z.object({
   state: RefundState,
   amount: Cents,
@@ -306,6 +337,44 @@ export const BookingRefund = z.object({
   settledAt: Instant.nullable(),
 });
 export type BookingRefund = z.infer<typeof BookingRefund>;
+
+export const BookingBalance = z
+  .object({
+    state: z
+      .enum(["paid", "scheduled", "due", "overdue", "canceled"])
+      .describe(
+        "paid: nothing owed. scheduled: owed, before the first reminder. due: owed, within 7 days of the due date. overdue: owed, past the due date; nothing cancels the booking. canceled: the booking was canceled",
+      ),
+    currency: z.literal("USD"),
+    total: Cents.describe("The booking's total"),
+    deposit: Cents.describe("Charged at checkout"),
+    paidIn: Cents.describe("Deposit paid, balance payments, and external payments staff recorded"),
+    owed: Cents.describe("Left to pay; zero once paid or canceled"),
+    overpaid: Cents.describe("Money in above the total, which staff return"),
+    dueAt: Instant.describe("When the balance is due: the newest staff change, else the booking's"),
+    originalDueAt: Instant,
+    payments: z.array(
+      z.object({
+        id: Uuid,
+        amount: Cents,
+        state: z.enum(["pending", "succeeded", "failed", "abandoned"]),
+        createdAt: Instant,
+        succeededAt: Instant.nullable(),
+      }),
+    ),
+    dueChanges: z.array(
+      z.object({
+        dueAt: Instant,
+        reason: z
+          .string()
+          .nullable()
+          .describe("Staff's reason; null for a reader without booking access, and for the guest"),
+        changedAt: Instant,
+      }),
+    ),
+  })
+  .describe("A private charter's deposit and balance (W3-G2.8)");
+export type BookingBalance = z.infer<typeof BookingBalance>;
 
 export const BookingTimelineEvent = z.object({
   kind: z.enum([
@@ -353,8 +422,16 @@ export const BookingDetail = z.object({
   extras: z.array(BookingExtra),
   policyVersion: z.number().int().min(1).describe("The policy version the guest accepted"),
   order: BookingOrder,
-  payment: BookingPayment,
+  payment: BookingPayment.nullable().describe(
+    "Null on a complimentary booking, which has no payment (see complimentary)",
+  ),
+  complimentary: BookingComplimentary.nullable()
+    .optional()
+    .describe("The owner's grant on a complimentary booking; null or absent on a paid one"),
   refund: BookingRefund.nullable(),
+  balance: BookingBalance.nullable()
+    .optional()
+    .describe("A private charter's balance; null or absent when the booking paid in full"),
   timeline: z
     .array(BookingTimelineEvent)
     .describe("Checkout opened, paid, confirmed, any cancellation, and any refund, oldest first"),

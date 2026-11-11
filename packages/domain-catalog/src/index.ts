@@ -15,6 +15,14 @@ export {
   type RangeProblem,
   type TripStateResult,
 } from "./catalog.ts";
+export {
+  archiveImportantLink,
+  createImportantLink,
+  guestImportantLinks,
+  type ImportantLinkResult,
+  listImportantLinks,
+  updateImportantLink,
+} from "./important-links.ts";
 export { departuresTooClose, expandSchedule, validateScheduleRule } from "./recurrence.ts";
 export * from "./schedule-types.ts";
 export {

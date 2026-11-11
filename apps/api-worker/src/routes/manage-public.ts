@@ -1,9 +1,14 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  BalancePaymentResponse,
+  BookerContactRequest,
   CancelBookingRequest,
   CancelBookingResponse,
   CancellationTermsResponse,
   CheckoutSessionParams,
+  GuestBookerContactResponse,
+  GuestRemoveParticipantResponse,
+  GuestRescheduleResponse,
   IdempotencyKey,
   type ManagedBooking,
   ManagedBookingResponse,
@@ -13,8 +18,13 @@ import {
   ManageSessionEndResponse,
   ManageSessionResponse,
   ParticipantInput,
+  ParticipantInvitationResponse,
   ParticipantPosition,
   ParticipantResponse,
+  RemoveParticipantRequest,
+  ReschedulePreviewResponse,
+  RescheduleRequest,
+  StripeElementConfig,
 } from "@tidegrid/contracts";
 import {
   claimIdempotencyKey,
@@ -30,18 +40,26 @@ import {
   BookingHookRefusal,
   type CancellationTerms,
   cancelBooking,
+  changeBookerContact,
   checkoutSecretPattern,
+  ensureBalanceProviderPayment,
   getManagedBooking,
+  inviteParticipant,
   type ManagedBookingView,
   manageSession,
+  openBalancePayment,
   openManageSession,
   openManageSessionFromCheckout,
   previewCancellation,
+  previewReschedule,
   putParticipant,
+  removeParticipant,
   renewManageLink,
   requestManageLink,
+  rescheduleBooking,
   settleRefund,
 } from "@tidegrid/domain-booking";
+import { guestImportantLinks } from "@tidegrid/domain-catalog";
 import { type GuestSession, revokeGuestSession } from "@tidegrid/domain-messaging";
 import type { Context } from "hono";
 import { sql } from "kysely";
@@ -57,6 +75,10 @@ import {
   resolvePublicTenant,
   withPublicTenant,
 } from "../public-tenant.ts";
+import { stripePublishableKey } from "./checkout-public.ts";
+import { invitationRefusal } from "./participant-public.ts";
+import { bookerContactRefusal, partyChangeRefusal } from "./participants-staff.ts";
+import { previewJson, rescheduleRefusal } from "./reschedules-staff.ts";
 import { errorBody } from "./responses.ts";
 
 const redeemPath = "/v1/public/booking-access";
@@ -64,9 +86,14 @@ const renewPath = "/v1/public/booking-access/renewals";
 const fromCheckoutPath = "/v1/public/checkout-sessions/{checkoutSessionId}/manage-session";
 const bookingPath = "/v1/public/manage/booking";
 const participantPath = "/v1/public/manage/participants/{position}";
+const removalPath = "/v1/public/manage/participants/{position}/removal";
+const invitationPath = "/v1/public/manage/participants/{position}/invitation";
+const bookerPath = "/v1/public/manage/booker";
 const cancellationPath = "/v1/public/manage/cancellation";
 const linkEmailPath = "/v1/public/manage/link-email";
 const endPath = "/v1/public/manage/session/end";
+const balancePaymentPath = "/v1/public/manage/balance-payment";
+const reschedulePath = "/v1/public/manage/reschedule";
 
 const sessionSecurity = [{ manageSession: [] }];
 
@@ -79,6 +106,26 @@ const sessionRequired = () =>
 const sessionExpired = () =>
   new ApiError(401, "session_expired", "This booking session has ended; open your link again");
 const bookingGone = () => new ApiError(404, "booking_not_found", "No such booking at this address");
+
+/** The card form's account for a balance payment under Stripe (W3-G2.8), as checkout's. */
+async function balanceStripeElement(
+  c: Context<AppEnv>,
+  ctx: TenantContext,
+  paymentId: string,
+  publishableKey: string,
+): Promise<StripeElementConfig | null> {
+  const row = await inTenantTransaction(getDb(c), ctx, (trx) =>
+    trx
+      .selectFrom("balance_payments")
+      .select("account_ref")
+      .where("tenant_id", "=", ctx.tenantId)
+      .where("id", "=", paymentId)
+      .where("provider", "=", "stripe")
+      .executeTakeFirst(),
+  );
+  const parsed = StripeElementConfig.safeParse({ publishableKey, account: row?.account_ref });
+  return parsed.success ? parsed.data : null;
+}
 
 /** The session token from `Authorization: Bearer <token>`; never accepted in a URL. */
 function bearer(c: Context<AppEnv>): string {
@@ -118,14 +165,17 @@ function managedJson(view: ManagedBookingView): ManagedBooking {
     party: b.party,
     extras: b.extras,
     order: b.order,
-    payment: {
-      provider: b.payment.provider,
-      state: b.payment.state,
-      amount: b.payment.amount,
-      currency: "USD",
-    },
+    payment: b.payment
+      ? {
+          provider: b.payment.provider,
+          state: b.payment.state,
+          amount: b.payment.amount,
+          currency: "USD",
+        }
+      : null,
     refund: b.refund,
     cancellation: b.cancellation,
+    balance: b.balance,
     policy: view.policy,
     participants: view.party,
     partyEditable: view.partyEditable,
@@ -151,7 +201,7 @@ interface SessionCommand {
  */
 async function withManageSession<T extends JsonObject>(
   c: Context<AppEnv>,
-  options: { idempotency?: SessionCommand; limit?: boolean },
+  options: { idempotency?: SessionCommand; limit?: boolean; endsSession?: boolean },
   run: (trx: TenantTransaction, ctx: TenantContext, session: GuestSession) => Promise<T>,
 ): Promise<{ body: T; replayed: boolean; ctx: TenantContext; session: GuestSession }> {
   const tenantId = await resolvePublicTenant(c);
@@ -186,6 +236,17 @@ async function withManageSession<T extends JsonObject>(
         }
       }
       const body = await run(trx, ctx, session);
+      // The session again, after the command took its locks: staff who
+      // corrected the booker's email (or anything else that ended this
+      // session) while it waited on them committed first, so nothing it did
+      // may stand. Everything rolls back.
+      if (!options.endsSession) {
+        const { rows: live } = await sql<{ id: string }>`
+          select id from guest_sessions
+           where tenant_id = ${tenantId} and id = ${session.sessionId}
+             and revoked_at is null and expires_at > now()`.execute(trx);
+        if (live.length === 0) throw sessionExpired();
+      }
       if (claim) await completeIdempotencyKey(trx, ctx, claim, { status: 200, body });
       return { body, replayed: false, ctx, session };
     });
@@ -201,7 +262,15 @@ async function withManageSession<T extends JsonObject>(
 async function managedBody(trx: TenantTransaction, tenantId: string, bookingId: string) {
   const view = await getManagedBooking(trx, tenantId, bookingId);
   if (!view) throw bookingGone();
-  return managedJson(view);
+  // The operator's important links for the booking's product (W3-G2.14b-rest).
+  const trip = await trx
+    .selectFrom("scheduled_trips")
+    .select("product_id")
+    .where("tenant_id", "=", tenantId)
+    .where("id", "=", view.booking.trip.tripId)
+    .executeTakeFirst();
+  const importantLinks = await guestImportantLinks(trx, tenantId, trip?.product_id ?? null);
+  return { ...managedJson(view), importantLinks };
 }
 
 /**
@@ -431,7 +500,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       401: errorBody("No session (session_required), or it has ended (session_expired)"),
       404: errorBody("No active tenant hostname matches the origin"),
       409: errorBody(
-        "The booking is canceled (booking_canceled), its trip has departed (trip_departed), or the waiver module refused the change (its own code)",
+        "The booking is canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_not_found), or the waiver module refused the change (its own code)",
       ),
       422: errorBody(
         "The place is past the party size (position_out_of_range), or idempotency_key_reused",
@@ -479,6 +548,12 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
               "position_out_of_range",
               `This party has ${put.partySize} place(s)`,
             );
+          case "place_removed":
+            throw new ApiError(
+              409,
+              "place_not_found",
+              "This place was given up; the party has no such place now",
+            );
         }
       },
     );
@@ -487,6 +562,215 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     // waiver email through the booking hooks; send it now, not at the sweep.
     else deliverAfterCommit(c, deps, ctx.tenantId);
     return c.json(body as ParticipantResponse, 200);
+  });
+
+  const removalRoute = createRoute({
+    method: "post",
+    path: removalPath,
+    tags: ["public", "manage"],
+    summary: "Give up one place in the party",
+    description: [
+      "Needs the booking session and an Idempotency-Key. Before the policy's change cutoff, the guest gives up one place in a shared-seat party: whoever was named there is removed and their waiver withdrawn, and the seat goes back on sale. The price does not change. Places keep their numbers; the place given up is not named again. Not for a private charter, and not the last place (cancel the booking instead).",
+      "partySize is the size the guest saw; if the party is another size now, nothing changes (409 booking_changed). A repeat of the same change answers 200 with the booking as it stands.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    request: {
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      params: z.object({ position: ParticipantPosition }),
+      body: {
+        required: true,
+        content: { "application/json": { schema: RemoveParticipantRequest } },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: GuestRemoveParticipantResponse } },
+        description: "The booking with its smaller party, and the change",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), is a private charter (party_change_not_allowed), its trip has departed (trip_departed), it is past its change cutoff (party_change_cutoff_passed), the party is not partySize now (booking_changed), the party has no such place (place_not_found), it is the last place (last_place), or the trip can't keep the smaller party (trip_unavailable)",
+      ),
+      422: errorBody("idempotency_key_reused"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+    },
+  });
+
+  app.openapi(removalRoute, async (c) => {
+    const { position } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const key = c.req.valid("header")["idempotency-key"];
+    let removed = false;
+    const { body, replayed, ctx } = await withManageSession(
+      c,
+      {
+        idempotency: {
+          scope: "public.manage.participants.remove",
+          key,
+          route: removalPath,
+          params: { position: String(position) },
+          body: input,
+        },
+      },
+      async (trx, txCtx, session) => {
+        const result = await removeParticipant(
+          trx,
+          txCtx,
+          { bookingId: session.bookingId, position, partySize: input.partySize },
+          bookingHooksFor(c.env, deps),
+        );
+        if (result.kind !== "removed" && result.kind !== "already_removed") {
+          throw partyChangeRefusal(result, bookingGone);
+        }
+        removed = result.kind === "removed";
+        return {
+          booking: await managedBody(trx, txCtx.tenantId, session.bookingId),
+          change: JSON.parse(JSON.stringify(result.change)),
+        };
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    if (removed) deliverAfterCommit(c, deps, ctx.tenantId);
+    return c.json(body as GuestRemoveParticipantResponse, 200);
+  });
+
+  const invitationRoute = createRoute({
+    method: "post",
+    path: invitationPath,
+    tags: ["public", "manage"],
+    summary: "Invite one participant to check their own details",
+    description: [
+      "Needs the booking session and an Idempotency-Key. Emails the participant named at the place a link of their own, to the participant's own address on file, or a minor's guardian's; never to an address in the request. The link opens only that participant's details and the trip, never the rest of the party or the payment, and works once, for seven days or until the trip leaves. A newer invitation's link replaces an older unused one.",
+      "At most 3 invitations a person in 24 hours, and 20 a booking. A repeat with the same key answers as the first did and sends nothing more.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    request: {
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      params: z.object({ position: ParticipantPosition }),
+    },
+    responses: {
+      202: {
+        content: { "application/json": { schema: ParticipantInvitationResponse } },
+        description: "Queued; it goes out after this request",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+      ),
+      422: errorBody(
+        "No such place in this party (position_out_of_range), or idempotency_key_reused",
+      ),
+      429: errorBody(
+        "Too many invitations for this person or booking today (invitation_limit_reached), or too many requests from this address (rate_limited)",
+      ),
+    },
+  });
+
+  app.openapi(invitationRoute, async (c) => {
+    const { position } = c.req.valid("param");
+    const key = c.req.valid("header")["idempotency-key"];
+    let invited = false;
+    const { body, replayed, ctx } = await withManageSession(
+      c,
+      {
+        idempotency: {
+          scope: "public.manage.participants.invite",
+          key,
+          route: invitationPath,
+          params: { position: String(position) },
+          body: {},
+        },
+      },
+      async (trx, txCtx, session) => {
+        const result = await inviteParticipant(trx, txCtx, {
+          bookingId: session.bookingId,
+          position,
+        });
+        if (result.kind !== "invited") throw invitationRefusal(result, bookingGone);
+        invited = true;
+        return { status: "accepted" as const, recipient: result.recipient };
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    if (invited) deliverAfterCommit(c, deps, ctx.tenantId);
+    return c.json(body as ParticipantInvitationResponse, 202);
+  });
+
+  const bookerRoute = createRoute({
+    method: "put",
+    path: bookerPath,
+    tags: ["public", "manage"],
+    summary: "Correct the booker's own name and email",
+    description: [
+      "Needs the booking session and an Idempotency-Key. The booker's name and email as they should be, on a confirmed booking whose trip has not left. At most 3 corrections by the guest a booking in 24 hours; staff are not limited, so they can always restore it.",
+      "When the email changes: links sent to the old address stop working, every other session on this booking ends (this one stays open), the trip and balance reminders not yet sent go to the new address instead, the old address gets a notice with the new one partly hidden and no link, and the new address gets a fresh link. A name-only change sends nothing.",
+      "Sending the details already on the booking changes nothing and answers 200 with change null.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    request: {
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      body: {
+        required: true,
+        content: { "application/json": { schema: BookerContactRequest } },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: GuestBookerContactResponse } },
+        description: "The booking with the booker as corrected, and the change",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), or another correction landed a moment ago (booking_changed; read the booking again and retry)",
+      ),
+      422: errorBody("idempotency_key_reused"),
+      429: errorBody(
+        "Three corrections already in the last 24 hours (contact_change_limit_reached), or too many requests from this address (rate_limited)",
+      ),
+    },
+  });
+
+  app.openapi(bookerRoute, async (c) => {
+    const input = c.req.valid("json");
+    const key = c.req.valid("header")["idempotency-key"];
+    let changed = false;
+    const { body, replayed, ctx } = await withManageSession(
+      c,
+      {
+        idempotency: {
+          scope: "public.manage.booker",
+          key,
+          route: bookerPath,
+          params: {},
+          body: input,
+        },
+      },
+      async (trx, txCtx, session) => {
+        const result = await changeBookerContact(trx, txCtx, {
+          bookingId: session.bookingId,
+          name: input.name,
+          email: input.email,
+          keepSessionId: session.sessionId,
+        });
+        if (result.kind !== "changed" && result.kind !== "unchanged") {
+          throw bookerContactRefusal(result, bookingGone);
+        }
+        changed = result.kind === "changed";
+        return {
+          booking: await managedBody(trx, txCtx.tenantId, session.bookingId),
+          change: result.kind === "changed" ? JSON.parse(JSON.stringify(result.change)) : null,
+        };
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    if (changed) deliverAfterCommit(c, deps, ctx.tenantId);
+    return c.json(body as GuestBookerContactResponse, 200);
   });
 
   const termsRoute = createRoute({
@@ -622,6 +906,102 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     return c.json(result, 200);
   });
 
+  const reschedulePreviewRoute = createRoute({
+    method: "get",
+    path: reschedulePath,
+    tags: ["public", "manage"],
+    summary: "What moving the booking now would do",
+    description:
+      "Needs the booking session. Whether the guest may move the booking now (before its policy's change cutoff, and before the trip leaves), the policy's reschedule text, and the other departures of the same trip it could move to, soonest first, each with whether it would take the whole party now; only departures on sale are listed. The price does not change. Read-only and advisory. Rate limited per client address and tenant.",
+    security: sessionSecurity,
+    responses: {
+      200: {
+        content: { "application/json": { schema: ReschedulePreviewResponse } },
+        description: "The preview",
+      },
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+    },
+  });
+
+  app.openapi(reschedulePreviewRoute, async (c) => {
+    // Limited like a command: it reads every option's capacity.
+    const { body } = await withManageSession(c, { limit: true }, async (trx, ctx, session) => {
+      const preview = await previewReschedule(trx, ctx.tenantId, session.bookingId, {
+        forGuest: true,
+      });
+      if (!preview) throw bookingGone();
+      return { preview: previewJson(preview) };
+    });
+    return c.json(body as ReschedulePreviewResponse, 200);
+  });
+
+  const rescheduleRoute = createRoute({
+    method: "post",
+    path: reschedulePath,
+    tags: ["public", "manage"],
+    summary: "Move the booking to another departure",
+    description: [
+      "Needs the booking session and an Idempotency-Key. Before the policy's change cutoff, the guest moves the whole booking to another departure of the same trip. One transaction: the seats on the new departure are taken first, then the booking moves and its old seats go back on sale; if the new departure has no room, nothing changes. The price does not change. The guest is emailed the new time.",
+      "fromTripId is the departure the guest saw the booking on; if it is on another now, nothing changes (409 booking_changed). A repeat of the same move answers 200 with the booking as it stands.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    request: {
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      body: { required: true, content: { "application/json": { schema: RescheduleRequest } } },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: GuestRescheduleResponse } },
+        description: "The moved booking",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), it is past its change cutoff (reschedule_cutoff_passed), it is no longer on fromTripId (booking_changed), the trip is not another departure of the same trip (trip_not_eligible), or that departure can't take the party now (trip_unavailable)",
+      ),
+      422: errorBody("idempotency_key_reused"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+    },
+  });
+
+  app.openapi(rescheduleRoute, async (c) => {
+    const input = c.req.valid("json");
+    const key = c.req.valid("header")["idempotency-key"];
+    let moved = false;
+    const { body, replayed, ctx } = await withManageSession(
+      c,
+      {
+        idempotency: {
+          scope: "public.manage.reschedule.create",
+          key,
+          route: reschedulePath,
+          body: input,
+        },
+      },
+      async (trx, txCtx, session) => {
+        const result = await rescheduleBooking(trx, txCtx, {
+          bookingId: session.bookingId,
+          fromTripId: input.fromTripId,
+          toTripId: input.toTripId,
+        });
+        if (result.kind !== "moved" && result.kind !== "already_moved") {
+          throw rescheduleRefusal(result, bookingGone);
+        }
+        moved = result.kind === "moved";
+        return {
+          booking: await managedBody(trx, txCtx.tenantId, session.bookingId),
+          move: JSON.parse(JSON.stringify(result.move)),
+        };
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    if (moved) deliverAfterCommit(c, deps, ctx.tenantId);
+    return c.json(body as GuestRescheduleResponse, 200);
+  });
+
   const linkEmailRoute = createRoute({
     method: "post",
     path: linkEmailPath,
@@ -663,6 +1043,109 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     return c.json({ status: "accepted" as const }, 202);
   });
 
+  const balancePaymentRoute = createRoute({
+    method: "post",
+    path: balancePaymentPath,
+    tags: ["public", "manage"],
+    summary: "Pay a private charter's balance",
+    description: [
+      "Needs the booking session. Opens a card payment for exactly what the booking owes now, or returns the open one when the balance has not changed; one for an older balance is abandoned. Returns what the browser pays with. Only a verified provider event marks it paid: read the booking again after paying. Nothing is ever charged without the guest.",
+      "409 nothing_owed when the booking paid in full, owes nothing, was canceled, or its trip has left; 409 amount_too_small when what is left is below the provider's smallest charge (staff record it instead). Never cached; keep the client secret out of URLs and logs.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    responses: {
+      200: {
+        content: { "application/json": { schema: BalancePaymentResponse } },
+        description: "What to pay with",
+      },
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "Nothing is owed (nothing_owed), too little to charge (amount_too_small), or the balance changed while the payment was being prepared (balance_changed)",
+      ),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+      503: errorBody(
+        "Payments are not configured, or under Stripe the card form is not (payments_unavailable); or the provider did not answer (payment_provider_unavailable)",
+      ),
+    },
+  });
+
+  app.openapi(balancePaymentRoute, async (c) => {
+    c.header("Cache-Control", "no-store");
+    const provider = providerFor(c, deps);
+    if (!provider) {
+      throw new ApiError(503, "payments_unavailable", "Payments are not configured here");
+    }
+    const publishableKey = provider.name === "stripe" ? stripePublishableKey(c.env) : null;
+    if (provider.name === "stripe" && !publishableKey) {
+      throw new ApiError(503, "payments_unavailable", "The card form is not configured here");
+    }
+    const { body, ctx } = await withManageSession(
+      c,
+      { limit: true },
+      async (trx, txCtx, session) => {
+        const opened = await openBalancePayment(trx, txCtx, {
+          bookingId: session.bookingId,
+          provider: provider.name,
+          minimumAmount: provider.minimumAmount("USD"),
+        });
+        switch (opened.kind) {
+          case "opened":
+            return { paymentId: opened.paymentId, amount: opened.amount };
+          case "not_found":
+            throw bookingGone();
+          case "nothing_owed":
+            throw new ApiError(409, "nothing_owed", "Nothing is owed on this booking");
+          case "amount_too_small":
+            throw new ApiError(
+              409,
+              "amount_too_small",
+              "What is left is too small to pay by card; contact the operator",
+            );
+          case "payments_unavailable":
+            throw new ApiError(503, "payments_unavailable", "Payments are not configured here");
+        }
+      },
+    );
+    // Outside any transaction, as for checkout.
+    const ready = await ensureBalanceProviderPayment(getDb(c), provider, ctx, body.paymentId);
+    if (ready.kind === "not_open") {
+      // Canceled, or the balance changed, while the provider answered.
+      throw new ApiError(409, "balance_changed", "The balance changed; read the booking again");
+    }
+    if (ready.kind !== "ready") {
+      c.get("log").warn("payment_provider_unavailable", {
+        "event.name": "payment_provider_unavailable",
+        "tidegrid.tenant_id": ctx.tenantId,
+        "error.type": ready.kind === "unavailable" ? ready.reason : ready.kind,
+      });
+      throw new ApiError(
+        503,
+        "payment_provider_unavailable",
+        "The payment provider did not answer; try again later",
+      );
+    }
+    const stripe =
+      ready.provider === "stripe" && publishableKey
+        ? await balanceStripeElement(c, ctx, body.paymentId, publishableKey)
+        : null;
+    if (ready.provider === "stripe" && !stripe) {
+      throw new ApiError(503, "payments_unavailable", "The card form is not configured here");
+    }
+    return c.json(
+      {
+        amount: body.amount,
+        payment: {
+          provider: ready.provider,
+          paymentRef: ready.paymentRef,
+          clientSecret: ready.clientSecret,
+          ...(stripe ? { stripe } : {}),
+        },
+      },
+      200,
+    );
+  });
+
   const endRoute = createRoute({
     method: "post",
     path: endPath,
@@ -681,7 +1164,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
   });
 
   app.openapi(endRoute, async (c) => {
-    await withManageSession(c, { limit: true }, async (trx, ctx, session) => {
+    await withManageSession(c, { limit: true, endsSession: true }, async (trx, ctx, session) => {
       await revokeGuestSession(trx, ctx, session.sessionId);
       return { ended: true };
     });

@@ -50,6 +50,7 @@
  * opens nothing, and the attempt records nothing and is never retried.
  */
 import {
+  type AccessPurpose,
   type AccessRevocationReason,
   type Database,
   inTenantTransaction,
@@ -69,7 +70,15 @@ import {
 } from "./adapter.ts";
 import { deliverySender, loadEmailBrand } from "./brand.ts";
 import { revokeMessageLinks } from "./enqueue.ts";
-import { REMINDER_TOO_LATE, TRIP_REMINDER_TEMPLATE, tripReminderTiming } from "./reminders.ts";
+import {
+  BALANCE_LINK_TEMPLATE,
+  BALANCE_REMINDER_TEMPLATE,
+  BALANCE_SETTLED,
+  balanceEmailTiming,
+  REMINDER_TOO_LATE,
+  TRIP_REMINDER_TEMPLATE,
+  tripReminderTiming,
+} from "./reminders.ts";
 import { fillLinkSlot } from "./render.ts";
 import { ADDRESS_SUPPRESSED, isSuppressed, type SenderPolicy, senderAddressFor } from "./sender.ts";
 
@@ -238,7 +247,7 @@ interface ClaimedRow {
   subject: string;
   html_body: string;
   text_body: string;
-  link_purpose: "booking_manage" | "waiver_sign" | null;
+  link_purpose: AccessPurpose | null;
   link_path: string | null;
   link_ttl_seconds: number | null;
   link_slot: string | null;
@@ -486,6 +495,75 @@ async function claimOne(
         } as const;
       }
     }
+    // A participant's invitation (W3-G2.11-rest, 0036) is only worth sending
+    // while it is still the one that should arrive, checked again here
+    // because a retry can wait for hours and a change can race the write:
+    // - closed: the booking canceled, the trip started, or the participant
+    //   removed, so its link could open nothing;
+    // - recipient_changed: the participant's address (or a minor's
+    //   guardian's) is no longer the one it was written to;
+    // - superseded: a newer invitation to the same participant was written,
+    //   so this one's link must not outlive or sit beside that one's.
+    // It is canceled with no provider call, never left queued: it would
+    // come first in every later run.
+    if (found.link_purpose === "participant_profile" && found.booking_id !== null) {
+      const { rows: checks } = await sql<{
+        open: boolean | null;
+        recipient: string | null;
+        newer: boolean;
+      }>`
+        select app.profile_access_open(${ctx.tenantId}::uuid, ${found.booking_id}::uuid,
+                                       ${found.participant_id}::uuid) as open,
+               (select case when p.is_minor then p.guardian_email else p.email end
+                  from booking_participants p
+                 where p.tenant_id = ${ctx.tenantId} and p.id = ${found.participant_id}::uuid)
+                 as recipient,
+               exists (select 1 from email_messages n
+                        where n.tenant_id = ${ctx.tenantId}
+                          and n.booking_id = ${found.booking_id}::uuid
+                          and n.participant_id = ${found.participant_id}::uuid
+                          and n.link_purpose = 'participant_profile'
+                          and n.state <> 'canceled'
+                          and (n.created_at, n.id) > (select m.created_at, m.id from email_messages m
+                                                       where m.tenant_id = ${ctx.tenantId}
+                                                         and m.id = ${found.id}::uuid))
+                 as newer`.execute(trx);
+      const check = checks[0];
+      const code =
+        check?.open !== true
+          ? INVITATION_CLOSED
+          : check.recipient !== found.to_email
+            ? "recipient_changed"
+            : check.newer
+              ? INVITATION_SUPERSEDED
+              : null;
+      if (code !== null) {
+        await sql`
+          update email_messages set state = 'canceled', last_error_code = ${code}
+           where tenant_id = ${ctx.tenantId} and id = ${found.id}
+             and state in ('queued', 'sending')`.execute(trx);
+        return { kind: "canceled", messageId: found.id, attempt: found.attempts, code } as const;
+      }
+    }
+    // A balance email (W3-G2.8) is only worth sending while something is
+    // owed: one whose balance was paid, or whose booking was canceled, since
+    // it was written is canceled as balance_settled, with no provider call.
+    if (found.template === BALANCE_REMINDER_TEMPLATE || found.template === BALANCE_LINK_TEMPLATE) {
+      const timing = await balanceEmailTiming(trx, ctx.tenantId, found.booking_id);
+      if (timing === "busy") return { kind: "passed", messageId: found.id } as const;
+      if (timing === "settled") {
+        await sql`
+          update email_messages set state = 'canceled', last_error_code = ${BALANCE_SETTLED}
+           where tenant_id = ${ctx.tenantId} and id = ${found.id}
+             and state in ('queued', 'sending')`.execute(trx);
+        return {
+          kind: "canceled",
+          messageId: found.id,
+          attempt: found.attempts,
+          code: BALANCE_SETTLED,
+        } as const;
+      }
+    }
     const { rows: claimed } = await sql<{ attempts: number }>`
       update email_messages
          set state = 'sending', attempts = attempts + 1,
@@ -538,6 +616,10 @@ async function claimOne(
     return { kind: "ready", row, url: `${base}${row.link_path}#t=${issued.token}` } as const;
   });
 }
+
+/** Why a participant's invitation was canceled at its claim (0036). */
+export const INVITATION_CLOSED = "invitation_closed";
+export const INVITATION_SUPERSEDED = "invitation_superseded";
 
 async function fail(
   trx: TenantTransaction,

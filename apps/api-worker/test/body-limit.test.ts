@@ -164,6 +164,13 @@ describe("request body cap", () => {
     expectMarked(overChunked, "chunked 16,385");
   });
 
+  it("gives the import dry run 4 MiB and only that path (W3-G2.13)", () => {
+    const tenant = "11111111-1111-4111-8111-111111111111";
+    expect(bodyLimitFor(`/v1/staff/tenants/${tenant}/import-dry-runs`)).toBe(4 * 1024 * 1024);
+    expect(bodyLimitFor(`/v1/staff/tenants/${tenant}/import-dry-runs/x`)).toBe(16_384);
+    expect(bodyLimitFor(`/v1/staff/tenants/${tenant}/quotes`)).toBe(16_384);
+  });
+
   it("keeps the webhook's 64 KiB: 65,536 bytes pass the cap, 65,537 do not", async () => {
     const fake: Bindings = {
       ...bindings,

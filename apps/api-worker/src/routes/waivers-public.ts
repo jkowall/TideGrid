@@ -1,5 +1,6 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
+  ManageWaiverResendRequest,
   ManageWaiversResponse,
   WaiverLinkRedeemRequest,
   WaiverLinkRenewalRequest,
@@ -23,12 +24,14 @@ import {
   type RedeemResult,
   redeemWaiverToken,
   renewWaiverLink,
+  resendWaiverForBooker,
   type SigningView,
   signWaiver,
   type WaiverSession,
   waiverSecretPattern,
 } from "@tidegrid/domain-waivers";
 import type { Context } from "hono";
+import { sql } from "kysely";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
@@ -42,6 +45,8 @@ const signaturePath = "/v1/public/waiver-sessions/current/signature";
 const documentPath = "/v1/public/waiver-sessions/current/document";
 /** The booker's view, in lane 1's booking session; the path sits beside lane 1's manage routes. */
 const manageWaiversPath = "/v1/public/manage/waivers";
+/** The booker sends a person's waiver email again (W3-G2.15-rest). */
+const manageResendPath = "/v1/public/manage/waivers/resend";
 /** A guest's own new link for a spent, lapsed, or replaced one (W1-WAIVER-RENEWAL). */
 const renewalPath = "/v1/public/waiver-links/renewal";
 
@@ -190,6 +195,7 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     sessionsPath,
     "/v1/public/waiver-sessions/*",
     manageWaiversPath,
+    manageResendPath,
     renewalPath,
   ]) {
     app.use(path, async (c, next) => {
@@ -538,4 +544,144 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     });
     return c.json(body as ManageWaiversResponse, 200);
   });
+  const resendRoute = createRoute({
+    method: "post",
+    path: manageResendPath,
+    tags: ["public", "manage", "waivers"],
+    summary: "Send a party member's waiver email again",
+    description: [
+      "Resolves the browser Origin and needs the booking session from POST /v1/public/booking-access (lane 1) as a bearer token. Sends the waiver email of the person at `position`, named `name` as the list gave it, again, to the address the latest one went to, never anywhere else. The new email's link replaces the earlier one, as any resend does. To send it somewhere new, the booker changes the address in Who's coming instead.",
+      "Limits: 3 a day for the person, shared with their own new-link requests; the waiver's five sends; and the usual sending limits, including 10 minutes between emails to one address. Nothing goes out while the latest email is still on its way. Answers the party's waivers as GET does, after the send. Rate limited per client address and operator like other public commands.",
+    ].join("\n\n"),
+    security: [{ manageSession: [] }],
+    request: {
+      body: {
+        required: true,
+        content: { "application/json": { schema: ManageWaiverResendRequest } },
+      },
+    },
+    responses: {
+      202: {
+        content: { "application/json": { schema: ManageWaiversResponse } },
+        description: "Queued; the party's waivers as they stand now",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody(
+        "No booking session (session_required), or it has ended (session_expired); open the link again",
+      ),
+      404: errorBody(
+        "No operator at this address, or no one at that place in the party (waiver_participant_not_found)",
+      ),
+      409: errorBody(
+        "The waiver no longer waits for a signature (waiver_not_pending), the trip is over (waiver_trip_over), the latest email is still on its way (waiver_email_pending), nothing went to this address yet (waiver_not_sent), the day's or the waiver's sends are used (waiver_resend_limit), the party changed since the list was read (waiver_participant_changed), an email went to this address in the last 10 minutes (waiver_resend_too_soon), a sending cap holds it (waiver_resend_held), or the email could not be built (waiver_email_invalid)",
+      ),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+    },
+  });
+
+  app.openapi(resendRoute, async (c) => {
+    const token = bookingSessionToken(c);
+    const { position, name } = c.req.valid("json");
+    const wdeps = waiverDeps(deps);
+    // A refusal writes nothing, so the transaction commits empty and the
+    // answer is built outside it.
+    const { body } = await withPublicTenant(c, { limit: true }, async (trx, ctx) => {
+      const session = await manageSession(trx, ctx.tenantId, token);
+      if (!session) {
+        throw new ApiError(
+          401,
+          "session_expired",
+          "This booking session has ended; open your link again",
+        );
+      }
+      // Record the session as the actor, as lane 1's manage commands do, so
+      // the delivery and the audit name which booking session asked.
+      const actor = `guest_session:${session.sessionId}`;
+      await sql`select set_config('app.actor_id', ${actor}, true)`.execute(trx);
+      const sent = await resendWaiverForBooker(trx, { ...ctx, actorId: actor }, wdeps, {
+        bookingId: session.bookingId,
+        position,
+        name,
+      });
+      if (sent.kind === "refused") return { refused: sent.reason } as JsonObject;
+      // The session again, after the send took its locks: staff who corrected
+      // the booker's email (or anything else that ended this session) while
+      // it waited committed first, so the send must not stand. Everything
+      // rolls back, as lane 1's manage commands do.
+      const { rows: live } = await sql<{ id: string }>`
+        select id from guest_sessions
+         where tenant_id = ${ctx.tenantId} and id = ${session.sessionId}
+           and revoked_at is null and expires_at > now()`.execute(trx);
+      if (live.length === 0) {
+        throw new ApiError(
+          401,
+          "session_expired",
+          "This booking session has ended; open your link again",
+        );
+      }
+      const found = await listGuestBookingWaivers(trx, ctx.tenantId, session.bookingId);
+      if (!found) throw new Error("a booking that just sent a waiver was not found");
+      return { tenantId: ctx.tenantId, waivers: guestWaiversJson(found) } as JsonObject;
+    });
+    const result = body as
+      | { refused: string }
+      | { tenantId: string; waivers: ManageWaiversResponse["waivers"] };
+    if ("refused" in result) throw resendRefusal(result.refused);
+    deliverAfterCommit(c, deps, result.tenantId);
+    return c.json({ waivers: result.waivers } satisfies ManageWaiversResponse, 202);
+  });
+}
+
+/** Why the booker's resend did not go out, in words they can act on. */
+function resendRefusal(reason: string): ApiError {
+  switch (reason) {
+    case "not_found":
+      return new ApiError(
+        404,
+        "waiver_participant_not_found",
+        "No one is named at that place in your party",
+      );
+    case "changed":
+      return new ApiError(
+        409,
+        "waiver_participant_changed",
+        "Your party changed since the page loaded; check who you meant",
+      );
+    case "not_pending":
+      return new ApiError(409, "waiver_not_pending", "This waiver no longer waits for a signature");
+    case "trip_over":
+      return new ApiError(
+        409,
+        "waiver_trip_over",
+        "This trip is over, so its waiver takes no signature",
+      );
+    case "email_pending":
+      return new ApiError(409, "waiver_email_pending", "The latest email is still on its way");
+    case "not_sent":
+      return new ApiError(
+        409,
+        "waiver_not_sent",
+        "No waiver email has gone to this address yet; check the address in Who's coming",
+      );
+    case "limit_reached":
+      return new ApiError(
+        409,
+        "waiver_resend_limit",
+        "This waiver has been sent as many times as allowed for now",
+      );
+    case "too_soon":
+      return new ApiError(
+        409,
+        "waiver_resend_too_soon",
+        "An email went to this address in the last 10 minutes; try again after that",
+      );
+    case "held":
+      return new ApiError(
+        409,
+        "waiver_resend_held",
+        "Waiver email to this person, address, or booking has reached its sending limit for now",
+      );
+    default:
+      return new ApiError(409, "waiver_email_invalid", "This waiver email could not be built");
+  }
 }

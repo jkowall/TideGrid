@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  BookingBalance,
   BookingCancellation,
   BookingExtra,
   BookingOrder,
@@ -9,7 +10,8 @@ import {
   BookingState,
 } from "./bookings.ts";
 import { TripSummary } from "./catalog.ts";
-import { PaymentProviderName } from "./checkout.ts";
+import { CheckoutPaymentRead, PaymentProviderName } from "./checkout.ts";
+import { GuestImportantLink } from "./important-links.ts";
 import { ParticipantList } from "./participants.ts";
 
 /**
@@ -125,14 +127,20 @@ export const ManagedBooking = z
     party: BookingParty,
     extras: z.array(BookingExtra),
     order: BookingOrder,
-    payment: z.object({
-      provider: PaymentProviderName,
-      state: z.enum(["pending", "succeeded", "failed"]),
-      amount: Cents,
-      currency: z.literal("USD"),
-    }),
+    payment: z
+      .object({
+        provider: PaymentProviderName,
+        state: z.enum(["pending", "succeeded", "failed"]),
+        amount: Cents,
+        currency: z.literal("USD"),
+      })
+      .nullable()
+      .describe("Null when the operator booked it complimentary: nothing was charged"),
     refund: BookingRefund.nullable(),
     cancellation: BookingCancellation.nullable(),
+    balance: BookingBalance.nullable()
+      .optional()
+      .describe("A private charter's deposit and balance (W3-G2.8); null when paid in full"),
     policy: z.object({
       version: z.number().int().min(1),
       cancellationText: z.string(),
@@ -143,6 +151,12 @@ export const ManagedBooking = z
       .boolean()
       .describe("True while the party can still be named: confirmed and not departed"),
     cancellationTerms: CancellationTerms,
+    importantLinks: z
+      .array(GuestImportantLink)
+      .optional()
+      .describe(
+        "The operator's important links for this booking's product, by position (W3-G2.14b-rest)",
+      ),
   })
   .describe("One booking as its guest may see it: their own details, the receipt, and the party");
 export type ManagedBooking = z.infer<typeof ManagedBooking>;
@@ -228,7 +242,7 @@ export const MessageStatus = z
       .string()
       .nullable()
       .describe(
-        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error, deadline_reached (the run ran out of time before sending it; it retries); from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), delivery_failed (the provider could not deliver it; not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), address_suppressed (this operator suppressed the address after a hard bounce or a spam complaint, so TideGrid did not send it), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, resent: a newer email replaced it, or reminder_too_late: a trip reminder whose booking was canceled or whose trip was about to leave) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically",
+        "The last attempt's error: provider_unavailable, bounced, retries_exhausted, link_host_unmapped, send_error, deadline_reached (the run ran out of time before sending it; it retries); from the Cloudflare adapter also outcome_unknown (the provider may have accepted it, so it is not sent again), delivery_failed (the provider could not deliver it; not sent again), invalid_message, recipient_suppressed (the provider will not deliver to this address), address_suppressed (this operator suppressed the address after a hard bounce or a spam complaint, so TideGrid did not send it), recipient_not_allowed, provider_rate_limited, provider_quota_exceeded, sender_not_verified, provider_account_suspended. Null once sent. For a canceled message, the cancellation's own reason (recipient_changed, access_withdrawn, booking_canceled, resent: a newer email replaced it, or reminder_too_late: a trip reminder whose booking was canceled or whose trip was about to leave, or booking_moved: a trip reminder for the trip the booking moved away from) or null. MESSAGE_FAILURE_CODES lists the known codes; a client shows any other code generically",
       ),
     provider: z.enum(["fake", "cloudflare"]).nullable(),
     staffResend: z
@@ -269,6 +283,7 @@ export const MESSAGE_FAILURE_CODES = [
   "booking_canceled",
   "resent",
   "reminder_too_late",
+  "booking_moved",
 ] as const;
 export type MessageFailureCode = (typeof MESSAGE_FAILURE_CODES)[number];
 
@@ -365,3 +380,15 @@ export const BookingEmailResendResponse = z.object({
   }),
 });
 export type BookingEmailResendResponse = z.infer<typeof BookingEmailResendResponse>;
+
+// Balance payment (W3-G2.8) ------------------------------------------------------------
+
+export const BalancePaymentResponse = z
+  .object({
+    amount: Cents.describe("What this payment charges: exactly what the booking owes now"),
+    payment: CheckoutPaymentRead,
+  })
+  .describe(
+    "What the guest needs to pay a private charter's balance at the provider. Only a verified provider event marks it paid; read the booking again after paying",
+  );
+export type BalancePaymentResponse = z.infer<typeof BalancePaymentResponse>;

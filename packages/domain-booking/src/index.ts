@@ -1,4 +1,40 @@
 // Guest self-service (lane 1, G2.11c): cancellation, management, and email.
+
+// Private-charter deposits and balances (W3-G2.8).
+export {
+  BALANCE_PAYMENT_REUSE_HOURS,
+  BALANCE_REMINDER_MIN_NOTICE_HOURS,
+  type BalancePaymentEventOutcome,
+  type ChangeDueDateResult,
+  cancelQueuedBalanceEmails,
+  changeBalanceDueDate,
+  type EnsureBalancePaymentResult,
+  enqueueBalanceReminders,
+  ensureBalanceProviderPayment,
+  MAX_BALANCE_LINKS_PER_HOUR,
+  type OpenBalancePaymentResult,
+  onBalancePaymentEvent,
+  openBalancePayment,
+  type SendBalanceLinkResult,
+  sendBalanceLink,
+} from "./balance.ts";
+export {
+  BALANCE_DUE_WINDOW_DAYS,
+  type BalanceDueChangeView,
+  type BalancePaymentView,
+  type BalanceState,
+  type BalanceView,
+  getBookingBalance,
+} from "./balance-read.ts";
+// Correcting the booker's own name and email (W3-G2.11-rest, 0037).
+export {
+  type BookerContactChangeRecord,
+  type ChangeBookerContactInput,
+  type ChangeBookerContactResult,
+  changeBookerContact,
+  listBookerContactChanges,
+  MAX_CONTACT_CHANGES_PER_DAY,
+} from "./booker-contact.ts";
 export {
   type CancelBookingResult,
   type CancellationRecord,
@@ -17,6 +53,9 @@ export {
   type BookerDetails,
   type CancelCheckoutResult,
   CHECKOUT_TTL_SECONDS,
+  COMPLIMENTARY_REASONS,
+  type ComplimentaryGrantRequest,
+  type ComplimentaryReason,
   type CreateCheckoutInput,
   type CreateCheckoutResult,
   cancelCheckoutSession,
@@ -73,10 +112,13 @@ export {
   csvInstant,
   csvMoney,
   csvReference,
+  csvSignedMoney,
   csvText,
   dayExportFileName,
+  moneyExportFileName,
   renderCsv,
   renderDayExport,
+  renderMoneyExport,
 } from "./csv.ts";
 export {
   buildDayReport,
@@ -117,6 +159,7 @@ export {
   MANAGE_LINK_TTL_SECONDS,
   MANAGE_PATH,
   REMINDER_TEMPLATE,
+  RESCHEDULED_TEMPLATE,
 } from "./emails.ts";
 // Finalization exception resolution (W1-FIN-EXC).
 export {
@@ -149,8 +192,61 @@ export {
   noBookingHooks,
   type ParticipantEvent,
   type ParticipantField,
+  type ParticipantRemovedEvent,
   type ParticipantUpdatedEvent,
 } from "./hooks.ts";
+// The standard CSV import's dry run (W3-G2.13, part 1).
+export { readCsv } from "./import/csv-read.ts";
+export {
+  type ImportDryRunResult,
+  importContentHash,
+  importErrorColumns,
+  importLookup,
+  renderImportErrors,
+  runImportDryRun,
+} from "./import/dry-run.ts";
+export {
+  COLUMNS as IMPORT_COLUMNS,
+  CONTROL_METRICS as IMPORT_CONTROL_METRICS,
+  IMPORT_FILES,
+  IMPORT_ISSUE_CODES,
+  type ImportFile,
+  type ImportIssue,
+  type ImportIssueCode,
+  looksLikeCardNumber,
+  MAPPING_VERSION as IMPORT_MAPPING_VERSION,
+} from "./import/spec.ts";
+export {
+  type BoatInfo as ImportBoatInfo,
+  type ImportControl,
+  type ImportDryRun,
+  type ImportFileSummary,
+  type ImportLookup,
+  type ImportManifest,
+  type ProductInfo as ImportProductInfo,
+  type TripInfo as ImportTripInfo,
+  validateImport,
+} from "./import/validate.ts";
+// Participant invitations and the participant's own details (W3-G2.11-rest, 0036).
+export {
+  getParticipantProfile,
+  INVITATION_LINK_TTL_SECONDS,
+  INVITATION_TEMPLATE,
+  type InviteParticipantResult,
+  inviteParticipant,
+  MAX_INVITATIONS_PER_BOOKING,
+  MAX_INVITATIONS_PER_INVITEE,
+  type OpenParticipantSessionResult,
+  type OwnDetails,
+  openParticipantSession,
+  PARTICIPANT_PATH,
+  PARTICIPANT_SESSION_TTL_SECONDS,
+  type ParticipantProfileView,
+  type ParticipantSession,
+  participantSession,
+  type UpdateOwnDetailsResult,
+  updateOwnDetails,
+} from "./invitations.ts";
 export {
   getManagedBooking,
   MANAGE_SESSION_TTL_SECONDS,
@@ -165,6 +261,22 @@ export {
   renewManageLink,
   requestManageLink,
 } from "./manage.ts";
+// Money movements for a date range (W3-G2.12-rest).
+export {
+  buildMoneyReport,
+  controlsAgree,
+  MONEY_ENTRY_KINDS,
+  MONEY_REPORT_LIMIT,
+  MONEY_REPORT_MAX_DAYS,
+  type MoneyEntry,
+  type MoneyEntryKind,
+  type MoneyKindTotals,
+  type MoneyReport,
+  type MoneyReportOutcome,
+  type MoneyTotals,
+  moneyTotalsOf,
+  totalsByKind,
+} from "./money-report.ts";
 export {
   type AddBookingNoteResult,
   addBookingNote,
@@ -181,7 +293,17 @@ export {
   type ParticipantView,
   type PutParticipantResult,
   putParticipant,
+  withdrawProfileAccess,
 } from "./participants.ts";
+// Giving up a place in a shared-seat party (W3-G2.11-rest).
+export {
+  listPartyChanges,
+  type PartyChangeIssue,
+  type PartyChangeRecord,
+  type RemoveParticipantInput,
+  type RemoveParticipantResult,
+  removeParticipant,
+} from "./party-changes.ts";
 export {
   requestPaymentCancellation,
   type SettleCancellationResult,
@@ -233,6 +355,20 @@ export {
   type RefundExceptionView,
   raiseRefundException,
 } from "./refunds.ts";
+// Moving a whole booking to another trip (W3-G2.11-rest).
+export {
+  MAX_RESCHEDULE_OPTIONS,
+  previewReschedule,
+  RESCHEDULE_HORIZON_DAYS,
+  type RescheduleInput,
+  type RescheduleOption,
+  type ReschedulePreview,
+  type RescheduleRecord,
+  type RescheduleRefusal,
+  type RescheduleResult,
+  rescheduleBooking,
+  type TripOptionIssue,
+} from "./reschedule.ts";
 export {
   type BookingSearchField,
   type BookingSearchOutcome,
@@ -254,6 +390,9 @@ export {
 } from "./secrets.ts";
 // Staff-assisted booking (G2.12d).
 export {
+  type BookComplimentaryInput,
+  type BookComplimentaryResult,
+  bookComplimentary,
   cancelStaffCheckout,
   getStaffCheckout,
   type OpenStaffCheckoutInput,

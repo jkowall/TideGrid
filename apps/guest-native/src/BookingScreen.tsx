@@ -175,10 +175,11 @@ export function BookingScreen({
         <Body muted>{b.extras.map((e) => `${e.name} × ${e.quantity}`).join(", ")}</Body>
       ) : null}
 
-      <Heading>Paid</Heading>
+      <Heading>{b.payment ? "Paid" : "Complimentary"}</Heading>
       <Body>
-        {formatMoney(b.order.totals.total)}{" "}
-        {b.payment.provider === "fake" ? "(demo test payment)" : ""}
+        {b.payment
+          ? `${formatMoney(b.order.totals.total)} ${b.payment.provider === "fake" ? "(demo test payment)" : ""}`
+          : "Your host booked this trip for you at no charge."}
       </Body>
 
       <Waivers

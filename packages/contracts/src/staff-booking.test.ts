@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { BookingDetail, RosterBooking } from "./bookings.ts";
 import { BookingChannel, BookingSource, StaffBooking } from "./checkout.ts";
-import { StaffCheckoutCreateRequest, StaffTestPaymentRequest } from "./staff-booking.ts";
+import {
+  StaffCheckoutCreateRequest,
+  StaffComplimentaryBookingRequest,
+  StaffTestPaymentRequest,
+} from "./staff-booking.ts";
 
 const open = {
   quoteId: "6a1c3e50-7b2d-4f8e-9a6b-1c2d3e4f5a61",
@@ -50,10 +54,28 @@ describe("staff-assisted booking contracts (G2.12d)", () => {
   });
 
   it("widens the source and names the channels", () => {
-    expect(BookingSource.options).toEqual(["direct", "staff_assisted"]);
+    expect(BookingSource.options).toEqual(["direct", "staff_assisted", "complimentary"]);
     expect(BookingChannel.options).toEqual(["phone", "email", "walk_up"]);
     expect(StaffBooking.shape.source.safeParse("staff_assisted").success).toBe(true);
     expect(StaffBooking.shape.source.safeParse("imported").success).toBe(false);
+  });
+
+  it("takes an owner's complimentary grant with a reason, and a note for other", () => {
+    const base = {
+      quoteId: "00000000-0000-4000-8000-000000000001",
+      acceptedPolicyVersion: 1,
+      booker: { name: "Maya Lopez", email: "maya@example.com" },
+      channel: "phone",
+      attestations: { policyToldToGuest: true, emailReadBack: true },
+    };
+    const ok = (complimentary: unknown) =>
+      StaffComplimentaryBookingRequest.safeParse({ ...base, complimentary }).success;
+    expect(ok({ reasonCode: "service_recovery" })).toBe(true);
+    expect(ok({ reasonCode: "other", note: "Skipper's family" })).toBe(true);
+    expect(ok({ reasonCode: "other" })).toBe(false);
+    expect(ok({ reasonCode: "other", note: "line\nbreak" })).toBe(false);
+    expect(ok({ reasonCode: "free" })).toBe(false);
+    expect(StaffComplimentaryBookingRequest.safeParse(base).success).toBe(false);
   });
 
   it("keeps channel and openedBy optional on reads, so older clients' data still parses", () => {

@@ -30,16 +30,21 @@ import {
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
+import { type CapacityOverrideRequest, confirmHold } from "@tidegrid/domain-inventory";
 import type { PaymentProviderName } from "@tidegrid/domain-payments";
 import { sql } from "kysely";
 import {
   type CancelCheckoutResult,
+  type ComplimentaryGrantRequest,
   type CreateCheckoutResult,
   cancelLockedSession,
   createCheckoutSession,
+  ownerRefFor,
   type StaffCheckoutDetails,
 } from "./checkout.ts";
-import { type CheckoutSessionView, iso, record } from "./views.ts";
+import { createBooking } from "./finalize.ts";
+import { type BookingHooks, noBookingHooks } from "./hooks.ts";
+import { type CheckoutSessionView, iso, loadSessionView, record } from "./views.ts";
 
 export type StaffTestPaymentOutcome = "succeed" | "fail";
 
@@ -50,6 +55,8 @@ export interface OpenStaffCheckoutInput extends StaffCheckoutDetails {
   provider: PaymentProviderName;
   minimumAmount: number;
   ttlSeconds?: number;
+  /** An owner's capacity override for a full trip (W3-G2.12-rest). */
+  capacityOverride?: CapacityOverrideRequest;
 }
 
 /** How a staff member is counted for the open-checkout limit. Never a client address. */
@@ -98,7 +105,101 @@ export async function openStaffCheckout(
     minimumAmount: input.minimumAmount,
     ...(input.ttlSeconds === undefined ? {} : { ttlSeconds: input.ttlSeconds }),
     staff: { channel: input.channel, attestations: input.attestations },
+    ...(input.capacityOverride ? { capacityOverride: input.capacityOverride } : {}),
   });
+}
+
+export interface BookComplimentaryInput
+  extends Omit<OpenStaffCheckoutInput, "provider" | "minimumAmount" | "ttlSeconds"> {
+  complimentary: ComplimentaryGrantRequest;
+}
+
+export type BookComplimentaryResult =
+  | {
+      kind: "booked";
+      bookingId: string;
+      reference: string;
+      /** The order's whole total, waived by the grant. */
+      waivedAmount: number;
+      session: CheckoutSessionView;
+    }
+  | Exclude<CreateCheckoutResult, { kind: "created" }>;
+
+/**
+ * An owner books a guest at no charge (W3-G2.12-rest), in one transaction:
+ * the staff checkout for a quote staff made, as openStaffCheckout opens it,
+ * but with the owner's grant for the order's whole total in place of a
+ * payment; then the hold confirmed and the booking created exactly as a paid
+ * one is (finalize.ts), with its emails, waivers, and hooks. The database
+ * checks the owner, the grant, and that no payment exists (0039). The caller
+ * claims the idempotency key first and commits.
+ */
+export async function bookComplimentary(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: BookComplimentaryInput,
+  hooks: BookingHooks = noBookingHooks,
+): Promise<BookComplimentaryResult> {
+  const actorId = assertStaff(ctx);
+  if (!isUuid(input.quoteId)) return { kind: "quote_not_found" };
+  const { rows } = await sql<{ actor_type: string }>`
+    select actor_type from quotes
+     where tenant_id = ${ctx.tenantId} and id = ${input.quoteId}`.execute(trx);
+  if (rows[0]?.actor_type !== "staff") return { kind: "quote_not_found" };
+  const opened = await createCheckoutSession(trx, ctx, {
+    quoteId: input.quoteId,
+    acceptedPolicyVersion: input.acceptedPolicyVersion,
+    booker: input.booker,
+    secret: unusedSecret(),
+    clientAddress: staffClientAddress(actorId),
+    // Never called: a complimentary checkout has no payment.
+    provider: "fake",
+    minimumAmount: 0,
+    staff: { channel: input.channel, attestations: input.attestations },
+    ...(input.capacityOverride ? { capacityOverride: input.capacityOverride } : {}),
+    complimentary: input.complimentary,
+  });
+  if (opened.kind !== "created") return opened;
+  const session = opened.session;
+  const { rows: located } = await sql<{ hold_id: string; order_id: string; total: number }>`
+    select s.hold_id, o.id as order_id, o.total_amount as total
+      from checkout_sessions s
+      join orders o on o.tenant_id = s.tenant_id and o.checkout_session_id = s.id
+     where s.tenant_id = ${ctx.tenantId} and s.id = ${session.id}`.execute(trx);
+  const held = located[0];
+  if (!held) throw new Error("a complimentary checkout vanished inside its own transaction");
+  const confirmed = await confirmHold(trx, ctx, {
+    holdId: held.hold_id,
+    ownerRef: ownerRefFor(session.id),
+  });
+  if (confirmed.kind !== "confirmed") {
+    throw new Error(
+      `a new complimentary checkout's hold could not be confirmed: ${confirmed.kind}`,
+    );
+  }
+  const booking = await createBooking(
+    trx,
+    ctx,
+    {
+      id: session.id,
+      state: "open",
+      hold_id: held.hold_id,
+      trip_id: session.tripId,
+      party_size: session.partySize,
+    },
+    { orderId: held.order_id, paymentId: null },
+    confirmed.reacquired,
+    hooks,
+  );
+  const view = await loadSessionView(trx, ctx.tenantId, session.id);
+  if (!view) throw new Error("a complimentary checkout vanished inside its own transaction");
+  return {
+    kind: "booked",
+    bookingId: booking.id,
+    reference: booking.reference,
+    waivedAmount: held.total,
+    session: view,
+  };
 }
 
 /** Lock a staff-assisted checkout of this tenant; a guest's reads as nothing. */

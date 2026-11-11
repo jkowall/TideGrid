@@ -735,6 +735,23 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         billing_plans: ["INSERT", "SELECT"],
         fee_invoices: ["INSERT", "SELECT"],
         payment_reconciliation_exceptions: ["INSERT", "SELECT"],
+        // Deposits and balances (0033, W3-G2.8): a due date change is
+        // append-only; a balance payment moves with verified events.
+        balance_due_changes: ["INSERT", "SELECT"],
+        balance_payments: ["INSERT", "SELECT"],
+        // Rescheduling (0034, W3-G2.11-rest): append-only moves.
+        booking_reschedules: ["INSERT", "SELECT"],
+        // Participant removal (0035, W3-G2.11-rest): append-only party changes.
+        booking_party_changes: ["INSERT", "SELECT"],
+        // Booker contact corrections (0037, W3-G2.11-rest): append-only, and
+        // written only by the checkout's own trigger.
+        booking_contact_changes: ["INSERT", "SELECT"],
+        // Capacity overrides (0038, W3-G2.12-rest): append-only, owners only.
+        capacity_overrides: ["INSERT", "SELECT"],
+        complimentary_grants: ["INSERT", "SELECT"],
+        import_runs: ["INSERT", "SELECT"],
+        // Important links (0041, W3-G2.14b-rest): edited in place, archived, never deleted.
+        important_links: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -760,7 +777,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         capacity_holds: ["state"],
         // Checkout and confirmation (G2.7): only the columns that carry a
         // transition; triggers stamp the times and check the evidence.
-        checkout_sessions: ["state"],
+        // The booker's name and email (0037), in one checked shape only.
+        checkout_sessions: ["booker_email", "booker_name", "state"],
         orders: ["status"],
         payments: [
           "checked_at",
@@ -773,8 +791,15 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         provider_events: ["outcome", "processing_state"],
         // Guest self-service (lane 1, G2.11c): a participant's details may be
         // corrected, and a booking may move to canceled with its cancellation.
-        booking_participants: ["email", "full_name", "guardian_email", "guardian_name", "is_minor"],
-        bookings: ["state"],
+        booking_participants: [
+          "email",
+          "full_name",
+          "guardian_email",
+          "guardian_name",
+          "is_minor",
+          "removed_at",
+        ],
+        bookings: ["hold_id", "party_size", "state", "trip_id"],
         // A message's delivery moves, a link is used or revoked, a session is revoked.
         email_messages: [
           "attempts",
@@ -803,6 +828,18 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         tenant_deletion_requests: ["state"],
         // Payment reconciliation (0031): a dispute moves with its verified events.
         payment_disputes: ["last_event_id", "status"],
+        // Deposits and balances (0033): a balance payment's transition and evidence.
+        balance_payments: ["failed_event_id", "provider_payment_id", "state", "succeeded_event_id"],
+        important_links: [
+          "description",
+          "label",
+          "position",
+          "product_ids",
+          "status",
+          "updated_at",
+          "updated_by",
+          "url",
+        ],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a

@@ -99,15 +99,22 @@
 .manage-party__slot:first-child {
   border-top: 0;
 }
-.manage-party__slot > .tg-button {
+.manage-party__slot > .tg-button,
+.manage-party__actions {
   grid-column: 1 / -1;
   justify-self: start;
+}
+.manage-party__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 @media (min-width: 30rem) {
   .manage-party__slot {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
-  .manage-party__slot > .tg-button {
+  .manage-party__slot > .tg-button,
+  .manage-party__actions {
     grid-column: auto;
   }
 }
@@ -153,4 +160,31 @@
 /* A focus target once something happened, such as a cancellation, not a control. */
 .manage-done:focus {
   outline: none;
+}
+
+/* Important links (W3-G2.14b-rest): beside the arrival details. */
+.manage-links {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.manage-links-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+.manage-links-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.manage-links-list a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
 }

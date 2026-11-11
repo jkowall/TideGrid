@@ -223,6 +223,7 @@
   list-style: none;
 }
 .wv-party__item {
+  position: relative;
   display: grid;
   gap: var(--space-1);
   min-width: 0;
@@ -259,6 +260,36 @@
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   vertical-align: middle;
+}
+.wv-party__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.wv-party__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-body);
+}
+/* An empty note stays in the accessibility tree, so a refusal written into it is announced. */
+.wv-party__note:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.wv-party__note:focus {
+  outline: none;
+}
+.wv-party__note:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+.wv-party__note--problem {
+  color: var(--status-blocked);
 }
 .wv-party__skeleton {
   display: grid;

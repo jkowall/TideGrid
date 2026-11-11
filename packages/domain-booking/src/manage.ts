@@ -125,6 +125,14 @@ export async function openManageSessionFromCheckout(
   if (!row) return { kind: "not_found" };
   if (!row.booking_id || !row.reference) return { kind: "not_confirmed" };
   if (!row.within) return { kind: "window_closed" };
+  // Once the booker's email was corrected, only a link to the new address
+  // opens the booking (W3-G2.11-rest): the secret may be on the device
+  // someone used to take the booking over.
+  const { rows: moved } = await sql<{ id: string }>`
+    select id from booking_contact_changes
+     where tenant_id = ${ctx.tenantId} and booking_id = ${row.booking_id} and email_changed
+     limit 1`.execute(trx);
+  if (moved.length > 0) return { kind: "window_closed" };
   const session = await openGuestSession(trx, ctx, {
     checkout: { checkoutSessionId: input.checkoutSessionId, bookingId: row.booking_id },
     ttlSeconds: MANAGE_SESSION_TTL_SECONDS,
@@ -176,8 +184,15 @@ export async function getManagedBooking(
   const party = await listParticipants(trx, tenantId, bookingId);
   const terms = await previewCancellation(trx, tenantId, bookingId);
   if (!party || !terms) return null;
+  // Staff's reasons for moving a due date are theirs, not the guest's.
+  const balance = booking.balance
+    ? {
+        ...booking.balance,
+        dueChanges: booking.balance.dueChanges.map((c) => ({ ...c, reason: null })),
+      }
+    : null;
   return {
-    booking: { ...booking, booker: booking.booker },
+    booking: { ...booking, booker: booking.booker, balance },
     policy: {
       version: terms.policyVersion,
       cancellationText: terms.policyText,
@@ -249,7 +264,14 @@ export async function renewManageLink(
        and purpose = 'booking_manage'
        and revoked_reason is distinct from 'recipient_changed'
        and revoked_reason is distinct from 'staff'
-       and revoked_reason is distinct from 'booking_canceled'`.execute(trx);
+       and revoked_reason is distinct from 'booking_canceled'
+       -- A link from before the booker's email was corrected (W3-G2.11-rest)
+       -- belongs to the old address: it renews nothing.
+       and not exists (select 1 from booking_contact_changes c
+                        where c.tenant_id = guest_access_links.tenant_id
+                          and c.booking_id = guest_access_links.booking_id
+                          and c.email_changed
+                          and c.created_at > guest_access_links.created_at)`.execute(trx);
   const bookingId = rows[0]?.booking_id;
   if (!bookingId) return { kind: "not_found" };
   return requestManageLink(trx, ctx, { bookingId, requestKey: input.requestKey });

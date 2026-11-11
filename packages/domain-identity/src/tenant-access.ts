@@ -574,6 +574,18 @@ export const EXPORT_TABLES = [
   "bookings",
   "booking_participants",
   "booking_cancellations",
+  // Deposits and balances (W3-G2.8), moves, party changes, and booker
+  // corrections (W3-G2.11-rest).
+  "balance_payments",
+  "balance_due_changes",
+  "booking_reschedules",
+  "booking_party_changes",
+  "booking_contact_changes",
+  // Owners' capacity overrides and complimentary grants (W3-G2.12-rest).
+  "capacity_overrides",
+  "complimentary_grants",
+  // The standard CSV import's dry runs (W3-G2.13): counts only.
+  "import_runs",
   "booking_notes",
   "finalization_exceptions",
   "finalization_exception_resolutions",

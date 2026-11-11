@@ -69,6 +69,8 @@ export {
   type EmailSweepOptions,
   type EmailSweepReport,
   guestOriginFor,
+  INVITATION_CLOSED,
+  INVITATION_SUPERSEDED,
   MAX_DELIVERY_ATTEMPTS,
   providerDeduplicates,
   RETRY_BACKOFF_SECONDS,
@@ -125,6 +127,11 @@ export {
   fakeEmailIdPattern,
 } from "./fake.ts";
 export {
+  BALANCE_LINK_TEMPLATE,
+  BALANCE_REMINDER_LEAD_DAYS,
+  BALANCE_REMINDER_TEMPLATE,
+  BALANCE_SETTLED,
+  balanceEmailTiming,
   REMINDER_TOO_LATE,
   TRIP_REMINDER_CUTOFF_HOURS,
   TRIP_REMINDER_LEAD_HOURS,

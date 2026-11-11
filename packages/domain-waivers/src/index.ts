@@ -81,9 +81,12 @@ export {
   type WaiverDocumentInput,
 } from "./render.ts";
 export {
+  BOOKER_RESEND_REASON,
+  type BookerResendResult,
   GUEST_RENEWAL_REASON,
   type RenewalResult,
   renewWaiverLink,
+  resendWaiverForBooker,
   resetWaiverSendCount,
   type SendResetResult,
 } from "./renewal.ts";

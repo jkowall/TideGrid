@@ -12,6 +12,8 @@
  */
 import type { TenantContext, TenantTransaction } from "@tidegrid/database";
 import {
+  BALANCE_LINK_TEMPLATE,
+  BALANCE_REMINDER_TEMPLATE,
   DEFAULT_LINK_TTL_SECONDS,
   type EmailBlock,
   enqueueMessage,
@@ -40,8 +42,16 @@ export const MANAGE_LINK_TEMPLATE = { key: "booking_manage_link", version: 1 } a
 /** Version 2: the refund is on its way, not already back (review M1). */
 export const CANCELED_TEMPLATE = { key: "booking_canceled", version: 2 } as const;
 export const REFUND_FAILED_TEMPLATE = { key: "booking_refund_failed", version: 1 } as const;
+/** A booking moved to another trip (W3-G2.11-rest). */
+export const RESCHEDULED_TEMPLATE = { key: "booking_rescheduled", version: 1 } as const;
+/** The old address's notice that the booker's email changed (W3-G2.11-rest). */
+export const CONTACT_CHANGED_TEMPLATE = { key: "booking_contact_changed", version: 1 } as const;
 /** The trip reminder, a day before departure (W3-G2.16-rest). */
 export const REMINDER_TEMPLATE = { key: TRIP_REMINDER_TEMPLATE, version: 1 } as const;
+
+/** A private charter's balance reminder and the balance link staff send (W3-G2.8). */
+export const BALANCE_REMINDER_EMAIL = { key: BALANCE_REMINDER_TEMPLATE, version: 1 } as const;
+export const BALANCE_LINK_EMAIL = { key: BALANCE_LINK_TEMPLATE, version: 1 } as const;
 
 /** A management link lasts three days once sent. */
 export const MANAGE_LINK_TTL_SECONDS = DEFAULT_LINK_TTL_SECONDS;
@@ -96,7 +106,7 @@ function tripRows(detail: BookingDetailView): { label: string; value: string }[]
 
 /** At most a receipt's worth of rows; a longer order says so. */
 function receipt(detail: BookingDetailView): EmailBlock {
-  const rows = receiptRows(detail.order);
+  const rows = receiptRows(detail.order, detail.payment === null);
   return {
     kind: "lines",
     rows:
@@ -118,6 +128,15 @@ function subject(prefix: string, detail: BookingDetailView): string {
  */
 export interface ComposeOptions {
   dedupeKey?: string;
+}
+
+export interface ReminderOptions extends ComposeOptions {
+  /**
+   * Due at this moment instead of a day before the trip, with no minimum
+   * notice: a reminder rewritten for a corrected address (W3-G2.11-rest)
+   * keeps the moment the one it replaces had.
+   */
+  at?: Date;
 }
 
 /**
@@ -143,7 +162,21 @@ export async function enqueueConfirmationEmail(
     },
     { kind: "details", rows: tripRows(detail) },
     receipt(detail),
-    { kind: "paragraph", text: "Paid with a test payment. No real card was charged." },
+    ...(detail.balance
+      ? [
+          {
+            kind: "paragraph",
+            text: `You paid a deposit of ${money(detail.balance.deposit)}. The balance of ${money(detail.balance.total - detail.balance.deposit)} is due by ${tripWhen(detail.balance.dueAt, detail.trip.timeZone)}. We will remind you, and nothing is charged without you.`,
+          } as const,
+        ]
+      : []),
+    {
+      kind: "paragraph",
+      text:
+        detail.payment === null
+          ? "This booking is complimentary, with our compliments: there is nothing to pay."
+          : "Paid with a test payment. No real card was charged.",
+    },
     {
       kind: "paragraph",
       text: "Use the button to name everyone in your party, or to cancel within the policy below.",
@@ -241,6 +274,7 @@ export async function enqueueReminderEmail(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
+  options: ReminderOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   const { rows } = await sql<{ due: Date; worth: boolean }>`
     select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
@@ -251,7 +285,7 @@ export async function enqueueReminderEmail(
      where b.tenant_id = ${ctx.tenantId} and b.id = ${bookingId}`.execute(trx);
   const timing = rows[0];
   if (!timing) throw new Error("a booking for email was not found");
-  if (!timing.worth) return null;
+  if (!options.at && !timing.worth) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
   const blocks: EmailBlock[] = [
@@ -273,7 +307,8 @@ export async function enqueueReminderEmail(
     { kind: "note", text: demoNote },
   ];
   const result = await enqueueMessage(trx, ctx, {
-    dedupeKey: `booking.reminder:${bookingId}`,
+    // A moved booking's reminder (W3-G2.11-rest) names the move in its key.
+    dedupeKey: options.dedupeKey ?? `booking.reminder:${bookingId}`,
     template: REMINDER_TEMPLATE.key,
     templateVersion: REMINDER_TEMPLATE.version,
     to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
@@ -288,7 +323,73 @@ export async function enqueueReminderEmail(
       path: MANAGE_PATH,
       ttlSeconds: MANAGE_LINK_TTL_SECONDS,
     },
-    notBefore: timing.due,
+    notBefore: options.at ?? timing.due,
+  });
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
+}
+
+/**
+ * A private charter's balance email (W3-G2.8): a reminder, written with the
+ * confirmation and sent 7 days and 1 day before the due date (`notBefore`),
+ * or the balance link staff send now. Its words say when the balance is due,
+ * not how much is left, because a payment recorded later changes that; the
+ * button opens the booking, which shows what is owed and takes the payment.
+ * The delivery job cancels one whose balance was paid or whose booking was
+ * canceled by the time it is due (`balance_settled`).
+ */
+export async function enqueueBalanceEmail(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+  options:
+    | { kind: "reminder"; dedupeKey: string; notBefore: Date }
+    | { kind: "link"; dedupeKey: string },
+): Promise<{ messageId: string; duplicate: boolean }> {
+  const detail = await detailFor(trx, ctx.tenantId, bookingId);
+  if (!detail.balance) throw new Error("a balance email for a booking with no balance");
+  const due = tripWhen(detail.balance.dueAt, detail.trip.timeZone);
+  const template = options.kind === "reminder" ? BALANCE_REMINDER_EMAIL : BALANCE_LINK_EMAIL;
+  const blocks: EmailBlock[] = [
+    {
+      kind: "heading",
+      text: options.kind === "reminder" ? "Your balance is coming due" : "Pay your balance",
+    },
+    {
+      kind: "paragraph",
+      text: clean(
+        `Hi ${firstName(detail.booker.name)}. The balance on booking ${detail.reference} (${detail.trip.productName}, ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}) is due by ${due}.`,
+        2000,
+      ),
+    },
+    { kind: "details", rows: tripRows(detail) },
+    {
+      kind: "paragraph",
+      text: "Use the button to see what is left to pay and pay it. If you have already paid, you can ignore this email.",
+    },
+    { kind: "action", label: "Pay your balance", href: "access_link" },
+    { kind: "note", text: linkNote },
+    { kind: "note", text: demoNote },
+  ];
+  const result = await enqueueMessage(trx, ctx, {
+    dedupeKey: options.dedupeKey,
+    template: template.key,
+    templateVersion: template.version,
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
+    bookingId,
+    content: {
+      subject: subject(
+        `Balance due by ${shortDay(detail.balance.dueAt, detail.trip.timeZone)}`,
+        detail,
+      ),
+      preview: singleLine(`Booking ${detail.reference}: the balance is due by ${due}.`, 200),
+      blocks,
+    },
+    accessLink: {
+      purpose: "booking_manage",
+      path: MANAGE_PATH,
+      ttlSeconds: MANAGE_LINK_TTL_SECONDS,
+    },
+    ...(options.kind === "reminder" ? { notBefore: options.notBefore } : {}),
   });
   return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }
@@ -310,9 +411,11 @@ export async function enqueueCancellationEmail(
         : `${money(c.refundAmount)} of the ${money(c.paidAmount)} you paid, on its way back to your original payment method`
       : c.creditAmount > 0
         ? "None to your card: the value is booking credit instead (below)"
-        : c.overridden
-          ? "None"
-          : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
+        : c.paidAmount === 0 && detail.payment === null
+          ? "None: the booking was complimentary, so nothing was paid"
+          : c.overridden
+            ? "None"
+            : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking is canceled" },
     {
@@ -363,6 +466,58 @@ export async function enqueueCancellationEmail(
 }
 
 /**
+ * A booking moved to another trip (W3-G2.11-rest), in the moving
+ * transaction, once per move: the new time and place, the old time for
+ * reference, and a fresh management link. The price did not change.
+ */
+export async function enqueueRescheduledEmail(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+  move: { rescheduleId: string; fromStartsAt: string },
+): Promise<{ messageId: string; duplicate: boolean }> {
+  const detail = await detailFor(trx, ctx.tenantId, bookingId);
+  const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
+  const was = tripWhen(move.fromStartsAt, detail.trip.timeZone);
+  const blocks: EmailBlock[] = [
+    { kind: "heading", text: "Your booking has moved" },
+    {
+      kind: "paragraph",
+      text: clean(
+        `Hi ${firstName(detail.booker.name)}. Booking ${detail.reference} is now for ${detail.trip.productName}, ${when}. It was for ${was}.`,
+        2000,
+      ),
+    },
+    { kind: "details", rows: tripRows(detail) },
+    {
+      kind: "paragraph",
+      text: "The price is unchanged: nothing more was charged and nothing was refunded.",
+    },
+    { kind: "action", label: "Manage your booking", href: "access_link" },
+    { kind: "note", text: linkNote },
+    { kind: "note", text: demoNote },
+  ];
+  const result = await enqueueMessage(trx, ctx, {
+    dedupeKey: `booking.rescheduled:${move.rescheduleId}`,
+    template: RESCHEDULED_TEMPLATE.key,
+    templateVersion: RESCHEDULED_TEMPLATE.version,
+    to: { email: detail.booker.email, name: singleLine(detail.booker.name, 120) },
+    bookingId,
+    content: {
+      subject: subject(`Booking ${detail.reference} moved`, detail),
+      preview: singleLine(`Now ${when}.`, 200),
+      blocks,
+    },
+    accessLink: {
+      purpose: "booking_manage",
+      path: MANAGE_PATH,
+      ttlSeconds: MANAGE_LINK_TTL_SECONDS,
+    },
+  });
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
+}
+
+/**
  * The follow-up when the payment provider refuses a cancellation's refund,
  * in the transaction that records the refusal, once per booking: the
  * cancellation email said the refund was on its way.
@@ -408,4 +563,62 @@ export async function enqueueRefundFailedEmail(
     },
   });
   return { messageId: result.messageId };
+}
+
+/**
+ * Hide most of an address: the first letter of the mailbox and of the
+ * domain, and the domain's last part. "ava.guest@example.test" reads
+ * "a•••@e•••.test". Enough for the owner of the old address to recognise a
+ * change they made, not enough to learn a stranger's address.
+ */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+  const host = dot > 0 ? domain.slice(0, dot) : domain;
+  const tld = dot > 0 ? domain.slice(dot) : "";
+  return `${local.slice(0, 1)}\u2022\u2022\u2022@${host.slice(0, 1)}\u2022\u2022\u2022${tld}`;
+}
+
+/**
+ * The notice to the booker's old address that the booking's email changed
+ * (W3-G2.11-rest), in the changing transaction, once per change. It carries
+ * no link and only a masked new address: whoever reads the old inbox learns
+ * that a change happened and whom to ask, nothing they could use.
+ */
+export async function enqueueContactChangedEmail(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+  change: { contactChangeId: string; oldEmail: string; oldName: string; newEmail: string },
+): Promise<{ messageId: string; duplicate: boolean }> {
+  const detail = await detailFor(trx, ctx.tenantId, bookingId);
+  const blocks: EmailBlock[] = [
+    { kind: "heading", text: "Your booking's email address changed" },
+    {
+      kind: "paragraph",
+      text: clean(
+        `Hi ${firstName(change.oldName)}. The email address on booking ${detail.reference} (${detail.trip.productName}, ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}) was changed to ${maskEmail(change.newEmail)}. Emails about this booking now go there, and links sent to this address no longer work.`,
+        2000,
+      ),
+    },
+    {
+      kind: "paragraph",
+      text: "If you made this change, there is nothing more to do. If you did not, reply to this email and we'll help.",
+    },
+    { kind: "note", text: demoNote },
+  ];
+  const result = await enqueueMessage(trx, ctx, {
+    dedupeKey: `booking.contact_changed:${change.contactChangeId}`,
+    template: CONTACT_CHANGED_TEMPLATE.key,
+    templateVersion: CONTACT_CHANGED_TEMPLATE.version,
+    to: { email: change.oldEmail, name: singleLine(change.oldName, 120) },
+    bookingId,
+    content: {
+      subject: singleLine(`Booking ${detail.reference}: email address changed`, 200),
+      blocks,
+    },
+  });
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }

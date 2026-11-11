@@ -7,6 +7,7 @@ import {
   FakePaymentEvent,
   RefundState,
 } from "./checkout.ts";
+import { QuoteCreateRequest } from "./pricing.ts";
 
 /**
  * Staff-assisted booking (G2.12d). An owner or booking staff member books for
@@ -42,6 +43,50 @@ export const StaffCheckoutAttestations = z
   .describe("What staff confirm before opening the checkout. Both are required");
 export type StaffCheckoutAttestations = z.infer<typeof StaffCheckoutAttestations>;
 
+/**
+ * An owner's capacity override (W3-G2.12-rest): why one more party may come on
+ * a full shared-seat trip. Owners only; never past the boat's guest capacity.
+ */
+export const CapacityOverrideReason = z
+  .enum(["regular_guest", "group_kept_together", "captain_approved", "make_good", "other"])
+  .describe(
+    "regular_guest: a regular the owner makes room for. group_kept_together: the rest of a party already booked. captain_approved: the captain agreed to carry more. make_good: making up for an earlier problem. other: say why in the note",
+  );
+export type CapacityOverrideReason = z.infer<typeof CapacityOverrideReason>;
+
+export const CapacityOverride = z
+  .object({
+    reasonCode: CapacityOverrideReason,
+    note: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+      .regex(/^[^\u0000-\u001f\u007f]*$/, "No control characters")
+      .optional()
+      .describe("Required for other. Kept with the override, never in the audit history"),
+  })
+  .refine((o) => o.reasonCode !== "other" || o.note !== undefined, {
+    message: "A note is required for other",
+    path: ["note"],
+  })
+  .describe(
+    "Owners only. When the trip is full, this booking may take the seats it lacks past the trip's capacity, never past the boat's guest capacity. Recorded with the reason, who, and when; written only when the trip is actually full",
+  );
+export type CapacityOverride = z.infer<typeof CapacityOverride>;
+
+/** A staff quote: the guest's request, and for an owner, a capacity override. */
+export const StaffQuoteCreateRequest = QuoteCreateRequest.extend({
+  capacityOverride: z
+    .literal(true)
+    .optional()
+    .describe(
+      "Owners only (W3-G2.12-rest). Price the party on a full shared-seat trip, counting the room left on the boat rather than in the trip's capacity. The checkout then needs a capacityOverride with a reason",
+    ),
+});
+export type StaffQuoteCreateRequest = z.infer<typeof StaffQuoteCreateRequest>;
+
 export const StaffCheckoutCreateRequest = z.object({
   quoteId: Uuid.describe(
     "A quote from POST /v1/staff/tenants/{tenantId}/quotes, still within its validity",
@@ -54,8 +99,58 @@ export const StaffCheckoutCreateRequest = z.object({
   booker: BookerDetails,
   channel: BookingChannel,
   attestations: StaffCheckoutAttestations,
+  capacityOverride: CapacityOverride.optional(),
 });
 export type StaffCheckoutCreateRequest = z.infer<typeof StaffCheckoutCreateRequest>;
+
+/** Why an owner books a guest at no charge (W3-G2.12-rest); the same codes as a booking shows. */
+export const ComplimentaryGrant = z
+  .object({
+    reasonCode: z
+      .enum([
+        "service_recovery",
+        "staff_or_crew",
+        "partner_or_media",
+        "charity_or_donation",
+        "other",
+      ])
+      .describe(
+        "service_recovery: making up for a problem. staff_or_crew, partner_or_media, charity_or_donation, or other with a note",
+      ),
+    note: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+      .regex(/^[^\u0000-\u001f\u007f]*$/, "No control characters")
+      .optional()
+      .describe(
+        "Required for other. Kept with the grant and shown to roles that see guests, never in the audit history",
+      ),
+  })
+  .refine((o) => o.reasonCode !== "other" || o.note !== undefined, {
+    message: "A note is required for other",
+    path: ["note"],
+  })
+  .describe("Owners only. The order's whole total is waived and the booking takes no payment");
+export type ComplimentaryGrant = z.infer<typeof ComplimentaryGrant>;
+
+export const StaffComplimentaryBookingRequest = StaffCheckoutCreateRequest.extend({
+  complimentary: ComplimentaryGrant,
+});
+export type StaffComplimentaryBookingRequest = z.infer<typeof StaffComplimentaryBookingRequest>;
+
+export const StaffComplimentaryBookingResponse = z.object({
+  booking: z.object({
+    id: Uuid,
+    reference: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{8}$/),
+    source: z.literal("complimentary"),
+    waivedAmount: Cents.describe("The quote's whole total, waived"),
+    currency: z.literal("USD"),
+  }),
+});
+export type StaffComplimentaryBookingResponse = z.infer<typeof StaffComplimentaryBookingResponse>;
 
 export const StaffCheckoutParams = z.object({
   tenantId: z.string(),

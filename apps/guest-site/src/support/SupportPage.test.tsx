@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import type { PublicBrand } from "@tidegrid/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrandedShell } from "../BrandedShell.tsx";
@@ -211,5 +211,71 @@ describe("service worker registration (G2.14b)", () => {
     followExperience({ kind: "ready", tenant, brand });
     await new Promise((r) => setTimeout(r, 0));
     expect(register).not.toHaveBeenCalled();
+  });
+});
+
+describe("the help page's important links (W3-G2.14b-rest)", () => {
+  it("lists the site's links for every trip, each naming the site it opens", async () => {
+    const fetchMock = vi.fn(async (_input: string) =>
+      Response.json({
+        links: [
+          {
+            label: "Parking map",
+            url: "https://maps.example.org/dock",
+            host: "maps.example.org",
+            description: "Free after 5 p.m.",
+          },
+          { label: "Sneaky", url: "javascript:alert(1)", host: "x", description: null },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    shell("/support");
+    const heading = await screen.findByRole("heading", {
+      level: 2,
+      name: "Important links from Demo Reef Divers",
+    });
+    const section = heading.closest("section") as HTMLElement;
+    const links = within(section).getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe("https://maps.example.org/dock");
+    expect(links[0]?.getAttribute("target")).toBe("_blank");
+    expect(links[0]?.getAttribute("rel")).toContain("noopener");
+    expect(links[0]?.textContent).toContain("(opens maps.example.org in a new tab)");
+    expect(section.textContent).toContain("Opens maps.example.org");
+    expect(section.textContent).toContain("Free after 5 p.m.");
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/v1\/public\/important-links$/);
+  });
+
+  it("names the site the address opens, whatever host the answer gives", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: string) =>
+        Response.json({
+          links: [
+            {
+              label: "Parks",
+              url: "https://evil.example.com/x",
+              host: "parks.gov",
+              description: null,
+            },
+          ],
+        }),
+      ),
+    );
+    shell("/support");
+    const heading = await screen.findByRole("heading", { name: /Important links/ });
+    const section = heading.closest("section") as HTMLElement;
+    expect(section.textContent).toContain("Opens evil.example.com");
+    expect(section.textContent).not.toContain("parks.gov");
+  });
+
+  it("shows no section when the operator has none or the list does not load", async () => {
+    const fetchMock = vi.fn(async () => new Response("down", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    shell("/support");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(screen.queryByRole("heading", { name: /Important links/ })).toBeNull();
   });
 });

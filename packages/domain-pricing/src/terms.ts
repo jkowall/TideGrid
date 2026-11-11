@@ -1,3 +1,5 @@
+import type { DepositTerms } from "./deposit.ts";
+
 /**
  * Commercial terms as the pricing computation sees them, loaded from the
  * current versions (load.ts) or built by tests. Money is integer cents; tax
@@ -49,6 +51,8 @@ export interface PriceList {
   productId: string;
   version: number;
   productKind: ProductKind;
+  /** How a booking pays (W3-G2.8); absent or `none` pays in full. Charters only. */
+  deposit?: DepositTerms;
   tickets: readonly TicketItem[];
   charter: CharterItem | null;
   fees: readonly FeeItem[];

@@ -85,7 +85,9 @@ export const CheckoutSession = z
     quoteId: Uuid,
     tripId: Uuid,
     partySize: z.number().int().min(1),
-    amount: Cents.describe("What the payment charges: the quote's total"),
+    amount: Cents.describe(
+      "What the payment charges: the quote's total, or its deposit for a private charter that takes one",
+    ),
     currency: z.literal("USD"),
     expiresAt: Instant.describe(
       "Pay before this instant. The seats are held until then; a later payment is booked only if they are still free, and refunded otherwise",
@@ -254,9 +256,9 @@ export type FakePaymentControlResponse = z.infer<typeof FakePaymentControlRespon
 // Booking source (G2.12d) -------------------------------------------------------------
 
 export const BookingSource = z
-  .enum(["direct", "staff_assisted"])
+  .enum(["direct", "staff_assisted", "complimentary"])
   .describe(
-    "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment",
+    "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest)",
   );
 export type BookingSource = z.infer<typeof BookingSource>;
 
@@ -287,12 +289,15 @@ export const StaffBooking = z.object({
     total: Cents,
     currency: z.literal("USD"),
   }),
-  payment: z.object({
-    id: Uuid,
-    provider: PaymentProviderName,
-    state: z.enum(["pending", "succeeded", "failed"]),
-    amount: Cents,
-  }),
+  payment: z
+    .object({
+      id: Uuid,
+      provider: PaymentProviderName,
+      state: z.enum(["pending", "succeeded", "failed"]),
+      amount: Cents,
+    })
+    .nullable()
+    .describe("Null on a complimentary booking, which has no payment"),
 });
 export type StaffBooking = z.infer<typeof StaffBooking>;
 

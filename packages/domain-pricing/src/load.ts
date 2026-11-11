@@ -1,5 +1,6 @@
-import { isUuid, type TenantTransaction } from "@tidegrid/database";
+import { type DepositKind, isUuid, type TenantTransaction } from "@tidegrid/database";
 import { findAvailableTrips, listTrips } from "@tidegrid/domain-catalog";
+import { type DepositTerms, NO_DEPOSIT } from "./deposit.ts";
 import type {
   AddOnItem,
   ChargeBasis,
@@ -19,6 +20,26 @@ import type {
  * row-level security is the backstop. "Current" is the highest version.
  */
 
+/** A price list version's deposit columns as terms (0033). */
+export function depositTermsOf(row: {
+  deposit_kind: DepositKind;
+  deposit_amount: number | null;
+  deposit_bp: number | null;
+  balance_due_days: number | null;
+}): DepositTerms {
+  if (
+    row.deposit_kind === "fixed" &&
+    row.deposit_amount !== null &&
+    row.balance_due_days !== null
+  ) {
+    return { kind: "fixed", amount: row.deposit_amount, balanceDueDays: row.balance_due_days };
+  }
+  if (row.deposit_kind === "percent" && row.deposit_bp !== null && row.balance_due_days !== null) {
+    return { kind: "percent", bp: row.deposit_bp, balanceDueDays: row.balance_due_days };
+  }
+  return NO_DEPOSIT;
+}
+
 /** postgres.js reads a date column as a Date at UTC midnight of that date. */
 export function dateOnly(value: Date | string): string {
   return typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10);
@@ -31,7 +52,14 @@ export async function loadPriceList(
 ): Promise<PriceList | null> {
   const head = await trx
     .selectFrom("price_list_versions")
-    .select(["version", "product_kind"])
+    .select([
+      "version",
+      "product_kind",
+      "deposit_kind",
+      "deposit_amount",
+      "deposit_bp",
+      "balance_due_days",
+    ])
     .where("tenant_id", "=", tenantId)
     .where("product_id", "=", productId)
     .orderBy("version", "desc")
@@ -75,6 +103,7 @@ export async function loadPriceList(
     charter,
     fees,
     addOns,
+    deposit: depositTermsOf(head),
   };
 }
 
@@ -267,6 +296,60 @@ export interface FindTripOptions {
    * instead, so the guest's own hold never takes the trip off sale for them.
    */
   ownHold?: OwnHoldSale;
+  /**
+   * Set only for an owner's capacity override (W3-G2.12-rest): the seats the
+   * boat itself still has, when the trip passes every other rule a hold must
+   * pass. It decides whether the trip is on sale and is the capacity the
+   * quote counts, so a full trip can be quoted up to its boat.
+   */
+  overrideRoom?: OwnHoldSale;
+}
+
+interface SaleRow {
+  location_id: string;
+  min_party_size: number;
+  max_party_size: number;
+  local_start_time: string;
+  start_utc_offset_minutes: number;
+}
+
+/**
+ * A trip whose sale rules the caller already checked, with the capacity it
+ * counts, read from the staff calendar, which lists every trip in any state,
+ * timed exactly as the availability listing times it.
+ */
+async function staffListed(
+  trx: TenantTransaction,
+  tenantId: string,
+  tripId: string,
+  row: SaleRow,
+  localDate: string,
+  remaining: number,
+): Promise<TripForSale> {
+  const staff = (await listTrips(trx, tenantId, { from: localDate, to: localDate })).find(
+    (t) => t.tripId === tripId,
+  );
+  if (!staff) return { kind: "not_on_sale" };
+  return {
+    kind: "on_sale",
+    trip: {
+      tripId,
+      productId: staff.productId,
+      productKind: staff.productKind,
+      productName: staff.productName,
+      locationId: row.location_id,
+      minPartySize: row.min_party_size,
+      maxPartySize: row.max_party_size,
+      capacityRemaining: remaining,
+      timeZone: staff.timeZone,
+      localDate: staff.localDate,
+      localStartTime: staff.localStartTime,
+      exactLocalStartTime: row.local_start_time,
+      startsAt: staff.startsAt,
+      startsAtLocal: staff.startsAtLocal,
+      startOffsetMinutes: row.start_utc_offset_minutes,
+    },
+  };
 }
 
 /**
@@ -303,6 +386,11 @@ export async function findTripForSale(
     .executeTakeFirst();
   if (!row) return { kind: "not_found" };
   const localDate = dateOnly(row.local_date);
+  if (options.overrideRoom) {
+    const room = await options.overrideRoom(row.min_party_size);
+    if (room === null || room < row.min_party_size) return { kind: "not_on_sale" };
+    return staffListed(trx, tenantId, tripId, row, localDate, room);
+  }
   const listed = await findAvailableTrips(trx, tenantId, {
     from: localDate,
     to: localDate,
@@ -317,32 +405,7 @@ export async function findTripForSale(
     // have room for the smallest party: a held charter, or the last seats.
     const remaining = await options.ownHold(row.min_party_size);
     if (remaining === null || remaining < row.min_party_size) return { kind: "not_on_sale" };
-    // The staff calendar lists every trip in any state, timed exactly as the
-    // availability listing times it; the sale rules were just checked.
-    const staff = (await listTrips(trx, tenantId, { from: localDate, to: localDate })).find(
-      (t) => t.tripId === tripId,
-    );
-    if (!staff) return { kind: "not_on_sale" };
-    return {
-      kind: "on_sale",
-      trip: {
-        tripId,
-        productId: staff.productId,
-        productKind: staff.productKind,
-        productName: staff.productName,
-        locationId: row.location_id,
-        minPartySize: row.min_party_size,
-        maxPartySize: row.max_party_size,
-        capacityRemaining: remaining,
-        timeZone: staff.timeZone,
-        localDate: staff.localDate,
-        localStartTime: staff.localStartTime,
-        exactLocalStartTime: row.local_start_time,
-        startsAt: staff.startsAt,
-        startsAtLocal: staff.startsAtLocal,
-        startOffsetMinutes: row.start_utc_offset_minutes,
-      },
-    };
+    return staffListed(trx, tenantId, tripId, row, localDate, remaining);
   }
   return {
     kind: "on_sale",

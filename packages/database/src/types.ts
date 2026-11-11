@@ -340,7 +340,15 @@ export interface PriceListVersionsTable extends TermsAuthor {
   currency: InsertDefault<"USD">;
   created_txid: CreatedTxid;
   reason: Insert<string>;
+  /** A charter's deposit terms (0033, W3-G2.8); `none` pays in full. */
+  deposit_kind: InsertDefault<DepositKind>;
+  deposit_amount: InsertDefault<number | null>;
+  deposit_bp: InsertDefault<number | null>;
+  balance_due_days: InsertDefault<number | null>;
 }
+
+/** How a charter's booking pays (0033): in full, a fixed deposit, or a percentage of the total. */
+export type DepositKind = "none" | "fixed" | "percent";
 
 export interface PriceListItemsTable {
   tenant_id: TenantColumn;
@@ -451,6 +459,9 @@ export interface QuotesTable {
   tax_amount: Insert<number>;
   included_tax_amount: Insert<number>;
   total_amount: Insert<number>;
+  /** The deposit checkout charges, and when the balance is due; null pays in full (0033). */
+  deposit_amount: InsertDefault<number | null>;
+  balance_due_at: ColumnType<Date | null, Date | string | null | undefined, never>;
   quoted_at: Instant;
   expires_at: Instant;
   created_at: CreatedAt;
@@ -551,7 +562,9 @@ export type BookingState = "confirmed" | "canceled";
  * transaction's actor on the checkout, and copies it to the booking; no
  * writer chooses it.
  */
-export type BookingSource = "direct" | "staff_assisted";
+export type BookingSource = "direct" | "staff_assisted" | "complimentary";
+/** A checkout's source: a complimentary booking's checkout is a staff one (0012, 0039). */
+export type CheckoutSource = "direct" | "staff_assisted";
 /** How a guest reached the staff member who opened a staff-assisted checkout (G2.12d). */
 export type BookingChannel = "phone" | "email" | "walk_up";
 export type ProviderEventType =
@@ -632,10 +645,11 @@ export interface CheckoutSessionsTable {
   expires_at: ColumnType<Date, Date | string, never>;
   secret_hash: Fixed<string>;
   client_key: FixedDefault<string | null>;
-  booker_name: Fixed<string>;
-  booker_email: Fixed<string>;
+  /** Corrected only on a confirmed booking, in the shape 0037 checks. */
+  booker_name: ColumnType<string, string, string>;
+  booker_email: ColumnType<string, string, string>;
   /** Stamped from the transaction's actor (0012); never chosen by a writer. */
-  source: ColumnType<BookingSource, never, never>;
+  source: ColumnType<CheckoutSource, never, never>;
   /** Required on a staff-assisted checkout and null otherwise (0012). */
   channel: FixedDefault<BookingChannel | null>;
   /** The staff member who opened it, stamped from the actor (0012); null when direct. */
@@ -667,6 +681,9 @@ export interface OrdersTable {
   tax_amount: Fixed<number>;
   included_tax_amount: Fixed<number>;
   total_amount: Fixed<number>;
+  /** The quote's deposit and balance due instant (0033); null paid in full. */
+  deposit_amount: FixedDefault<number | null>;
+  balance_due_at: ColumnType<Date | null, Date | string | null | undefined, never>;
   status: ColumnType<OrderStatus, "pending" | undefined, OrderStatus>;
   created_at: Stamped;
   created_txid: CreatedTxid;
@@ -743,10 +760,13 @@ export interface BookingsTable {
   reference: Fixed<string>;
   checkout_session_id: Fixed<string>;
   order_id: Fixed<string>;
-  payment_id: Fixed<string>;
-  hold_id: Fixed<string>;
-  trip_id: Fixed<string>;
-  party_size: Fixed<number>;
+  /** Null exactly on a complimentary booking, whose evidence is its owner's grant (0039). */
+  payment_id: Fixed<string | null>;
+  /** Moves with the trip, only with its reschedule row (0034, W3-G2.11-rest). */
+  hold_id: ColumnType<string, string, string>;
+  trip_id: ColumnType<string, string, string>;
+  /** Down by one with its hold, only with a party change row (0035, W3-G2.11-rest). */
+  party_size: ColumnType<number, number, number>;
   /** Copied from its checkout by a trigger (0012), whatever the insert names. */
   source: FixedDefault<BookingSource>;
   /** Created confirmed; canceled once, with its cancellation (G2.11c). */
@@ -833,6 +853,8 @@ export interface BookingParticipantsTable {
   guardian_email: string | null;
   created_at: Stamped;
   updated_at: Stamped;
+  /** Set once, by the trigger's clock, with the party change that gave up the place (0035). */
+  removed_at: ColumnType<Date | null, never, Date>;
 }
 
 export type CancellationRemedy = "full_refund" | "percent_refund" | "credit" | "none";
@@ -842,7 +864,8 @@ export interface BookingCancellationsTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
   booking_id: Fixed<string>;
-  payment_id: Fixed<string>;
+  /** Null, with nothing paid, on a complimentary booking (0039). */
+  payment_id: Fixed<string | null>;
   product_id: Fixed<string>;
   policy_version: Fixed<number>;
   departs_at: Instant;
@@ -869,7 +892,8 @@ export interface BookingCancellationsTable {
 
 export type EmailMessageState = "queued" | "sending" | "sent" | "failed" | "canceled";
 export type EmailProviderName = "fake" | "cloudflare";
-export type AccessPurpose = "booking_manage" | "waiver_sign";
+/** participant_profile: a participant's own details, from an invitation (W3-G2.11-rest, 0036). */
+export type AccessPurpose = "booking_manage" | "waiver_sign" | "participant_profile";
 export type AccessRevocationReason =
   | "superseded"
   | "completed"
@@ -1425,6 +1449,15 @@ export interface Database
   billing_plans: BillingPlansTable;
   fee_invoices: FeeInvoicesTable;
   payment_reconciliation_exceptions: PaymentReconciliationExceptionsTable;
+  balance_due_changes: BalanceDueChangesTable;
+  booking_reschedules: BookingReschedulesTable;
+  booking_party_changes: BookingPartyChangesTable;
+  balance_payments: BalancePaymentsTable;
+  booking_contact_changes: BookingContactChangesTable;
+  capacity_overrides: CapacityOverridesTable;
+  complimentary_grants: ComplimentaryGrantsTable;
+  import_runs: ImportRunsTable;
+  important_links: ImportantLinksTable;
 }
 
 /** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
@@ -1657,6 +1690,185 @@ export interface PaymentReconciliationExceptionsTable {
   provider_status: FixedDefault<string | null>;
   provider_amount: FixedDefault<number | null>;
   created_at: Stamped;
+}
+
+/** A staff move of a booking's balance due date (0033, W3-G2.8). Append-only; the newest wins. */
+export interface BalanceDueChangesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  due_at: ColumnType<Date, Date | string, never>;
+  reason: Fixed<string>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** A whole booking's move to another trip of its product (0034, W3-G2.11-rest). Append-only. */
+export interface BookingReschedulesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  from_trip_id: Fixed<string>;
+  to_trip_id: Fixed<string>;
+  from_hold_id: Fixed<string>;
+  to_hold_id: Fixed<string>;
+  /** Set by the trigger from the database clock. */
+  before_cutoff: ColumnType<boolean, boolean | undefined, never>;
+  override_reason: ColumnType<string | null, string | null | undefined, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** A shared-seat booking giving up one place (0035, W3-G2.11-rest). Append-only. */
+export interface BookingPartyChangesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  trip_id: Fixed<string>;
+  from_hold_id: Fixed<string>;
+  from_party_size: Fixed<number>;
+  to_party_size: Fixed<number>;
+  position: Fixed<number>;
+  participant_id: ColumnType<string | null, string | null | undefined, never>;
+  /** Set by the trigger from the database clock. */
+  before_cutoff: ColumnType<boolean, boolean | undefined, never>;
+  override_reason: ColumnType<string | null, string | null | undefined, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/**
+ * A correction of the booker's name or email (0037, W3-G2.11-rest), written
+ * only by the checkout's trigger. Append-only, and never the values.
+ */
+export interface BookingContactChangesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  name_changed: Fixed<boolean>;
+  email_changed: Fixed<boolean>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+export type CapacityOverrideReasonCode =
+  | "regular_guest"
+  | "group_kept_together"
+  | "captain_approved"
+  | "make_good"
+  | "other";
+
+/**
+ * An owner's capacity override for one hold (0038, W3-G2.12-rest). Append-only,
+ * except that the retention job clears an abandoned checkout's note.
+ */
+export interface CapacityOverridesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  trip_id: Fixed<string>;
+  owner_ref: Fixed<string>;
+  extra_seats: Fixed<number>;
+  reason_code: Fixed<CapacityOverrideReasonCode>;
+  note: ColumnType<string | null, string | null | undefined, never>;
+  note_redacted_at: ColumnType<Date | null, never, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+export type ComplimentaryReasonCode =
+  | "service_recovery"
+  | "staff_or_crew"
+  | "partner_or_media"
+  | "charity_or_donation"
+  | "other";
+
+/** An owner's grant in place of a payment on one staff checkout (0039). Append-only. */
+export interface ComplimentaryGrantsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  checkout_session_id: Fixed<string>;
+  order_id: Fixed<string>;
+  waived_amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  reason_code: Fixed<ComplimentaryReasonCode>;
+  note: ColumnType<string | null, string | null | undefined, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** A standard CSV import's dry run (0040, W3-G2.13): counts and totals, never the files' data. */
+export interface ImportRunsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  batch_id: Fixed<string>;
+  run_number: Fixed<number>;
+  source_system: Fixed<string>;
+  mapping_version: Fixed<"std-csv-v0">;
+  mode: Fixed<"dry_run">;
+  content_hash: Fixed<string>;
+  clean: Fixed<boolean>;
+  error_count: Fixed<number>;
+  warning_count: Fixed<number>;
+  files: Json;
+  controls: Json;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** An operator's named HTTPS link for guests (0041, W3-G2.14b-rest). Edited in place, archived not deleted. */
+export interface ImportantLinksTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  label: string;
+  url: string;
+  description: string | null;
+  /** Null: every trip. */
+  product_ids: string[] | null;
+  position: number;
+  status: Generated<"active" | "archived">;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, Date | string>;
+  created_by: ColumnType<string | null, never, never>;
+  updated_by: ColumnType<string | null, never, string | null>;
+}
+
+export type BalancePaymentState = "pending" | "succeeded" | "failed" | "abandoned";
+
+/** A card payment of a booking's balance (0033). Moves only as its trigger allows. */
+export interface BalancePaymentsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  provider: Fixed<PaymentProviderName>;
+  account_ref: Fixed<string>;
+  idempotency_key: Fixed<string>;
+  provider_payment_id: ColumnType<string | null, never, string>;
+  amount: Fixed<number>;
+  currency: FixedDefault<"USD">;
+  state: ColumnType<BalancePaymentState, "pending" | undefined, BalancePaymentState>;
+  succeeded_event_id: ColumnType<string | null, never, string>;
+  failed_event_id: ColumnType<string | null, never, string>;
+  created_at: Stamped;
+  provider_recorded_at: Stamp;
+  succeeded_at: Stamp;
+  failed_at: Stamp;
+  updated_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
 }
 
 export type { Generated, GeneratedAlways };

@@ -61,4 +61,9 @@ export interface AppDeps {
    * keeps the domain's limit; tests lower it to reach `day_too_large`.
    */
   dayReportLimit?: number;
+  /**
+   * The most entries one money report or export holds (W3-G2.12-rest).
+   * Production keeps the domain's limit; tests lower it to reach `range_too_large`.
+   */
+  moneyReportLimit?: number;
 }
