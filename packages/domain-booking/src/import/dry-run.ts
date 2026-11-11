@@ -161,8 +161,8 @@ export type ImportDryRunResult =
       checkedAt: string;
       result: ImportDryRun;
     }
-  /** The batch already has a run with this number. */
-  | { kind: "run_number_used"; batchId: string; runNumber: number }
+  /** The run number is not the batch's next one (used already, or skipping ahead). */
+  | { kind: "run_number_used"; batchId: string; runNumber: number; expected: number }
   /** The batch's earlier runs name another source system. */
   | { kind: "source_changed"; batchId: string };
 
@@ -186,11 +186,17 @@ export async function runImportDryRun(
   if (!m) {
     return { kind: "checked", runId: null, contentHash, checkedAt: now.toISOString(), result };
   }
+  // One run of a batch at a time, so two at once cannot both pass the check below.
+  await sql`select pg_advisory_xact_lock(hashtext(${`import_runs:${ctx.tenantId}:${m.batchId}`}))`.execute(
+    trx,
+  );
   const { rows: earlier } = await sql<{ run_number: number; source_system: string }>`
     select run_number, source_system from import_runs
      where tenant_id = ${ctx.tenantId} and batch_id = ${m.batchId}`.execute(trx);
-  if (earlier.some((r) => r.run_number === m.runNumber)) {
-    return { kind: "run_number_used", batchId: m.batchId, runNumber: m.runNumber };
+  // Run numbers start at 1 and go up by one: never reused, never skipped.
+  const expected = earlier.reduce((max, r) => Math.max(max, r.run_number), 0) + 1;
+  if (m.runNumber !== expected) {
+    return { kind: "run_number_used", batchId: m.batchId, runNumber: m.runNumber, expected };
   }
   if (earlier.some((r) => r.source_system !== m.sourceSystem)) {
     return { kind: "source_changed", batchId: m.batchId };

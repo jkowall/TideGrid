@@ -92,7 +92,10 @@ export interface ImportFileSummary {
 
 export interface ImportDryRun {
   manifest: ImportManifest | null;
+  /** At most MAX_ISSUES_KEPT; the counts below cover every issue found. */
   issues: ImportIssue[];
+  /** More issues were found than `issues` keeps. */
+  issuesCapped: boolean;
   files: ImportFileSummary[];
   controls: ImportControl[];
   /** No error, and every declared total matched: a commit may follow (a later goal). */
@@ -131,8 +134,29 @@ const MINUTE_MS = 60_000;
 /** The furthest ahead an import may place a trip: the dates the catalog accepts. */
 const LAST_YEAR = 2099;
 
+/** The most issues one dry run keeps; the error and warning counts go on past it. */
+export const MAX_ISSUES_KEPT = 5_000;
+/** The longest offending value an issue repeats. */
+const MAX_VALUE_CHARS = 64;
+/** The most line numbers one message lists. */
+const MAX_LINES_LISTED = 10;
+
+/** "lines 2, 5, 9" with at most MAX_LINES_LISTED numbers, then "and N more". */
+function linesText(lines: number[]): string {
+  const listed = lines.slice(0, MAX_LINES_LISTED).join(", ");
+  const more = lines.length - MAX_LINES_LISTED;
+  return more > 0 ? `lines ${listed}, and ${more} more` : `lines ${listed}`;
+}
+
+/** True when any part of a value or key could be a card number. */
+function holdsCardNumber(value: string): boolean {
+  return value.split(/[|,;/]/).some((part) => looksLikeCardNumber(part.trim()));
+}
+
 class Report {
   readonly issues: ImportIssue[] = [];
+  errorCount = 0;
+  warningCount = 0;
 
   add(
     file: ImportFile,
@@ -144,15 +168,25 @@ class Report {
     severity: "error" | "warning" = "error",
   ): void {
     if (row && severity === "error") row.refused = true;
+    if (severity === "error") this.errorCount += 1;
+    else this.warningCount += 1;
+    if (this.issues.length >= MAX_ISSUES_KEPT) return;
+    // A card number never leaves in a key or a value, whatever column held it.
+    const key = row?.key ? (holdsCardNumber(row.key) ? null : row.key.slice(0, 120)) : null;
+    let shownValue = value;
+    if (shownValue !== null && holdsCardNumber(shownValue)) shownValue = "[withheld]";
+    if (shownValue !== null && shownValue.length > MAX_VALUE_CHARS) {
+      shownValue = `${shownValue.slice(0, MAX_VALUE_CHARS)}...`;
+    }
     this.issues.push({
       file,
       line: row?.line ?? null,
-      recordKey: row?.key ?? null,
+      recordKey: key,
       column,
       code,
       severity,
       message,
-      value,
+      value: shownValue,
     });
   }
 }
@@ -188,9 +222,11 @@ function readFile(
   const known = new Set(specs.map((c) => c.name));
   let headerOk = true;
   const seen = new Set<string>();
-  for (const name of parsed.header) {
+  parsed.header.forEach((name, i) => {
+    // A header name not in the standard is named by its position, never echoed.
+    const where = known.has(name) ? name : `column ${i + 1}`;
     if (seen.has(name)) {
-      report.add(file, null, name, "repeated_column", "This column appears more than once.");
+      report.add(file, null, where, "repeated_column", "This column appears more than once.");
       headerOk = false;
     }
     seen.add(name);
@@ -198,13 +234,13 @@ function readFile(
       report.add(
         file,
         null,
-        name.slice(0, 64),
+        where,
         "unknown_column",
         "This column is not part of the standard import; unknown columns are refused, not ignored.",
       );
       headerOk = false;
     }
-  }
+  });
   for (const spec of specs) {
     if (!seen.has(spec.name)) {
       report.add(
@@ -247,6 +283,8 @@ function readFile(
       const raw = row.raw.get(spec.name) ?? "";
       if (raw === "") continue;
       if (hasControl(raw)) continue;
+      // A card number is never kept, not even as part of the row's key.
+      if ((spec.type.t === "text" || spec.type.t === "id") && holdsCardNumber(raw)) continue;
       const parsedValue = parseValue(raw, spec.type);
       if (parsedValue.ok) row.v.set(spec.name, parsedValue.value);
     }
@@ -270,7 +308,7 @@ function readFile(
         );
         continue;
       }
-      if ((spec.type.t === "text" || spec.type.t === "id") && looksLikeCardNumber(raw)) {
+      if ((spec.type.t === "text" || spec.type.t === "id") && holdsCardNumber(raw)) {
         row.v.delete(spec.name);
         report.add(
           file,
@@ -308,13 +346,14 @@ function refuseDuplicates(report: Report, fr: FileRows): void {
   }
   for (const [, list] of byKey) {
     if (list.length < 2) continue;
+    const lines = linesText(list.map((r) => r.line));
     for (const row of list) {
       report.add(
         fr.file,
         row,
         null,
         "duplicate_key_in_batch",
-        `Another row in this file has the same key (lines ${list.map((r) => r.line).join(", ")}).`,
+        `Another row in this file has the same key (${lines}).`,
       );
     }
   }
@@ -867,17 +906,20 @@ export async function validateImport(
   const sameDeparture = new Map<string, TripPlan[]>();
   for (const plan of plans) {
     const k = `${plan.product.id}|${plan.boat.id}|${plan.startMs}`;
-    sameDeparture.set(k, [...(sameDeparture.get(k) ?? []), plan]);
+    const list = sameDeparture.get(k);
+    if (list) list.push(plan);
+    else sameDeparture.set(k, [plan]);
   }
   for (const [, list] of sameDeparture) {
     if (list.length < 2) continue;
+    const lines = linesText(list.map((p) => p.row.line));
     for (const plan of list) {
       report.add(
         "trips.csv",
         plan.row,
         "source_trip_id",
         "duplicate_key_in_batch",
-        `Another row is the same product, boat, and start (lines ${list.map((p) => p.row.line).join(", ")}).`,
+        `Another row is the same product, boat, and start (${lines}).`,
       );
     }
   }
@@ -885,8 +927,12 @@ export async function validateImport(
   let live: TripInfo[] = [];
   const open = plans.filter((p) => !p.row.refused);
   if (open.length > 0) {
-    const from = Math.min(...open.map((p) => p.startMs));
-    const to = Math.max(...open.map((p) => p.freeAtMs));
+    let from = Number.POSITIVE_INFINITY;
+    let to = Number.NEGATIVE_INFINITY;
+    for (const p of open) {
+      from = Math.min(from, p.startMs);
+      to = Math.max(to, p.freeAtMs);
+    }
     live = await lookup.liveTrips([...new Set(open.map((p) => p.boat.id))], from, to);
   }
   for (const plan of open) {
@@ -930,14 +976,28 @@ export async function validateImport(
     }
   }
   const stillOpen = open.filter((p) => !p.row.refused && !p.existing);
+  // Two new trips on one boat at once: per boat, sorted by start, a trip
+  // overlaps another exactly when an earlier one is still out at its start or
+  // the next one starts before it is free.
+  const byBoat = new Map<string, TripPlan[]>();
   for (const plan of stillOpen) {
-    const other = stillOpen.find(
-      (o) =>
-        o !== plan &&
-        o.boat.id === plan.boat.id &&
-        o.startMs < plan.freeAtMs &&
-        plan.startMs < o.freeAtMs,
-    );
+    const list = byBoat.get(plan.boat.id);
+    if (list) list.push(plan);
+    else byBoat.set(plan.boat.id, [plan]);
+  }
+  const overlapOf = new Map<TripPlan, TripPlan>();
+  for (const [, list] of byBoat) {
+    list.sort((a, c) => a.startMs - c.startMs);
+    let latest: TripPlan | null = null;
+    list.forEach((plan, i) => {
+      const next = list[i + 1];
+      if (latest && latest.freeAtMs > plan.startMs) overlapOf.set(plan, latest);
+      else if (next && next.startMs < plan.freeAtMs) overlapOf.set(plan, next);
+      if (!latest || plan.freeAtMs > latest.freeAtMs) latest = plan;
+    });
+  }
+  for (const plan of stillOpen) {
+    const other = overlapOf.get(plan);
     if (other) {
       report.add(
         "trips.csv",
@@ -961,17 +1021,22 @@ export async function validateImport(
     const source = s(row, "source_customer_id");
     if (source) customerRows.set(source, row);
     const email = s(row, "email");
-    if (email && !row.refused) byEmail.set(email, [...(byEmail.get(email) ?? []), row]);
+    if (email && !row.refused) {
+      const list = byEmail.get(email);
+      if (list) list.push(row);
+      else byEmail.set(email, [row]);
+    }
   }
   for (const [, list] of byEmail) {
     if (list.length < 2) continue;
+    const lines = linesText(list.map((r) => r.line));
     for (const row of list) {
       report.add(
         "customers.csv",
         row,
         "email",
         "customer_match_candidate",
-        `Another customer has the same email (lines ${list.map((r) => r.line).join(", ")}); they stay separate until reviewed.`,
+        `Another customer has the same email (${lines}); they stay separate until reviewed.`,
         "[withheld]",
         "warning",
       );
@@ -1185,9 +1250,134 @@ export async function validateImport(
     }
     if (!row.refused) bookingPlans.set(`${ref}|${date}`, { row, trip, ota, total });
   }
+  const bookingFor = (file: DataFile, row: Row): BookingPlan | null => {
+    const k = `${s(row, "source_booking_ref")}|${s(row, "trip_date")}`;
+    const plan = bookingPlans.get(k);
+    if (plan && !plan.row.refused) return plan;
+    if (bookingRows.has(k)) parentRejected(file, row, "source_booking_ref", "booking");
+    else unknownRef(file, row, "source_booking_ref", "bookings.csv");
+    return null;
+  };
+
+  // Payments, before capacity: a booking whose money does not balance is
+  // refused before it takes seats. Totals per booking, so row order never matters.
+  interface PaymentEntry {
+    row: Row;
+    booking: BookingPlan;
+    amount: number;
+    refund: boolean;
+  }
+  const entries = new Map<BookingPlan, PaymentEntry[]>();
+  for (const row of rowsOf("payments.csv")) {
+    if (row.refused) continue;
+    const booking = bookingPlans.get(`${s(row, "source_booking_ref")}|${s(row, "trip_date")}`);
+    if (!booking) {
+      bookingFor("payments.csv", row);
+      continue;
+    }
+    if (booking.ota) {
+      report.add(
+        "payments.csv",
+        row,
+        "source_booking_ref",
+        "payment_on_ota_booking",
+        "An OTA booking's money stays with the OTA.",
+      );
+      continue;
+    }
+    const at = s(row, "received_at") as string;
+    if (timestampMs(at) > exportedMs) {
+      report.add(
+        "payments.csv",
+        row,
+        "received_at",
+        "later_than_export",
+        "This is later than the export.",
+        at,
+      );
+      continue;
+    }
+    const entry = {
+      row,
+      booking,
+      amount: n(row, "amount_cents") as number,
+      refund: s(row, "entry_kind") !== "payment",
+    };
+    const list = entries.get(booking);
+    if (list) list.push(entry);
+    else entries.set(booking, [entry]);
+  }
+  const paid = new Map<BookingPlan, { in: number; out: number }>();
+  for (const [booking, list] of entries) {
+    let sumIn = 0;
+    let sumOut = 0;
+    for (const e of list) {
+      if (e.refund) sumOut += e.amount;
+      else sumIn += e.amount;
+    }
+    if (sumOut > sumIn) {
+      for (const e of list.filter((x) => x.refund)) {
+        report.add(
+          "payments.csv",
+          e.row,
+          "amount_cents",
+          "refund_exceeds_payments",
+          `The booking's refunds (${sumOut}) exceed its payments (${sumIn}).`,
+          String(e.amount),
+        );
+      }
+      continue;
+    }
+    if (sumIn - sumOut > booking.total) {
+      for (const e of list.filter((x) => !x.refund)) {
+        report.add(
+          "payments.csv",
+          e.row,
+          "amount_cents",
+          "overpaid",
+          `The booking's payments, less refunds, come to ${sumIn - sumOut}, more than its total of ${booking.total}.`,
+          String(e.amount),
+        );
+      }
+      continue;
+    }
+    paid.set(booking, { in: sumIn, out: sumOut });
+  }
+  let outstanding = 0;
+  const owing = new Map<BookingPlan, number>();
+  for (const [, plan] of bookingPlans) {
+    if (plan.ota || plan.row.refused) continue;
+    const sums = paid.get(plan) ?? { in: 0, out: 0 };
+    const left = plan.total - (sums.in - sums.out);
+    if (left <= 0) continue;
+    if (plan.trip.product.kind !== "private_charter") {
+      report.add(
+        "bookings.csv",
+        plan.row,
+        "total_cents",
+        "unexpected_balance",
+        `A shared-seat booking cannot carry a balance; ${left} is unpaid.`,
+        String(plan.total),
+      );
+      continue;
+    }
+    if (!s(plan.row, "balance_due_date")) {
+      report.add(
+        "bookings.csv",
+        plan.row,
+        "balance_due_date",
+        "balance_due_date_missing",
+        `${left} is unpaid; a balance needs its due date.`,
+      );
+      continue;
+    }
+    owing.set(plan, left);
+  }
+
   // Capacity, in file order: rows that would overbook are refused.
   const taken = new Map<TripPlan, { seats: number; bookings: number }>();
   for (const [, plan] of bookingPlans) {
+    if (plan.row.refused) continue;
     const t = taken.get(plan.trip) ?? {
       seats: plan.trip.existing?.heldSeats ?? 0,
       bookings: plan.trip.existing && plan.trip.existing.heldSeats > 0 ? 1 : 0,
@@ -1223,14 +1413,17 @@ export async function validateImport(
     }
     taken.set(plan.trip, t);
   }
-  const bookingFor = (file: DataFile, row: Row): BookingPlan | null => {
-    const k = `${s(row, "source_booking_ref")}|${s(row, "trip_date")}`;
-    const plan = bookingPlans.get(k);
-    if (plan && !plan.row.refused) return plan;
-    if (bookingRows.has(k)) parentRejected(file, row, "source_booking_ref", "booking");
-    else unknownRef(file, row, "source_booking_ref", "bookings.csv");
-    return null;
-  };
+  // Payments on a booking refused for its money or its seats go with it.
+  for (const [booking, list] of entries) {
+    for (const e of list) {
+      if (e.row.refused) continue;
+      if (booking.row.refused)
+        parentRejected("payments.csv", e.row, "source_booking_ref", "booking");
+    }
+  }
+  for (const [plan, left] of owing) {
+    if (!plan.row.refused) outstanding += left;
+  }
 
   // Participants ----------------------------------------------------------------
   const participantRows = new Map<string, Row>();
@@ -1291,95 +1484,6 @@ export async function validateImport(
     }
   }
 
-  // Payments --------------------------------------------------------------------
-  const paid = new Map<BookingPlan, { in: number; out: number }>();
-  for (const row of rowsOf("payments.csv")) {
-    if (row.refused) continue;
-    const booking = bookingFor("payments.csv", row);
-    if (!booking) continue;
-    if (booking.ota) {
-      report.add(
-        "payments.csv",
-        row,
-        "source_booking_ref",
-        "payment_on_ota_booking",
-        "An OTA booking's money stays with the OTA.",
-      );
-      continue;
-    }
-    const at = s(row, "received_at") as string;
-    if (timestampMs(at) > exportedMs) {
-      report.add(
-        "payments.csv",
-        row,
-        "received_at",
-        "later_than_export",
-        "This is later than the export.",
-        at,
-      );
-      continue;
-    }
-    const sums = paid.get(booking) ?? { in: 0, out: 0 };
-    const amount = n(row, "amount_cents") as number;
-    if (s(row, "entry_kind") === "payment") {
-      if (sums.in + amount - sums.out > booking.total) {
-        report.add(
-          "payments.csv",
-          row,
-          "amount_cents",
-          "overpaid",
-          `Payments would exceed the booking's total of ${booking.total}.`,
-          String(amount),
-        );
-        continue;
-      }
-      sums.in += amount;
-    } else {
-      if (sums.out + amount > sums.in) {
-        report.add(
-          "payments.csv",
-          row,
-          "amount_cents",
-          "refund_exceeds_payments",
-          "Refunds would exceed the payments recorded before them in this file.",
-          String(amount),
-        );
-        continue;
-      }
-      sums.out += amount;
-    }
-    paid.set(booking, sums);
-  }
-  let outstanding = 0;
-  for (const [, plan] of bookingPlans) {
-    if (plan.ota || plan.row.refused) continue;
-    const sums = paid.get(plan) ?? { in: 0, out: 0 };
-    const left = plan.total - (sums.in - sums.out);
-    if (left <= 0) continue;
-    if (plan.trip.product.kind !== "private_charter") {
-      report.add(
-        "bookings.csv",
-        plan.row,
-        "total_cents",
-        "unexpected_balance",
-        `A shared-seat booking cannot carry a balance; ${left} is unpaid.`,
-        String(plan.total),
-      );
-      continue;
-    }
-    if (!s(plan.row, "balance_due_date")) {
-      report.add(
-        "bookings.csv",
-        plan.row,
-        "balance_due_date",
-        "balance_due_date_missing",
-        `${left} is unpaid; a balance needs its due date.`,
-      );
-      continue;
-    }
-    outstanding += left;
-  }
-
   // Opening balances -----------------------------------------------------------------
   const today = localDateAt(manifest.operatorTimeZone, nowMs);
   for (const row of rowsOf("opening_balances.csv")) {
@@ -1436,7 +1540,7 @@ export async function validateImport(
             "eligible_source_product_ids",
             productRows.has(id) ? "parent_rejected" : "unknown_reference",
             "A listed product is not an accepted row of products.csv.",
-            id.slice(0, 64),
+            looksLikeCardNumber(id) ? "[withheld]" : id,
           );
           break;
         }
@@ -1609,11 +1713,11 @@ function finish(
   files: ImportFileSummary[],
   controls: ImportControl[],
 ): ImportDryRun {
-  const errorCount = report.issues.filter((i) => i.severity === "error").length;
-  const warningCount = report.issues.length - errorCount;
+  const { errorCount, warningCount } = report;
   return {
     manifest,
     issues: report.issues,
+    issuesCapped: errorCount + warningCount > report.issues.length,
     files,
     controls,
     clean: manifest !== null && errorCount === 0 && controls.every((c) => c.matches),

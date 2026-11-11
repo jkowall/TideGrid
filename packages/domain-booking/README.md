@@ -526,11 +526,13 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 
 ## Standard CSV import: the dry run (W3-G2.13)
 
-`src/import/`. The files, columns, codes, and control totals are the [draft](../../docs/v2/drafts/standard-csv-import.md)'s, a coordinator default pending the owner's approval; defaults D1 to D5 are in the [decision register](../../docs/v2/06-decision-register.md#decision-log).
+`src/import/`. The files, columns, codes, and control totals are the [draft](../../docs/v2/drafts/standard-csv-import.md)'s, a coordinator default pending the owner's approval; defaults D1 to D6 are in the [decision register](../../docs/v2/06-decision-register.md#decision-log).
 
 - **`validateImport(files, lookup, nowMs)`** is pure apart from `ImportLookup` (products with their location's zone, boats with their linked products, and live trips on those boats with their held seats). It reads each file (`readCsv`: RFC 4180, CRLF or LF, an optional byte order mark), checks the header, every value's type, the deduplication keys, and the rules across files (references, a refused parent taking its children, local times in the operator's zone, departed trips, boat overlaps, capacity counting live holds, private charters, amounts that add up, OTA rows, balances, guardians, expired balances), then the manifest's control totals against the accepted rows.
-- **`runImportDryRun(trx, ctx, files)`** runs it at the database's time, hashes the files (`importContentHash`), and records the run in `import_runs` with an `import.dry_run` audit event, neither holding a value from the files. `renderImportErrors` writes `errors.csv` with every cell formula-guarded.
-- **Never shown.** Names, emails, phones, and references appear as `[withheld]`; a value that looks like a card number is refused as `possible_card_number` and withheld.
+- **`runImportDryRun(trx, ctx, files)`** runs it at the database's time, hashes the files (`importContentHash`), and records the run in `import_runs` with an `import.dry_run` audit event. Of the files' values, these hold only the manifest's batch id, run number, and source system, never a name, email, phone, reference, or row value. Runs of one batch take turns (an advisory lock), and run numbers must go up by one. `renderImportErrors` writes `errors.csv` with every cell formula-guarded.
+- **Never shown.** Names, emails, phones, and references appear as `[withheld]`; a value that looks like a card number, or holds one between `|`, `,`, `;`, or `/`, is refused as `possible_card_number` and never repeated, in any column, the row's key, or the manifest. Header names that are not in the standard are named by position, not echoed.
+- **Bounded.** A run keeps its first 5,000 issues (`MAX_ISSUES_KEPT`) and counts all of them (`issuesCapped`); a message names at most 10 line numbers; a repeated value is cut at 64 characters. Duplicate groups and boat overlaps are found in near-linear time, so a 2-million-character file cannot exhaust the Worker.
+- **Money before seats.** Payments and refunds are totalled per booking, whatever their order, before capacity is counted: a booking that does not balance is refused first, frees its seats, and takes its participants, payments, and waivers with it.
 
 ## Deferred and known gaps
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readCsv } from "./csv-read.ts";
 import { importContentHash, renderImportErrors } from "./dry-run.ts";
 import { looksLikeCardNumber } from "./spec.ts";
-import { type ImportLookup, type TripInfo, validateImport } from "./validate.ts";
+import { type ImportLookup, MAX_ISSUES_KEPT, type TripInfo, validateImport } from "./validate.ts";
+import { cachedZoneCount, isKnownZone } from "./zone-time.ts";
 
 // The draft's synthetic batch (docs/v2/drafts/standard-csv-import.md), without
 // the trip-card and dollar-card lots, which no operator can hold yet.
@@ -183,6 +184,8 @@ LB-5013,2027-04-12,T-0412-AM,C-1002,ota,,Example OTA,1,500,,,,,,,
 `;
     files["payments.csv"] =
       `${files["payments.csv"]}PAY-9010,LB-5001,2027-04-12,payment,1,cash,4111 1111 1111 1111,2027-02-01T10:00:00-05:00
+PAY-9011,LB-5010,2027-04-12,payment,90000,cash,,2027-02-01T10:00:00-05:00
+PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
 `;
     const run = await validateImport(files, lookup(), NOW);
     expect(run.clean).toBe(false);
@@ -219,6 +222,60 @@ LB-5013,2027-04-12,T-0412-AM,C-1002,ota,,Example OTA,1,500,,,,,,,
     });
   });
 
+  it("refuses a booking whose money does not balance before it takes seats, with its children", async () => {
+    // LB-5002 pays 40000 of 44835: refused, and its participants, payment, and waiver go with it.
+    const files = sample();
+    files["payments.csv"] = (files["payments.csv"] as string).replace(
+      "payment,44835,cash",
+      "payment,40000,cash",
+    );
+    let run = await validateImport(files, lookup(), NOW);
+    const at = (file: string, line: number) =>
+      run.issues.filter((i) => i.file === file && i.line === line).map((i) => i.code);
+    expect(at("bookings.csv", 3)).toEqual(["unexpected_balance"]);
+    expect(at("participants.csv", 4)).toEqual(["parent_rejected"]);
+    expect(at("participants.csv", 5)).toEqual(["parent_rejected"]);
+    expect(at("payments.csv", 3)).toEqual(["parent_rejected"]);
+    expect(at("waivers.csv", 4)).toEqual(["parent_rejected"]);
+    expect(run.controls.find((c) => c.metric === "sum_payment_cents")?.computed).toBe(73100);
+
+    // A refused booking's seats are free for the next: LB-5001 (10 guests) is
+    // refused for its balance, so LB-5002's 3 fit.
+    const big = sample();
+    big["bookings.csv"] = (big["bookings.csv"] as string).replace(
+      "LB-5001,2027-04-12,T-0412-AM,C-1001,direct,,,2,",
+      "LB-5001,2027-04-12,T-0412-AM,C-1001,direct,,,10,",
+    );
+    big["payments.csv"] = (big["payments.csv"] as string).replace(
+      "payment,33100,card",
+      "payment,30000,card",
+    );
+    run = await validateImport(big, lookup(), NOW);
+    expect(at("bookings.csv", 2)).toEqual(["unexpected_balance"]);
+    expect(at("bookings.csv", 3)).toEqual([]);
+
+    // A refund listed before its payment, and payment, payment, refund that nets
+    // to the total, are both fine: the totals per booking decide, not the order.
+    const ordered = sample();
+    ordered["payments.csv"] = (ordered["payments.csv"] as string).replace(
+      "PAY-9002,LB-5002,2027-04-12,payment,44835,cash,,2027-02-25T10:00:00-05:00",
+      [
+        "PAY-9002R,LB-5002,2027-04-12,refund,5000,cash,,2027-02-26T10:00:00-05:00",
+        "PAY-9002,LB-5002,2027-04-12,payment,44835,cash,,2027-02-25T10:00:00-05:00",
+        "PAY-9002B,LB-5002,2027-04-12,payment,5000,cash,,2027-02-25T11:00:00-05:00",
+      ].join("\n"),
+    );
+    run = await validateImport(ordered, lookup(), NOW);
+    expect(run.issues.filter((i) => i.file === "payments.csv").map((i) => i.code)).toEqual([]);
+
+    // Refunds above payments refuse the refunds.
+    const over = sample();
+    over["payments.csv"] =
+      `${over["payments.csv"]}PAY-9004,LB-5003,2027-04-12,refund,50000,check,,2027-02-11T09:05:00-05:00\n`;
+    run = await validateImport(over, lookup(), NOW);
+    expect(at("payments.csv", 5)).toEqual(["refund_exceeds_payments"]);
+  });
+
   it("refuses an unknown column, a commit, a past trip, and a busy boat", async () => {
     const files = sample();
     files["customers.csv"] = (files["customers.csv"] as string).replace(
@@ -230,9 +287,10 @@ LB-5013,2027-04-12,T-0412-AM,C-1002,ota,,Example OTA,1,500,,,,,,,
       expect.objectContaining({
         file: "customers.csv",
         code: "unknown_column",
-        column: "medical_notes",
+        column: "column 5",
       }),
     );
+    expect(JSON.stringify(run)).not.toContain("medical_notes");
 
     const commit = sample();
     commit["manifest.csv"] = (commit["manifest.csv"] as string).replace(
@@ -276,6 +334,81 @@ LB-5013,2027-04-12,T-0412-AM,C-1002,ota,,Example OTA,1,500,,,,,,,
     expect(run.issues).toContainEqual(
       expect.objectContaining({ file: "bookings.csv", line: 3, code: "over_capacity" }),
     );
+  });
+
+  it("never repeats a card number, in a key, a value, or a list of ids", async () => {
+    const card = "4242424242424242";
+    const files = sample();
+    files["payments.csv"] = (files["payments.csv"] as string)
+      .replace("PAY-9002", card)
+      .replace("payment,40000,check", "payment,4012888888881881,check");
+    files["opening_balances.csv"] = (files["opening_balances.csv"] as string).replace(
+      "booking_credit,,5000,,,",
+      `booking_credit,,5000,,P-REEF2|4111 1111 1111 1111,`,
+    );
+    const run = await validateImport(files, lookup(), NOW);
+    expect(run.issues).toContainEqual(
+      expect.objectContaining({
+        file: "payments.csv",
+        line: 3,
+        code: "possible_card_number",
+        recordKey: null,
+      }),
+    );
+    expect(run.issues).toContainEqual(
+      expect.objectContaining({
+        file: "opening_balances.csv",
+        column: "eligible_source_product_ids",
+        code: "possible_card_number",
+        value: "[withheld]",
+      }),
+    );
+    const text = JSON.stringify(run) + renderImportErrors(run);
+    expect(text).not.toContain(card);
+    expect(text).not.toContain("4111 1111 1111 1111");
+    expect(text).not.toContain("4012888888881881");
+    expect(run.issues).toContainEqual(
+      expect.objectContaining({
+        file: "payments.csv",
+        column: "amount_cents",
+        value: "[withheld]",
+      }),
+    );
+  });
+
+  it("keeps at most a fixed number of issues and short messages, but counts them all", async () => {
+    const files = sample();
+    const header = "source_customer_id,full_name,email,phone";
+    const rows = Array.from({ length: 6_000 }, () => "C-DUP,Same Person,,");
+    files["customers.csv"] = `${header}\n${rows.join("\n")}\n`;
+    const run = await validateImport(files, lookup(), NOW);
+    expect(run.issues.length).toBe(MAX_ISSUES_KEPT);
+    expect(run.issuesCapped).toBe(true);
+    expect(run.errorCount + run.warningCount).toBeGreaterThan(MAX_ISSUES_KEPT);
+    const dup = run.issues.find((i) => i.code === "duplicate_key_in_batch");
+    expect(dup?.message).toMatch(/lines 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, and 5990 more/);
+    expect(run.issues.every((i) => (i.value ?? "").length <= 67)).toBe(true);
+  });
+
+  it("finds two new trips on one boat at once, however the file orders them", async () => {
+    const files = sample();
+    files["trips.csv"] =
+      `${files["trips.csv"]}T-0413-LATE,P-REEF2,${B_REEF},2027-04-13,10:00,America/New_York,,12\n`;
+    const run = await validateImport(files, lookup(), NOW);
+    const overlaps = run.issues.filter((i) => i.code === "boat_overlap").map((i) => i.line);
+    expect(overlaps.sort()).toEqual([4, 5]);
+  });
+
+  it("knows zones without letting spellings grow its cache", () => {
+    expect(isKnownZone("America/New_York")).toBe(true);
+    expect(isKnownZone("Etc/UTC")).toBe(false);
+    expect(isKnownZone("Not/A_Zone")).toBe(false);
+    const name = "america/new_york";
+    for (let i = 0; i < 2_000; i += 1) {
+      const spelled = [...name].map((ch, j) => ((i >> j) & 1 ? ch.toUpperCase() : ch)).join("");
+      isKnownZone(spelled);
+    }
+    expect(cachedZoneCount()).toBeLessThanOrEqual(600);
   });
 
   it("writes errors.csv with every cell kept from running as a formula", async () => {

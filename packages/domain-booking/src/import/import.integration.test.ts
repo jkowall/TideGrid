@@ -189,7 +189,17 @@ describe.skipIf(!env)("the standard CSV import's dry run (W3-G2.13)", () => {
     const again = await inTenantTransaction(runtime.db, ctx, (trx) =>
       runImportDryRun(trx, ctx, files),
     );
-    expect(again).toEqual({ kind: "run_number_used", batchId: "CLEAN-1", runNumber: 1 });
+    expect(again).toEqual({
+      kind: "run_number_used",
+      batchId: "CLEAN-1",
+      runNumber: 1,
+      expected: 2,
+    });
+    // Skipping ahead is refused too.
+    const skipped = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      runImportDryRun(trx, ctx, batch(A, { batchId: "CLEAN-1", run: 5 })),
+    );
+    expect(skipped).toMatchObject({ kind: "run_number_used", expected: 2 });
     const second = await inTenantTransaction(runtime.db, ctx, (trx) =>
       runImportDryRun(trx, ctx, batch(A, { batchId: "CLEAN-1", run: 2 })),
     );

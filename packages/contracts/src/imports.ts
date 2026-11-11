@@ -10,7 +10,7 @@ import { z } from "zod";
 
 /** The most characters one file may hold; the whole request is capped at 4 MiB. */
 export const MAX_IMPORT_FILE_CHARS = 2_000_000;
-/** The most issues the JSON answer lists; errors.csv always has every one. */
+/** The most issues the JSON answer lists; errors.csv has up to 5,000. */
 export const MAX_IMPORT_ISSUES_LISTED = 500;
 
 const FileText = z
@@ -103,10 +103,14 @@ export const ImportDryRunResponse = z.object({
       }),
     ),
     issues: z.array(ImportIssue).max(MAX_IMPORT_ISSUES_LISTED),
-    issuesTruncated: z.boolean().describe("More issues than listed; errors.csv has them all"),
+    issuesTruncated: z
+      .boolean()
+      .describe(
+        "More issues than listed; errors.csv has the first 5,000, and the counts cover them all",
+      ),
   }),
   errorsCsv: z
     .string()
-    .describe("errors.csv: every issue, each cell kept from running as a formula"),
+    .describe("errors.csv: the first 5,000 issues, each cell kept from running as a formula"),
 });
 export type ImportDryRunResponse = z.infer<typeof ImportDryRunResponse>;

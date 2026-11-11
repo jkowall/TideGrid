@@ -18,7 +18,7 @@ export const importDryRunsPath = "/v1/staff/tenants/{tenantId}/import-dry-runs";
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 /**
- * The standard CSV import (W3-G2.13), part 1: the dry run. Owners only
+ * The standard CSV import, part 1 of W3-G2.13: the dry run. Owners only
  * (imports.run). Nothing from the files is written; the run's counts and
  * totals are recorded, so a later commit step can require a clean dry run of
  * the same files.
@@ -37,7 +37,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     summary: "Check a standard CSV import batch without importing it",
     description: [
       "Owners only (imports.run). The batch is the manifest and the files it declares totals for, as the standard CSV import draft defines them (coordinator default, pending the owner's approval). Every row is checked against the operator's products, boats, trips, and capacity at the time of the check; nothing from the files is written.",
-      "The answer lists the issues (the first 500) and the full errors.csv, the accepted and refused rows per file, and each declared control total beside the computed one. A run is clean when no row is refused and every total matches. The run's counts and totals are recorded under its batch and run number; a run number already used is refused (409 import_run_number_used). Committing a batch is a later step. Idempotent by key.",
+      "The answer lists the issues (the first 500) and the full errors.csv, the accepted and refused rows per file, and each declared control total beside the computed one. A run is clean when no row is refused and every total matches. The run's counts and totals are recorded under its batch and run number; run numbers start at 1 and go up by one, so a used or skipped number is refused (409 import_run_number_used). Committing a batch is a later step. Idempotent by key.",
     ].join("\n\n"),
     security: staffSecurity,
     request: {
@@ -58,7 +58,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant"),
       409: errorBody(
-        "The batch already has this run number (import_run_number_used), or its earlier runs name another source system (import_source_changed)",
+        "The run number is not the batch's next one (import_run_number_used), or its earlier runs name another source system (import_source_changed)",
       ),
       422: errorBody("idempotency_key_reused"),
     },
@@ -89,7 +89,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
           throw new ApiError(
             409,
             "import_run_number_used",
-            `Batch ${checked.batchId} already has run ${checked.runNumber}; use the next run number`,
+            `Batch ${checked.batchId} cannot take run ${checked.runNumber}; its next run number is ${checked.expected}`,
           );
         }
         if (checked.kind === "source_changed") {
@@ -114,7 +114,7 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
             files: r.files,
             controls: r.controls,
             issues: r.issues.slice(0, MAX_IMPORT_ISSUES_LISTED),
-            issuesTruncated: r.issues.length > MAX_IMPORT_ISSUES_LISTED,
+            issuesTruncated: r.issuesCapped || r.issues.length > MAX_IMPORT_ISSUES_LISTED,
           },
           errorsCsv: renderImportErrors(r),
         };

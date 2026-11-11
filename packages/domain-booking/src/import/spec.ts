@@ -255,8 +255,9 @@ const EMAIL =
   /^[^\s@,;<>"]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
 const PHONE = /^\+[1-9]\d{6,14}$/;
 const MAX_CENTS = 100_000_000;
+// C0 and C1 controls, and the bidirectional overrides that can disguise text.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to find them.
-const CONTROL = /[\u0000-\u001f\u007f]/;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
 
 /** True when the text holds a control character, which no import value may. */
 export function hasControl(value: string): boolean {

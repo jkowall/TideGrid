@@ -9,7 +9,13 @@ const MINUTE_MS = 60_000;
 const DAY_MS = 86_400_000;
 const ZONE = /^(?:UTC|[A-Z][A-Za-z_]+(?:\/[A-Z0-9][A-Za-z0-9_+-]*)+)$/;
 
+/**
+ * Formatters by zone. Capped: a zone may be spelled in many cases ("america/
+ * New_York"), so a file could otherwise grow the cache without end. Past the
+ * cap a formatter is made for the call and dropped.
+ */
 const formatters = new Map<string, Intl.DateTimeFormat>();
+const MAX_CACHED_ZONES = 600;
 
 function formatterFor(zone: string): Intl.DateTimeFormat {
   let formatter = formatters.get(zone);
@@ -24,9 +30,14 @@ function formatterFor(zone: string): Intl.DateTimeFormat {
       minute: "2-digit",
       second: "2-digit",
     });
-    formatters.set(zone, formatter);
+    if (formatters.size < MAX_CACHED_ZONES) formatters.set(zone, formatter);
   }
   return formatter;
+}
+
+/** The number of cached formatters, for tests. */
+export function cachedZoneCount(): number {
+  return formatters.size;
 }
 
 /** An IANA zone the runtime knows, spelled as the database stores it (no Etc/ zones). */
