@@ -586,7 +586,7 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
   });
 
   it("withdraws a removed participant's request, link, and queued email, and no one else's", async () => {
-    const booked = await book(A, 3);
+    const booked = await book(A, 4);
     const stays = await nameParticipant(
       runtime.db,
       A.id,
@@ -611,13 +611,13 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       removeParticipant(
         trx,
         ctx,
-        { bookingId: booked.bookingId, position: 2, partySize: 3 },
+        { bookingId: booked.bookingId, position: 2, partySize: 4 },
         hooks,
       ),
     );
     expect(removed).toMatchObject({
       kind: "removed",
-      change: { position: 2, participantId: leaves.participant.id, toPartySize: 2 },
+      change: { position: 2, participantId: leaves.participant.id, toPartySize: 3 },
     });
     const [request] = await admin<{ state: string; revoked_reason: string }[]>`
       select state, revoked_reason from public.waiver_requests where id = ${leaving}`;
@@ -628,7 +628,29 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       ),
     ).toBeNull();
     expect((await sign(A.id, session)).kind).toBe("not_pending");
-    expect((await messagesOf(leaving)).map((m) => m.state)).toEqual(["canceled"]);
+    // A second person leaves before their waiver email has gone out: it is canceled.
+    const queued = await nameParticipant(
+      runtime.db,
+      A.id,
+      booked.bookingId,
+      3,
+      adult("Quinn Queued"),
+      hooks,
+    );
+    const queuedRequest = await liveRequest(booked.bookingId, queued.participant.id);
+    expect((await messagesOf(queuedRequest)).map((m) => m.state)).toEqual(["queued"]);
+    const second = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      removeParticipant(
+        trx,
+        ctx,
+        { bookingId: booked.bookingId, position: 3, partySize: 3 },
+        hooks,
+      ),
+    );
+    expect(second.kind).toBe("removed");
+    expect((await messagesOf(queuedRequest)).map((m) => m.state)).toEqual(["canceled"]);
+    await deliverMail(runtime.db, A.id);
+    expect((await messagesOf(queuedRequest)).map((m) => m.state)).toEqual(["canceled"]);
     const [kept] = await admin<{ state: string }[]>`
       select state from public.waiver_requests where id = ${staying}`;
     expect(kept?.state).toBe("pending");
@@ -637,7 +659,7 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
       listParticipants(trx, A.id, booked.bookingId),
     );
     expect(party?.participants.map((p) => p.id)).toEqual([stays.participant.id]);
-    expect(party?.places).toEqual([1, 3]);
+    expect(party?.places).toEqual([1, 4]);
   });
 
   it("moves unsigned requests to a new version on request and never touches signed evidence", async () => {

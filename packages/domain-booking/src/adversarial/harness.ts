@@ -721,6 +721,9 @@ export async function auditLedger(admin: Sql, tenantIds: readonly string[]): Pro
                             or (exists (select 1 from public.capacity_holds bh
                                          where bh.tenant_id = b.tenant_id and bh.id = b.hold_id
                                            and bh.trip_id = b.trip_id
+                                           and bh.party_size = b.party_size
+                                           -- A confirmed booking holds its seats.
+                                           and (bh.state = 'confirmed' or b.state = 'canceled')
                                            and (exists (select 1 from public.booking_reschedules r
                                                          where r.tenant_id = b.tenant_id
                                                            and r.booking_id = b.id

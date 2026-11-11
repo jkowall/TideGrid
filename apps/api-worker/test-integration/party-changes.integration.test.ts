@@ -300,7 +300,7 @@ describe.skipIf(!env)("giving up a place through the API (W3-G2.11-rest)", () =>
     const owner = await request("POST", path, {
       as: B.owner,
       key: randomUUID(),
-      body: { partySize: 3, overrideReason: "Guest called; one of them is ill" },
+      body: { partySize: 3, overrideReason: "Guest called; owner approved a late change" },
     });
     expect(owner.status).toBe(200);
     expect(owner.json.change).toMatchObject({

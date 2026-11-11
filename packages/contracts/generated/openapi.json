@@ -13510,7 +13510,7 @@
                     "minLength": 1,
                     "maxLength": 500,
                     "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
-                    "description": "Owners only (bookings.override): why a place is given up past the change cutoff. Kept in the audit history"
+                    "description": "Owners only (bookings.override): why a place is given up past the change cutoff. Kept in the audit history for good, so never enter health or other sensitive details"
                   }
                 },
                 "required": [

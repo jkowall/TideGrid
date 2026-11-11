@@ -52,7 +52,7 @@ export const StaffRemoveParticipantRequest = RemoveParticipantRequest.extend({
     .nullable()
     .optional()
     .describe(
-      "Owners only (bookings.override): why a place is given up past the change cutoff. Kept in the audit history",
+      "Owners only (bookings.override): why a place is given up past the change cutoff. Kept in the audit history for good, so never enter health or other sensitive details",
     ),
 });
 export type StaffRemoveParticipantRequest = z.infer<typeof StaffRemoveParticipantRequest>;

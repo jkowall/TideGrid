@@ -340,7 +340,7 @@ describe.skipIf(!env)("giving up a place in a shared-seat party (W3-G2.11-rest)"
       bookingId: booked.bookingId,
       position: 3,
       partySize: 3,
-      overrideReason: "Guest is ill; owner approved",
+      overrideReason: "Owner approved a late change",
     });
     if (done.kind !== "removed") throw new Error(JSON.stringify(done));
     expect(done.change).toMatchObject({ beforeCutoff: false, overridden: true, by: "staff" });
@@ -349,7 +349,7 @@ describe.skipIf(!env)("giving up a place in a shared-seat party (W3-G2.11-rest)"
        where subject_id = ${booked.bookingId} and action like 'booking.party_reduced%'`;
     expect(audit).toEqual({
       action: "booking.party_reduced_override",
-      reason: "Guest is ill; owner approved",
+      reason: "Owner approved a late change",
     });
   });
 
