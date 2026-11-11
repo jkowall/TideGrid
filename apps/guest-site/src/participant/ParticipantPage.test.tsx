@@ -246,6 +246,17 @@ describe("opening an invitation", () => {
     expect(calls).toEqual([]);
   });
 
+  it("says the session ended, not that the link is missing, when a reload finds it run out", async () => {
+    const calls = api();
+    storeSession({ token: secret, expiresAt: new Date(Date.now() - 1_000).toISOString() });
+    renderPage("/participant");
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Your session ended" }),
+    ).toBeTruthy();
+    expect(calls).toEqual([]);
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  });
+
   it("picks the session up again after a reload", async () => {
     const calls = api();
     storeSession({ token: secret, expiresAt: new Date(Date.now() + 600_000).toISOString() });

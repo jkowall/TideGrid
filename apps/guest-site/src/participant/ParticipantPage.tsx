@@ -23,7 +23,7 @@ import { type FormErrors, formErrors, formOf, type ParticipantForm } from "../ma
 import { useLinkClick } from "../navigation.tsx";
 import { useTitle } from "../States.tsx";
 import { endSession, openWithLink, readProfile, saveOwnDetails } from "./api.ts";
-import { clearSession, loadSession, storeSession, takeLinkToken } from "./session.ts";
+import { clearSession, hadSession, loadSession, storeSession, takeLinkToken } from "./session.ts";
 import "../waiver/waiver.css";
 
 /**
@@ -277,7 +277,8 @@ function DetailsForm({
     }
     if (result.kind === "refused") {
       // A server error leaves the outcome unknown: keep the key for a retry.
-      if (result.status < 500) attempt.current = null;
+      // A 429 is answered before the key is looked up, so it settles nothing either.
+      if (result.status < 500 && result.status !== 429) attempt.current = null;
       if (result.status === 401) return onStopped("session_expired");
       if (result.status === 404 && result.code === "participant_not_found") {
         return onStopped("participant_not_found");
@@ -342,6 +343,7 @@ function DetailsForm({
           ref={fields.name}
           label={minor ? "Their full name" : "Your full name"}
           autoComplete={minor ? "off" : "name"}
+          readOnly={busy}
           maxLength={120}
           value={form.name}
           error={errors.name}
@@ -353,6 +355,7 @@ function DetailsForm({
               ref={fields.guardianName}
               label="Parent or guardian's full name"
               autoComplete="name"
+              readOnly={busy}
               maxLength={120}
               value={form.guardianName}
               error={errors.guardianName}
@@ -364,6 +367,7 @@ function DetailsForm({
               type="email"
               inputMode="email"
               autoComplete="email"
+              readOnly={busy}
               maxLength={254}
               value={form.guardianEmail}
               error={errors.guardianEmail}
@@ -378,6 +382,7 @@ function DetailsForm({
           type="email"
           inputMode="email"
           autoComplete={minor ? "off" : "email"}
+          readOnly={busy}
           maxLength={254}
           value={form.email}
           error={errors.email}
@@ -429,7 +434,10 @@ export function ParticipantPage({
   const [phase, setPhase] = useState<Phase>(() => {
     const token = takeLinkToken();
     if (token) return { kind: "start", token, opening: false, failed: false };
-    return loadSession() ? { kind: "loading" } : { kind: "stopped", code: "no_link" };
+    // A session this tab held that has run out is an ended session, not a missing link.
+    const lapsed = hadSession();
+    if (loadSession()) return { kind: "loading" };
+    return { kind: "stopped", code: lapsed ? "session_expired" : "no_link" };
   });
   const moved = useRef(false);
   const phaseKey = phase.kind === "stopped" ? `stopped:${phase.code}` : phase.kind;

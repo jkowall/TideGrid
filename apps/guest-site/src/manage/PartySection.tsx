@@ -48,7 +48,7 @@ export function PartySection({
   const [inviting, setInviting] = useState<number | null>(null);
   // One key per place's invitation: a retry after no answer, or a server
   // error, sends the same request, so it never emails twice.
-  const inviteKeys = useRef(new Map<number, string>());
+  const inviteKeys = useRef(new Map<number, { to: string; key: string }>());
   const [invite, setInvite] = useState<{
     tone: "success" | "warning" | "error";
     text: string;
@@ -168,15 +168,20 @@ export function PartySection({
                         setSaved(null);
                         setInvite(null);
                         setInviting(slot.position);
-                        const key = inviteKeys.current.get(slot.position) ?? crypto.randomUUID();
-                        inviteKeys.current.set(slot.position, key);
+                        // A key holds only for the same address: a corrected one is a new request.
+                        const to = recipientOf(participant);
+                        const kept = inviteKeys.current.get(slot.position);
+                        const key = kept?.to === to ? kept.key : crypto.randomUUID();
+                        inviteKeys.current.set(slot.position, { to, key });
                         void inviteParticipant(session, slot.position, key).then((result) => {
                           setInviting(null);
                           // Keep the key only when the outcome is unknown.
                           const unsure =
                             result.kind === "network" ||
                             result.kind === "unreadable" ||
-                            (result.kind === "refused" && result.status >= 500);
+                            // A 429 is answered before the key is looked up, so it settles nothing.
+                            (result.kind === "refused" &&
+                              (result.status >= 500 || result.status === 429));
                           if (!unsure) inviteKeys.current.delete(slot.position);
                           if (result.kind === "refused" && result.status === 401) {
                             onEnded();
@@ -203,6 +208,10 @@ export function PartySection({
 /** Whether someone can be sent their own link: an address of theirs, or their guardian's. */
 function invitable(p: Participant): boolean {
   return p.isMinor ? p.guardian !== null : p.email !== null;
+}
+
+function recipientOf(p: Participant): string {
+  return (p.isMinor ? p.guardian?.email : p.email) ?? "";
 }
 
 function inviteOutcome(

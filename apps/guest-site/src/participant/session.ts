@@ -32,6 +32,15 @@ export function takeLinkToken(): string | null {
   return match?.[1] ?? null;
 }
 
+/** Whether this tab holds a session record at all, live or run out. Reads only. */
+export function hadSession(): boolean {
+  try {
+    return window.sessionStorage.getItem(KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function loadSession(now: number = Date.now()): StoredSession | null {
   try {
     const raw = window.sessionStorage.getItem(KEY);

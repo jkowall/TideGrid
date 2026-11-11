@@ -1325,6 +1325,24 @@ describe("sending someone their own link", () => {
     expect(keys[2]).not.toBe(keys[1]);
   });
 
+  it("keeps the key after too many tries, as that settles nothing", async () => {
+    let tries = 0;
+    const calls = await shown({
+      invite: () => {
+        tries += 1;
+        if (tries === 1) return refusal(429, "rate_limited");
+        return json({ status: "accepted", recipient: "guardian" }, 202);
+      },
+    });
+    fireEvent.click(sendTo(2));
+    await noticeTitled("Link not sent");
+    fireEvent.click(sendTo(2));
+    await noticeTitled("Link on its way");
+    const keys = callsTo(calls, "invite").map((c) => c.headers.get("idempotency-key"));
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+  });
+
   it("shows the ended screen when the session has ended", async () => {
     await shown({ invite: () => refusal(401, "session_expired") });
     fireEvent.click(sendTo(2));
