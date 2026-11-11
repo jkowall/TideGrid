@@ -67,6 +67,12 @@ BEGIN
   NEW.actor_id := app.setting_or_null('app.actor_id');
   NEW.request_id := app.setting_or_null('app.request_id');
   NEW.note_redacted_at := NULL;
+  -- The trip's lock first, as the hold rules and a checkout take it, so an
+  -- override, a hold, and a checkout under one reference are checked in turn,
+  -- each seeing what the others committed.
+  PERFORM 1 FROM public.scheduled_trips t
+    WHERE t.tenant_id = NEW.tenant_id AND t.id = NEW.trip_id
+      FOR NO KEY UPDATE;
   IF NEW.owner_ref NOT LIKE 'checkout\_session:%' THEN
     RAISE EXCEPTION 'a capacity override is for a staff checkout'
       USING ERRCODE = '23514', CONSTRAINT = 'capacity_overrides_trip';
@@ -130,6 +136,10 @@ CREATE FUNCTION app.check_checkout_capacity_override() RETURNS trigger
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
+  -- The trip's lock first, as an override takes it (see above).
+  PERFORM 1 FROM public.scheduled_trips t
+    WHERE t.tenant_id = NEW.tenant_id AND t.id = NEW.trip_id
+      FOR NO KEY UPDATE;
   IF EXISTS (SELECT 1 FROM public.capacity_overrides o
               WHERE o.tenant_id = NEW.tenant_id
                 AND o.owner_ref = 'checkout_session:' || NEW.id::text
