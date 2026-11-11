@@ -93,6 +93,14 @@ BEGIN
       NEW.trip_id, trip.seat_capacity, trip.boat_capacity, NEW.extra_seats
       USING ERRCODE = '23514', CONSTRAINT = 'capacity_overrides_boat';
   END IF;
+  -- A checkout already open under that reference must be a staff checkout.
+  IF EXISTS (SELECT 1 FROM public.checkout_sessions s
+              WHERE s.tenant_id = NEW.tenant_id
+                AND NEW.owner_ref = 'checkout_session:' || s.id::text
+                AND (s.source <> 'staff_assisted' OR s.trip_id <> NEW.trip_id)) THEN
+    RAISE EXCEPTION 'a capacity override is for a staff checkout of this trip'
+      USING ERRCODE = '23514', CONSTRAINT = 'capacity_overrides_trip';
+  END IF;
   IF EXISTS (SELECT 1 FROM public.capacity_holds h
               WHERE h.tenant_id = NEW.tenant_id AND h.trip_id = NEW.trip_id
                 AND h.owner_ref = NEW.owner_ref) THEN
@@ -114,6 +122,27 @@ CREATE TRIGGER capacity_overrides_no_delete BEFORE DELETE ON public.capacity_ove
   FOR EACH ROW EXECUTE FUNCTION app.reject_mutation();
 CREATE TRIGGER capacity_overrides_no_truncate BEFORE TRUNCATE ON public.capacity_overrides
   FOR EACH STATEMENT EXECUTE FUNCTION app.reject_mutation();
+-- And the other way round: a checkout opened under a reference an override
+-- names is a staff checkout of that override's trip, whatever order the two
+-- rows are written in, so no guest or direct checkout uses an override.
+CREATE FUNCTION app.check_checkout_capacity_override() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.capacity_overrides o
+              WHERE o.tenant_id = NEW.tenant_id
+                AND o.owner_ref = 'checkout_session:' || NEW.id::text
+                AND (NEW.source <> 'staff_assisted' OR o.trip_id <> NEW.trip_id)) THEN
+    RAISE EXCEPTION 'checkout % names a capacity override; only a staff checkout of its trip may', NEW.id
+      USING ERRCODE = '23514', CONSTRAINT = 'capacity_overrides_trip';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+CREATE TRIGGER checkout_sessions_capacity_override AFTER INSERT ON public.checkout_sessions
+  FOR EACH ROW EXECUTE FUNCTION app.check_checkout_capacity_override();
+
 -- Append-only, except one update shape: the retention job clearing a note
 -- and stamping when (once, permanently). Any other change is refused.
 CREATE FUNCTION app.check_capacity_override_update() RETURNS trigger
@@ -425,5 +454,6 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION app.check_capacity_override_update() FROM PUBLIC;
+REVOKE ALL ON FUNCTION app.check_checkout_capacity_override() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app.retention_redact_abandoned_checkouts(integer, integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app.retention_redact_abandoned_checkouts(integer, integer) TO tidegrid_app;

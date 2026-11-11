@@ -1728,7 +1728,18 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
   it("W3-G2.12-rest: lets only an owner book one more party onto a full trip, up to the boat", async () => {
     // A guest takes all ten seats of a trip on the twenty-guest boat.
     const full = tripsA.shared();
-    expect((await guestOpen(A, await quoteFor(runtime.db, A.id, full, 8))).status).toBe(201);
+    const guestEight = await guestOpen(A, await quoteFor(runtime.db, A.id, full, 8));
+    expect(guestEight.status).toBe(201);
+    // Not even an owner, writing directly, can put an override on a guest's checkout.
+    await expect(
+      admin.begin(async (tx) => {
+        await tx`select set_config('app.tenant_id', ${A.id}, true),
+                        set_config('app.actor_type', 'staff', true),
+                        set_config('app.actor_id', ${A.ownerId}, true)`;
+        await tx`insert into public.capacity_overrides (tenant_id, trip_id, owner_ref, extra_seats, reason_code)
+          values (${A.id}, ${full}, ${`checkout_session:${guestEight.json.checkoutSession.id as string}`}, 1, 'make_good')`;
+      }),
+    ).rejects.toMatchObject({ constraint_name: "capacity_overrides_trip" });
     expect((await guestOpen(A, await quoteFor(runtime.db, A.id, full, 2))).status).toBe(201);
     const override = { reasonCode: "captain_approved" } as const;
 
