@@ -99,11 +99,11 @@ export function importLookup(trx: TenantTransaction, tenantId: string): ImportLo
                t.sales_state,
                (select coalesce(sum(h.seats), 0)::int from capacity_holds h
                  where h.tenant_id = t.tenant_id and h.trip_id = t.id
-                   and h.state in ('active', 'confirmed')) as held
+                   and (h.state = 'confirmed'
+                        or (h.state = 'active' and h.expires_at > pg_catalog.now()))) as held
           from scheduled_trips t
          where t.tenant_id = ${tenantId}
            and t.boat_id = any(${[...boatIds]}::uuid[])
-           and t.sales_state <> 'canceled'
            and t.boat_free_at > ${new Date(fromMs)}
            and t.starts_at < ${new Date(toMs)}`.execute(trx);
       return rows.map(

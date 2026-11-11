@@ -49,6 +49,7 @@ export const IMPORT_ISSUE_CODES = [
   "ambiguous_local_time",
   "trip_in_past",
   "trip_departed",
+  "trip_canceled",
   "boat_overlap",
   "trip_date_mismatch",
   "over_capacity",

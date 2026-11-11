@@ -390,16 +390,16 @@ function readManifest(
       if (!header.includes(w))
         report.add(file, null, w, "missing_column", "This column is missing from the header.");
     }
-    for (const h of header) {
+    header.forEach((h, i) => {
       if (!want.includes(h))
         report.add(
           file,
           null,
-          h.slice(0, 64),
+          `column ${i + 1}`,
           "unknown_column",
           "The manifest has the columns item, file, and value.",
         );
-    }
+    });
     return { manifest: null, declared };
   }
   const at = (name: string) => header.indexOf(name);
@@ -516,6 +516,18 @@ function readManifest(
     const v = entry?.value ?? "";
     if (v === "") {
       report.add(file, row, item, "missing_required", "This manifest item is required.");
+      fatal = true;
+      return null;
+    }
+    if (holdsCardNumber(v)) {
+      report.add(
+        file,
+        row,
+        item,
+        "possible_card_number",
+        "The value looks like a card number and was not stored.",
+        "[withheld]",
+      );
       fatal = true;
       return null;
     }
@@ -935,7 +947,29 @@ export async function validateImport(
     }
     live = await lookup.liveTrips([...new Set(open.map((p) => p.boat.id))], from, to);
   }
+  // A canceled departure still holds its product, boat, and start, so a row
+  // naming it is refused; it never blocks another trip on the boat.
+  const canceled = live.filter((t) => t.salesState === "canceled");
+  live = live.filter((t) => t.salesState !== "canceled");
   for (const plan of open) {
+    if (
+      canceled.some(
+        (t) =>
+          t.boatId === plan.boat.id &&
+          t.productId === plan.product.id &&
+          t.startsAtMs === plan.startMs,
+      )
+    ) {
+      report.add(
+        "trips.csv",
+        plan.row,
+        "local_start_time",
+        "trip_canceled",
+        "This departure was canceled in TideGrid.",
+        plan.localDate,
+      );
+      continue;
+    }
     const same = live.find(
       (t) =>
         t.boatId === plan.boat.id &&
@@ -956,6 +990,7 @@ export async function validateImport(
       }
       plan.existing = same;
       plan.capacity = same.seatCapacity;
+      plan.freeAtMs = same.boatFreeAtMs;
     }
     const clash = live.find(
       (t) =>
@@ -1326,6 +1361,13 @@ export async function validateImport(
           String(e.amount),
         );
       }
+      report.add(
+        "bookings.csv",
+        booking.row,
+        "total_cents",
+        "refund_exceeds_payments",
+        "The booking's refunds exceed its payments, so its money cannot be taken over.",
+      );
       continue;
     }
     if (sumIn - sumOut > booking.total) {
@@ -1339,6 +1381,13 @@ export async function validateImport(
           String(e.amount),
         );
       }
+      report.add(
+        "bookings.csv",
+        booking.row,
+        "total_cents",
+        "overpaid",
+        "The booking's payments exceed its total, so its money cannot be taken over.",
+      );
       continue;
     }
     paid.set(booking, { in: sumIn, out: sumOut });

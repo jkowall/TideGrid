@@ -274,6 +274,48 @@ PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
       `${over["payments.csv"]}PAY-9004,LB-5003,2027-04-12,refund,50000,check,,2027-02-11T09:05:00-05:00\n`;
     run = await validateImport(over, lookup(), NOW);
     expect(at("payments.csv", 5)).toEqual(["refund_exceeds_payments"]);
+    // The booking goes too, and its other payment with it.
+    expect(at("bookings.csv", 4)).toEqual(["refund_exceeds_payments"]);
+    expect(at("payments.csv", 4)).toEqual(["parent_rejected"]);
+  });
+
+  it("refuses a canceled departure and a card number in the manifest", async () => {
+    const canceledTrip: TripInfo = {
+      id: "00000000-0000-4000-8000-000000000302",
+      productId: P_REEF,
+      boatId: B_REEF,
+      startsAtMs: Date.parse("2027-04-13T12:00:00Z"),
+      boatFreeAtMs: Date.parse("2027-04-13T16:30:00Z"),
+      seatCapacity: 12,
+      salesState: "canceled",
+      heldSeats: 0,
+    };
+    let run = await validateImport(sample(), lookup([canceledTrip]), NOW);
+    expect(run.issues).toContainEqual(
+      expect.objectContaining({ file: "trips.csv", line: 4, code: "trip_canceled" }),
+    );
+    expect(run.issues.filter((i) => i.code === "boat_overlap")).toEqual([]);
+
+    const files = sample();
+    files["manifest.csv"] = (files["manifest.csv"] as string).replace(
+      "batch_id,,DH-2027-03-A",
+      "batch_id,,4242424242424242",
+    );
+    run = await validateImport(files, lookup(), NOW);
+    expect(run.manifest).toBeNull();
+    expect(run.issues).toContainEqual(
+      expect.objectContaining({ column: "batch_id", code: "possible_card_number" }),
+    );
+    const header = sample();
+    header["manifest.csv"] = (header["manifest.csv"] as string).replace(
+      "item,file,value",
+      "item,file,value,4111111111111111",
+    );
+    const bad = await validateImport(header, lookup(), NOW);
+    expect(bad.issues).toContainEqual(
+      expect.objectContaining({ column: "column 4", code: "unknown_column" }),
+    );
+    expect(JSON.stringify([run, bad])).not.toMatch(/4242424242424242|4111111111111111/);
   });
 
   it("refuses an unknown column, a commit, a past trip, and a busy boat", async () => {
