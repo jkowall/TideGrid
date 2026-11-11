@@ -212,7 +212,7 @@ describe("Important links in the console (W3-G2.14b-rest)", () => {
     expect(
       sent.filter((s) => s.method === "GET" && s.path.endsWith("/important-links")),
     ).toHaveLength(2);
-    expect(document.activeElement?.id).toBe("links-add");
+    await waitFor(() => expect(document.activeElement?.id).toBe("links-add"));
     expect(screen.getByText(/Archived links \(1\)/)).toBeTruthy();
   });
 
@@ -369,7 +369,10 @@ describe("Important links, after review (W3-G2.14b-rest)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive link" }));
     await waitFor(() => expect(screen.getByText("No links for guests yet")).toBeTruthy());
     expect(reads).toBe(2);
-    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1 }));
+    // Focus moves in an effect after the new list renders.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1 })),
+    );
     expect(screen.getByText(/Archived links \(1\)/)).toBeTruthy();
   });
 
