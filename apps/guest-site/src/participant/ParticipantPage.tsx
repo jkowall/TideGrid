@@ -433,7 +433,11 @@ export function ParticipantPage({
 }) {
   const [phase, setPhase] = useState<Phase>(() => {
     const token = takeLinkToken();
-    if (token) return { kind: "start", token, opening: false, failed: false };
+    if (token) {
+      // A new invitation replaces any person this tab had open before.
+      clearSession();
+      return { kind: "start", token, opening: false, failed: false };
+    }
     // A session this tab held that has run out is an ended session, not a missing link.
     const lapsed = hadSession();
     if (loadSession()) return { kind: "loading" };
@@ -463,11 +467,15 @@ export function ParticipantPage({
     [go],
   );
 
+  // Bumped when another invitation arrives in this tab: answers for the
+  // earlier one then change nothing.
+  const epoch = useRef(0);
   const load = useCallback(
     async (session: string) => {
+      const mine = epoch.current;
       const result = await readProfile(session);
-      // Done, or stopped, while this read was on its way: it changes nothing.
-      if (current.current.kind === "stopped") return;
+      // Done, stopped, or replaced while this read was on its way: it changes nothing.
+      if (mine !== epoch.current || current.current.kind === "stopped") return;
       if (result.kind === "ok") go({ kind: "details", session, profile: result.value });
       else if (result.kind === "refused" && result.status === 401) stop("session_expired");
       else if (result.kind === "refused" && result.code === "participant_not_found") {
@@ -489,9 +497,27 @@ export function ParticipantPage({
     void load(stored.token);
   }, [phase.kind, load, stop]);
 
+  // Another invitation opened in this tab changes only the fragment: start
+  // over with it, without spending it, and forget the person shown before.
+  useEffect(() => {
+    const onHash = () => {
+      const token = takeLinkToken();
+      if (!token) return;
+      epoch.current += 1;
+      const before = current.current;
+      if (before.kind === "details") void endSession(before.session);
+      clearSession();
+      go({ kind: "start", token, opening: false, failed: false });
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [go]);
+
   const open = async (token: string) => {
+    const mine = epoch.current;
     setPhase({ kind: "start", token, opening: true, failed: false });
     const result = await openWithLink(token);
+    if (mine !== epoch.current) return;
     if (result.kind === "ok") {
       storeSession(result.value);
       await load(result.value.token);

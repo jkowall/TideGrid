@@ -257,6 +257,38 @@ describe("opening an invitation", () => {
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
   });
 
+  it("forgets a person this tab had open when a new invitation arrives", async () => {
+    const calls = api();
+    storeSession({ token: secret, expiresAt: new Date(Date.now() + 600_000).toISOString() });
+    renderPage();
+    expect(screen.getByRole("heading", { name: "Check your trip details" })).toBeTruthy();
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it("starts over, without spending it, when another invitation opens in this tab", async () => {
+    const calls = api();
+    renderPage();
+    await openDetails();
+    const other = "U".repeat(43);
+    window.history.replaceState(null, "", `/participant#t=${other}`);
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Check your trip details" }),
+    ).toBeTruthy();
+    expect(window.location.hash).toBe("");
+    expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+    await waitFor(() => expect(paths(calls)).toContain("POST /v1/public/participant/session/end"));
+    expect(calls.filter((c) => c.method === "POST" && c.body !== undefined)).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Open my details" }));
+    await screen.findByRole("heading", { level: 1, name: "Your trip details" });
+    expect(
+      calls
+        .filter((c) => new URL(c.url).pathname.endsWith("participant-access"))
+        .map((c) => c.body),
+    ).toEqual([{ token }, { token: other }]);
+  });
+
   it("picks the session up again after a reload", async () => {
     const calls = api();
     storeSession({ token: secret, expiresAt: new Date(Date.now() + 600_000).toISOString() });

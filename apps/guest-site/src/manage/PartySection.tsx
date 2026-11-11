@@ -210,8 +210,13 @@ function invitable(p: Participant): boolean {
   return p.isMinor ? p.guardian !== null : p.email !== null;
 }
 
+/**
+ * What an invitation's key is good for: this address and this version of the
+ * person's details. Any edit since may have withdrawn the earlier invitation,
+ * so it starts a new one.
+ */
 function recipientOf(p: Participant): string {
-  return (p.isMinor ? p.guardian?.email : p.email) ?? "";
+  return `${(p.isMinor ? p.guardian?.email : p.email) ?? ""} ${p.updatedAt}`;
 }
 
 function inviteOutcome(
