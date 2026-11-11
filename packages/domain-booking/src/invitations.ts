@@ -459,10 +459,16 @@ export async function updateOwnDetails(
   details: OwnDetails,
   hooks: BookingHooks = noBookingHooks,
 ): Promise<UpdateOwnDetailsResult> {
+  // The booking's lock, then the participant's, as putParticipant takes them,
+  // so whether they are a minor cannot change between this read and the write.
+  await sql`
+    select 1 from bookings where tenant_id = ${ctx.tenantId} and id = ${session.bookingId}
+       for no key update`.execute(trx);
   const { rows } = await sql<{ position: number; is_minor: boolean }>`
     select position, is_minor from booking_participants
      where tenant_id = ${ctx.tenantId} and booking_id = ${session.bookingId}
-       and id = ${session.participantId} and removed_at is null`.execute(trx);
+       and id = ${session.participantId} and removed_at is null
+       for no key update`.execute(trx);
   const current = rows[0];
   if (!current) return { kind: "participant_not_found" };
   const guardian = details.guardian ?? null;

@@ -222,6 +222,10 @@ describe.skipIf(!env)("participant invitations and their own details (W3-G2.11-r
     // Two emails; the newer link replaced the older one.
     const inbox = (await mail.listMailbox(A.id)).filter((m) => m.to === "gail@example.test");
     expect(inbox.length).toBe(2);
+    const older = await mail.getMailboxMessage(A.id, inbox[1]?.id ?? "");
+    const olderToken = /\/participant#t=([A-Za-z0-9_-]{43})/.exec(older?.html ?? "")?.[1];
+    if (!olderToken) throw new Error("no older link");
+    expect(await open(A, olderToken)).toEqual({ kind: "superseded" });
     const first = await openedSession(A, await tokenFor(A, "gail@example.test"));
 
     // A third invitation, queued but not sent, and a second session through it later.
@@ -360,6 +364,62 @@ describe.skipIf(!env)("participant invitations and their own details (W3-G2.11-r
       await as(g, (trx) => resolveGuestSession(trx, A.id, quin.token, "participant_profile")),
     ).toBeNull();
     expect(anyone?.id).toBeDefined();
+  });
+
+  it("cancels an invitation still queued when the trip leaves, and the operator's other mail still goes", async () => {
+    const late = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    await put(guestContext(A.id), late.bookingId, 1, {
+      name: "Tia Tardy",
+      isMinor: false,
+      email: "tia@example.test",
+    });
+    const queued = await invite(A.id, late.bookingId, 1);
+    if (queued.kind !== "invited") throw new Error(queued.kind);
+    // The trip leaves before the delivery job gets to it.
+    await admin`
+      with t as (select date_trunc('minute', now()) - interval '400 days' as s)
+      update public.scheduled_trips st
+         set starts_at = t.s, ends_at = t.s + make_interval(mins => st.duration_minutes),
+             boat_free_at = t.s + (st.boat_free_at - st.starts_at),
+             local_date = (t.s at time zone st.time_zone)::date,
+             local_start_time = (t.s at time zone st.time_zone)::time(0)
+        from t, public.bookings b
+       where b.id = ${late.bookingId} and st.id = b.trip_id`;
+    const other = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1);
+    await put(guestContext(A.id), other.bookingId, 1, {
+      name: "Uma Ontime",
+      isMinor: false,
+      email: "uma@example.test",
+    });
+    const fine = await invite(A.id, other.bookingId, 1);
+    if (fine.kind !== "invited") throw new Error(fine.kind);
+
+    const run = await deliver(A);
+    expect(run.items.find((i) => i.messageId === queued.messageId)).toMatchObject({
+      outcome: "canceled",
+    });
+    expect(run.items.find((i) => i.messageId === fine.messageId)?.outcome).toBe("sent");
+    const [row] = await admin<{ state: string; last_error_code: string }[]>`
+      select state, last_error_code from public.email_messages where id = ${queued.messageId}`;
+    expect(row).toEqual({ state: "canceled", last_error_code: "invitation_closed" });
+    const [links] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.guest_access_links where message_id = ${queued.messageId}`;
+    expect(links?.n).toBe(0);
+  });
+
+  it("closes a queued invitation when its participant is removed", async () => {
+    const { bookingId } = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 2);
+    const g = guestContext(A.id);
+    await put(g, bookingId, 2, { name: "Vic Leaving", isMinor: false, email: "vic@example.test" });
+    const queued = await invite(A.id, bookingId, 2);
+    if (queued.kind !== "invited") throw new Error(queued.kind);
+    const removed = await as(g, (trx, c) =>
+      removeParticipant(trx, c, { bookingId, position: 2, partySize: 2 }),
+    );
+    expect(removed.kind).toBe("removed");
+    const [row] = await admin<{ state: string; last_error_code: string }[]>`
+      select state, last_error_code from public.email_messages where id = ${queued.messageId}`;
+    expect(row).toEqual({ state: "canceled", last_error_code: "access_withdrawn" });
   });
 
   it("clamps a link to the trip's start", async () => {

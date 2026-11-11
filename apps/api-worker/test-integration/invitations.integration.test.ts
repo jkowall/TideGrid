@@ -292,6 +292,20 @@ describe.skipIf(!env)("participant invitations through the API (W3-G2.11-rest)",
       changed: true,
       profile: { participant: { name: "Ivy Invitee", isMinor: false } },
     });
+    // A new address of their own: this session stays, and the waiver hooks run.
+    const moved = await request("PUT", "/v1/public/participant/profile", {
+      ...guest(session, randomUUID()),
+      body: { name: "Ivy Invitee", email: "ivy.new@example.test" },
+    });
+    expect(moved.status).toBe(200);
+    expect(moved.json.profile.participant.email).toBe("ivy.new@example.test");
+    const [after] = await admin<{ email: string }[]>`
+      select email from public.booking_participants
+       where booking_id = ${b.bookingId} and position = 2`;
+    expect(after?.email).toBe("ivy.new@example.test");
+    expect((await request("GET", "/v1/public/participant/profile", guest(session))).status).toBe(
+      200,
+    );
     // An adult names no guardian.
     const wrong = await request("PUT", "/v1/public/participant/profile", {
       ...guest(session, randomUUID()),

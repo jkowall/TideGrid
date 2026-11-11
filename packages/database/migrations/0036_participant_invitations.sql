@@ -14,9 +14,10 @@
 --    the participant's own email, or a minor's guardian's. Never to the
 --    booker's or any other address. At most 3 an invitee in 24 hours and 20
 --    a booking, counted here, under the participant's row lock.
--- 3. A link and a session of this purpose open only while the booking is
---    confirmed, its trip has not started, and the participant is not
---    removed; a link never outlives the trip's start.
+-- 3. A session of this purpose opens only while the booking is confirmed,
+--    its trip has not started, and the participant is not removed; a link
+--    never outlives the trip's start, and one issued after that opens
+--    nothing.
 -- 4. A participant's session changes only its own participant's row, and
 --    never whether they are a minor; it never names a place.
 --
@@ -70,9 +71,11 @@ $$;
 
 -- An invitation is a message carrying a participant_profile link. It goes to
 -- the address the participant's row holds now, and the limits are counted
--- under that row's lock, so two invitations at once count each other. The
--- lock is FOR NO KEY UPDATE, as the booking service takes it, so a delivery's
--- foreign key checks on the row never wait behind it.
+-- under the booking's and then the participant's row locks, the order the
+-- booking service takes them in, so two invitations at once count each
+-- other, for one participant or one booking. The locks are FOR NO KEY
+-- UPDATE, so a delivery's foreign key checks on the rows never wait behind
+-- them.
 CREATE FUNCTION app.check_profile_invitation() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -81,6 +84,9 @@ DECLARE
   p record;
   recent integer;
 BEGIN
+  PERFORM 1 FROM public.bookings x
+   WHERE x.tenant_id = NEW.tenant_id AND x.id = NEW.booking_id
+     FOR NO KEY UPDATE;
   SELECT x.is_minor, x.email, x.guardian_email, x.removed_at INTO p
     FROM public.booking_participants x
    WHERE x.tenant_id = NEW.tenant_id AND x.booking_id = NEW.booking_id
@@ -124,10 +130,13 @@ CREATE TRIGGER email_messages_profile_invitation BEFORE INSERT ON public.email_m
 
 -- 3. Links and sessions ---------------------------------------------------------------
 
--- A participant_profile link is issued only while the participant may still
--- be reached, and never outlives the trip's start (a second to live if the
--- start is that close, so it opens nothing). Runs before the module's own
--- rules, as the waiver clamp does.
+-- A participant_profile link never outlives the trip's start, and one issued
+-- when the participant can no longer be reached lives a second, so it opens
+-- nothing. It clamps rather than refuses, as the waiver clamp does: the
+-- delivery job issues links while it claims a message, and a refusal there
+-- would leave the message queued ahead of the operator's other mail (the
+-- job also cancels such an invitation before it gets here). Runs before the
+-- module's own rules.
 CREATE FUNCTION app.check_profile_link() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp
@@ -135,16 +144,16 @@ CREATE FUNCTION app.check_profile_link() RETURNS trigger
 DECLARE
   trip_start timestamptz;
 BEGIN
-  IF NOT coalesce(app.profile_access_open(NEW.tenant_id, NEW.booking_id, NEW.participant_id),
-                  false) THEN
-    RAISE EXCEPTION 'a participant link needs a confirmed booking, a trip not yet started, and a participant still in the party'
-      USING ERRCODE = '23514', CONSTRAINT = 'guest_access_links_profile';
-  END IF;
   SELECT t.starts_at INTO trip_start
     FROM public.bookings b
     JOIN public.scheduled_trips t ON t.tenant_id = b.tenant_id AND t.id = b.trip_id
    WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id;
-  NEW.expires_at := greatest(least(NEW.expires_at, trip_start), now() + interval '1 second');
+  IF NOT coalesce(app.profile_access_open(NEW.tenant_id, NEW.booking_id, NEW.participant_id),
+                  false) THEN
+    NEW.expires_at := now() + interval '1 second';
+  ELSE
+    NEW.expires_at := greatest(least(NEW.expires_at, trip_start), now() + interval '1 second');
+  END IF;
   RETURN NEW;
 END;
 $$;

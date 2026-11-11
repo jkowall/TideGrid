@@ -173,6 +173,12 @@ async function withParticipantSession<T extends JsonObject>(
       throw new ApiError(422, "idempotency_key_reused", err.message);
     }
     if (err instanceof BookingHookRefusal) throw new ApiError(409, err.code, err.message);
+    // The database's own check that this session is live and its own (0036):
+    // the booker ended it, or changed the participant, while this ran.
+    const db = err as { code?: string; constraint_name?: string };
+    if (db.code === "42501" && db.constraint_name === "booking_participants_profile_session") {
+      throw sessionExpired();
+    }
     throw err;
   }
 }

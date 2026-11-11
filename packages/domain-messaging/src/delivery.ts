@@ -495,6 +495,29 @@ async function claimOne(
         } as const;
       }
     }
+    // A participant's invitation (W3-G2.11-rest, 0036) is only worth sending
+    // while that participant can still be reached: the booking confirmed,
+    // the trip not started, the participant still in the party. A retry can
+    // wait past departure, so the claim checks again, and an invitation that
+    // can no longer open anything is canceled with no provider call. It must
+    // never be left queued: it would come first in every later run.
+    if (found.link_purpose === "participant_profile" && found.booking_id !== null) {
+      const { rows: open } = await sql<{ open: boolean | null }>`
+        select app.profile_access_open(${ctx.tenantId}::uuid, ${found.booking_id}::uuid,
+                                       ${found.participant_id}::uuid) as open`.execute(trx);
+      if (open[0]?.open !== true) {
+        await sql`
+          update email_messages set state = 'canceled', last_error_code = ${INVITATION_CLOSED}
+           where tenant_id = ${ctx.tenantId} and id = ${found.id}
+             and state in ('queued', 'sending')`.execute(trx);
+        return {
+          kind: "canceled",
+          messageId: found.id,
+          attempt: found.attempts,
+          code: INVITATION_CLOSED,
+        } as const;
+      }
+    }
     // A balance email (W3-G2.8) is only worth sending while something is
     // owed: one whose balance was paid, or whose booking was canceled, since
     // it was written is canceled as balance_settled, with no provider call.
@@ -566,6 +589,9 @@ async function claimOne(
     return { kind: "ready", row, url: `${base}${row.link_path}#t=${issued.token}` } as const;
   });
 }
+
+/** Why a participant's invitation was canceled at its claim (0036). */
+export const INVITATION_CLOSED = "invitation_closed";
 
 async function fail(
   trx: TenantTransaction,
