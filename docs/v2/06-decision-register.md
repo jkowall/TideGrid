@@ -8,6 +8,20 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.15-rest, part 2, names and typed signatures in other alphabets in the signed PDF, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-11 ("Go ahead") on the last waiver item that needs no owner call, with the same limits as part 1 below. No migration, no new npm dependency, and no change to what a waiver's own text may contain (still WinAnsi only).
+
+What it adds: a participant's name, a guardian's name, the operator's name, or a typed signature with a letter the standard PDF fonts lack (Polish, Czech, Turkish, Romanian, Vietnamese, Greek, Cyrillic, and similar) now shows that letter in the signed PDF instead of a question mark. See the [waiver module](../../packages/domain-waivers/README.md#signing).
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: DejaVu Sans, embedded as a subset.** A free font whose license allows embedding and redistribution with its notice. Each PDF carries only the letters it uses (a few kilobytes); the Worker carries the font reduced to the covered alphabets (about 170 KB more compressed).
+- **D2: alphabets only.** Scripts that need shaping or right-to-left layout (Arabic, Hebrew, Indic, Chinese, Japanese, Korean) still show a question mark; the evidence keeps the exact text either way.
+- **D3: existing documents unchanged.** A waiver whose text WinAnsi can show produces the same bytes as before, so the rendering version stays 1.
+
+Known gaps from review: a waiver with a non-WinAnsi name signed before this change would not re-render to the same bytes, which matters only if something ever re-renders old evidence (today the PDF is rendered once, at signing, and nothing is in production yet); and a name that mixes look-alike letters from two alphabets (a Cyrillic "о" in "John") now looks exactly like the Latin name, though its stored and searchable text still differs. Flagging mixed-alphabet names where they are entered is a candidate follow-up.
+
 ### 2026-11-11: W3-G2.15-rest, the booker sends a person's waiver email again, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The tracker's W3-G2.15-rest also covers the generic dock QR with staff lookup, waiver reuse across bookings, and suppressing waiver email for imported bookings; the first needs the owner's call on how staff look a guest up at the dock, the second needs verified customer identity and the owner's re-sign policy, and the third waits for the CSV import's commit step, so none is in this part.
