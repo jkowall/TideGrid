@@ -188,6 +188,15 @@ export function PartyWaivers({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [resends, setResends] = useState<Record<number, Resend>>({});
+  // Draws again when a sent note runs out, so the button comes back on its own.
+  const [, setExpired] = useState(0);
+  const expiry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (expiry.current) clearTimeout(expiry.current);
+    },
+    [],
+  );
   const notes = useRef(new Map<number, HTMLParagraphElement>());
   const focusNote = useRef<number | null>(null);
   const loadedAt = useRef(0);
@@ -270,6 +279,8 @@ export function PartyWaivers({
       const now = result.value.participants.find((x) => x.position === p.position) ?? p;
       // The button goes away, so the note takes focus.
       focusNote.current = p.position;
+      if (expiry.current) clearTimeout(expiry.current);
+      expiry.current = setTimeout(() => setExpired((n) => n + 1), SENT_NOTE_MS + 1000);
       note(
         "sent",
         `Sent again${now.sentTo ? ` to ${now.sentTo}` : ""}. Ask them to check their inbox and spam folder.`,

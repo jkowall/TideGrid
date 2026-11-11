@@ -422,6 +422,23 @@ describe("sending a person's waiver again", () => {
     expect(screen.getByText("2 of 3 signed")).toBeTruthy();
   });
 
+  it("brings the button back 10 minutes after a send", async () => {
+    stubApi((call) =>
+      call.method === "POST" ? json(202, { waivers: party }) : json(200, { waivers: party }),
+    );
+    show();
+    await screen.findByText("1 of 3 signed");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(/^Sent again/);
+    expect(screen.queryByRole("button", { name: /^Send again/ })).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(11 * 60_000);
+    });
+    expect(screen.queryByText(/^Sent again/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Send again to Kit Minor" })).toBeTruthy();
+  });
+
   it("says when the booking site can't be reached, and the button stays", async () => {
     stubApi((call) => {
       if (call.method === "POST") throw new TypeError("offline");

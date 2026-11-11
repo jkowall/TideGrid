@@ -574,6 +574,31 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
     expect((await deliveries(mreq)).at(-1)?.recipient_email).toBe("mo.new@example.test");
   }, 240_000);
 
+  it("waits for a rename in progress, then sends nothing to the renamed person", async () => {
+    const booked = await book(world, A, nextTrip(), 1, hooks);
+    const pid = await name(
+      world,
+      A.id,
+      booked.bookingId,
+      1,
+      adult("Ren Before", "ren@example.test"),
+      hooks,
+    );
+    const req = (await liveRequest(world.admin, booked.bookingId, pid)).id;
+    await linkFor(world.admin, world.db, A.id, req);
+    await ageDeliveries(world.admin, req);
+    let pending: ReturnType<typeof bookerResend> | null = null;
+    await world.admin.begin(async (tx) => {
+      // A party edit holds the booking while it renames the person.
+      await tx`select 1 from public.bookings where id = ${booked.bookingId} for no key update`;
+      await tx`update public.booking_participants set full_name = 'Ren After' where id = ${pid}`;
+      pending = bookerResend(A.id, booked.bookingId, 1, "Ren Before");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(await pending).toEqual({ kind: "refused", reason: "changed", retryAfter: null });
+    expect((await deliveries(req)).length).toBe(1);
+  }, 120_000);
+
   it("flags a guardian's address that is also a participant's own, and not a family of minors", async () => {
     const booked = await book(world, A, nextTrip(), 3, hooks);
     const shared = "pat.parent@example.test";

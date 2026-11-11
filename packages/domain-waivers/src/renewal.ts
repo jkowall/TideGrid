@@ -16,6 +16,7 @@
 import { recordAudit, type TenantContext, type TenantTransaction } from "@tidegrid/database";
 import { accessTokenPattern, hashLinkToken } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
+import { lockBookingForWaivers } from "./assign.ts";
 import { tripIsOver } from "./booking.ts";
 import {
   lockRequest,
@@ -217,6 +218,11 @@ export async function resendWaiverForBooker(
     retryAfter: Date | null = null,
   ) => ({ kind: "refused", reason, retryAfter }) as const;
   if (ctx.actorType !== "guest") throw new Error("only a booker resends from the management page");
+  // The booking first, as party edits take it, so the party read below is
+  // the party the send goes to: a rename or removal waits, or went first.
+  if (!(await lockBookingForWaivers(trx, ctx.tenantId, input.bookingId))) {
+    return refuse("not_found");
+  }
   const booking = await listBookingWaivers(trx, ctx.tenantId, input.bookingId);
   const person = booking?.participants.find((p) => p.position === input.position);
   if (!booking || !person) return refuse("not_found");
