@@ -353,6 +353,29 @@ describe.skipIf(!env)("giving up a place in a shared-seat party (W3-G2.11-rest)"
     });
   });
 
+  it("moves a booking and gives up a place in one transaction", async () => {
+    const [from, to] = [tripsA.shared(), tripsA.shared()];
+    const booked = await confirmBooking(runtime.db, payments, A, from, 3);
+    await as(guestContext(A.id), async (trx, ctx) => {
+      const moved = await rescheduleBooking(trx, ctx, {
+        bookingId: booked.bookingId,
+        fromTripId: from,
+        toTripId: to,
+      });
+      expect(moved.kind).toBe("moved");
+      const removed = await removeParticipant(trx, ctx, {
+        bookingId: booked.bookingId,
+        position: 1,
+        partySize: 3,
+      });
+      expect(removed.kind).toBe("removed");
+    });
+    expect(await seatsUsed(from)).toBe(0);
+    expect(await seatsUsed(to)).toBe(2);
+    expect(await bookingNow(booked.bookingId)).toMatchObject({ party_size: 2, hold_party: 2 });
+    expect(await auditLedger(admin, [A.id])).toEqual([]);
+  });
+
   it("moves and cancels a booking whose party gave up places", async () => {
     const [from, to] = [tripsA.shared(), tripsA.shared()];
     const booked = await confirmBooking(runtime.db, payments, A, from, 3);
@@ -440,6 +463,35 @@ describe.skipIf(!env)("giving up a place in a shared-seat party (W3-G2.11-rest)"
           .execute(),
       ),
     ).rejects.toMatchObject({ code: "23514", constraint_name: "booking_party_changes_applied" });
+    // A change not yet applied never opens a place past the party sold.
+    await expect(
+      as(ctx, async (trx) => {
+        await trx
+          .insertInto("booking_party_changes")
+          .values({
+            tenant_id: A.id,
+            booking_id: booked.bookingId,
+            trip_id: trip,
+            from_hold_id: now.hold_id,
+            from_party_size: 3,
+            to_party_size: 2,
+            position: 2,
+            participant_id: null,
+            before_cutoff: true,
+          })
+          .execute();
+        await trx
+          .insertInto("booking_participants")
+          .values({
+            tenant_id: A.id,
+            booking_id: booked.bookingId,
+            position: 4,
+            full_name: "Extra Four",
+            is_minor: false,
+          })
+          .execute();
+      }),
+    ).rejects.toMatchObject({ code: "23514", constraint_name: "booking_participants_party_size" });
     // A change naming no one at a named place is refused at once.
     await expect(
       as(ctx, (trx) =>

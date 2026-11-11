@@ -75,7 +75,6 @@ CREATE FUNCTION app.check_booking_party_change() RETURNS trigger
   AS $$
 DECLARE
   b record;
-  given_up integer;
   at_place uuid;
 BEGIN
   NEW.created_at := clock_timestamp();
@@ -86,10 +85,12 @@ BEGIN
     WHERE x.tenant_id = NEW.tenant_id AND x.id = NEW.booking_id
       FOR NO KEY UPDATE;
   SELECT x.state, x.trip_id, x.hold_id, x.party_size, p.kind AS product_kind,
-         t.starts_at,
+         s.party_size AS sold_party_size, t.starts_at,
          now() < t.starts_at - make_interval(mins => v.change_cutoff_minutes) AS before_cutoff
     INTO b
     FROM public.bookings x
+    JOIN public.checkout_sessions s
+      ON s.tenant_id = x.tenant_id AND s.id = x.checkout_session_id
     JOIN public.orders o ON o.tenant_id = x.tenant_id AND o.id = x.order_id
     JOIN public.products p ON p.tenant_id = o.tenant_id AND p.id = o.product_id
     JOIN public.scheduled_trips t ON t.tenant_id = x.tenant_id AND t.id = x.trip_id
@@ -121,12 +122,9 @@ BEGIN
       NEW.booking_id
       USING ERRCODE = '23514', CONSTRAINT = 'booking_party_changes_cutoff';
   END IF;
-  -- The places are 1 to the party size plus the places already given up,
-  -- less those; the unique key refuses one given up twice.
-  SELECT count(*)::integer INTO given_up
-    FROM public.booking_party_changes c
-   WHERE c.tenant_id = NEW.tenant_id AND c.booking_id = NEW.booking_id;
-  IF NEW.position > b.party_size + given_up OR EXISTS (
+  -- The places are 1 to the party size the booking was sold with, less those
+  -- given up; the unique key refuses one given up twice.
+  IF NEW.position > b.sold_party_size OR EXISTS (
        SELECT 1 FROM public.booking_party_changes c
         WHERE c.tenant_id = NEW.tenant_id AND c.booking_id = NEW.booking_id
           AND c.position = NEW.position) THEN
@@ -157,7 +155,6 @@ CREATE OR REPLACE FUNCTION app.check_booking_participant() RETURNS trigger
   AS $$
 DECLARE
   b record;
-  given_up integer;
 BEGIN
   IF TG_OP = 'UPDATE' AND (
        NEW.id IS DISTINCT FROM OLD.id
@@ -176,10 +173,12 @@ BEGIN
     RAISE EXCEPTION 'a participant joins a party; it is removed only with a party change'
       USING ERRCODE = '23514', CONSTRAINT = 'booking_participants_removed';
   END IF;
-  SELECT x.state, x.party_size INTO b
+  SELECT x.state, x.party_size, s.party_size AS sold_party_size INTO b
     FROM public.bookings x
+    JOIN public.checkout_sessions s
+      ON s.tenant_id = x.tenant_id AND s.id = x.checkout_session_id
    WHERE x.tenant_id = NEW.tenant_id AND x.id = NEW.booking_id
-     FOR SHARE;
+     FOR SHARE OF x;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'no booking % for this tenant', NEW.booking_id
       USING ERRCODE = '23503', CONSTRAINT = 'booking_participants_booking';
@@ -206,15 +205,15 @@ BEGIN
     NEW.updated_at := now();
     RETURN NEW;
   END IF;
-  SELECT count(*)::integer INTO given_up
-    FROM public.booking_party_changes c
-   WHERE c.tenant_id = NEW.tenant_id AND c.booking_id = NEW.booking_id;
-  IF NEW.position > b.party_size + given_up THEN
+  -- Places run 1 to the party size the booking was sold with (fixed on its
+  -- checkout), less those given up; a change not yet applied in the same
+  -- transaction never opens an extra place.
+  IF NEW.position > b.sold_party_size THEN
     RAISE EXCEPTION 'booking % has % places; there is no place %',
       NEW.booking_id, b.party_size, NEW.position
       USING ERRCODE = '23514', CONSTRAINT = 'booking_participants_party_size';
   END IF;
-  IF given_up > 0 AND EXISTS (
+  IF EXISTS (
        SELECT 1 FROM public.booking_party_changes c
         WHERE c.tenant_id = NEW.tenant_id AND c.booking_id = NEW.booking_id
           AND c.position = NEW.position) THEN
@@ -340,7 +339,7 @@ BEGIN
        AND h.owner_ref = 'booking_party_change:' || NEW.id::text
        AND h.trip_id = NEW.trip_id AND h.party_size = NEW.to_party_size
        AND ((h.state = 'confirmed' AND b.hold_id = h.id)
-            OR b.state = 'canceled'
+            OR (b.state = 'canceled' AND b.hold_id = h.id)
             OR EXISTS (SELECT 1 FROM public.booking_party_changes c
                         WHERE c.tenant_id = h.tenant_id AND c.from_hold_id = h.id)
             OR EXISTS (SELECT 1 FROM public.booking_reschedules r
@@ -361,6 +360,37 @@ CREATE CONSTRAINT TRIGGER booking_party_changes_applied
   AFTER INSERT ON public.booking_party_changes
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION app.check_party_change_applied();
+
+-- 0034's commit check for a move, which also accepts a move whose new hold
+-- a later party change (or move) in the same transaction gave up, as the
+-- party change's own check does.
+CREATE OR REPLACE FUNCTION app.check_rescheduled_released() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp
+  AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.capacity_holds h
+     WHERE h.tenant_id = NEW.tenant_id AND h.id = NEW.from_hold_id AND h.state <> 'released'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public.bookings b
+      JOIN public.capacity_holds h ON h.tenant_id = b.tenant_id AND h.id = NEW.to_hold_id
+     WHERE b.tenant_id = NEW.tenant_id AND b.id = NEW.booking_id
+       AND ((b.hold_id = NEW.to_hold_id AND b.trip_id = NEW.to_trip_id
+             -- Still holding its new seats, unless it was canceled since.
+             AND (h.state = 'confirmed' OR b.state = 'canceled'))
+            OR EXISTS (SELECT 1 FROM public.booking_party_changes c
+                        WHERE c.tenant_id = NEW.tenant_id AND c.from_hold_id = NEW.to_hold_id)
+            OR EXISTS (SELECT 1 FROM public.booking_reschedules r
+                        WHERE r.tenant_id = NEW.tenant_id AND r.from_hold_id = NEW.to_hold_id))
+  ) THEN
+    RAISE EXCEPTION 'move % must leave its booking on the new hold with the old one released',
+      NEW.id
+      USING ERRCODE = '23514', CONSTRAINT = 'booking_reschedules_applied';
+  END IF;
+  RETURN NULL;
+END;
+$$;
 
 -- Row-level security, append-only guards, and privileges ---------------------------------
 

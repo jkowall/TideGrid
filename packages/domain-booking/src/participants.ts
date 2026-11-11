@@ -175,21 +175,31 @@ export async function listParticipants(
   bookingId: string,
 ): Promise<ParticipantListView | null> {
   if (!isUuid(bookingId)) return null;
-  const { rows: bookings } = await sql<{ party_size: number }>`
-    select party_size from bookings where tenant_id = ${tenantId} and id = ${bookingId}`.execute(
-    trx,
-  );
-  const booking = bookings[0];
-  if (!booking) return null;
-  const { rows } = await sql<ParticipantRow>`
-    select ${participantColumns} from booking_participants
-     where tenant_id = ${tenantId} and booking_id = ${bookingId} and removed_at is null
-     order by position`.execute(trx);
-  const givenUp = await placesGivenUp(trx, tenantId, bookingId);
+  // One statement, so the party size, the places given up, and the
+  // participants are read from one snapshot even under READ COMMITTED: a
+  // place given up meanwhile never shows a size and places that disagree.
+  const { rows } = await sql<
+    Partial<ParticipantRow> & { party_size: number; given_up: number[]; p_id: string | null }
+  >`
+    select b.party_size,
+           array(select c.position from booking_party_changes c
+                  where c.tenant_id = b.tenant_id and c.booking_id = b.id
+                  order by c.position)::int[] as given_up,
+           p.id as p_id, p.position, p.full_name, p.is_minor, p.email, p.guardian_name,
+           p.guardian_email, p.created_at, p.updated_at
+      from bookings b
+      left join booking_participants p
+        on p.tenant_id = b.tenant_id and p.booking_id = b.id and p.removed_at is null
+     where b.tenant_id = ${tenantId} and b.id = ${bookingId}
+     order by p.position`.execute(trx);
+  const first = rows[0];
+  if (!first) return null;
   return {
-    partySize: booking.party_size,
-    places: placesOf(booking.party_size, givenUp),
-    participants: rows.map(toView),
+    partySize: first.party_size,
+    places: placesOf(first.party_size, first.given_up),
+    participants: rows
+      .filter((r) => r.p_id !== null)
+      .map((r) => toView({ ...(r as ParticipantRow), id: r.p_id as string })),
   };
 }
 
