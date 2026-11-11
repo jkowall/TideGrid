@@ -1,5 +1,6 @@
 import {
   type CancellationTerms,
+  importantLinkHost,
   isImportantLinkUrl,
   type ManagedBooking,
   type PublicBrand,
@@ -863,10 +864,13 @@ function ImportantLinks({
             <a href={l.url} target="_blank" rel="noopener noreferrer external">
               {l.label}
               <Icon name="external" />
-              <span className="tg-visually-hidden"> (opens {l.host} in a new tab)</span>
+              <span className="tg-visually-hidden">
+                {" "}
+                (opens {importantLinkHost(l.url)} in a new tab)
+              </span>
             </a>
             <span className="manage-block manage-quiet" aria-hidden="true">
-              Opens {l.host}
+              Opens {importantLinkHost(l.url)}
             </span>
             {l.description && <span className="manage-block">{l.description}</span>}
           </li>

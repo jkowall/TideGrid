@@ -1,9 +1,15 @@
-import type { PublicBrand } from "@tidegrid/contracts";
-import { ButtonLink } from "@tidegrid/design-system/components";
-import type { ReactNode } from "react";
+import {
+  type GuestImportantLink,
+  importantLinkHost,
+  isImportantLinkUrl,
+  type PublicBrand,
+} from "@tidegrid/contracts";
+import { ButtonLink, Icon } from "@tidegrid/design-system/components";
+import { type ReactNode, useEffect, useState } from "react";
 import { ContactActions } from "../Contact.tsx";
 import { useLinkClick } from "../navigation.tsx";
 import { useTitle } from "../States.tsx";
+import { loadSiteLinks } from "./important-links.ts";
 import "./support.css";
 
 /**
@@ -50,6 +56,48 @@ function PolicyLink({
   );
 }
 
+/**
+ * The operator's important links for every trip (W3-G2.14b-rest), such as a
+ * parking map or a packing list. Each names the site it opens, as on the
+ * booking page, and opens in a new tab without telling that site where the
+ * guest came from. Shown only when there are some; a link that fails the
+ * address rule is never shown, and the site named is worked out here from the
+ * address itself, never taken from the answer.
+ */
+function SiteLinks({ brand }: { brand: PublicBrand }) {
+  const [links, setLinks] = useState<GuestImportantLink[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadSiteLinks(controller.signal).then((found) => {
+      if (!controller.signal.aborted) setLinks(found.filter((l) => isImportantLinkUrl(l.url)));
+    });
+    return () => controller.abort();
+  }, []);
+  if (links.length === 0) return null;
+  return (
+    <Section id="links" title={`Important links from ${brand.name}`}>
+      <ul className="support-site-links">
+        {links.map((l, i) => (
+          <li key={i}>
+            <a href={l.url} target="_blank" rel="noopener noreferrer external">
+              {l.label}
+              <Icon name="external" />
+              <span className="tg-visually-hidden">
+                {" "}
+                (opens {importantLinkHost(l.url)} in a new tab)
+              </span>
+            </a>
+            <span className="support-site-links__host" aria-hidden="true">
+              Opens {importantLinkHost(l.url)}
+            </span>
+            {l.description && <span className="support-site-links__note">{l.description}</span>}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
 export function SupportPage({ brand }: { brand: PublicBrand }) {
   useTitle(`Help and support · ${brand.name}`);
   const linkClick = useLinkClick();
@@ -70,6 +118,8 @@ export function SupportPage({ brand }: { brand: PublicBrand }) {
           <ContactActions brand={brand} />
         </div>
       </Section>
+
+      <SiteLinks brand={brand} />
 
       <Section id="manage" title="Find or manage my booking">
         <p>

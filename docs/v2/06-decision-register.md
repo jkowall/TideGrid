@@ -25,7 +25,7 @@ Coordinator defaults, pending owner confirmation:
 - **D3: https only, public-looking host names only.** No `http`, IP address, user name and password, port outside 1 to 65535, or name kept for local networks or special use (`.local`, `.localhost`, `.internal`, `.home.arpa`, `.test`, and the like) in the address, and no hidden direction or zero-width characters in the address, name, or note. This keeps out the obvious ways to point at a local network or carry credentials, but a public name can still lead anywhere, so it is not a guarantee: TideGrid never fetches these pages itself, only the guest's browser does, and it does not check what a page says, as docs/v2/02 says. Guests see the host (with any port other than 443) before they open a link.
 - **D4: archive, never delete.** An archived link is final; to bring one back an owner adds it again. The audit keeps what each link said.
 
-Not built yet: a console screen (the API is ready), a site-wide links page on the guest site, and links in the confirmation email.
+Part 2 (same day) adds the console's Important links page, where owners change links and every role reads them, and a list of the links for every trip on the guest site's help page. Not built yet: links in the confirmation email, which docs/v2/02 does not require.
 
 ### 2026-11-11: W3-G2.13, part 1, checking a standard CSV import without importing it, code only (owner go; coordinator defaults pending owner confirmation)
 

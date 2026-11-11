@@ -16,6 +16,7 @@ import { CalendarPage } from "./calendar/Calendar.tsx";
 import { EmailExceptionsPage } from "./email/EmailExceptionsPage.tsx";
 import { canSeeEmailExceptions, emailExceptionsPath } from "./email/exceptions.ts";
 import { Wordmark } from "./Gate.tsx";
+import { LinksPage, linksPath } from "./links/LinksPage.tsx";
 import { ConsoleLink, NavigationProvider } from "./navigation.tsx";
 import { NewBookingPage } from "./new-booking/NewBookingPage.tsx";
 import { type FocusOnArrival, PageHeader } from "./PageHeader.tsx";
@@ -42,6 +43,8 @@ const sections: ReadonlyArray<{
     icon: "mail",
     shows: canSeeEmailExceptions,
   },
+  // W3-G2.14b-rest: every role reads them; owners change them.
+  { path: linksPath, label: "Important links", icon: "external" },
 ];
 
 /** The console's pages, by address. Ids in an address are UUIDs; anything else is not a page. */
@@ -53,6 +56,7 @@ export type Route =
   | { kind: "booking"; bookingId: string }
   | { kind: "exceptions" }
   | { kind: "email_exceptions" }
+  | { kind: "links" }
   | { kind: "roster"; tripId: string }
   | { kind: "new_booking"; tripId: string }
   | { kind: "not_found" };
@@ -69,6 +73,7 @@ export function routeOf(path: string): Route {
   if (path === "/bookings/search") return { kind: "search" };
   if (path === "/exceptions") return { kind: "exceptions" };
   if (path === emailExceptionsPath) return { kind: "email_exceptions" };
+  if (path === linksPath) return { kind: "links" };
   const booking = bookingPath.exec(path)?.[1];
   if (booking && isUuid(booking)) return { kind: "booking", bookingId: booking.toLowerCase() };
   const roster = rosterPath.exec(path)?.[1];
@@ -90,6 +95,7 @@ const placeOf: Record<Route["kind"], { section: string | null; title: string }> 
   new_booking: { section: "/calendar", title: "New booking" },
   exceptions: { section: "/exceptions", title: "Payment exceptions" },
   email_exceptions: { section: emailExceptionsPath, title: "Email exceptions" },
+  links: { section: linksPath, title: "Important links" },
   not_found: { section: null, title: "Not found" },
 };
 
@@ -402,6 +408,9 @@ export function ConsoleShell({
           focusHeading={focusPage}
         />
       );
+      break;
+    case "links":
+      page = <LinksPage key={selected.tenantId} membership={selected} focusHeading={focusPage} />;
       break;
     case "roster":
       page = (
