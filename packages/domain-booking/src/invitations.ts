@@ -51,7 +51,7 @@ export const PARTICIPANT_PATH = "/participant";
 export const INVITATION_TEMPLATE = { key: "participant_invitation", version: 1 } as const;
 /** An invitation's link lasts seven days, or until the trip leaves (the database clamps it). */
 export const INVITATION_LINK_TTL_SECONDS = 7 * 24 * 3600;
-/** A participant's session lasts an hour; they open their link again, or ask for another. */
+/** A participant's session lasts an hour; after that they ask the booker for a new invitation (D4). */
 export const PARTICIPANT_SESSION_TTL_SECONDS = 3600;
 /** Invitations one invitee may be sent in 24 hours (also held by the database). */
 export const MAX_INVITATIONS_PER_INVITEE = 3;
@@ -356,8 +356,8 @@ export interface ParticipantProfileView {
 
 /**
  * What a participant's session shows: their own details, the trip, and
- * where to meet. Null once the participant is removed (their session is
- * over). Never the party, the booker's contact details, or the payment.
+ * where to meet. Null once the participant is removed or the session has
+ * ended (the caller answers that their session is over). Never the party, the booker's contact details, or the payment.
  */
 export async function getParticipantProfile(
   trx: TenantTransaction,
@@ -395,6 +395,12 @@ export async function getParticipantProfile(
       join products p on p.tenant_id = t.tenant_id and p.id = t.product_id
       join locations l on l.tenant_id = p.tenant_id and l.id = p.location_id
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
+      -- The session is checked again in this statement, so a session the
+      -- booker ended a moment ago never reads the details they just changed.
+      join guest_sessions g
+        on g.tenant_id = pt.tenant_id and g.id = ${session.sessionId}
+       and g.participant_id = pt.id and g.purpose = 'participant_profile'
+       and g.revoked_at is null and g.expires_at > now()
      where pt.tenant_id = ${tenantId} and pt.booking_id = ${session.bookingId}
        and pt.id = ${session.participantId} and pt.removed_at is null`.execute(trx);
   const row = rows[0];

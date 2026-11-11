@@ -496,26 +496,53 @@ async function claimOne(
       }
     }
     // A participant's invitation (W3-G2.11-rest, 0036) is only worth sending
-    // while that participant can still be reached: the booking confirmed,
-    // the trip not started, the participant still in the party. A retry can
-    // wait past departure, so the claim checks again, and an invitation that
-    // can no longer open anything is canceled with no provider call. It must
-    // never be left queued: it would come first in every later run.
+    // while it is still the one that should arrive, checked again here
+    // because a retry can wait for hours and a change can race the write:
+    // - closed: the booking canceled, the trip started, or the participant
+    //   removed, so its link could open nothing;
+    // - recipient_changed: the participant's address (or a minor's
+    //   guardian's) is no longer the one it was written to;
+    // - superseded: a newer invitation to the same participant was written,
+    //   so this one's link must not outlive or sit beside that one's.
+    // It is canceled with no provider call, never left queued: it would
+    // come first in every later run.
     if (found.link_purpose === "participant_profile" && found.booking_id !== null) {
-      const { rows: open } = await sql<{ open: boolean | null }>`
+      const { rows: checks } = await sql<{
+        open: boolean | null;
+        recipient: string | null;
+        newer: boolean;
+      }>`
         select app.profile_access_open(${ctx.tenantId}::uuid, ${found.booking_id}::uuid,
-                                       ${found.participant_id}::uuid) as open`.execute(trx);
-      if (open[0]?.open !== true) {
+                                       ${found.participant_id}::uuid) as open,
+               (select case when p.is_minor then p.guardian_email else p.email end
+                  from booking_participants p
+                 where p.tenant_id = ${ctx.tenantId} and p.id = ${found.participant_id}::uuid)
+                 as recipient,
+               exists (select 1 from email_messages n
+                        where n.tenant_id = ${ctx.tenantId}
+                          and n.booking_id = ${found.booking_id}::uuid
+                          and n.participant_id = ${found.participant_id}::uuid
+                          and n.link_purpose = 'participant_profile'
+                          and n.state <> 'canceled'
+                          and (n.created_at, n.id) > (select m.created_at, m.id from email_messages m
+                                                       where m.tenant_id = ${ctx.tenantId}
+                                                         and m.id = ${found.id}::uuid))
+                 as newer`.execute(trx);
+      const check = checks[0];
+      const code =
+        check?.open !== true
+          ? INVITATION_CLOSED
+          : check.recipient !== found.to_email
+            ? "recipient_changed"
+            : check.newer
+              ? INVITATION_SUPERSEDED
+              : null;
+      if (code !== null) {
         await sql`
-          update email_messages set state = 'canceled', last_error_code = ${INVITATION_CLOSED}
+          update email_messages set state = 'canceled', last_error_code = ${code}
            where tenant_id = ${ctx.tenantId} and id = ${found.id}
              and state in ('queued', 'sending')`.execute(trx);
-        return {
-          kind: "canceled",
-          messageId: found.id,
-          attempt: found.attempts,
-          code: INVITATION_CLOSED,
-        } as const;
+        return { kind: "canceled", messageId: found.id, attempt: found.attempts, code } as const;
       }
     }
     // A balance email (W3-G2.8) is only worth sending while something is
@@ -592,6 +619,7 @@ async function claimOne(
 
 /** Why a participant's invitation was canceled at its claim (0036). */
 export const INVITATION_CLOSED = "invitation_closed";
+export const INVITATION_SUPERSEDED = "invitation_superseded";
 
 async function fail(
   trx: TenantTransaction,

@@ -84,6 +84,14 @@ DECLARE
   p record;
   recent integer;
 BEGIN
+  -- Under REPEATABLE READ the locks below would not refresh the snapshot the
+  -- counts read, so two writers could each count the same total (as 0014's
+  -- resend limit requires, READ COMMITTED only).
+  IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'an invitation is written only under READ COMMITTED, not %',
+      pg_catalog.current_setting('transaction_isolation')
+      USING ERRCODE = '25000';
+  END IF;
   PERFORM 1 FROM public.bookings x
    WHERE x.tenant_id = NEW.tenant_id AND x.id = NEW.booking_id
      FOR NO KEY UPDATE;

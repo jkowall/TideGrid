@@ -217,6 +217,7 @@ describe.skipIf(!env)("participant invitations and their own details (W3-G2.11-r
       kind: "invited",
       recipient: "guardian",
     });
+    await deliver(A);
     expect(await invite(A.id, bookingId, 1)).toMatchObject({ kind: "invited" });
     await deliver(A);
     // Two emails; the newer link replaced the older one.
@@ -405,6 +406,38 @@ describe.skipIf(!env)("participant invitations and their own details (W3-G2.11-r
     const [links] = await admin<{ n: number }[]>`
       select count(*)::int as n from public.guest_access_links where message_id = ${queued.messageId}`;
     expect(links?.n).toBe(0);
+  });
+
+  it("sends only the newest of two queued invitations, and none to an address changed behind its back", async () => {
+    const { bookingId } = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 2);
+    const g = guestContext(A.id);
+    await put(g, bookingId, 1, { name: "Wes Twice", isMinor: false, email: "wes@example.test" });
+    await put(g, bookingId, 2, { name: "Xan Moved", isMinor: false, email: "xan@example.test" });
+    const older = await invite(A.id, bookingId, 1);
+    const newer = await invite(A.id, bookingId, 1);
+    const moved = await invite(A.id, bookingId, 2);
+    if (older.kind !== "invited" || newer.kind !== "invited" || moved.kind !== "invited") {
+      throw new Error("not invited");
+    }
+    // The address changes without the service's revocation, as a correction
+    // that raced the invitation's write would leave it.
+    await admin`update public.booking_participants set email = 'xan.new@example.test'
+                 where booking_id = ${bookingId} and position = 2`;
+    const run = await deliver(A);
+    const outcome = (id: string) => run.items.find((i) => i.messageId === id);
+    expect(outcome(older.messageId)).toMatchObject({
+      outcome: "canceled",
+      code: "invitation_superseded",
+    });
+    expect(outcome(newer.messageId)?.outcome).toBe("sent");
+    expect(outcome(moved.messageId)).toMatchObject({
+      outcome: "canceled",
+      code: "recipient_changed",
+    });
+    const [links] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.guest_access_links
+       where booking_id = ${bookingId} and purpose = 'participant_profile'`;
+    expect(links?.n).toBe(1);
   });
 
   it("closes a queued invitation when its participant is removed", async () => {
