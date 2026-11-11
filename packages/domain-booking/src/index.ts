@@ -195,6 +195,38 @@ export {
   type ParticipantRemovedEvent,
   type ParticipantUpdatedEvent,
 } from "./hooks.ts";
+// The standard CSV import's dry run (W3-G2.13, part 1).
+export { readCsv } from "./import/csv-read.ts";
+export {
+  type ImportDryRunResult,
+  importContentHash,
+  importErrorColumns,
+  importLookup,
+  renderImportErrors,
+  runImportDryRun,
+} from "./import/dry-run.ts";
+export {
+  COLUMNS as IMPORT_COLUMNS,
+  CONTROL_METRICS as IMPORT_CONTROL_METRICS,
+  IMPORT_FILES,
+  IMPORT_ISSUE_CODES,
+  type ImportFile,
+  type ImportIssue,
+  type ImportIssueCode,
+  looksLikeCardNumber,
+  MAPPING_VERSION as IMPORT_MAPPING_VERSION,
+} from "./import/spec.ts";
+export {
+  type BoatInfo as ImportBoatInfo,
+  type ImportControl,
+  type ImportDryRun,
+  type ImportFileSummary,
+  type ImportLookup,
+  type ImportManifest,
+  type ProductInfo as ImportProductInfo,
+  type TripInfo as ImportTripInfo,
+  validateImport,
+} from "./import/validate.ts";
 // Participant invitations and the participant's own details (W3-G2.11-rest, 0036).
 export {
   getParticipantProfile,

@@ -194,11 +194,12 @@ export * from "./checkout.ts";
 export * from "./console.ts";
 // The tenant-wide staff email exceptions list (W1-EMAIL-EXC).
 export * from "./email-exceptions.ts";
+// Money movements for a date range (W3-G2.12-rest).
+export * from "./imports.ts";
 // Capacity and holds (G2.6).
 export * from "./inventory.ts";
 // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
 export * from "./invitations.ts";
-// Money movements for a date range (W3-G2.12-rest).
 export * from "./money-report.ts";
 export * from "./participants.ts";
 export * from "./party-changes.ts";

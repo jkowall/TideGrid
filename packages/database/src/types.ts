@@ -1456,6 +1456,7 @@ export interface Database
   booking_contact_changes: BookingContactChangesTable;
   capacity_overrides: CapacityOverridesTable;
   complimentary_grants: ComplimentaryGrantsTable;
+  import_runs: ImportRunsTable;
 }
 
 /** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
@@ -1800,6 +1801,27 @@ export interface ComplimentaryGrantsTable {
   currency: FixedDefault<"USD">;
   reason_code: Fixed<ComplimentaryReasonCode>;
   note: ColumnType<string | null, string | null | undefined, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** A standard CSV import's dry run (0040, W3-G2.13): counts and totals, never the files' data. */
+export interface ImportRunsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  batch_id: Fixed<string>;
+  run_number: Fixed<number>;
+  source_system: Fixed<string>;
+  mapping_version: Fixed<"std-csv-v0">;
+  mode: Fixed<"dry_run">;
+  content_hash: Fixed<string>;
+  clean: Fixed<boolean>;
+  error_count: Fixed<number>;
+  warning_count: Fixed<number>;
+  files: Json;
+  controls: Json;
   created_at: Stamped;
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;

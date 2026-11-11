@@ -427,6 +427,13 @@ W3-G2.12-rest. `complimentary_grants` records an owner's decision to waive a sta
 - **Bookings.** `payment_id` may be null, only for source `complimentary` (`bookings_complimentary_payment`); `app.stamp_booking_source` sets that source when a grant exists, and `app.check_booking` requires the grant, an open checkout, a pending order, and the confirmed hold in place of a succeeded payment. `app.check_checkout_session` (replaced) lets such a checkout move to confirmed with no payment.
 - **Cancellations and fees.** `booking_cancellations.payment_id` may be null, exactly when `paid_amount` is 0 (`booking_cancellations_complimentary`); a complimentary booking cancels with remedy none, no refund share, and no override. `app.check_fee_assessment` requires an order total and eligible amount of 0 for one.
 
+## Import runs (0040)
+
+W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import: the batch id, run number, source system, mapping version (`std-csv-v0`), mode (`dry_run`), the files' SHA-256 (`content_hash`, without the manifest's `batch_mode` and `run_number` rows), whether it was clean, error and warning counts, rows per file, and declared and computed control totals (`files` and `controls`, numbers only). Nothing from the files' rows is stored. Append-only, forced row-level security, SELECT and INSERT only.
+
+- **Owners only.** The insert trigger stamps the actor and time and requires a staff actor who is an active `owner` member (`import_runs_owner`, 42501).
+- **One batch, one source.** `(tenant_id, batch_id, run_number)` is unique (`import_runs_run`), and a run whose batch was run before from another source system is refused (`import_runs_source`).
+
 ## Indexes built concurrently (no-transaction files)
 
 The runner has a second mode for `CREATE INDEX CONCURRENTLY`, which PostgreSQL refuses inside a transaction. It is the D6 A standing rule of the pre-pilot hardening goal, confirmed by the owner on 2026-11-08 ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions)): the mode lands before any pilot-volume table gets a new index. The marker, the one-statement rule, the repair rule, and leaving the 0005 constraints alone (D1 to D4) are coordinator defaults, pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-mig-conc-a-no-transaction-runner-mode-for-create-index-concurrently-owner-go-coordinator-defaults-pending-owner-confirmation)). Update, 2026-11-08: `0022_email_events_index.sql` (W1-EMAIL-EVENTS) is the first file that uses the mode, `0030_refunds_pending_index.sql` (W3-G2.9) the second, and `0032_payments_check_index.sql` (W3-G2.10) the third.

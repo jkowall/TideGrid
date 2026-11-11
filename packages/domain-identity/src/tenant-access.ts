@@ -584,6 +584,8 @@ export const EXPORT_TABLES = [
   // Owners' capacity overrides and complimentary grants (W3-G2.12-rest).
   "capacity_overrides",
   "complimentary_grants",
+  // The standard CSV import's dry runs (W3-G2.13): counts only.
+  "import_runs",
   "booking_notes",
   "finalization_exceptions",
   "finalization_exception_resolutions",

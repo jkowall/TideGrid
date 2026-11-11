@@ -52,6 +52,8 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["PUT", `/v1/staff/tenants/${tenant}/bookings/${someId}/booker`],
     // Complimentary bookings (W3-G2.12-rest).
     ["POST", `/v1/staff/tenants/${tenant}/complimentary-bookings`],
+    // The standard CSV import's dry run (W3-G2.13).
+    ["POST", `/v1/staff/tenants/${tenant}/import-dry-runs`],
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -309,6 +311,8 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/payment-reconciliation-exceptions",
         "/v1/staff/tenants/{tenantId}/reconciliation",
         "/v1/staff/tenants/{tenantId}/fee-invoices",
+        // The standard CSV import's dry run (W3-G2.13).
+        "/v1/staff/tenants/{tenantId}/import-dry-runs",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are
