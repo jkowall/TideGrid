@@ -24,6 +24,7 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { handleVerifiedEvent } from "./finalize.ts";
 import {
   BALANCE_PAYMENT_REUSE_HOURS,
+  buildMoneyReport,
   cancelBooking,
   changeBalanceDueDate,
   ensureBalanceProviderPayment,
@@ -203,6 +204,32 @@ describe.skipIf(!env)("private-charter deposits and balances (W3-G2.8)", () => {
     const balance = await balanceOf(booked.bookingId);
     expect(balance).toMatchObject({ state: "paid", owed: 0, paidIn: TOTAL, overpaid: 0 });
     expect(balance?.payments.map((p) => p.state)).toEqual(["failed", "succeeded"]);
+
+    // The money report (W3-G2.12-rest) has the succeeded balance payment, and
+    // not the declined one, on today's business date, with its booking.
+    const [today] = await admin<
+      { d: string }[]
+    >`select (now() at time zone 'UTC')::date::text as d`;
+    const day = today?.d ?? "";
+    const report = await as(systemContext(A.id), (trx) =>
+      buildMoneyReport(trx, A.id, {
+        from: day,
+        to: day,
+        typedReferences: true,
+        maskProviderReferences: false,
+      }),
+    );
+    if (report.kind !== "ok") throw new Error(report.kind);
+    const mine = report.report.entries.filter(
+      (e) => e.kind === "balance_payment" && e.booking?.bookingId === booked.bookingId,
+    );
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({
+      moneyIn: TOTAL - DEPOSIT,
+      businessDate: day,
+      reference: second.ready.paymentRef,
+    });
+    expect(report.report.controlTotalsMatch).toBe(true);
 
     // Nothing more is owed: no new payment, no link, and the reminders stand down.
     const more = await as(guestContext(A.id), (trx, c) =>

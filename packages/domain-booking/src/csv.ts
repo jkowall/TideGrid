@@ -55,6 +55,19 @@ export function csvMoney(cents: number): string {
 }
 
 /**
+ * A reference someone typed or a provider issued (a check or receipt number),
+ * kept from running as a formula and from being read as a number: a
+ * spreadsheet would drop "001234"'s leading zeros or round a long one, so a
+ * number-shaped reference starts with an apostrophe, as a booking reference
+ * that looks like a number does.
+ */
+export function csvTypedReference(value: string): string {
+  return /^\s*[+-]?(\d[\d,]*\.?\d*|\.\d+)([eE][+-]?\d+)?\s*$/.test(value)
+    ? `'${value}`
+    : csvText(value);
+}
+
+/**
  * Signed integer cents, for the columns that can go down (credit, TideGrid's
  * fee): -1234 is "-12.34". A spreadsheet reads it as a number; it is never
  * text from a person, so the minus sign is not a formula risk.
@@ -192,7 +205,7 @@ export function renderMoneyExport(report: MoneyReport, operator: { name: string 
     e.booking ? csvReference(e.booking.reference) : "",
     e.booking?.source ?? "",
     e.tender ?? "",
-    csvText(e.reference ?? ""),
+    csvTypedReference(e.reference ?? ""),
     csvMoney(e.moneyIn),
     csvMoney(e.moneyOut),
     csvSignedMoney(e.credit),

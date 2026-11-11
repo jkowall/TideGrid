@@ -135,6 +135,7 @@ function daysBetween(from: string, to: string): number {
   if (!datePattern.test(from) || !datePattern.test(to)) return Number.NaN;
   const a = Date.parse(`${from}T00:00:00Z`);
   const b = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return Number.NaN;
   // Date.parse rolls 2026-02-30 over; a date that does not survive the round trip is not one.
   if (new Date(a).toISOString().slice(0, 10) !== from) return Number.NaN;
   if (new Date(b).toISOString().slice(0, 10) !== to) return Number.NaN;

@@ -163,7 +163,12 @@ describe.skipIf(!env)("money movements for a date range (W3-G2.12-rest)", () => 
     ).toBe("applied");
     // Cash in, a check back, and TideGrid's fee on the closed bookings.
     for (const input of [
-      { kind: "payment" as const, tender: "cash" as const, amount: 1_200 },
+      {
+        kind: "payment" as const,
+        tender: "cash" as const,
+        amount: 1_200,
+        tenderReference: "001234",
+      },
       {
         kind: "refund" as const,
         tender: "check" as const,
@@ -260,6 +265,8 @@ describe.skipIf(!env)("money movements for a date range (W3-G2.12-rest)", () => 
     expect(lines).toHaveLength(r.entries.length + 2);
     expect(lines[0]?.split(",")[0]).toBe("Row");
     expect(csv).toContain(",'=HYPERLINK(1),");
+    // A number-shaped receipt number keeps its leading zeros in a spreadsheet.
+    expect(csv).toContain(",'001234,");
     const total = lines.at(-1)?.split(",") ?? [];
     expect(total[0]).toBe("Total");
     expect(total[7]).toBe("");
@@ -366,6 +373,7 @@ describe.skipIf(!env)("money movements for a date range (W3-G2.12-rest)", () => 
     expect(await read({ from: "2026-11-02", to: "2026-11-01" })).toEqual({ kind: "invalid_range" });
     expect(await read({ from: "2026-01-01", to: "2026-04-03" })).toEqual({ kind: "invalid_range" });
     expect(await read({ from: "2026-02-30", to: "2026-03-01" })).toEqual({ kind: "invalid_range" });
+    expect(await read({ from: "2026-13-01", to: "2026-13-02" })).toEqual({ kind: "invalid_range" });
     expect((await read({ from: "2026-01-01", to: "2026-04-02" })).kind).toBe("ok");
     const day = await today("UTC");
     expect(await read({ from: day, to: day, limit: 1 })).toEqual({ kind: "too_large" });
