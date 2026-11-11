@@ -95,6 +95,13 @@ BEGIN
   END IF;
 
   IF NEW.status = 'active' AND (TG_OP = 'INSERT' OR OLD.status <> 'active') THEN
+    -- The counts below are right only if read afresh after the lock, which
+    -- READ COMMITTED does and a snapshot taken earlier would not.
+    IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+      RAISE EXCEPTION 'important links are added only under READ COMMITTED, not %',
+        pg_catalog.current_setting('transaction_isolation')
+        USING ERRCODE = '25001';
+    END IF;
     PERFORM pg_catalog.pg_advisory_xact_lock(
       pg_catalog.hashtext('important_links:' || NEW.tenant_id::text));
     -- Archived links are kept, so the whole list is bounded too.

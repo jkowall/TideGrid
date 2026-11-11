@@ -387,6 +387,15 @@ describe.skipIf(!env)("important links through the API (W3-G2.14b-rest)", () => 
       ),
     ).rejects.toThrow(/check constraint/);
 
+    // Counted only under READ COMMITTED, where the count is read after the lock.
+    await expect(
+      rt.begin("isolation level repeatable read", async (tx) => {
+        await tx`select set_config('app.tenant_id', ${A.id}, true)`;
+        await tx`insert into public.important_links (tenant_id, label, url, position)
+          values (${A.id}, 'Raw', 'https://ok.example.com/', 0)`;
+      }),
+    ).rejects.toThrow(/only under READ COMMITTED/);
+
     // Archived is final, and nothing starts archived.
     await expect(
       write(
