@@ -264,7 +264,14 @@ export async function renewManageLink(
        and purpose = 'booking_manage'
        and revoked_reason is distinct from 'recipient_changed'
        and revoked_reason is distinct from 'staff'
-       and revoked_reason is distinct from 'booking_canceled'`.execute(trx);
+       and revoked_reason is distinct from 'booking_canceled'
+       -- A link from before the booker's email was corrected (W3-G2.11-rest)
+       -- belongs to the old address: it renews nothing.
+       and not exists (select 1 from booking_contact_changes c
+                        where c.tenant_id = guest_access_links.tenant_id
+                          and c.booking_id = guest_access_links.booking_id
+                          and c.email_changed
+                          and c.created_at > guest_access_links.created_at)`.execute(trx);
   const bookingId = rows[0]?.booking_id;
   if (!bookingId) return { kind: "not_found" };
   return requestManageLink(trx, ctx, { bookingId, requestKey: input.requestKey });

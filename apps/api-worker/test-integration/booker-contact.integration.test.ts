@@ -6,8 +6,9 @@
  * packages/contracts/src/booker-contact.ts.
  */
 import { randomUUID } from "node:crypto";
-import { createDb } from "@tidegrid/database";
+import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
+import { changeBookerContact } from "@tidegrid/domain-booking";
 import {
   type CheckoutFixture,
   confirmBooking,
@@ -332,6 +333,52 @@ describe.skipIf(!env)("booker contact corrections through the API (W3-G2.11-rest
     const [row] = await admin<{ booker_name: string; booker_email: string }[]>`
       select booker_name, booker_email from public.checkout_sessions where id = ${b.checkoutSessionId}`;
     expect(row).toEqual({ booker_name: body.name, booker_email: body.email });
+  });
+
+  it("rolls back a guest command whose session staff ended while it waited", async () => {
+    const b = await booked(A, 1);
+    const terms = await request("GET", "/v1/public/manage/cancellation", guest(b.session));
+    expect(terms.status).toBe(200);
+    // Staff restore the booking and hold the checkout's lock a moment; the
+    // guest's cancellation arrives meanwhile and queues behind it.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let locked!: () => void;
+    const holding = new Promise<void>((r) => {
+      locked = r;
+    });
+    const staff: TenantContext = {
+      tenantId: A.id,
+      actorType: "staff",
+      actorId: `user:${randomUUID()}`,
+      requestId: `req-${randomUUID()}`,
+    };
+    const desk = inTenantTransaction(runtime.db, staff, async (trx) => {
+      const done = await changeBookerContact(trx, staff, {
+        bookingId: b.bookingId,
+        name: "Restored Booker",
+        email: "restored@example.test",
+      });
+      locked();
+      await gate;
+      return done;
+    });
+    await holding;
+    const cancel = request("POST", "/v1/public/manage/cancellation", {
+      ...guest(b.session, randomUUID()),
+      body: { expectedRefundAmount: terms.json.terms.refundAmount },
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    release();
+    expect((await desk).kind).toBe("changed");
+    const res = await cancel;
+    expect(res.status).toBe(401);
+    expect(res.json.error.code).toBe("session_expired");
+    const [row] = await admin<{ state: string }[]>`
+      select state from public.bookings where id = ${b.bookingId}`;
+    expect(row?.state).toBe("confirmed");
   });
 
   it("refuses a canceled booking", async () => {

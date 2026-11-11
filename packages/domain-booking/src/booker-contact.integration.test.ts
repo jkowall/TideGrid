@@ -25,8 +25,10 @@ import {
   getManagedBooking,
   listBookerContactChanges,
   MAX_CONTACT_CHANGES_PER_DAY,
+  openManageSession,
   openManageSessionFromCheckout,
   previewCancellation,
+  renewManageLink,
 } from "./index.ts";
 import { manageSession } from "./manage.ts";
 import {
@@ -491,7 +493,7 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
     ).toBe("42501");
   });
 
-  it("names its own change when another committed while it waited, and leaves the replaced address nothing", async () => {
+  it("refuses a correction that waited behind another, so the final address keeps working links", async () => {
     const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 2, {
       booker: { name: "Old One", email: "old@example.test" },
     });
@@ -523,22 +525,47 @@ describe.skipIf(!env)("correcting the booker's contact details (W3-G2.11-rest)",
     });
     release();
     const firstResult = await pending;
-    if (firstResult.kind !== "changed" || second.kind !== "changed") throw new Error("not changed");
-    expect(firstResult.change.contactChangeId).not.toBe(second.change.contactChangeId);
+    // The one that waited changes nothing and asks for a retry: its email
+    // would carry a start time earlier than the other's revocations.
+    expect(firstResult).toEqual({ kind: "booking_changed" });
+    if (second.kind !== "changed") throw new Error("not changed");
+    const [count] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.booking_contact_changes
+       where booking_id = ${booked.bookingId}`;
+    expect(count?.n).toBe(1);
 
-    // Nothing is left to go to bbb@ but the notice that it was replaced; aaa@
-    // gets its link and the reminder.
+    // bbb@ is the booker: its link and reminder stand, and the link goes out.
     const rows = await messages(booked.bookingId);
-    const live = rows.filter((m) => m.state === "queued");
-    expect(live.filter((m) => m.to_email === "bbb@example.test").map((m) => m.template)).toEqual([
-      "booking_contact_changed",
-    ]);
-    expect(
-      live
-        .filter((m) => m.to_email === "aaa@example.test")
-        .map((m) => m.template)
-        .sort(),
-    ).toEqual(["booking_manage_link", "booking_reminder"]);
+    expect(rows.some((m) => m.to_email === "aaa@example.test")).toBe(false);
+    const live = rows.filter((m) => m.state === "queued" && m.to_email === "bbb@example.test");
+    expect(live.map((m) => m.template).sort()).toEqual(["booking_manage_link", "booking_reminder"]);
+    await deliver(A);
+    const inbox = await mailTo(A, "bbb@example.test");
+    expect(manageToken(inbox.find((m) => m?.subject.startsWith("Your link"))?.html)).toBeDefined();
+  });
+
+  it("renews nothing from a link sent before the email was corrected", async () => {
+    const booked = await confirmBooking(runtime.db, payments, A, tripsA.shared(), 1, {
+      booker: { name: "Old Inbox", email: "oldinbox@example.test" },
+    });
+    await deliver(A);
+    const [confirmation] = await mailTo(A, "oldinbox@example.test");
+    const oldLink = manageToken(confirmation?.html) as string;
+    // The old link was used once, as a guest would before the change.
+    const opened = await as(guestContext(A.id), (trx, c) =>
+      openManageSession(trx, c, { token: oldLink }),
+    );
+    expect(opened.kind).toBe("opened");
+    const done = await change(staffContext(A.id), {
+      bookingId: booked.bookingId,
+      name: "Old Inbox",
+      email: "newinbox@example.test",
+    });
+    expect(done.kind).toBe("changed");
+    const renewed = await as(guestContext(A.id), (trx, c) =>
+      renewManageLink(trx, c, { token: oldLink, requestKey: randomUUID() }),
+    );
+    expect(renewed).toEqual({ kind: "not_found" });
   });
 
   it("refuses a guest correction whose session staff ended while it waited", async () => {

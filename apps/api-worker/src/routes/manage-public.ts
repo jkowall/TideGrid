@@ -198,7 +198,7 @@ interface SessionCommand {
  */
 async function withManageSession<T extends JsonObject>(
   c: Context<AppEnv>,
-  options: { idempotency?: SessionCommand; limit?: boolean },
+  options: { idempotency?: SessionCommand; limit?: boolean; endsSession?: boolean },
   run: (trx: TenantTransaction, ctx: TenantContext, session: GuestSession) => Promise<T>,
 ): Promise<{ body: T; replayed: boolean; ctx: TenantContext; session: GuestSession }> {
   const tenantId = await resolvePublicTenant(c);
@@ -233,6 +233,17 @@ async function withManageSession<T extends JsonObject>(
         }
       }
       const body = await run(trx, ctx, session);
+      // The session again, after the command took its locks: staff who
+      // corrected the booker's email (or anything else that ended this
+      // session) while it waited on them committed first, so nothing it did
+      // may stand. Everything rolls back.
+      if (!options.endsSession) {
+        const { rows: live } = await sql<{ id: string }>`
+          select id from guest_sessions
+           where tenant_id = ${tenantId} and id = ${session.sessionId}
+             and revoked_at is null and expires_at > now()`.execute(trx);
+        if (live.length === 0) throw sessionExpired();
+      }
       if (claim) await completeIdempotencyKey(trx, ctx, claim, { status: 200, body });
       return { body, replayed: false, ctx, session };
     });
@@ -705,7 +716,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       401: errorBody("No session (session_required), or it has ended (session_expired)"),
       404: errorBody("No active tenant hostname matches the origin"),
       409: errorBody(
-        "The booking was canceled (booking_canceled), or its trip has departed (trip_departed)",
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), or another correction landed a moment ago (booking_changed; read the booking again and retry)",
       ),
       422: errorBody("idempotency_key_reused"),
       429: errorBody(
@@ -1142,7 +1153,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
   });
 
   app.openapi(endRoute, async (c) => {
-    await withManageSession(c, { limit: true }, async (trx, ctx, session) => {
+    await withManageSession(c, { limit: true, endsSession: true }, async (trx, ctx, session) => {
       await revokeGuestSession(trx, ctx, session.sessionId);
       return { ended: true };
     });

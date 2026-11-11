@@ -66,6 +66,8 @@ export type ChangeBookerContactResult =
   | { kind: "not_confirmed" }
   | { kind: "trip_departed" }
   | { kind: "limit_reached" }
+  /** Another correction landed while this one waited. Nothing changed; try again. */
+  | { kind: "booking_changed" }
   /** The guest session making the change ended while it waited. Nothing changed. */
   | { kind: "session_ended" };
 
@@ -169,6 +171,18 @@ export async function changeBookerContact(
          and revoked_at is null and expires_at > now()`.execute(trx);
     if (live.length === 0) return { kind: "session_ended" };
   }
+
+  // Another correction committed after this transaction began, while this
+  // one waited on the checkout's lock. The email written here would carry
+  // this transaction's start time, earlier than that correction's link
+  // revocations, and delivery would take it for stale. Ask for a retry: the
+  // asker has not seen the details as they are now anyway.
+  const { rows: overtaken } = await sql<{ id: string }>`
+    select id from booking_contact_changes
+     where tenant_id = ${tenantId} and booking_id = ${input.bookingId}
+       and created_at > now()
+     limit 1`.execute(trx);
+  if (overtaken.length > 0) return { kind: "booking_changed" };
 
   const nameChanged = name !== before.booker_name;
   const emailChanged = email !== before.booker_email;

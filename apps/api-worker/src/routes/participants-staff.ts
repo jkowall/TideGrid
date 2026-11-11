@@ -59,6 +59,12 @@ export function bookerContactRefusal(
         "trip_departed",
         "This trip has departed; the booker's details no longer change",
       );
+    case "booking_changed":
+      return new ApiError(
+        409,
+        "booking_changed",
+        "The booker's details changed a moment ago; read the booking again and retry",
+      );
     case "session_ended":
       return new ApiError(
         401,
@@ -374,7 +380,7 @@ export function registerParticipantStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or booking (booking_not_found)"),
       409: errorBody(
-        "The booking was canceled (booking_canceled), or its trip has departed (trip_departed)",
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), or another correction landed a moment ago (booking_changed; read the booking again and retry)",
       ),
       422: errorBody("idempotency_key_reused"),
       429: errorBody(
