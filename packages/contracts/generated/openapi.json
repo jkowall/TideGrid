@@ -25574,6 +25574,611 @@
         }
       }
     },
+    "/v1/staff/tenants/{tenantId}/money-report": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Money movements for a date range: control totals",
+        "description": "Every role. Every entry in the money ledgers on the operator's business dates from and to (inclusive, at most 92 days): card and balance payments that succeeded, cash, check, and other money staff recorded, card refunds that succeeded, lost disputes, booking credit entries, and TideGrid's fee and its reversals, totaled by kind. Business dates are counted in the billing plan's time zone, else the one zone all active locations share, else UTC. controlTotalsMatch is true when the entries add up to a separate count and sum of each ledger and the fee to the monthly invoice's figure, so the export is whole; it does not tie money to orders (the day export does, by trip date). No guest's name or email. The money export carries the same entries and ends with the same totals.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "First business date, inclusive"
+            },
+            "required": true,
+            "description": "First business date, inclusive",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "Last business date, inclusive; at most 91 days after from"
+            },
+            "required": true,
+            "description": "Last business date, inclusive; at most 91 days after from",
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The range's totals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date"
+                    },
+                    "timeZone": {
+                      "type": "string",
+                      "description": "The zone business dates are counted in: the billing plan's, else the one zone all active locations share, else UTC"
+                    },
+                    "generatedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When the figures were read"
+                    },
+                    "currency": {
+                      "type": "string",
+                      "enum": [
+                        "USD"
+                      ]
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "entries": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "moneyIn": {
+                          "type": "integer",
+                          "description": "Money received"
+                        },
+                        "moneyOut": {
+                          "type": "integer",
+                          "description": "Money returned or taken back, as a positive amount"
+                        },
+                        "credit": {
+                          "type": "integer",
+                          "description": "Booking credit's change: issued and reinstated add, used subtracts"
+                        },
+                        "fee": {
+                          "type": "integer",
+                          "description": "TideGrid's fee: an assessment adds, a reversal subtracts"
+                        },
+                        "netMoney": {
+                          "type": "integer",
+                          "description": "moneyIn - moneyOut"
+                        }
+                      },
+                      "required": [
+                        "entries",
+                        "moneyIn",
+                        "moneyOut",
+                        "credit",
+                        "fee",
+                        "netMoney"
+                      ],
+                      "description": "The range's control totals, which the CSV export's last row repeats"
+                    },
+                    "byKind": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "card_payment",
+                              "balance_payment",
+                              "external_payment",
+                              "card_refund",
+                              "external_refund",
+                              "dispute_lost",
+                              "credit_issued",
+                              "credit_used",
+                              "credit_reinstated",
+                              "credit_adjusted",
+                              "fee_assessed",
+                              "fee_reversed"
+                            ],
+                            "description": "card_payment and balance_payment: a card payment that succeeded. external_payment and external_refund: cash, check, or other money staff recorded. card_refund: a card refund that succeeded. dispute_lost: a card dispute the operator lost. credit_*: an entry in the booking credit ledger. fee_assessed and fee_reversed: TideGrid's fee and a card refund's reversal of it"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "moneyIn": {
+                            "type": "integer",
+                            "description": "Money received"
+                          },
+                          "moneyOut": {
+                            "type": "integer",
+                            "description": "Money returned or taken back, as a positive amount"
+                          },
+                          "credit": {
+                            "type": "integer",
+                            "description": "Booking credit's change: issued and reinstated add, used subtracts"
+                          },
+                          "fee": {
+                            "type": "integer",
+                            "description": "TideGrid's fee: an assessment adds, a reversal subtracts"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "count",
+                          "moneyIn",
+                          "moneyOut",
+                          "credit",
+                          "fee"
+                        ]
+                      },
+                      "description": "Every kind, in a fixed order, summed from the entries"
+                    },
+                    "ledgerFeeTotal": {
+                      "type": "integer",
+                      "description": "TideGrid's fee for the range as the monthly invoice computes it"
+                    },
+                    "controlTotalsMatch": {
+                      "type": "boolean",
+                      "description": "True when every kind's entries add up to a separate count and sum of its ledger in the same statement, and the fee to the monthly invoice's figure: the export is whole. It does not tie money to orders"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "timeZone",
+                    "generatedAt",
+                    "currency",
+                    "totals",
+                    "byKind",
+                    "ledgerFeeTotal",
+                    "controlTotalsMatch"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed date (validation_failed), or from after to or more than 92 days (invalid_range)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "More entries in the range than one report holds (range_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/money-export": {
+      "get": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Export money movements for a date range as CSV",
+        "description": "Every role. One row per money ledger entry on the business dates from and to, as the money report counts them, with its exact moment, kind, booking reference and source, tender, the provider's or the typed reference, and its money in, money out, credit, and TideGrid fee; then a total row equal to the report's totals. Stable columns, the same for every role, with no guest's name or email. The reference is the provider's id (masked for TideGrid support), or the check or receipt number staff typed, which only owners and booking staff receive because it can name a guest. Operator, range, time zone, and generation time are on every row. UTF-8 with a byte order mark and CRLF lines; a typed reference is kept from running as a spreadsheet formula. The file name holds the operator's slug and the range only. Each export is recorded in the audit history.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "First business date, inclusive"
+            },
+            "required": true,
+            "description": "First business date, inclusive",
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "description": "Last business date, inclusive; at most 91 days after from"
+            },
+            "required": true,
+            "description": "Last business date, inclusive; at most 91 days after from",
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The range's entries as an attachment",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed date (validation_failed), or from after to or more than 92 days (invalid_range)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "More entries in the range than one export holds (range_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes": {
       "get": {
         "tags": [

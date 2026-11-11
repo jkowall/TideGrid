@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-11
 
+### Money movements for a date range (W3-G2.12-rest, part 1), built November 11, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, from `main` at `5ea5a33`, no migration, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data and the fake provider only; no provider call, no deploy.
+
+- **Built.** `GET /v1/staff/tenants/{tenantId}/money-report` (totals by kind) and `/money-export` (CSV, audited) for every role with `payments.read`: every entry in the money ledgers on the operator's business dates (card and balance payments, external payments and refunds, card refunds, lost disputes, booking credit, TideGrid's fee and reversals), at most 92 days and 5,000 entries, with control totals from a separate count of each ledger and the invoice's fee figure in the same statement.
+- **Reviews.** Independent review: accept with fixes. The control was described as more than it is (now described as a completeness check, with a test that it can fail, and the tie to orders recorded as the day export's job); the total row put the entry count under Kind (now an appended Entries column); the zone being read at run time, disputes counted at close, and refund exceptions are recorded as known limits; tests added for credit adjustments, the exact local midnight on a 25-hour day, another tenant with its own entries, and asking inside one tenant for another's id. Security review: nothing serious; one Medium fixed (a check or receipt number staff typed can name a guest, so finance and support no longer get it, as in the external payments list, with an API test) and one Low fixed (TideGrid support sees provider ids masked). Not fixed: indexes on the ledgers' time columns (pilot volume), and a line feed at the start of an operator's name in the CSV guard (TideGrid writes the name).
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `money-report.integration.test.ts` in domain-booking (3 cases) and in the API (2 cases), the route guard and OpenAPI listing tests. Full integration suites, each run on its own: database 72, domain-messaging 99, domain-booking 314, domain-waivers 75, api-worker 386 (the Stripe fixture test needs a fresh database, as before). `pnpm check` passed.
+
 ### Correcting the booker's contact details (W3-G2.11-rest, last part), built November 11, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, from `main` at `d58cae3`, migration `0037_booker_contact_changes.sql`, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data and the fake provider only; no provider call, no deploy.

@@ -18,8 +18,10 @@ import {
   bookingDayExportColumns,
   bookingDayExportGuestColumns,
   isNumberShapedReference,
+  moneyExportColumns,
 } from "@tidegrid/contracts";
 import type { DayReport, DayReportMoney, DayReportRow } from "./day-report.ts";
+import type { MoneyReport } from "./money-report.ts";
 
 const byteOrderMark = "\ufeff";
 const lineEnd = "\r\n";
@@ -52,9 +54,37 @@ export function csvMoney(cents: number): string {
   return `${dollars}.${String(cents % 100).padStart(2, "0")}`;
 }
 
+/**
+ * A reference someone typed or a provider issued (a check or receipt number),
+ * kept from running as a formula and from being read as a number: a
+ * spreadsheet would drop "001234"'s leading zeros or round a long one, so a
+ * number-shaped reference starts with an apostrophe, as a booking reference
+ * that looks like a number does.
+ */
+export function csvTypedReference(value: string): string {
+  return /^\s*[+-]?(\d[\d,]*\.?\d*|\.\d+)([eE][+-]?\d+)?\s*$/.test(value)
+    ? `'${value}`
+    : csvText(value);
+}
+
+/**
+ * Signed integer cents, for the columns that can go down (credit, TideGrid's
+ * fee): -1234 is "-12.34". A spreadsheet reads it as a number; it is never
+ * text from a person, so the minus sign is not a formula risk.
+ */
+export function csvSignedMoney(cents: number): string {
+  if (!Number.isSafeInteger(cents)) throw new RangeError(`not whole cents: ${String(cents)}`);
+  return cents < 0 ? `-${csvMoney(-cents)}` : csvMoney(cents);
+}
+
 /** An instant as a spreadsheet reads a UTC date and time: "2026-10-06 18:17:00". */
 export function csvInstant(instant: string): string {
   return new Date(instant).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** An instant to the millisecond, for rows that two entries can share a second in. */
+export function csvInstantMs(instant: string): string {
+  return new Date(instant).toISOString().slice(0, 23).replace("T", " ");
 }
 
 /** A whole file: the byte order mark, a header, and the rows, each line ending CRLF. */
@@ -155,6 +185,68 @@ export function renderDayExport(
 /** The export's file name: the operator's slug and the date, never a person's details. */
 export function dayExportFileName(slug: string, date: string): string {
   return `${slug}-bookings-${date}.csv`;
+}
+
+/**
+ * The money export (W3-G2.12-rest): a header, one row per ledger entry, and a
+ * total row whose figures are the report's totals. Stable columns
+ * (`moneyExportColumns`). No guest's name or email; a check or receipt
+ * number staff typed (present only for roles that see guests) is kept from
+ * running as a formula.
+ */
+export function renderMoneyExport(report: MoneyReport, operator: { name: string }): string {
+  const generated = csvInstant(report.generatedAt);
+  const operatorName = csvText(operator.name);
+  const zone = csvText(report.timeZone);
+  const entryRows = report.entries.map((e) => [
+    "Entry",
+    operatorName,
+    report.from,
+    report.to,
+    zone,
+    e.businessDate,
+    csvInstantMs(e.at),
+    e.kind,
+    e.booking ? csvReference(e.booking.reference) : "",
+    e.booking?.source ?? "",
+    e.tender ?? "",
+    csvTypedReference(e.reference ?? ""),
+    csvMoney(e.moneyIn),
+    csvMoney(e.moneyOut),
+    csvSignedMoney(e.credit),
+    csvSignedMoney(e.fee),
+    "USD",
+    generated,
+    "1",
+  ]);
+  const t = report.totals;
+  const totalRow = [
+    "Total",
+    operatorName,
+    report.from,
+    report.to,
+    zone,
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    csvMoney(t.moneyIn),
+    csvMoney(t.moneyOut),
+    csvSignedMoney(t.credit),
+    csvSignedMoney(t.fee),
+    "USD",
+    generated,
+    String(t.entries),
+  ];
+  return renderCsv(moneyExportColumns, [...entryRows, totalRow]);
+}
+
+/** The money export's file name: the operator's slug and the range only. */
+export function moneyExportFileName(slug: string, from: string, to: string): string {
+  return `${slug}-money-${from}-to-${to}.csv`;
 }
 
 export type { DayReportRow };

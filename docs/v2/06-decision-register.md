@@ -8,6 +8,28 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.12-rest, money movements for a date range, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the first part of W3-G2.12-rest; the tracker's other parts follow (a capacity override, complimentary bookings), the booker email correction is already in (the entry above), staff cancel and refund came with W3-G2.9, and imported records come with W3-G2.13.
+
+It covers the tracker's "financial exports have control totals that match the ledger", with [docs/v2/02](02-product-scope.md#reports-and-exports) as the scope. There is no migration. What it adds, in the API only:
+
+- **A money report for a date range.** Every entry in the money ledgers on the operator's business dates from and to: card and balance payments that succeeded, cash, check, and other money staff recorded, card refunds that succeeded, lost disputes, booking credit entries, and TideGrid's fee and its reversals. Totaled by kind, with money in, money out, credit, and fee.
+- **Its CSV export.** One row per entry, with its exact moment, kind, booking reference and source, tender, and the provider's or typed reference; then a total row. Operator, range, time zone, and generation time are on every row. Each export is in the audit history.
+- **Control totals.** In the same statement the database counts and sums each ledger a second time, apart from the rows, and computes the fee as the monthly invoice does. The report says whether the rows add up to them (`controlTotalsMatch`): that proves the export is whole and agrees with the invoice on the fee. It is not a tie to orders (the day export does that, by trip date), and it would not notice a ledger both sides leave out. The tests also check the totals against the tables read directly.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: by when the money moved, not by trip date.** A refund lands on the day it succeeded, not the day of the trip. The day export (by trip date) stays as it is for "how did Saturday's trips do".
+- **D2: the business day's zone.** The billing plan's time zone, else the one zone all the operator's active locations share, else UTC. The same rule as the monthly reconciliation, with the locations step added for an operator with no plan yet. The zone is read when the report runs, so adding a plan later (or changing the only location's zone) moves past entries near midnight to another date in later reports.
+- **D3: who.** Every role with `payments.read`: owners, booking staff, and finance (and TideGrid support under a grant). The report and export carry no guest's name or email, and every role gets the same columns. A check or receipt number staff typed is free text that can name a guest, so only owners and booking staff get it; for finance and support that cell is blank, as in the external payments list.
+- **D4: limits.** At most 92 days a report (about a quarter) and 5,000 entries; a bigger range is refused, never cut short, so the totals are always whole.
+- **D5: provider references in full for the operator.** The export carries the provider's payment, refund, and dispute ids unmasked for owners, booking staff, and finance, as docs/v2/02 asks ("Stripe charge and refund references"), so finance can match them to the provider's own reports. Dispute ids are added on the same reasoning. They are identifiers, not card data. TideGrid support sees them masked, as the console shows them. A typed reference is kept from running as a spreadsheet formula.
+
+Known limits: a dispute counts only when it closes as lost, on the day it closed, though the provider takes the money when it opens and returns it on a win; refunds the provider reported back after settling (`failed_after_success`, `succeeded_after_failure`) show as TideGrid recorded them, and they are listed for staff on the refund exceptions list, not in this report; the timestamp columns some ledgers are read by have no index, which is fine at pilot volume.
+
+Not built: the console screen (the API is ready for it); a range summary of bookings, guests, and occupancy by product, boat, and source; waiver completion, message delivery, and reconciliation exception reports; and balance payment refunds, which do not exist yet (W3-G2.8's known gaps).
+
 ### 2026-11-11: W3-G2.11-rest, correcting the booker's contact details, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the last part of W3-G2.11-rest, after moves, giving up a place, and participant invitations (the entries below).

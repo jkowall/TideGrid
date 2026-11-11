@@ -109,10 +109,13 @@ export {
   csvInstant,
   csvMoney,
   csvReference,
+  csvSignedMoney,
   csvText,
   dayExportFileName,
+  moneyExportFileName,
   renderCsv,
   renderDayExport,
+  renderMoneyExport,
 } from "./csv.ts";
 export {
   buildDayReport,
@@ -223,6 +226,22 @@ export {
   renewManageLink,
   requestManageLink,
 } from "./manage.ts";
+// Money movements for a date range (W3-G2.12-rest).
+export {
+  buildMoneyReport,
+  controlsAgree,
+  MONEY_ENTRY_KINDS,
+  MONEY_REPORT_LIMIT,
+  MONEY_REPORT_MAX_DAYS,
+  type MoneyEntry,
+  type MoneyEntryKind,
+  type MoneyKindTotals,
+  type MoneyReport,
+  type MoneyReportOutcome,
+  type MoneyTotals,
+  moneyTotalsOf,
+  totalsByKind,
+} from "./money-report.ts";
 export {
   type AddBookingNoteResult,
   addBookingNote,
