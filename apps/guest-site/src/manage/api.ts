@@ -113,11 +113,13 @@ export async function saveParticipant(
 export async function inviteParticipant(
   session: string,
   position: number,
+  key: string,
   signal?: AbortSignal,
 ): Promise<Result<"participant" | "guardian">> {
   const result = await call(`/v1/public/manage/participants/${position}/invitation`, {
     method: "POST",
     bearer: session,
+    key,
     schema: ParticipantInvitationResponse,
     signal,
     timeoutMs: commandTimeoutMs,

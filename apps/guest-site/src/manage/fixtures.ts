@@ -444,6 +444,9 @@ export const answers: Record<Route, Answer> = {
   }),
   // Sends to the address saved for the place: a minor's guardian, or their own.
   invite: withSession((call) => {
+    if (!IdempotencyKey.safeParse(call.headers.get("idempotency-key")).success) {
+      return refusal(400, "validation_failed");
+    }
     const position = Number(call.path.split("/").at(-2));
     const p = server.booking.participants.participants.find((x) => x.position === position);
     if (!p) return refusal(409, "participant_not_named");

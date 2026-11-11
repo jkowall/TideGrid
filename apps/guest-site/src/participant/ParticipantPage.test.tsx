@@ -95,7 +95,10 @@ function stubApi(answer: (call: Call) => Response | Promise<Response>): Call[] {
 }
 
 /** The usual API: opens, reads, and saves as asked. */
-function api(read: () => ParticipantProfile = profile, save?: (call: Call) => Response) {
+function api(
+  read: () => ParticipantProfile = profile,
+  save?: (call: Call) => Response | Promise<Response>,
+) {
   return stubApi((call) => {
     const path = new URL(call.url).pathname;
     if (call.method === "POST" && path === "/v1/public/participant-access") return opened();
@@ -334,7 +337,7 @@ describe("correcting your details", () => {
 
   it.each([
     ["session_expired", 401, "Your session ended"],
-    ["participant_not_found", 404, "You're no longer in this booking"],
+    ["participant_not_found", 404, "This person is no longer in the booking"],
     ["trip_departed", 409, "This booking no longer takes changes"],
     ["booking_canceled", 409, "This booking no longer takes changes"],
   ])("stops on %s", async (code, status, title) => {
@@ -363,6 +366,28 @@ describe("correcting your details", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "All done" })).toBeTruthy();
     await waitFor(() => expect(paths(calls)).toContain("POST /v1/public/participant/session/end"));
     expect(window.sessionStorage.getItem(storageKey)).toBeNull();
+  });
+});
+
+describe("an answer that arrives late", () => {
+  it("leaves the done screen alone when a save answers after I'm done", async () => {
+    let release: (r: Response) => void = () => {};
+    api(
+      profile,
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    );
+    renderPage();
+    await openDetails();
+    fireEvent.click(screen.getByRole("button", { name: "Save details" }));
+    fireEvent.click(screen.getByRole("button", { name: "I'm done" }));
+    await screen.findByRole("heading", { level: 1, name: "All done" });
+    release(json(200, { profile: profile(), changed: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("heading", { level: 1, name: "All done" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save details" })).toBeNull();
   });
 });
 

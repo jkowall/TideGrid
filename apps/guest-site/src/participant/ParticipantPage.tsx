@@ -115,7 +115,7 @@ const stops: Record<string, Stop> = {
   participant_not_found: {
     icon: "users",
     tone: "neutral",
-    title: "You're no longer in this booking",
+    title: "This person is no longer in the booking",
     body: (op) =>
       `The booking's party changed, so there's nothing to update here. Questions? Contact ${op}.`,
   },
@@ -276,7 +276,8 @@ function DetailsForm({
       return;
     }
     if (result.kind === "refused") {
-      attempt.current = null;
+      // A server error leaves the outcome unknown: keep the key for a retry.
+      if (result.status < 500) attempt.current = null;
       if (result.status === 401) return onStopped("session_expired");
       if (result.status === 404 && result.code === "participant_not_found") {
         return onStopped("participant_not_found");
@@ -384,7 +385,7 @@ function DetailsForm({
         />
         <div role="status" aria-live="polite">
           {saved && (
-            <Notice tone="success" title="Saved">
+            <Notice tone="success" title="Saved" announce="none">
               {saved === "changed"
                 ? `${operator} has the new details.`
                 : `${operator} already had these details.`}
@@ -437,8 +438,12 @@ export function ParticipantPage({
     phase.kind === "details" ? `Your details · ${brand.name}` : `Your trip details · ${brand.name}`,
   );
 
+  // The phase as it is now, for answers that arrive after the page moved on.
+  const current = useRef(phase);
+  current.current = phase;
   const go = useCallback((next: Phase) => {
     moved.current = true;
+    current.current = next;
     setPhase(next);
   }, []);
 
@@ -453,6 +458,8 @@ export function ParticipantPage({
   const load = useCallback(
     async (session: string) => {
       const result = await readProfile(session);
+      // Done, or stopped, while this read was on its way: it changes nothing.
+      if (current.current.kind === "stopped") return;
       if (result.kind === "ok") go({ kind: "details", session, profile: result.value });
       else if (result.kind === "refused" && result.status === 401) stop("session_expired");
       else if (result.kind === "refused" && result.code === "participant_not_found") {
@@ -526,8 +533,8 @@ export function ParticipantPage({
             }
           >
             <p>
-              You're in the party for a trip with {brand.name}. Check that your name and email are
-              right, so {brand.name} knows who's coming.
+              Check the details {brand.name} has for someone in the party on a trip, so {brand.name}{" "}
+              knows who's coming.
             </p>
             <p className="waiver-fine-print">
               This link opens once, so keep this page open until you've finished.
@@ -578,8 +585,16 @@ export function ParticipantPage({
                 profile={profile}
                 session={session}
                 operator={brand.name}
-                onSaved={(next) => setPhase({ kind: "details", session, profile: next })}
-                onStopped={stop}
+                onSaved={(next) => {
+                  const now = current.current;
+                  if (now.kind !== "details" || now.session !== session) return;
+                  go({ kind: "details", session, profile: next });
+                }}
+                onStopped={(code) => {
+                  const now = current.current;
+                  if (now.kind !== "details" || now.session !== session) return;
+                  stop(code);
+                }}
                 onReload={() => void load(session)}
               />
             ) : (

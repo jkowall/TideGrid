@@ -69,5 +69,7 @@ export async function endSession(session: string): Promise<void> {
     method: "POST",
     bearer: session,
     schema: ParticipantSessionEndResponse,
+    // "I'm done" and a closed tab right after still end the session.
+    keepalive: true,
   });
 }

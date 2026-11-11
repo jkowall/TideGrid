@@ -46,6 +46,9 @@ export function PartySection({
   const [editing, setEditing] = useState<number | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [inviting, setInviting] = useState<number | null>(null);
+  // One key per place's invitation: a retry after no answer, or a server
+  // error, sends the same request, so it never emails twice.
+  const inviteKeys = useRef(new Map<number, string>());
   const [invite, setInvite] = useState<{
     tone: "success" | "warning" | "error";
     text: string;
@@ -165,8 +168,16 @@ export function PartySection({
                         setSaved(null);
                         setInvite(null);
                         setInviting(slot.position);
-                        void inviteParticipant(session, slot.position).then((result) => {
+                        const key = inviteKeys.current.get(slot.position) ?? crypto.randomUUID();
+                        inviteKeys.current.set(slot.position, key);
+                        void inviteParticipant(session, slot.position, key).then((result) => {
                           setInviting(null);
+                          // Keep the key only when the outcome is unknown.
+                          const unsure =
+                            result.kind === "network" ||
+                            result.kind === "unreadable" ||
+                            (result.kind === "refused" && result.status >= 500);
+                          if (!unsure) inviteKeys.current.delete(slot.position);
                           if (result.kind === "refused" && result.status === 401) {
                             onEnded();
                             return;
@@ -203,8 +214,8 @@ function inviteOutcome(
       tone: "success",
       text:
         result.value === "guardian"
-          ? `We're emailing ${p.guardian?.name ?? "their parent or guardian"} a link to check ${p.name}'s details. It works once and lasts until the trip.`
-          : `We're emailing ${p.name} a link to check their own details. It works once and lasts until the trip.`,
+          ? `We're emailing ${p.guardian?.name ?? "their parent or guardian"} a link to check ${p.name}'s details. It works once, for 7 days or until the trip, whichever comes first.`
+          : `We're emailing ${p.name} a link to check their own details. It works once, for 7 days or until the trip, whichever comes first.`,
     };
   }
   if (result.kind === "refused") {
@@ -212,7 +223,7 @@ function inviteOutcome(
       case "invitation_limit_reached":
         return {
           tone: "warning",
-          text: `${p.name} has had enough links for today. Try again tomorrow.`,
+          text: `That's the most links we can send for ${p.name} or this booking today. Try again tomorrow.`,
         };
       case "participant_no_email":
       case "participant_not_named":
@@ -223,6 +234,8 @@ function inviteOutcome(
         return { tone: "warning", text: "This trip has left, so no link was sent." };
       case "place_removed":
         return { tone: "warning", text: "That place was given up, so no link was sent." };
+      case "position_out_of_range":
+        return { tone: "warning", text: "The party changed. Reload the page to see it." };
       case "rate_limited":
         return { tone: "warning", text: "Too many tries. Wait a minute, then try again." };
     }

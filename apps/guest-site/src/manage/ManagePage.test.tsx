@@ -1286,12 +1286,13 @@ describe("sending someone their own link", () => {
     fireEvent.click(sendTo(2));
     const notice = await noticeTitled("Link on its way");
     expect(text(notice)).toContain(
-      "We're emailing Ava Guest a link to check Theo Guest's details.",
+      "We're emailing Ava Guest a link to check Theo Guest's details. It works once, for 7 days or until the trip, whichever comes first.",
     );
     const [invite] = callsTo(calls, "invite");
     expect(invite?.path).toBe("/v1/public/manage/participants/2/invitation");
     expect(invite?.body).toBeUndefined();
     expect(invite?.headers.get("authorization")).toBe(`Bearer ${sessionToken}`);
+    expect(invite?.headers.get("idempotency-key")).toMatch(uuid);
     expect(invite?.url).not.toMatch(/@|Theo|Ava|\?/);
   });
 
@@ -1300,8 +1301,28 @@ describe("sending someone their own link", () => {
     fireEvent.click(sendTo(2));
     const notice = await noticeTitled("Link not sent");
     expect(text(notice)).toContain(
-      "Theo Guest has had enough links for today. Try again tomorrow.",
+      "That's the most links we can send for Theo Guest or this booking today. Try again tomorrow.",
     );
+  });
+
+  it("sends the same key again after no answer, and a new one after a sent link", async () => {
+    let tries = 0;
+    const calls = await shown({
+      invite: () => {
+        tries += 1;
+        if (tries === 1) throw new TypeError("offline");
+        return json({ status: "accepted", recipient: "guardian" }, 202);
+      },
+    });
+    fireEvent.click(sendTo(2));
+    await noticeTitled("Link not sent");
+    fireEvent.click(sendTo(2));
+    await noticeTitled("Link on its way");
+    fireEvent.click(sendTo(2));
+    await waitFor(() => expect(callsTo(calls, "invite")).toHaveLength(3));
+    const keys = callsTo(calls, "invite").map((c) => c.headers.get("idempotency-key"));
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[1]);
   });
 
   it("shows the ended screen when the session has ended", async () => {
