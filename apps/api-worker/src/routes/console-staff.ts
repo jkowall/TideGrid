@@ -31,7 +31,7 @@ import {
   resolveFinalizationException,
   searchBookings,
 } from "@tidegrid/domain-booking";
-import { can } from "@tidegrid/domain-identity";
+import { type AccessRole, can } from "@tidegrid/domain-identity";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { type StaffTenantContext, withStaffTenant } from "../staff-tenant.ts";
@@ -75,15 +75,20 @@ const rangeTooLarge = () =>
   );
 
 /**
- * What a money report shows this role (W3-G2.12-rest): a check or receipt
- * number staff typed can name a guest, so only roles that see guests read it,
- * as the external settlements list does; TideGrid support sees provider ids
- * masked, as on the booking detail.
+ * What a money report shows this role (W3-G2.12-rest, D3): a check or receipt
+ * number staff typed can name a guest, so only the operator's own staff who
+ * see guests (owners and booking staff) read it. Finance and TideGrid support,
+ * even under a grant that reveals personal data, get the cell blank. Support
+ * sees provider ids masked, as on the booking detail.
  */
-const moneyView = (ctx: StaffTenantContext) => ({
-  typedReferences: can(ctx.access.role, "bookings.read"),
-  maskProviderReferences: ctx.access.role.startsWith("support"),
-});
+export function moneyViewFor(role: AccessRole) {
+  const support = role.startsWith("support");
+  return {
+    typedReferences: !support && can(role, "bookings.read"),
+    maskProviderReferences: support,
+  };
+}
+const moneyView = (ctx: StaffTenantContext) => moneyViewFor(ctx.access.role);
 
 function moneyReport(outcome: MoneyReportOutcome) {
   if (outcome.kind === "invalid_range") throw rangeInvalid();
