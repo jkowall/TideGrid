@@ -198,6 +198,8 @@ export * from "./email-exceptions.ts";
 export * from "./inventory.ts";
 // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
 export * from "./invitations.ts";
+// Money movements for a date range (W3-G2.12-rest).
+export * from "./money-report.ts";
 export * from "./participants.ts";
 export * from "./party-changes.ts";
 export * from "./pricing.ts";

@@ -506,6 +506,16 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 - **Events.** Audit `booking.booker_contact_changed` and outbox `booking.booker_contact_changed` `{ bookingId, contactChangeId, nameChanged, emailChanged }`; never the values.
 - **Known gaps.** No form on the booking page or in the console yet. A name-only change leaves queued email greeting the old name. A confirmation, link, "moved" notice, or staff balance link not yet sent is canceled rather than moved (D4); a queued email without a link (a refund problem notice) still goes to the old address. Credit follows the booker's email (`credits.ts`), so after a correction it is the new address's account.
 
+## Money movements for a date range (W3-G2.12-rest)
+
+`money-report.ts`. Coordinator defaults D1 to D5, pending owner confirmation, are in the [decision register](../../docs/v2/06-decision-register.md#decision-log).
+
+- **`buildMoneyReport(trx, tenantId, { from, to })`** lists every money ledger entry whose moment falls on the operator's business dates `from` to `to` (inclusive, at most 92 days, at most 5,000 entries; otherwise `invalid_range` or `too_large`, never a short report). The kinds, in `MONEY_ENTRY_KINDS` order: `card_payment`, `balance_payment`, `external_payment`, `card_refund`, `external_refund`, `dispute_lost`, `credit_issued`, `credit_used`, `credit_reinstated`, `credit_adjusted`, `fee_assessed`, `fee_reversed`. Each has money in, money out (positive), credit (signed), and TideGrid's fee (signed). An external refund carries its own fee reversal.
+- **Business dates** are counted in the billing plan's zone, else the one zone all active locations share, else UTC. Each entry keeps its exact moment.
+- **Control totals.** One statement reads the entries and, apart from them, each ledger's own count and sums plus `app.fee_ledger_total`, so both describe one moment under READ COMMITTED. `controlTotalsMatch` (`controlsAgree`) is true when every kind's rows equal its ledger and the fee equals the invoice's figure: the export is whole. It uses the same tables and filters, so it does not catch a ledger both leave out, and it is not a tie to orders (the day report is).
+- **Who sees what.** `typedReferences` (roles with `bookings.read`) reads the check or receipt numbers staff typed, which can name a guest; otherwise they are null. `maskProviderReferences` (TideGrid support) masks provider ids with `maskProviderReference`.
+- **CSV.** `renderMoneyExport` writes `moneyExportColumns` (contracts), one row per entry and a total row, with the entry count in the last column (Entries). Signed amounts use `csvSignedMoney`. No guest's name or email is read.
+
 ## Deferred and known gaps
 
 - **Staff-assisted booking (G2.12d).** Staff cannot cancel a confirmed booking, refund, enter participants, correct the booker's address, override the cutoff, sales state, capacity, or price, or record cash, check, or complimentary bookings. A mistyped booker address sends the management link to whoever holds it; the read-back and its attestation reduce that, nothing removes it.

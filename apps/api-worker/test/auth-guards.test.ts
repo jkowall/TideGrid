@@ -18,6 +18,8 @@ const bookingViews = [
 const completionReads = [
   `/v1/staff/tenants/${tenant}/booking-day-totals?date=2026-10-06`,
   `/v1/staff/tenants/${tenant}/booking-day-export?date=2026-10-06`,
+  `/v1/staff/tenants/${tenant}/money-report?from=2026-10-01&to=2026-10-31`,
+  `/v1/staff/tenants/${tenant}/money-export?from=2026-10-01&to=2026-10-31`,
   `/v1/staff/tenants/${tenant}/bookings/${someId}/notes`,
 ];
 const completionWrites = [
@@ -252,6 +254,9 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/booking-searches",
         "/v1/staff/tenants/{tenantId}/booking-day-totals",
         "/v1/staff/tenants/{tenantId}/booking-day-export",
+        // Money movements for a date range (W3-G2.12-rest).
+        "/v1/staff/tenants/{tenantId}/money-report",
+        "/v1/staff/tenants/{tenantId}/money-export",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes",
         // Waiver evidence (G2.15).
         "/v1/public/waiver-sessions",

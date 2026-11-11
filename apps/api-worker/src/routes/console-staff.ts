@@ -12,16 +12,22 @@ import {
   FinalizationExceptionResolvedResponse,
   FinalizationExceptionResolveRequest,
   IdempotencyKey,
+  MoneyReportQuery,
+  MoneyReportResponse,
   StaffTenantParams,
 } from "@tidegrid/contracts";
 import { recordAudit } from "@tidegrid/database";
 import {
   addBookingNote,
   buildDayReport,
+  buildMoneyReport,
   type DayReportOutcome,
   dayExportFileName,
   listBookingNotes,
+  type MoneyReportOutcome,
+  moneyExportFileName,
   renderDayExport,
+  renderMoneyExport,
   resolveFinalizationException,
   searchBookings,
 } from "@tidegrid/domain-booking";
@@ -34,6 +40,8 @@ import { errorBody, staffSecurity } from "./responses.ts";
 const searchPath = "/v1/staff/tenants/{tenantId}/booking-searches";
 const totalsPath = "/v1/staff/tenants/{tenantId}/booking-day-totals";
 const exportPath = "/v1/staff/tenants/{tenantId}/booking-day-export";
+const moneyReportPath = "/v1/staff/tenants/{tenantId}/money-report";
+const moneyExportPath = "/v1/staff/tenants/{tenantId}/money-export";
 const notesPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/notes";
 const resolutionPath =
   "/v1/staff/tenants/{tenantId}/finalization-exceptions/{exceptionId}/resolution";
@@ -52,6 +60,36 @@ const dayTooLarge = () =>
     "day_too_large",
     "This day has more bookings than one export holds; ask TideGrid for a split export",
   );
+
+const rangeInvalid = () =>
+  new ApiError(
+    400,
+    "invalid_range",
+    "The first date is after the last, or the range is longer than 92 days",
+  );
+const rangeTooLarge = () =>
+  new ApiError(
+    422,
+    "range_too_large",
+    "This range has more entries than one report holds; choose a shorter range",
+  );
+
+/**
+ * What a money report shows this role (W3-G2.12-rest): a check or receipt
+ * number staff typed can name a guest, so only roles that see guests read it,
+ * as the external settlements list does; TideGrid support sees provider ids
+ * masked, as on the booking detail.
+ */
+const moneyView = (ctx: StaffTenantContext) => ({
+  typedReferences: can(ctx.access.role, "bookings.read"),
+  maskProviderReferences: ctx.access.role.startsWith("support"),
+});
+
+function moneyReport(outcome: MoneyReportOutcome) {
+  if (outcome.kind === "invalid_range") throw rangeInvalid();
+  if (outcome.kind === "too_large") throw rangeTooLarge();
+  return outcome.report;
+}
 
 /**
  * Whether this request's role may see, and search on, the booker's name and
@@ -75,6 +113,7 @@ function report(outcome: DayReportOutcome) {
 export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
   // A test may lower the day report's limit to reach day_too_large.
   const limit = deps.dayReportLimit === undefined ? {} : { limit: deps.dayReportLimit };
+  const moneyLimit = deps.moneyReportLimit === undefined ? {} : { limit: deps.moneyReportLimit };
 
   // Search ------------------------------------------------------------------------
 
@@ -228,6 +267,115 @@ export function registerConsoleStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         return {
           csv: renderDayExport(day, { name: ctx.access.tenant.name }, { withBooker }),
           fileName: dayExportFileName(ctx.access.tenant.slug, date),
+        };
+      },
+    );
+    return c.body(body.csv, 200, {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${body.fileName}"`,
+      "X-Content-Type-Options": "nosniff",
+    });
+  });
+
+  // Money movements for a date range (W3-G2.12-rest) ------------------------------------
+
+  const moneyReportRoute = createRoute({
+    method: "get",
+    path: moneyReportPath,
+    tags: ["staff", "bookings"],
+    summary: "Money movements for a date range: control totals",
+    description:
+      "Every role. Every entry in the money ledgers on the operator's business dates from and to (inclusive, at most 92 days): card and balance payments that succeeded, cash, check, and other money staff recorded, card refunds that succeeded, lost disputes, booking credit entries, and TideGrid's fee and its reversals, totaled by kind. Business dates are counted in the billing plan's time zone, else the one zone all active locations share, else UTC. controlTotalsMatch is true when the entries add up to a separate count and sum of each ledger and the fee to the monthly invoice's figure, so the export is whole; it does not tie money to orders (the day export does, by trip date). No guest's name or email. The money export carries the same entries and ends with the same totals.",
+    security: staffSecurity,
+    request: { params: StaffTenantParams, query: MoneyReportQuery },
+    responses: {
+      200: {
+        content: { "application/json": { schema: MoneyReportResponse } },
+        description: "The range's totals",
+      },
+      400: errorBody(
+        "A malformed date (validation_failed), or from after to or more than 92 days (invalid_range)",
+      ),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant"),
+      422: errorBody("More entries in the range than one report holds (range_too_large)"),
+    },
+  });
+
+  app.openapi(moneyReportRoute, async (c) => {
+    const { tenantId } = c.req.valid("param");
+    const { from, to } = c.req.valid("query");
+    const { body } = await withStaffTenant(
+      c,
+      deps,
+      { tenantId, permission: "payments.read", snapshot: true },
+      async (trx, ctx) => {
+        const r = moneyReport(
+          await buildMoneyReport(trx, tenantId, { from, to, ...moneyLimit, ...moneyView(ctx) }),
+        );
+        return {
+          from: r.from,
+          to: r.to,
+          timeZone: r.timeZone,
+          generatedAt: r.generatedAt,
+          currency: "USD" as const,
+          totals: { ...r.totals },
+          byKind: r.byKind.map((k) => ({ ...k })),
+          ledgerFeeTotal: r.ledgerFeeTotal,
+          controlTotalsMatch: r.controlTotalsMatch,
+        };
+      },
+    );
+    return c.json(body, 200);
+  });
+
+  const moneyExportRoute = createRoute({
+    method: "get",
+    path: moneyExportPath,
+    tags: ["staff", "bookings"],
+    summary: "Export money movements for a date range as CSV",
+    description:
+      "Every role. One row per money ledger entry on the business dates from and to, as the money report counts them, with its exact moment, kind, booking reference and source, tender, the provider's or the typed reference, and its money in, money out, credit, and TideGrid fee; then a total row equal to the report's totals. Stable columns, the same for every role, with no guest's name or email. The reference is the provider's id (masked for TideGrid support), or the check or receipt number staff typed, which only owners and booking staff receive because it can name a guest. Operator, range, time zone, and generation time are on every row. UTF-8 with a byte order mark and CRLF lines; a typed reference is kept from running as a spreadsheet formula. The file name holds the operator's slug and the range only. Each export is recorded in the audit history.",
+    security: staffSecurity,
+    request: { params: StaffTenantParams, query: MoneyReportQuery },
+    responses: {
+      200: {
+        content: { "text/csv": { schema: z.string() } },
+        description: "The range's entries as an attachment",
+      },
+      400: errorBody(
+        "A malformed date (validation_failed), or from after to or more than 92 days (invalid_range)",
+      ),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant"),
+      422: errorBody("More entries in the range than one export holds (range_too_large)"),
+    },
+  });
+
+  app.openapi(moneyExportRoute, async (c) => {
+    const { tenantId } = c.req.valid("param");
+    const { from, to } = c.req.valid("query");
+    // One statement reads the entries and the control figures, so they are
+    // one moment; the audit row commits with the read, before anything leaves.
+    const { body } = await withStaffTenant(
+      c,
+      deps,
+      { tenantId, permission: "payments.read" },
+      async (trx, ctx) => {
+        const r = moneyReport(
+          await buildMoneyReport(trx, tenantId, { from, to, ...moneyLimit, ...moneyView(ctx) }),
+        );
+        await recordAudit(trx, ctx, {
+          action: "money_report.exported",
+          subjectType: "money_report",
+          subjectId: `${from}..${to}`,
+          after: { rows: r.entries.length, controlTotalsMatch: r.controlTotalsMatch },
+        });
+        return {
+          csv: renderMoneyExport(r, { name: ctx.access.tenant.name }),
+          fileName: moneyExportFileName(ctx.access.tenant.slug, from, to),
         };
       },
     );

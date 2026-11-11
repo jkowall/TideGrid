@@ -8,7 +8,9 @@
  * when the caller says the role may see them (`withBooker`), so a view for
  * any other role never holds them, not even in memory. Nothing here returns a
  * checkout secret's hash, a client key, an idempotency key, a payload hash,
- * or a provider's raw payload, and provider payment ids leave masked.
+ * or a provider's raw payload, and provider payment ids leave masked. (The
+ * money export, money-report.ts, gives the operator's own roles the ids in
+ * full so finance can match the provider's reports; support sees them masked.)
  */
 
 import {
