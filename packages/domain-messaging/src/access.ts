@@ -69,7 +69,7 @@ export function hashSessionToken(token: string): Promise<string> {
 
 export interface IssueAccessLinkInput {
   bookingId: string;
-  /** Required for waiver_sign. */
+  /** Required for waiver_sign and participant_profile. */
   participantId?: string | null;
   purpose: AccessPurpose;
   subjectRef?: string | null;
@@ -440,7 +440,8 @@ export async function revokeGuestSession(
 /**
  * Revoke the live sessions of one booking and purpose, optionally of one
  * participant and subject, such as when a waiver is signed or its recipient
- * corrected. Answers how many.
+ * corrected, and optionally keeping one session (the one making the change).
+ * Answers how many.
  */
 export async function revokeGuestSessions(
   trx: TenantTransaction,
@@ -450,17 +451,22 @@ export async function revokeGuestSessions(
     purpose: AccessPurpose;
     participantId?: string | null;
     subjectRef?: string | null;
+    /** Leave this session live. */
+    exceptSessionId?: string | null;
   },
 ): Promise<number> {
   if (!isUuid(input.bookingId)) throw new TypeError("bookingId must be a UUID");
   const byParticipant = input.participantId !== undefined;
   const bySubject = input.subjectRef !== undefined;
+  const except = input.exceptSessionId ?? null;
+  if (except !== null && !isUuid(except)) throw new TypeError("exceptSessionId must be a UUID");
   const { rows } = await sql<{ id: string }>`
     update guest_sessions set revoked_at = now()
      where tenant_id = ${ctx.tenantId} and booking_id = ${input.bookingId}
        and purpose = ${input.purpose}
        and (${!byParticipant} or participant_id is not distinct from ${input.participantId ?? null})
        and (${!bySubject} or subject_ref is not distinct from ${input.subjectRef ?? null})
+       and (${except}::uuid is null or id <> ${except}::uuid)
        and revoked_at is null and expires_at > now()
     returning id`.execute(trx);
   return rows.length;

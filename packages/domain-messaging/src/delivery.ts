@@ -50,6 +50,7 @@
  * opens nothing, and the attempt records nothing and is never retried.
  */
 import {
+  type AccessPurpose,
   type AccessRevocationReason,
   type Database,
   inTenantTransaction,
@@ -246,7 +247,7 @@ interface ClaimedRow {
   subject: string;
   html_body: string;
   text_body: string;
-  link_purpose: "booking_manage" | "waiver_sign" | null;
+  link_purpose: AccessPurpose | null;
   link_path: string | null;
   link_ttl_seconds: number | null;
   link_slot: string | null;

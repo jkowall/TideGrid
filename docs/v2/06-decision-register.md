@@ -8,6 +8,27 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.11-rest, participant invitations, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the third part of W3-G2.11-rest, after moving a whole booking and giving up a place (the entries below); correcting the booker's own contact details follows in its own pull request.
+
+It lands as migration `0036` and the [database contract](../../packages/database/README.md#participant-invitations-0036), with [docs/v2/02](02-product-scope.md#guest-party-and-account-self-service) as the scope ("invite participants through participant-specific links"; "A participant can manage only their own profile"; "A participant invitation cannot be used to see another participant's answers or the booker's full payment method data"). What it adds:
+
+- **An invitation is a link of the participant's own.** The booker, from their booking page, or owners and booking staff (`messages.resend`, the permission for sending a booking's email) send the participant named at a place an email whose single-use link opens a session for that participant only. It shows their details, the trip, and where to meet; never the rest of the party, the booker's contact details, the booking reference, or the payment.
+- **It goes only to the address on file.** The participant's own email, or a minor's guardian's, never an address in the request. The database checks it again when the email is written.
+- **The participant corrects only their own details.** Their name and email, or a minor's name and guardian. The database refuses a participant's session that names a place, changes anyone else, or changes whether someone is a minor.
+- **Changing the address ends the old access.** When the booker, staff, or the participant changes the email an invitation went to, that person's other links and sessions end and an invitation not yet sent is withdrawn; the session making the change stays open. Removing the participant or canceling the booking ends them all.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: only a named participant with an address is invited.** The booker names the person at a place first, with an email (or a minor's guardian's), then invites them. Inviting an empty place by email alone, for the invitee to fill in their own name, is left for later; it would need a place held for someone not yet named.
+- **D2: limits.** At most 3 invitations a person in 24 hours and 20 a booking, counted together whoever sends them, on top of the usual sending limits. The link works once, for seven days or until the trip leaves, whichever is first, and a newer invitation's link replaces an older unused one. A participant's session lasts an hour.
+- **D3: whether someone is a minor is the booker's to say.** The participant cannot change it; the booker or staff can. A minor's invitation goes to their guardian, who acts for them.
+- **D4: the participant asks the booker for a new link.** An expired or used invitation does not renew itself from the participant's page, unlike a waiver link, because the booker chose to invite them.
+- **D5: staff send with `messages.resend`,** which owners and booking staff hold; finance does not. No new permission.
+
+Not built: the guest-site page that the link opens (`/participant`) and an Invite button on the booking page and in the console, which follow in the next pull request before any release; the participant's waiver from the same page (the waiver email still carries its own link); and correcting the booker's contact details.
+
 ### 2026-11-11: W3-G2.11-rest, removing a participant from a shared-seat booking, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the second part of W3-G2.11-rest, after moving a whole booking (the 2026-11-10 entry below); participant invitations and profile changes follow in their own pull request.

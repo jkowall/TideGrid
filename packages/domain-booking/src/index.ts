@@ -180,6 +180,26 @@ export {
   type ParticipantRemovedEvent,
   type ParticipantUpdatedEvent,
 } from "./hooks.ts";
+// Participant invitations and the participant's own details (W3-G2.11-rest, 0036).
+export {
+  getParticipantProfile,
+  INVITATION_LINK_TTL_SECONDS,
+  INVITATION_TEMPLATE,
+  type InviteParticipantResult,
+  inviteParticipant,
+  MAX_INVITATIONS_PER_BOOKING,
+  MAX_INVITATIONS_PER_INVITEE,
+  type OpenParticipantSessionResult,
+  type OwnDetails,
+  openParticipantSession,
+  PARTICIPANT_PATH,
+  PARTICIPANT_SESSION_TTL_SECONDS,
+  type ParticipantProfileView,
+  type ParticipantSession,
+  participantSession,
+  type UpdateOwnDetailsResult,
+  updateOwnDetails,
+} from "./invitations.ts";
 export {
   getManagedBooking,
   MANAGE_SESSION_TTL_SECONDS,
@@ -210,6 +230,7 @@ export {
   type ParticipantView,
   type PutParticipantResult,
   putParticipant,
+  withdrawProfileAccess,
 } from "./participants.ts";
 // Giving up a place in a shared-seat party (W3-G2.11-rest).
 export {

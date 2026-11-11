@@ -195,6 +195,7 @@ export * from "./email-exceptions.ts";
 // Capacity and holds (G2.6).
 export * from "./inventory.ts";
 // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
+export * from "./invitations.ts";
 export * from "./participants.ts";
 export * from "./party-changes.ts";
 export * from "./pricing.ts";

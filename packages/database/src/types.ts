@@ -887,7 +887,8 @@ export interface BookingCancellationsTable {
 
 export type EmailMessageState = "queued" | "sending" | "sent" | "failed" | "canceled";
 export type EmailProviderName = "fake" | "cloudflare";
-export type AccessPurpose = "booking_manage" | "waiver_sign";
+/** participant_profile: a participant's own details, from an invitation (W3-G2.11-rest, 0036). */
+export type AccessPurpose = "booking_manage" | "waiver_sign" | "participant_profile";
 export type AccessRevocationReason =
   | "superseded"
   | "completed"

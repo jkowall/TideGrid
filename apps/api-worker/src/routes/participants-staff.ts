@@ -2,6 +2,7 @@ import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   BookingMessagesResponse,
   IdempotencyKey,
+  ParticipantInvitationResponse,
   ParticipantListResponse,
   ParticipantPosition,
   StaffParticipantParams,
@@ -10,6 +11,7 @@ import {
 } from "@tidegrid/contracts";
 import { isUuid } from "@tidegrid/database";
 import {
+  inviteParticipant,
   listParticipants,
   type RemoveParticipantResult,
   removeParticipant,
@@ -23,12 +25,15 @@ import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
 import { emailDelivery } from "./booking-email-staff.ts";
+import { invitationRefusal } from "./participant-public.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 const participantsPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants";
 const messagesPath = "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/messages";
 const removalPath =
   "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/removal";
+const invitationPath =
+  "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/invitation";
 
 /**
  * A refused party change as the API answers it, for guest and staff alike.
@@ -215,6 +220,84 @@ export function registerParticipantStaffRoutes(app: OpenAPIHono<AppEnv>, deps: A
     if (answer.replayed) c.header("Idempotent-Replayed", "true");
     if (removed) deliverAfterCommit(c, deps, answer.ctx.tenantId);
     return c.json(answer.body as StaffRemoveParticipantResponse, 200);
+  });
+
+  app.use(
+    "/v1/staff/tenants/:tenantId/bookings/:bookingId/participants/:position/invitation",
+    async (c, next) => {
+      c.header("Cache-Control", "no-store");
+      await next();
+      c.header("Cache-Control", "no-store");
+    },
+  );
+
+  const invitationRoute = createRoute({
+    method: "post",
+    path: invitationPath,
+    tags: ["staff", "bookings"],
+    summary: "Invite one participant to check their own details",
+    description: [
+      "Owners and booking staff (messages.resend). Emails the participant named at the place a link of their own, to the participant's own address on file, or a minor's guardian's; never to an address in the request. The link opens only that participant's details and the trip, and works once, for seven days or until the trip leaves. A newer invitation's link replaces an older unused one.",
+      "At most 3 invitations a person in 24 hours, and 20 a booking, whoever sends them. Idempotent by key.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: StaffParticipantParams.extend({ position: ParticipantPosition }),
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+    },
+    responses: {
+      202: {
+        content: { "application/json": { schema: ParticipantInvitationResponse } },
+        description: "Queued; it goes out after this request",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant or booking (booking_not_found)"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+      ),
+      422: errorBody(
+        "No such place in this party (position_out_of_range), or idempotency_key_reused",
+      ),
+      429: errorBody(
+        "Too many invitations for this person or booking today (invitation_limit_reached)",
+      ),
+    },
+  });
+
+  app.openapi(invitationRoute, async (c) => {
+    const { tenantId, bookingId, position } = c.req.valid("param");
+    const key = c.req.valid("header")["idempotency-key"];
+    const notFound = () =>
+      new ApiError(404, "booking_not_found", "No such booking for this tenant");
+    let invited = false;
+    const answer = await withStaffTenant(
+      c,
+      deps,
+      {
+        tenantId,
+        permission: "messages.resend",
+        idempotency: {
+          scope: "bookings.staff_participant_invitation",
+          key,
+          route: invitationPath,
+          params: { bookingId, position: String(position) },
+          body: {},
+          successStatus: 202,
+        },
+      },
+      async (trx, ctx) => {
+        if (!isUuid(bookingId)) throw notFound();
+        const result = await inviteParticipant(trx, ctx, { bookingId, position });
+        if (result.kind !== "invited") throw invitationRefusal(result, notFound);
+        invited = true;
+        return { status: "accepted" as const, recipient: result.recipient };
+      },
+    );
+    if (answer.replayed) c.header("Idempotent-Replayed", "true");
+    if (invited) deliverAfterCommit(c, deps, answer.ctx.tenantId);
+    return c.json(answer.body as ParticipantInvitationResponse, 202);
   });
 
   app.use("/v1/staff/tenants/:tenantId/bookings/:bookingId/messages", async (c, next) => {

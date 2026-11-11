@@ -27,6 +27,7 @@ const completionWrites = [
   `/v1/staff/tenants/${tenant}/bookings/${someId}/balance/link`,
   `/v1/staff/tenants/${tenant}/bookings/${someId}/reschedule`,
   `/v1/staff/tenants/${tenant}/bookings/${someId}/participants/2/removal`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/participants/2/invitation`,
 ];
 
 describe("the public entry hides staff and sign-in routes", () => {
@@ -222,6 +223,12 @@ describe("contract", () => {
         // Giving up a place in a shared-seat party (W3-G2.11-rest).
         "/v1/public/manage/participants/{position}/removal",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/removal",
+        // Participant invitations and their own details (W3-G2.11-rest).
+        "/v1/public/manage/participants/{position}/invitation",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/invitation",
+        "/v1/public/participant-access",
+        "/v1/public/participant/profile",
+        "/v1/public/participant/session/end",
         // Console completion (G2.12c).
         "/v1/staff/tenants/{tenantId}/booking-searches",
         "/v1/staff/tenants/{tenantId}/booking-day-totals",
@@ -284,6 +291,8 @@ describe("contract", () => {
       "fakeClientSecret",
       // The guest's booking session (lane 1, G2.11c).
       "manageSession",
+      // An invited participant's own session (W3-G2.11-rest).
+      "participantSession",
       "sessionCookie",
       // The guest's waiver signing session (G2.15).
       "waiverSession",

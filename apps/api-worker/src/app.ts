@@ -22,6 +22,7 @@ import { registerFakeEmailRoutes } from "./routes/fake-email.ts";
 import { registerFakeProviderRoutes } from "./routes/fake-provider.ts";
 import { registerHoldStaffRoutes } from "./routes/holds-staff.ts";
 import { registerManagePublicRoutes } from "./routes/manage-public.ts";
+import { registerParticipantPublicRoutes } from "./routes/participant-public.ts";
 import { registerParticipantStaffRoutes } from "./routes/participants-staff.ts";
 import { registerPaymentWebhookRoutes } from "./routes/payment-webhooks.ts";
 import { registerPricingPublicRoutes } from "./routes/pricing-public.ts";
@@ -175,6 +176,7 @@ export function createApp(deps: AppDeps = {}) {
   // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
   registerParticipantStaffRoutes(app, deps);
   registerManagePublicRoutes(app, deps);
+  registerParticipantPublicRoutes(app, deps);
   registerFakeEmailRoutes(app);
   // Console completion (G2.12c): search, day totals and export, booking notes.
   registerConsoleStaffRoutes(app, deps);
