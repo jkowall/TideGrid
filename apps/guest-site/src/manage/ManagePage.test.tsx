@@ -1267,6 +1267,89 @@ describe("naming the party", () => {
 
 // Canceling ---------------------------------------------------------------------------------------------
 
+describe("sending someone their own link", () => {
+  const sendButtons = () =>
+    screen.queryAllByRole("button", { name: /^Send link/ }).map((b) => text(b));
+  // As with placeButton: jsdom joins the hidden place text without its space.
+  const sendTo = (position: number) =>
+    screen.getByRole("button", { name: new RegExp(`^Send link ?to guest ${position}$`) });
+
+  it("offers a link only to a named person with an address: their own, or a minor's guardian's", async () => {
+    await shown();
+    // Ava is named with no email of her own; Theo is a minor with a guardian; place 3 is empty.
+    expect(sendButtons()).toEqual(["Send link to guest 2"]);
+    expect(sendTo(2)).toBeTruthy();
+  });
+
+  it("asks the API to email the place's saved address, with nothing personal in the request", async () => {
+    const calls = await shown();
+    fireEvent.click(sendTo(2));
+    const notice = await noticeTitled("Link on its way");
+    expect(text(notice)).toContain(
+      "We're emailing Ava Guest a link to check Theo Guest's details. It works once, for 7 days or until the trip, whichever comes first.",
+    );
+    const [invite] = callsTo(calls, "invite");
+    expect(invite?.path).toBe("/v1/public/manage/participants/2/invitation");
+    expect(invite?.body).toBeUndefined();
+    expect(invite?.headers.get("authorization")).toBe(`Bearer ${sessionToken}`);
+    expect(invite?.headers.get("idempotency-key")).toMatch(uuid);
+    expect(invite?.url).not.toMatch(/@|Theo|Ava|\?/);
+  });
+
+  it("says when the person has had enough links today", async () => {
+    await shown({ invite: () => refusal(429, "invitation_limit_reached") });
+    fireEvent.click(sendTo(2));
+    const notice = await noticeTitled("Link not sent");
+    expect(text(notice)).toContain(
+      "That's the most links we can send for Theo Guest or this booking today. Try again tomorrow.",
+    );
+  });
+
+  it("sends the same key again after no answer, and a new one after a sent link", async () => {
+    let tries = 0;
+    const calls = await shown({
+      invite: () => {
+        tries += 1;
+        if (tries === 1) throw new TypeError("offline");
+        return json({ status: "accepted", recipient: "guardian" }, 202);
+      },
+    });
+    fireEvent.click(sendTo(2));
+    await noticeTitled("Link not sent");
+    fireEvent.click(sendTo(2));
+    await noticeTitled("Link on its way");
+    fireEvent.click(sendTo(2));
+    await waitFor(() => expect(callsTo(calls, "invite")).toHaveLength(3));
+    const keys = callsTo(calls, "invite").map((c) => c.headers.get("idempotency-key"));
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[2]).not.toBe(keys[1]);
+  });
+
+  it("keeps the key after too many tries, as that settles nothing", async () => {
+    let tries = 0;
+    const calls = await shown({
+      invite: () => {
+        tries += 1;
+        if (tries === 1) return refusal(429, "rate_limited");
+        return json({ status: "accepted", recipient: "guardian" }, 202);
+      },
+    });
+    fireEvent.click(sendTo(2));
+    await noticeTitled("Link not sent");
+    fireEvent.click(sendTo(2));
+    await noticeTitled("Link on its way");
+    const keys = callsTo(calls, "invite").map((c) => c.headers.get("idempotency-key"));
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+  });
+
+  it("shows the ended screen when the session has ended", async () => {
+    await shown({ invite: () => refusal(401, "session_expired") });
+    fireEvent.click(sendTo(2));
+    expect(await heading("Your session has ended")).toBeTruthy();
+  });
+});
+
 describe("canceling", () => {
   const cardText = () => text(card("Cancel this booking"));
 

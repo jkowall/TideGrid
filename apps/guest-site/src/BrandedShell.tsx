@@ -6,6 +6,7 @@ import { BookingPage } from "./booking/BookingPage.tsx";
 import { formatPhone, type Tenant } from "./bootstrap.ts";
 import { ManagePage } from "./manage/ManagePage.tsx";
 import { useLinkClick } from "./navigation.tsx";
+import { ParticipantPage } from "./participant/ParticipantPage.tsx";
 import { useTitle } from "./States.tsx";
 import { OfflinePage, SupportPage } from "./support/SupportPage.tsx";
 import { UpcomingTrips } from "./UpcomingTrips.tsx";
@@ -37,6 +38,8 @@ type Page =
   | { kind: "legal"; title: string; placeholder: string }
   // Waiver signing (G2.15): the email link's page.
   | { kind: "waiver" }
+  // A participant's own details, from an invitation (W3-G2.11-rest).
+  | { kind: "participant" }
   // Help and support, and the offline explainer (G2.14b).
   | { kind: "support" }
   | { kind: "offline" }
@@ -47,6 +50,7 @@ function pageFor(path: string): Page {
   if (clean === "/") return { kind: "home" };
   if (clean === "/manage") return { kind: "manage" };
   if (clean === "/waiver") return { kind: "waiver" };
+  if (clean === "/participant") return { kind: "participant" };
   if (clean === "/support") return { kind: "support" };
   if (clean === "/offline") return { kind: "offline" };
   const tripId = tripIdOf(clean);
@@ -295,7 +299,13 @@ export function BrandedShell({
   // again" and after each move between pages. A booking page has no heading
   // until its trip loads, so it moves focus itself.
   useEffect(() => {
-    if (focusHeading && page.kind !== "book" && page.kind !== "manage" && page.kind !== "waiver") {
+    if (
+      focusHeading &&
+      page.kind !== "book" &&
+      page.kind !== "manage" &&
+      page.kind !== "waiver" &&
+      page.kind !== "participant"
+    ) {
       (main.current ?? document).querySelector<HTMLElement>("h1")?.focus();
     }
   }, []);
@@ -334,10 +344,16 @@ export function BrandedShell({
           <LegalPage brand={brand} title={page.title} placeholder={page.placeholder} />
         )}
         {page.kind === "waiver" && <WaiverPage brand={brand} focusOnArrival={focusHeading} />}
+        {page.kind === "participant" && (
+          <ParticipantPage brand={brand} focusOnArrival={focusHeading} />
+        )}
         {page.kind === "support" && <SupportPage brand={brand} />}
         {page.kind === "not-found" && <NotFoundPage brand={brand} />}
       </main>
-      <Footer brand={brand} inCheckout={page.kind === "book" || page.kind === "waiver"} />
+      <Footer
+        brand={brand}
+        inCheckout={page.kind === "book" || page.kind === "waiver" || page.kind === "participant"}
+      />
     </div>
   );
 }

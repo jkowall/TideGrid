@@ -495,7 +495,7 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 - **`updateOwnDetails`** corrects the session's own participant through `putParticipant`, keeping whether they are a minor (`details_invalid` when a minor sends no guardian or an adult sends one), so the hooks run as for the booker's change: a changed address moves the waiver request to it.
 - **Ending access.** `withdrawProfileAccess` (in `participants.ts`) revokes a participant's invitation links and sessions and withdraws an invitation not yet sent. `putParticipant` calls it when an email, a guardian's email, or whether someone is a minor changes (`recipient_changed`), keeping the session making the change; `removeParticipant` when the participant is removed (`withdrawn`); `cancelBooking` for every participant (`booking_canceled`).
 - **Events.** Audit `participant.invited` and outbox `booking.participant.invited` `{ bookingId, participantId, position, recipient }`, where `recipient` is `participant` or `guardian`; never an address. The participant's own change is recorded as `participant.updated`, with the session as the actor.
-- **Known gaps.** No guest-site page or buttons yet (next pull request). An empty place cannot be invited by email alone (D1). The participant's page does not show their waiver. A participant cannot ask for a new link themselves (D4).
+- **Known gaps.** The guest site has the page (`/participant`) and a Send link button on the booking page; the console has no button yet, as it has no party editor. An empty place cannot be invited by email alone (D1). The participant's page does not show their waiver. A participant cannot ask for a new link themselves (D4).
 
 ## Deferred and known gaps
 
