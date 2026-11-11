@@ -256,10 +256,15 @@ describe.skipIf(!env)("complimentary bookings (W3-G2.12-rest)", () => {
         from public.outbox_events where tenant_id = ${A.id}`;
     expect(outbox?.notes).toBe(0);
     // The confirmation email is queued as for a paid booking.
-    const [mail] = await admin<{ n: number }[]>`
-      select count(*)::int as n from public.email_messages
+    const mails = await admin<{ text_body: string }[]>`
+      select text_body from public.email_messages
        where booking_id = ${result.bookingId} and template = 'booking_confirmation'`;
-    expect(mail?.n).toBe(1);
+    expect(mails).toHaveLength(1);
+    // It never says the guest paid.
+    expect(mails[0]?.text_body).toContain("You paid");
+    expect(mails[0]?.text_body).toContain("complimentary");
+    expect(mails[0]?.text_body).not.toContain("Total paid");
+    expect(mails[0]?.text_body).not.toContain("test payment");
   });
 
   it("refuses booking staff, a disabled owner, and a guest at the database", async () => {
@@ -423,6 +428,10 @@ describe.skipIf(!env)("complimentary bookings (W3-G2.12-rest)", () => {
        where c.booking_id = ${guestCancel.bookingId}`;
     expect(row).toMatchObject({ payment_id: null, paid: 0, hold: "released" });
     expect(row?.policy_remedy).toBeTruthy();
+    const [cancelMail] = await admin<{ text_body: string }[]>`
+      select text_body from public.email_messages
+       where booking_id = ${guestCancel.bookingId} and template = 'booking_canceled'`;
+    expect(cancelMail?.text_body).toContain("complimentary, so nothing was paid");
 
     const staffCancel = await booked(A, ownerA, tripsA.shared(), 1);
     const override = await asStaff(A.id, ownerA, (trx, ctx) =>

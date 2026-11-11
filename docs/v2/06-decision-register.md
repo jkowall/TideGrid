@@ -25,6 +25,9 @@ Coordinator defaults, pending owner confirmation:
 - **D3: the whole order or nothing.** No partial discounts here (a discount is a pricing rule). A quote that would take a deposit is refused (`complimentary_deposit`), since there is no balance to collect.
 - **D4: cancelling gives nothing back.** Cancelling a complimentary booking frees the seats with no refund and no credit, whatever the policy says, and a staff override of the refund is refused.
 - **D5: no TideGrid fee.** The fee is a share of money taken, so a complimentary booking's fee is zero.
+- **D6: no money recorded outside the card flow.** Cash, check, or other money, in or out, cannot be recorded against a complimentary booking (`booking_complimentary`). There is nothing owed, and a refund recorded on one would reverse a TideGrid fee that was never charged.
+
+The guest's confirmation email and booking page say the booking is complimentary and that they paid $0.00, and the cancellation email says nothing was paid.
 
 Known limits: there is no console form yet (the API is ready for it); the staff checkout read does not show a complimentary checkout; the grant's note is not cleared by the 30-day retention job, since it belongs to a confirmed booking, like booking notes; the money report shows nothing for a complimentary booking, as no money moved; and changing the party size or moving the booking works as usual and charges nothing.
 
