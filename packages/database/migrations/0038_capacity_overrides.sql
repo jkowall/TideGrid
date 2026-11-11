@@ -69,7 +69,13 @@ BEGIN
   NEW.note_redacted_at := NULL;
   -- The trip's lock first, as the hold rules and a checkout take it, so an
   -- override, a hold, and a checkout under one reference are checked in turn,
-  -- each seeing what the others committed.
+  -- each seeing what the others committed. Only under READ COMMITTED, where each
+  -- check after the lock reads afresh.
+  IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'capacity overrides and checkouts are written only under READ COMMITTED, not %',
+      pg_catalog.current_setting('transaction_isolation')
+      USING ERRCODE = '25000';
+  END IF;
   PERFORM 1 FROM public.scheduled_trips t
     WHERE t.tenant_id = NEW.tenant_id AND t.id = NEW.trip_id
       FOR NO KEY UPDATE;
@@ -137,6 +143,11 @@ CREATE FUNCTION app.check_checkout_capacity_override() RETURNS trigger
   AS $$
 BEGIN
   -- The trip's lock first, as an override takes it (see above).
+  IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'capacity overrides and checkouts are written only under READ COMMITTED, not %',
+      pg_catalog.current_setting('transaction_isolation')
+      USING ERRCODE = '25000';
+  END IF;
   PERFORM 1 FROM public.scheduled_trips t
     WHERE t.tenant_id = NEW.tenant_id AND t.id = NEW.trip_id
       FOR NO KEY UPDATE;
