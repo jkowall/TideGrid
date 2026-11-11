@@ -82,6 +82,11 @@ export function csvInstant(instant: string): string {
   return new Date(instant).toISOString().slice(0, 19).replace("T", " ");
 }
 
+/** An instant to the millisecond, for rows that two entries can share a second in. */
+export function csvInstantMs(instant: string): string {
+  return new Date(instant).toISOString().slice(0, 23).replace("T", " ");
+}
+
 /** A whole file: the byte order mark, a header, and the rows, each line ending CRLF. */
 export function renderCsv(header: readonly string[], rows: readonly (readonly string[])[]): string {
   const line = (cells: readonly string[]) => cells.map(csvField).join(",");
@@ -200,7 +205,7 @@ export function renderMoneyExport(report: MoneyReport, operator: { name: string 
     report.to,
     zone,
     e.businessDate,
-    csvInstant(e.at),
+    csvInstantMs(e.at),
     e.kind,
     e.booking ? csvReference(e.booking.reference) : "",
     e.booking?.source ?? "",

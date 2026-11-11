@@ -25,6 +25,7 @@ import { CORE_FEE_BP, feeReversalFor } from "./fee-ledger.ts";
 import { handleVerifiedEvent } from "./finalize.ts";
 import {
   assessClosedBookings,
+  buildMoneyReport,
   checkPendingPayment,
   createCheckoutSession,
   ensureProviderPayment,
@@ -575,6 +576,30 @@ describe.skipIf(!env)("external payment and reconciliation (W3-G2.10)", () => {
     listed = await as(staffContext(B.id), (trx) => listDisputes(trx, B.id));
     expect(listed).toHaveLength(1);
     expect(listed[0]).toMatchObject({ status: "lost", open: false });
+    // The money report (W3-G2.12-rest) has the lost dispute once, on the
+    // business date it closed, with its booking and amount; the mismatched
+    // and unmatched disputes, which never closed, are not in it.
+    const [today] = await admin<
+      { d: string }[]
+    >`select (now() at time zone 'UTC')::date::text as d`;
+    const day = today?.d ?? "";
+    const report = await as(staffContext(B.id), (trx) =>
+      buildMoneyReport(trx, B.id, {
+        from: day,
+        to: day,
+        typedReferences: true,
+        maskProviderReferences: false,
+      }),
+    );
+    if (report.kind !== "ok") throw new Error(report.kind);
+    const lost = report.report.entries.filter((e) => e.kind === "dispute_lost");
+    expect(lost).toHaveLength(1);
+    expect(lost[0]).toMatchObject({
+      moneyOut: 4_000,
+      businessDate: day,
+      booking: { bookingId: booked.bookingId, reference: booked.reference },
+    });
+    expect(report.report.controlTotalsMatch).toBe(true);
     // The lost dispute took 4,000 back, so a refund outside the card flow may
     // return at most what is left.
     const left = await as(staffContext(B.id), (trx) =>

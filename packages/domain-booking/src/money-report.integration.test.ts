@@ -272,6 +272,12 @@ describe.skipIf(!env)("money movements for a date range (W3-G2.12-rest)", () => 
     expect(total[7]).toBe("");
     expect(total[18]).toBe(String(r.totals.entries));
     expect(lines[1]?.split(",")[18]).toBe("1");
+    // Each entry's moment to the millisecond, as the report has it.
+    const first = r.entries[0];
+    if (!first) throw new Error("no entries");
+    expect(lines[1]?.split(",")[6]).toBe(
+      new Date(first.at).toISOString().slice(0, 23).replace("T", " "),
+    );
     expect(total[12]).toBe((r.totals.moneyIn / 100).toFixed(2));
     expect(total[13]).toBe((r.totals.moneyOut / 100).toFixed(2));
     expect(csv).not.toContain("@");
