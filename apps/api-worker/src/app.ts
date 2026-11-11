@@ -21,6 +21,7 @@ import { registerConsoleStaffRoutes } from "./routes/console-staff.ts";
 import { registerFakeEmailRoutes } from "./routes/fake-email.ts";
 import { registerFakeProviderRoutes } from "./routes/fake-provider.ts";
 import { registerHoldStaffRoutes } from "./routes/holds-staff.ts";
+import { registerImportantLinkRoutes } from "./routes/important-links.ts";
 import { registerImportStaffRoutes } from "./routes/imports-staff.ts";
 import { registerManagePublicRoutes } from "./routes/manage-public.ts";
 import { registerParticipantPublicRoutes } from "./routes/participant-public.ts";
@@ -196,6 +197,7 @@ export function createApp(deps: AppDeps = {}) {
   registerTenantAccessStaffRoutes(app, deps);
   // The standard CSV import's dry run (W3-G2.13).
   registerImportStaffRoutes(app, deps);
+  registerImportantLinkRoutes(app, deps);
 
   // After every route: the cap's 413 on each operation with a request body.
   declarePayloadTooLarge(app);

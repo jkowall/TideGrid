@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-11
 
+### An operator's Important links (W3-G2.14b-rest, part 1), built November 11, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0041_important_links.sql`, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.
+
+- **Built.** Owners add, change, reorder, and archive named HTTPS links for every trip or named products (`/v1/staff/tenants/{tenantId}/important-links`); every role reads them. Guests see the ones for their booking's product beside the meeting point on the booking page, each naming the site it opens, and the site's links for every trip from `GET /v1/public/important-links`.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `important-links.integration.test.ts` (4 cases: add, replay, change, archive, and the audit; bad addresses, another operator's product, booking staff and finance refused, two tenants; guests' links by product and position, archived ones hidden, an unknown site refused; the database's rules for a direct writer, no DELETE, and the limit of 25), and the tenancy privileges test. Guest site: `ManagePage.test.tsx` (the links, their new-tab and opener attributes, the host named, a bad address dropped, and no section without links).
+- **Still open.** The coordinator defaults D1 to D4 await the owner. No console screen yet.
+
 ### Checking a standard CSV import batch without importing it (W3-G2.13, part 1), built November 11, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, migration `0040_import_runs.sql`, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Built against the [draft import format](v2/drafts/standard-csv-import.md), a coordinator default pending the owner's approval. Synthetic data only; no provider call, no deploy.

@@ -64,6 +64,14 @@ A blackout is whole local days for the tenant, a location, a product, or a boat;
 
 Capacity left is the trip's seat count minus seats held by holds still within their time and confirmed seats, read from `app.trip_capacity_usage` by the database clock (G2.6, [inventory README](../domain-inventory/README.md#availability)). A whole-boat hold takes every seat. A guest listing leaves out a trip without room for the party; staff see every trip with `soldOut`, `held`, and `confirmed`. Only acquiring a hold decides; the listing is advisory.
 
+## Important links (W3-G2.14b-rest)
+
+`src/important-links.ts`, migration `0041` ([database contract](../database/README.md#important-links-0041)). An operator's named HTTPS links for guests (docs/v2/02, brand configuration), for every trip or for named products. Defaults D1 to D4 are coordinator defaults pending the owner's confirmation ([decision register](../../docs/v2/06-decision-register.md#decision-log)).
+
+- **Owners change them** (`catalog.manage`): `createImportantLink`, `updateImportantLink` (replaces name, address, note, products, and position), and `archiveImportantLink`. Each is audited (`important_link.created`, `.updated`, `.archived`) with the link's fields before and after. Every role reads them (`catalog.read`, `listImportantLinks`).
+- **Guests see the ones that apply** (`guestImportantLinks`): the active links for every trip, plus, for a booking, the ones naming its product, by position. They come with the booking the guest manages (`importantLinks` on the managed booking) and, for every trip only, from `GET /v1/public/important-links` for the calling site. A guest sees the name, address, note, and the host it opens, never ids or products.
+- **On the booking page** the links sit in "The trip" card, beside the meeting point. Each opens in a new tab with `rel="noopener noreferrer"`, says which site it opens, and is dropped if its address fails the contract's rule.
+
 ## Deferred and not yet reachable
 
 - Ticket types, prices, add-ons, fees, taxes, the promotion code, and the policy with its change cutoff live in [domain-pricing](../domain-pricing/README.md) since G2.5. Quotes price a trip only when the availability query above lists it.

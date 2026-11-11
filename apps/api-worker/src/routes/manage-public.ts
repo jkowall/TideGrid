@@ -59,6 +59,7 @@ import {
   rescheduleBooking,
   settleRefund,
 } from "@tidegrid/domain-booking";
+import { guestImportantLinks } from "@tidegrid/domain-catalog";
 import { type GuestSession, revokeGuestSession } from "@tidegrid/domain-messaging";
 import type { Context } from "hono";
 import { sql } from "kysely";
@@ -261,7 +262,15 @@ async function withManageSession<T extends JsonObject>(
 async function managedBody(trx: TenantTransaction, tenantId: string, bookingId: string) {
   const view = await getManagedBooking(trx, tenantId, bookingId);
   if (!view) throw bookingGone();
-  return managedJson(view);
+  // The operator's important links for the booking's product (W3-G2.14b-rest).
+  const trip = await trx
+    .selectFrom("scheduled_trips")
+    .select("product_id")
+    .where("tenant_id", "=", tenantId)
+    .where("id", "=", view.booking.trip.tripId)
+    .executeTakeFirst();
+  const importantLinks = await guestImportantLinks(trx, tenantId, trip?.product_id ?? null);
+  return { ...managedJson(view), importantLinks };
 }
 
 /**

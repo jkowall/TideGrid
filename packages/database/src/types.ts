@@ -1457,6 +1457,7 @@ export interface Database
   capacity_overrides: CapacityOverridesTable;
   complimentary_grants: ComplimentaryGrantsTable;
   import_runs: ImportRunsTable;
+  important_links: ImportantLinksTable;
 }
 
 /** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
@@ -1826,6 +1827,23 @@ export interface ImportRunsTable {
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;
   request_id: ColumnType<string | null, never, never>;
+}
+
+/** An operator's named HTTPS link for guests (0041, W3-G2.14b-rest). Edited in place, archived not deleted. */
+export interface ImportantLinksTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  label: string;
+  url: string;
+  description: string | null;
+  /** Null: every trip. */
+  product_ids: string[] | null;
+  position: number;
+  status: Generated<"active" | "archived">;
+  created_at: CreatedAt;
+  updated_at: ColumnType<Date, never, Date | string>;
+  created_by: ColumnType<string | null, never, never>;
+  updated_by: ColumnType<string | null, never, string | null>;
 }
 
 export type BalancePaymentState = "pending" | "succeeded" | "failed" | "abandoned";

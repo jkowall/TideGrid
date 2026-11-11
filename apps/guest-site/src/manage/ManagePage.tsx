@@ -1,4 +1,9 @@
-import type { CancellationTerms, ManagedBooking, PublicBrand } from "@tidegrid/contracts";
+import {
+  type CancellationTerms,
+  isImportantLinkUrl,
+  type ManagedBooking,
+  type PublicBrand,
+} from "@tidegrid/contracts";
 import {
   Button,
   ButtonLink,
@@ -605,6 +610,7 @@ function BookingView({
               </dd>
             </div>
           </dl>
+          <ImportantLinks operator={brand.name} links={booking.importantLinks ?? []} />
         </section>
 
         <section className="manage-card" aria-labelledby="manage-receipt">
@@ -830,5 +836,42 @@ function CancelSection({
         </ConfirmDialog>
       )}
     </section>
+  );
+}
+
+/**
+ * The operator's important links for this booking (W3-G2.14b-rest), beside
+ * the arrival details. Each says it opens another site and names the host,
+ * and opens in a new tab without the operator's page as its opener. A link
+ * whose address fails the contract's rule is left out rather than shown.
+ */
+function ImportantLinks({
+  operator,
+  links,
+}: {
+  operator: string;
+  links: NonNullable<ManagedBooking["importantLinks"]>;
+}) {
+  const shown = links.filter((l) => isImportantLinkUrl(l.url));
+  if (shown.length === 0) return null;
+  return (
+    <div className="manage-links">
+      <h3 className="manage-links-title">Important links from {operator}</h3>
+      <ul className="manage-links-list">
+        {shown.map((l) => (
+          <li key={`${l.url} ${l.label}`}>
+            <a href={l.url} target="_blank" rel="noopener noreferrer external">
+              {l.label}
+              <Icon name="external" />
+              <span className="tg-visually-hidden"> (opens {l.host} in a new tab)</span>
+            </a>
+            <span className="manage-block manage-quiet" aria-hidden="true">
+              Opens {l.host}
+            </span>
+            {l.description && <span className="manage-block">{l.description}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

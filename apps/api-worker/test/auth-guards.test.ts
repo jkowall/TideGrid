@@ -54,6 +54,11 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["POST", `/v1/staff/tenants/${tenant}/complimentary-bookings`],
     // The standard CSV import's dry run (W3-G2.13).
     ["POST", `/v1/staff/tenants/${tenant}/import-dry-runs`],
+    // Important links (W3-G2.14b-rest).
+    ["GET", `/v1/staff/tenants/${tenant}/important-links`],
+    ["POST", `/v1/staff/tenants/${tenant}/important-links`],
+    ["PUT", `/v1/staff/tenants/${tenant}/important-links/${someId}`],
+    ["POST", `/v1/staff/tenants/${tenant}/important-links/${someId}/archive`],
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -290,6 +295,7 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/emails/resend",
         // Guest API follow-ups (W1-GUEST-API).
         "/v1/public/checkout-sessions/{checkoutSessionId}/payment",
+        "/v1/public/important-links",
         "/v1/public/checkout-sessions/{checkoutSessionId}/offer",
         // The tenant-wide email exceptions list (W1-EMAIL-EXC).
         "/v1/staff/tenants/{tenantId}/email-exceptions",
@@ -313,6 +319,9 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/fee-invoices",
         // The standard CSV import's dry run (W3-G2.13).
         "/v1/staff/tenants/{tenantId}/import-dry-runs",
+        "/v1/staff/tenants/{tenantId}/important-links",
+        "/v1/staff/tenants/{tenantId}/important-links/{linkId}",
+        "/v1/staff/tenants/{tenantId}/important-links/{linkId}/archive",
       ].sort(),
     );
     // The guest's checkout secret and the fake payment's client secret are

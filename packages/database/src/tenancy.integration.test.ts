@@ -750,6 +750,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         capacity_overrides: ["INSERT", "SELECT"],
         complimentary_grants: ["INSERT", "SELECT"],
         import_runs: ["INSERT", "SELECT"],
+        // Important links (0041, W3-G2.14b-rest): edited in place, archived, never deleted.
+        important_links: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -828,6 +830,16 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         payment_disputes: ["last_event_id", "status"],
         // Deposits and balances (0033): a balance payment's transition and evidence.
         balance_payments: ["failed_event_id", "provider_payment_id", "state", "succeeded_event_id"],
+        important_links: [
+          "description",
+          "label",
+          "position",
+          "product_ids",
+          "status",
+          "updated_at",
+          "updated_by",
+          "url",
+        ],
       });
       const [identity] = await admin`
         select array(select a.attname::text from pg_attribute a
