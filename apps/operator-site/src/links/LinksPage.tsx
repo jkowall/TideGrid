@@ -81,9 +81,13 @@ export function LinksPage({
     const controller = new AbortController();
     const retry = retryRequested.current;
     retryRequested.current = false;
-    setLoad((current) =>
-      retry && current.kind === "failed" ? { ...current, retrying: true } : { kind: "loading" },
-    );
+    // A read after a save keeps the list on screen until the new one arrives.
+    setLoad((current) => {
+      if (current.kind === "ready") return current;
+      return retry && current.kind === "failed"
+        ? { ...current, retrying: true }
+        : { kind: "loading" };
+    });
     void loadLinks(tenantId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetry(result.reason));
@@ -103,7 +107,10 @@ export function LinksPage({
     const target = focusAfter.current;
     focusAfter.current = null;
     if (target) {
-      document.getElementById(target)?.focus();
+      // The saved link's row, or the add button; the heading when neither is
+      // there (an archived link, or a list that failed to load again).
+      const element = target === headingTarget ? null : document.getElementById(target);
+      (element ?? heading.current)?.focus();
       return;
     }
     if (!focusHeadingOnLoad.current) return;
@@ -111,19 +118,16 @@ export function LinksPage({
     if (focusIsLost()) heading.current?.focus();
   }, [load]);
 
+  /**
+   * After a save or an archive, read the list again from the API, so the
+   * order (position, then when added) and every link's state are the API's,
+   * including changes another owner made meanwhile.
+   */
   const put = (link: ImportantLink, message: string) => {
     focusAfter.current = link.status === "active" ? rowId(link.id) : addButtonId;
     setSaid(message);
-    setLoad((current) => {
-      if (current.kind !== "ready") return current;
-      // In place, so a link keeps its place among links at the same position,
-      // as the API orders them (position, then when added). A new one goes last.
-      const found = current.page.links.some((l) => l.id === link.id);
-      const links = found
-        ? current.page.links.map((l) => (l.id === link.id ? link : l))
-        : [...current.page.links, link];
-      return { kind: "ready", page: { ...current.page, links } };
-    });
+    retryRequested.current = false;
+    setAttempt((n) => n + 1);
   };
 
   const header = (
@@ -169,6 +173,7 @@ export function LinksPage({
   const { links, products, catalogLoaded } = load.page;
   /** Another owner changed a link meanwhile: read the list again when the dialog closes. */
   const reload = () => {
+    focusAfter.current = headingTarget;
     retryRequested.current = false;
     setAttempt((n) => n + 1);
   };
@@ -308,6 +313,8 @@ export function LinksPage({
 }
 
 const addButtonId = "links-add";
+/** Focus goes to the page heading after a reload. */
+const headingTarget = "#heading";
 const rowId = (id: string) => `link-${id}`;
 
 function LinkSummary({ link, products }: { link: ImportantLink; products: LinkProduct[] }) {
@@ -347,8 +354,10 @@ const saveProblems: Record<SaveFailure, string> = {
     "That link couldn't be saved. Check the name, the https address, and the note, then save again.",
   unreadable:
     "TideGrid sent an answer this console can't read. Reload to check the link was saved.",
-  unreachable: "The link wasn't sent. Check your connection, then save again.",
-  unavailable: "TideGrid isn't responding right now. Save again in a moment.",
+  unreachable:
+    "TideGrid didn't answer, so it isn't known whether this was saved. Check your connection and send it again: the same change is applied only once.",
+  unavailable:
+    "TideGrid didn't answer properly, so it isn't known whether this was saved. Send it again in a moment: the same change is applied only once.",
   key_reused: "The link changed while it was being sent. Save again.",
   archived: "This link was archived, so it can't change. Add a new one instead.",
   limit: `An operator shows at most ${maxActiveLinks} links and keeps at most 500, archived ones included. Archive one if ${maxActiveLinks} are showing; at 500, no more can be added.`,
@@ -369,7 +378,7 @@ export function formProblems(form: {
   > = {};
   const label = form.label.trim();
   if (!label) problems.label = "Give the link a name.";
-  else if ([...label].length > labelLimit) problems.label = `Use at most ${labelLimit} characters.`;
+  else if (label.length > labelLimit) problems.label = `Use at most ${labelLimit} characters.`;
   else if (!ImportantLinkInput.shape.label.safeParse(label).success) {
     problems.label = "Remove hidden or control characters from the name.";
   }
@@ -381,7 +390,8 @@ export function formProblems(form: {
       "Use a public https address with a site name, not an IP address, a local name, or a user name and password.";
   }
   const note = form.description.trim();
-  if ([...note].length > noteLimit) {
+  // Lengths as the contract counts them (UTF-16 code units).
+  if (note.length > noteLimit) {
     problems.description = `Use at most ${noteLimit} characters.`;
   } else if (note && !ImportantLinkInput.shape.description.safeParse(note).success) {
     problems.description = "Remove hidden or control characters from the note.";

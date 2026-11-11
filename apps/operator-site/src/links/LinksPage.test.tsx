@@ -33,8 +33,9 @@ interface Sent {
   body: unknown;
 }
 
-function stub(links: ImportantLink[], answers: Record<string, () => Response> = {}) {
+function stub(initial: ImportantLink[], answers: Record<string, () => Response> = {}) {
   const sent: Sent[] = [];
+  const links = [...initial];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: string, init: RequestInit = {}) => {
@@ -47,7 +48,22 @@ function stub(links: ImportantLink[], answers: Record<string, () => Response> = 
         body: init.body ? JSON.parse(String(init.body)) : null,
       });
       const answer = answers[`${method} ${input}`];
-      if (answer) return answer();
+      if (answer) {
+        const res = answer();
+        // The API's list follows what was saved, so a read after a save shows it.
+        const saved = res.ok
+          ? ((await res
+              .clone()
+              .json()
+              .catch(() => null)) as { link?: ImportantLink } | null)
+          : null;
+        if (saved?.link) {
+          const at = links.findIndex((l) => l.id === saved.link?.id);
+          if (at === -1) links.push(saved.link);
+          else links[at] = saved.link;
+        }
+        return res;
+      }
       if (input === `${base}/important-links`) return Response.json({ links });
       if (input === `${base}/catalog`) {
         return Response.json({
@@ -191,7 +207,12 @@ describe("Important links in the console (W3-G2.14b-rest)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive link" }));
     await waitFor(() => expect(screen.getByText(/Archived Fishing license/)).toBeTruthy());
     expect(sent.find((s) => s.path.endsWith("/archive"))?.key).toBeTruthy();
-    expect(screen.getByText("No links for guests yet")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("No links for guests yet")).toBeTruthy());
+    // The list was read again after the archive, and focus is on the add button.
+    expect(
+      sent.filter((s) => s.method === "GET" && s.path.endsWith("/important-links")),
+    ).toHaveLength(2);
+    expect(document.activeElement?.id).toBe("links-add");
     expect(screen.getByText(/Archived links \(1\)/)).toBeTruthy();
   });
 
@@ -305,7 +326,7 @@ describe("Important links, after review (W3-G2.14b-rest)", () => {
     const save = () => fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     save();
     await waitFor(() => expect(calls).toBe(1));
-    await waitFor(() => expect(screen.getByText(/isn't responding/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/didn't answer properly/)).toBeTruthy());
     save();
     await waitFor(() => expect(calls).toBe(2));
     await waitFor(() =>
@@ -348,6 +369,7 @@ describe("Important links, after review (W3-G2.14b-rest)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archive link" }));
     await waitFor(() => expect(screen.getByText("No links for guests yet")).toBeTruthy());
     expect(reads).toBe(2);
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1 }));
     expect(screen.getByText(/Archived links \(1\)/)).toBeTruthy();
   });
 
