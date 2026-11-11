@@ -741,6 +741,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         balance_payments: ["INSERT", "SELECT"],
         // Rescheduling (0034, W3-G2.11-rest): append-only moves.
         booking_reschedules: ["INSERT", "SELECT"],
+        // Participant removal (0035, W3-G2.11-rest): append-only party changes.
+        booking_party_changes: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -779,8 +781,15 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         provider_events: ["outcome", "processing_state"],
         // Guest self-service (lane 1, G2.11c): a participant's details may be
         // corrected, and a booking may move to canceled with its cancellation.
-        booking_participants: ["email", "full_name", "guardian_email", "guardian_name", "is_minor"],
-        bookings: ["hold_id", "state", "trip_id"],
+        booking_participants: [
+          "email",
+          "full_name",
+          "guardian_email",
+          "guardian_name",
+          "is_minor",
+          "removed_at",
+        ],
+        bookings: ["hold_id", "party_size", "state", "trip_id"],
         // A message's delivery moves, a link is used or revoked, a session is revoked.
         email_messages: [
           "attempts",

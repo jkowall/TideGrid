@@ -63,7 +63,9 @@ describe("the fixtures", () => {
   it("shape the booking exactly as the contract says", () => {
     expect(ManagedBooking.parse(managedBooking())).toEqual(managedBooking());
     expect(
-      ManagedBooking.parse(managedBooking({ participants: { partySize: 3, participants: [] } })),
+      ManagedBooking.parse(
+        managedBooking({ participants: { partySize: 3, places: [1, 2, 3], participants: [] } }),
+      ),
     ).toBeTruthy();
   });
 
@@ -254,6 +256,13 @@ describe("slotsOf", () => {
     const before = structuredClone(named);
     expect(slotsOf(4, named).map((s) => s.position)).toEqual([1, 2, 3, 4]);
     expect(named).toEqual(before);
+  });
+
+  it("follows the API's places when the party gave one up", () => {
+    // ava is at place 1 and theo at place 2 in these fixtures; place 2 was given up.
+    const slots = slotsOf(2, [ava], [1, 3]);
+    expect(slots.map((s) => s.position)).toEqual([1, 3]);
+    expect(slots[1]?.participant).toBeNull();
   });
 });
 

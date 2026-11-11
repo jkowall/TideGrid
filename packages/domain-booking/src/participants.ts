@@ -2,7 +2,10 @@
  * Booking participants (lane 1, G2.11c): who is coming, one per place in the
  * party, from 1 to the booking's party size. The guest names them through the
  * management link and corrects them in place; owners and booking staff read
- * them. Removing a participant is a later goal (it releases a seat).
+ * them. Giving up a place in a shared-seat party, and removing whoever was
+ * named there, is `removeParticipant` (party-changes.ts, W3-G2.11-rest): the
+ * place keeps its number and is never named again, and a removed participant
+ * is kept for the history that names them but no longer listed here.
  *
  * Personal data. Names and addresses go into the participant rows and the
  * responses that read them, never into audit rows, events, logs, or URLs:
@@ -46,6 +49,12 @@ export interface ParticipantView {
 
 export interface ParticipantListView {
   partySize: number;
+  /**
+   * The places the party has now, in order: 1 to the party size, less any
+   * given up, whose numbers are never reused (W3-G2.11-rest). As many as the
+   * party size.
+   */
+  places: number[];
   participants: ParticipantView[];
 }
 
@@ -56,7 +65,9 @@ export type PutParticipantResult =
   | { kind: "booking_not_found" }
   | { kind: "booking_canceled" }
   | { kind: "trip_departed" }
-  | { kind: "position_out_of_range"; partySize: number };
+  | { kind: "position_out_of_range"; partySize: number }
+  /** The place was given up, and its number is not used again. */
+  | { kind: "place_removed" };
 
 interface ParticipantRow {
   id: string;
@@ -172,9 +183,37 @@ export async function listParticipants(
   if (!booking) return null;
   const { rows } = await sql<ParticipantRow>`
     select ${participantColumns} from booking_participants
+     where tenant_id = ${tenantId} and booking_id = ${bookingId} and removed_at is null
+     order by position`.execute(trx);
+  const givenUp = await placesGivenUp(trx, tenantId, bookingId);
+  return {
+    partySize: booking.party_size,
+    places: placesOf(booking.party_size, givenUp),
+    participants: rows.map(toView),
+  };
+}
+
+/** The places a booking's party gave up, by number (0035). */
+export async function placesGivenUp(
+  trx: TenantTransaction,
+  tenantId: string,
+  bookingId: string,
+): Promise<number[]> {
+  const { rows } = await sql<{ position: number }>`
+    select position from booking_party_changes
      where tenant_id = ${tenantId} and booking_id = ${bookingId}
      order by position`.execute(trx);
-  return { partySize: booking.party_size, participants: rows.map(toView) };
+  return rows.map((r) => r.position);
+}
+
+/** The places a party of `partySize` has after giving up `givenUp`. */
+export function placesOf(partySize: number, givenUp: readonly number[]): number[] {
+  const gone = new Set(givenUp);
+  const places: number[] = [];
+  for (let place = 1; places.length < partySize; place++) {
+    if (!gone.has(place)) places.push(place);
+  }
+  return places;
 }
 
 /**
@@ -213,7 +252,9 @@ export async function putParticipant(
   if (!booking) return { kind: "booking_not_found" };
   if (booking.state !== "confirmed") return { kind: "booking_canceled" };
   if (booking.departed) return { kind: "trip_departed" };
-  if (input.position > booking.party_size) {
+  const givenUp = await placesGivenUp(trx, ctx.tenantId, input.bookingId);
+  if (givenUp.includes(input.position)) return { kind: "place_removed" };
+  if (input.position > booking.party_size + givenUp.length) {
     return { kind: "position_out_of_range", partySize: booking.party_size };
   }
 

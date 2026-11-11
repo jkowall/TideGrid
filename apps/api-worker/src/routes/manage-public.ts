@@ -5,6 +5,7 @@ import {
   CancelBookingResponse,
   CancellationTermsResponse,
   CheckoutSessionParams,
+  GuestRemoveParticipantResponse,
   GuestRescheduleResponse,
   IdempotencyKey,
   type ManagedBooking,
@@ -17,6 +18,7 @@ import {
   ParticipantInput,
   ParticipantPosition,
   ParticipantResponse,
+  RemoveParticipantRequest,
   ReschedulePreviewResponse,
   RescheduleRequest,
   StripeElementConfig,
@@ -46,6 +48,7 @@ import {
   previewCancellation,
   previewReschedule,
   putParticipant,
+  removeParticipant,
   renewManageLink,
   requestManageLink,
   rescheduleBooking,
@@ -67,6 +70,7 @@ import {
   withPublicTenant,
 } from "../public-tenant.ts";
 import { stripePublishableKey } from "./checkout-public.ts";
+import { partyChangeRefusal } from "./participants-staff.ts";
 import { previewJson, rescheduleRefusal } from "./reschedules-staff.ts";
 import { errorBody } from "./responses.ts";
 
@@ -75,6 +79,7 @@ const renewPath = "/v1/public/booking-access/renewals";
 const fromCheckoutPath = "/v1/public/checkout-sessions/{checkoutSessionId}/manage-session";
 const bookingPath = "/v1/public/manage/booking";
 const participantPath = "/v1/public/manage/participants/{position}";
+const removalPath = "/v1/public/manage/participants/{position}/removal";
 const cancellationPath = "/v1/public/manage/cancellation";
 const linkEmailPath = "/v1/public/manage/link-email";
 const endPath = "/v1/public/manage/session/end";
@@ -465,7 +470,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
       401: errorBody("No session (session_required), or it has ended (session_expired)"),
       404: errorBody("No active tenant hostname matches the origin"),
       409: errorBody(
-        "The booking is canceled (booking_canceled), its trip has departed (trip_departed), or the waiver module refused the change (its own code)",
+        "The booking is canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_not_found), or the waiver module refused the change (its own code)",
       ),
       422: errorBody(
         "The place is past the party size (position_out_of_range), or idempotency_key_reused",
@@ -513,6 +518,12 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
               "position_out_of_range",
               `This party has ${put.partySize} place(s)`,
             );
+          case "place_removed":
+            throw new ApiError(
+              409,
+              "place_not_found",
+              "This place was given up; the party has no such place now",
+            );
         }
       },
     );
@@ -521,6 +532,78 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     // waiver email through the booking hooks; send it now, not at the sweep.
     else deliverAfterCommit(c, deps, ctx.tenantId);
     return c.json(body as ParticipantResponse, 200);
+  });
+
+  const removalRoute = createRoute({
+    method: "post",
+    path: removalPath,
+    tags: ["public", "manage"],
+    summary: "Give up one place in the party",
+    description: [
+      "Needs the booking session and an Idempotency-Key. Before the policy's change cutoff, the guest gives up one place in a shared-seat party: whoever was named there is removed and their waiver withdrawn, and the seat goes back on sale. The price does not change. Places keep their numbers; the place given up is not named again. Not for a private charter, and not the last place (cancel the booking instead).",
+      "partySize is the size the guest saw; if the party is another size now, nothing changes (409 booking_changed). A repeat of the same change answers 200 with the booking as it stands.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    request: {
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      params: z.object({ position: ParticipantPosition }),
+      body: {
+        required: true,
+        content: { "application/json": { schema: RemoveParticipantRequest } },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: GuestRemoveParticipantResponse } },
+        description: "The booking with its smaller party, and the change",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), is a private charter (party_change_not_allowed), its trip has departed (trip_departed), it is past its change cutoff (party_change_cutoff_passed), the party is not partySize now (booking_changed), the party has no such place (place_not_found), it is the last place (last_place), or the trip can't keep the smaller party (trip_unavailable)",
+      ),
+      422: errorBody("idempotency_key_reused"),
+      429: errorBody("Too many requests from this address for this operator (rate_limited)"),
+    },
+  });
+
+  app.openapi(removalRoute, async (c) => {
+    const { position } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const key = c.req.valid("header")["idempotency-key"];
+    let removed = false;
+    const { body, replayed, ctx } = await withManageSession(
+      c,
+      {
+        idempotency: {
+          scope: "public.manage.participants.remove",
+          key,
+          route: removalPath,
+          params: { position: String(position) },
+          body: input,
+        },
+      },
+      async (trx, txCtx, session) => {
+        const result = await removeParticipant(
+          trx,
+          txCtx,
+          { bookingId: session.bookingId, position, partySize: input.partySize },
+          bookingHooksFor(c.env, deps),
+        );
+        if (result.kind !== "removed" && result.kind !== "already_removed") {
+          throw partyChangeRefusal(result, bookingGone);
+        }
+        removed = result.kind === "removed";
+        return {
+          booking: await managedBody(trx, txCtx.tenantId, session.bookingId),
+          change: JSON.parse(JSON.stringify(result.change)),
+        };
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    if (removed) deliverAfterCommit(c, deps, ctx.tenantId);
+    return c.json(body as GuestRemoveParticipantResponse, 200);
   });
 
   const termsRoute = createRoute({

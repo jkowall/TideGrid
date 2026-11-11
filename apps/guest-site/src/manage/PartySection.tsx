@@ -41,8 +41,8 @@ export function PartySection({
 }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const { partySize, participants } = booking.participants;
-  const slots = slotsOf(partySize, participants);
+  const { partySize, participants, places } = booking.participants;
+  const slots = slotsOf(partySize, participants, places);
   const editable = booking.partyEditable;
   const rowButtons = useRef(new Map<number, HTMLButtonElement>());
   const returnTo = useRef<number | null>(null);

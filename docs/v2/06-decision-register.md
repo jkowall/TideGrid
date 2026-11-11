@@ -8,6 +8,26 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.11-rest, removing a participant from a shared-seat booking, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the second part of W3-G2.11-rest, after moving a whole booking (the 2026-11-10 entry below); participant invitations and profile changes follow in their own pull request.
+
+It lands as migration `0035` and the [database contract](../../packages/database/README.md#participant-removal-0035), with [docs/v2/02](02-product-scope.md#customer-and-staff-changes) as the scope ("remove shared-seat participants"; "Removing a participant releases their seat and equipment and applies the booking policy once"). What it adds:
+
+- **A place is given up in one transaction.** The party shrinks by one: whoever was named at that place is removed, their waiver request, link, and queued email end, and the seat goes back on sale. The booking gives back its hold and takes a smaller one on the same trip, under the trip's lock, so no one else can take the seat in between and nothing changes if the smaller hold is refused.
+- **Who may do it.** The guest, from their booking page, and owners and booking staff (`bookings.reschedule`, the permission for changing a booking's trip or party), before the policy's change cutoff. At or after the cutoff only an owner, with a reason (`bookings.override`); the database refuses an override from anyone but staff. Never after the trip has left.
+- **Places keep their numbers.** A party of 4 that gave up place 2 has places 1, 3, and 4, so a waiver, a message, or a roster line that names a place still names the same person. The removed participant's row is kept, marked removed, for that history.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: no money moves.** The booking keeps the price it was sold at: giving up a place neither refunds nor credits the seat. docs/v2/02 asks that removal "applies the booking policy once"; the payment allows one refund only, for the whole payment, and an order's lines do not say which ticket a person held, so a per-seat refund or credit is left for a later step, with the owner's rule for which ticket price goes back.
+- **D2: shared-seat bookings only.** A private charter's party takes the whole boat and its price does not depend on the party, so giving up a place frees no seat. Removing someone from a charter's party, without changing its size, is left for later.
+- **D3: the trip must still be on sale for the smaller party,** by the same rules as a new hold, as for a move (D3 of the 2026-11-10 entry): published, before its booking cutoff, and at or above the product's minimum party. When it is not, the answer is that the trip can't keep the smaller party, and nothing changes; staff can reopen sales first.
+- **D4: the last place is never given up.** A party of one cancels the booking instead, under the cancellation policy.
+- **D5: no email to the booker.** The booker sees the change on their booking page at once, and staff in the booking's history; the removed person's waiver email is withdrawn. A confirmation email of a party change is left for later.
+
+Not built: console and guest-site screens (the API carries it), adding a place, and pooled equipment and trip-card units, which do not exist yet.
+
 ### 2026-11-10: Refunds, reconciliation, and pilot infrastructure defaults confirmed; Terraform state in R2 (owner decision)
 
 At 16:46 UTC on 2026-11-10 the owner chose "Accept all as recommended" on the card "Accept my recommended answers on refunds, payment checks and infrastructure?", whose option read: "Stuck refunds flagged after 24h, credit never expires, only owners refund cash, a provider lookup never moves money, and infra records stay on Cloudflare (no AWS)."

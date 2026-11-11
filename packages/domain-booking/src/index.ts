@@ -177,6 +177,7 @@ export {
   noBookingHooks,
   type ParticipantEvent,
   type ParticipantField,
+  type ParticipantRemovedEvent,
   type ParticipantUpdatedEvent,
 } from "./hooks.ts";
 export {
@@ -210,6 +211,15 @@ export {
   type PutParticipantResult,
   putParticipant,
 } from "./participants.ts";
+// Giving up a place in a shared-seat party (W3-G2.11-rest).
+export {
+  listPartyChanges,
+  type PartyChangeIssue,
+  type PartyChangeRecord,
+  type RemoveParticipantInput,
+  type RemoveParticipantResult,
+  removeParticipant,
+} from "./party-changes.ts";
 export {
   requestPaymentCancellation,
   type SettleCancellationResult,

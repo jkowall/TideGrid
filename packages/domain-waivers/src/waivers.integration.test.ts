@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
-import type { BookingHooks } from "@tidegrid/domain-booking";
+import { type BookingHooks, listParticipants, removeParticipant } from "@tidegrid/domain-booking";
 import { hashLinkToken } from "@tidegrid/domain-messaging";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
@@ -583,6 +583,61 @@ describe.skipIf(!env)("G2.15 waiver evidence core", () => {
     expect((await messagesOf(queuedRequest)).map((m) => m.state)).toEqual(["canceled"]);
     await deliverMail(runtime.db, A.id);
     expect((await messagesOf(queuedRequest)).map((m) => m.state)).toEqual(["canceled"]);
+  });
+
+  it("withdraws a removed participant's request, link, and queued email, and no one else's", async () => {
+    const booked = await book(A, 3);
+    const stays = await nameParticipant(
+      runtime.db,
+      A.id,
+      booked.bookingId,
+      1,
+      adult("Sam Stays"),
+      hooks,
+    );
+    const leaves = await nameParticipant(
+      runtime.db,
+      A.id,
+      booked.bookingId,
+      2,
+      adult("Lee Leaves"),
+      hooks,
+    );
+    const leaving = await liveRequest(booked.bookingId, leaves.participant.id);
+    const staying = await liveRequest(booked.bookingId, stays.participant.id);
+    const { session, secret } = await open(A.id, leaving);
+    const ctx = guest(A.id);
+    const removed = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      removeParticipant(
+        trx,
+        ctx,
+        { bookingId: booked.bookingId, position: 2, partySize: 3 },
+        hooks,
+      ),
+    );
+    expect(removed).toMatchObject({
+      kind: "removed",
+      change: { position: 2, participantId: leaves.participant.id, toPartySize: 2 },
+    });
+    const [request] = await admin<{ state: string; revoked_reason: string }[]>`
+      select state, revoked_reason from public.waiver_requests where id = ${leaving}`;
+    expect(request).toEqual({ state: "revoked", revoked_reason: "participant_removed" });
+    expect(
+      await inTenantTransaction(runtime.db, guest(A.id), (trx) =>
+        loadWaiverSession(trx, A.id, secret),
+      ),
+    ).toBeNull();
+    expect((await sign(A.id, session)).kind).toBe("not_pending");
+    expect((await messagesOf(leaving)).map((m) => m.state)).toEqual(["canceled"]);
+    const [kept] = await admin<{ state: string }[]>`
+      select state from public.waiver_requests where id = ${staying}`;
+    expect(kept?.state).toBe("pending");
+    // The waiver module no longer sees the removed participant at all.
+    const party = await inTenantTransaction(runtime.db, guest(A.id), (trx) =>
+      listParticipants(trx, A.id, booked.bookingId),
+    );
+    expect(party?.participants.map((p) => p.id)).toEqual([stays.participant.id]);
+    expect(party?.places).toEqual([1, 3]);
   });
 
   it("moves unsigned requests to a new version on request and never touches signed evidence", async () => {

@@ -13233,6 +13233,15 @@
                           "minimum": 1,
                           "description": "Places in the party: the most participants"
                         },
+                        "places": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 500
+                          },
+                          "description": "The party's places now, in order, as many as the party size: 1 to the party size, less any place the party gave up, whose number is never used again"
+                        },
                         "participants": {
                           "type": "array",
                           "items": {
@@ -13303,6 +13312,7 @@
                       },
                       "required": [
                         "partySize",
+                        "places",
                         "participants"
                       ],
                       "description": "A booking's party as named so far"
@@ -13385,6 +13395,415 @@
           },
           "404": {
             "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/removal": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Give up one place in a shared-seat party",
+        "description": "Owners and booking staff (bookings.reschedule). The party shrinks by one: the participant named at the place, if any, is removed and their waivers withdrawn, and the seat goes back on sale, in one transaction on the same trip. The price does not change. Places keep their numbers; the place given up is never named again.\n\nBefore the policy's change cutoff anyone with bookings.reschedule may do it. At or after the cutoff it needs overrideReason, and overrideReason needs bookings.override (owners). Never after the trip has left, never the last place (cancel instead), and never on a private charter.\n\npartySize is the size the caller saw; if it is another now, nothing changes. Idempotent by key; a repeat of the same change with another key answers 200 with the first change.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Booking UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Booking UUID; anything else answers 404",
+            "name": "bookingId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "description": "The participant's place in the party: one of the party's places (`places`)"
+            },
+            "required": true,
+            "description": "The participant's place in the party: one of the party's places (`places`)",
+            "name": "position",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "partySize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "description": "The party size the guest saw. If the party is another size now, nothing changes (409 booking_changed)"
+                  },
+                  "overrideReason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                    "description": "Owners only (bookings.override): why a place is given up past the change cutoff. Kept in the audit history"
+                  }
+                },
+                "required": [
+                  "partySize"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "change": {
+                      "type": "object",
+                      "properties": {
+                        "partyChangeId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 500,
+                          "description": "The place given up"
+                        },
+                        "participantId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uuid",
+                          "description": "Who was named there, now removed; null if no one was"
+                        },
+                        "fromPartySize": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "toPartySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "beforeCutoff": {
+                          "type": "boolean"
+                        },
+                        "overridden": {
+                          "type": "boolean",
+                          "description": "True when an owner changed the party against the policy, with a reason"
+                        },
+                        "by": {
+                          "type": "string",
+                          "enum": [
+                            "staff",
+                            "guest",
+                            "system",
+                            "support"
+                          ]
+                        },
+                        "changedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "partyChangeId",
+                        "position",
+                        "participantId",
+                        "fromPartySize",
+                        "toPartySize",
+                        "beforeCutoff",
+                        "overridden",
+                        "by",
+                        "changedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "change"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this (an override needs bookings.override)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant or booking (booking_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The booking was canceled (booking_canceled), is a private charter (party_change_not_allowed), its trip has departed (trip_departed), it is past its cutoff without an override (party_change_cutoff_passed), the party is not partySize now (booking_changed), the party has no such place (place_not_found), it is the last place (last_place), or the trip can't keep the smaller party (trip_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
             "content": {
               "application/json": {
                 "schema": {
@@ -15235,6 +15654,15 @@
                               "minimum": 1,
                               "description": "Places in the party: the most participants"
                             },
+                            "places": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 500
+                              },
+                              "description": "The party's places now, in order, as many as the party size: 1 to the party size, less any place the party gave up, whose number is never used again"
+                            },
                             "participants": {
                               "type": "array",
                               "items": {
@@ -15305,6 +15733,7 @@
                           },
                           "required": [
                             "partySize",
+                            "places",
                             "participants"
                           ],
                           "description": "A booking's party as named so far"
@@ -15533,10 +15962,10 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 500,
-              "description": "The participant's place in the party: 1 to the booking's party size"
+              "description": "The participant's place in the party: one of the party's places (`places`)"
             },
             "required": true,
-            "description": "The participant's place in the party: 1 to the booking's party size",
+            "description": "The participant's place in the party: one of the party's places (`places`)",
             "name": "position",
             "in": "path"
           },
@@ -15799,7 +16228,7 @@
             }
           },
           "409": {
-            "description": "The booking is canceled (booking_canceled), its trip has departed (trip_departed), or the waiver module refused the change (its own code)",
+            "description": "The booking is canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_not_found), or the waiver module refused the change (its own code)",
             "content": {
               "application/json": {
                 "schema": {
@@ -15868,6 +16297,1297 @@
           },
           "422": {
             "description": "The place is past the party size (position_out_of_range), or idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address for this operator (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/public/manage/participants/{position}/removal": {
+      "post": {
+        "tags": [
+          "public",
+          "manage"
+        ],
+        "summary": "Give up one place in the party",
+        "description": "Needs the booking session and an Idempotency-Key. Before the policy's change cutoff, the guest gives up one place in a shared-seat party: whoever was named there is removed and their waiver withdrawn, and the seat goes back on sale. The price does not change. Places keep their numbers; the place given up is not named again. Not for a private charter, and not the last place (cancel the booking instead).\n\npartySize is the size the guest saw; if the party is another size now, nothing changes (409 booking_changed). A repeat of the same change answers 200 with the booking as it stands.",
+        "security": [
+          {
+            "manageSession": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "description": "The participant's place in the party: one of the party's places (`places`)"
+            },
+            "required": true,
+            "description": "The participant's place in the party: one of the party's places (`places`)",
+            "name": "position",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "partySize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "description": "The party size the guest saw. If the party is another size now, nothing changes (409 booking_changed)"
+                  }
+                },
+                "required": [
+                  "partySize"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The booking with its smaller party, and the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "booking": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$",
+                          "description": "Eight characters of Crockford base32; what the guest and the operator quote"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "confirmed",
+                            "canceled"
+                          ],
+                          "description": "confirmed: booked and holding its seats. canceled: given back, with any refund"
+                        },
+                        "confirmedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "booker": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "email": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "email"
+                          ],
+                          "description": "The guest's own details"
+                        },
+                        "trip": {
+                          "type": "object",
+                          "properties": {
+                            "tripId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "productName": {
+                              "type": "string"
+                            },
+                            "productKind": {
+                              "type": "string",
+                              "enum": [
+                                "shared_seat",
+                                "private_charter"
+                              ]
+                            },
+                            "boatName": {
+                              "type": "string"
+                            },
+                            "timeZone": {
+                              "type": "string",
+                              "description": "IANA time zone name, such as America/New_York"
+                            },
+                            "localDate": {
+                              "type": "string",
+                              "format": "date",
+                              "description": "Local calendar date, YYYY-MM-DD"
+                            },
+                            "localStartTime": {
+                              "type": "string",
+                              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                              "description": "Local wall-clock time, HH:MM, 24-hour"
+                            },
+                            "startsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "salesState": {
+                              "type": "string",
+                              "enum": [
+                                "draft",
+                                "published",
+                                "closed",
+                                "canceled",
+                                "completed"
+                              ]
+                            },
+                            "endsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "endsAtLocal": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The same instant with the zone's offset, for display"
+                            },
+                            "durationMinutes": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "tripId",
+                            "productName",
+                            "productKind",
+                            "boatName",
+                            "timeZone",
+                            "localDate",
+                            "localStartTime",
+                            "startsAt",
+                            "salesState",
+                            "endsAt",
+                            "endsAtLocal",
+                            "durationMinutes"
+                          ]
+                        },
+                        "location": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "meetingPoint": {
+                              "type": "string"
+                            },
+                            "meetingInstructions": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "meetingPoint",
+                            "meetingInstructions"
+                          ]
+                        },
+                        "party": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "tickets"
+                                  ]
+                                },
+                                "guests": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "description": "Seats booked: the sum of the tickets"
+                                },
+                                "tickets": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "code": {
+                                        "type": "string",
+                                        "description": "The ticket type's code, such as adult"
+                                      },
+                                      "name": {
+                                        "type": "string",
+                                        "description": "The ticket type as sold, such as Child (3 to 12)"
+                                      },
+                                      "quantity": {
+                                        "type": "integer",
+                                        "minimum": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "code",
+                                      "name",
+                                      "quantity"
+                                    ]
+                                  },
+                                  "description": "Counts by ticket type, in the order sold"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "guests",
+                                "tickets"
+                              ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "charter"
+                                  ]
+                                },
+                                "guests": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "description": "Guests aboard, as the booker gave them"
+                                },
+                                "charter": {
+                                  "type": "string",
+                                  "description": "The charter as sold, such as Whole boat, up to 12 guests"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "guests",
+                                "charter"
+                              ]
+                            }
+                          ],
+                          "description": "Who is coming, from the order: counts by ticket type, or a charter's guests"
+                        },
+                        "extras": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "quantity": {
+                                "type": "integer",
+                                "minimum": 1
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "name",
+                              "quantity"
+                            ],
+                            "description": "A paid add-on on the order"
+                          }
+                        },
+                        "order": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "pending",
+                                "paid",
+                                "void"
+                              ]
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "lines": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "lineNo": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "service",
+                                      "add_on",
+                                      "fee",
+                                      "discount",
+                                      "tax"
+                                    ],
+                                    "description": "service: tickets or the charter price"
+                                  },
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "basis": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "enum": [
+                                      "per_booking",
+                                      "per_participant",
+                                      null
+                                    ],
+                                    "description": "Fees and add-ons only"
+                                  },
+                                  "quantity": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  "unitAmount": {
+                                    "type": "integer",
+                                    "description": "Integer US cents"
+                                  },
+                                  "amount": {
+                                    "type": "integer",
+                                    "description": "Negative on the discount line"
+                                  },
+                                  "taxInclusive": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ],
+                                    "description": "Tax lines only: true when the tax is inside the prices and reported, not added"
+                                  },
+                                  "taxRatePpm": {
+                                    "type": [
+                                      "integer",
+                                      "null"
+                                    ],
+                                    "description": "Tax lines only: the rate the order used, in parts per million"
+                                  }
+                                },
+                                "required": [
+                                  "lineNo",
+                                  "kind",
+                                  "code",
+                                  "name",
+                                  "basis",
+                                  "quantity",
+                                  "unitAmount",
+                                  "amount",
+                                  "taxInclusive",
+                                  "taxRatePpm"
+                                ]
+                              },
+                              "description": "In order: trip price, add-ons, fees, discount, taxes"
+                            },
+                            "totals": {
+                              "type": "object",
+                              "properties": {
+                                "subtotal": {
+                                  "type": "integer",
+                                  "description": "Trip price and add-ons, before the discount"
+                                },
+                                "discount": {
+                                  "type": "integer",
+                                  "description": "Integer US cents"
+                                },
+                                "fees": {
+                                  "type": "integer",
+                                  "description": "Integer US cents"
+                                },
+                                "tax": {
+                                  "type": "integer",
+                                  "description": "Taxes added on top of prices"
+                                },
+                                "includedTax": {
+                                  "type": "integer",
+                                  "description": "Taxes already inside prices; informational"
+                                },
+                                "total": {
+                                  "type": "integer",
+                                  "description": "subtotal - discount + fees + tax"
+                                }
+                              },
+                              "required": [
+                                "subtotal",
+                                "discount",
+                                "fees",
+                                "tax",
+                                "includedTax",
+                                "total"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "status",
+                            "currency",
+                            "lines",
+                            "totals"
+                          ],
+                          "description": "The immutable order, copied from the quote the guest accepted"
+                        },
+                        "payment": {
+                          "type": "object",
+                          "properties": {
+                            "provider": {
+                              "type": "string",
+                              "enum": [
+                                "fake",
+                                "stripe"
+                              ],
+                              "description": "fake is the demo provider; stripe replaces it before any live booking"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "pending",
+                                "succeeded",
+                                "failed"
+                              ]
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "provider",
+                            "state",
+                            "amount",
+                            "currency"
+                          ]
+                        },
+                        "refund": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "requested",
+                                "pending",
+                                "succeeded",
+                                "failed"
+                              ],
+                              "description": "requested until the provider answers; pending once it accepted the refund and has not finished it; a failed refund is an operator exception"
+                            },
+                            "amount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "failureCode": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "requestedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "settledAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "amount",
+                            "failureCode",
+                            "requestedAt",
+                            "settledAt"
+                          ]
+                        },
+                        "cancellation": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "canceledAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "by": {
+                              "type": "string",
+                              "enum": [
+                                "guest",
+                                "staff",
+                                "system",
+                                "support"
+                              ],
+                              "description": "Who canceled: the guest or staff"
+                            },
+                            "remedy": {
+                              "type": "string",
+                              "enum": [
+                                "full_refund",
+                                "percent_refund",
+                                "credit",
+                                "none"
+                              ],
+                              "description": "What the cancellation applied: the policy's remedy, the policy's refund value taken as credit (staff), or an override (staff, with a reason)"
+                            },
+                            "refundBp": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10000,
+                              "description": "Basis points of what was paid, returned as a refund or as credit: 10000 for all of it, 0 for none"
+                            },
+                            "refundAmount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "creditAmount": {
+                              "type": "integer",
+                              "description": "Booking credit issued to the booker instead of a refund"
+                            },
+                            "overridden": {
+                              "type": "boolean",
+                              "description": "Staff applied a remedy the policy does not give, with a reason (kept in the audit history)"
+                            },
+                            "paidAmount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "cutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The policy's change cutoff for this trip"
+                            },
+                            "beforeCutoff": {
+                              "type": "boolean"
+                            },
+                            "policyVersion": {
+                              "type": "integer",
+                              "minimum": 1
+                            }
+                          },
+                          "required": [
+                            "canceledAt",
+                            "by",
+                            "remedy",
+                            "refundBp",
+                            "refundAmount",
+                            "creditAmount",
+                            "overridden",
+                            "paidAmount",
+                            "cutoffAt",
+                            "beforeCutoff",
+                            "policyVersion"
+                          ],
+                          "description": "The terms the cancellation applied; the refund's state is in refund"
+                        },
+                        "balance": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "paid",
+                                "scheduled",
+                                "due",
+                                "overdue",
+                                "canceled"
+                              ],
+                              "description": "paid: nothing owed. scheduled: owed, before the first reminder. due: owed, within 7 days of the due date. overdue: owed, past the due date; nothing cancels the booking. canceled: the booking was canceled"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "total": {
+                              "type": "integer",
+                              "description": "The booking's total"
+                            },
+                            "deposit": {
+                              "type": "integer",
+                              "description": "Charged at checkout"
+                            },
+                            "paidIn": {
+                              "type": "integer",
+                              "description": "Deposit paid, balance payments, and external payments staff recorded"
+                            },
+                            "owed": {
+                              "type": "integer",
+                              "description": "Left to pay; zero once paid or canceled"
+                            },
+                            "overpaid": {
+                              "type": "integer",
+                              "description": "Money in above the total, which staff return"
+                            },
+                            "dueAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When the balance is due: the newest staff change, else the booking's"
+                            },
+                            "originalDueAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "payments": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "amount": {
+                                    "type": "integer",
+                                    "description": "Integer US cents"
+                                  },
+                                  "state": {
+                                    "type": "string",
+                                    "enum": [
+                                      "pending",
+                                      "succeeded",
+                                      "failed",
+                                      "abandoned"
+                                    ]
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "succeededAt": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "amount",
+                                  "state",
+                                  "createdAt",
+                                  "succeededAt"
+                                ]
+                              }
+                            },
+                            "dueChanges": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "dueAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "reason": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "Staff's reason; null for a reader without booking access, and for the guest"
+                                  },
+                                  "changedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "dueAt",
+                                  "reason",
+                                  "changedAt"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "state",
+                            "currency",
+                            "total",
+                            "deposit",
+                            "paidIn",
+                            "owed",
+                            "overpaid",
+                            "dueAt",
+                            "originalDueAt",
+                            "payments",
+                            "dueChanges"
+                          ],
+                          "description": "A private charter's deposit and balance (W3-G2.8); null when paid in full"
+                        },
+                        "policy": {
+                          "type": "object",
+                          "properties": {
+                            "version": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "cancellationText": {
+                              "type": "string"
+                            },
+                            "cutoffAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "required": [
+                            "version",
+                            "cancellationText",
+                            "cutoffAt"
+                          ]
+                        },
+                        "participants": {
+                          "type": "object",
+                          "properties": {
+                            "partySize": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "description": "Places in the party: the most participants"
+                            },
+                            "places": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 500
+                              },
+                              "description": "The party's places now, in order, as many as the party size: 1 to the party size, less any place the party gave up, whose number is never used again"
+                            },
+                            "participants": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "position": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 500
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "isMinor": {
+                                    "type": "boolean"
+                                  },
+                                  "email": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "guardian": {
+                                    "type": [
+                                      "object",
+                                      "null"
+                                    ],
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "email": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "email"
+                                    ]
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  },
+                                  "updatedAt": {
+                                    "type": "string",
+                                    "format": "date-time"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "position",
+                                  "name",
+                                  "isMinor",
+                                  "email",
+                                  "guardian",
+                                  "createdAt",
+                                  "updatedAt"
+                                ],
+                                "description": "One person in the party. Personal data"
+                              },
+                              "description": "Named so far, by place; places without a participant are not listed"
+                            }
+                          },
+                          "required": [
+                            "partySize",
+                            "places",
+                            "participants"
+                          ],
+                          "description": "A booking's party as named so far"
+                        },
+                        "partyEditable": {
+                          "type": "boolean",
+                          "description": "True while the party can still be named: confirmed and not departed"
+                        },
+                        "cancellationTerms": {
+                          "type": "object",
+                          "properties": {
+                            "cancelable": {
+                              "type": "boolean",
+                              "description": "True when the guest can cancel now, with exactly these terms"
+                            },
+                            "refusal": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "enum": [
+                                "already_canceled",
+                                "trip_departed",
+                                "remedy_requires_operator",
+                                null
+                              ],
+                              "description": "already_canceled: nothing more to do. trip_departed: it is a no-show now. remedy_requires_operator: the policy gives credit here, which the operator issues, or the operator already refunded money outside the card flow and decides the rest"
+                            },
+                            "remedy": {
+                              "type": "string",
+                              "enum": [
+                                "full_refund",
+                                "percent_refund",
+                                "credit",
+                                "none"
+                              ]
+                            },
+                            "refundBp": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10000,
+                              "description": "Basis points of what was paid: 10000 for a full refund"
+                            },
+                            "paidAmount": {
+                              "type": "integer",
+                              "description": "Integer US cents"
+                            },
+                            "refundAmount": {
+                              "type": "integer",
+                              "description": "Rounded half up to the cent. Send it back to cancel"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "departsAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "cutoffAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "Departure minus the policy's change cutoff"
+                            },
+                            "beforeCutoff": {
+                              "type": "boolean"
+                            },
+                            "policyVersion": {
+                              "type": "integer",
+                              "minimum": 1
+                            },
+                            "asOf": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "The server's clock when these terms were computed"
+                            }
+                          },
+                          "required": [
+                            "cancelable",
+                            "refusal",
+                            "remedy",
+                            "refundBp",
+                            "paidAmount",
+                            "refundAmount",
+                            "currency",
+                            "departsAt",
+                            "cutoffAt",
+                            "beforeCutoff",
+                            "policyVersion",
+                            "asOf"
+                          ],
+                          "description": "What canceling now would do, from the booking's own policy version"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "reference",
+                        "state",
+                        "confirmedAt",
+                        "booker",
+                        "trip",
+                        "location",
+                        "party",
+                        "extras",
+                        "order",
+                        "payment",
+                        "refund",
+                        "cancellation",
+                        "policy",
+                        "participants",
+                        "partyEditable",
+                        "cancellationTerms"
+                      ],
+                      "description": "One booking as its guest may see it: their own details, the receipt, and the party"
+                    },
+                    "change": {
+                      "type": "object",
+                      "properties": {
+                        "partyChangeId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 500,
+                          "description": "The place given up"
+                        },
+                        "participantId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uuid",
+                          "description": "Who was named there, now removed; null if no one was"
+                        },
+                        "fromPartySize": {
+                          "type": "integer",
+                          "minimum": 2
+                        },
+                        "toPartySize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "beforeCutoff": {
+                          "type": "boolean"
+                        },
+                        "overridden": {
+                          "type": "boolean",
+                          "description": "True when an owner changed the party against the policy, with a reason"
+                        },
+                        "by": {
+                          "type": "string",
+                          "enum": [
+                            "staff",
+                            "guest",
+                            "system",
+                            "support"
+                          ]
+                        },
+                        "changedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "partyChangeId",
+                        "position",
+                        "participantId",
+                        "fromPartySize",
+                        "toPartySize",
+                        "beforeCutoff",
+                        "overridden",
+                        "by",
+                        "changedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "booking",
+                    "change"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No session (session_required), or it has ended (session_expired)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No active tenant hostname matches the origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The booking was canceled (booking_canceled), is a private charter (party_change_not_allowed), its trip has departed (trip_departed), it is past its change cutoff (party_change_cutoff_passed), the party is not partySize now (booking_changed), the party has no such place (place_not_found), it is the last place (last_place), or the trip can't keep the smaller party (trip_unavailable)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
             "content": {
               "application/json": {
                 "schema": {
@@ -16891,6 +18611,15 @@
                               "minimum": 1,
                               "description": "Places in the party: the most participants"
                             },
+                            "places": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 500
+                              },
+                              "description": "The party's places now, in order, as many as the party size: 1 to the party size, less any place the party gave up, whose number is never used again"
+                            },
                             "participants": {
                               "type": "array",
                               "items": {
@@ -16961,6 +18690,7 @@
                           },
                           "required": [
                             "partySize",
+                            "places",
                             "participants"
                           ],
                           "description": "A booking's party as named so far"
@@ -18446,6 +20176,15 @@
                               "minimum": 1,
                               "description": "Places in the party: the most participants"
                             },
+                            "places": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 500
+                              },
+                              "description": "The party's places now, in order, as many as the party size: 1 to the party size, less any place the party gave up, whose number is never used again"
+                            },
                             "participants": {
                               "type": "array",
                               "items": {
@@ -18516,6 +20255,7 @@
                           },
                           "required": [
                             "partySize",
+                            "places",
                             "participants"
                           ],
                           "description": "A booking's party as named so far"

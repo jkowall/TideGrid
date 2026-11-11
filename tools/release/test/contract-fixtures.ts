@@ -349,7 +349,7 @@ export function managedBooking(over: ManagedOver = {}): ManagedBooking {
       cancellationText: "Cancel at least 24 hours before departure for a full refund.",
       cutoffAt: "2026-11-05T22:00:00.000Z",
     },
-    participants: { partySize: 1, participants: [] },
+    participants: { partySize: 1, places: [1], participants: [] },
     partyEditable: (over.state ?? "confirmed") === "confirmed",
     cancellationTerms: terms(paid, over.refundAmount ?? paid),
   };

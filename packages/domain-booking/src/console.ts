@@ -954,6 +954,7 @@ export async function getTripRoster(
   }>`
     select booking_id, position, full_name, is_minor from booking_participants
      where tenant_id = ${tenantId} and booking_id = any(${rows.map((r) => r.id)}::uuid[])
+       and removed_at is null
      order by booking_id, position`.execute(trx);
   const participants = new Map<string, { position: number; name: string; minor: boolean }[]>();
   for (const p of named) {

@@ -230,20 +230,20 @@ After a booking confirms, its guest names the party and may cancel within the bo
 
 ### Participants
 
-- **One per place.** A participant fills one place in the party, `position` 1 to the booking's party size, so a party never holds more people than it bought. The database checks the place against the booking (`booking_participants_party_size`) and keeps one participant per place (`booking_participants_position_key`).
+- **One per place.** A participant fills one place in the party, `position` 1 to the booking's party size, so a party never holds more people than it bought. A party that gave up a place keeps its other places' numbers (below), so its places are listed in `places`. The database checks the place against the booking (`booking_participants_party_size`) and keeps one participant per place (`booking_participants_position_key`).
 - **What is recorded.** The full name; whether a minor; for a minor, the guardian's name and email; for anyone, an optional email of their own. A minor without a guardian, or an adult with one, never reaches the table (`booking_participants_guardian`). Addresses are stored lowercased and ASCII, as the booker's are.
-- **Edited in place, never removed.** The guest corrects a place's details; the participant keeps its id, booking, and place for good (`booking_participants_immutable`). Removing a shared-seat participant releases a seat and is a later goal. No role deletes a participant.
+- **Edited in place; removed only with their place.** The guest corrects a place's details; the participant keeps its id, booking, and place for good (`booking_participants_immutable`). A shared-seat party may give up a place, which removes whoever was named there ([below](#giving-up-a-place-in-a-shared-seat-party-w3-g211-rest)); the row stays, marked removed, and is no longer listed. No role deletes a participant.
 - **Only while the booking stands.** A participant joins or changes only on a confirmed booking, and the service refuses it once the trip has departed. The booking's row lock orders a participant change against a cancellation, so whichever commits second sees the other.
 - **Personal data.** Names and addresses live in the participant rows and the responses that read them. Audit rows and events record which place changed and which fields (`changed: ["name", "email"]`), never the values. Finance never reads them.
 
 ```ts
-listParticipants(trx, tenantId, bookingId): Promise<{ partySize, participants: ParticipantView[] } | null>
+listParticipants(trx, tenantId, bookingId): Promise<{ partySize, places: number[], participants: ParticipantView[] } | null>
 putParticipant(trx, ctx, { bookingId, position, details: { name, isMinor, email?, guardian? } }, hooks?):
   Promise<
     | { kind: "created"; participant } | { kind: "updated"; participant; changed: ParticipantField[] }
     | { kind: "unchanged"; participant }
     | { kind: "booking_not_found" } | { kind: "booking_canceled" } | { kind: "trip_departed" }
-    | { kind: "position_out_of_range"; partySize }
+    | { kind: "position_out_of_range"; partySize } | { kind: "place_removed" }
   >
 ```
 
@@ -263,11 +263,12 @@ interface BookingHooks {
   bookingConfirmed?(trx, ctx, { bookingId, checkoutSessionId, tripId, productId, partySize, reacquired }): Promise<void>;
   participantAdded?(trx, ctx, { bookingId, participantId, position }): Promise<void>;
   participantUpdated?(trx, ctx, { bookingId, participantId, position, changed }): Promise<void>;
+  participantRemoved?(trx, ctx, { bookingId, participantId, position, partyChangeId }): Promise<void>;
   bookingCanceled?(trx, ctx, { bookingId, cancellationId, refundId }): Promise<void>;
 }
 ```
 
-- **Where they run.** `bookingConfirmed` in `book()`, on every path that confirms: the webhook route (`handleVerifiedEvent(db, provider, event, { hooks })`), which the fake provider's delivery also goes through, and the checkout sweep's reprocessing (`sweepCheckouts(db, { hooks })`, `processProviderEvent(trx, ctx, id, { hooks })`). `participantAdded` and `participantUpdated` in `putParticipant`. `bookingCanceled` in the cancellation, after the booking is canceled and its seats released.
+- **Where they run.** `bookingConfirmed` in `book()`, on every path that confirms: the webhook route (`handleVerifiedEvent(db, provider, event, { hooks })`), which the fake provider's delivery also goes through, and the checkout sweep's reprocessing (`sweepCheckouts(db, { hooks })`, `processProviderEvent(trx, ctx, id, { hooks })`). `participantAdded` and `participantUpdated` in `putParticipant`. `participantRemoved` in `removeParticipant`, after the participant is marked removed and before the booking's hold changes; it must not refuse. `bookingCanceled` in the cancellation, after the booking is canceled and its seats released.
 - **One wiring point.** The API builds the hooks once, in [apps/api-worker/src/booking-hooks.ts](../../apps/api-worker/src/booking-hooks.ts), and passes them on every path above. The waiver module returns its hooks there; nothing else in the API changes. Tests pass their own (`AppDeps.bookingHooks` in the API).
 - **Atomic both ways.** Whatever a hook writes, assignments and `enqueueMessage` rows included, commits or rolls back with the change. A throw rolls the change back.
 - **Who may refuse.** Only `participantAdded` and `participantUpdated`, by throwing `BookingHookRefusal(code, message)`; the API answers 409 with that code. `bookingConfirmed` and `bookingCanceled` must not refuse: payment and confirmation never wait on waivers, and a throw in `bookingConfirmed` rolls back a confirmation whose money has moved, leaving the event received for the sweep's retry.
@@ -473,10 +474,21 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 - **Cancellation** now releases the booking's hold by the hold's own owner, so a moved booking cancels as any other, and cancels a queued "moved" email.
 - **Known gaps.** The price never changes on a move (D1), and the cancellation cutoff follows the new trip (D5). A waiver reminder already sent for the old trip's slot is not sent again, and a waiver link sent before the move expires with the old trip. The checkout session's own view still names the first trip. The adversarial ledger audit (`adversarial/harness.ts`) accepts a booking on its last move's trip and hold. No screens yet.
 
+## Giving up a place in a shared-seat party (W3-G2.11-rest)
+
+`party-changes.ts`; database contract in [0035](../database/README.md#participant-removal-0035); defaults in the [decision register](../../docs/v2/06-decision-register.md#decision-log).
+
+- **`removeParticipant`** gives up one place of a confirmed shared-seat booking, in one transaction: it locks the checkout, the booking, the payment, the trip, and the participant at the place; writes the party change; marks that participant removed and runs the `participantRemoved` hook (waivers withdraw that person's request, link, session, and queued email); releases the booking's hold by its own owner; takes and confirms a hold for one fewer on the same trip, owned by the change; and points the booking at it with the smaller party size. The old hold goes first because a full trip would not fit the smaller one beside it; both happen under the trip's lock. If the smaller hold is refused (the trip is no longer on sale, or the party would fall below the product's minimum), everything since a savepoint is rolled back and the answer is `trip_unavailable`.
+- **Refusals.** `not_confirmed`, `not_shared_seat` (a charter's party takes the whole boat, so no seat is freed), `trip_departed`, `past_cutoff` (without an override), `booking_changed` (the party is not the size the asker saw), `place_not_found`, and `last_place` (a party of one cancels instead). A repeat of the same change answers `already_removed` with the first. An `overrideReason` lets staff give up a place past the cutoff; the caller checks `bookings.override`, and the database refuses one from anyone but staff.
+- **Places keep their numbers.** A party of 4 that gave up place 2 has places 1, 3, and 4. `listParticipants` returns them as `places` and leaves removed participants out; `putParticipant` answers `place_removed` for a place given up.
+- **Money and email.** The booking keeps the price it was sold at (D1): no refund or charge, and the order is unchanged. No email goes to the booker; the removed person's waiver email is canceled by the waiver hook.
+- **Events.** Audit `booking.party_reduced` (or `booking.party_reduced_override`, with the reason) and outbox `booking.party_reduced` `{ bookingId, partyChangeId, tripId, position, participantId, fromPartySize, toPartySize }`, with no names.
+- **Known gaps.** No refund or credit for the seat given up (D1). Private charters cannot give up a place (D2). Adding a place, invitations, and screens are not here. The ledger audit (`adversarial/harness.ts`) accepts a booking on its last party change's hold, with its party size less its changes.
+
 ## Deferred and known gaps
 
 - **Staff-assisted booking (G2.12d).** Staff cannot cancel a confirmed booking, refund, enter participants, correct the booker's address, override the cutoff, sales state, capacity, or price, or record cash, check, or complimentary bookings. A mistyped booker address sends the management link to whoever holds it; the read-back and its attestation reduce that, nothing removes it.
-- Deposits and balances (G2.8), credits (G2.9), rescheduling, removing a participant, and staff cancellation of a confirmed booking are not here. Participants and guest cancellation within policy arrived with lane 1 (G2.11c, above). Update, 2026-11-10: deposits, credits, staff cancellation, and moving a whole booking have arrived (above); removing a participant follows.
+- Deposits and balances (G2.8), credits (G2.9), rescheduling, removing a participant, and staff cancellation of a confirmed booking are not here. Participants and guest cancellation within policy arrived with lane 1 (G2.11c, above). Update, 2026-11-10: deposits, credits, staff cancellation, and moving a whole booking have arrived (above); removing a participant follows. Update, 2026-11-11: a shared-seat party gives up a place, removing its participant (above).
 - **A late success gets no priority (the owner kept this on 2026-10-19).** It reacquires only if its seats are still free, and new checkouts queued for the same trip usually take them first: in the test specialist's race with no sweep, 1 of 10 late payments reacquired and 9 were refunded. Every one was handled correctly: a guest who paid after the seats were gone is refunded in full, with an exception for the operator. The owner confirmed there is no grace period ([owner confirmations](../../docs/v2/12-demo-build-plan.md#goal-sequence)).
 - Nothing reconciles a payment whose webhook never arrives, other than the provider's own retries (Stripe retries for days; the fake can redeliver). The adapter's `retrievePayment` is the seam for the reconciliation goal (G2.10). Update, 2026-11-09 (W3-G2.10): the reconciliation sweep reads such a payment at the provider and raises a disagreement for staff; the payment still settles only by its verified event ([below](#external-payment-and-reconciliation-w3-g210)).
 - The booker's name and email stay on abandoned checkouts. A retention job should clear them after a set time before real guests use the system.

@@ -709,19 +709,37 @@ export async function auditLedger(admin: Sql, tenantIds: readonly string[]): Pro
              where b.tenant_id = s.tenant_id and b.checkout_session_id = s.id) as bookings,
            (select count(*)::int from public.bookings b
              where b.tenant_id = s.tenant_id and b.checkout_session_id = s.id
-               and (b.party_size <> s.party_size or b.payment_id <> p.id or b.order_id <> o.id
-                    -- On the checkout's trip and hold, or on its last move's (W3-G2.11-rest),
-                    -- a chain that starts from the checkout's hold.
+               and (b.party_size <> s.party_size - (select count(*)::int
+                                                         from public.booking_party_changes c
+                                                        where c.tenant_id = b.tenant_id
+                                                          and c.booking_id = b.id)
+                    or b.payment_id <> p.id or b.order_id <> o.id
+                    -- On the checkout's trip and hold, or on the hold its last move or
+                    -- party change took (W3-G2.11-rest), a chain that starts from the
+                    -- checkout's hold.
                     or not ((b.trip_id = s.trip_id and b.hold_id = s.hold_id)
-                            or (exists (select 1 from public.booking_reschedules r
-                                         where r.tenant_id = b.tenant_id and r.booking_id = b.id
-                                           and r.to_trip_id = b.trip_id and r.to_hold_id = b.hold_id)
-                                and exists (select 1 from public.booking_reschedules r
-                                             where r.tenant_id = b.tenant_id and r.booking_id = b.id
-                                               and r.from_hold_id = s.hold_id)))))
+                            or (exists (select 1 from public.capacity_holds bh
+                                         where bh.tenant_id = b.tenant_id and bh.id = b.hold_id
+                                           and bh.trip_id = b.trip_id
+                                           and (exists (select 1 from public.booking_reschedules r
+                                                         where r.tenant_id = b.tenant_id
+                                                           and r.booking_id = b.id
+                                                           and r.to_hold_id = bh.id)
+                                                or exists (select 1 from public.booking_party_changes c
+                                                            where c.tenant_id = b.tenant_id
+                                                              and c.booking_id = b.id
+                                                              and bh.owner_ref = 'booking_party_change:' || c.id::text)))
+                                and (exists (select 1 from public.booking_reschedules r
+                                              where r.tenant_id = b.tenant_id and r.booking_id = b.id
+                                                and r.from_hold_id = s.hold_id)
+                                     or exists (select 1 from public.booking_party_changes c
+                                                 where c.tenant_id = b.tenant_id and c.booking_id = b.id
+                                                   and c.from_hold_id = s.hold_id))))))
              as bad_bookings,
-           exists (select 1 from public.booking_reschedules r
-                    where r.tenant_id = s.tenant_id and r.from_hold_id = s.hold_id) as moved,
+           (exists (select 1 from public.booking_reschedules r
+                     where r.tenant_id = s.tenant_id and r.from_hold_id = s.hold_id)
+            or exists (select 1 from public.booking_party_changes c
+                        where c.tenant_id = s.tenant_id and c.from_hold_id = s.hold_id)) as moved,
            (select count(*)::int from public.payment_refunds r
              where r.tenant_id = s.tenant_id and r.payment_id = p.id) as refunds,
            (select r.state from public.payment_refunds r
@@ -773,7 +791,8 @@ export async function auditLedger(admin: Sql, tenantIds: readonly string[]): Pro
     switch (r.state) {
       case "confirmed":
         expect(r.bookings === 1, "confirmed without a booking");
-        // A moved booking gave its checkout's hold back for the new trip's.
+        // A moved booking, or one whose party gave up a place, gave its
+        // checkout's hold back for another.
         expect(
           r.hold === "confirmed" || (r.moved && r.hold === "released"),
           `confirmed with a ${r.hold} hold`,
