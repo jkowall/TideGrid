@@ -20,6 +20,14 @@ export const MAX_REQUEST_BODY_BYTES = 16 * 1024;
 
 const webhookPrefix = "/v1/webhooks/payments/";
 
+/**
+ * A standard CSV import batch (W3-G2.13): the files of one operator's export,
+ * sent as JSON text. 4 MiB covers a pilot operator's future bookings with
+ * room to spare; a bigger export is custom work under the draft.
+ */
+export const MAX_IMPORT_BODY_BYTES = 4 * 1024 * 1024;
+const IMPORT_DRY_RUN_PATH = /^\/v1\/staff\/tenants\/[^/]+\/import-dry-runs$/;
+
 /** The routes a guest page calls cross-origin, as in src/hostnames/cors.ts. */
 const guestRoutePrefixes = ["/v1/public/", "/v1/fake-provider/"] as const;
 
@@ -29,7 +37,9 @@ const guestRoutePrefixes = ["/v1/public/", "/v1/fake-provider/"] as const;
  * needs more (an upload, an import) adds its prefix here.
  */
 export function bodyLimitFor(path: string): number {
-  return path.startsWith(webhookPrefix) ? MAX_WEBHOOK_BYTES : MAX_REQUEST_BODY_BYTES;
+  if (path.startsWith(webhookPrefix)) return MAX_WEBHOOK_BYTES;
+  if (IMPORT_DRY_RUN_PATH.test(path)) return MAX_IMPORT_BODY_BYTES;
+  return MAX_REQUEST_BODY_BYTES;
 }
 
 /**

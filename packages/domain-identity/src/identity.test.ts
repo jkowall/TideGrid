@@ -123,6 +123,10 @@ describe("role permissions", () => {
     ]);
   });
 
+  it("keeps the standard CSV import with owners (W3-G2.13)", () => {
+    expect(StaffRole.options.filter((r) => can(r, "imports.run"))).toEqual(["owner"]);
+  });
+
   it("keeps support access, export, and the deletion request with owners (W3-G2.2b)", () => {
     for (const permission of ["support.manage", "data.export", "account.manage"] as const) {
       expect(StaffRole.options.filter((r) => can(r, permission))).toEqual(["owner"]);

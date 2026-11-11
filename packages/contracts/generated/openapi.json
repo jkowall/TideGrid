@@ -44297,6 +44297,612 @@
           }
         }
       }
+    },
+    "/v1/staff/tenants/{tenantId}/import-dry-runs": {
+      "post": {
+        "tags": [
+          "staff",
+          "imports"
+        ],
+        "summary": "Check a standard CSV import batch without importing it",
+        "description": "Owners only (imports.run). The batch is the manifest and the files it declares totals for, as the standard CSV import draft defines them (coordinator default, pending the owner's approval). Every row is checked against the operator's products, boats, trips, and capacity at the time of the check; nothing from the files is written.\n\nThe answer lists the issues (the first 500) and the full errors.csv, the accepted and refused rows per file, and each declared control total beside the computed one. A run is clean when no row is refused and every total matches. The run's counts and totals are recorded under its batch and run number; a run number already used is refused (409 import_run_number_used). Committing a batch is a later step. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "object",
+                    "properties": {
+                      "manifest.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "products.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "trips.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "customers.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "bookings.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "participants.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "payments.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "opening_balances.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "waivers.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      }
+                    },
+                    "required": [
+                      "manifest.csv"
+                    ],
+                    "additionalProperties": false,
+                    "description": "One batch: the manifest and the files it declares totals for"
+                  }
+                },
+                "required": [
+                  "files"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The dry run's result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uuid",
+                          "description": "The recorded run; null when the manifest could not be read"
+                        },
+                        "batchId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "runNumber": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "sourceSystem": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "contentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "description": "SHA-256 of the files, without the manifest's batch_mode and run_number rows"
+                        },
+                        "checkedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "clean": {
+                          "type": "boolean",
+                          "description": "No error and every declared total matched"
+                        },
+                        "errorCount": {
+                          "type": "integer"
+                        },
+                        "warningCount": {
+                          "type": "integer"
+                        },
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "file": {
+                                "type": "string",
+                                "enum": [
+                                  "manifest.csv",
+                                  "products.csv",
+                                  "trips.csv",
+                                  "customers.csv",
+                                  "bookings.csv",
+                                  "participants.csv",
+                                  "payments.csv",
+                                  "opening_balances.csv",
+                                  "waivers.csv"
+                                ]
+                              },
+                              "rows": {
+                                "type": "integer"
+                              },
+                              "accepted": {
+                                "type": "integer"
+                              },
+                              "refused": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "file",
+                              "rows",
+                              "accepted",
+                              "refused"
+                            ]
+                          }
+                        },
+                        "controls": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "file": {
+                                "type": "string",
+                                "enum": [
+                                  "manifest.csv",
+                                  "products.csv",
+                                  "trips.csv",
+                                  "customers.csv",
+                                  "bookings.csv",
+                                  "participants.csv",
+                                  "payments.csv",
+                                  "opening_balances.csv",
+                                  "waivers.csv"
+                                ]
+                              },
+                              "metric": {
+                                "type": "string"
+                              },
+                              "declared": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "computed": {
+                                "type": "integer"
+                              },
+                              "matches": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "file",
+                              "metric",
+                              "declared",
+                              "computed",
+                              "matches"
+                            ]
+                          }
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "file": {
+                                "type": "string",
+                                "enum": [
+                                  "manifest.csv",
+                                  "products.csv",
+                                  "trips.csv",
+                                  "customers.csv",
+                                  "bookings.csv",
+                                  "participants.csv",
+                                  "payments.csv",
+                                  "opening_balances.csv",
+                                  "waivers.csv"
+                                ]
+                              },
+                              "line": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "description": "The record number, the header being 1; null for the whole file"
+                              },
+                              "recordKey": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The row's deduplication key"
+                              },
+                              "column": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "code": {
+                                "type": "string",
+                                "description": "A stable code, as the draft lists them"
+                              },
+                              "severity": {
+                                "type": "string",
+                                "enum": [
+                                  "error",
+                                  "warning"
+                                ],
+                                "description": "error refuses the row; warning needs review"
+                              },
+                              "message": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The offending value, or \"[withheld]\" for a name, email, phone, or reference"
+                              }
+                            },
+                            "required": [
+                              "file",
+                              "line",
+                              "recordKey",
+                              "column",
+                              "code",
+                              "severity",
+                              "message",
+                              "value"
+                            ]
+                          },
+                          "maxItems": 500
+                        },
+                        "issuesTruncated": {
+                          "type": "boolean",
+                          "description": "More issues than listed; errors.csv has them all"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "batchId",
+                        "runNumber",
+                        "sourceSystem",
+                        "contentHash",
+                        "checkedAt",
+                        "clean",
+                        "errorCount",
+                        "warningCount",
+                        "files",
+                        "controls",
+                        "issues",
+                        "issuesTruncated"
+                      ]
+                    },
+                    "errorsCsv": {
+                      "type": "string",
+                      "description": "errors.csv: every issue, each cell kept from running as a formula"
+                    }
+                  },
+                  "required": [
+                    "run",
+                    "errorsCsv"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The batch already has this run number (import_run_number_used), or its earlier runs name another source system (import_source_changed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 4096 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

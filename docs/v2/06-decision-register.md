@@ -8,6 +8,26 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.13, part 1, checking a standard CSV import without importing it, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The standard CSV import is the tracker's G2.13. Its file format is the [draft](drafts/standard-csv-import.md) from W1-CSV-DEF (the 2026-11-08 entry below), still proposed and not approved by the owner. As the coordinator directed, this goal builds against that draft as a coordinator default, so every column, code, and total below is pending the owner's approval of the draft.
+
+This first part is the dry run only. It lands as migration `0040` and the [database contract](../../packages/database/README.md#import-runs-0040). What it adds:
+
+- **An owner checks a batch.** In the console API (`POST /v1/staff/tenants/{tenantId}/import-dry-runs`), an owner sends the manifest and the batch's CSV files. Every row is checked against its column's type and the draft's rules, and against the operator's own products, boats, trips, and the seats already held on them, at the time of the check. The answer lists every refused row with a stable code, the accepted and refused rows per file, each declared control total beside the computed one, and the draft's `errors.csv`.
+- **Nothing from the files is written.** No trip, booking, customer, payment, or balance is created. What is kept is a record of the run: its batch, run number, source system, a hash of the files, whether it was clean, and its counts and totals. Names, emails, phones, and references never reach that record, the audit history, or the error report; the report shows them as `[withheld]`. A value that looks like a card number is refused and never shown.
+- **Toward the commit.** The run's hash leaves out the manifest's `batch_mode` and `run_number` rows, so a later commit of the same files can be matched to its clean dry run, as the draft proposes.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only.** The dry run reads the whole catalog and is the first step of a migration, so only owners run it; the database checks it too.
+- **D2: the draft as written**, with its two coordinator defaults (the booking key is source reference plus trip date; payments are external tender). One change: a product row whose name does not match the TideGrid product is refused as `product_name_mismatch`, a code the draft's list lacks; and `file_unreadable`, `missing_file`, `repeated_column`, and `batch_mode_not_supported` are added for whole-file problems the draft does not name.
+- **D3: one batch, one source system.** Run numbers go up by one per run and are never reused (`import_run_number_used`); a batch's later run from another source system is refused (`import_source_changed`).
+- **D4: size.** A batch is at most 4 MiB as sent, each file at most 2 million characters; a larger export is custom work under the draft. The answer lists the first 500 issues; `errors.csv` has all of them.
+- **D5: what the draft's schema gaps mean here.** There are no customer, trip-card, or dollar-card tables yet, so a trip-card or dollar-card lot is refused as `module_disabled`, and a customer is matched only against the batch's own rows (two with the same email are flagged for review, never merged). Earlier batches are not consulted, because none can be committed yet.
+
+Not built yet: the commit (it needs the import capacity path that amends `app.check_capacity_hold`, which the draft's open question 12 leaves to the owner, and tables for imported bookings, customers, and balances), the final delta batch, operator review of customer matches, and a console screen. The owner's approval of the draft, and of question 12 in particular, is needed before the commit is built.
+
 ### 2026-11-11: W3-G2.12-rest, an owner books a guest at no charge with a reason, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. Third and last part of W3-G2.12-rest, after the money report and the capacity override (the entries below).

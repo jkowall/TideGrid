@@ -524,6 +524,14 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 - **Reads.** Lists, the roster, search, and the day report show payment state `complimentary` and zero money; the booking detail has `payment: null` and `complimentary` (reason, amount, when, who, and the note only for roles that see the booker).
 - **Cancel, fees, changes.** `termsOf` gives remedy none; a staff override is `override_invalid`. Reconciliation assesses a zero fee. Moves and party changes run as usual and move no money.
 
+## Standard CSV import: the dry run (W3-G2.13)
+
+`src/import/`. The files, columns, codes, and control totals are the [draft](../../docs/v2/drafts/standard-csv-import.md)'s, a coordinator default pending the owner's approval; defaults D1 to D5 are in the [decision register](../../docs/v2/06-decision-register.md#decision-log).
+
+- **`validateImport(files, lookup, nowMs)`** is pure apart from `ImportLookup` (products with their location's zone, boats with their linked products, and live trips on those boats with their held seats). It reads each file (`readCsv`: RFC 4180, CRLF or LF, an optional byte order mark), checks the header, every value's type, the deduplication keys, and the rules across files (references, a refused parent taking its children, local times in the operator's zone, departed trips, boat overlaps, capacity counting live holds, private charters, amounts that add up, OTA rows, balances, guardians, expired balances), then the manifest's control totals against the accepted rows.
+- **`runImportDryRun(trx, ctx, files)`** runs it at the database's time, hashes the files (`importContentHash`), and records the run in `import_runs` with an `import.dry_run` audit event, neither holding a value from the files. `renderImportErrors` writes `errors.csv` with every cell formula-guarded.
+- **Never shown.** Names, emails, phones, and references appear as `[withheld]`; a value that looks like a card number is refused as `possible_card_number` and withheld.
+
 ## Deferred and known gaps
 
 - **Staff-assisted booking (G2.12d).** Staff cannot cancel a confirmed booking, refund, enter participants, correct the booker's address, override the cutoff, sales state, capacity, or price, or record cash, check, or complimentary bookings. A mistyped booker address sends the management link to whoever holds it; the read-back and its attestation reduce that, nothing removes it.

@@ -83,7 +83,9 @@ export type Permission =
   | "payments.refund_external"
   | "fees.read"
   // Moving a booking to another trip (W3-G2.11-rest).
-  | "bookings.reschedule";
+  | "bookings.reschedule"
+  // The standard CSV import (W3-G2.13), owners only.
+  | "imports.run";
 
 const matrix: Record<AccessRole, readonly Permission[]> = {
   owner: [
@@ -111,6 +113,7 @@ const matrix: Record<AccessRole, readonly Permission[]> = {
     "payments.refund_external",
     "fees.read",
     "bookings.reschedule",
+    "imports.run",
   ],
   booking_staff: [
     "catalog.read",
