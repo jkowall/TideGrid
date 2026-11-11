@@ -22,7 +22,7 @@ const IMPORTANT_LINK_URL =
   /^https:\/\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,63}(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?#].*)?$/;
 /** Names reserved for local networks or special use; a link never points at one. */
 const RESERVED_HOST =
-  /(?:^|\.)(?:localhost|localdomain|local|internal|intranet|lan|home|corp|private|test|invalid|example|onion|arpa|alt)$/;
+  /(?:^|\.)(?:local(?:host|domain)?|internal|intranet|lan|home|corp|private|test|invalid|example|onion|arpa|alt)$/;
 /**
  * Control characters, line and paragraph separators, and characters that
  * change text direction or take no width. The database refuses the same set.
