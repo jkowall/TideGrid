@@ -68,7 +68,13 @@ export interface ImportLookup {
    */
   zoneMismatches(
     zone: string,
-    departures: readonly { startsAtMs: number; local: string; offsetMinutes: number }[],
+    departures: readonly {
+      startsAtMs: number;
+      local: string;
+      offsetMinutes: number;
+      endsAtMs: number;
+      endOffsetMinutes: number;
+    }[],
   ): Promise<Set<number>>;
 }
 
@@ -399,6 +405,8 @@ function readManifest(
         report.add(file, null, w, "missing_column", "This column is missing from the header.");
     }
     header.forEach((h, i) => {
+      if (want.includes(h) && header.indexOf(h) !== i)
+        report.add(file, null, h, "repeated_column", "This column appears more than once.");
       if (!want.includes(h))
         report.add(
           file,
@@ -504,8 +512,8 @@ function readManifest(
         "A control total is a whole number.",
         value.slice(0, 64),
       );
+      // The files are still checked; only this total cannot be compared.
       declared.set(key, { value: null, line: record.line });
-      fatal = true;
       continue;
     }
     declared.set(key, { value: Number(value), line: record.line });
@@ -938,11 +946,16 @@ export async function validateImport(
     const zone = manifest.operatorTimeZone;
     const mismatched = await lookup.zoneMismatches(
       zone,
-      plans.map((p) => ({
-        startsAtMs: p.startMs,
-        local: `${p.localDate} ${p.localTime}`,
-        offsetMinutes: offsetAt(zone, p.startMs),
-      })),
+      plans.map((p) => {
+        const endsAtMs = p.startMs + p.product.durationMinutes * MINUTE_MS;
+        return {
+          startsAtMs: p.startMs,
+          local: `${p.localDate} ${p.localTime}`,
+          offsetMinutes: offsetAt(zone, p.startMs),
+          endsAtMs,
+          endOffsetMinutes: offsetAt(zone, endsAtMs),
+        };
+      }),
     );
     plans.forEach((plan, i) => {
       if (!mismatched.has(i)) return;

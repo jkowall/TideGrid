@@ -297,6 +297,34 @@ PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
     expect(at("trips.csv", 3)).toEqual([]);
   });
 
+  it("names a repeated manifest column, and checks the files past a bad control total", async () => {
+    const files = sample();
+    files["manifest.csv"] = (files["manifest.csv"] as string).replace(
+      "item,file,value",
+      "item,file,value,item",
+    );
+    let run = await validateImport(files, lookup(), NOW);
+    expect(run.issues).toContainEqual(
+      expect.objectContaining({ column: "item", code: "repeated_column" }),
+    );
+
+    const total = sample();
+    total["manifest.csv"] = (total["manifest.csv"] as string).replace(
+      "row_count,products.csv,2",
+      "row_count,products.csv,2.0",
+    );
+    total["trips.csv"] = (total["trips.csv"] as string).replace("08:00", "8 am");
+    run = await validateImport(total, lookup(), NOW);
+    expect(run.manifest).not.toBeNull();
+    expect(run.issues).toContainEqual(
+      expect.objectContaining({ file: "manifest.csv", column: "value", code: "invalid_type" }),
+    );
+    expect(run.issues).toContainEqual(
+      expect.objectContaining({ file: "trips.csv", column: "local_start_time" }),
+    );
+    expect(run.clean).toBe(false);
+  });
+
   it("refuses a canceled departure and a card number in the manifest", async () => {
     const canceledTrip: TripInfo = {
       id: "00000000-0000-4000-8000-000000000302",

@@ -128,11 +128,15 @@ export function importLookup(trx: TenantTransaction, tenantId: string): ImportLo
           from unnest(
                  ${departures.map((d) => new Date(d.startsAtMs).toISOString())}::text[],
                  ${departures.map((d) => d.local)}::text[],
-                 ${departures.map((d) => d.offsetMinutes)}::int[]
-               ) with ordinality as d(starts_at, local_start, start_offset, n)
+                 ${departures.map((d) => d.offsetMinutes)}::int[],
+                 ${departures.map((d) => new Date(d.endsAtMs).toISOString())}::text[],
+                 ${departures.map((d) => d.endOffsetMinutes)}::int[]
+               ) with ordinality as d(starts_at, local_start, start_offset, ends_at, end_offset, n)
          where pg_catalog.timezone(${zone}, d.starts_at::timestamptz) <> d.local_start::timestamp
             or extract(epoch from pg_catalog.timezone(${zone}, d.starts_at::timestamptz)
                  - pg_catalog.timezone('UTC', d.starts_at::timestamptz)) / 60 <> d.start_offset
+            or extract(epoch from pg_catalog.timezone(${zone}, d.ends_at::timestamptz)
+                 - pg_catalog.timezone('UTC', d.ends_at::timestamptz)) / 60 <> d.end_offset
       `.execute(trx);
       return new Set(rows.map((r) => r.position));
     },
