@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { GuestParticipantWaiver, ManageWaiversResponse } from "@tidegrid/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PartyWaivers, partyWaiverDetail } from "./PartyWaivers.tsx";
+import { canResend, PartyWaivers, partyWaiverDetail, resendProblem } from "./PartyWaivers.tsx";
 
 const session = "M".repeat(43);
 const zone = "America/New_York";
@@ -45,6 +45,7 @@ interface Call {
   url: string;
   method: string;
   authorization: string | null;
+  body: unknown;
 }
 
 const json = (status: number, body: unknown) =>
@@ -59,6 +60,7 @@ function stubApi(answer: (call: Call) => Response): Call[] {
         url: String(input),
         method: init?.method ?? "GET",
         authorization: new Headers(init?.headers).get("authorization"),
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
       };
       calls.push(call);
       return answer(call);
@@ -261,5 +263,238 @@ describe("what each status tells the booker", () => {
     expect(detail(person(1, "A", "email_held"))).toBe(
       "We can't email this address again just yet. Demo Reef Divers can send it once it's allowed.",
     );
+  });
+});
+
+describe("sending a person's waiver again", () => {
+  const sentAgain: ManageWaiversResponse["waivers"] = {
+    ...party,
+    participants: party.participants.map((p) => (p.position === 2 ? { ...p } : p)),
+  };
+
+  it("offers it only to people whose email went out and who haven't signed", async () => {
+    stubApi(() => json(200, { waivers: party }));
+    show();
+    await screen.findByText("1 of 3 signed");
+    const buttons = screen.getAllByRole("button", { name: /^Send again/ });
+    expect(buttons.map((b) => b.textContent)).toEqual(["Send again to Kit Minor"]);
+    expect(canResend(person(1, "A", "email_failed", { sentTo: "a•••@example.test" }))).toBe(true);
+    expect(canResend(person(1, "A", "email_failed"))).toBe(false);
+    expect(canResend(person(1, "A", "waiting", { sendsAt: "2026-10-06T19:14:05.000Z" }))).toBe(
+      false,
+    );
+    expect(canResend(person(1, "A", "email_held"))).toBe(false);
+    expect(canResend(person(1, "A", "signed"))).toBe(false);
+  });
+
+  it("sends it with the booking session and the person's place, then says where it went", async () => {
+    const calls = stubApi((call) =>
+      call.method === "POST" ? json(202, { waivers: sentAgain }) : json(200, { waivers: party }),
+    );
+    show();
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    const note = await screen.findByText(
+      "Sent again to g•••@example.test. Ask them to check their inbox and spam folder.",
+    );
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url).toMatch(/\/v1\/public\/manage\/waivers\/resend$/);
+    expect(post?.url).not.toContain(session);
+    expect(post?.authorization).toBe(`Bearer ${session}`);
+    expect(post?.body).toEqual({ position: 2, name: "Kit Minor" });
+    // The button goes, and its note takes focus so the result is heard.
+    expect(screen.queryByRole("button", { name: /^Send again/ })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(note));
+  });
+
+  it("explains a refusal beside the person, and keeps the button", async () => {
+    stubApi((call) =>
+      call.method === "POST"
+        ? json(409, { error: { code: "waiver_resend_too_soon", message: "x", requestId: "r" } })
+        : json(200, { waivers: party }),
+    );
+    show();
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    const item = (
+      await screen.findByText(
+        "We emailed this address in the last 10 minutes. Try again a little later.",
+      )
+    ).closest("li") as HTMLElement;
+    expect(within(item).getByRole("button", { name: "Send again to Kit Minor" })).toBeTruthy();
+  });
+
+  it("reads again when the waiver changed, and hands an ended session to the page", async () => {
+    let answer = 409;
+    const calls = stubApi((call) =>
+      call.method === "POST"
+        ? json(answer, {
+            error: {
+              code: answer === 409 ? "waiver_not_pending" : "session_expired",
+              message: "x",
+              requestId: "r",
+            },
+          })
+        : json(200, { waivers: party }),
+    );
+    const onEnded = vi.fn();
+    show({ onEnded });
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(
+      "This waiver changed since the page loaded. The list now shows where it stands.",
+    );
+    await waitFor(() => expect(calls.filter((c) => c.method === "GET")).toHaveLength(2));
+    answer = 401;
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await waitFor(() => expect(onEnded).toHaveBeenCalledTimes(1));
+  });
+
+  it("drops a sent note once the list shows the person differently", async () => {
+    let list = party;
+    stubApi((call) =>
+      call.method === "POST" ? json(202, { waivers: party }) : json(200, { waivers: list }),
+    );
+    const view = show({ refresh: 1 });
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(/^Sent again to g•••@example.test/);
+    // The booker corrects the address in Who's coming, and the page reads again.
+    list = {
+      ...party,
+      participants: party.participants.map((p) =>
+        p.position === 2 ? { ...p, sentTo: "n•••@example.test" } : p,
+      ),
+    };
+    view.rerender(
+      <PartyWaivers
+        session={session}
+        operator="Demo Harbor Charters"
+        timeZone={zone}
+        refresh={2}
+        onEnded={() => {}}
+      />,
+    );
+    await screen.findByText(
+      "We emailed the link to their parent or guardian at n•••@example.test.",
+    );
+    expect(screen.queryByText(/^Sent again/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Send again to Kit Minor" })).toBeTruthy();
+  });
+
+  it("never lets an earlier answer replace a later one", async () => {
+    let releasePost: (r: Response) => void = () => {};
+    const signedKit = {
+      ...party,
+      participants: party.participants.map((p) =>
+        p.position === 2 ? { ...p, status: "signed" as const, sentTo: null } : p,
+      ),
+    };
+    let reads = 0;
+    stubApi((call) => {
+      if (call.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          releasePost = resolve;
+        }) as unknown as Response;
+      }
+      reads += 1;
+      return json(200, { waivers: reads === 1 ? party : signedKit });
+    });
+    const view = show({ refresh: 1 });
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    // A read that starts after the send answers first: Kit has signed.
+    view.rerender(
+      <PartyWaivers
+        session={session}
+        operator="Demo Harbor Charters"
+        timeZone={zone}
+        refresh={2}
+        onEnded={() => {}}
+      />,
+    );
+    await screen.findByText("2 of 3 signed");
+    // The send's older list arrives last and changes nothing shown.
+    await act(async () => {
+      releasePost(json(202, { waivers: party }));
+    });
+    await waitFor(() => expect(reads).toBe(3));
+    expect(screen.getByText("2 of 3 signed")).toBeTruthy();
+  });
+
+  it("brings the button back 10 minutes after a send", async () => {
+    stubApi((call) =>
+      call.method === "POST" ? json(202, { waivers: party }) : json(200, { waivers: party }),
+    );
+    show();
+    await screen.findByText("1 of 3 signed");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(/^Sent again/);
+    expect(screen.queryByRole("button", { name: /^Send again/ })).toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(11 * 60_000);
+    });
+    expect(screen.queryByText(/^Sent again/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Send again to Kit Minor" })).toBeTruthy();
+  });
+
+  it("brings each person's button back on their own 10 minutes", async () => {
+    const two = {
+      ...party,
+      participants: [
+        person(1, "Ann Adult", "waiting"),
+        person(2, "Kit Minor", "waiting", { sentTo: "g•••@example.test" }),
+      ],
+    };
+    stubApi(() => json(200, { waivers: two }));
+    show();
+    await screen.findByText("0 of 2 signed");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Ann Adult" }));
+    await screen.findByText(/^Sent again to a•••/);
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60_000);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(/^Sent again to g•••/);
+    await act(async () => {
+      vi.advanceTimersByTime(6 * 60_000);
+    });
+    // Ann's 10 minutes are up; Kit's are not.
+    expect(screen.getByRole("button", { name: "Send again to Ann Adult" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send again to Kit Minor" })).toBeNull();
+  });
+
+  it("says when the booking site can't be reached, and the button stays", async () => {
+    stubApi((call) => {
+      if (call.method === "POST") throw new TypeError("offline");
+      return json(200, { waivers: party });
+    });
+    show();
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(
+      "We couldn't reach the booking site. Check your connection, then try again.",
+    );
+    const button = screen.getByRole("button", { name: "Send again to Kit Minor" });
+    expect(button.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("says what to do for each refusal", () => {
+    const op = "Demo Reef Divers";
+    expect(resendProblem("waiver_email_pending", 409, op)).toMatch(/still on its way/);
+    expect(resendProblem("waiver_resend_limit", 409, op)).toBe(
+      "This waiver has been sent as many times as we can for now. Contact Demo Reef Divers if it still hasn't arrived.",
+    );
+    expect(resendProblem("waiver_not_sent", 409, op)).toMatch(/Who's coming/);
+    expect(resendProblem("waiver_trip_over", 409, op)).toMatch(/trip is over/);
+    expect(resendProblem("waiver_resend_held", 409, op)).toBe(
+      "We can't email this person again just yet. Try again later, or contact Demo Reef Divers.",
+    );
+    expect(resendProblem("waiver_participant_changed", 409, op)).toMatch(/party changed/);
+    expect(resendProblem("rate_limited", 429, op)).toMatch(/Wait a minute/);
+    expect(resendProblem("unknown", 503, op)).toMatch(/couldn't send it just now/);
+    expect(resendProblem("unknown", 400, op)).toMatch(/contact Demo Reef Divers/);
   });
 });

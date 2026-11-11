@@ -29547,6 +29547,368 @@
         }
       }
     },
+    "/v1/public/manage/waivers/resend": {
+      "post": {
+        "tags": [
+          "public",
+          "manage",
+          "waivers"
+        ],
+        "summary": "Send a party member's waiver email again",
+        "description": "Resolves the browser Origin and needs the booking session from POST /v1/public/booking-access (lane 1) as a bearer token. Sends the waiver email of the person at `position`, named `name` as the list gave it, again, to the address the latest one went to, never anywhere else. The new email's link replaces the earlier one, as any resend does. To send it somewhere new, the booker changes the address in Who's coming instead.\n\nLimits: 3 a day for the person, shared with their own new-link requests; the waiver's five sends; and the usual sending limits, including 10 minutes between emails to one address. Nothing goes out while the latest email is still on its way. Answers the party's waivers as GET does, after the send. Rate limited per client address and operator like other public commands.",
+        "security": [
+          {
+            "manageSession": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "position": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "The person's place in the party, as the waivers list gives it"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "The person's name as the waivers list gave it, so a party changed since then sends nothing"
+                  }
+                },
+                "required": [
+                  "position",
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued; the party's waivers as they stand now",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "waivers": {
+                      "type": "object",
+                      "properties": {
+                        "applies": {
+                          "type": "boolean",
+                          "description": "False when no waiver applies to the trip or the booking is not confirmed; the page then shows nothing"
+                        },
+                        "unnamedPlaces": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Places nobody has been named for yet"
+                        },
+                        "participants": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "position": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "The person's place in the party"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "minor": {
+                                "type": "boolean"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "signed",
+                                  "waiting",
+                                  "email_failed",
+                                  "no_address",
+                                  "email_held",
+                                  "not_assigned",
+                                  "not_required",
+                                  "not_needed"
+                                ],
+                                "description": "signed; waiting: sent, not signed yet; email_failed: the latest email failed; no_address: no address to send to yet; email_held: the booking has an address but no working email went to it (a sending limit held it, or the address went and came back); not_assigned: a waiver applies but this participant has no request; not_required: no waiver applies to the trip; not_needed: the booking was canceled"
+                              },
+                              "signer": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "enum": [
+                                  "participant",
+                                  "guardian",
+                                  null
+                                ],
+                                "description": "Who signs; null when nothing was requested"
+                              },
+                              "signedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time"
+                              },
+                              "sentTo": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "Where the latest email went, masked: first character and domain; null once signed or when none went out"
+                              },
+                              "sendsAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "format": "date-time",
+                                "description": "When a waiting email is due to go out, when that is later than now; null otherwise"
+                              }
+                            },
+                            "required": [
+                              "position",
+                              "name",
+                              "minor",
+                              "status",
+                              "signer",
+                              "signedAt",
+                              "sentTo",
+                              "sendsAt"
+                            ]
+                          },
+                          "description": "By place in the party"
+                        }
+                      },
+                      "required": [
+                        "applies",
+                        "unnamedPlaces",
+                        "participants"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "waivers"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No booking session (session_required), or it has ended (session_expired); open the link again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No operator at this address, or no one at that place in the party (waiver_participant_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The waiver no longer waits for a signature (waiver_not_pending), the trip is over (waiver_trip_over), the latest email is still on its way (waiver_email_pending), nothing went to this address yet (waiver_not_sent), the day's or the waiver's sends are used (waiver_resend_limit), the party changed since the list was read (waiver_participant_changed), an email went to this address in the last 10 minutes (waiver_resend_too_soon), a sending cap holds it (waiver_resend_held), or the email could not be built (waiver_email_invalid)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB; a cross-origin browser gets this answer without CORS headers, so it cannot read it (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this address for this operator (rate_limited)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/waivers": {
       "get": {
         "tags": [

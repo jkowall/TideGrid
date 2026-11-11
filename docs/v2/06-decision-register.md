@@ -8,6 +8,22 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.15-rest, the booker sends a person's waiver email again, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The tracker's W3-G2.15-rest also covers the generic dock QR with staff lookup, waiver reuse across bookings, and suppressing waiver email for imported bookings; the first needs the owner's call on how staff look a guest up at the dock, the second needs verified customer identity and the owner's re-sign policy, and the third waits for the CSV import's commit step, so none is in this part.
+
+No migration: it reuses the guest renewal of `0028` and its database rules. It closes the [waiver module's](../../packages/domain-waivers/README.md#deferred-and-known-gaps) "Renewal from the management page" gap. What it adds:
+
+- **The booker can send a person's waiver again.** On the booking's management page, beside each named person whose waiver email went out and who hasn't signed, a "Send again" button sends the same email again (`POST /v1/public/manage/waivers/resend`, in the booking session). The page then says where it went, masked.
+- **Only where it went before.** The email goes to the address the latest one went to, never anywhere else. To send it somewhere new, the booker changes the address in Who's coming, which sends at once.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: it counts as the person's own renewal.** At most 3 a day for each person, shared with the "Email me a new link" requests from the signing page, inside the waiver's five sends, 10 minutes between emails to one address, and the operator's sending limits. The database holds the address and the 3 a day for every writer.
+- **D2: the new link replaces the old one,** as any resend does, so the booker can send it even while the last link still works: the booker can't see whether the email arrived. Nothing goes out while the latest email is still on its way.
+- **D3: the booker hears why it did not go.** The booker is signed in to the booking, so the answer names the reason (still on its way, sent in the last 10 minutes, held by a sending limit, sent as many times as allowed, nothing sent to this address yet, the party changed, no longer needed), where a guest's renewal from a link answers the same whatever happened. The page sends the person's name with their place, so a party changed in another tab sends nothing, and the audit records the booker's resend apart from the person's own renewal.
+- **D4: offered only for a waiting or failed email that went to an address.** Not for a signed waiver, one with no address yet (Who's coming handles it), one held by the sending limits (staff can send it once allowed), or one not yet sent by the operator.
+
 ### 2026-11-11: W3-G2.14b-rest, part 1, an operator's Important links, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. The tracker's W3-G2.14b-rest also covers custom hostnames on an operator's domain, TXT reuse, the D15 narrowings, and the sweep of unattached pending hostnames; those need a real operator domain or the owner's rule and are not in this part.

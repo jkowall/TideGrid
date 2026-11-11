@@ -4,6 +4,15 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-11
 
+### The booker sends a person's waiver email again (W3-G2.15-rest), built November 11, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, no migration, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.
+
+- **Built.** `POST /v1/public/manage/waivers/resend` in the booking session, with the person's place and name: the same waiver email again, to the address the latest one went to, as a `guest_renewal` generation (3 a day for the person, shared with their own renewals; the five sends; the sending limits; nothing while an email is on its way). The management page's Waivers card offers "Send again" beside each person whose email went out and who hasn't signed, and says where it went or why it did not.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `renewal.integration.test.ts` (3 new cases: on its way, the 10 minutes, sent and audited apart, the shared 3 a day; no one, another operator, a changed name, no address, signed, a non-guest caller; two at once, the five sends, a corrected address) and the API's `waivers.integration.test.ts` (1 new case: session, other operator, contract, unknown place, changed name, canceled, and no ids or full address in the answer). Guest site: `PartyWaivers.test.tsx` (8 new cases). `pnpm check` green.
+- **Reviews.** An independent and a security review found nothing that blocks. Fixed from them: the page sends the person's name, so a party changed in another tab sends nothing; a sending cap answers its own code and words instead of "10 minutes"; the audit names the booker's resend apart from the person's own renewal; a note goes once the list shows the person differently, and after 10 minutes; refusals are announced to screen readers; the button never stays busy after a session ends.
+- **Still open.** Defaults D1 to D4 await the owner. The native guest app does not offer the button yet. A failed email to an address suppressed after a hard bounce is still offered; the send fails again and the page says so.
+
 ### Important links in the console and on the help page (W3-G2.14b-rest, part 2), built November 11, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, no migration, under the owner's go of 2026-11-10. Synthetic data only; no provider call, no deploy.
