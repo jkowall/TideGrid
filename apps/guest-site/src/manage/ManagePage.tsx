@@ -611,11 +611,21 @@ function BookingView({
           <h2 id="manage-receipt" className="booking-section-title">
             Receipt
           </h2>
-          <Ledger caption="Receipt in US dollars" hideCaption rows={orderRows(booking.order)} />
-          <p className="manage-quiet">
-            Paid with a test payment ({formatMoney(booking.payment.amount)}). This is a demo: no
-            real card was charged.
-          </p>
+          <Ledger
+            caption="Receipt in US dollars"
+            hideCaption
+            rows={orderRows(booking.order, booking.payment === null)}
+          />
+          {booking.payment ? (
+            <p className="manage-quiet">
+              Paid with a test payment ({formatMoney(booking.payment.amount)}). This is a demo: no
+              real card was charged.
+            </p>
+          ) : (
+            <p className="manage-quiet">
+              Complimentary: your host booked this trip for you at no charge.
+            </p>
+          )}
           {booking.refund && (
             <p className="manage-refund">
               <Icon name="receipt" />

@@ -31,6 +31,7 @@ import {
   bookingsHref,
   cancellationRemedyText,
   cancelledByText,
+  complimentaryReasonText,
   countText,
   dayText,
   extrasText,
@@ -228,7 +229,7 @@ function Detail({
   const end = localPartsOf(trip.endsAtLocal);
   const endText = end.date === trip.localDate ? end.time : `${end.time} next day`;
   const payment = paymentCopy({
-    state: booking.payment.state,
+    state: booking.payment?.state ?? "complimentary",
     refund: booking.refund ? { state: booking.refund.state, amount: booking.refund.amount } : null,
   });
   const state = bookingStates[booking.state];
@@ -253,9 +254,11 @@ function Detail({
         </div>
       </div>
       <p className="bd-lede">
-        {booking.source === "staff_assisted"
-          ? `${sourceText(booking.source, booking.channel)}.`
-          : "Booked online by the guest."}{" "}
+        {booking.source === "complimentary"
+          ? "Booked complimentary by an owner, at no charge."
+          : booking.source === "staff_assisted"
+            ? `${sourceText(booking.source, booking.channel)}.`
+            : "Booked online by the guest."}{" "}
         Confirmed {instantText(booking.confirmedAt, zone)}.
         {booking.reacquired &&
           " The payment arrived after the checkout's hold ran out, and the seats were still free."}
@@ -363,30 +366,59 @@ function Detail({
                 {payment.label}
               </StatusBadge>
             </dd>
-            <dt>Amount</dt>
-            <dd className="bk-money">
-              {formatMoney(booking.payment.amount, booking.payment.currency)}
-            </dd>
-            <dt>Method</dt>
-            <dd>{providerName(booking.payment.provider)}</dd>
-            <dt>Provider reference</dt>
-            <dd>
-              {booking.payment.providerReference ? (
-                <>
-                  <MaskedReference value={booking.payment.providerReference} />
-                  <span className="bd-block bd-muted bd-small">
-                    Shortened: the start and the last four characters.
-                  </span>
-                </>
-              ) : (
-                "Not recorded yet"
-              )}
-            </dd>
-            {booking.payment.succeededAt && (
+            {booking.payment ? (
               <>
-                <dt>Received</dt>
-                <dd>{instantText(booking.payment.succeededAt, zone)}</dd>
+                <dt>Amount</dt>
+                <dd className="bk-money">
+                  {formatMoney(booking.payment.amount, booking.payment.currency)}
+                </dd>
+                <dt>Method</dt>
+                <dd>{providerName(booking.payment.provider)}</dd>
+                <dt>Provider reference</dt>
+                <dd>
+                  {booking.payment.providerReference ? (
+                    <>
+                      <MaskedReference value={booking.payment.providerReference} />
+                      <span className="bd-block bd-muted bd-small">
+                        Shortened: the start and the last four characters.
+                      </span>
+                    </>
+                  ) : (
+                    "Not recorded yet"
+                  )}
+                </dd>
+                {booking.payment.succeededAt && (
+                  <>
+                    <dt>Received</dt>
+                    <dd>{instantText(booking.payment.succeededAt, zone)}</dd>
+                  </>
+                )}
               </>
+            ) : (
+              booking.complimentary && (
+                <>
+                  <dt>Waived</dt>
+                  <dd className="bk-money">
+                    {formatMoney(
+                      booking.complimentary.waivedAmount,
+                      booking.complimentary.currency,
+                    )}
+                  </dd>
+                  <dt>Reason</dt>
+                  <dd>{complimentaryReasonText(booking.complimentary.reasonCode)}</dd>
+                  {booking.complimentary.note && (
+                    <>
+                      <dt>Note</dt>
+                      <dd>{booking.complimentary.note}</dd>
+                    </>
+                  )}
+                  <dt>Granted by</dt>
+                  <dd>
+                    {booking.complimentary.grantedBy?.displayName ?? "An owner"},{" "}
+                    {instantText(booking.complimentary.grantedAt, zone)}
+                  </dd>
+                </>
+              )
             )}
           </dl>
           {booking.cancellation && (

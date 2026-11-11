@@ -1818,4 +1818,58 @@ describe.skipIf(!env)("G2.12d staff-assisted booking through the API", () => {
       (await quote(A.id, A.owner, { ...tickets(small, 5), capacityOverride: true })).status,
     ).toBe(201);
   });
+
+  it("W3-G2.12-rest: lets only an owner book a guest at no charge, with a reason", async () => {
+    const trip = tripsA.shared();
+    const path = `${base(A.id)}/complimentary-bookings`;
+    const comp = (as: string, body: unknown, k = key("comp")) =>
+      request("POST", path, { as, body, headers: { "idempotency-key": k } });
+    const grant = { reasonCode: "service_recovery" } as const;
+
+    const q = await staffQuote(A, A.owner, tickets(trip, 2));
+    // Booking staff may not give a booking away.
+    const staffTry = await comp(A.staff, {
+      ...openBody(q, booker("comp")),
+      complimentary: grant,
+    });
+    expect([staffTry.status, staffTry.json.error?.code], staffTry.text).toEqual([
+      403,
+      "complimentary_forbidden",
+    ]);
+    // Other needs a note.
+    const noNote = await comp(A.owner, {
+      ...openBody(q, booker("comp")),
+      complimentary: { reasonCode: "other" },
+    });
+    expect(noNote.status).toBe(400);
+
+    const k = key("comp");
+    const body = { ...openBody(q, booker("comp")), complimentary: grant };
+    const made = await comp(A.owner, body, k);
+    expect(made.status, made.text).toBe(201);
+    expect(made.json.booking).toMatchObject({
+      source: "complimentary",
+      waivedAmount: q.totals.total,
+    });
+    // A retry with the same key gives the same booking, not a second one.
+    const again = await comp(A.owner, body, k);
+    expect(again.status, again.text).toBe(201);
+    expect(again.json.booking.id).toBe(made.json.booking.id);
+
+    const [row] = await admin<{ source: string; payment_id: string | null; reason_code: string }[]>`
+      select b.source, b.payment_id, g.reason_code
+        from public.bookings b
+        join public.complimentary_grants g on g.checkout_session_id = b.checkout_session_id
+       where b.id = ${made.json.booking.id as string}`;
+    expect(row).toEqual({
+      source: "complimentary",
+      payment_id: null,
+      reason_code: "service_recovery",
+    });
+    const [payments] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.payments p
+        join public.bookings b on b.checkout_session_id = p.checkout_session_id
+       where b.id = ${made.json.booking.id as string}`;
+    expect(payments?.n).toBe(0);
+  });
 });

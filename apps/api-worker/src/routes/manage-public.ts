@@ -164,12 +164,14 @@ function managedJson(view: ManagedBookingView): ManagedBooking {
     party: b.party,
     extras: b.extras,
     order: b.order,
-    payment: {
-      provider: b.payment.provider,
-      state: b.payment.state,
-      amount: b.payment.amount,
-      currency: "USD",
-    },
+    payment: b.payment
+      ? {
+          provider: b.payment.provider,
+          state: b.payment.state,
+          amount: b.payment.amount,
+          currency: "USD",
+        }
+      : null,
     refund: b.refund,
     cancellation: b.cancellation,
     balance: b.balance,

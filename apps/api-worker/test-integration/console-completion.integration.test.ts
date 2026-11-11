@@ -803,7 +803,7 @@ describe.skipIf(!env)("G2.12c console completion through the API", () => {
         { from: "2026-02-30" },
         { q: "maya", limit: 101 },
         { q: "maya", after: "not-a-uuid" },
-        { q: "maya", source: "complimentary" },
+        { q: "maya", source: "imported" },
         { q: "maya", source: "" },
         { q: "maya", source: null },
         // A source narrows a search and is not one by itself.

@@ -7,6 +7,8 @@ import {
   StaffCheckoutCreateResponse,
   StaffCheckoutParams,
   StaffCheckoutResponse,
+  StaffComplimentaryBookingRequest,
+  StaffComplimentaryBookingResponse,
   StaffQuoteCreateRequest,
   StaffTenantParams,
   StaffTestPaymentRequest,
@@ -16,6 +18,7 @@ import {
 } from "@tidegrid/contracts";
 import { inTenantTransaction } from "@tidegrid/database";
 import {
+  bookComplimentary,
   type CreateCheckoutResult,
   cancelStaffCheckout,
   ensureProviderPayment,
@@ -32,8 +35,10 @@ import { getTripSale } from "@tidegrid/domain-inventory";
 import { type FakeEvent, ProviderUnavailableError } from "@tidegrid/domain-payments";
 import { createQuote, getTripOffer, type QuoteProblem } from "@tidegrid/domain-pricing";
 import { sql } from "kysely";
+import { bookingHooksFor } from "../booking-hooks.ts";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { getDb } from "../db.ts";
+import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
 import { deliverFakeEvent } from "../fake-delivery.ts";
 import { cancelPaymentAfterCommit, fakeProviderFor, providerFor } from "../payments.ts";
@@ -44,6 +49,7 @@ const offerPath = "/v1/staff/tenants/{tenantId}/trips/{tripId}/offer";
 const quotesPath = "/v1/staff/tenants/{tenantId}/quotes";
 const checkoutsPath = "/v1/staff/tenants/{tenantId}/checkouts";
 const checkoutPath = "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}";
+const complimentaryPath = "/v1/staff/tenants/{tenantId}/complimentary-bookings";
 const cancelPath = "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/cancel";
 const testPaymentPath = "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/test-payment";
 
@@ -137,6 +143,12 @@ function checkoutRefused(created: Exclude<CreateCheckoutResult, { kind: "created
         "override_exceeds_boat",
         `Even past the trip's capacity this party does not fit: ${created.boatRemaining} seat(s) are left on the boat`,
       );
+    case "complimentary_deposit":
+      return new ApiError(
+        409,
+        "complimentary_deposit",
+        "A trip that takes a deposit cannot be complimentary; its deposit and balance stay paid",
+      );
   }
 }
 
@@ -150,6 +162,17 @@ function requireOwnerForOverride(ctx: StaffTenantContext) {
       403,
       "capacity_override_forbidden",
       "Only an owner can let a booking past a full trip",
+    );
+  }
+}
+
+/** A complimentary booking is the owner's alone (W3-G2.12-rest); the database refuses anyone else's too (0039). */
+function requireOwnerForComplimentary(ctx: StaffTenantContext) {
+  if (ctx.access.role !== "owner") {
+    throw new ApiError(
+      403,
+      "complimentary_forbidden",
+      "Only an owner can book a guest at no charge",
     );
   }
 }
@@ -429,6 +452,110 @@ export function registerStaffBookingRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     if (ready.kind === "not_found") throw new Error("a committed checkout has no payment");
     if (result.replayed) c.header("Idempotent-Replayed", "true");
     return c.json({ checkout, paymentReady: ready.kind === "ready" }, 201);
+  });
+
+  // Complimentary (W3-G2.12-rest) -----------------------------------------------------
+  const complimentaryRoute = createRoute({
+    method: "post",
+    path: complimentaryPath,
+    tags: ["staff", "bookings"],
+    summary: "Book a guest at no charge, as an owner",
+    description: [
+      "Owners only (bookings.create and the owner role; anyone else answers 403 complimentary_forbidden). Takes a quote this tenant's staff created, as a staff checkout does, and in one step holds the party, writes the order, records the owner's grant for the order's whole total with a reason code (a note is required for other), and confirms the booking. There is no payment, and the booking's source is complimentary. Never on a trip that takes a deposit (409 complimentary_deposit). An owner may add a capacityOverride as on a staff checkout.",
+      "The booking is otherwise a booking like any other: the confirmation email with the management link and waiver requests goes to the booker, and it can be moved, made smaller, or canceled. Canceling it returns nothing, since nothing was paid. TideGrid charges no fee on it.",
+      "Staff attest as for a staff checkout. Idempotent by key: a retry with the same key and body returns the same booking with `Idempotent-Replayed: true`.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: StaffTenantParams,
+      headers: idempotencyHeader,
+      body: {
+        required: true,
+        content: { "application/json": { schema: StaffComplimentaryBookingRequest } },
+      },
+    },
+    responses: {
+      201: {
+        content: { "application/json": { schema: StaffComplimentaryBookingResponse } },
+        description: "The confirmed complimentary booking",
+      },
+      400: errorBody("Request did not match the contract, or the Idempotency-Key is missing"),
+      401: errorBody("Not signed in"),
+      403: errorBody(
+        "Only an owner books a guest at no charge (complimentary_forbidden), the role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+      ),
+      404: errorBody(
+        "No such tenant, or no such staff quote for it (quote_not_found); a guest's quote reads the same",
+      ),
+      409: errorBody(
+        "quote_expired, quote_already_used, trip_not_bookable, insufficient_capacity, party_size_out_of_range, override_exceeds_boat, or complimentary_deposit (a trip that takes a deposit)",
+      ),
+      422: errorBody("policy_not_accepted or idempotency_key_reused"),
+      429: errorBody("Too many open checkouts for this staff member (too_many_checkouts)"),
+    },
+  });
+
+  app.openapi(complimentaryRoute, async (c) => {
+    const { tenantId } = c.req.valid("param");
+    const input = c.req.valid("json");
+    const key = c.req.valid("header")["idempotency-key"];
+    const result = await withStaffTenant(
+      c,
+      deps,
+      {
+        tenantId,
+        permission: "bookings.create",
+        idempotency: {
+          scope: "staff.complimentary_bookings.create",
+          key,
+          route: complimentaryPath,
+          body: input,
+          successStatus: 201,
+        },
+      },
+      async (trx, ctx) => {
+        requireOwnerForComplimentary(ctx);
+        const booked = await bookComplimentary(
+          trx,
+          ctx,
+          {
+            quoteId: input.quoteId,
+            acceptedPolicyVersion: input.acceptedPolicyVersion,
+            booker: input.booker,
+            channel: input.channel,
+            attestations: input.attestations,
+            complimentary: {
+              reasonCode: input.complimentary.reasonCode,
+              note: input.complimentary.note ?? null,
+            },
+            ...(input.capacityOverride
+              ? {
+                  capacityOverride: {
+                    reasonCode: input.capacityOverride.reasonCode,
+                    note: input.capacityOverride.note ?? null,
+                  },
+                }
+              : {}),
+          },
+          bookingHooksFor(c.env, deps),
+        );
+        if (booked.kind !== "booked") throw checkoutRefused(booked);
+        return {
+          booking: {
+            id: booked.bookingId,
+            reference: booked.reference,
+            source: "complimentary" as const,
+            waivedAmount: booked.waivedAmount,
+            currency: "USD" as const,
+          },
+        };
+      },
+    );
+    if (result.status !== 201) throw new Error(`unexpected stored status ${result.status}`);
+    if (result.replayed) c.header("Idempotent-Replayed", "true");
+    // The confirmation and waiver emails: send them now, not at the sweep.
+    else deliverAfterCommit(c, deps, result.ctx.tenantId);
+    return c.json(result.body as StaffComplimentaryBookingResponse, 201);
   });
 
   // R4 ---------------------------------------------------------------------------------

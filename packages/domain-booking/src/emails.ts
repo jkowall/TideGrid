@@ -106,7 +106,7 @@ function tripRows(detail: BookingDetailView): { label: string; value: string }[]
 
 /** At most a receipt's worth of rows; a longer order says so. */
 function receipt(detail: BookingDetailView): EmailBlock {
-  const rows = receiptRows(detail.order);
+  const rows = receiptRows(detail.order, detail.payment === null);
   return {
     kind: "lines",
     rows:
@@ -170,7 +170,13 @@ export async function enqueueConfirmationEmail(
           } as const,
         ]
       : []),
-    { kind: "paragraph", text: "Paid with a test payment. No real card was charged." },
+    {
+      kind: "paragraph",
+      text:
+        detail.payment === null
+          ? "This booking is complimentary, with our compliments: there is nothing to pay."
+          : "Paid with a test payment. No real card was charged.",
+    },
     {
       kind: "paragraph",
       text: "Use the button to name everyone in your party, or to cancel within the policy below.",
@@ -405,9 +411,11 @@ export async function enqueueCancellationEmail(
         : `${money(c.refundAmount)} of the ${money(c.paidAmount)} you paid, on its way back to your original payment method`
       : c.creditAmount > 0
         ? "None to your card: the value is booking credit instead (below)"
-        : c.overridden
-          ? "None"
-          : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
+        : c.paidAmount === 0 && detail.payment === null
+          ? "None: the booking was complimentary, so nothing was paid"
+          : c.overridden
+            ? "None"
+            : `None: the policy gives no refund ${c.beforeCutoff ? "for this booking" : "after its cutoff"}`;
   const blocks: EmailBlock[] = [
     { kind: "heading", text: "Your booking is canceled" },
     {

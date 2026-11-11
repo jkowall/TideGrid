@@ -86,6 +86,7 @@ describe("the Source control", () => {
         "All sources",
         "Online, by the guest",
         "Staff bookings",
+        "Complimentary",
       ]);
       const q = role === "finance" ? "QKG6" : "maya";
       type(q);

@@ -8,6 +8,29 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.12-rest, an owner books a guest at no charge with a reason, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. Third and last part of W3-G2.12-rest, after the money report and the capacity override (the entries below).
+
+It lands as migration `0039` and the [database contract](../../packages/database/README.md#complimentary-bookings-0039). It covers the tracker's "complimentary bookings with a reason code, through the waiver matrix". It changes the booking, checkout, cancellation, and fee rules, so it was reviewed against the rule that every booking has its money evidence. What it adds:
+
+- **An owner books a guest at no charge.** In the console API (`POST /v1/staff/tenants/{tenantId}/complimentary-bookings`), an owner prices the party as for any staff booking, then books it with a reason code. The owner's grant takes the place of the payment: it waives the order's whole total, the order closes as settled by the grant, and the booking has no payment. Everything else is the same: the seats are held and confirmed like any booking, the booker gets the confirmation email, and the guests go through the same waiver steps (the waiver matrix test now books one).
+- **The grant is the evidence.** The database keeps one append-only grant for the checkout and its order, with the owner who gave it, the reason, the amount waived, and when. A booking has a payment or a grant, never both and never neither, and no payment can be taken on a checkout that has a grant.
+- **It shows as complimentary.** Lists, rosters, and search show "Complimentary" where the payment state would be. The booking's page shows the amount waived, the reason, and who granted it. The day report counts the booking with zero money.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: owners only**, as for the capacity override. Booking staff, finance, and support cannot, and the database checks it from the owner's membership, not only the API.
+- **D2: reason codes.** `service_recovery` (making up for a problem), `staff_or_crew`, `partner_or_media`, `charity_or_donation`, and `other`, which needs a short note. The audit history records the code, the amount, and who; the note stays with the grant and is shown only to roles that see guests' details, because it can name a guest.
+- **D3: the whole order or nothing.** No partial discounts here (a discount is a pricing rule). A quote that would take a deposit is refused (`complimentary_deposit`), since there is no balance to collect.
+- **D4: cancelling gives nothing back.** Cancelling a complimentary booking frees the seats with no refund and no credit, whatever the policy says, and a staff override of the refund is refused.
+- **D5: no TideGrid fee.** The fee is a share of money taken, so a complimentary booking's fee is zero.
+- **D6: no money recorded outside the card flow.** Cash, check, or other money, in or out, cannot be recorded against a complimentary booking (`booking_complimentary`). There is nothing owed, and a refund recorded on one would reverse a TideGrid fee that was never charged.
+
+The guest's confirmation email and booking page say the booking is complimentary and that they paid $0.00, and the cancellation email says nothing was paid.
+
+Known limits: there is no console form yet (the API is ready for it); the staff checkout read does not show a complimentary checkout; the grant's note is not cleared by the 30-day retention job, since it belongs to a confirmed booking, like booking notes; the money report shows nothing for a complimentary booking, as no money moved; and changing the party size or moving the booking works as usual and charges nothing.
+
 ### 2026-11-11: W3-G2.12-rest, an owner's capacity override with a reason, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. Second part of W3-G2.12-rest, after the money report (the entry below).

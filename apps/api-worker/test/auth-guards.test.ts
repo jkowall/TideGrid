@@ -50,6 +50,8 @@ describe("the public entry hides staff and sign-in routes", () => {
     ["POST", `/v1/staff/tenants/${tenant}/finalization-exceptions/${someId}/resolution`],
     // Correcting the booker's contact details (W3-G2.11-rest).
     ["PUT", `/v1/staff/tenants/${tenant}/bookings/${someId}/booker`],
+    // Complimentary bookings (W3-G2.12-rest).
+    ["POST", `/v1/staff/tenants/${tenant}/complimentary-bookings`],
   ] as const) {
     it(`answers ${method} ${path} with the ordinary 404`, async () => {
       const res = await SELF.fetch(`https://api.test${path}`, {
@@ -280,6 +282,8 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}",
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/cancel",
         "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}/test-payment",
+        // Complimentary bookings (W3-G2.12-rest).
+        "/v1/staff/tenants/{tenantId}/complimentary-bookings",
         // Staff resend of a booking's email (G2.16b).
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/emails/resend",
         // Guest API follow-ups (W1-GUEST-API).

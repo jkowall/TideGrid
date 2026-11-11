@@ -748,6 +748,7 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         booking_contact_changes: ["INSERT", "SELECT"],
         // Capacity overrides (0038, W3-G2.12-rest): append-only, owners only.
         capacity_overrides: ["INSERT", "SELECT"],
+        complimentary_grants: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,

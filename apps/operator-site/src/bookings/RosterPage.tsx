@@ -390,7 +390,7 @@ function RosterTable({
                 </th>
                 <td>
                   {b.booker.name}
-                  {b.source === "staff_assisted" && (
+                  {(b.source === "staff_assisted" || b.source === "complimentary") && (
                     <span className="bd-block roster-table__detail">
                       {sourceText(b.source, b.channel)}
                     </span>

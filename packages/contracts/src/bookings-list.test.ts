@@ -19,7 +19,7 @@ const trip = {
 };
 
 describe("the day list's source filter (G2.12e)", () => {
-  it.each(["direct", "staff_assisted"])("takes source=%s", (source) => {
+  it.each(["direct", "staff_assisted", "complimentary"])("takes source=%s", (source) => {
     const parsed = BookingListQuery.safeParse({ date, source });
     expect(parsed.success).toBe(true);
     expect(parsed.data?.source).toBe(source);
@@ -31,7 +31,7 @@ describe("the day list's source filter (G2.12e)", () => {
   });
 
   it.each([
-    ["a source the API does not have", "complimentary"],
+    ["a source the API does not have", "imported"],
     ["an empty value", ""],
     ["another case", "STAFF_ASSISTED"],
     ["two values", ["direct", "staff_assisted"]],

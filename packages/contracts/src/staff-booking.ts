@@ -103,6 +103,55 @@ export const StaffCheckoutCreateRequest = z.object({
 });
 export type StaffCheckoutCreateRequest = z.infer<typeof StaffCheckoutCreateRequest>;
 
+/** Why an owner books a guest at no charge (W3-G2.12-rest); the same codes as a booking shows. */
+export const ComplimentaryGrant = z
+  .object({
+    reasonCode: z
+      .enum([
+        "service_recovery",
+        "staff_or_crew",
+        "partner_or_media",
+        "charity_or_donation",
+        "other",
+      ])
+      .describe(
+        "service_recovery: making up for a problem. staff_or_crew, partner_or_media, charity_or_donation, or other with a note",
+      ),
+    note: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
+      .regex(/^[^\u0000-\u001f\u007f]*$/, "No control characters")
+      .optional()
+      .describe(
+        "Required for other. Kept with the grant and shown to roles that see guests, never in the audit history",
+      ),
+  })
+  .refine((o) => o.reasonCode !== "other" || o.note !== undefined, {
+    message: "A note is required for other",
+    path: ["note"],
+  })
+  .describe("Owners only. The order's whole total is waived and the booking takes no payment");
+export type ComplimentaryGrant = z.infer<typeof ComplimentaryGrant>;
+
+export const StaffComplimentaryBookingRequest = StaffCheckoutCreateRequest.extend({
+  complimentary: ComplimentaryGrant,
+});
+export type StaffComplimentaryBookingRequest = z.infer<typeof StaffComplimentaryBookingRequest>;
+
+export const StaffComplimentaryBookingResponse = z.object({
+  booking: z.object({
+    id: Uuid,
+    reference: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{8}$/),
+    source: z.literal("complimentary"),
+    waivedAmount: Cents.describe("The quote's whole total, waived"),
+    currency: z.literal("USD"),
+  }),
+});
+export type StaffComplimentaryBookingResponse = z.infer<typeof StaffComplimentaryBookingResponse>;
+
 export const StaffCheckoutParams = z.object({
   tenantId: z.string(),
   checkoutId: z.string().describe("Checkout UUID; anything else answers 404"),

@@ -10027,9 +10027,10 @@
                             "type": "string",
                             "enum": [
                               "direct",
-                              "staff_assisted"
+                              "staff_assisted",
+                              "complimentary"
                             ],
-                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment"
+                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest)"
                           },
                           "reacquired": {
                             "type": "boolean",
@@ -10088,7 +10089,10 @@
                             ]
                           },
                           "payment": {
-                            "type": "object",
+                            "type": [
+                              "object",
+                              "null"
+                            ],
                             "properties": {
                               "id": {
                                 "type": "string",
@@ -10120,7 +10124,8 @@
                               "provider",
                               "state",
                               "amount"
-                            ]
+                            ],
+                            "description": "Null on a complimentary booking, which has no payment"
                           }
                         },
                         "required": [
@@ -10901,7 +10906,8 @@
               "type": "string",
               "enum": [
                 "direct",
-                "staff_assisted"
+                "staff_assisted",
+                "complimentary"
               ],
               "description": "Only bookings of this source, and trip counts of this source (G2.12e). Every trip of the date still lists. Exactly direct or staff_assisted; any other value, an empty one, or a repeated source answers 400 validation_failed"
             },
@@ -11063,9 +11069,10 @@
                             "type": "string",
                             "enum": [
                               "direct",
-                              "staff_assisted"
+                              "staff_assisted",
+                              "complimentary"
                             ],
-                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment"
+                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest)"
                           },
                           "channel": {
                             "type": [
@@ -11215,9 +11222,10 @@
                                 "enum": [
                                   "pending",
                                   "succeeded",
-                                  "failed"
+                                  "failed",
+                                  "complimentary"
                                 ],
-                                "description": "The charge: succeeded once a verified provider event says so"
+                                "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment"
                               },
                               "refund": {
                                 "type": [
@@ -11286,6 +11294,7 @@
                       "enum": [
                         "direct",
                         "staff_assisted",
+                        "complimentary",
                         null
                       ],
                       "description": "The source the page and the trip counts are filtered to; null for every source (G2.12e)"
@@ -11510,9 +11519,10 @@
                           "type": "string",
                           "enum": [
                             "direct",
-                            "staff_assisted"
+                            "staff_assisted",
+                            "complimentary"
                           ],
-                          "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment"
+                          "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest)"
                         },
                         "channel": {
                           "type": [
@@ -12008,7 +12018,10 @@
                           "description": "The immutable order, copied from the quote the guest accepted"
                         },
                         "payment": {
-                          "type": "object",
+                          "type": [
+                            "object",
+                            "null"
+                          ],
                           "properties": {
                             "provider": {
                               "type": "string",
@@ -12063,7 +12076,76 @@
                             "providerReference",
                             "createdAt",
                             "succeededAt"
-                          ]
+                          ],
+                          "description": "Null on a complimentary booking, which has no payment (see complimentary)"
+                        },
+                        "complimentary": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "reasonCode": {
+                              "type": "string",
+                              "enum": [
+                                "service_recovery",
+                                "staff_or_crew",
+                                "partner_or_media",
+                                "charity_or_donation",
+                                "other"
+                              ],
+                              "description": "Why the owner booked the guest at no charge; other carries a note"
+                            },
+                            "note": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "description": "Text the owner typed. Present only for roles that hold bookings.read; absent otherwise"
+                            },
+                            "waivedAmount": {
+                              "type": "integer",
+                              "description": "The order's whole total, waived"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "enum": [
+                                "USD"
+                              ]
+                            },
+                            "grantedAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "grantedBy": {
+                              "type": [
+                                "object",
+                                "null"
+                              ],
+                              "properties": {
+                                "userId": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                },
+                                "displayName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "userId",
+                                "displayName"
+                              ],
+                              "description": "The owner who granted it, as this operator names them"
+                            }
+                          },
+                          "required": [
+                            "reasonCode",
+                            "waivedAmount",
+                            "currency",
+                            "grantedAt",
+                            "grantedBy"
+                          ],
+                          "description": "The owner's grant on a complimentary booking; null or absent on a paid one"
                         },
                         "refund": {
                           "type": [
@@ -12847,7 +12929,8 @@
                                 "type": "string",
                                 "enum": [
                                   "direct",
-                                  "staff_assisted"
+                                  "staff_assisted",
+                                  "complimentary"
                                 ],
                                 "description": "Where the booking came from (G2.12d); always sent"
                               },
@@ -12985,9 +13068,10 @@
                                     "enum": [
                                       "pending",
                                       "succeeded",
-                                      "failed"
+                                      "failed",
+                                      "complimentary"
                                     ],
-                                    "description": "The charge: succeeded once a verified provider event says so"
+                                    "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment"
                                   },
                                   "refund": {
                                     "type": [
@@ -16066,7 +16150,10 @@
                           "description": "The immutable order, copied from the quote the guest accepted"
                         },
                         "payment": {
-                          "type": "object",
+                          "type": [
+                            "object",
+                            "null"
+                          ],
                           "properties": {
                             "provider": {
                               "type": "string",
@@ -16100,7 +16187,8 @@
                             "state",
                             "amount",
                             "currency"
-                          ]
+                          ],
+                          "description": "Null when the operator booked it complimentary: nothing was charged"
                         },
                         "refund": {
                           "type": [
@@ -17560,7 +17648,10 @@
                           "description": "The immutable order, copied from the quote the guest accepted"
                         },
                         "payment": {
-                          "type": "object",
+                          "type": [
+                            "object",
+                            "null"
+                          ],
                           "properties": {
                             "provider": {
                               "type": "string",
@@ -17594,7 +17685,8 @@
                             "state",
                             "amount",
                             "currency"
-                          ]
+                          ],
+                          "description": "Null when the operator booked it complimentary: nothing was charged"
                         },
                         "refund": {
                           "type": [
@@ -19123,7 +19215,10 @@
                           "description": "The immutable order, copied from the quote the guest accepted"
                         },
                         "payment": {
-                          "type": "object",
+                          "type": [
+                            "object",
+                            "null"
+                          ],
                           "properties": {
                             "provider": {
                               "type": "string",
@@ -19157,7 +19252,8 @@
                             "state",
                             "amount",
                             "currency"
-                          ]
+                          ],
+                          "description": "Null when the operator booked it complimentary: nothing was charged"
                         },
                         "refund": {
                           "type": [
@@ -20563,7 +20659,10 @@
                           "description": "The immutable order, copied from the quote the guest accepted"
                         },
                         "payment": {
-                          "type": "object",
+                          "type": [
+                            "object",
+                            "null"
+                          ],
                           "properties": {
                             "provider": {
                               "type": "string",
@@ -20597,7 +20696,8 @@
                             "state",
                             "amount",
                             "currency"
-                          ]
+                          ],
+                          "description": "Null when the operator booked it complimentary: nothing was charged"
                         },
                         "refund": {
                           "type": [
@@ -22128,7 +22228,10 @@
                           "description": "The immutable order, copied from the quote the guest accepted"
                         },
                         "payment": {
-                          "type": "object",
+                          "type": [
+                            "object",
+                            "null"
+                          ],
                           "properties": {
                             "provider": {
                               "type": "string",
@@ -22162,7 +22265,8 @@
                             "state",
                             "amount",
                             "currency"
-                          ]
+                          ],
+                          "description": "Null when the operator booked it complimentary: nothing was charged"
                         },
                         "refund": {
                           "type": [
@@ -24586,7 +24690,8 @@
                     "type": "string",
                     "enum": [
                       "direct",
-                      "staff_assisted"
+                      "staff_assisted",
+                      "complimentary"
                     ],
                     "description": "Only bookings of this source, as the day list's filter does: the results, the count, and the cursor. Exactly direct or staff_assisted; any other value, an empty one, or null answers 400 validation_failed. It narrows a search and is not a criterion on its own"
                   },
@@ -24641,7 +24746,8 @@
                             "type": "string",
                             "enum": [
                               "direct",
-                              "staff_assisted"
+                              "staff_assisted",
+                              "complimentary"
                             ],
                             "description": "Where the booking came from (G2.12d); always sent"
                           },
@@ -24749,9 +24855,10 @@
                                 "enum": [
                                   "pending",
                                   "succeeded",
-                                  "failed"
+                                  "failed",
+                                  "complimentary"
                                 ],
-                                "description": "The charge: succeeded once a verified provider event says so"
+                                "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment"
                               },
                               "refund": {
                                 "type": [
@@ -24835,6 +24942,7 @@
                       "enum": [
                         "direct",
                         "staff_assisted",
+                        "complimentary",
                         null
                       ],
                       "description": "The source the results and the count are filtered to; null for every source"
@@ -33783,6 +33891,510 @@
         }
       }
     },
+    "/v1/staff/tenants/{tenantId}/complimentary-bookings": {
+      "post": {
+        "tags": [
+          "staff",
+          "bookings"
+        ],
+        "summary": "Book a guest at no charge, as an owner",
+        "description": "Owners only (bookings.create and the owner role; anyone else answers 403 complimentary_forbidden). Takes a quote this tenant's staff created, as a staff checkout does, and in one step holds the party, writes the order, records the owner's grant for the order's whole total with a reason code (a note is required for other), and confirms the booking. There is no payment, and the booking's source is complimentary. Never on a trip that takes a deposit (409 complimentary_deposit). An owner may add a capacityOverride as on a staff checkout.\n\nThe booking is otherwise a booking like any other: the confirmation email with the management link and waiver requests goes to the booker, and it can be moved, made smaller, or canceled. Canceling it returns nothing, since nothing was paid. TideGrid charges no fee on it.\n\nStaff attest as for a staff checkout. Idempotent by key: a retry with the same key and body returns the same booking with `Idempotent-Replayed: true`.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "quoteId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "A quote from POST /v1/staff/tenants/{tenantId}/quotes, still within its validity"
+                  },
+                  "acceptedPolicyVersion": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "The policy version staff told the guest; must be the quote's"
+                  },
+                  "booker": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$"
+                      },
+                      "email": {
+                        "type": "string",
+                        "maxLength": 254,
+                        "pattern": "^[\\x21-\\x7e]+$"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "email"
+                    ],
+                    "description": "The person booking. Personal data: stored once for the booking and its messages, never in URLs, events, or logs"
+                  },
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "phone",
+                      "email",
+                      "walk_up"
+                    ],
+                    "description": "How the guest reached staff, on a staff-assisted booking"
+                  },
+                  "attestations": {
+                    "type": "object",
+                    "properties": {
+                      "policyToldToGuest": {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ],
+                        "description": "The staff member told the guest the cancellation policy of the quote's version"
+                      },
+                      "emailReadBack": {
+                        "type": "boolean",
+                        "enum": [
+                          true
+                        ],
+                        "description": "The staff member read the email address back to the guest; it cannot be changed after booking"
+                      }
+                    },
+                    "required": [
+                      "policyToldToGuest",
+                      "emailReadBack"
+                    ],
+                    "description": "What staff confirm before opening the checkout. Both are required"
+                  },
+                  "capacityOverride": {
+                    "type": "object",
+                    "properties": {
+                      "reasonCode": {
+                        "type": "string",
+                        "enum": [
+                          "regular_guest",
+                          "group_kept_together",
+                          "captain_approved",
+                          "make_good",
+                          "other"
+                        ],
+                        "description": "regular_guest: a regular the owner makes room for. group_kept_together: the rest of a party already booked. captain_approved: the captain agreed to carry more. make_good: making up for an earlier problem. other: say why in the note"
+                      },
+                      "note": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "description": "Required for other. Kept with the override, never in the audit history"
+                      }
+                    },
+                    "required": [
+                      "reasonCode"
+                    ],
+                    "description": "Owners only. When the trip is full, this booking may take the seats it lacks past the trip's capacity, never past the boat's guest capacity. Recorded with the reason, who, and when; written only when the trip is actually full"
+                  },
+                  "complimentary": {
+                    "type": "object",
+                    "properties": {
+                      "reasonCode": {
+                        "type": "string",
+                        "enum": [
+                          "service_recovery",
+                          "staff_or_crew",
+                          "partner_or_media",
+                          "charity_or_donation",
+                          "other"
+                        ],
+                        "description": "service_recovery: making up for a problem. staff_or_crew, partner_or_media, charity_or_donation, or other with a note"
+                      },
+                      "note": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500,
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                        "description": "Required for other. Kept with the grant and shown to roles that see guests, never in the audit history"
+                      }
+                    },
+                    "required": [
+                      "reasonCode"
+                    ],
+                    "description": "Owners only. The order's whole total is waived and the booking takes no payment"
+                  }
+                },
+                "required": [
+                  "quoteId",
+                  "acceptedPolicyVersion",
+                  "booker",
+                  "channel",
+                  "attestations",
+                  "complimentary"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The confirmed complimentary booking",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "booking": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "reference": {
+                          "type": "string",
+                          "pattern": "^[0-9A-HJKMNP-TV-Z]{8}$"
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "complimentary"
+                          ]
+                        },
+                        "waivedAmount": {
+                          "type": "integer",
+                          "description": "The quote's whole total, waived"
+                        },
+                        "currency": {
+                          "type": "string",
+                          "enum": [
+                            "USD"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "reference",
+                        "source",
+                        "waivedAmount",
+                        "currency"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "booking"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract, or the Idempotency-Key is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only an owner books a guest at no charge (complimentary_forbidden), the role cannot create bookings (forbidden), the origin is not the console (origin_not_allowed), or the tenant is suspended (tenant_suspended)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no such staff quote for it (quote_not_found); a guest's quote reads the same",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "quote_expired, quote_already_used, trip_not_bookable, insufficient_capacity, party_size_out_of_range, override_exceeds_boat, or complimentary_deposit (a trip that takes a deposit)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 16 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "policy_not_accepted or idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many open checkouts for this staff member (too_many_checkouts)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/staff/tenants/{tenantId}/checkouts/{checkoutId}": {
       "get": {
         "tags": [
@@ -38827,7 +39439,7 @@
             }
           },
           "409": {
-            "description": "The refund is larger than allowed (external_refund_too_large)",
+            "description": "The refund is larger than allowed (external_refund_too_large), or the booking is complimentary (booking_complimentary)",
             "content": {
               "application/json": {
                 "schema": {

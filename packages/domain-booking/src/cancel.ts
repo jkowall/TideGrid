@@ -86,7 +86,9 @@ interface TermsRow {
   reference: string;
   state: "confirmed" | "canceled";
   checkout_session_id: string;
-  payment_id: string;
+  /** Null on a complimentary booking (0039), which paid nothing. */
+  payment_id: string | null;
+  complimentary: boolean;
   hold_id: string;
   product_id: string;
   policy_version: number;
@@ -121,7 +123,13 @@ export function refundFor(paid: number, bp: number): number {
 }
 
 function termsOf(bookingId: string, row: TermsRow): CancellationTerms {
-  const remedy = row.before_cutoff ? row.before_cutoff_remedy : row.after_cutoff_remedy;
+  // A complimentary booking (0039) paid nothing, so whatever its policy gives
+  // a paid booking, it cancels with nothing to return, before departure.
+  const remedy = row.complimentary
+    ? "none"
+    : row.before_cutoff
+      ? row.before_cutoff_remedy
+      : row.after_cutoff_remedy;
   const policyBp = row.before_cutoff ? row.before_cutoff_refund_bp : row.after_cutoff_refund_bp;
   const bp = remedy === "full_refund" ? 10000 : remedy === "percent_refund" ? (policyBp ?? 0) : 0;
   const refusal: CancelRefusal | null =
@@ -168,9 +176,10 @@ async function termsRow(
   bookingId: string,
 ): Promise<TermsRow | undefined> {
   const { rows } = await sql<TermsRow>`
-    select b.reference, b.state, b.checkout_session_id, b.payment_id, b.hold_id,
+    select b.reference, b.state, b.checkout_session_id, b.payment_id,
+           b.payment_id is null as complimentary, b.hold_id,
            o.product_id, o.policy_version, t.starts_at,
-           pay.amount as paid, pay.state as payment_state,
+           coalesce(pay.amount, 0) as paid, coalesce(pay.state, 'none') as payment_state,
            t.starts_at - make_interval(mins => v.change_cutoff_minutes) as cutoff_at,
            now() < t.starts_at - make_interval(mins => v.change_cutoff_minutes) as before_cutoff,
            now() >= t.starts_at as departed,
@@ -194,7 +203,7 @@ async function termsRow(
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
-      join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
+      left join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       join policy_versions v
         on v.tenant_id = o.tenant_id and v.product_id = o.product_id and v.version = o.policy_version
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}`.execute(trx);
@@ -310,8 +319,10 @@ async function lockForCancel(
               for no key update`.execute(trx);
   const row = await termsRow(trx, tenantId, bookingId);
   if (!row) throw new Error("a locked booking's terms were not found");
-  await sql`select id from payments where tenant_id = ${tenantId} and id = ${row.payment_id}
-              for update`.execute(trx);
+  if (row.payment_id !== null) {
+    await sql`select id from payments where tenant_id = ${tenantId} and id = ${row.payment_id}
+                for update`.execute(trx);
+  }
   return row;
 }
 
@@ -521,6 +532,13 @@ export async function staffCancelBooking(
   }
   const terms = termsOf(input.bookingId, row);
   if (terms.refusal === "trip_departed") return { kind: "trip_departed" };
+  if (row.complimentary && input.choice.kind === "override") {
+    return {
+      kind: "override_invalid",
+      message:
+        "This booking was complimentary, so there is nothing to refund or credit. Cancel it under its policy",
+    };
+  }
   const policyRemedy: CancellationRemedy = terms.remedy;
   let applied: Applied;
   switch (input.choice.kind) {
@@ -598,7 +616,7 @@ async function applyCancellation(
   holdReason: string,
 ): Promise<CancellationRecord> {
   const tenantId = ctx.tenantId;
-  if (row.payment_state !== "succeeded")
+  if (!row.complimentary && row.payment_state !== "succeeded")
     throw new Error("a confirmed booking's payment did not succeed");
   const value = refundFor(terms.paidAmount, applied.refundBp);
   const isCredit = applied.remedy === "credit";
@@ -615,12 +633,12 @@ async function applyCancellation(
     select b.tenant_id, b.id, b.payment_id, o.product_id, o.policy_version, t.starts_at,
            t.starts_at - make_interval(mins => v.change_cutoff_minutes),
            now() < t.starts_at - make_interval(mins => v.change_cutoff_minutes),
-           ${applied.remedy}, ${applied.refundBp}, pay.amount, ${refundAmount}, ${refundId}::uuid,
-           ${creditAmount}, ${creditEntryId}::uuid, ${applied.overrideReason}
+           ${applied.remedy}, ${applied.refundBp}, coalesce(pay.amount, 0), ${refundAmount},
+           ${refundId}::uuid, ${creditAmount}, ${creditEntryId}::uuid, ${applied.overrideReason}
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
-      join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
+      left join payments pay on pay.tenant_id = b.tenant_id and pay.id = b.payment_id
       join policy_versions v
         on v.tenant_id = o.tenant_id and v.product_id = o.product_id and v.version = o.policy_version
      where b.tenant_id = ${tenantId} and b.id = ${bookingId}
@@ -637,6 +655,7 @@ async function applyCancellation(
     .execute();
 
   if (refundId) {
+    if (row.payment_id === null) throw new Error("a complimentary booking has nothing to refund");
     await trx
       .insertInto("payment_refunds")
       .values({

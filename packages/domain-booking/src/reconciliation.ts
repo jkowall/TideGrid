@@ -248,6 +248,8 @@ export interface ExternalSettlementView {
 export type ExternalSettlementResult =
   | { kind: "recorded"; settlement: ExternalSettlementView; replayed: boolean }
   | { kind: "not_found" }
+  /** A complimentary booking takes no money, in or out (0039). */
+  | { kind: "complimentary" }
   /** A refund would return more than came in, or more than the booking cost. */
   | { kind: "refund_too_large"; refundable: number }
   /** The key was used for another command. */
@@ -329,7 +331,8 @@ async function refundable(trx: TenantTransaction, tenantId: string, bookingId: s
              o.total_amount - coalesce(r.refunded, 0) - coalesce(s.refunded, 0)))::int as refundable
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
-      join payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
+      -- None on a complimentary booking (0039): only money recorded outside the card flow.
+      left join payments p on p.tenant_id = b.tenant_id and p.id = b.payment_id
       left join lateral (
         select sum(x.amount) as refunded from payment_refunds x
          where x.tenant_id = b.tenant_id and x.payment_id = b.payment_id
@@ -385,13 +388,19 @@ export async function recordExternalSettlement(
       ? { kind: "recorded", settlement: settlementView(prior), replayed: true }
       : { kind: "key_reused" };
   }
-  const { rows: bookings } = await sql<{ total_amount: number; eligible_total: number }>`
-    select o.total_amount, o.total_amount - o.tax_amount - o.included_tax_amount as eligible_total
+  const { rows: bookings } = await sql<{
+    total_amount: number;
+    eligible_total: number;
+    source: string;
+  }>`
+    select o.total_amount, o.total_amount - o.tax_amount - o.included_tax_amount as eligible_total,
+           b.source
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
      where b.tenant_id = ${ctx.tenantId} and b.id = ${command.bookingId}`.execute(trx);
   const order = bookings[0];
   if (!order) return { kind: "not_found" };
+  if (order.source === "complimentary") return { kind: "complimentary" };
   let fee: {
     orderTotal: number;
     eligibleTotal: number;
@@ -533,7 +542,10 @@ export async function assessClosedBookings(
   }>`
     select b.id as booking_id,
            case when b.state = 'canceled' then 'canceled' else 'trip_completed' end as basis,
-           o.total_amount, o.total_amount - o.tax_amount - o.included_tax_amount as eligible_total
+           -- A complimentary booking (0039) is not in the fee base: zero, and nothing owed.
+           case when b.source = 'complimentary' then 0 else o.total_amount end as total_amount,
+           case when b.source = 'complimentary' then 0
+                else o.total_amount - o.tax_amount - o.included_tax_amount end as eligible_total
       from bookings b
       join orders o on o.tenant_id = b.tenant_id and o.id = b.order_id
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id

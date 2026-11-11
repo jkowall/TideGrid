@@ -53,6 +53,9 @@ export {
   type BookerDetails,
   type CancelCheckoutResult,
   CHECKOUT_TTL_SECONDS,
+  COMPLIMENTARY_REASONS,
+  type ComplimentaryGrantRequest,
+  type ComplimentaryReason,
   type CreateCheckoutInput,
   type CreateCheckoutResult,
   cancelCheckoutSession,
@@ -355,6 +358,9 @@ export {
 } from "./secrets.ts";
 // Staff-assisted booking (G2.12d).
 export {
+  type BookComplimentaryInput,
+  type BookComplimentaryResult,
+  bookComplimentary,
   cancelStaffCheckout,
   getStaffCheckout,
   type OpenStaffCheckoutInput,

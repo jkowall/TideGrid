@@ -268,8 +268,9 @@ export function registerCheckoutPublicRoutes(app: OpenAPIHono<AppEnv>, deps: App
                 created.remaining,
               );
             case "override_exceeds_boat":
-              // A guest checkout never asks for an override.
-              throw new Error("a guest checkout returned an override refusal");
+            case "complimentary_deposit":
+              // A guest checkout never asks for an override or a grant.
+              throw new Error(`a guest checkout returned a staff refusal: ${created.kind}`);
           }
         },
       );
