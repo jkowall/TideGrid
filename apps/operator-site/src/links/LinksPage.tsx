@@ -73,6 +73,11 @@ export function LinksPage({
   const [editing, setEditing] = useState<ImportantLink | "new" | null>(null);
   const [archiving, setArchiving] = useState<ImportantLink | null>(null);
   const [said, setSaid] = useState("");
+  /**
+   * The list is being read again after a save. Changes wait until it is in,
+   * so no dialog opens with a link's values from before the save.
+   */
+  const [refreshing, setRefreshing] = useState(false);
   /** After a save or an archive, the link's row (or the add button) takes focus. */
   const focusAfter = useRef<string | null>(null);
 
@@ -90,6 +95,7 @@ export function LinksPage({
     });
     void loadLinks(tenantId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
+      setRefreshing(false);
       focusHeadingOnLoad.current = retry && (result.kind === "ok" || !canRetry(result.reason));
       if (result.kind === "ok") return setLoad({ kind: "ready", page: result.value });
       setLoad((current) => ({
@@ -127,6 +133,7 @@ export function LinksPage({
     focusAfter.current = link.status === "active" ? rowId(link.id) : addButtonId;
     setSaid(message);
     retryRequested.current = false;
+    setRefreshing(true);
     setAttempt((n) => n + 1);
   };
 
@@ -175,6 +182,7 @@ export function LinksPage({
   const reload = () => {
     focusAfter.current = headingTarget;
     retryRequested.current = false;
+    setRefreshing(true);
     setAttempt((n) => n + 1);
   };
   const active = links.filter((l) => l.status === "active").sort((a, b) => a.position - b.position);
@@ -195,7 +203,7 @@ export function LinksPage({
             id={addButtonId}
             variant="primary"
             icon="plus"
-            disabled={full}
+            disabled={full || refreshing}
             onClick={() => setEditing("new")}
           >
             Add a link
@@ -241,6 +249,7 @@ export function LinksPage({
                 <div className="links-item__actions">
                   <Button
                     icon="pencil"
+                    disabled={refreshing}
                     onClick={() => setEditing(link)}
                     aria-describedby={rowId(link.id)}
                   >
@@ -248,6 +257,7 @@ export function LinksPage({
                   </Button>
                   <Button
                     icon="lock"
+                    disabled={refreshing}
                     onClick={() => setArchiving(link)}
                     aria-describedby={rowId(link.id)}
                   >
@@ -526,6 +536,7 @@ function LinkDialog({
           maxLength={labelLimit * 2}
           autoComplete="off"
           error={shown.label}
+          disabled={busy}
           onChange={(e) => setLabel(e.target.value)}
         />
         <TextField
@@ -538,6 +549,7 @@ function LinkDialog({
           autoComplete="off"
           spellCheck={false}
           error={shown.url}
+          disabled={busy}
           onChange={(e) => setUrl(e.target.value)}
         />
         <TextField
@@ -547,6 +559,7 @@ function LinkDialog({
           value={description}
           autoComplete="off"
           error={shown.description}
+          disabled={busy}
           onChange={(e) => setDescription(e.target.value)}
         />
         <fieldset className="links-form__trips">
@@ -555,7 +568,7 @@ function LinkDialog({
             id={`${formId}-every`}
             label="Every trip"
             checked={everyTrip}
-            disabled={tripsLocked}
+            disabled={tripsLocked || busy}
             hint={
               tripsLocked
                 ? "The trip names didn't load, so the trips this link shows on stay as they are."
@@ -574,6 +587,7 @@ function LinkDialog({
                     key={p.id}
                     label={p.name}
                     checked={productIds.includes(p.id)}
+                    disabled={busy}
                     onChange={(e) =>
                       setProductIds((ids) =>
                         e.target.checked ? [...ids, p.id] : ids.filter((id) => id !== p.id),
@@ -592,6 +606,7 @@ function LinkDialog({
           inputMode="numeric"
           value={position}
           error={shown.position}
+          disabled={busy}
           onChange={(e) => setPosition(e.target.value)}
         />
       </form>

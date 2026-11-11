@@ -409,4 +409,36 @@ describe("Important links, after review (W3-G2.14b-rest)", () => {
       expect(canManageLinks(role)).toBe(role === "owner");
     }
   });
+
+  it("waits for the list after a save before another change can start", async () => {
+    const current = link();
+    let release: () => void = () => {};
+    let gets = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init: RequestInit = {}) => {
+        if (init.method === "PUT") return Response.json({ link: { ...current, label: "New" } });
+        if (input === `${base}/important-links`) {
+          gets += 1;
+          if (gets === 2) await new Promise<void>((r) => (release = r));
+          return Response.json({ links: [gets === 1 ? current : { ...current, label: "New" }] });
+        }
+        return Response.json({ locations: [], boats: [], products: [], schedules: [] });
+      }),
+    );
+    renderPage();
+    await loaded();
+    fireEvent.click(screen.getByRole("button", { name: "Change Fishing license" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "New" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(gets).toBe(2));
+    const change = screen.getByRole("button", { name: "Change Fishing license" });
+    expect(
+      change.getAttribute("aria-disabled") ?? String((change as HTMLButtonElement).disabled),
+    ).toBe("true");
+    release();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Change New" })).toBeTruthy());
+    const after = screen.getByRole("button", { name: "Change New" });
+    expect(after.getAttribute("aria-disabled")).toBeNull();
+  });
 });
