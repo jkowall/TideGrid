@@ -4,6 +4,16 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-11
 
+### Demo guest app on test phones (W1N-TESTFLIGHT), November 10 and 11, 2026
+
+Under the owner's go of 2026-11-10 16:20 UTC to put the demo guest app on TestFlight and Google Play. Internal testing only. Nothing went to App Review, external testing, or a public store listing.
+
+- **Store prep.** [PR 137](https://github.com/jkowall/TideGrid/pull/137) merged as `4989e8c`. It adds a 1024 px icon per variant, a required build number for tester builds, the exempt-encryption flag for iOS, and Android release signing with the owner's upload key, which fails closed when the key settings are missing.
+- **Builds.** Built on the owner's Mac with Xcode and Android Studio, with no cloud build service. Both variants, version 0.1.0, build 1, `TIDEGRID_RELEASE=1`, pointed at the deployed demo API. The two iOS archives used automatic signing with the owner's individual team. The two Android app bundles were signed with a new upload key that is kept on the owner's Mac, outside the repository.
+- **TestFlight.** The bundle ids `us.tidegrid.demo.harbor` and `us.tidegrid.demo.reef` were registered. The App Store Connect apps "Demo Harbor" and "Demo Reef" were created, and both builds uploaded. Each app has an internal group with the owner as its only tester, and automatic distribution is on.
+- **Google Play.** The apps "Demo Harbor" and "Demo Reef" were created; the owner ticked the two declarations himself. Each has release "0.1.0 (1)" on the internal testing track only, Google-managed app signing, and a tester list holding the owner's account.
+- **Not shown yet.** No booking has been made on a phone. The device checks left open by PR 128 still wait for the owner's first run on each platform: the brand loads on Hermes, the API sees each variant's origin from React Native's fetch, and secure storage keeps a booking across restarts.
+
 ### The booker sends a person's waiver email again (W3-G2.15-rest), built November 11, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, no migration, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.
