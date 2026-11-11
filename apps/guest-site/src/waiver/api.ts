@@ -202,3 +202,19 @@ export async function readPartyWaivers(
   });
   return result.kind === "ok" ? { ...result, value: result.value.waivers } : result;
 }
+
+/**
+ * Send a named person's waiver email again (W3-G2.15-rest), to the address the
+ * latest one went to. Answers the party's waivers as they stand after it.
+ */
+export async function resendPartyWaiver(
+  bookingSession: string,
+  position: number,
+): Promise<Result<PartyWaiverList>> {
+  const result = await call("/v1/public/manage/waivers/resend", ManageWaiversResponse, {
+    method: "POST",
+    bearer: bookingSession,
+    body: { position },
+  });
+  return result.kind === "ok" ? { ...result, value: result.value.waivers } : result;
+}

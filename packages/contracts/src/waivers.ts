@@ -419,6 +419,16 @@ export const ManageWaiversResponse = z.object({
 });
 export type ManageWaiversResponse = z.infer<typeof ManageWaiversResponse>;
 
+export const ManageWaiverResendRequest = z.object({
+  position: z
+    .number()
+    .int()
+    .min(1)
+    .max(1000)
+    .describe("The person's place in the party, as the waivers list gives it"),
+});
+export type ManageWaiverResendRequest = z.infer<typeof ManageWaiverResendRequest>;
+
 export const WaiverLinkRenewalRequest = z.object({
   token: Secret.describe("The spent, lapsed, or replaced emailed link's token, from its fragment"),
 });

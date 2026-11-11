@@ -260,6 +260,30 @@
   font-weight: var(--weight-semibold);
   vertical-align: middle;
 }
+.wv-party__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.wv-party__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-body);
+}
+.wv-party__note:empty {
+  display: none;
+}
+.wv-party__note:focus {
+  outline: none;
+}
+.wv-party__note:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+.wv-party__note--problem {
+  color: var(--status-blocked);
+}
 .wv-party__skeleton {
   display: grid;
   gap: var(--space-3);

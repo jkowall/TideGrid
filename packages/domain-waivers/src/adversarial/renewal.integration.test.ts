@@ -11,6 +11,9 @@
  *   audited, held by the database for every writer.
  * - D3: a guardian's address that is also a participant's own address on the
  *   booking is flagged to staff, not blocked.
+ * - W3-G2.15-rest: the booker sends a person's waiver email again from the
+ *   management page, to the same address only, sharing the person's three a
+ *   day, and never while an email is on its way.
  */
 import { randomUUID } from "node:crypto";
 import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
@@ -18,8 +21,10 @@ import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks } from "@tidegrid/domain-booking";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import {
+  BOOKER_RESEND_REASON,
   listBookingWaivers,
   renewWaiverLink,
+  resendWaiverForBooker,
   resetWaiverSendCount,
   sendWaiverRequest,
   startAssistedSigning,
@@ -42,9 +47,11 @@ import {
   guestCtx,
   liveRequest,
   name,
+  openFor,
   openWorld,
   redeem,
   refusal,
+  sign,
   systemCtx,
   trips,
   type World,
@@ -72,6 +79,13 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
   function renew(tenantId: string, token: string) {
     const ctx = guestCtx(tenantId);
     return inTenantTransaction(world.db, ctx, (trx) => renewWaiverLink(trx, ctx, deps, { token }));
+  }
+
+  function bookerResend(tenantId: string, bookingId: string, position: number) {
+    const ctx = guestCtx(tenantId);
+    return inTenantTransaction(world.db, ctx, (trx) =>
+      resendWaiverForBooker(trx, ctx, deps, { bookingId, position }),
+    );
   }
 
   function resend(tenantId: string, requestId: string) {
@@ -406,6 +420,85 @@ describe.skipIf(!env)("W1-WAIVER-RENEWAL adversarial: link renewal and the send 
       ),
     ).toMatch(/waiver_deliveries_generation/);
   }, 480_000);
+
+  it("lets the booker send a person's waiver again, to the same address, sharing their three a day", async () => {
+    const booked = await book(world, A, nextTrip(), 1, hooks);
+    const email = "bea.booker@example.test";
+    const pid = await name(world, A.id, booked.bookingId, 1, adult("Bea Booker", email), hooks);
+    const req = (await liveRequest(world.admin, booked.bookingId, pid)).id;
+    const sent = (generation: number) => ({ kind: "sent", generation });
+    const refused = (reason: string) => ({ kind: "refused", reason, retryAfter: null });
+    // The first email is still on its way: nothing more goes out.
+    expect(await bookerResend(A.id, booked.bookingId, 1)).toEqual(refused("email_pending"));
+    const first = await linkFor(world.admin, world.db, A.id, req);
+    // Delivered moments ago: the 10 minutes between emails to one address hold.
+    expect(await bookerResend(A.id, booked.bookingId, 1)).toMatchObject({
+      kind: "refused",
+      reason: "too_soon",
+      retryAfter: expect.any(Date),
+    });
+    await ageDeliveries(world.admin, req);
+    expect(await bookerResend(A.id, booked.bookingId, 1)).toEqual(sent(2));
+    const rows = await deliveries(req);
+    expect(rows.at(-1)).toEqual({ generation: 2, actor_type: "guest", recipient_email: email });
+    const [audit] = await world.admin<{ reason: string; actor_type: string }[]>`
+      select reason, actor_type from public.audit_events
+       where subject_id = ${req} and action = 'waiver_request.renewed'`;
+    expect(audit).toEqual({ reason: BOOKER_RESEND_REASON, actor_type: "guest" });
+    // The new email's link works and replaces the first, as any resend does.
+    const second = await linkFor(world.admin, world.db, A.id, req);
+    expect(second.to).toBe(email);
+    expect(second.token).not.toBe(first.token);
+    expect((await redeem(world, A.id, first.token)).kind).toBe("replaced");
+
+    // The person's own renewal and the booker's share three a day.
+    await ageDeliveries(world.admin, req);
+    expect(await bookerResend(A.id, booked.bookingId, 1)).toEqual(sent(3));
+    const third = await linkFor(world.admin, world.db, A.id, req);
+    await redeem(world, A.id, second.token);
+    await redeem(world, A.id, third.token);
+    await ageDeliveries(world.admin, req);
+    expect(await renew(A.id, third.token)).toEqual({ kind: "renewed", generation: 4 });
+    await linkFor(world.admin, world.db, A.id, req);
+    await ageDeliveries(world.admin, req);
+    expect(await bookerResend(A.id, booked.bookingId, 1)).toEqual(refused("limit_reached"));
+    expect((await deliveries(req)).length).toBe(4);
+  }, 180_000);
+
+  it("refuses the booker's resend for no one, another operator, a signed waiver, or no address", async () => {
+    const booked = await book(world, A, nextTrip(), 3, hooks);
+    const refused = (reason: string) => ({ kind: "refused", reason, retryAfter: null });
+    const signedPid = await name(
+      world,
+      A.id,
+      booked.bookingId,
+      1,
+      adult("Sid Signed", "sid.signed@example.test"),
+      hooks,
+    );
+    await name(world, A.id, booked.bookingId, 2, adult("Nia Noaddress", null), hooks);
+    // Place 3 is not named; place 9 does not exist.
+    expect(await bookerResend(A.id, booked.bookingId, 3)).toEqual(refused("not_found"));
+    expect(await bookerResend(A.id, booked.bookingId, 9)).toEqual(refused("not_found"));
+    // Another operator's site finds nothing for this booking.
+    expect(await bookerResend(B.id, booked.bookingId, 1)).toEqual(refused("not_found"));
+    expect(await bookerResend(A.id, randomUUID(), 1)).toEqual(refused("not_found"));
+    // No address: nothing ever went out, so nothing goes out again.
+    expect(await bookerResend(A.id, booked.bookingId, 2)).toEqual(refused("not_sent"));
+    // Signed: nothing to send.
+    const req = (await liveRequest(world.admin, booked.bookingId, signedPid)).id;
+    const opened = await openFor(world, A.id, req);
+    expect((await sign(world, A.id, deps, opened.session)).kind).toBe("signed");
+    await ageDeliveries(world.admin, req);
+    expect(await bookerResend(A.id, booked.bookingId, 1)).toEqual(refused("not_pending"));
+    // Only a guest's transaction sends this way.
+    const sys = systemCtx(A.id);
+    await expect(
+      inTenantTransaction(world.db, sys, (trx) =>
+        resendWaiverForBooker(trx, sys, deps, { bookingId: booked.bookingId, position: 2 }),
+      ),
+    ).rejects.toThrow(/only a booker/);
+  }, 120_000);
 
   it("flags a guardian's address that is also a participant's own, and not a family of minors", async () => {
     const booked = await book(world, A, nextTrip(), 3, hooks);

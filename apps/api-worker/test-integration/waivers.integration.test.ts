@@ -640,6 +640,90 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     ).toEqual(["not_needed", "not_needed"]);
   });
 
+  it("lets the booker send a person's waiver again from the booking session, within the limits", async () => {
+    const tripId = A.trips.shared[tripIndex++] ?? "";
+    const booked = await bookParty(admin, runtime.db, A, tripId, 1, hooks);
+    const email = `rae.${randomUUID().slice(0, 8)}@example.test`;
+    const rae = await nameParticipant(
+      runtime.db,
+      A.id,
+      booked.bookingId,
+      1,
+      adult("Rae Resend", email),
+      hooks,
+    );
+    const [req] = await admin<{ id: string }[]>`
+      select id from public.waiver_requests where participant_id = ${rae.participant.id}
+         and state = 'pending'`;
+    const requestId = req?.id ?? "";
+    const session = await bookingSession(A, booked);
+    const resend = (body: unknown, o: { origin?: string; bearer?: string } = {}) =>
+      request("POST", "/v1/public/manage/waivers/resend", {
+        origin: guestOf(A),
+        bearer: session,
+        ...o,
+        body,
+      });
+    const codeOf = (res: Res) => [res.status, res.json.error?.code];
+    // No session, another operator's site, or a waiver signing session's secret.
+    expect(
+      codeOf(
+        await request("POST", "/v1/public/manage/waivers/resend", {
+          origin: guestOf(A),
+          body: { position: 1 },
+        }),
+      ),
+    ).toEqual([401, "session_required"]);
+    expect(codeOf(await resend({ position: 1 }, { origin: guestOf(B) }))).toEqual([
+      401,
+      "session_expired",
+    ]);
+    expect((await resend({ position: 0 })).status).toBe(400);
+    expect(codeOf(await resend({ position: 9 }))).toEqual([404, "waiver_participant_not_found"]);
+    // The first email has not gone out yet.
+    const pending = await resend({ position: 1 });
+    expect(codeOf(pending)).toEqual([409, "waiver_email_pending"]);
+    expect(pending.headers.get("cache-control")).toBe("no-store");
+    await linkFor(admin, runtime.db, A.id, requestId);
+    // Moments after it went: the 10 minutes between emails to one address hold.
+    expect(codeOf(await resend({ position: 1 }))).toEqual([409, "waiver_resend_too_soon"]);
+    await admin.begin(async (tx) => {
+      await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
+      await tx`update public.waiver_deliveries
+                  set created_at = created_at - interval '11 minutes',
+                      send_after = send_after - interval '11 minutes'
+                where request_id = ${requestId}`;
+      await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
+    });
+    const sent = await resend({ position: 1 });
+    expect(sent.status).toBe(202);
+    expect(sent.headers.get("cache-control")).toBe("no-store");
+    expect(sent.json.waivers).toMatchObject({
+      applies: true,
+      participants: [
+        { position: 1, name: "Rae Resend", status: "waiting", sentTo: "r•••@example.test" },
+      ],
+    });
+    // Nothing that identifies a record or the address in full.
+    const raw = new TextDecoder().decode(sent.bytes);
+    for (const value of [requestId, rae.participant.id, booked.bookingId, email]) {
+      expect(raw).not.toContain(value);
+    }
+    const [latest] = await admin<
+      { generation: number; guest_renewal: boolean; recipient_email: string; actor_type: string }[]
+    >`
+      select generation, guest_renewal, recipient_email, actor_type from public.waiver_deliveries
+       where request_id = ${requestId} order by generation desc limit 1`;
+    expect(latest).toEqual({
+      generation: 2,
+      guest_renewal: true,
+      recipient_email: email,
+      actor_type: "guest",
+    });
+    // The new email goes to the same address once delivered.
+    expect((await linkFor(admin, runtime.db, A.id, requestId)).to).toBe(email);
+  });
+
   it("starts a dock signing for staff only, once per code, and ends the session on request", async () => {
     const p = await party(A);
     const start = (as: string, requestId: string, body: unknown, tenantId = A.id) =>

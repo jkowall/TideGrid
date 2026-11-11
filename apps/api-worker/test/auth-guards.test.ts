@@ -273,6 +273,8 @@ describe("contract", () => {
         "/v1/public/waiver-sessions/current/signature",
         "/v1/public/waiver-sessions/current/document",
         "/v1/public/manage/waivers",
+        // The booker sends a person's waiver again (W3-G2.15-rest).
+        "/v1/public/manage/waivers/resend",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/waivers",
         "/v1/staff/tenants/{tenantId}/trips/{tripId}/waivers",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend",
