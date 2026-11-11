@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-11
 
+### Names and typed signatures in other alphabets in the signed PDF (W3-G2.15-rest, part 2), built November 11, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, no migration, under the owner's go of 2026-11-11. Synthetic data only; no provider call, no deploy.
+
+- **Built.** The waiver PDF draws characters WinAnsi lacks (Latin extensions, Greek, Cyrillic, Armenian, Georgian) with an embedded subset of DejaVu Sans: only the glyphs the document uses, renumbered, with a Unicode map so the text can be searched. A small TrueType reader and subsetter (`truetype.ts`, no new dependency) and a script that reduces the bundled font to those alphabets. Shaped and right-to-left scripts keep the question mark.
+- **Proof.** `truetype.test.ts` (6 cases: coverage and refusals by script, widths, a compact subset that sums to a valid font with its license names, a composite glyph's parts renumbered, deterministic bytes) and `render.test.ts` (2 new cases: a WinAnsi waiver's bytes pinned to the hash from before the change; a Polish, Greek, Cyrillic, and Chinese sample with the subset font, its Unicode map, the oblique slant, the question mark, and every embedded glyph drawn). The sample was also opened with Poppler (`pdffonts` lists the embedded subset; `pdftotext` returns the names; the page renders with the letters). Waiver integration suites green. The API Worker grows from 561 to 733 KiB compressed.
+- **Still open.** Defaults D1 to D3 await the owner.
+
 ### The booker sends a person's waiver email again (W3-G2.15-rest), built November 11, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, no migration, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.

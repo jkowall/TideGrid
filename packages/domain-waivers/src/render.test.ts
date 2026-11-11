@@ -1,7 +1,40 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { maskEmail, renderWaiverPdf, type WaiverDocumentInput } from "./render.ts";
+import { hasOutline, parseTrueType } from "./truetype.ts";
 
-const ascii = (bytes: Uint8Array) => String.fromCharCode(...bytes);
+const ascii = (bytes: Uint8Array) => {
+  let out = "";
+  for (const b of bytes) out += String.fromCharCode(b);
+  return out;
+};
+
+// Computed from the renderer as it was before the fallback font (commit e06dfab).
+const PINNED_SHA256 = "192cbc871333d7bc5ed30ab498936f40d412df8cfe8a89a44e626b7873140c2e";
+
+function fromAscii85(text: string): Uint8Array {
+  const out: number[] = [];
+  const body = text.replace(/~>$/, "").replace(/\s/g, "");
+  let group: number[] = [];
+  const flush = (n: number) => {
+    let value = 0;
+    for (let i = 0; i < 5; i++) value = value * 85 + (group[i] ?? 84);
+    for (let i = 0; i < n - 1; i++) out.push((value >>> (24 - i * 8)) & 0xff);
+  };
+  for (const ch of body) {
+    if (ch === "z" && group.length === 0) {
+      out.push(0, 0, 0, 0);
+      continue;
+    }
+    group.push(ch.charCodeAt(0) - 33);
+    if (group.length === 5) {
+      flush(5);
+      group = [];
+    }
+  }
+  if (group.length > 0) flush(group.length);
+  return new Uint8Array(out);
+}
 
 function sampleWaiver(overrides: Partial<WaiverDocumentInput> = {}): WaiverDocumentInput {
   return {
@@ -114,6 +147,50 @@ describe("renderWaiverPdf", () => {
     }
     // The bodies push the record across at least one page break.
     expect(pagesSeen.size).toBeGreaterThan(1);
+  });
+
+  it("keeps a waiver WinAnsi can show byte for byte as it was, with no font embedded", () => {
+    const pdf = renderWaiverPdf(
+      sampleWaiver({ body: "Synthetic demo text.\n\nI release Demo Harbor Charters." }),
+    );
+    expect(ascii(pdf)).not.toContain("FontFile2");
+    // Pinned before the fallback font existed: these bytes must never change.
+    expect(createHash("sha256").update(pdf).digest("hex")).toBe(PINNED_SHA256);
+  });
+
+  it("draws names and signatures in other alphabets with an embedded subset font", () => {
+    const input = sampleWaiver({
+      operatorName: "Ελληνική Ναυτιλία",
+      participant: { name: "Łukasz Żółć", minor: false },
+      signer: { role: "participant", name: "Łukasz Żółć", relationship: null },
+      signatureText: "Łukasz Żółć Дмитрий 李",
+    });
+    const bytes = renderWaiverPdf(input);
+    expect(bytes).toEqual(renderWaiverPdf(input));
+    const pdf = ascii(bytes);
+    expect(pdf).toMatch(/\/BaseFont \/[A-Z]{6}\+DejaVuSans \/Encoding \/Identity-H/);
+    expect(pdf).toContain("/CIDToGIDMap /Identity");
+    expect(pdf).toContain("/ToUnicode");
+    // The signature: Latin letters WinAnsi has stay in Helvetica, the rest in
+    // the subset, slanted like the oblique face; Chinese keeps the question mark.
+    expect(pdf).toMatch(/\/F3 18 Tf 1 0 0 1 [\d.]+ [\d.]+ Tm \(ukasz \) Tj/);
+    expect(pdf).toMatch(/\/F4 18 Tf 1 0 0\.21 1 [\d.]+ [\d.]+ Tm <[0-9A-F]+> Tj/);
+    expect(pdf).toContain("( ?)");
+    // Each fallback character maps back to its Unicode, so the text can be searched.
+    for (const cp of ["Ł", "Ż", "Д", "λ"].map((c) => c.codePointAt(0) as number)) {
+      expect(pdf).toMatch(
+        new RegExp(`<[0-9A-F]{4}> <${cp.toString(16).toUpperCase().padStart(4, "0")}>`),
+      );
+    }
+    // The embedded font holds only what the document uses, and every one has an outline.
+    const stream =
+      /\/Filter \/ASCII85Decode >>\nstream\n([\s\S]*?)\nendstream/.exec(pdf)?.[1] ?? "";
+    const font = parseTrueType(fromAscii85(stream));
+    const used = new Set("ŁŻżółćДмитрийΕλληνικήΝαυτιλία".split("")).size;
+    expect(font.numGlyphs).toBeGreaterThanOrEqual(used);
+    expect(font.numGlyphs).toBeLessThan(used + 10);
+    for (let g = 1; g < font.numGlyphs; g++) expect(hasOutline(font, g)).toBe(true);
+    expect(bytes.length).toBeLessThan(60_000);
   });
 
   it("masks an address to its first character and domain", () => {
