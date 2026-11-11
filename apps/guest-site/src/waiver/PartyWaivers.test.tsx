@@ -439,6 +439,33 @@ describe("sending a person's waiver again", () => {
     expect(screen.getByRole("button", { name: "Send again to Kit Minor" })).toBeTruthy();
   });
 
+  it("brings each person's button back on their own 10 minutes", async () => {
+    const two = {
+      ...party,
+      participants: [
+        person(1, "Ann Adult", "waiting"),
+        person(2, "Kit Minor", "waiting", { sentTo: "g•••@example.test" }),
+      ],
+    };
+    stubApi(() => json(200, { waivers: two }));
+    show();
+    await screen.findByText("0 of 2 signed");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Ann Adult" }));
+    await screen.findByText(/^Sent again to a•••/);
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60_000);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(/^Sent again to g•••/);
+    await act(async () => {
+      vi.advanceTimersByTime(6 * 60_000);
+    });
+    // Ann's 10 minutes are up; Kit's are not.
+    expect(screen.getByRole("button", { name: "Send again to Ann Adult" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send again to Kit Minor" })).toBeNull();
+  });
+
   it("says when the booking site can't be reached, and the button stays", async () => {
     stubApi((call) => {
       if (call.method === "POST") throw new TypeError("offline");

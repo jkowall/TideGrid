@@ -190,13 +190,15 @@ export function PartyWaivers({
   const [resends, setResends] = useState<Record<number, Resend>>({});
   // Draws again when a sent note runs out, so the button comes back on its own.
   const [, setExpired] = useState(0);
-  const expiry = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (expiry.current) clearTimeout(expiry.current);
-    },
-    [],
-  );
+  // One timer a person, so a send for one never delays another's.
+  const expiries = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const timers = expiries.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
   const notes = useRef(new Map<number, HTMLParagraphElement>());
   const focusNote = useRef<number | null>(null);
   const loadedAt = useRef(0);
@@ -279,8 +281,15 @@ export function PartyWaivers({
       const now = result.value.participants.find((x) => x.position === p.position) ?? p;
       // The button goes away, so the note takes focus.
       focusNote.current = p.position;
-      if (expiry.current) clearTimeout(expiry.current);
-      expiry.current = setTimeout(() => setExpired((n) => n + 1), SENT_NOTE_MS + 1000);
+      const earlier = expiries.current.get(p.position);
+      if (earlier) clearTimeout(earlier);
+      expiries.current.set(
+        p.position,
+        setTimeout(() => {
+          expiries.current.delete(p.position);
+          setExpired((n) => n + 1);
+        }, SENT_NOTE_MS + 1000),
+      );
       note(
         "sent",
         `Sent again${now.sentTo ? ` to ${now.sentTo}` : ""}. Ask them to check their inbox and spam folder.`,

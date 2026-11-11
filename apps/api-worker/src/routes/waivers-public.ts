@@ -31,6 +31,7 @@ import {
   waiverSecretPattern,
 } from "@tidegrid/domain-waivers";
 import type { Context } from "hono";
+import { sql } from "kysely";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { deliverAfterCommit } from "../email.ts";
 import { ApiError } from "../errors.ts";
@@ -599,6 +600,21 @@ export function registerWaiverPublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
         name,
       });
       if (sent.kind === "refused") return { refused: sent.reason } as JsonObject;
+      // The session again, after the send took its locks: staff who corrected
+      // the booker's email (or anything else that ended this session) while
+      // it waited committed first, so the send must not stand. Everything
+      // rolls back, as lane 1's manage commands do.
+      const { rows: live } = await sql<{ id: string }>`
+        select id from guest_sessions
+         where tenant_id = ${ctx.tenantId} and id = ${session.sessionId}
+           and revoked_at is null and expires_at > now()`.execute(trx);
+      if (live.length === 0) {
+        throw new ApiError(
+          401,
+          "session_expired",
+          "This booking session has ended; open your link again",
+        );
+      }
       const found = await listGuestBookingWaivers(trx, ctx.tenantId, session.bookingId);
       if (!found) throw new Error("a booking that just sent a waiver was not found");
       return { tenantId: ctx.tenantId, waivers: guestWaiversJson(found) } as JsonObject;

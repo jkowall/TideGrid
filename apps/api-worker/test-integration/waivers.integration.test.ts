@@ -727,32 +727,61 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     });
     // The new email goes to the same address once delivered.
     expect((await linkFor(admin, runtime.db, A.id, requestId)).to).toBe(email);
+    // A correction that ends the session while the send waits on the booking:
+    // the send rolls back, and the session's end stands.
+    await linkFor(admin, runtime.db, A.id, requestId);
+    await admin.begin(async (tx) => {
+      await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
+      await tx`update public.waiver_deliveries
+                  set created_at = created_at - interval '11 minutes',
+                      send_after = send_after - interval '11 minutes'
+                where request_id = ${requestId}`;
+      await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
+    });
+    const second = await bookingSession(A, booked);
+    let raced: Promise<Res> | null = null;
+    await admin.begin(async (tx) => {
+      await tx`select 1 from public.bookings where id = ${booked.bookingId} for no key update`;
+      await tx`update public.guest_sessions set revoked_at = now()
+                where booking_id = ${booked.bookingId} and revoked_at is null`;
+      raced = request("POST", "/v1/public/manage/waivers/resend", {
+        origin: guestOf(A),
+        bearer: second,
+        body: { position: 1, name: "Rae Resend" },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(codeOf(await (raced as unknown as Promise<Res>))).toEqual([401, "session_expired"]);
+    const [count] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.waiver_deliveries where request_id = ${requestId}`;
+    expect(count?.n).toBe(2);
     // The audit names the booker's resend apart from the person's own renewal.
     const [audit] = await admin<{ n: number }[]>`
       select count(*)::int as n from public.audit_events
        where subject_id = ${requestId} and action = 'waiver_request.resent_by_booker'`;
     expect(audit?.n).toBe(1);
+    const third = await bookingSession(A, booked);
     // A name the place no longer has, then a missing name.
-    expect(codeOf(await resend({ position: 1, name: "Someone Else" }))).toEqual([
+    expect(codeOf(await resend({ position: 1, name: "Someone Else" }, { bearer: third }))).toEqual([
       409,
       "waiver_participant_changed",
     ]);
-    expect((await resend({ position: 1 })).status).toBe(400);
+    expect((await resend({ position: 1 }, { bearer: third })).status).toBe(400);
     // Canceled: the waiver is no longer needed, so nothing goes out.
     const managed = await request("GET", "/v1/public/manage/booking", {
       origin: guestOf(A),
-      bearer: session,
+      bearer: third,
     });
     const refund = (managed.json.booking as { cancellationTerms: { refundAmount: number } })
       .cancellationTerms.refundAmount;
     const canceled = await request("POST", "/v1/public/manage/cancellation", {
       origin: guestOf(A),
-      bearer: session,
+      bearer: third,
       headers: { "idempotency-key": `k-${randomUUID()}` },
       body: { expectedRefundAmount: refund },
     });
     expect(canceled.status).toBe(200);
-    expect(codeOf(await resend({ position: 1, name: "Rae Resend" }))).toEqual([
+    expect(codeOf(await resend({ position: 1, name: "Rae Resend" }, { bearer: third }))).toEqual([
       409,
       "waiver_not_pending",
     ]);
