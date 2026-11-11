@@ -42,9 +42,10 @@ export type AccessRole = StaffRole | SupportRole;
  * (`payments.record`); only owners record money paid back outside the card
  * flow (`payments.refund_external`). Owners and finance read TideGrid's fee
  * invoices (`fees.read`); finance still changes nothing. Owners and booking
- * staff move a booking to another trip of its product before its change
- * cutoff (`bookings.reschedule`, W3-G2.11-rest); after the cutoff only an
- * owner, with a reason (`bookings.override`).
+ * staff move a booking to another trip of its product, or give up a place in
+ * a shared-seat party, before its change cutoff (`bookings.reschedule`,
+ * W3-G2.11-rest); after the cutoff only an owner, with a reason
+ * (`bookings.override`).
  */
 export type Permission =
   | "members.read"

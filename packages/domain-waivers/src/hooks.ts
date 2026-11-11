@@ -115,6 +115,13 @@ export function createWaiverHooks(deps: WaiverDeps): BookingHooks {
     async participantUpdated(trx, ctx, event) {
       await onParticipantUpdated(trx, ctx, deps, event);
     },
+    async participantRemoved(trx, ctx, event) {
+      await revokeParticipantWaivers(trx, ctx, {
+        bookingId: event.bookingId,
+        participantId: event.participantId,
+        reason: "participant_removed",
+      });
+    },
     async bookingCanceled(trx, ctx, event) {
       await revokeBookingWaivers(trx, ctx, { bookingId: event.bookingId });
     },

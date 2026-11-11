@@ -761,7 +761,8 @@ export interface BookingsTable {
   /** Moves with the trip, only with its reschedule row (0034, W3-G2.11-rest). */
   hold_id: ColumnType<string, string, string>;
   trip_id: ColumnType<string, string, string>;
-  party_size: Fixed<number>;
+  /** Down by one with its hold, only with a party change row (0035, W3-G2.11-rest). */
+  party_size: ColumnType<number, number, number>;
   /** Copied from its checkout by a trigger (0012), whatever the insert names. */
   source: FixedDefault<BookingSource>;
   /** Created confirmed; canceled once, with its cancellation (G2.11c). */
@@ -848,6 +849,8 @@ export interface BookingParticipantsTable {
   guardian_email: string | null;
   created_at: Stamped;
   updated_at: Stamped;
+  /** Set once, by the trigger's clock, with the party change that gave up the place (0035). */
+  removed_at: ColumnType<Date | null, never, Date>;
 }
 
 export type CancellationRemedy = "full_refund" | "percent_refund" | "credit" | "none";
@@ -1442,6 +1445,7 @@ export interface Database
   payment_reconciliation_exceptions: PaymentReconciliationExceptionsTable;
   balance_due_changes: BalanceDueChangesTable;
   booking_reschedules: BookingReschedulesTable;
+  booking_party_changes: BookingPartyChangesTable;
   balance_payments: BalancePaymentsTable;
 }
 
@@ -1699,6 +1703,26 @@ export interface BookingReschedulesTable {
   to_trip_id: Fixed<string>;
   from_hold_id: Fixed<string>;
   to_hold_id: Fixed<string>;
+  /** Set by the trigger from the database clock. */
+  before_cutoff: ColumnType<boolean, boolean | undefined, never>;
+  override_reason: ColumnType<string | null, string | null | undefined, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** A shared-seat booking giving up one place (0035, W3-G2.11-rest). Append-only. */
+export interface BookingPartyChangesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  trip_id: Fixed<string>;
+  from_hold_id: Fixed<string>;
+  from_party_size: Fixed<number>;
+  to_party_size: Fixed<number>;
+  position: Fixed<number>;
+  participant_id: ColumnType<string | null, string | null | undefined, never>;
   /** Set by the trigger from the database clock. */
   before_cutoff: ColumnType<boolean, boolean | undefined, never>;
   override_reason: ColumnType<string | null, string | null | undefined, never>;

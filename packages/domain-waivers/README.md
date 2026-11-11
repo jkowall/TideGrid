@@ -213,7 +213,7 @@ Recorded as follow-ups; the demo leaves them out:
 - **The generic dock QR with staff lookup.** One printed code at the dock that finds a guest's waiver by lookup is not built; participant QR and staff-device signing are (above).
 - **Renewal from the management page.** The booker's management page shows status but offers no resend; a guest asks from the signing page instead (above). A corrected address there sends at once.
 - **Migration suppression.** Imported bookings do not exist yet, so there is no initial-notification policy.
-- **Removing a participant.** The booking module does not remove participants yet. `revokeParticipantWaivers` is ready for the hook that will.
+- **Removing a participant.** When a shared-seat party gives up a place (W3-G2.11-rest), the booking module's `participantRemoved` hook calls `revokeParticipantWaivers` with `participant_removed`: the request, its links, sessions, and queued email end, and a signature already given stays as evidence. The removed participant is no longer listed by the booking module, so nothing is assigned to them again.
 - **Reuse across bookings.** The re-sign policy is `every_booking`; reusing a signature needs verified customer identity.
 - **Mailbox verification beyond the link.** Following the emailed link is the mailbox signal; there is no separate code. A guardian address shared with a participant is flagged to staff (above), not verified.
 - **Typed signatures outside WinAnsi** show a question mark in the PDF (the evidence keeps the exact text). An embedded font fixes it.

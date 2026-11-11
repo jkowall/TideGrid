@@ -1305,7 +1305,7 @@ describe("canceling", () => {
             guests: 1,
             tickets: [{ code: "adult", name: "Adult", quantity: 1 }],
           },
-          participants: { partySize: 1, participants: [] },
+          participants: { partySize: 1, places: [1], participants: [] },
         }),
       },
     );

@@ -443,7 +443,8 @@ export async function cancelStateOf(admin: Sql, bookingId: string): Promise<Canc
            (select count(*)::int from public.email_messages m
              where m.booking_id = b.id and m.template = 'booking_canceled')
              as cancellation_emails,
-           (select count(*)::int from public.booking_participants x where x.booking_id = b.id)
+           (select count(*)::int from public.booking_participants x
+             where x.booking_id = b.id and x.removed_at is null)
              as participants
       from public.bookings b
       join public.capacity_holds h on h.id = b.hold_id
@@ -560,7 +561,8 @@ export async function cancellationLedger(
            (select count(*)::int from public.email_messages m
              where m.booking_id = b.id and m.template = 'booking_canceled')
              as cancellation_emails,
-           (select count(*)::int from public.booking_participants x where x.booking_id = b.id)
+           (select count(*)::int from public.booking_participants x
+             where x.booking_id = b.id and x.removed_at is null)
              as participants
       from public.bookings b
       join public.capacity_holds h on h.id = b.hold_id

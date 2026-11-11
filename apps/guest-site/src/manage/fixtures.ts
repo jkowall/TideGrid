@@ -242,7 +242,7 @@ export function managedBooking(over: Partial<ManagedBooking> = {}): ManagedBooki
       cancellationText: "Cancel at least 24 hours before departure for a full refund.",
       cutoffAt,
     },
-    participants: { partySize: 3, participants: [ava, theo] },
+    participants: { partySize: 3, places: [1, 2, 3], participants: [ava, theo] },
     partyEditable: true,
     cancellationTerms: terms("full_refund"),
     ...over,

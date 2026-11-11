@@ -148,6 +148,7 @@ describe.skipIf(!env)("booking participants and lifecycle hooks against a real d
     const { bookingId } = await book(A, 3);
     expect(await asGuest(A.id, (trx) => listParticipants(trx, A.id, bookingId))).toEqual({
       partySize: 3,
+      places: [1, 2, 3],
       participants: [],
     });
 

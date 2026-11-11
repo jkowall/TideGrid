@@ -26,6 +26,7 @@ const completionWrites = [
   `/v1/staff/tenants/${tenant}/bookings/${someId}/balance/due-date`,
   `/v1/staff/tenants/${tenant}/bookings/${someId}/balance/link`,
   `/v1/staff/tenants/${tenant}/bookings/${someId}/reschedule`,
+  `/v1/staff/tenants/${tenant}/bookings/${someId}/participants/2/removal`,
 ];
 
 describe("the public entry hides staff and sign-in routes", () => {
@@ -218,6 +219,9 @@ describe("contract", () => {
         // Moving a booking to another trip (W3-G2.11-rest).
         "/v1/public/manage/reschedule",
         "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/reschedule",
+        // Giving up a place in a shared-seat party (W3-G2.11-rest).
+        "/v1/public/manage/participants/{position}/removal",
+        "/v1/staff/tenants/{tenantId}/bookings/{bookingId}/participants/{position}/removal",
         // Console completion (G2.12c).
         "/v1/staff/tenants/{tenantId}/booking-searches",
         "/v1/staff/tenants/{tenantId}/booking-day-totals",

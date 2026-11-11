@@ -196,6 +196,7 @@ export * from "./email-exceptions.ts";
 export * from "./inventory.ts";
 // Guest self-service and email (lane 1, G2.11c and the G2.16 shim).
 export * from "./participants.ts";
+export * from "./party-changes.ts";
 export * from "./pricing.ts";
 // Problem details for the guest commands (W1-GUEST-API).
 export * from "./problems.ts";
