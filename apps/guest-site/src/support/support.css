@@ -29,3 +29,29 @@
   padding: 0;
   list-style: none;
 }
+
+/* Important links for every trip (W3-G2.14b-rest), as on the booking page. */
+.support-site-links {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.support-site-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+.support-site-links__host,
+.support-site-links__note {
+  display: block;
+  margin-top: var(--space-1);
+}
+.support-site-links__host {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}

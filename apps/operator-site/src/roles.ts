@@ -69,3 +69,12 @@ export function canResendEmail(role: StaffRole): boolean {
 export function canResolveExceptions(role: StaffRole): boolean {
   return role === "owner" || role === "booking_staff";
 }
+
+/**
+ * Who adds, changes, and archives the operator's important links for guests
+ * (W3-G2.14b-rest): owners only. This mirrors the API's `catalog.manage`
+ * permission for display only; every role reads the links.
+ */
+export function canManageLinks(role: StaffRole): boolean {
+  return role === "owner";
+}
