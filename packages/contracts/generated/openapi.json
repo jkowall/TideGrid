@@ -39439,7 +39439,7 @@
             }
           },
           "409": {
-            "description": "The refund is larger than allowed (external_refund_too_large)",
+            "description": "The refund is larger than allowed (external_refund_too_large), or the booking is complimentary (booking_complimentary)",
             "content": {
               "application/json": {
                 "schema": {
