@@ -134,6 +134,8 @@ export interface SendInput {
    * generation went to, never closing anything, at most three a day.
    */
   guestRenewal?: boolean;
+  /** The booker sent it from the management page: audited apart from the person's own renewal. */
+  byBooker?: boolean;
 }
 
 /** Who the email greets: the participant, or a minor's parent or guardian. */
@@ -385,9 +387,11 @@ export async function sendWaiverRequest(
     action:
       kind === "initial"
         ? "waiver_request.sent"
-        : input.guestRenewal
-          ? "waiver_request.renewed"
-          : "waiver_request.resent",
+        : input.byBooker
+          ? "waiver_request.resent_by_booker"
+          : input.guestRenewal
+            ? "waiver_request.renewed"
+            : "waiver_request.resent",
     subjectType: "waiver_request",
     subjectId: request.id,
     reason: input.reason,

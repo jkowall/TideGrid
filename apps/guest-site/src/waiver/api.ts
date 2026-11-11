@@ -209,12 +209,12 @@ export async function readPartyWaivers(
  */
 export async function resendPartyWaiver(
   bookingSession: string,
-  position: number,
+  person: { position: number; name: string },
 ): Promise<Result<PartyWaiverList>> {
   const result = await call("/v1/public/manage/waivers/resend", ManageWaiversResponse, {
     method: "POST",
     bearer: bookingSession,
-    body: { position },
+    body: { position: person.position, name: person.name },
   });
   return result.kind === "ok" ? { ...result, value: result.value.waivers } : result;
 }

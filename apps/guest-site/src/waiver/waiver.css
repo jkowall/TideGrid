@@ -223,6 +223,7 @@
   list-style: none;
 }
 .wv-party__item {
+  position: relative;
   display: grid;
   gap: var(--space-1);
   min-width: 0;
@@ -271,8 +272,14 @@
   font-size: var(--text-sm);
   color: var(--text-body);
 }
+/* An empty note stays in the accessibility tree, so a refusal written into it is announced. */
 .wv-party__note:empty {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .wv-party__note:focus {
   outline: none;

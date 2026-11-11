@@ -177,6 +177,8 @@ export type BookerResendResult =
       kind: "refused";
       reason: /** No one is named at that place, or the booking is not this tenant's. */
         | "not_found"
+        /** The person at that place is not the one the booker saw: the party changed. */
+        | "changed"
         /** The booking is not confirmed, or the waiver is signed, replaced, or not needed. */
         | "not_pending"
         | "trip_over"
@@ -186,8 +188,10 @@ export type BookerResendResult =
         | "not_sent"
         /** Three new links today for this person, or the request's five sends are used. */
         | "limit_reached"
-        /** This address had an email moments ago, or a sending cap holds it. */
+        /** This address had an email in the last 10 minutes. */
         | "too_soon"
+        /** A sending cap for the person, address, booking, or operator holds it. */
+        | "held"
         | "email_invalid";
       retryAfter: Date | null;
     };
@@ -206,7 +210,7 @@ export async function resendWaiverForBooker(
   trx: TenantTransaction,
   ctx: TenantContext,
   deps: WaiverDeps,
-  input: { bookingId: string; position: number },
+  input: { bookingId: string; position: number; name: string },
 ): Promise<BookerResendResult> {
   const refuse = (
     reason: Extract<BookerResendResult, { kind: "refused" }>["reason"],
@@ -216,6 +220,8 @@ export async function resendWaiverForBooker(
   const booking = await listBookingWaivers(trx, ctx.tenantId, input.bookingId);
   const person = booking?.participants.find((p) => p.position === input.position);
   if (!booking || !person) return refuse("not_found");
+  // The place is what the page sent; the name says it is still the person shown.
+  if (person.name !== input.name) return refuse("changed");
   if (booking.bookingState !== "confirmed") return refuse("not_pending");
   if (!person.request) return refuse("not_sent");
   const request = await lockRequest(trx, ctx.tenantId, person.request.id);
@@ -229,6 +235,7 @@ export async function resendWaiverForBooker(
     kind: "resend",
     reason: BOOKER_RESEND_REASON,
     guestRenewal: true,
+    byBooker: true,
   });
   switch (sent.kind) {
     case "sent":
@@ -245,8 +252,9 @@ export async function resendWaiverForBooker(
     case "limit_reached":
       return refuse("limit_reached");
     case "too_soon":
-    case "rate_limited":
       return refuse("too_soon", sent.retryAfter);
+    case "rate_limited":
+      return refuse("held", sent.retryAfter);
     case "trip_over":
       return refuse("trip_over");
     case "email_invalid":

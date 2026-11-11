@@ -670,23 +670,28 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
       codeOf(
         await request("POST", "/v1/public/manage/waivers/resend", {
           origin: guestOf(A),
-          body: { position: 1 },
+          body: { position: 1, name: "Rae Resend" },
         }),
       ),
     ).toEqual([401, "session_required"]);
-    expect(codeOf(await resend({ position: 1 }, { origin: guestOf(B) }))).toEqual([
-      401,
-      "session_expired",
+    expect(
+      codeOf(await resend({ position: 1, name: "Rae Resend" }, { origin: guestOf(B) })),
+    ).toEqual([401, "session_expired"]);
+    expect((await resend({ position: 0, name: "Rae Resend" })).status).toBe(400);
+    expect(codeOf(await resend({ position: 9, name: "Rae Resend" }))).toEqual([
+      404,
+      "waiver_participant_not_found",
     ]);
-    expect((await resend({ position: 0 })).status).toBe(400);
-    expect(codeOf(await resend({ position: 9 }))).toEqual([404, "waiver_participant_not_found"]);
     // The first email has not gone out yet.
-    const pending = await resend({ position: 1 });
+    const pending = await resend({ position: 1, name: "Rae Resend" });
     expect(codeOf(pending)).toEqual([409, "waiver_email_pending"]);
     expect(pending.headers.get("cache-control")).toBe("no-store");
     await linkFor(admin, runtime.db, A.id, requestId);
     // Moments after it went: the 10 minutes between emails to one address hold.
-    expect(codeOf(await resend({ position: 1 }))).toEqual([409, "waiver_resend_too_soon"]);
+    expect(codeOf(await resend({ position: 1, name: "Rae Resend" }))).toEqual([
+      409,
+      "waiver_resend_too_soon",
+    ]);
     await admin.begin(async (tx) => {
       await tx`alter table public.waiver_deliveries disable trigger waiver_deliveries_append_only`;
       await tx`update public.waiver_deliveries
@@ -695,7 +700,7 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
                 where request_id = ${requestId}`;
       await tx`alter table public.waiver_deliveries enable trigger waiver_deliveries_append_only`;
     });
-    const sent = await resend({ position: 1 });
+    const sent = await resend({ position: 1, name: "Rae Resend" });
     expect(sent.status).toBe(202);
     expect(sent.headers.get("cache-control")).toBe("no-store");
     expect(sent.json.waivers).toMatchObject({
@@ -722,6 +727,35 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     });
     // The new email goes to the same address once delivered.
     expect((await linkFor(admin, runtime.db, A.id, requestId)).to).toBe(email);
+    // The audit names the booker's resend apart from the person's own renewal.
+    const [audit] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.audit_events
+       where subject_id = ${requestId} and action = 'waiver_request.resent_by_booker'`;
+    expect(audit?.n).toBe(1);
+    // A name the place no longer has, then a missing name.
+    expect(codeOf(await resend({ position: 1, name: "Someone Else" }))).toEqual([
+      409,
+      "waiver_participant_changed",
+    ]);
+    expect((await resend({ position: 1 })).status).toBe(400);
+    // Canceled: the waiver is no longer needed, so nothing goes out.
+    const managed = await request("GET", "/v1/public/manage/booking", {
+      origin: guestOf(A),
+      bearer: session,
+    });
+    const refund = (managed.json.booking as { cancellationTerms: { refundAmount: number } })
+      .cancellationTerms.refundAmount;
+    const canceled = await request("POST", "/v1/public/manage/cancellation", {
+      origin: guestOf(A),
+      bearer: session,
+      headers: { "idempotency-key": `k-${randomUUID()}` },
+      body: { expectedRefundAmount: refund },
+    });
+    expect(canceled.status).toBe(200);
+    expect(codeOf(await resend({ position: 1, name: "Rae Resend" }))).toEqual([
+      409,
+      "waiver_not_pending",
+    ]);
   });
 
   it("starts a dock signing for staff only, once per code, and ends the session on request", async () => {

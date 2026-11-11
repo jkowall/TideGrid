@@ -426,6 +426,13 @@ export const ManageWaiverResendRequest = z.object({
     .min(1)
     .max(1000)
     .describe("The person's place in the party, as the waivers list gives it"),
+  name: z
+    .string()
+    .min(1)
+    .max(200)
+    .describe(
+      "The person's name as the waivers list gave it, so a party changed since then sends nothing",
+    ),
 });
 export type ManageWaiverResendRequest = z.infer<typeof ManageWaiverResendRequest>;
 

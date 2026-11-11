@@ -301,7 +301,7 @@ describe("sending a person's waiver again", () => {
     expect(post?.url).toMatch(/\/v1\/public\/manage\/waivers\/resend$/);
     expect(post?.url).not.toContain(session);
     expect(post?.authorization).toBe(`Bearer ${session}`);
-    expect(post?.body).toEqual({ position: 2 });
+    expect(post?.body).toEqual({ position: 2, name: "Kit Minor" });
     // The button goes, and its note takes focus so the result is heard.
     expect(screen.queryByRole("button", { name: /^Send again/ })).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(note));
@@ -318,7 +318,7 @@ describe("sending a person's waiver again", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
     const item = (
       await screen.findByText(
-        "We emailed this address in the last few minutes. Try again in 10 minutes.",
+        "We emailed this address in the last 10 minutes. Try again a little later.",
       )
     ).closest("li") as HTMLElement;
     expect(within(item).getByRole("button", { name: "Send again to Kit Minor" })).toBeTruthy();
@@ -342,12 +342,59 @@ describe("sending a person's waiver again", () => {
     await screen.findByText("1 of 3 signed");
     fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
     await screen.findByText(
-      "This waiver changed since the page loaded. It now shows where it stands.",
+      "This waiver changed since the page loaded. The list now shows where it stands.",
     );
     await waitFor(() => expect(calls.filter((c) => c.method === "GET")).toHaveLength(2));
     answer = 401;
     fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
     await waitFor(() => expect(onEnded).toHaveBeenCalledTimes(1));
+  });
+
+  it("drops a sent note once the list shows the person differently", async () => {
+    let list = party;
+    stubApi((call) =>
+      call.method === "POST" ? json(202, { waivers: party }) : json(200, { waivers: list }),
+    );
+    const view = show({ refresh: 1 });
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(/^Sent again to g•••@example.test/);
+    // The booker corrects the address in Who's coming, and the page reads again.
+    list = {
+      ...party,
+      participants: party.participants.map((p) =>
+        p.position === 2 ? { ...p, sentTo: "n•••@example.test" } : p,
+      ),
+    };
+    view.rerender(
+      <PartyWaivers
+        session={session}
+        operator="Demo Harbor Charters"
+        timeZone={zone}
+        refresh={2}
+        onEnded={() => {}}
+      />,
+    );
+    await screen.findByText(
+      "We emailed the link to their parent or guardian at n•••@example.test.",
+    );
+    expect(screen.queryByText(/^Sent again/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Send again to Kit Minor" })).toBeTruthy();
+  });
+
+  it("says when the booking site can't be reached, and the button stays", async () => {
+    stubApi((call) => {
+      if (call.method === "POST") throw new TypeError("offline");
+      return json(200, { waivers: party });
+    });
+    show();
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    await screen.findByText(
+      "We couldn't reach the booking site. Check your connection, then try again.",
+    );
+    const button = screen.getByRole("button", { name: "Send again to Kit Minor" });
+    expect(button.getAttribute("aria-busy")).toBeNull();
   });
 
   it("says what to do for each refusal", () => {
@@ -358,6 +405,10 @@ describe("sending a person's waiver again", () => {
     );
     expect(resendProblem("waiver_not_sent", 409, op)).toMatch(/Who's coming/);
     expect(resendProblem("waiver_trip_over", 409, op)).toMatch(/trip is over/);
+    expect(resendProblem("waiver_resend_held", 409, op)).toBe(
+      "We can't email this person again just yet. Try again later, or contact Demo Reef Divers.",
+    );
+    expect(resendProblem("waiver_participant_changed", 409, op)).toMatch(/party changed/);
     expect(resendProblem("rate_limited", 429, op)).toMatch(/Wait a minute/);
     expect(resendProblem("unknown", 503, op)).toMatch(/couldn't send it just now/);
     expect(resendProblem("unknown", 400, op)).toMatch(/contact Demo Reef Divers/);

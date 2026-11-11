@@ -43,8 +43,35 @@ const REFRESH_AFTER_MS = 10_000;
 
 type Load = { kind: "loading" } | { kind: "ready"; list: PartyWaiverList } | { kind: "failed" };
 
-/** One person's send-again, by their place in the party. */
-type Resend = { kind: "busy" } | { kind: "sent"; text: string } | { kind: "failed"; text: string };
+/**
+ * One person's send-again, by their place in the party, with what the list
+ * said of them then: once a read shows them differently (signed, a new
+ * address, a failed email), the note no longer applies and goes.
+ */
+type Resend =
+  | { kind: "busy" }
+  | {
+      kind: "sent" | "failed";
+      text: string;
+      status: string;
+      sentTo: string | null;
+      at: number;
+      /** Says the list changed, so it stays when the list reads again. */
+      keep?: boolean;
+    };
+
+/** After this long, a sent note gives way to the button again: the 10 minutes have passed. */
+const SENT_NOTE_MS = 10 * 60_000;
+
+/** The note still describes this person as the list shows them now. */
+function current(resend: Resend | undefined, p: GuestParticipantWaiver): Resend | undefined {
+  if (!resend || resend.kind === "busy") return resend;
+  if (!resend.keep && (resend.status !== p.status || resend.sentTo !== p.sentTo)) {
+    return undefined;
+  }
+  if (resend.kind === "sent" && Date.now() - resend.at > SENT_NOTE_MS) return undefined;
+  return resend;
+}
 
 /** Whether the booker can send this person's email again: it went out, and they haven't signed. */
 export function canResend(p: GuestParticipantWaiver): boolean {
@@ -58,14 +85,18 @@ export function resendProblem(code: string, status: number, operator: string): s
     case "waiver_email_pending":
       return "Their latest email is still on its way. Give it a few minutes, and ask them to check their spam folder.";
     case "waiver_resend_too_soon":
-      return "We emailed this address in the last few minutes. Try again in 10 minutes.";
+      return "We emailed this address in the last 10 minutes. Try again a little later.";
+    case "waiver_resend_held":
+      return `We can't email this person again just yet. Try again later, or contact ${operator}.`;
+    case "waiver_participant_changed":
+      return "Your party changed since the page loaded. Check the list, then try again.";
     case "waiver_resend_limit":
       return `This waiver has been sent as many times as we can for now. Contact ${operator} if it still hasn't arrived.`;
     case "waiver_not_sent":
       return "We can't send this one again from here. Check their email address in Who's coming.";
     case "waiver_not_pending":
     case "waiver_participant_not_found":
-      return "This waiver changed since the page loaded. It now shows where it stands.";
+      return "This waiver changed since the page loaded. The list now shows where it stands.";
     case "waiver_trip_over":
       return "This trip is over, so its waiver can't be signed now.";
     case "rate_limited":
@@ -207,36 +238,55 @@ export function PartyWaivers({
 
   async function sendAgain(p: GuestParticipantWaiver) {
     setResends((all) => ({ ...all, [p.position]: { kind: "busy" } }));
-    const result = await resendPartyWaiver(session, p.position);
-    let next: Resend;
+    const result = await resendPartyWaiver(session, p);
+    const note = (
+      kind: "sent" | "failed",
+      text: string,
+      now: GuestParticipantWaiver = p,
+      keep = false,
+    ) =>
+      setResends((all) => ({
+        ...all,
+        [p.position]: { kind, text, status: now.status, sentTo: now.sentTo, at: Date.now(), keep },
+      }));
     if (result.kind === "ok") {
       loadedAt.current = Date.now();
       setLoad({ kind: "ready", list: result.value });
-      const to = result.value.participants.find((x) => x.position === p.position)?.sentTo;
-      next = {
-        kind: "sent",
-        text: `Sent again${to ? ` to ${to}` : ""}. Ask them to check their inbox and spam folder.`,
-      };
+      const now = result.value.participants.find((x) => x.position === p.position) ?? p;
       // The button goes away, so the note takes focus.
       focusNote.current = p.position;
-    } else if (result.kind === "refused" && result.status === 401) {
+      note(
+        "sent",
+        `Sent again${now.sentTo ? ` to ${now.sentTo}` : ""}. Ask them to check their inbox and spam folder.`,
+        now,
+      );
+      return;
+    }
+    if (result.kind === "refused" && result.status === 401) {
+      setResends((all) => {
+        const rest = { ...all };
+        delete rest[p.position];
+        return rest;
+      });
       ended.current();
       return;
-    } else if (result.kind === "refused") {
-      next = { kind: "failed", text: resendProblem(result.code, result.status, operator) };
-      if (result.code === "waiver_not_pending" || result.code === "waiver_participant_not_found") {
-        setAttempt((n) => n + 1);
-      }
-    } else {
-      next = {
-        kind: "failed",
-        text:
-          result.kind === "network"
-            ? "We couldn't reach the booking site. Check your connection, then try again."
-            : `Something went wrong. Try again, or contact ${operator}.`,
-      };
     }
-    setResends((all) => ({ ...all, [p.position]: next }));
+    if (result.kind === "refused") {
+      const changed =
+        result.code === "waiver_not_pending" ||
+        result.code === "waiver_participant_not_found" ||
+        result.code === "waiver_participant_changed";
+      note("failed", resendProblem(result.code, result.status, operator), p, changed);
+      // The list reads again, and the note saying so stays.
+      if (changed) setAttempt((n) => n + 1);
+      return;
+    }
+    note(
+      "failed",
+      result.kind === "network"
+        ? "We couldn't reach the booking site. Check your connection, then try again."
+        : `Something went wrong. Try again, or contact ${operator}.`,
+    );
   }
 
   if (load.kind === "ready" && !load.list.applies) return null;
@@ -300,7 +350,7 @@ export function PartyWaivers({
               {list.participants.map((p) => {
                 const status = statuses[p.status];
                 const detail = partyWaiverDetail(p, operator, timeZone);
-                const resend = resends[p.position];
+                const resend = current(resends[p.position], p);
                 return (
                   <li key={p.position} className="wv-party__item">
                     <div className="wv-party__head">
