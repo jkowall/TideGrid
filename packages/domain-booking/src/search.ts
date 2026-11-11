@@ -266,7 +266,8 @@ export async function searchBookings(
                  to_char(t1.local_date, 'YYYY-MM-DD') as local_date,
                  to_char(t1.local_start_time, 'HH24:MI') as local_start_time,
                  t1.starts_at, t1.sales_state,
-                 o.total_amount, coalesce(pay.state, 'complimentary') as payment_state,
+                 case when pb.payment_id is null then 0 else o.total_amount end as total_amount,
+                 coalesce(pay.state, 'complimentary') as payment_state,
                  r.state as refund_state, r.amount as refund_amount
                  ${bookerColumns}
             from scheduled_trips t1

@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import {
   createDb,
   inTenantTransaction,
+  setTenantContext,
   type TenantContext,
   type TenantTransaction,
 } from "@tidegrid/database";
@@ -329,6 +330,22 @@ describe.skipIf(!env)("complimentary bookings (W3-G2.12-rest)", () => {
         ),
       ),
     ).toMatchObject({ constraint: "payments_complimentary" });
+    // Only under READ COMMITTED: an older snapshot could miss a grant
+    // committed while it waited for the checkout's lock.
+    expect(
+      await failure(
+        runtime.db
+          .transaction()
+          .setIsolationLevel("repeatable read")
+          .execute(async (trx) => {
+            await setTenantContext(trx, staffCtx(A.id, ownerA));
+            await sql`insert into payments (tenant_id, checkout_session_id, order_id, provider,
+                  account_ref, idempotency_key, amount)
+                values (${A.id}, ${session.id}, ${order?.id ?? ""}, 'fake', ${A.accountRef},
+                        ${`checkout_payment:${randomUUID()}`}, ${order?.total ?? 1})`.execute(trx);
+          }),
+      ),
+    ).toMatchObject({ code: "25000" });
 
     // A grant for a staff checkout that already has a payment.
     const quote = await staffQuote(A, ownerA, tripsA.shared(), 1);
@@ -568,8 +585,10 @@ describe.skipIf(!env)("complimentary bookings (W3-G2.12-rest)", () => {
     );
     if (day.kind !== "ok") throw new Error(JSON.stringify(day));
     const listed = day.bookings.find((b) => b.id === result.bookingId);
+    // Nothing to pay: the list shows 0; the detail keeps the waived value.
     expect(listed).toMatchObject({
       source: "complimentary",
+      total: 0,
       payment: { state: "complimentary", refund: null },
     });
     const only = await read((trx) =>
@@ -600,9 +619,10 @@ describe.skipIf(!env)("complimentary bookings (W3-G2.12-rest)", () => {
       }),
     );
     if (found.kind !== "ok") throw new Error(JSON.stringify(found));
-    expect(found.results.find((r) => r.id === result.bookingId)?.payment.state).toBe(
-      "complimentary",
-    );
+    expect(found.results.find((r) => r.id === result.bookingId)).toMatchObject({
+      total: 0,
+      payment: { state: "complimentary" },
+    });
 
     const report = await read((trx) => buildDayReport(trx, A.id, { date, withBooker: false }));
     if (report.kind !== "ok") throw new Error(JSON.stringify(report));

@@ -586,7 +586,9 @@ export async function listDayBookings(
   }>`
     select b.id, b.reference, b.trip_id, b.state, b.source, s.channel, b.party_size,
            b.confirmed_at, p.kind as product_kind,
-           o.id as order_id, o.total_amount,
+           o.id as order_id,
+           -- Nothing to pay on a complimentary booking; its detail shows the waived value.
+           case when b.payment_id is null then 0 else o.total_amount end as total_amount,
            coalesce(pay.state, 'complimentary') as payment_state,
            r.state as refund_state, r.amount as refund_amount
            ${bookerColumn}

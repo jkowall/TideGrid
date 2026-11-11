@@ -128,6 +128,14 @@ CREATE FUNCTION app.check_payment_not_complimentary() RETURNS trigger
   SET search_path = pg_catalog, pg_temp
   AS $$
 BEGIN
+  -- A grant takes the checkout's lock without changing the row, so a snapshot
+  -- older than the lock could miss a grant committed meanwhile. Only READ
+  -- COMMITTED reads afresh after the lock, as the grant requires too.
+  IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'payments are written only under READ COMMITTED, not %',
+      pg_catalog.current_setting('transaction_isolation')
+      USING ERRCODE = '25000';
+  END IF;
   PERFORM 1 FROM public.checkout_sessions s
     WHERE s.tenant_id = NEW.tenant_id AND s.id = NEW.checkout_session_id
       FOR NO KEY UPDATE;

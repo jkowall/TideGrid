@@ -129,7 +129,8 @@ export async function baselineSearch(
            to_char(t.local_date, 'YYYY-MM-DD') as local_date,
            to_char(t.local_start_time, 'HH24:MI') as local_start_time,
            t.starts_at, t.sales_state,
-           o.total_amount, coalesce(pay.state, 'complimentary') as payment_state,
+           case when b.payment_id is null then 0 else o.total_amount end as total_amount,
+           coalesce(pay.state, 'complimentary') as payment_state,
            r.state as refund_state, r.amount as refund_amount
            ${bookerColumns}
       ${from}
