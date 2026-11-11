@@ -191,6 +191,17 @@ export function PartyWaivers({
   const notes = useRef(new Map<number, HTMLParagraphElement>());
   const focusNote = useRef<number | null>(null);
   const loadedAt = useRef(0);
+  // Reads and sends are numbered as they start; a list from an earlier one
+  // never replaces a list from a later one, whatever order they answer in.
+  const started = useRef(0);
+  const shown = useRef(0);
+  const show = (seq: number, list: PartyWaiverList): boolean => {
+    if (seq < shown.current) return false;
+    shown.current = seq;
+    loadedAt.current = Date.now();
+    setLoad({ kind: "ready", list });
+    return true;
+  };
   const ended = useRef(onEnded);
   useEffect(() => {
     ended.current = onEnded;
@@ -200,11 +211,12 @@ export function PartyWaivers({
     void refresh;
     void attempt;
     const controller = new AbortController();
+    started.current += 1;
+    const seq = started.current;
     void readPartyWaivers(session, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
-      loadedAt.current = Date.now();
       if (result.kind === "ok") {
-        setLoad({ kind: "ready", list: result.value });
+        show(seq, result.value);
       } else if (result.kind === "refused" && result.status === 401) {
         ended.current();
       } else {
@@ -238,6 +250,8 @@ export function PartyWaivers({
 
   async function sendAgain(p: GuestParticipantWaiver) {
     setResends((all) => ({ ...all, [p.position]: { kind: "busy" } }));
+    started.current += 1;
+    const seq = started.current;
     const result = await resendPartyWaiver(session, p);
     const note = (
       kind: "sent" | "failed",
@@ -250,8 +264,9 @@ export function PartyWaivers({
         [p.position]: { kind, text, status: now.status, sentTo: now.sentTo, at: Date.now(), keep },
       }));
     if (result.kind === "ok") {
-      loadedAt.current = Date.now();
-      setLoad({ kind: "ready", list: result.value });
+      // A later read already shows newer facts: keep them, and read once more
+      // so this send shows too.
+      if (!show(seq, result.value)) setAttempt((n) => n + 1);
       const now = result.value.participants.find((x) => x.position === p.position) ?? p;
       // The button goes away, so the note takes focus.
       focusNote.current = p.position;

@@ -382,6 +382,46 @@ describe("sending a person's waiver again", () => {
     expect(screen.getByRole("button", { name: "Send again to Kit Minor" })).toBeTruthy();
   });
 
+  it("never lets an earlier answer replace a later one", async () => {
+    let releasePost: (r: Response) => void = () => {};
+    const signedKit = {
+      ...party,
+      participants: party.participants.map((p) =>
+        p.position === 2 ? { ...p, status: "signed" as const, sentTo: null } : p,
+      ),
+    };
+    let reads = 0;
+    stubApi((call) => {
+      if (call.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          releasePost = resolve;
+        }) as unknown as Response;
+      }
+      reads += 1;
+      return json(200, { waivers: reads === 1 ? party : signedKit });
+    });
+    const view = show({ refresh: 1 });
+    await screen.findByText("1 of 3 signed");
+    fireEvent.click(screen.getByRole("button", { name: "Send again to Kit Minor" }));
+    // A read that starts after the send answers first: Kit has signed.
+    view.rerender(
+      <PartyWaivers
+        session={session}
+        operator="Demo Harbor Charters"
+        timeZone={zone}
+        refresh={2}
+        onEnded={() => {}}
+      />,
+    );
+    await screen.findByText("2 of 3 signed");
+    // The send's older list arrives last and changes nothing shown.
+    await act(async () => {
+      releasePost(json(202, { waivers: party }));
+    });
+    await waitFor(() => expect(reads).toBe(3));
+    expect(screen.getByText("2 of 3 signed")).toBeTruthy();
+  });
+
   it("says when the booking site can't be reached, and the button stays", async () => {
     stubApi((call) => {
       if (call.method === "POST") throw new TypeError("offline");
