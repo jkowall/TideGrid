@@ -47,6 +47,7 @@ import {
 } from "./emails.ts";
 import { feeReversalFor } from "./fee-ledger.ts";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
+import { withdrawProfileAccess } from "./participants.ts";
 import { iso, record } from "./views.ts";
 
 export type CancelRefusal =
@@ -749,6 +750,9 @@ async function applyCancellation(
     trx,
   );
   await enqueueCancellationEmail(trx, ctx, bookingId);
+  // Participants' invitations (0036) open nothing on a canceled booking:
+  // their links and sessions end, and one not yet sent never goes.
+  await withdrawProfileAccess(trx, ctx, { bookingId, reason: "booking_canceled" });
   await hooks.bookingCanceled?.(trx, ctx, {
     bookingId,
     cancellationId: cancellation.id,

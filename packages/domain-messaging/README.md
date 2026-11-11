@@ -49,7 +49,7 @@ A link that grants access (the booking's management link, and a waiver signing l
 
 ## Access links and guest sessions
 
-Every function takes the caller's tenant transaction, so it commits or rolls back with the caller's change. Tokens are 32 random bytes, base64url (43 characters); only SHA-256 hashes with a purpose prefix are stored. Purposes are `booking_manage` (the booking's management page, lane 1) and `waiver_sign` (a participant's waiver, G2.15, which needs a participant).
+Every function takes the caller's tenant transaction, so it commits or rolls back with the caller's change. Tokens are 32 random bytes, base64url (43 characters); only SHA-256 hashes with a purpose prefix are stored. Purposes are `booking_manage` (the booking's management page, lane 1), `waiver_sign` (a participant's waiver, G2.15, which needs a participant), and `participant_profile` (a participant's own details, from an invitation, W3-G2.11-rest, which also needs a participant). `revokeGuestSessions` can keep one session live (`exceptSessionId`), the one making a change.
 
 ```ts
 redeemAccessLink(trx, ctx, { token, purpose }): Promise<

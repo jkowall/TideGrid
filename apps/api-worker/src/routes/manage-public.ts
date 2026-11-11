@@ -16,6 +16,7 @@ import {
   ManageSessionEndResponse,
   ManageSessionResponse,
   ParticipantInput,
+  ParticipantInvitationResponse,
   ParticipantPosition,
   ParticipantResponse,
   RemoveParticipantRequest,
@@ -40,6 +41,7 @@ import {
   checkoutSecretPattern,
   ensureBalanceProviderPayment,
   getManagedBooking,
+  inviteParticipant,
   type ManagedBookingView,
   manageSession,
   openBalancePayment,
@@ -70,6 +72,7 @@ import {
   withPublicTenant,
 } from "../public-tenant.ts";
 import { stripePublishableKey } from "./checkout-public.ts";
+import { invitationRefusal } from "./participant-public.ts";
 import { partyChangeRefusal } from "./participants-staff.ts";
 import { previewJson, rescheduleRefusal } from "./reschedules-staff.ts";
 import { errorBody } from "./responses.ts";
@@ -80,6 +83,7 @@ const fromCheckoutPath = "/v1/public/checkout-sessions/{checkoutSessionId}/manag
 const bookingPath = "/v1/public/manage/booking";
 const participantPath = "/v1/public/manage/participants/{position}";
 const removalPath = "/v1/public/manage/participants/{position}/removal";
+const invitationPath = "/v1/public/manage/participants/{position}/invitation";
 const cancellationPath = "/v1/public/manage/cancellation";
 const linkEmailPath = "/v1/public/manage/link-email";
 const endPath = "/v1/public/manage/session/end";
@@ -604,6 +608,70 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     if (replayed) c.header("Idempotent-Replayed", "true");
     if (removed) deliverAfterCommit(c, deps, ctx.tenantId);
     return c.json(body as GuestRemoveParticipantResponse, 200);
+  });
+
+  const invitationRoute = createRoute({
+    method: "post",
+    path: invitationPath,
+    tags: ["public", "manage"],
+    summary: "Invite one participant to check their own details",
+    description: [
+      "Needs the booking session and an Idempotency-Key. Emails the participant named at the place a link of their own, to the participant's own address on file, or a minor's guardian's; never to an address in the request. The link opens only that participant's details and the trip, never the rest of the party or the payment, and works once, for seven days or until the trip leaves. A newer invitation's link replaces an older unused one.",
+      "At most 3 invitations a person in 24 hours, and 20 a booking. A repeat with the same key answers as the first did and sends nothing more.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    request: {
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      params: z.object({ position: ParticipantPosition }),
+    },
+    responses: {
+      202: {
+        content: { "application/json": { schema: ParticipantInvitationResponse } },
+        description: "Queued; it goes out after this request",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+      ),
+      422: errorBody(
+        "No such place in this party (position_out_of_range), or idempotency_key_reused",
+      ),
+      429: errorBody(
+        "Too many invitations for this person or booking today (invitation_limit_reached), or too many requests from this address (rate_limited)",
+      ),
+    },
+  });
+
+  app.openapi(invitationRoute, async (c) => {
+    const { position } = c.req.valid("param");
+    const key = c.req.valid("header")["idempotency-key"];
+    let invited = false;
+    const { body, replayed, ctx } = await withManageSession(
+      c,
+      {
+        idempotency: {
+          scope: "public.manage.participants.invite",
+          key,
+          route: invitationPath,
+          params: { position: String(position) },
+          body: {},
+        },
+      },
+      async (trx, txCtx, session) => {
+        const result = await inviteParticipant(trx, txCtx, {
+          bookingId: session.bookingId,
+          position,
+        });
+        if (result.kind !== "invited") throw invitationRefusal(result, bookingGone);
+        invited = true;
+        return { status: "accepted" as const, recipient: result.recipient };
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    if (invited) deliverAfterCommit(c, deps, ctx.tenantId);
+    return c.json(body as ParticipantInvitationResponse, 202);
   });
 
   const termsRoute = createRoute({

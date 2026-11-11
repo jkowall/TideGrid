@@ -69,6 +69,8 @@ export {
   type EmailSweepOptions,
   type EmailSweepReport,
   guestOriginFor,
+  INVITATION_CLOSED,
+  INVITATION_SUPERSEDED,
   MAX_DELIVERY_ATTEMPTS,
   providerDeduplicates,
   RETRY_BACKOFF_SECONDS,

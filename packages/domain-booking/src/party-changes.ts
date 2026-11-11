@@ -37,7 +37,7 @@ import {
 } from "@tidegrid/domain-inventory";
 import { sql } from "kysely";
 import { type BookingHooks, noBookingHooks } from "./hooks.ts";
-import { placesGivenUp, placesOf } from "./participants.ts";
+import { placesGivenUp, placesOf, withdrawProfileAccess } from "./participants.ts";
 import { iso, record } from "./views.ts";
 
 export interface PartyChangeRecord {
@@ -257,6 +257,12 @@ export async function removeParticipant(
         participantId,
         position: input.position,
         partyChangeId,
+      });
+      // Their invitation's links and sessions end with them (0036).
+      await withdrawProfileAccess(trx, ctx, {
+        bookingId: input.bookingId,
+        participantId,
+        reason: "withdrawn",
       });
     }
 

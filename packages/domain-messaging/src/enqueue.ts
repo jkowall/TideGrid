@@ -31,7 +31,11 @@ const linkPathPattern = /^\/[a-z0-9/_-]{0,100}$/;
 const namePattern = /^[^\u0000-\u001f\u007f-\u009f]{1,120}$/;
 
 export interface AccessLinkSpec {
-  /** booking_manage: the booking's management page. waiver_sign: a participant's waiver (G2.15). */
+  /**
+   * booking_manage: the booking's management page. waiver_sign: a participant's
+   * waiver (G2.15). participant_profile: a participant's own details, from an
+   * invitation (W3-G2.11-rest).
+   */
   purpose: AccessPurpose;
   /** The guest site's page that redeems it, such as "/manage" or "/waiver". */
   path: string;
@@ -121,13 +125,17 @@ export async function enqueueMessage(
   }
   let ttl: number | null = null;
   if (link) {
-    if (link.purpose !== "booking_manage" && link.purpose !== "waiver_sign") {
+    if (
+      link.purpose !== "booking_manage" &&
+      link.purpose !== "waiver_sign" &&
+      link.purpose !== "participant_profile"
+    ) {
       throw new TypeError("unknown access purpose");
     }
     if (!linkPathPattern.test(link.path)) throw new TypeError("a link path is like /manage");
     if (bookingId === null) throw new TypeError("an access link needs its bookingId");
-    if (link.purpose === "waiver_sign" && participantId === null) {
-      throw new TypeError("a waiver link needs its participantId");
+    if (link.purpose !== "booking_manage" && participantId === null) {
+      throw new TypeError("a waiver or participant link needs its participantId");
     }
     ttl = link.ttlSeconds ?? DEFAULT_LINK_TTL_SECONDS;
     if (!Number.isInteger(ttl) || ttl < MIN_LINK_TTL_SECONDS || ttl > MAX_LINK_TTL_SECONDS) {

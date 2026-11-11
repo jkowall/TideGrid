@@ -19,7 +19,13 @@
  * these rows never wait behind a change that may itself wait for that job
  * (a hook that cancels a message being sent).
  */
-import { isUuid, type TenantContext, type TenantTransaction } from "@tidegrid/database";
+import {
+  type AccessRevocationReason,
+  isUuid,
+  type TenantContext,
+  type TenantTransaction,
+} from "@tidegrid/database";
+import { revokeAccessLinks, revokeGuestSessions } from "@tidegrid/domain-messaging";
 import { sql } from "kysely";
 import { type BookingHooks, noBookingHooks, type ParticipantField } from "./hooks.ts";
 import { iso, record } from "./views.ts";
@@ -334,5 +340,55 @@ export async function putParticipant(
     position: row.position,
     changed,
   });
+  // An invitation went to the address that changed (invitations.ts, 0036):
+  // its links, and every session of that participant but the one making
+  // this change, end.
+  if (changed.some((f) => f === "email" || f === "guardianEmail" || f === "isMinor")) {
+    await withdrawProfileAccess(trx, ctx, {
+      bookingId: input.bookingId,
+      participantId: row.id,
+      reason: "recipient_changed",
+      keepSessionId: actingSessionOf(ctx),
+    });
+  }
   return { kind: "updated", participant: toView(row), changed };
+}
+
+/** The guest session making a change, from its actor (`guest_session:<id>`), or null. */
+function actingSessionOf(ctx: TenantContext): string | null {
+  const match = /^guest_session:([0-9a-f-]{36})$/.exec(ctx.actorId ?? "");
+  return match?.[1] ?? null;
+}
+
+/**
+ * End a participant's invitation links, and their sessions (all but `keep`,
+ * the session making the change), and close any invitation not yet sent:
+ * when the address it went to changes (`recipient_changed`), the participant
+ * is removed (`withdrawn`), or the booking is canceled (`booking_canceled`,
+ * every participant's). Call it after the change's own rows are written.
+ */
+export async function withdrawProfileAccess(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: {
+    bookingId: string;
+    /** Omit for every participant of the booking. */
+    participantId?: string;
+    reason: Extract<AccessRevocationReason, "recipient_changed" | "withdrawn" | "booking_canceled">;
+    keepSessionId?: string | null;
+  },
+): Promise<void> {
+  const scope = input.participantId === undefined ? {} : { participantId: input.participantId };
+  await revokeAccessLinks(trx, ctx, {
+    bookingId: input.bookingId,
+    purpose: "participant_profile",
+    ...scope,
+    reason: input.reason,
+  });
+  await revokeGuestSessions(trx, ctx, {
+    bookingId: input.bookingId,
+    purpose: "participant_profile",
+    ...scope,
+    exceptSessionId: input.keepSessionId ?? null,
+  });
 }
