@@ -480,6 +480,8 @@ Status 2026-11-08: W1N-APP is built on branch `claude/project-thread-bqlorn` und
 
 Status 2026-11-08, later: W1N-JOURNEYS is built under the owner's go of 22:16 UTC. The app books a trip with the demo's test payment, shows the outcome, keeps each booking opened on the phone for its one-hour session in the platform's secure storage, and shows the booking with its waiver statuses. It uses the guest web app's own API calls; no API, contract, or guest site change. Two new Expo packages, expo-crypto and expo-secure-store, from the Expo SDK 58 set. Changing the party, canceling, Stripe's card form, push, and deep links stay out of the demo app. Canonical: the [app README](../../apps/guest-native/README.md) and the [verification log](../verification-log.md#2026-11-08).
 
+Status 2026-11-11: W1N-TESTFLIGHT. Both demo variants are on TestFlight and Google Play internal testing, build 1, with the owner as the only tester, under his go of 2026-11-10. Store prep merged in PR 137. No App Review submission, no external testing, and no public listing. The first booking on a phone is still to come. Canonical: the [verification log](../verification-log.md#2026-11-11).
+
 
 ### 2026-11-08: W1-FIN-EXC, staff resolve finalization exceptions (owner go; coordinator defaults pending owner confirmation)
 
