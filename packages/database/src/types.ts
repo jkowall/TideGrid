@@ -643,8 +643,9 @@ export interface CheckoutSessionsTable {
   expires_at: ColumnType<Date, Date | string, never>;
   secret_hash: Fixed<string>;
   client_key: FixedDefault<string | null>;
-  booker_name: Fixed<string>;
-  booker_email: Fixed<string>;
+  /** Corrected only on a confirmed booking, in the shape 0037 checks. */
+  booker_name: ColumnType<string, string, string>;
+  booker_email: ColumnType<string, string, string>;
   /** Stamped from the transaction's actor (0012); never chosen by a writer. */
   source: ColumnType<BookingSource, never, never>;
   /** Required on a staff-assisted checkout and null otherwise (0012). */
@@ -1448,6 +1449,7 @@ export interface Database
   booking_reschedules: BookingReschedulesTable;
   booking_party_changes: BookingPartyChangesTable;
   balance_payments: BalancePaymentsTable;
+  booking_contact_changes: BookingContactChangesTable;
 }
 
 /** One handler's outcome for one outbox event (0023, W3-G2.3). Append-only. */
@@ -1727,6 +1729,22 @@ export interface BookingPartyChangesTable {
   /** Set by the trigger from the database clock. */
   before_cutoff: ColumnType<boolean, boolean | undefined, never>;
   override_reason: ColumnType<string | null, string | null | undefined, never>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/**
+ * A correction of the booker's name or email (0037, W3-G2.11-rest), written
+ * only by the checkout's trigger. Append-only, and never the values.
+ */
+export interface BookingContactChangesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  booking_id: Fixed<string>;
+  name_changed: Fixed<boolean>;
+  email_changed: Fixed<boolean>;
   created_at: Stamped;
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;

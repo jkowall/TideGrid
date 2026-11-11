@@ -22,6 +22,7 @@ const templateNames: Record<string, string> = {
   booking_canceled: "Cancellation notice",
   booking_refund_failed: "Refund problem notice",
   booking_rescheduled: "Booking moved notice",
+  booking_contact_changed: "Email change notice",
 };
 
 /** What an email was, by its template; a template the console does not know is a booking email. */

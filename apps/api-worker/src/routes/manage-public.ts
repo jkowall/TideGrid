@@ -1,10 +1,12 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   BalancePaymentResponse,
+  BookerContactRequest,
   CancelBookingRequest,
   CancelBookingResponse,
   CancellationTermsResponse,
   CheckoutSessionParams,
+  GuestBookerContactResponse,
   GuestRemoveParticipantResponse,
   GuestRescheduleResponse,
   IdempotencyKey,
@@ -38,6 +40,7 @@ import {
   BookingHookRefusal,
   type CancellationTerms,
   cancelBooking,
+  changeBookerContact,
   checkoutSecretPattern,
   ensureBalanceProviderPayment,
   getManagedBooking,
@@ -73,7 +76,7 @@ import {
 } from "../public-tenant.ts";
 import { stripePublishableKey } from "./checkout-public.ts";
 import { invitationRefusal } from "./participant-public.ts";
-import { partyChangeRefusal } from "./participants-staff.ts";
+import { bookerContactRefusal, partyChangeRefusal } from "./participants-staff.ts";
 import { previewJson, rescheduleRefusal } from "./reschedules-staff.ts";
 import { errorBody } from "./responses.ts";
 
@@ -84,6 +87,7 @@ const bookingPath = "/v1/public/manage/booking";
 const participantPath = "/v1/public/manage/participants/{position}";
 const removalPath = "/v1/public/manage/participants/{position}/removal";
 const invitationPath = "/v1/public/manage/participants/{position}/invitation";
+const bookerPath = "/v1/public/manage/booker";
 const cancellationPath = "/v1/public/manage/cancellation";
 const linkEmailPath = "/v1/public/manage/link-email";
 const endPath = "/v1/public/manage/session/end";
@@ -194,7 +198,7 @@ interface SessionCommand {
  */
 async function withManageSession<T extends JsonObject>(
   c: Context<AppEnv>,
-  options: { idempotency?: SessionCommand; limit?: boolean },
+  options: { idempotency?: SessionCommand; limit?: boolean; endsSession?: boolean },
   run: (trx: TenantTransaction, ctx: TenantContext, session: GuestSession) => Promise<T>,
 ): Promise<{ body: T; replayed: boolean; ctx: TenantContext; session: GuestSession }> {
   const tenantId = await resolvePublicTenant(c);
@@ -229,6 +233,17 @@ async function withManageSession<T extends JsonObject>(
         }
       }
       const body = await run(trx, ctx, session);
+      // The session again, after the command took its locks: staff who
+      // corrected the booker's email (or anything else that ended this
+      // session) while it waited on them committed first, so nothing it did
+      // may stand. Everything rolls back.
+      if (!options.endsSession) {
+        const { rows: live } = await sql<{ id: string }>`
+          select id from guest_sessions
+           where tenant_id = ${tenantId} and id = ${session.sessionId}
+             and revoked_at is null and expires_at > now()`.execute(trx);
+        if (live.length === 0) throw sessionExpired();
+      }
       if (claim) await completeIdempotencyKey(trx, ctx, claim, { status: 200, body });
       return { body, replayed: false, ctx, session };
     });
@@ -674,6 +689,79 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
     return c.json(body as ParticipantInvitationResponse, 202);
   });
 
+  const bookerRoute = createRoute({
+    method: "put",
+    path: bookerPath,
+    tags: ["public", "manage"],
+    summary: "Correct the booker's own name and email",
+    description: [
+      "Needs the booking session and an Idempotency-Key. The booker's name and email as they should be, on a confirmed booking whose trip has not left. At most 3 corrections by the guest a booking in 24 hours; staff are not limited, so they can always restore it.",
+      "When the email changes: links sent to the old address stop working, every other session on this booking ends (this one stays open), the trip and balance reminders not yet sent go to the new address instead, the old address gets a notice with the new one partly hidden and no link, and the new address gets a fresh link. A name-only change sends nothing.",
+      "Sending the details already on the booking changes nothing and answers 200 with change null.",
+    ].join("\n\n"),
+    security: sessionSecurity,
+    request: {
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      body: {
+        required: true,
+        content: { "application/json": { schema: BookerContactRequest } },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: GuestBookerContactResponse } },
+        description: "The booking with the booker as corrected, and the change",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("No session (session_required), or it has ended (session_expired)"),
+      404: errorBody("No active tenant hostname matches the origin"),
+      409: errorBody(
+        "The booking was canceled (booking_canceled), its trip has departed (trip_departed), or another correction landed a moment ago (booking_changed; read the booking again and retry)",
+      ),
+      422: errorBody("idempotency_key_reused"),
+      429: errorBody(
+        "Three corrections already in the last 24 hours (contact_change_limit_reached), or too many requests from this address (rate_limited)",
+      ),
+    },
+  });
+
+  app.openapi(bookerRoute, async (c) => {
+    const input = c.req.valid("json");
+    const key = c.req.valid("header")["idempotency-key"];
+    let changed = false;
+    const { body, replayed, ctx } = await withManageSession(
+      c,
+      {
+        idempotency: {
+          scope: "public.manage.booker",
+          key,
+          route: bookerPath,
+          params: {},
+          body: input,
+        },
+      },
+      async (trx, txCtx, session) => {
+        const result = await changeBookerContact(trx, txCtx, {
+          bookingId: session.bookingId,
+          name: input.name,
+          email: input.email,
+          keepSessionId: session.sessionId,
+        });
+        if (result.kind !== "changed" && result.kind !== "unchanged") {
+          throw bookerContactRefusal(result, bookingGone);
+        }
+        changed = result.kind === "changed";
+        return {
+          booking: await managedBody(trx, txCtx.tenantId, session.bookingId),
+          change: result.kind === "changed" ? JSON.parse(JSON.stringify(result.change)) : null,
+        };
+      },
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    if (changed) deliverAfterCommit(c, deps, ctx.tenantId);
+    return c.json(body as GuestBookerContactResponse, 200);
+  });
+
   const termsRoute = createRoute({
     method: "get",
     path: cancellationPath,
@@ -1065,7 +1153,7 @@ export function registerManagePublicRoutes(app: OpenAPIHono<AppEnv>, deps: AppDe
   });
 
   app.openapi(endRoute, async (c) => {
-    await withManageSession(c, { limit: true }, async (trx, ctx, session) => {
+    await withManageSession(c, { limit: true, endsSession: true }, async (trx, ctx, session) => {
       await revokeGuestSession(trx, ctx, session.sessionId);
       return { ended: true };
     });

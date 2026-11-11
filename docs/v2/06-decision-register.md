@@ -8,6 +8,28 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-11: W3-G2.11-rest, correcting the booker's contact details, code only (owner go; coordinator defaults pending owner confirmation)
+
+Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the last part of W3-G2.11-rest, after moves, giving up a place, and participant invitations (the entries below).
+
+It lands as migration `0037` and the [database contract](../../packages/database/README.md#booker-contact-corrections-0037), with [docs/v2/02](02-product-scope.md#guest-party-and-account-self-service) as the scope ("correct permitted contact and participant details"). Until now the booker's name and email were fixed at checkout, so a typo in the address meant the guest never got their confirmation, reminder, or links. What it adds:
+
+- **The booker or staff correct the booker's name and email.** From the booking page, or from the console API for owners and booking staff. The database allows exactly one shape of change to the checkout: only those two fields, on a confirmed booking whose trip has not left, at most 3 times a booking in 24 hours by the guest. It writes a history row for each change saying who changed which field, never the old or new values.
+- **An email change moves the booking to the new address.** Links sent to the old address stop working, the booking's other sessions end (the booker's own session making the change stays open), the trip and balance reminders not yet sent are rewritten to the new address for the same moment, the old address gets a short notice with the new address partly hidden and no link, and the new address gets a fresh link to the booking.
+
+Coordinator defaults, pending owner confirmation:
+
+- **D1: who.** The booker, from their booking session, and owners and booking staff with `bookings.reschedule` (the permission for changing a booking's details). Finance and support cannot. No new permission.
+- **D2: when.** A confirmed booking, before its trip leaves. A canceled booking keeps the details it was canceled with.
+- **D3: an email change tells the old address and ends its access.** The notice carries no link and hides most of the new address (`a•••@e•••.test`), so whoever reads the old inbox learns a change happened and can reply to the operator, and nothing they could use. A change by staff ends every guest session, including the booker's, and after any email change the checkout's own secret (the hour-long "open your booking" right after paying) no longer opens one: only a link to the new address does.
+- **D4: email not yet sent moves.** The trip and balance reminders are rewritten for the new address, due at the same moment. Any other booking email with a link that has not gone out yet (a confirmation still retrying, a link the guest asked for, a "booking moved" notice, a balance link staff sent) is canceled, not moved: the new address already gets a fresh link, and staff can send the balance link again. A name-only change sends nothing; a queued reminder still greets the old name.
+- **D5: limit.** 3 corrections by the guest a booking in 24 hours, so a stolen booking link cannot keep moving the booking around. Staff and support are not limited, so they can always restore a booking someone took over.
+- **D6: history without the values.** The history, audit, and events record which fields changed and who changed them, never the addresses, so the audit log does not become a second copy of personal data. The current values live only on the checkout, as before.
+
+Also note: a booker's credit balance follows their email address (W3-G2.9), so after a correction the booking's future credit and the staff credit view use the new address's account. A booker who types someone else's address would point it there, which staff should keep in mind when correcting a booking by phone.
+
+Not built: a form on the booking page and in the console (the API is ready for both); confirming the new address before the change takes effect (the booker's session already proves control of the old one); and a change after the trip leaves.
+
 ### 2026-11-11: W3-G2.11-rest, participant invitations, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the third part of W3-G2.11-rest, after moving a whole booking and giving up a place (the entries below); correcting the booker's own contact details follows in its own pull request.

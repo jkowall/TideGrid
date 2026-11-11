@@ -44,6 +44,8 @@ export const CANCELED_TEMPLATE = { key: "booking_canceled", version: 2 } as cons
 export const REFUND_FAILED_TEMPLATE = { key: "booking_refund_failed", version: 1 } as const;
 /** A booking moved to another trip (W3-G2.11-rest). */
 export const RESCHEDULED_TEMPLATE = { key: "booking_rescheduled", version: 1 } as const;
+/** The old address's notice that the booker's email changed (W3-G2.11-rest). */
+export const CONTACT_CHANGED_TEMPLATE = { key: "booking_contact_changed", version: 1 } as const;
 /** The trip reminder, a day before departure (W3-G2.16-rest). */
 export const REMINDER_TEMPLATE = { key: TRIP_REMINDER_TEMPLATE, version: 1 } as const;
 
@@ -126,6 +128,15 @@ function subject(prefix: string, detail: BookingDetailView): string {
  */
 export interface ComposeOptions {
   dedupeKey?: string;
+}
+
+export interface ReminderOptions extends ComposeOptions {
+  /**
+   * Due at this moment instead of a day before the trip, with no minimum
+   * notice: a reminder rewritten for a corrected address (W3-G2.11-rest)
+   * keeps the moment the one it replaces had.
+   */
+  at?: Date;
 }
 
 /**
@@ -257,7 +268,7 @@ export async function enqueueReminderEmail(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
-  options: ComposeOptions = {},
+  options: ReminderOptions = {},
 ): Promise<{ messageId: string; duplicate: boolean } | null> {
   const { rows } = await sql<{ due: Date; worth: boolean }>`
     select t.starts_at - make_interval(hours => ${TRIP_REMINDER_LEAD_HOURS}) as due,
@@ -268,7 +279,7 @@ export async function enqueueReminderEmail(
      where b.tenant_id = ${ctx.tenantId} and b.id = ${bookingId}`.execute(trx);
   const timing = rows[0];
   if (!timing) throw new Error("a booking for email was not found");
-  if (!timing.worth) return null;
+  if (!options.at && !timing.worth) return null;
   const detail = await detailFor(trx, ctx.tenantId, bookingId);
   const when = tripWhen(detail.trip.startsAt, detail.trip.timeZone);
   const blocks: EmailBlock[] = [
@@ -306,7 +317,7 @@ export async function enqueueReminderEmail(
       path: MANAGE_PATH,
       ttlSeconds: MANAGE_LINK_TTL_SECONDS,
     },
-    notBefore: timing.due,
+    notBefore: options.at ?? timing.due,
   });
   return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }
@@ -544,4 +555,62 @@ export async function enqueueRefundFailedEmail(
     },
   });
   return { messageId: result.messageId };
+}
+
+/**
+ * Hide most of an address: the first letter of the mailbox and of the
+ * domain, and the domain's last part. "ava.guest@example.test" reads
+ * "a•••@e•••.test". Enough for the owner of the old address to recognise a
+ * change they made, not enough to learn a stranger's address.
+ */
+export function maskEmail(email: string): string {
+  const at = email.lastIndexOf("@");
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+  const host = dot > 0 ? domain.slice(0, dot) : domain;
+  const tld = dot > 0 ? domain.slice(dot) : "";
+  return `${local.slice(0, 1)}\u2022\u2022\u2022@${host.slice(0, 1)}\u2022\u2022\u2022${tld}`;
+}
+
+/**
+ * The notice to the booker's old address that the booking's email changed
+ * (W3-G2.11-rest), in the changing transaction, once per change. It carries
+ * no link and only a masked new address: whoever reads the old inbox learns
+ * that a change happened and whom to ask, nothing they could use.
+ */
+export async function enqueueContactChangedEmail(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  bookingId: string,
+  change: { contactChangeId: string; oldEmail: string; oldName: string; newEmail: string },
+): Promise<{ messageId: string; duplicate: boolean }> {
+  const detail = await detailFor(trx, ctx.tenantId, bookingId);
+  const blocks: EmailBlock[] = [
+    { kind: "heading", text: "Your booking's email address changed" },
+    {
+      kind: "paragraph",
+      text: clean(
+        `Hi ${firstName(change.oldName)}. The email address on booking ${detail.reference} (${detail.trip.productName}, ${tripWhen(detail.trip.startsAt, detail.trip.timeZone)}) was changed to ${maskEmail(change.newEmail)}. Emails about this booking now go there, and links sent to this address no longer work.`,
+        2000,
+      ),
+    },
+    {
+      kind: "paragraph",
+      text: "If you made this change, there is nothing more to do. If you did not, reply to this email and we'll help.",
+    },
+    { kind: "note", text: demoNote },
+  ];
+  const result = await enqueueMessage(trx, ctx, {
+    dedupeKey: `booking.contact_changed:${change.contactChangeId}`,
+    template: CONTACT_CHANGED_TEMPLATE.key,
+    templateVersion: CONTACT_CHANGED_TEMPLATE.version,
+    to: { email: change.oldEmail, name: singleLine(change.oldName, 120) },
+    bookingId,
+    content: {
+      subject: singleLine(`Booking ${detail.reference}: email address changed`, 200),
+      blocks,
+    },
+  });
+  return { messageId: result.messageId, duplicate: result.kind === "duplicate" };
 }

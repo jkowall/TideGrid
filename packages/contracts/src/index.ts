@@ -182,6 +182,8 @@ export type AuditEventListResponse = z.infer<typeof AuditEventListResponse>;
 
 // Private-charter deposits and balances (W3-G2.8).
 export * from "./balances.ts";
+// Correcting the booker's own contact details (W3-G2.11-rest).
+export * from "./booker-contact.ts";
 // Console booking views (G2.12b).
 export * from "./bookings.ts";
 export * from "./brand.ts";

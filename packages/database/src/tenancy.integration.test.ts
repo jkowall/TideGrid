@@ -743,6 +743,9 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         booking_reschedules: ["INSERT", "SELECT"],
         // Participant removal (0035, W3-G2.11-rest): append-only party changes.
         booking_party_changes: ["INSERT", "SELECT"],
+        // Booker contact corrections (0037, W3-G2.11-rest): append-only, and
+        // written only by the checkout's own trigger.
+        booking_contact_changes: ["INSERT", "SELECT"],
       };
       const rows = await admin`
         select c.relname,
@@ -768,7 +771,8 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         capacity_holds: ["state"],
         // Checkout and confirmation (G2.7): only the columns that carry a
         // transition; triggers stamp the times and check the evidence.
-        checkout_sessions: ["state"],
+        // The booker's name and email (0037), in one checked shape only.
+        checkout_sessions: ["booker_email", "booker_name", "state"],
         orders: ["status"],
         payments: [
           "checked_at",

@@ -26,6 +26,15 @@ export {
   type BalanceView,
   getBookingBalance,
 } from "./balance-read.ts";
+// Correcting the booker's own name and email (W3-G2.11-rest, 0037).
+export {
+  type BookerContactChangeRecord,
+  type ChangeBookerContactInput,
+  type ChangeBookerContactResult,
+  changeBookerContact,
+  listBookerContactChanges,
+  MAX_CONTACT_CHANGES_PER_DAY,
+} from "./booker-contact.ts";
 export {
   type CancelBookingResult,
   type CancellationRecord,
