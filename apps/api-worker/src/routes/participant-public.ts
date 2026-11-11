@@ -108,7 +108,11 @@ const sessionRequired = () =>
     "Send the participant session as Authorization: Bearer <token>",
   );
 const sessionExpired = () =>
-  new ApiError(401, "session_expired", "This session has ended; ask the person who booked for a new invitation");
+  new ApiError(
+    401,
+    "session_expired",
+    "This session has ended; ask the person who booked for a new invitation",
+  );
 const participantGone = () =>
   new ApiError(404, "participant_not_found", "You are no longer in this booking's party");
 
