@@ -15,7 +15,8 @@
  * - Never cache, and never answer: a cross-origin request (the API, and
  *   with it /v1/public/tenant), a request that is not a GET, one that carries
  *   Authorization, or a navigation's own response, because a navigation's
- *   URL keeps its #t= fragment and /manage, /waiver, and /book carry state.
+ *   URL keeps its #t= fragment and /manage, /waiver, /participant, and /book
+ *   carry state.
  *   The manifest, the icons, and sw.js pass through to the network too.
  * - Navigations go to the network first and fall back to the offline page.
  * - Cache names carry the build id; activation deletes every other cache.

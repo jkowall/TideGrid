@@ -7,7 +7,7 @@ import {
   VisuallyHidden,
 } from "@tidegrid/design-system/components";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { saveParticipant } from "./api.ts";
+import { inviteParticipant, saveParticipant } from "./api.ts";
 import {
   type FormErrors,
   formErrors,
@@ -24,6 +24,10 @@ import {
  * names each place and corrects it in place; a minor names a parent or
  * guardian, who signs for them once waivers exist. One place is edited at a
  * time, and its Save is the only primary action on the page while it is open.
+ *
+ * A named person with an email of their own, or a minor with a guardian, can
+ * be sent a link to check their own details (W3-G2.11-rest). The email goes
+ * to the address already saved for them, never one typed here.
  */
 export function PartySection({
   booking,
@@ -41,6 +45,11 @@ export function PartySection({
 }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
+  const [inviting, setInviting] = useState<number | null>(null);
+  const [invite, setInvite] = useState<{
+    tone: "success" | "warning" | "error";
+    text: string;
+  } | null>(null);
   const { partySize, participants, places } = booking.participants;
   const slots = slotsOf(partySize, participants, places);
   const editable = booking.partyEditable;
@@ -80,6 +89,14 @@ export function PartySection({
           {saved}
         </Notice>
       )}
+      {invite && editable && (
+        <Notice
+          tone={invite.tone}
+          title={invite.tone === "success" ? "Link on its way" : "Link not sent"}
+        >
+          {invite.text}
+        </Notice>
+      )}
       <ol className="manage-party">
         {slots.map((slot) =>
           editing === slot.position ? (
@@ -115,22 +132,54 @@ export function PartySection({
                 )}
               </div>
               {editable && (
-                <Button
-                  ref={(node) => {
-                    if (node) rowButtons.current.set(slot.position, node);
-                    else rowButtons.current.delete(slot.position);
-                  }}
-                  variant="secondary"
-                  icon={slot.participant ? "pencil" : "plus"}
-                  disabled={editing !== null}
-                  onClick={() => {
-                    setSaved(null);
-                    setEditing(slot.position);
-                  }}
-                >
-                  {slot.participant ? "Edit" : "Add"}
-                  <VisuallyHidden> guest {slot.position}</VisuallyHidden>
-                </Button>
+                <div className="manage-party__actions">
+                  <Button
+                    ref={(node) => {
+                      if (node) rowButtons.current.set(slot.position, node);
+                      else rowButtons.current.delete(slot.position);
+                    }}
+                    variant="secondary"
+                    icon={slot.participant ? "pencil" : "plus"}
+                    disabled={editing !== null}
+                    onClick={() => {
+                      setSaved(null);
+                      setInvite(null);
+                      setEditing(slot.position);
+                    }}
+                  >
+                    {slot.participant ? "Edit" : "Add"}
+                    <VisuallyHidden> guest {slot.position}</VisuallyHidden>
+                  </Button>
+                  {slot.participant && invitable(slot.participant) && (
+                    <Button
+                      variant="ghost"
+                      icon="mail"
+                      busy={inviting === slot.position}
+                      busyLabel="Sending…"
+                      disabled={
+                        editing !== null || (inviting !== null && inviting !== slot.position)
+                      }
+                      onClick={() => {
+                        const participant = slot.participant;
+                        if (!participant) return;
+                        setSaved(null);
+                        setInvite(null);
+                        setInviting(slot.position);
+                        void inviteParticipant(session, slot.position).then((result) => {
+                          setInviting(null);
+                          if (result.kind === "refused" && result.status === 401) {
+                            onEnded();
+                            return;
+                          }
+                          setInvite(inviteOutcome(participant, result));
+                        });
+                      }}
+                    >
+                      Send link
+                      <VisuallyHidden> to guest {slot.position}</VisuallyHidden>
+                    </Button>
+                  )}
+                </div>
               )}
             </li>
           ),
@@ -138,6 +187,53 @@ export function PartySection({
       </ol>
     </section>
   );
+}
+
+/** Whether someone can be sent their own link: an address of theirs, or their guardian's. */
+function invitable(p: Participant): boolean {
+  return p.isMinor ? p.guardian !== null : p.email !== null;
+}
+
+function inviteOutcome(
+  p: Participant,
+  result: Awaited<ReturnType<typeof inviteParticipant>>,
+): { tone: "success" | "warning" | "error"; text: string } {
+  if (result.kind === "ok") {
+    return {
+      tone: "success",
+      text:
+        result.value === "guardian"
+          ? `We're emailing ${p.guardian?.name ?? "their parent or guardian"} a link to check ${p.name}'s details. It works once and lasts until the trip.`
+          : `We're emailing ${p.name} a link to check their own details. It works once and lasts until the trip.`,
+    };
+  }
+  if (result.kind === "refused") {
+    switch (result.code) {
+      case "invitation_limit_reached":
+        return {
+          tone: "warning",
+          text: `${p.name} has had enough links for today. Try again tomorrow.`,
+        };
+      case "participant_no_email":
+      case "participant_not_named":
+        return { tone: "warning", text: `Add an email for ${p.name} first, then send the link.` };
+      case "booking_canceled":
+        return { tone: "warning", text: "This booking is canceled, so no link was sent." };
+      case "trip_departed":
+        return { tone: "warning", text: "This trip has left, so no link was sent." };
+      case "place_removed":
+        return { tone: "warning", text: "That place was given up, so no link was sent." };
+      case "rate_limited":
+        return { tone: "warning", text: "Too many tries. Wait a minute, then try again." };
+    }
+  }
+  return {
+    tone: "error",
+    text:
+      result.kind === "network"
+        ? "We couldn't reach the booking site. Check your connection and try again."
+        : "Something went wrong on our side. Try again in a moment.",
+  };
 }
 
 function ParticipantEditor({

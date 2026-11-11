@@ -337,6 +337,7 @@ export type Route =
   | "renew"
   | "read"
   | "saveParticipant"
+  | "invite"
   | "readTerms"
   | "cancel"
   | "emailLink"
@@ -349,6 +350,9 @@ export function routeOf(call: Pick<Call, "method" | "path">): Route {
   if (method === "GET" && path === "/v1/public/manage/booking") return "read";
   if (method === "PUT" && /^\/v1\/public\/manage\/participants\/\d+$/.test(path)) {
     return "saveParticipant";
+  }
+  if (method === "POST" && /^\/v1\/public\/manage\/participants\/\d+\/invitation$/.test(path)) {
+    return "invite";
   }
   if (method === "GET" && path === "/v1/public/manage/cancellation") return "readTerms";
   if (method === "POST" && path === "/v1/public/manage/cancellation") return "cancel";
@@ -437,6 +441,15 @@ export const answers: Record<Route, Answer> = {
       },
     };
     return json({ participant, created: was === undefined });
+  }),
+  // Sends to the address saved for the place: a minor's guardian, or their own.
+  invite: withSession((call) => {
+    const position = Number(call.path.split("/").at(-2));
+    const p = server.booking.participants.participants.find((x) => x.position === position);
+    if (!p) return refusal(409, "participant_not_named");
+    if (p.isMinor) return json({ status: "accepted", recipient: "guardian" }, 202);
+    if (!p.email) return refusal(409, "participant_no_email");
+    return json({ status: "accepted", recipient: "participant" }, 202);
   }),
   readTerms: withSession(() => json({ terms: server.booking.cancellationTerms })),
   // Cancels once, if the guest was shown what canceling gives now.

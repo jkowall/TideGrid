@@ -29,6 +29,8 @@ Coordinator defaults, pending owner confirmation:
 
 Not built: the guest-site page that the link opens (`/participant`) and an Invite button on the booking page and in the console, which follow in the next pull request before any release; the participant's waiver from the same page (the waiver email still carries its own link); and correcting the booker's contact details.
 
+Status, 2026-11-11: merged in pull request 142 (`7ec754d`). The guest-site `/participant` page and a Send link button on the booking page followed in the next pull request. The console has no party editor yet, so it has no Send link button; staff send through the API until it does.
+
 ### 2026-11-11: W3-G2.11-rest, removing a participant from a shared-seat booking, code only (owner go; coordinator defaults pending owner confirmation)
 
 Under the owner's go of 2026-11-10 on the rest of Wave 3 (the W3-G2.8 entry below), with the same limits: synthetic data and the fake provider only; no provider call, account, new Worker binding, or deploy. No gate is claimed. This is the second part of W3-G2.11-rest, after moving a whole booking (the 2026-11-10 entry below); participant invitations and profile changes follow in their own pull request.

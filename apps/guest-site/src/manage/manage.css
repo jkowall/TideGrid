@@ -99,15 +99,22 @@
 .manage-party__slot:first-child {
   border-top: 0;
 }
-.manage-party__slot > .tg-button {
+.manage-party__slot > .tg-button,
+.manage-party__actions {
   grid-column: 1 / -1;
   justify-self: start;
+}
+.manage-party__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 @media (min-width: 30rem) {
   .manage-party__slot {
     grid-template-columns: auto minmax(0, 1fr) auto;
   }
-  .manage-party__slot > .tg-button {
+  .manage-party__slot > .tg-button,
+  .manage-party__actions {
     grid-column: auto;
   }
 }

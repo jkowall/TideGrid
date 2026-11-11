@@ -8,6 +8,7 @@ import {
   ManageSessionResponse,
   type Participant,
   type ParticipantInput,
+  ParticipantInvitationResponse,
   ParticipantResponse,
 } from "@tidegrid/contracts";
 import { call, commandTimeoutMs, type Result } from "../booking/api.ts";
@@ -102,6 +103,26 @@ export async function saveParticipant(
     signal,
     timeoutMs: commandTimeoutMs,
   });
+}
+
+/**
+ * Email the participant at this place a link to check their own details
+ * (W3-G2.11-rest). It goes to their own address, or a minor's guardian's,
+ * never to one in the request.
+ */
+export async function inviteParticipant(
+  session: string,
+  position: number,
+  signal?: AbortSignal,
+): Promise<Result<"participant" | "guardian">> {
+  const result = await call(`/v1/public/manage/participants/${position}/invitation`, {
+    method: "POST",
+    bearer: session,
+    schema: ParticipantInvitationResponse,
+    signal,
+    timeoutMs: commandTimeoutMs,
+  });
+  return mapOk(result, (r) => r.recipient);
 }
 
 export async function readTerms(session: string, signal?: AbortSignal) {

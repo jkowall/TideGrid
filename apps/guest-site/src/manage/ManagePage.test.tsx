@@ -1267,6 +1267,50 @@ describe("naming the party", () => {
 
 // Canceling ---------------------------------------------------------------------------------------------
 
+describe("sending someone their own link", () => {
+  const sendButtons = () =>
+    screen.queryAllByRole("button", { name: /^Send link/ }).map((b) => text(b));
+  // As with placeButton: jsdom joins the hidden place text without its space.
+  const sendTo = (position: number) =>
+    screen.getByRole("button", { name: new RegExp(`^Send link ?to guest ${position}$`) });
+
+  it("offers a link only to a named person with an address: their own, or a minor's guardian's", async () => {
+    await shown();
+    // Ava is named with no email of her own; Theo is a minor with a guardian; place 3 is empty.
+    expect(sendButtons()).toEqual(["Send link to guest 2"]);
+    expect(sendTo(2)).toBeTruthy();
+  });
+
+  it("asks the API to email the place's saved address, with nothing personal in the request", async () => {
+    const calls = await shown();
+    fireEvent.click(sendTo(2));
+    const notice = await noticeTitled("Link on its way");
+    expect(text(notice)).toContain(
+      "We're emailing Ava Guest a link to check Theo Guest's details.",
+    );
+    const [invite] = callsTo(calls, "invite");
+    expect(invite?.path).toBe("/v1/public/manage/participants/2/invitation");
+    expect(invite?.body).toBeUndefined();
+    expect(invite?.headers.get("authorization")).toBe(`Bearer ${sessionToken}`);
+    expect(invite?.url).not.toMatch(/@|Theo|Ava|\?/);
+  });
+
+  it("says when the person has had enough links today", async () => {
+    await shown({ invite: () => refusal(429, "invitation_limit_reached") });
+    fireEvent.click(sendTo(2));
+    const notice = await noticeTitled("Link not sent");
+    expect(text(notice)).toContain(
+      "Theo Guest has had enough links for today. Try again tomorrow.",
+    );
+  });
+
+  it("shows the ended screen when the session has ended", async () => {
+    await shown({ invite: () => refusal(401, "session_expired") });
+    fireEvent.click(sendTo(2));
+    expect(await heading("Your session has ended")).toBeTruthy();
+  });
+});
+
 describe("canceling", () => {
   const cardText = () => text(card("Cancel this booking"));
 

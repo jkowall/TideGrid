@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-11
 
+### Participant page and Send link button (W3-G2.11-rest, third part, guest site), built November 11, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, from `main` at `7ec754d`. No migration, no API change. Synthetic data only.
+
+- **Built.** The guest-site page an invitation opens, `/participant#t=<token>`, and a Send link button beside Edit on the booking page's party list, for a named person with an email of their own or a minor with a guardian. Details in [the guest site README](../apps/guest-site/README.md).
+- **Proof.** Guest-site unit suites: 23 new page cases (the token spent only on the tap and never in an address, the trip on the marina's clock with a device in Tokyo, each refused link, a retry after no answer or too many tries, a reload, an ended session, saving with one key and a retry with the same key, a minor's guardian, the form's own checks, each stop on save, a departed trip shown read only, ending the session) and 4 booking-page cases (who is offered a link, the request carrying nothing personal, the daily limit, an ended session). The rest of the guest-site suite passed, except one existing waiver download case that also fails on `main` in this container and passes in CI. Typecheck and lint passed. Screens checked at 375 px and 1280 px with the API stubbed: start, form, saved, adult and minor.
+- **Not built.** A console Send link button: the console has no party editor yet.
+
 ### Participant invitations (W3-G2.11-rest, third part), built November 11, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, from `main` at `39215fc`, migration `0036_participant_invitations.sql`, under the owner's go of 2026-11-10 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data and the fake provider only; no provider call, no deploy.
