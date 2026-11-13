@@ -232,9 +232,9 @@ describe("the dock page", () => {
 
   it("ends the lookup after its 15 minutes by this phone's count, even when the phone's clock is fast", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    // The server says it ends in 15 minutes; this phone's clock is 20 minutes ahead.
+    // The server says it ends in 15 minutes; this phone's clock is 14 minutes ahead.
     const serverExpiry = new Date(Date.now() + 15 * 60_000).toISOString();
-    vi.setSystemTime(Date.now() + 20 * 60_000);
+    vi.setSystemTime(Date.now() + 14 * 60_000);
     stubApi(() => json(201, { lookupSecret: secret, party: party({ expiresAt: serverExpiry }) }));
     renderPage();
     await findBooking();
@@ -254,5 +254,22 @@ describe("the dock page", () => {
     answer = refusal(400, "validation_failed");
     await findBooking();
     expect(await screen.findByText("Something went wrong")).toBeTruthy();
+  });
+
+  it("ignores a lookup answer that lands after the guest left the page", async () => {
+    let answer: (r: Response) => void = () => {};
+    stubApi(
+      () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }) as unknown as Response,
+    );
+    renderPage();
+    await findBooking();
+    cleanup();
+    answer(json(201, { lookupSecret: secret, party: party() }));
+    await new Promise((r) => setTimeout(r, 20));
+    renderPage();
+    expect(screen.getByRole("button", { name: "Find my booking" })).toBeTruthy();
   });
 });

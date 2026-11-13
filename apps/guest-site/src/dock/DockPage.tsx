@@ -153,6 +153,14 @@ function LookupForm({
   const [errors, setErrors] = useState<{ code?: string; lastName?: string }>({});
   const codeRef = useRef<HTMLInputElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
+  // An answer that lands after the guest left the page changes nothing.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -165,6 +173,7 @@ function LookupForm({
     if (next.lastName) return nameRef.current?.focus();
     onBusy();
     const result = await lookUp({ bookingCode: code.trim(), lastName: lastName.trim() });
+    if (!mounted.current) return;
     if (result.kind === "ok") onFound(result.value);
     else onTrouble(troubleOf(result));
   };
