@@ -342,9 +342,9 @@ describe("the journey's states", () => {
 });
 
 describe("a test payment's event", () => {
-  const settled = (status: number) => ({
+  const settled = (status: number, outcome: string | null = "confirmed") => ({
     kind: "ok" as const,
-    value: { delivery: { status, outcome: null, duplicate: null } },
+    value: { delivery: { status, outcome, duplicate: null } },
   });
   const network = { kind: "network" as const };
   const refused = (status: number, code = "refused") => ({
@@ -373,6 +373,17 @@ describe("a test payment's event", () => {
     // Null means the delivery was held back, so nothing was recorded either.
     expect(afterSettle("none", { kind: "ok", value: { delivery: null } })).toBe("undelivered");
     expect(afterSettle("undelivered", settled(200))).toBe("delivered");
+  });
+
+  it("keeps the event owed when the webhook answers 200 but rejects it", () => {
+    // An unknown account or a mismatched payload answers 200 without
+    // processing the event, so no booking got it: cancel must stay closed.
+    for (const outcome of ["unknown_account", "payload_mismatch"]) {
+      const d = afterSettle("none", settled(200, outcome));
+      expect(d).toBe("undelivered");
+      expect(mustResend(d)).toBe(true);
+    }
+    expect(afterSettle("none", settled(200, "received"))).toBe("delivered");
   });
 
   it("keeps a failed delivery owed through retries that settle nothing", () => {

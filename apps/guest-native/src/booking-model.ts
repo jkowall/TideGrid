@@ -350,11 +350,15 @@ export function pollDelay(attempt: number): number {
  * - `none`: no test payment sent for this checkout.
  * - `delivered`: the provider's event reached the webhook.
  * - `undelivered`: the payment settled, but the webhook didn't accept its
- *   event (a refusal, an error, or no delivery made), so it wasn't recorded.
+ *   event (a refusal, an error, a 200 that rejected it, or no delivery made),
+ *   so it reached no booking.
  * - `unknown`: no readable answer, so the payment may have settled with its
  *   event undelivered.
  */
 export type PaymentDelivery = "none" | "delivered" | "undelivered" | "unknown";
+
+/** Outcomes the webhook answers 200 with but doesn't process the event for. */
+const rejectedOutcomes: ReadonlySet<string> = new Set(["unknown_account", "payload_mismatch"]);
 
 /** What one settle's answer says about the event, given what was known before it. */
 export function afterSettle(
@@ -363,8 +367,15 @@ export function afterSettle(
 ): PaymentDelivery {
   if (r.kind === "ok") {
     // Only the webhook's 2xx records the event: a 4xx refuses it before recording.
-    const status = r.value.delivery?.status;
-    return status !== undefined && status >= 200 && status < 300 ? "delivered" : "undelivered";
+    // A 200 can still reject it: an unknown account or a mismatched payload is
+    // answered 200 without processing this event, so it reached no booking.
+    const delivery = r.value.delivery;
+    const accepted =
+      delivery !== null &&
+      delivery.status >= 200 &&
+      delivery.status < 300 &&
+      !(delivery.outcome !== null && rejectedOutcomes.has(delivery.outcome));
+    return accepted ? "delivered" : "undelivered";
   }
   // A lost answer may hide a settled payment whose delivery failed. It can't
   // undo a delivery already made, nor confirm one that failed.
