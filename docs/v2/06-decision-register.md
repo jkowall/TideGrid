@@ -8,6 +8,16 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-13: W3-G2.13, saving a standard CSV import, part C, opening booking credit (coordinator defaults pending owner confirmation)
+
+Part C of the commit step. A customer's booking credit from the legacy system is carried over. Migration `0046` and the [database README](../../packages/database/README.md#import-opening-credit-0046). Coordinator defaults, pending owner confirmation:
+
+- **D1: booking credit only.** `opening_balances.csv` rows of kind `booking_credit` become an `import` entry on the customer's TideGrid credit account, keyed by the email they book with; the customer can then use it as any credit. Trip cards and dollar cards stay refused (`module_disabled`), since TideGrid has no card module yet.
+- **D2: no email, no credit.** A customer with no email cannot hold credit (`credit_needs_email`), because TideGrid finds credit by the booker's email.
+- **D3: it never expires.** TideGrid credit never expires during the pilot (W3-G2.9 D2, confirmed), so a legacy expiry date is dropped with a warning (`credit_never_expires`). A credit already expired is still refused (`balance_expired`).
+- **D4: no product limits.** TideGrid credit applies to every trip, so a credit limited to some products is refused (`credit_restriction_unsupported`) rather than widened.
+- **D5: not money.** Imported credit is not money TideGrid moved, so the money movements report leaves it out, as it does imported payments.
+
 ### 2026-11-13: W3-G2.13, saving a standard CSV import, part B, charter balances (coordinator defaults pending owner confirmation)
 
 Part B of the commit step (part A is the entry below). An imported private charter may now carry its outstanding balance. Migration `0045` and the [database README](../../packages/database/README.md#import-charter-balances-0045). Coordinator defaults, pending owner confirmation:

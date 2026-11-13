@@ -75,6 +75,8 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     charterExtra?: number;
     /** A refund on the R-3 charter. */
     charterRefund?: number;
+    /** An opening booking credit for C-1, in cents. */
+    credit?: number;
   }
 
   /**
@@ -157,6 +159,14 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
         `sum_payment_cents,payments.csv,${paid}`,
         `sum_refund_cents,payments.csv,${refunded}`,
         `sum_outstanding_cents,payments.csv,${total - paid + refunded}`,
+        ...(o.credit
+          ? [
+              "row_count,opening_balances.csv,1",
+              `sum_booking_credit_cents,opening_balances.csv,${o.credit}`,
+              "sum_dollar_card_cents,opening_balances.csv,0",
+              "sum_trip_count_units,opening_balances.csv,0",
+            ]
+          : []),
       ].join("\n"),
       "products.csv": [
         "source_product_id,source_product_name,tidegrid_product_id,tidegrid_product_name,product_kind",
@@ -186,6 +196,14 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
         "source_payment_id,source_booking_ref,trip_date,entry_kind,amount_cents,tender,reference,received_at",
         ...payments.map(([, line]) => line),
       ].join("\n"),
+      ...(o.credit
+        ? {
+            "opening_balances.csv": [
+              "source_balance_id,source_customer_id,balance_kind,lot_kind,amount_cents,units,eligible_source_product_ids,expires_on,source_card_ref",
+              `OB-1,C-1,booking_credit,,${o.credit},,,,`,
+            ].join("\n"),
+          }
+        : {}),
     };
   }
 
@@ -253,6 +271,7 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
       participants: 3,
       payments: 3,
       refunds: 1,
+      credits: 0,
       unchanged: 0,
     });
 
@@ -715,5 +734,48 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     expect(refunded.result.issues).toContainEqual(
       expect.objectContaining({ file: "bookings.csv", code: "refund_with_balance" }),
     );
+  });
+
+  it("carries a customer's booking credit over to the email they book with, once", async () => {
+    // Tenant D's records are in from BAL-1; this batch repeats them with a credit.
+    await dryRun(D, ownerD, { batchId: "CRED-1", charterPaid: 0, credit: 7500 });
+    const saved = await commit(D, ownerD, {
+      batchId: "CRED-1",
+      run: 2,
+      charterPaid: 0,
+      credit: 7500,
+    });
+    if (saved.kind !== "committed") throw new Error(JSON.stringify(saved));
+    expect(saved.counts).toMatchObject({ credits: 1, bookings: 0, payments: 0 });
+    const entries = await admin<{ kind: string; amount: number; balance: number }[]>`
+      select e.kind, e.amount, a.balance from public.credit_entries e
+        join public.credit_accounts a on a.id = e.account_id
+       where a.tenant_id = ${D.id} and a.customer_email = 'ima.sample@example.test'`;
+    expect(entries).toEqual([{ kind: "import", amount: 7500, balance: 7500 }]);
+    // The same row again is a no-op.
+    await dryRun(D, ownerD, { batchId: "CRED-2", charterPaid: 0, credit: 7500 });
+    const again = await commit(D, ownerD, {
+      batchId: "CRED-2",
+      run: 2,
+      charterPaid: 0,
+      credit: 7500,
+    });
+    if (again.kind !== "committed") throw new Error(JSON.stringify(again));
+    expect(again.counts.credits).toBe(0);
+    // No other writer adds imported credit.
+    const ctx = staffCtx(D.id, ownerD);
+    const [account] = await admin<{ id: string }[]>`
+      select id from public.credit_accounts where tenant_id = ${D.id}`;
+    const [ledger] = await admin<{ id: string }[]>`
+      select id from public.import_records
+       where tenant_id = ${D.id} and file = 'opening_balances.csv'`;
+    await expect(
+      inTenantTransaction(runtime.db, ctx, (trx) =>
+        sql`insert into credit_entries (tenant_id, account_id, kind, amount, import_record_id,
+              idempotency_key)
+            values (${D.id}, ${account?.id ?? ""}, 'import', 100, ${ledger?.id ?? ""},
+                    ${`test:${randomUUID()}`})`.execute(trx),
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 });

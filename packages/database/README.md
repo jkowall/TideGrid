@@ -435,6 +435,10 @@ W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import:
 - **Owners only.** The insert trigger stamps the actor and time and requires a staff actor who is an active `owner` member (`import_runs_owner`, 42501).
 - **One batch, one source.** `(tenant_id, batch_id, run_number)` is unique (`import_runs_run`), and a run whose batch was run before from another source system is refused (`import_runs_source`).
 
+## Import opening credit (0046)
+
+W3-G2.13, part C of the commit step. `import_records.file` takes `opening_balances.csv`. `credit_entries.kind` gains `import`: a booking credit carried over from the legacy system, positive, on no booking, naming its `opening_balances.csv` ledger row (`import_record_id`, once, `credit_entries_import_once`). `app.apply_credit_entry` takes it only from signed-in staff with that ledger row from this transaction's clean commit (`credit_entries_import`), then moves the balance as for any entry.
+
 ## Import charter balances (0045)
 
 W3-G2.13, part B of the commit step. An imported private charter may carry an outstanding balance: its order's `deposit_amount` is what came in before TideGrid (0 allowed only on an order with no quote, `orders_deposit_amount_check`), and `balance_due_at` falls before the trip's start. `app.check_order_deposit` takes such an order only for a private charter's trip, from an import commit in this transaction (`orders_deposit`). `app.booking_balance` (0033) then reads it unchanged: the imported payments count as money in. An imported refund on a charter that still owes is refused (`external_settlements_import`, trigger `external_settlements_import_refund`), the database's own check of the dry run's `refund_with_balance`.
