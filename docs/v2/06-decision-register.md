@@ -8,6 +8,16 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-13: W3-G2.15-rest, the dock QR lookup, part 1 (coordinator defaults pending owner confirmation)
+
+Builds the owner's choice in the entry below: one QR code at the dock, the booking code and the booker's last name, only that booking's party, only on the day of the trip, tries limited. Part 1 is the database, the service, and the public API (migration `0043`, [waiver contract](../../packages/domain-waivers/README.md#the-dock-qr-lookup-w3-g215-rest)); part 2 is the guest site's dock page and the printable code in the console. Under the owner's go of 2026-11-10 on the rest of Wave 3, synthetic data only, no provider call, account, new Worker binding, or deploy. The owner set the shape; these details are coordinator defaults, pending owner confirmation:
+
+- **D1: the try limits.** The database counts misses: 10 from one client address in 15 minutes, 5 for one booking code in an hour from any address (so one code cannot be tried name by name from many phones), and 300 at one operator in an hour; and 20 matches from one address in an hour. Past any of them the page says to ask the crew. A miss never says why.
+- **D2: what "last name" means.** The last word or words of the booker's name on the booking, ignoring case, accents, and punctuation, at least two letters, and never the whole name: "Cruz" and "de la Cruz" both match "Juan de la Cruz". A booker with a one-word name cannot use the dock page and asks the crew.
+- **D3: what the party shows.** Each named person's first name and last initial, whether their waiver is signed, still to sign, not needed, or needs the crew, and who signs (the person, or a minor's parent or guardian). No address, booking id, or email history. Anyone in the party may start anyone's signing, as the booker could by forwarding the email; the signer still confirms who they are.
+- **D4: how long it lasts.** A match lasts 15 minutes and starts at most 30 signings. Each signing link works once, for 15 minutes, like a crew QR code, and replaces that person's earlier unused code. The emailed link keeps working.
+- **D5: the record.** Every try is kept with the code as typed (normalized) and the client address, never the name typed. A signature records `dock_lookup` and the match method `booking_lookup`, with no staff member, and the PDF says the dock code was used on the day of the trip.
+
 ### 2026-11-13: the owner chooses the dock QR lookup and when a signed waiver carries over
 
 Asked one at a time with options, as the owner requested on 2026-11-12. Both settle the open parts of W3-G2.15-rest named in the [waiver module's gaps](../../packages/domain-waivers/README.md#deferred-and-known-gaps).

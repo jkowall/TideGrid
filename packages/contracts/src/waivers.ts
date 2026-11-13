@@ -63,9 +63,9 @@ export const WaiverLinkRedeemRequest = z.object({
 export type WaiverLinkRedeemRequest = z.infer<typeof WaiverLinkRedeemRequest>;
 
 export const WaiverAccessMethod = z
-  .enum(["email_link", "staff_device", "participant_qr"])
+  .enum(["email_link", "staff_device", "participant_qr", "dock_lookup"])
   .describe(
-    "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer. Staff check who signs before a staff_device or participant_qr start",
+    "How the signer reached the waiver: email_link, a single-use link emailed to the signer; staff_device, a staff-assisted signing on the operator's device; participant_qr, a single-use QR code staff showed the signer; dock_lookup, the operator's dock QR code, where the booking code and the booker's last name matched on the day of the trip. Staff check who signs before a staff_device or participant_qr start",
   );
 export type WaiverAccessMethod = z.infer<typeof WaiverAccessMethod>;
 
@@ -469,3 +469,80 @@ export const WaiverSendResetResponse = z.object({
   }),
 });
 export type WaiverSendResetResponse = z.infer<typeof WaiverSendResetResponse>;
+
+// The generic dock QR (W3-G2.15-rest, migration 0043) ---------------------------------
+
+export const DockLookupRequest = z.object({
+  bookingCode: z
+    .string()
+    .min(1)
+    .max(32)
+    .describe(
+      "The booking code as the guest typed it. Case, spaces, and dashes do not matter, and O, I, and L read as 0, 1, and 1",
+    ),
+  lastName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .describe("The booker's last name, as on the booking. Case and accents do not matter"),
+});
+export type DockLookupRequest = z.infer<typeof DockLookupRequest>;
+
+export const DockPerson = z.object({
+  position: z
+    .number()
+    .int()
+    .min(1)
+    .describe("The person's place on the booking; send it to start their signing"),
+  name: z.string().describe("The first name and the last name's initial, as the booking has it"),
+  minor: z.boolean(),
+  status: z
+    .enum(["signed", "to_sign", "not_needed", "ask_crew"])
+    .describe(
+      "signed; to_sign, waiting for a signature that can start here; not_needed; ask_crew, nothing can be signed here yet, so the crew helps",
+    ),
+  signer: z
+    .enum(["participant", "guardian"])
+    .nullable()
+    .describe(
+      "Who signs while it waits: the person, or a minor's parent or guardian; null otherwise",
+    ),
+});
+export type DockPerson = z.infer<typeof DockPerson>;
+
+export const DockParty = z.object({
+  trip: z.object({
+    name: z.string(),
+    when: z.string().describe("The departure, in the trip's own time zone"),
+  }),
+  expiresAt: Instant.describe(
+    "The lookup works until this instant (15 minutes); then look up again",
+  ),
+  people: z.array(DockPerson),
+});
+export type DockParty = z.infer<typeof DockParty>;
+
+export const DockLookupResponse = z.object({
+  lookupSecret: Secret.describe(
+    "Send it as Authorization: Bearer <secret> to start a signing. Keep it in memory only, never in a URL or storage",
+  ),
+  party: DockParty,
+});
+export type DockLookupResponse = z.infer<typeof DockLookupResponse>;
+
+export const DockSigningRequest = z.object({
+  position: z.number().int().min(1).max(500).describe("The person's position from the party"),
+});
+export type DockSigningRequest = z.infer<typeof DockSigningRequest>;
+
+export const DockSigningResponse = z.object({
+  path: z
+    .string()
+    .regex(/^\/waiver#t=[A-Za-z0-9_-]{43}$/)
+    .describe(
+      "The signing page with a single-use token in its fragment, on this site. Open it on this phone; it works once, for 15 minutes",
+    ),
+  expiresAt: Instant,
+});
+export type DockSigningResponse = z.infer<typeof DockSigningResponse>;

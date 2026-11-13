@@ -130,11 +130,44 @@ export async function startAssistedSigning(
   ) {
     return { kind: "participant_changed" };
   }
-  const subject = waiverSubject(request.id);
   // One working code per request: the earlier unused assisted link ends, and
   // so does a session an earlier code already opened, so one phone at most
   // holds it. A session from the emailed link stays open.
+  const link = await issueCodeLink(trx, ctx, request, {
+    mode: input.mode,
+    dockLookupId: null,
+  });
+  await recordAudit(trx, ctx, {
+    action: "waiver_access.assisted_started",
+    subjectType: "waiver_request",
+    subjectId: request.id,
+    after: { linkId: link.id, mode: input.mode, identityChecked: true },
+  });
+  return {
+    kind: "issued",
+    linkId: link.id,
+    token: link.token,
+    path: `${WAIVER_LINK_PATH}#t=${link.token}`,
+    expiresAt: link.expiresAt,
+    mode: input.mode,
+  };
+}
+
+/**
+ * Issue a waiver link that no email carries, for one pending request the
+ * caller holds locked, and record how it was started: by a staff member, or
+ * by a matched dock lookup (0043). The earlier unused code of the request,
+ * and a session an earlier code opened, end first, so one code at most works
+ * per request. The raw token goes back once.
+ */
+export async function issueCodeLink(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  request: { id: string; booking_id: string; participant_id: string },
+  start: { mode: WaiverAssistedMode; dockLookupId: string | null },
+): Promise<{ id: string; token: string; expiresAt: Date }> {
   await endAssistedAccess(trx, ctx.tenantId, request, "superseded");
+  const subject = waiverSubject(request.id);
   const token = newAccessToken();
   const { rows } = await sql<{ id: string; expires_at: Date }>`
     insert into guest_access_links (tenant_id, booking_id, participant_id, purpose, subject_ref,
@@ -153,29 +186,18 @@ export async function startAssistedSigning(
       request_id: request.id,
       booking_id: request.booking_id,
       participant_id: request.participant_id,
-      mode: input.mode,
+      mode: start.mode,
       identity_checked: true,
+      dock_lookup_id: start.dockLookupId,
     })
     .execute();
-  await recordAudit(trx, ctx, {
-    action: "waiver_access.assisted_started",
-    subjectType: "waiver_request",
-    subjectId: request.id,
-    after: { linkId: link.id, mode: input.mode, identityChecked: true },
-  });
-  return {
-    kind: "issued",
-    linkId: link.id,
-    token,
-    path: `${WAIVER_LINK_PATH}#t=${token}`,
-    expiresAt: new Date(link.expires_at),
-    mode: input.mode,
-  };
+  return { id: link.id, token, expiresAt: new Date(link.expires_at) };
 }
 
 export interface AssistedLinkFacts {
   mode: WaiverAssistedMode;
-  staffId: string;
+  /** The staff member; null for a dock lookup's link, which the guest started. */
+  staffId: string | null;
 }
 
 /**

@@ -46,6 +46,20 @@ export {
   sendWaiverRequest,
 } from "./delivery.ts";
 export {
+  DOCK_LOOKUP_TTL_MINUTES,
+  type DockLookupResult,
+  type DockParty,
+  type DockPersonStatus,
+  type DockSigningResult,
+  dockDisplayName,
+  dockParty,
+  lastNameMatches,
+  loadDockLookup,
+  lookUpAtDock,
+  normalizeBookingCode,
+  startDockSigning,
+} from "./dock.ts";
+export {
   WAIVER_EMAIL_TEMPLATE,
   WAIVER_EMAIL_VERSION,
   type WaiverEmailInput,
