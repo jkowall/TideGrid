@@ -8,6 +8,13 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-13: the owner chooses the dock QR lookup and when a signed waiver carries over
+
+Asked one at a time with options, as the owner requested on 2026-11-12. Both settle the open parts of W3-G2.15-rest named in the [waiver module's gaps](../../packages/domain-waivers/README.md#deferred-and-known-gaps).
+
+- **Generic dock QR: booking code and last name.** One QR code posted at the dock opens a page where a guest types the booking code and the booker's last name. A match shows only that booking's own party, and only for a trip departing that day, so the guest can sign on their own phone with no email. Tries are limited, so the page cannot be used to fish for names, and nothing about another booking is ever shown. The alternatives, a link sent to the booking's email or phone, and staff lookup only, were not chosen; staff-assisted signing stays available as it is.
+- **Reuse of a signed waiver: only on a moved booking.** A booking moved to another trip keeps its signatures when the waiver version that applies is unchanged; if the operator published a new version in between, each person signs the new one. Every new booking asks everyone to sign afresh, as today (re-sign policy `every_booking`). Reuse across different bookings waits for verified customer identity.
+
 ### 2026-11-13: the owner approves the standard CSV import draft and its twelve open questions
 
 On 2026-11-12 the owner asked for the open Wave 3 calls one at a time with options. On 2026-11-13 the owner chose "Approve all 12 as recommended" for the [standard CSV import draft](drafts/standard-csv-import.md#open-questions-for-the-owner). The draft's files, columns, rules, and boundaries are approved; it stays under `drafts/` until a later goal promotes it to a numbered document, and where it differs from this register, the register wins. The answers, by the draft's question number:
