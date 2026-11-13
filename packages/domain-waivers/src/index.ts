@@ -19,6 +19,7 @@ export {
   type AssistedLinkFacts,
   type AssistedStartResult,
   assistedLinkFacts,
+  type StaffAssistedMode,
   startAssistedSigning,
 } from "./assisted.ts";
 export { type BookingContext, loadBookingContext, tripFacts } from "./booking.ts";

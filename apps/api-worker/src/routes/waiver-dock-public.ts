@@ -85,7 +85,7 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
     summary: "Find today's booking at the dock by its code and the booker's last name",
     description: [
       "Resolves the browser Origin as /v1/public/trips does. A match needs a confirmed booking at this operator with that code, whose trip departs today in its own time zone and has not ended, and the booker's last name (the last word or words of the name on the booking, ignoring case, accents, and punctuation).",
-      "A match returns a 15-minute secret and the party: first names with an initial, each person's waiver status, and who signs. No address, id, or delivery detail. Every miss answers the same 404, whatever the reason. Tries are counted by the database: 10 misses from one address in 15 minutes, 5 misses for one booking code in an hour from anywhere, or 300 at one operator in an hour hold further tries (429), as do 20 matches from one address in an hour. Also rate limited per client address and operator like other public commands.",
+      "A match returns a 15-minute secret and the party: first names with an initial, each person's waiver status, and who signs. No address, id, or delivery detail. Every miss answers the same 404, whatever the reason. Tries are counted by the database, an IPv6 address by its /64: 20 misses from one address in 15 minutes or 8 misses for one booking code in 24 hours from anywhere hold further tries (429), as do 100 matches from one address in an hour; 300 misses at one operator in an hour hold further misses, never a right code and name. Also rate limited per client address and operator like other public commands.",
     ].join("\n\n"),
     request: {
       body: { required: true, content: { "application/json": { schema: DockLookupRequest } } },
@@ -135,7 +135,7 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
     tags: ["public", "waivers"],
     summary: "Start a signing at the dock for one person of a matched lookup's party",
     description:
-      "Resolves the browser Origin and needs the lookup's secret as a bearer token. For a person whose waiver waits for a signature, issues a single-use 15-minute link with no email and returns the signing page's path with its token in the fragment; opening it is the usual explicit POST to /v1/public/waiver-sessions. A new start replaces the person's earlier unused code. The evidence records the dock lookup. A lookup starts at most 30 signings.",
+      "Resolves the browser Origin and needs the lookup's secret as a bearer token. For a person whose waiver waits for a signature, issues a single-use 15-minute link with no email and returns the signing page's path with its token in the fragment; opening it is the usual explicit POST to /v1/public/waiver-sessions. A new start replaces the person's earlier dock code and its session; while a code or session the crew started for that person is live, the dock starts nothing. The evidence records the dock lookup. A lookup starts at most 30 signings.",
     security: lookupSecurity,
     request: {
       body: { required: true, content: { "application/json": { schema: DockSigningRequest } } },
@@ -151,7 +151,7 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
       ),
       404: errorBody("No operator at this address"),
       409: errorBody(
-        "No one at that position, or their waiver no longer waits for a signature (dock_not_pending)",
+        "No one at that position, or their waiver no longer waits for a signature (dock_not_pending); or the crew started a signing for that person that is still live (dock_crew_signing)",
       ),
       429: errorBody(
         "This lookup started as many signings as it may (dock_lookup_limited), or too many requests (rate_limited)",
@@ -173,6 +173,12 @@ export function registerWaiverDockPublicRoutes(app: OpenAPIHono<AppEnv>, deps: A
             409,
             "dock_not_pending",
             "That person's waiver does not wait for a signature here. Ask the crew if something looks wrong",
+          );
+        case "crew_signing":
+          throw new ApiError(
+            409,
+            "dock_crew_signing",
+            "The crew is already helping this person sign. Finish with the crew, or ask them",
           );
         case "limited":
           throw limited();

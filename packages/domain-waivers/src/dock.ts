@@ -25,7 +25,7 @@
 import type { TenantContext, TenantTransaction, WaiverSignerRole } from "@tidegrid/database";
 import { recordAudit } from "@tidegrid/database";
 import { sql } from "kysely";
-import { issueCodeLink } from "./assisted.ts";
+import { crewAccessLive, issueCodeLink } from "./assisted.ts";
 import { loadBookingContext, tripFacts } from "./booking.ts";
 import { sha256Hex } from "./content.ts";
 import { lockRequest } from "./delivery.ts";
@@ -56,29 +56,80 @@ export function normalizeBookingCode(input: string): string | null {
   return /^[0-9A-Z]{1,16}$/.test(key) ? key : null;
 }
 
-/** A name compared for the dock: Unicode-normalized, accents dropped, lower case, words only. */
-function nameWords(name: string): string[] {
-  return name
+/** Words after a last name that are not part of it. */
+const NAME_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv", "phd", "md", "dds", "esq"]);
+
+/**
+ * A name folded for the dock: lower case, accents dropped, and letters with
+ * no accent to drop spelled out (ø as o, ß as ss). With `german`, ä, ö, and ü
+ * are spelled ae, oe, and ue, as many people type them.
+ */
+function foldName(name: string, german: boolean): string {
+  let text = name.normalize("NFC").toLocaleLowerCase("en-US");
+  if (german) text = text.replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue");
+  return text
+    .replace(/ß/g, "ss")
+    .replace(/ø/g, "o")
+    .replace(/æ/g, "ae")
+    .replace(/œ/g, "oe")
+    .replace(/ł/g, "l")
+    .replace(/đ/g, "d")
+    .replace(/þ/g, "th")
     .normalize("NFKD")
-    .replace(/\p{M}+/gu, "")
-    .toLocaleLowerCase("en-US")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .split(" ")
-    .filter((w) => w.length > 0);
+    .replace(/\p{M}+/gu, "");
 }
 
 /**
- * Whether a typed last name is the booker's: the last word, or the last
- * words, of the booker's name, ignoring case, accents, and punctuation. One
- * letter is never enough.
+ * A folded name's words, each with its punctuation dropped (O'Brien is
+ * obrien, Smith-Jones is smithjones), and trailing suffixes (Jr, III, PhD)
+ * left off. `parts` is the last word's hyphenated parts.
+ */
+function nameWords(folded: string): { words: string[]; parts: string[] } {
+  const raw = folded.split(/[\s,]+/).filter((w) => /[\p{L}\p{N}]/u.test(w));
+  const bare = (w: string) => w.replace(/[^\p{L}\p{N}]+/gu, "");
+  while (raw.length > 1 && NAME_SUFFIXES.has(bare(raw[raw.length - 1] ?? ""))) raw.pop();
+  const last = raw[raw.length - 1] ?? "";
+  const parts = last.includes("-")
+    ? last
+        .split("-")
+        .map(bare)
+        .filter((w) => w.length > 0)
+    : [];
+  return { words: raw.map(bare), parts };
+}
+
+/**
+ * What counts as the booker's last name: the last word, or the last words
+ * run together, never the whole name; either part of a hyphenated last name;
+ * and for a name written "Last, First", the part before the comma.
+ */
+function lastNameKeys(bookerName: string, german: boolean): string[] {
+  const folded = foldName(bookerName, german);
+  const comma = folded.indexOf(",");
+  if (comma > 0) {
+    const before = nameWords(folded.slice(0, comma)).words;
+    const after = nameWords(folded.slice(comma + 1)).words;
+    return after.length > 0 && before.length > 0 ? [before.join("")] : [];
+  }
+  const { words, parts } = nameWords(folded);
+  if (words.length < 2) return [];
+  const keys: string[] = [];
+  for (let k = 1; k < words.length; k++) keys.push(words.slice(words.length - k).join(""));
+  if (parts.length > 1) keys.push(...parts);
+  return keys;
+}
+
+/**
+ * Whether a typed last name is the booker's (see lastNameKeys), ignoring
+ * case, accents, spaces, and punctuation. One letter is never enough.
  */
 export function lastNameMatches(bookerName: string, typed: string): boolean {
-  const booker = nameWords(bookerName);
-  const last = nameWords(typed);
-  if (last.length === 0 || last.join("").length < 2 || last.length >= booker.length) return false;
-  const tail = booker.slice(booker.length - last.length);
-  return tail.every((w, i) => w === last[i]);
+  const booker = new Set([...lastNameKeys(bookerName, false), ...lastNameKeys(bookerName, true)]);
+  for (const german of [false, true]) {
+    const key = nameWords(foldName(typed, german)).words.join("");
+    if (key.length >= 2 && booker.has(key)) return true;
+  }
+  return false;
 }
 
 /** How the dock shows a person: the first name and the last name's initial. */
@@ -145,7 +196,6 @@ export async function lookUpAtDock(
   if (ctx.actorType !== "guest") throw new Error("the dock lookup is a guest's");
   const referenceKey = normalizeBookingCode(input.bookingCode);
   if (!referenceKey) return { kind: "invalid" };
-  if (await refusal(trx, referenceKey, false)) return { kind: "limited" };
 
   let bookingId: string | null = null;
   if (BOOKING_CODE.test(referenceKey)) {
@@ -161,12 +211,15 @@ export async function lookUpAtDock(
     const found = rows[0];
     if (found && lastNameMatches(found.booker_name, input.lastName)) bookingId = found.id;
   }
+  // The limits are read after the lookup, so a right code and name still
+  // gets in while the operator-wide cap holds misses. A refused try is not
+  // recorded: it reached nothing.
+  if (await refusal(trx, referenceKey, bookingId !== null)) return { kind: "limited" };
   if (bookingId === null) {
     await sql`insert into waiver_dock_lookups (tenant_id, reference_key, matched)
               values (${ctx.tenantId}, ${referenceKey}, false)`.execute(trx);
     return { kind: "not_found" };
   }
-  if (await refusal(trx, referenceKey, true)) return { kind: "limited" };
   const secret = newWaiverSecret();
   const { rows } = await sql<{ id: string; expires_at: Date }>`
     insert into waiver_dock_lookups (tenant_id, reference_key, matched, booking_id, secret_hash)
@@ -214,7 +267,9 @@ export async function loadDockLookup(
       join scheduled_trips t on t.tenant_id = b.tenant_id and t.id = b.trip_id
      where k.tenant_id = ${tenantId} and k.secret_hash = ${await dockSecretHash(secret)}
        and k.matched and k.expires_at > now()
-       and b.state = 'confirmed' and t.ends_at > now()`.execute(trx);
+       and b.state = 'confirmed' and t.ends_at > now()
+       and (t.starts_at at time zone t.time_zone)::date = (now() at time zone t.time_zone)::date
+       `.execute(trx);
   const row = rows[0];
   return row
     ? { id: row.id, bookingId: row.booking_id, expiresAt: new Date(row.expires_at) }
@@ -261,6 +316,8 @@ export type DockSigningResult =
   | { kind: "lookup_ended" }
   /** No one at that position, or their waiver no longer waits for a signature. */
   | { kind: "not_pending" }
+  /** The crew started a signing for this person that is still live. */
+  | { kind: "crew_signing" }
   /** This lookup started as many signings as it may. */
   | { kind: "limited" };
 
@@ -292,6 +349,11 @@ export async function startDockSigning(
   if (!participant || (request.required_signer === "guardian") !== participant.minor) {
     return { kind: "not_pending" };
   }
+  if (await crewAccessLive(trx, ctx.tenantId, request.id)) return { kind: "crew_signing" };
+  // The insert trigger counts under this same lock, so the check here is the one it makes.
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`tidegrid.waiver_dock_lookup:${lookup.id}`}::text, 0))`.execute(
+    trx,
+  );
   const { rows: started } = await sql<{ n: number }>`
     select count(*)::int as n from waiver_assisted_links
      where tenant_id = ${ctx.tenantId} and dock_lookup_id = ${lookup.id}`.execute(trx);

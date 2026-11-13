@@ -10,7 +10,7 @@ import { inTenantTransaction, type TenantContext } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import type { BookingHooks } from "@tidegrid/domain-booking";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { lookUpAtDock, startDockSigning, type WaiverDeps } from "../index.ts";
+import { lookUpAtDock, startAssistedSigning, startDockSigning, type WaiverDeps } from "../index.ts";
 import {
   adult,
   createWaiverFixture,
@@ -198,6 +198,21 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup", () => {
       assisted_by: null,
       recipient_email: null,
     });
+    // The audit log says the same as the evidence.
+    const [audit] = await world.admin<{ after: Record<string, unknown> }[]>`
+      select after_state as after from public.audit_events
+       where tenant_id = ${A.id} and action = 'waiver_request.signed'
+         and subject_id = ${opened.session.requestId}`;
+    expect(audit?.after).toMatchObject({
+      accessMethod: "dock_lookup",
+      matchMethod: "booking_lookup",
+      assistedBy: null,
+    });
+    // Nobody checked who signs at the dock, and the row says so.
+    const [assisted] = await world.admin<{ identity_checked: boolean }[]>`
+      select identity_checked from public.waiver_assisted_links
+       where booking_id = ${booked.bookingId} and mode = 'dock_lookup'`;
+    expect(assisted?.identity_checked).toBe(false);
     // The party now shows the signature, and a signed person starts nothing.
     const again = await lookUp(A.id, booked.reference, "Booker");
     if (again.kind !== "matched") throw new Error(again.kind);
@@ -226,7 +241,7 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup", () => {
   it("limits misses from one address, even before a right answer", async () => {
     const { booked } = await todaysBooking("Client");
     const ip = "192.0.2.10";
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 20; i++) {
       expect(await lookUp(A.id, `ZZZZZZ${String(i).padStart(2, "0")}`, "Nobody", ip)).toEqual({
         kind: "not_found",
       });
@@ -236,9 +251,104 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup", () => {
     expect((await lookUp(A.id, booked.reference, "Booker")).kind).toBe("matched");
   });
 
+  it("counts an IPv6 address by its /64, so rotating through one network gains nothing", async () => {
+    const { booked } = await todaysBooking("Six");
+    for (let i = 0; i < 20; i++) {
+      expect(
+        await lookUp(
+          A.id,
+          `YYYYYY${String(i).padStart(2, "0")}`,
+          "Nobody",
+          `2001:db8:0:7::${i + 1}`,
+        ),
+      ).toEqual({ kind: "not_found" });
+    }
+    expect(await lookUp(A.id, booked.reference, "Booker", "2001:db8:0:7::ffff")).toEqual({
+      kind: "limited",
+    });
+    expect((await lookUp(A.id, booked.reference, "Booker", "2001:db8:0:8::1")).kind).toBe(
+      "matched",
+    );
+    // IPv4 addresses that IPv6 carries stay whole.
+    const [keys] = await world.admin<{ k: string }[]>`
+      select string_agg(distinct client_key, ',') as k from public.waiver_dock_lookups
+       where client_key like '2001:db8:0:7%'`;
+    expect(keys?.k).toBe("2001:db8:0:7::/64");
+  });
+
+  it("an operator-wide run of misses holds misses only, never a right code and name", async () => {
+    const tripId = nextB();
+    const booked = await book(world, B, tripId, 1, hooks);
+    await name(world, B.id, booked.bookingId, 1, adult("Busy Dock"), hooks);
+    await departingNow(tripId);
+    const [before] = await world.admin<{ n: number }[]>`
+      select count(*)::int as n from public.waiver_dock_lookups where tenant_id = ${B.id} and not matched`;
+    for (let i = before?.n ?? 0; i < 300; i++) {
+      const ip = `198.18.${Math.floor(i / 15)}.1`;
+      const found = await lookUp(B.id, `XX${String(i).padStart(6, "0")}`, "Nobody", ip);
+      expect(found.kind).toBe("not_found");
+    }
+    expect(await lookUp(B.id, "XXWWWWWW", "Nobody", "198.18.99.1")).toEqual({ kind: "limited" });
+    expect((await lookUp(B.id, booked.reference, "Booker", "198.18.99.2")).kind).toBe("matched");
+  });
+
+  it("a dock start never ends the crew's signing, and waits while it is live", async () => {
+    const { booked, p1 } = await todaysBooking("Crew");
+    const staffId = randomUUID();
+    await world.admin`insert into public.staff_users (id, email, display_name)
+      values (${staffId}, ${`dock-${staffId.slice(0, 8)}@example.test`}, 'Crew Member')`;
+    await world.admin`insert into public.tenant_memberships (tenant_id, user_id, role, display_name)
+      values (${A.id}, ${staffId}, 'booking_staff', 'Crew Member')`;
+    const request = await liveRequest(world.admin, booked.bookingId, p1);
+    const staff: TenantContext = {
+      tenantId: A.id,
+      actorType: "staff",
+      actorId: staffId,
+      requestId: `dock-${randomUUID()}`,
+      sourceIp: null,
+    };
+    const crew = await inTenantTransaction(world.db, staff, (trx) =>
+      startAssistedSigning(trx, staff, deps, {
+        requestId: request.id,
+        mode: "staff_device",
+        identityChecked: true,
+      }),
+    );
+    if (crew.kind !== "issued") throw new Error(crew.kind);
+    const found = await lookUp(A.id, booked.reference, "Booker");
+    if (found.kind !== "matched") throw new Error(found.kind);
+    // An unused crew code is live: the dock waits, and the code still works.
+    expect(await startSigning(A.id, found.secret, 1)).toEqual({ kind: "crew_signing" });
+    const opened = await redeem(world, A.id, crew.token);
+    expect(opened.kind).toBe("opened");
+    // The crew's open session is live too.
+    expect(await startSigning(A.id, found.secret, 1)).toEqual({ kind: "crew_signing" });
+    const [session] = await world.admin<{ revoked_at: Date | null }[]>`
+      select s.revoked_at from public.waiver_signing_sessions s
+       where s.access_link_id = ${crew.linkId}`;
+    expect(session?.revoked_at).toBeNull();
+    // Another person of the party is not held up.
+    expect((await startSigning(A.id, found.secret, 2)).kind).toBe("issued");
+  });
+
+  it("a lookup ends when its trip no longer departs today", async () => {
+    const { booked, tripId } = await todaysBooking("Moved");
+    const found = await lookUp(A.id, booked.reference, "Booker");
+    if (found.kind !== "matched") throw new Error(found.kind);
+    await world.admin.begin(async (tx) => {
+      await tx`alter table public.scheduled_trips disable trigger scheduled_trips_consistency`;
+      await tx`update public.scheduled_trips
+                  set starts_at = starts_at + interval '2 days', ends_at = ends_at + interval '2 days',
+                      boat_free_at = boat_free_at + interval '2 days'
+                where id = ${tripId}`;
+      await tx`alter table public.scheduled_trips enable trigger scheduled_trips_consistency`;
+    });
+    expect(await startSigning(A.id, found.secret, 1)).toEqual({ kind: "lookup_ended" });
+  });
+
   it("limits misses on one booking code from many addresses", async () => {
     const { booked } = await todaysBooking("Code");
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       expect(await lookUp(A.id, booked.reference, `Wrong${i}`)).toEqual({ kind: "not_found" });
     }
     expect(await lookUp(A.id, booked.reference, "Booker")).toEqual({ kind: "limited" });

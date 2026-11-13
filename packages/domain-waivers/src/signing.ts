@@ -507,8 +507,8 @@ export async function signWaiver(
       contentSha256: version.contentSha256,
       documentSha256,
       signerRole: request.required_signer,
-      accessMethod: assisted ? assisted.mode : "email_link",
-      matchMethod: assisted ? "staff_confirmed" : "signer_confirmed",
+      accessMethod: dock ? "dock_lookup" : assisted ? assisted.mode : "email_link",
+      matchMethod: dock ? "booking_lookup" : assisted ? "staff_confirmed" : "signer_confirmed",
       assistedBy: assisted ? assisted.staffId : null,
     },
   });

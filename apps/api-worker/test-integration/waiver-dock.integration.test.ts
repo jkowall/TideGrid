@@ -53,7 +53,7 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup through the API", () =>
     tenant: WaiverFixture,
     path: string,
     body: unknown,
-    opts: { bearer?: string; ip?: string } = {},
+    opts: { bearer?: string; ip?: string | undefined } = {},
   ): Promise<Res> {
     ip += 1;
     const headers = new Headers({
@@ -175,10 +175,15 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup through the API", () =>
       "dock_code_invalid",
     );
     const one = "192.0.2.77";
-    for (let i = 0; i < 10; i++) {
-      expect((await miss({ bookingCode: `YYYYYY${i}0`, lastName: "Nobody" }, one)).status).toBe(
-        404,
-      );
+    for (let i = 0; i < 20; i++) {
+      expect(
+        (
+          await miss(
+            { bookingCode: `YYYYY${String(i).padStart(2, "0")}0`, lastName: "Nobody" },
+            one,
+          )
+        ).status,
+      ).toBe(404);
     }
     const held = await miss({ bookingCode: booked.reference, lastName: "Booker" }, one);
     expect(held.status).toBe(429);

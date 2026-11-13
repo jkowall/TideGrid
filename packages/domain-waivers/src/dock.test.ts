@@ -25,6 +25,39 @@ describe("the dock lookup's comparisons", () => {
     expect(lastNameMatches("Madonna", "Madonna")).toBe(false);
   });
 
+  it("forgives punctuation, suffixes, name order, and common spellings", () => {
+    const yes: [string, string][] = [
+      ["Pat O'Brien", "OBrien"],
+      ["Pat OBrien", "O'Brien"],
+      ["Mary Smith-Jones", "SmithJones"],
+      ["Mary Smith-Jones", "Smith Jones"],
+      ["Mary Smith-Jones", "Smith"],
+      ["Mary Smith-Jones", "Jones"],
+      ["John Mc Donald", "McDonald"],
+      ["John Smith Jr.", "Smith"],
+      ["John Smith III", "Smith"],
+      ["Dr. Ana Ruiz PhD", "Ruiz"],
+      ["Smith, John", "Smith"],
+      ["Hans Müller", "Mueller"],
+      ["Hans Müller", "Muller"],
+      ["Hans Mueller", "Müller"],
+      ["Lars Sørensen", "Sorensen"],
+      ["Rolf Strauß", "Strauss"],
+    ];
+    for (const [booker, typed] of yes)
+      expect([booker, typed, lastNameMatches(booker, typed)]).toEqual([booker, typed, true]);
+    const no: [string, string][] = [
+      ["John Smith Jr.", "Jr"],
+      ["John Smith III", "III"],
+      ["Smith, John", "John"],
+      ["Mary Smith-Jones", "Mary"],
+      ["Pat O'Brien", "PatOBrien"],
+      ["Hans Müller", "Hans"],
+    ];
+    for (const [booker, typed] of no)
+      expect([booker, typed, lastNameMatches(booker, typed)]).toEqual([booker, typed, false]);
+  });
+
   it("shows a first name and an initial", () => {
     expect(dockDisplayName("Ana María Muñoz")).toBe("Ana M.");
     expect(dockDisplayName("  Kid   Ögren ")).toBe("Kid Ö.");
