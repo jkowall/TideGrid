@@ -229,7 +229,7 @@ function Detail({
   const end = localPartsOf(trip.endsAtLocal);
   const endText = end.date === trip.localDate ? end.time : `${end.time} next day`;
   const payment = paymentCopy({
-    state: booking.payment?.state ?? "complimentary",
+    state: booking.payment?.state ?? (booking.source === "imported" ? "imported" : "complimentary"),
     refund: booking.refund ? { state: booking.refund.state, amount: booking.refund.amount } : null,
   });
   const state = bookingStates[booking.state];
@@ -256,9 +256,11 @@ function Detail({
       <p className="bd-lede">
         {booking.source === "complimentary"
           ? "Booked complimentary by an owner, at no charge."
-          : booking.source === "staff_assisted"
-            ? `${sourceText(booking.source, booking.channel)}.`
-            : "Booked online by the guest."}{" "}
+          : booking.source === "imported"
+            ? "Imported from the operator's earlier booking system. Any money was taken outside TideGrid."
+            : booking.source === "staff_assisted"
+              ? `${sourceText(booking.source, booking.channel)}.`
+              : "Booked online by the guest."}{" "}
         Confirmed {instantText(booking.confirmedAt, zone)}.
         {booking.reacquired &&
           " The payment arrived after the checkout's hold ran out, and the seats were still free."}
@@ -309,7 +311,7 @@ function Detail({
               <dt>Booked by</dt>
               <dd>{booking.booker.name}</dd>
               <dt>Email</dt>
-              <dd className="console-dl__wrap">{booking.booker.email}</dd>
+              <dd className="console-dl__wrap">{booking.booker.email ?? "No email on file"}</dd>
             </dl>
           ) : (
             <p className="bd-hidden">

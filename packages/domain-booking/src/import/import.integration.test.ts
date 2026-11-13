@@ -151,7 +151,10 @@ describe.skipIf(!env)("the standard CSV import's dry run (W3-G2.13)", () => {
       runImportDryRun(trx, ctx, files),
     );
     if (result.kind !== "checked") throw new Error(JSON.stringify(result));
-    expect(result.result.issues).toEqual([]);
+    // The charter's balance is checked; saving it comes in a later part (a warning here).
+    expect(result.result.issues.map((i) => [i.code, i.severity])).toEqual([
+      ["import_not_supported_yet", "warning"],
+    ]);
     expect(result.result.clean).toBe(true);
     expect(await counts(A.id)).toEqual(before);
 

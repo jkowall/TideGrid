@@ -1,0 +1,501 @@
+/**
+ * Saving a standard CSV import batch (W3-G2.13, commit step, part A), against
+ * the database: a clean dry run committed all or nothing, the import branches
+ * of the booking rules reachable only through a commit, re-imports as no-ops,
+ * and tenants kept apart.
+ */
+import { randomUUID } from "node:crypto";
+import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/database";
+import type {} from "@tidegrid/database/global-setup";
+import postgres from "postgres";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { cancelBooking, staffCancelBooking } from "../cancel.ts";
+import { type CheckoutFixture, createCheckoutFixture, guestContext } from "../test-fixtures.ts";
+import { runImportCommit } from "./commit.ts";
+import { runImportDryRun } from "./dry-run.ts";
+
+type Sql = ReturnType<typeof postgres>;
+
+const env = inject("integrationDb");
+
+describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
+  let admin: Sql;
+  let runtime: ReturnType<typeof createDb>;
+  let A: CheckoutFixture;
+  let B: CheckoutFixture;
+  let ownerA: string;
+  let deskA: string;
+  let ownerB: string;
+  let day: string;
+  let exportedAt: string;
+
+  async function member(tenantId: string, role: "owner" | "booking_staff"): Promise<string> {
+    const id = randomUUID();
+    await admin`insert into public.staff_users (id, email, display_name)
+      values (${id}, ${`imc-${id.slice(0, 8)}@example.test`}, ${role})`;
+    await admin`insert into public.tenant_memberships (tenant_id, user_id, role, display_name)
+      values (${tenantId}, ${id}, ${role}, ${role})`;
+    return id;
+  }
+
+  const staffCtx = (tenantId: string, userId: string): TenantContext => ({
+    tenantId,
+    actorType: "staff",
+    actorId: userId,
+    requestId: `req-${randomUUID()}`,
+    sourceIp: null,
+  });
+
+  interface BatchOpts {
+    batchId: string;
+    run?: number;
+    mode?: "dry_run" | "commit";
+    /** Party on the 10:00 shared trip. */
+    party?: number;
+    /** Rows to leave out, by booking reference. */
+    skip?: string[];
+    /** A different name for C-1 (a changed row). */
+    renameC1?: string;
+  }
+
+  /**
+   * A batch on day+3: R-1 onto the fixture's 10:00 shared trip, R-2 onto a new
+   * 14:00 shared trip, R-3 a charter paid in full, with participants, cash,
+   * a check, and a refund.
+   */
+  function batch(t: CheckoutFixture, o: BatchOpts) {
+    const party = o.party ?? 2;
+    const skip = new Set(o.skip ?? []);
+    const bookings = [
+      ["R-1", `R-1,${day},T-AM,C-1,direct,,,${party},10000,0,0,0,0,10000,,${exportedAt}`],
+      ["R-2", `R-2,${day},T-PM,C-2,staff_assisted,phone,,2,8000,0,0,0,0,8000,,`],
+      ["R-3", `R-3,${day},T-CH,C-2,direct,,,3,50000,0,0,0,0,50000,,`],
+    ].filter(([ref]) => !skip.has(ref as string));
+    const participants = [
+      ["R-1", `R-1,${day},1,Ima Sample,false,ima.sample@example.test,,`],
+      ["R-2", `R-2,${day},1,Jo Fixture,false,jo.fixture@example.test,,`],
+      ["R-2", `R-2,${day},2,Kit Fixture,true,,Jo Fixture,jo.fixture@example.test`],
+    ].filter(([ref]) => !skip.has(ref as string));
+    const payments = [
+      ["R-1", `PAY-1,R-1,${day},payment,12500,cash,,${exportedAt}`],
+      ["R-1", `PAY-2,R-1,${day},refund,2500,cash,,${exportedAt}`],
+      ["R-3", `PAY-3,R-3,${day},payment,50000,check,CHK-77,${exportedAt}`],
+      ["R-2", `PAY-4,R-2,${day},payment,8000,bank_transfer,,${exportedAt}`],
+    ].filter(([ref]) => !skip.has(ref as string));
+    const totals: Record<string, number> = { "R-1": 10000, "R-2": 8000, "R-3": 50000 };
+    const parties: Record<string, number> = { "R-1": party, "R-2": 2, "R-3": 3 };
+    const kept = bookings.map(([ref]) => ref as string);
+    const paid = payments
+      .filter(([, line]) => (line as string).includes(",payment,"))
+      .reduce((n, [, line]) => n + Number((line as string).split(",")[4]), 0);
+    const refunded = payments
+      .filter(([, line]) => (line as string).includes(",refund,"))
+      .reduce((n, [, line]) => n + Number((line as string).split(",")[4]), 0);
+    const total = kept.reduce((n, ref) => n + (totals[ref] ?? 0), 0);
+    return {
+      "manifest.csv": [
+        "item,file,value",
+        `batch_id,,${o.batchId}`,
+        `run_number,,${o.run ?? 1}`,
+        "source_system,,legacy-booker",
+        "mapping_version,,std-csv-v0",
+        `batch_mode,,${o.mode ?? "dry_run"}`,
+        "operator_time_zone,,UTC",
+        `exported_at,,${exportedAt}`,
+        "waiver_notifications,,hold_until_staff_release",
+        "row_count,products.csv,2",
+        "row_count,trips.csv,3",
+        "sum_seat_capacity,trips.csv,20",
+        "row_count,customers.csv,2",
+        "rows_with_email,customers.csv,1",
+        `row_count,bookings.csv,${kept.length}`,
+        `rows_direct,bookings.csv,${kept.filter((ref) => ref !== "R-2").length}`,
+        `rows_staff_assisted,bookings.csv,${kept.includes("R-2") ? 1 : 0}`,
+        "rows_ota,bookings.csv,0",
+        "sum_included_tax_cents,bookings.csv,0",
+        `sum_party_size,bookings.csv,${kept.reduce((n, ref) => n + (parties[ref] ?? 0), 0)}`,
+        `sum_total_cents,bookings.csv,${total}`,
+        `row_count,participants.csv,${participants.length}`,
+        `rows_minor,participants.csv,${participants.filter(([, line]) => (line as string).includes(",true,")).length}`,
+        `row_count,payments.csv,${payments.length}`,
+        `sum_payment_cents,payments.csv,${paid}`,
+        `sum_refund_cents,payments.csv,${refunded}`,
+        `sum_outstanding_cents,payments.csv,${total - paid + refunded}`,
+      ].join("\n"),
+      "products.csv": [
+        "source_product_id,source_product_name,tidegrid_product_id,tidegrid_product_name,product_kind",
+        `P-SEATS,Legacy seats,${t.products.shared},Harbor Seats,shared_seat`,
+        `P-CHARTER,Legacy charter,${t.products.charter},Wren Charter,private_charter`,
+      ].join("\n"),
+      "trips.csv": [
+        "source_trip_id,source_product_id,tidegrid_boat_id,local_date,local_start_time,time_zone,utc_offset,seat_capacity",
+        `T-AM,P-SEATS,${t.boats.lark},${day},10:00,UTC,,`,
+        `T-PM,P-SEATS,${t.boats.lark},${day},14:00,UTC,,10`,
+        `T-CH,P-CHARTER,${t.boats.wren},${day},14:00,UTC,,`,
+      ].join("\n"),
+      "customers.csv": [
+        "source_customer_id,full_name,email,phone",
+        `C-1,${o.renameC1 ?? "Ima Sample"},ima.sample@example.test,`,
+        "C-2,Jo Fixture,,+15555550123",
+      ].join("\n"),
+      "bookings.csv": [
+        "source_booking_ref,trip_date,source_trip_id,source_customer_id,booking_source,staff_channel,ota_channel,party_size,subtotal_cents,discount_cents,fee_cents,tax_cents,included_tax_cents,total_cents,balance_due_date,booked_at",
+        ...bookings.map(([, line]) => line),
+      ].join("\n"),
+      "participants.csv": [
+        "source_booking_ref,trip_date,position,full_name,is_minor,email,guardian_name,guardian_email",
+        ...participants.map(([, line]) => line),
+      ].join("\n"),
+      "payments.csv": [
+        "source_payment_id,source_booking_ref,trip_date,entry_kind,amount_cents,tender,reference,received_at",
+        ...payments.map(([, line]) => line),
+      ].join("\n"),
+    };
+  }
+
+  async function dryRun(t: CheckoutFixture, user: string, o: BatchOpts) {
+    const ctx = staffCtx(t.id, user);
+    const result = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      runImportDryRun(trx, ctx, batch(t, { ...o, mode: "dry_run" })),
+    );
+    if (result.kind !== "checked") throw new Error(JSON.stringify(result));
+    return result;
+  }
+
+  async function commit(t: CheckoutFixture, user: string, o: BatchOpts) {
+    const ctx = staffCtx(t.id, user);
+    return inTenantTransaction(runtime.db, ctx, (trx) =>
+      runImportCommit(trx, ctx, batch(t, { ...o, mode: "commit" })),
+    );
+  }
+
+  beforeAll(async () => {
+    if (!env) return;
+    admin = postgres(env.adminUrl, { max: 4, onnotice: () => {} });
+    runtime = createDb(env.runtimeUrl, { max: 6 });
+    [A, B] = await Promise.all([
+      createCheckoutFixture(admin, runtime.db, "imc-a", { days: 6 }),
+      createCheckoutFixture(admin, runtime.db, "imc-b", { days: 6 }),
+    ]);
+    ownerA = await member(A.id, "owner");
+    deskA = await member(A.id, "booking_staff");
+    ownerB = await member(B.id, "owner");
+    const [clock] = await admin<{ day: string; exported: string }[]>`
+      select ((now() at time zone 'UTC')::date + 3)::text as day,
+             to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
+    day = clock?.day ?? "";
+    exportedAt = clock?.exported ?? "";
+  }, 180_000);
+
+  afterAll(async () => {
+    await runtime?.end();
+    await admin?.end({ timeout: 5 });
+  });
+
+  it("commits a clean dry run: trips, bookings, participants, and money, with no email", async () => {
+    const dry = await dryRun(A, ownerA, { batchId: "SAVE-1" });
+    expect(dry.result.issues.filter((i) => i.severity === "error")).toEqual([]);
+    expect(dry.result.clean).toBe(true);
+    const [emailsBefore] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.email_messages where tenant_id = ${A.id}`;
+
+    const saved = await commit(A, ownerA, { batchId: "SAVE-1", run: 2 });
+    if (saved.kind !== "committed") throw new Error(JSON.stringify(saved));
+    expect(saved.counts).toEqual({
+      trips: 3,
+      tripsCreated: 2,
+      customers: 2,
+      bookings: 3,
+      participants: 3,
+      payments: 3,
+      refunds: 1,
+      unchanged: 0,
+    });
+
+    const rows = await admin<
+      {
+        ref: string;
+        source: string;
+        payment_id: string | null;
+        checkout_source: string;
+        quote_id: string | null;
+        booker_name: string;
+        booker_email: string | null;
+        checkout_state: string;
+        order_status: string;
+        total_amount: number;
+        lines: number;
+        hold_state: string;
+        sales_state: string;
+        seats: number;
+      }[]
+    >`
+      select br.external_id as ref, b.source, b.payment_id, s.source as checkout_source,
+             s.quote_id, s.booker_name, s.booker_email, s.state as checkout_state,
+             o.status as order_status, o.total_amount,
+             (select count(*) from public.order_lines l where l.order_id = o.id)::int as lines,
+             h.state as hold_state, t.sales_state, h.seats
+        from public.import_bookings ib
+        join public.import_records br on br.id = ib.record_id
+        join public.bookings b on b.checkout_session_id = ib.checkout_session_id
+        join public.checkout_sessions s on s.id = b.checkout_session_id
+        join public.orders o on o.id = b.order_id
+        join public.capacity_holds h on h.id = b.hold_id
+        join public.scheduled_trips t on t.id = b.trip_id
+       where ib.tenant_id = ${A.id} and br.run_id = ${saved.runId}
+       order by br.external_id`;
+    expect(rows.map((r) => r.ref)).toEqual(["R-1", "R-2", "R-3"]);
+    for (const r of rows) {
+      expect(r).toMatchObject({
+        source: "imported",
+        payment_id: null,
+        checkout_source: "imported",
+        quote_id: null,
+        checkout_state: "confirmed",
+        order_status: "paid",
+        lines: 0,
+        hold_state: "confirmed",
+      });
+    }
+    // The fixture's 10:00 trip is published; the two new ones wait in draft.
+    expect(rows.map((r) => r.sales_state)).toEqual(["published", "draft", "draft"]);
+    expect(rows[0]).toMatchObject({
+      booker_name: "Ima Sample",
+      booker_email: "ima.sample@example.test",
+    });
+    // A customer without an email books with none.
+    expect(rows[1]).toMatchObject({ booker_name: "Jo Fixture", booker_email: null, seats: 2 });
+    // A charter takes the whole boat.
+    expect(rows[2]?.seats).toBeGreaterThan(3);
+
+    const money = await admin<
+      {
+        kind: string;
+        tender: string;
+        amount: number;
+        fee_amount: number | null;
+        received: boolean;
+      }[]
+    >`
+      select x.kind, x.tender, x.amount, x.fee_amount, x.received_at is not null as received
+        from public.external_settlements x
+        join public.import_records r on r.id = x.import_record_id
+       where x.tenant_id = ${A.id} and r.run_id = ${saved.runId}
+       order by r.external_id`;
+    expect(money).toEqual([
+      { kind: "payment", tender: "cash", amount: 12500, fee_amount: null, received: true },
+      // It returned an overpayment before TideGrid, so it reverses no fee.
+      { kind: "refund", tender: "cash", amount: 2500, fee_amount: 0, received: true },
+      { kind: "payment", tender: "check", amount: 50000, fee_amount: null, received: true },
+      { kind: "payment", tender: "bank_transfer", amount: 8000, fee_amount: null, received: true },
+    ]);
+    const [parts] = await admin<{ n: number; minors: number }[]>`
+      select count(*)::int as n, count(*) filter (where p.is_minor)::int as minors
+        from public.booking_participants p
+        join public.import_records r on r.participant_id = p.id
+       where r.run_id = ${saved.runId}`;
+    expect(parts).toEqual({ n: 3, minors: 1 });
+
+    // No email, and no personal data in the run or its audit row.
+    const [emailsAfter] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.email_messages where tenant_id = ${A.id}`;
+    expect(emailsAfter?.n).toBe(emailsBefore?.n);
+    const [stored] = await admin<{ text: string }[]>`
+      select (select row_to_json(r)::text from public.import_runs r where r.id = ${saved.runId})
+             || (select coalesce(string_agg(after_state::text, ''), '') from public.audit_events
+                  where tenant_id = ${A.id} and subject_id = ${saved.runId}) as text`;
+    expect(stored?.text).not.toMatch(/ima\.sample|Ima Sample|Jo Fixture|5555550123/);
+    const [run] = await admin<{ mode: string; clean: boolean; dry_run_id: string }[]>`
+      select mode, clean, dry_run_id from public.import_runs where id = ${saved.runId}`;
+    expect(run).toEqual({ mode: "commit", clean: true, dry_run_id: dry.runId });
+
+    // A batch commits once; a final delta is a new batch.
+    expect(await commit(A, ownerA, { batchId: "SAVE-1", run: 3 })).toEqual({
+      kind: "already_committed",
+      batchId: "SAVE-1",
+    });
+  });
+
+  it("treats rows imported before as no-ops and refuses changed ones", async () => {
+    // A second batch with the same records: every row unchanged.
+    const again = await dryRun(A, ownerA, { batchId: "SAVE-2" });
+    expect(again.result.clean).toBe(true);
+    const saved = await commit(A, ownerA, { batchId: "SAVE-2", run: 2 });
+    if (saved.kind !== "committed") throw new Error(JSON.stringify(saved));
+    expect(saved.counts).toMatchObject({ trips: 0, tripsCreated: 0, bookings: 0, payments: 0 });
+    expect(saved.counts.unchanged).toBe(2 + 3 + 2 + 3 + 3 + 4);
+
+    // A changed customer is refused: an import never overwrites.
+    const changed = await dryRun(A, ownerA, { batchId: "SAVE-3", renameC1: "Ima Changed" });
+    expect(changed.result.clean).toBe(false);
+    expect(changed.result.issues).toContainEqual(
+      expect.objectContaining({ file: "customers.csv", code: "changed_since_import" }),
+    );
+  });
+
+  it("lets staff cancel an imported booking, returning nothing, and never its guest", async () => {
+    const [row] = await admin<{ id: string }[]>`
+      select b.id from public.bookings b
+        join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+        join public.import_records r on r.id = ib.record_id
+       where b.tenant_id = ${A.id} and r.external_id = 'R-2' and b.state = 'confirmed'`;
+    if (!row) throw new Error("no imported booking R-2");
+    const guest = guestContext(A.id);
+    await expect(
+      inTenantTransaction(runtime.db, guest, (trx) =>
+        cancelBooking(trx, guest, { bookingId: row.id, expectedRefundAmount: 0 }),
+      ),
+    ).rejects.toMatchObject({ code: "23514", constraint_name: "booking_cancellations_imported" });
+    const [emailsBefore] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.email_messages where tenant_id = ${A.id}`;
+    const ctx = staffCtx(A.id, ownerA);
+    const done = await inTenantTransaction(runtime.db, ctx, (trx) =>
+      staffCancelBooking(trx, ctx, {
+        bookingId: row.id,
+        choice: { kind: "policy", remedy: "none" },
+        expectedAmount: 0,
+      }),
+    );
+    expect(done).toMatchObject({
+      kind: "canceled",
+      cancellation: { remedy: "none", paidAmount: 0, refundAmount: 0, creditAmount: 0 },
+    });
+    const [hold] = await admin<{ state: string }[]>`
+      select h.state from public.capacity_holds h
+        join public.bookings b on b.hold_id = h.id where b.id = ${row.id}`;
+    expect(hold?.state).toBe("released");
+    // Its emails are held: the cancellation sends none.
+    const [emailsAfter] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.email_messages where tenant_id = ${A.id}`;
+    expect(emailsAfter?.n).toBe(emailsBefore?.n);
+  });
+
+  it("commits only the latest clean dry run of the same files", async () => {
+    // No dry run at all.
+    expect(await commit(A, ownerA, { batchId: "ORDER-1", run: 1 })).toMatchObject({
+      kind: "no_clean_dry_run",
+    });
+    // Other files than the dry run's.
+    await dryRun(B, ownerB, { batchId: "ORDER-2", skip: ["R-3"] });
+    expect(await commit(B, ownerB, { batchId: "ORDER-2", run: 2 })).toEqual({
+      kind: "batch_changed_since_dry_run",
+      batchId: "ORDER-2",
+    });
+    // The wrong run number.
+    expect(await commit(B, ownerB, { batchId: "ORDER-2", run: 4, skip: ["R-3"] })).toMatchObject({
+      kind: "run_number_used",
+      expected: 2,
+    });
+    // Booking staff: the database refuses the run.
+    const desk = staffCtx(A.id, deskA);
+    await dryRun(A, ownerA, { batchId: "ORDER-3", skip: ["R-1", "R-2", "R-3"] });
+    await expect(
+      inTenantTransaction(runtime.db, desk, (trx) =>
+        runImportCommit(
+          trx,
+          desk,
+          batch(A, { batchId: "ORDER-3", run: 2, mode: "commit", skip: ["R-1", "R-2", "R-3"] }),
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "42501" });
+  });
+
+  it("checks again at commit time and records a refused commit", async () => {
+    // Tenant B's 10:00 trip has 10 seats. The dry run fits 8; then 6 are taken.
+    await dryRun(B, ownerB, { batchId: "LATE-1", party: 8 });
+    const [trip] = await admin<{ id: string }[]>`
+      select id from public.scheduled_trips
+       where tenant_id = ${B.id} and boat_id = ${B.boats.lark} and local_date = ${day}::date
+         and local_start_time = '10:00'`;
+    if (!trip) throw new Error("no fixture trip");
+    const holdCtx: TenantContext = {
+      tenantId: B.id,
+      actorType: "system",
+      actorId: "t",
+      requestId: "r",
+    };
+    await inTenantTransaction(runtime.db, holdCtx, (trx) =>
+      trx
+        .insertInto("capacity_holds")
+        .values({
+          tenant_id: B.id,
+          trip_id: trip.id,
+          owner_ref: `test:${randomUUID()}`,
+          party_size: 6,
+          expires_at: new Date(Date.now() + 30 * 60_000),
+        })
+        .execute(),
+    );
+    const late = await commit(B, ownerB, { batchId: "LATE-1", run: 2, party: 8 });
+    if (late.kind !== "refused") throw new Error(JSON.stringify(late));
+    expect(late.result.issues).toContainEqual(
+      expect.objectContaining({ file: "bookings.csv", code: "over_capacity" }),
+    );
+    const [run] = await admin<{ mode: string; clean: boolean }[]>`
+      select mode, clean from public.import_runs where id = ${late.runId ?? ""}`;
+    expect(run).toEqual({ mode: "commit", clean: false });
+    const [booked] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.bookings where tenant_id = ${B.id} and source = 'imported'`;
+    expect(booked?.n).toBe(0);
+    // The next commit needs a fresh dry run.
+    expect(await commit(B, ownerB, { batchId: "LATE-1", run: 3, party: 8 })).toMatchObject({
+      kind: "no_clean_dry_run",
+    });
+  });
+
+  it("keeps the import branches out of reach of any other writer", async () => {
+    const ctx = staffCtx(A.id, ownerA);
+    const [run] = await admin<{ id: string }[]>`
+      select id from public.import_runs
+       where tenant_id = ${A.id} and batch_id = 'SAVE-1' and mode = 'commit'`;
+    if (!run) throw new Error("no commit run");
+    // A ledger row outside its commit's transaction.
+    await expect(
+      inTenantTransaction(runtime.db, ctx, (trx) =>
+        trx
+          .insertInto("import_records")
+          .values({
+            tenant_id: A.id,
+            run_id: run.id,
+            source_system: "legacy-booker",
+            mapping_version: "std-csv-v0",
+            file: "customers.csv",
+            external_id: "C-9",
+            dedupe_key: "legacy-booker|C-9",
+            row_hash: "0".repeat(64),
+          })
+          .execute(),
+      ),
+    ).rejects.toMatchObject({ code: "23514", constraint_name: "import_records_run" });
+    // A checkout with no quote and no ledger row.
+    const [trip] = await admin<{ id: string; starts_at: Date }[]>`
+      select id, starts_at from public.scheduled_trips
+       where tenant_id = ${A.id} and sales_state = 'draft' order by starts_at limit 1`;
+    if (!trip) throw new Error("no draft trip");
+    const checkoutId = randomUUID();
+    await expect(
+      inTenantTransaction(runtime.db, ctx, (trx) =>
+        trx
+          .insertInto("capacity_holds")
+          .values({
+            tenant_id: A.id,
+            trip_id: trip.id,
+            owner_ref: `checkout_session:${checkoutId}`,
+            party_size: 1,
+            expires_at: trip.starts_at,
+          })
+          .execute(),
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    // The ledger is append-only.
+    await expect(
+      admin`update public.import_records set row_hash = ${"1".repeat(64)} where tenant_id = ${A.id}`,
+    ).rejects.toMatchObject({ code: "55000" });
+    // Tenant B sees none of tenant A's ledger.
+    const ctxB = staffCtx(B.id, ownerB);
+    const seen = await inTenantTransaction(runtime.db, ctxB, (trx) =>
+      trx.selectFrom("import_records").select("id").where("tenant_id", "=", A.id).execute(),
+    );
+    expect(seen).toEqual([]);
+  });
+});

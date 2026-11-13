@@ -43,10 +43,10 @@ import {
   counted,
   directBody,
   emptyDay,
-  importedBooking,
   staffBody,
   staffBooking,
   staffBookingTwoId,
+  unknownSourceBooking,
 } from "./source-fixtures.ts";
 
 /**
@@ -152,7 +152,7 @@ describe("the staff booking badge (G2.12e)", () => {
       [route.day()]: () =>
         json(
           allSourcesBody({
-            bookings: [priyaBooking, mayaBooking, importedBooking, staffBooking],
+            bookings: [priyaBooking, mayaBooking, unknownSourceBooking, staffBooking],
           }),
         ),
     });
@@ -177,7 +177,13 @@ describe("filtering by source (G2.12e)", () => {
       within(select)
         .getAllByRole("option")
         .map((o) => text(o)),
-    ).toEqual(["All sources", "Online, by the guest", "Staff bookings", "Complimentary"]);
+    ).toEqual([
+      "All sources",
+      "Online, by the guest",
+      "Staff bookings",
+      "Complimentary",
+      "Imported",
+    ]);
     expect(select.value).toBe("");
 
     select.focus();

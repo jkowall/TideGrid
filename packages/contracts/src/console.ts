@@ -39,7 +39,13 @@ const QueryDate = z.iso
 const LocalDate = z.iso.date().describe("Local calendar date at the marina, YYYY-MM-DD");
 
 const BookerContact = z
-  .object({ name: z.string(), email: z.string() })
+  .object({
+    name: z.string(),
+    email: z
+      .string()
+      .nullable()
+      .describe("Null only on an imported booking whose customer had no email (W3-G2.13)"),
+  })
   .optional()
   .describe(
     "Personal data. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise",

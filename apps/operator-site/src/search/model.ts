@@ -94,6 +94,7 @@ const sourceLead: Record<ListSource, string> = {
   direct: "Online bookings",
   staff_assisted: "Staff bookings",
   complimentary: "Complimentary bookings",
+  imported: "Imported bookings",
 };
 
 /**

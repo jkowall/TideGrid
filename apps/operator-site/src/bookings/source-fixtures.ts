@@ -36,11 +36,11 @@ export const staffBooking: BookingListItem = {
 };
 
 /** A booking from a source this console does not know yet: it lists, with no badge. */
-export const importedBooking: BookingListItem = {
+export const unknownSourceBooking: BookingListItem = {
   ...luisBooking,
   id: "3c1f6a52-9d44-4e0b-8a6f-2b7d5c9e0a22",
   reference: "M9TRVL3X",
-  source: "imported" as BookingListItem["source"],
+  source: "partner" as BookingListItem["source"],
   channel: null,
 };
 

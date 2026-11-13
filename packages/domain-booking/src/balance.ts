@@ -100,7 +100,7 @@ export async function enqueueBalanceReminders(
       dedupeKey: `booking.balance_reminder:${bookingId}:${row.generation}:${due.toISOString()}:${days}`,
       notBefore: new Date(due.getTime() - days * 86_400_000),
     });
-    if (!done.duplicate) written += 1;
+    if (done && !done.duplicate) written += 1;
   }
   return written;
 }
@@ -232,6 +232,8 @@ export async function sendBalanceLink(
     kind: "link",
     dedupeKey: `booking.balance_link:${bookingId}:${crypto.randomUUID()}`,
   });
+  // An imported booking (W3-G2.13) carries no balance yet, so never gets here.
+  if (!done) throw new Error("an imported booking has no balance link");
   await record(trx, ctx, {
     action: "booking.balance_link_sent",
     subjectType: "booking",

@@ -752,6 +752,10 @@ describe.skipIf(!env)("tenancy, row-level security, and privileged functions", (
         capacity_overrides: ["INSERT", "SELECT"],
         complimentary_grants: ["INSERT", "SELECT"],
         import_runs: ["INSERT", "SELECT"],
+        // The import commit's ledger (0044), append-only.
+        import_bookings: ["INSERT", "SELECT"],
+        import_customers: ["INSERT", "SELECT"],
+        import_records: ["INSERT", "SELECT"],
         // Important links (0041, W3-G2.14b-rest): edited in place, archived, never deleted.
         important_links: ["INSERT", "SELECT"],
       };

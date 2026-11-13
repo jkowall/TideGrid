@@ -31,7 +31,7 @@ describe("the day list's source filter (G2.12e)", () => {
   });
 
   it.each([
-    ["a source the API does not have", "imported"],
+    ["a source the API does not have", "ota"],
     ["an empty value", ""],
     ["another case", "STAFF_ASSISTED"],
     ["two values", ["direct", "staff_assisted"]],
@@ -43,7 +43,7 @@ describe("the day list's source filter (G2.12e)", () => {
     const body = { date, trips: [trip], bookings: [], nextAfter: null };
     expect(BookingListResponse.safeParse({ ...body, source: "staff_assisted" }).success).toBe(true);
     expect(BookingListResponse.safeParse({ ...body, source: null }).success).toBe(true);
-    expect(BookingListResponse.safeParse({ ...body, source: "imported" }).success).toBe(false);
+    expect(BookingListResponse.safeParse({ ...body, source: "ota" }).success).toBe(false);
     expect(BookingListResponse.shape.source).toBeDefined();
   });
 });

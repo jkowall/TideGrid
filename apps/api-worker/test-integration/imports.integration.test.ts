@@ -2,10 +2,12 @@
  * The standard CSV import's dry run through the API (W3-G2.13, part 1):
  * owners only, idempotent by key, a used run number refused, the issues and
  * errors.csv returned with personal values withheld, and another tenant's ids
- * treated as unknown. Contract: packages/contracts/src/imports.ts.
+ * treated as unknown. Then the commit (part A): a clean dry run saved once,
+ * the imported booking read back by the console. Contract:
+ * packages/contracts/src/imports.ts.
  */
 import { randomUUID } from "node:crypto";
-import { ImportDryRunResponse } from "@tidegrid/contracts";
+import { ImportCommitResponse, ImportDryRunResponse } from "@tidegrid/contracts";
 import { createDb } from "@tidegrid/database";
 import type {} from "@tidegrid/database/global-setup";
 import {
@@ -70,6 +72,28 @@ describe.skipIf(!env)("the standard CSV import's dry run through the API (W3-G2.
   }
 
   async function dryRun(t: Tenant, as: string, body: unknown, key = `imp-${randomUUID()}`) {
+    return send(t, as, "import-dry-runs", body, key);
+  }
+
+  async function commit(t: Tenant, as: string, body: unknown, key = `imp-${randomUUID()}`) {
+    return send(t, as, "import-commits", body, key);
+  }
+
+  async function get(t: Tenant, as: string, path: string) {
+    const res = await app.request(
+      `http://localhost/v1/staff/tenants/${t.id}/${path}`,
+      {
+        method: "GET",
+        headers: new Headers({ origin: CONSOLE, "cf-access-jwt-assertion": await token(as) }),
+      },
+      bindings(),
+      executionCtx,
+    );
+    const text = await res.text();
+    return { status: res.status, text, json: (text ? JSON.parse(text) : {}) as Json };
+  }
+
+  async function send(t: Tenant, as: string, path: string, body: unknown, key: string) {
     const headers = new Headers({
       origin: CONSOLE,
       "content-type": "application/json",
@@ -77,7 +101,7 @@ describe.skipIf(!env)("the standard CSV import's dry run through the API (W3-G2.
       "cf-access-jwt-assertion": await token(as),
     });
     const res = await app.request(
-      `http://localhost/v1/staff/tenants/${t.id}/import-dry-runs`,
+      `http://localhost/v1/staff/tenants/${t.id}/${path}`,
       { method: "POST", headers, body: JSON.stringify(body) },
       bindings(),
       executionCtx,
@@ -110,7 +134,12 @@ describe.skipIf(!env)("the standard CSV import's dry run through the API (W3-G2.
   }
 
   /** One shared-seat trip at 14:00 on day+3 and one paid booking on it. */
-  function files(t: CheckoutFixture, batchId: string, run = 1, extra: { cardRef?: boolean } = {}) {
+  function files(
+    t: CheckoutFixture,
+    batchId: string,
+    run = 1,
+    extra: { cardRef?: boolean; mode?: "dry_run" | "commit" } = {},
+  ) {
     return {
       "manifest.csv": [
         "item,file,value",
@@ -118,7 +147,7 @@ describe.skipIf(!env)("the standard CSV import's dry run through the API (W3-G2.
         `run_number,,${run}`,
         "source_system,,legacy-booker",
         "mapping_version,,std-csv-v0",
-        "batch_mode,,dry_run",
+        `batch_mode,,${extra.mode ?? "dry_run"}`,
         "operator_time_zone,,UTC",
         `exported_at,,${exportedAt}`,
         "waiver_notifications,,send_at_cutover",
@@ -239,5 +268,49 @@ describe.skipIf(!env)("the standard CSV import's dry run through the API (W3-G2.
     expect(res.json.errorsCsv).toMatch(
       /^﻿batch_id,run_number,file,line,record_key,column,code,severity,message,value\r\n/,
     );
+  });
+
+  it("saves a clean dry run once, and the console reads the imported booking", async () => {
+    const dry = await dryRun(A, A.owner, { files: files(A, "API-C1") });
+    expect(dry.status, dry.text).toBe(200);
+    expect(dry.json.run.clean).toBe(true);
+    // Not before a clean dry run, and never by booking staff.
+    const early = await commit(A, A.owner, { files: files(A, "API-C2", 1, { mode: "commit" }) });
+    expect([early.status, early.json.error?.code]).toEqual([409, "import_no_clean_dry_run"]);
+    const body = { files: files(A, "API-C1", 2, { mode: "commit" }) };
+    const desk = await commit(A, A.bookingStaff, body);
+    expect([desk.status, desk.json.error?.code]).toEqual([403, "forbidden"]);
+
+    const key = `imp-${randomUUID()}`;
+    const saved = await commit(A, A.owner, body, key);
+    expect(saved.status, saved.text).toBe(200);
+    expect(saved.headers.get("cache-control")).toBe("no-store");
+    const parsed = ImportCommitResponse.parse(saved.json);
+    expect(parsed).toMatchObject({
+      committed: true,
+      refusal: null,
+      counts: { trips: 1, tripsCreated: 1, customers: 1, bookings: 1, payments: 1, refunds: 0 },
+    });
+    expect(saved.text).not.toContain("Quinn");
+    const replay = await commit(A, A.owner, body, key);
+    expect(replay.headers.get("idempotent-replayed")).toBe("true");
+    expect(replay.json.run.id).toBe(parsed.run.id);
+    const twice = await commit(A, A.owner, { files: files(A, "API-C1", 3, { mode: "commit" }) });
+    expect([twice.status, twice.json.error?.code]).toEqual([409, "import_already_committed"]);
+
+    // The console reads it: imported, with its legacy total and no card payment.
+    const [booking] = await admin<{ id: string }[]>`
+      select b.id from public.bookings b
+        join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+        join public.import_records r on r.id = ib.record_id
+       where b.tenant_id = ${A.id} and r.run_id = ${parsed.run.id ?? ""}`;
+    if (!booking) throw new Error("no imported booking");
+    const detail = await get(A, A.owner, `bookings/${booking.id}`);
+    expect(detail.status, detail.text).toBe(200);
+    expect(detail.json.booking).toMatchObject({
+      source: "imported",
+      payment: null,
+      booker: { name: "Quinn Example", email: "quinn.example@example.test" },
+    });
   });
 });

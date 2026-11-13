@@ -54,7 +54,7 @@ interface SearchRow {
   starts_at: Date | string;
   sales_state: TripSalesState;
   total_amount: number;
-  payment_state: PaymentState | "complimentary";
+  payment_state: PaymentState | "complimentary" | "imported";
   refund_state: RefundState | null;
   refund_amount: number | null;
   booker_name?: string;
@@ -129,8 +129,9 @@ export async function baselineSearch(
            to_char(t.local_date, 'YYYY-MM-DD') as local_date,
            to_char(t.local_start_time, 'HH24:MI') as local_start_time,
            t.starts_at, t.sales_state,
-           case when b.payment_id is null then 0 else o.total_amount end as total_amount,
-           coalesce(pay.state, 'complimentary') as payment_state,
+           case when b.source = 'complimentary' then 0 else o.total_amount end as total_amount,
+           coalesce(pay.state, case when b.source = 'imported' then 'imported'
+                                   else 'complimentary' end) as payment_state,
            r.state as refund_state, r.amount as refund_amount
            ${bookerColumns}
       ${from}

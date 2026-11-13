@@ -4,6 +4,14 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-13
 
+### Saving a standard CSV import, part A (W3-G2.13), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0044_import_commit.sql`, after the owner approved the import draft and its twelve questions on 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.
+
+- **Built.** `POST /v1/staff/tenants/{tenantId}/import-commits` (owners only, idempotent): a clean dry run of the same files is saved all or nothing. New trips land in draft; each booking gets an imported checkout and order (legacy totals, no quote), a confirmed hold through the owner-approved import branch of the capacity rule, a booking with source `imported` and no TideGrid payment, its participants, and its legacy payments and refunds as labeled external settlements. An append-only import ledger is the evidence, and every import branch in the database opens only for ledger rows from a clean commit in the same transaction. Re-imports skip unchanged rows and refuse changed ones. The console reads imported bookings (payment state "Imported", a booker with no email). Imported bookings send no email yet.
+- **Proof.** On the local PostgreSQL 17 container (Docker, `TIDEGRID_EPHEMERAL_DB=1`): `commit.integration.test.ts` (6 cases: a full commit and every row it writes, no email and no personal data in the run or audit; a second batch of the same records as no-ops and a changed customer refused; no dry run, other files, a wrong run number, and booking staff all refused; a commit that no longer fits its trip refused and recorded, needing a fresh dry run; staff cancel with nothing returned and the guest refused; ledger rows outside a commit, a quote-less hold without a ledger row, ledger updates, and another tenant's reads all refused), the dry-run tests, the API's `imports.integration.test.ts` (4 cases, including the commit, its replay, a second commit refused, and the booking detail read back), and the tenancy privileges test. Unit: `validate.test.ts`, contract and console source tests.
+- **Still open.** Coordinator defaults D1 to D8 await the owner. Charter balances, opening balances, and legacy waiver status (parts B to D), and the import's email rules (part D). No console screen for the import yet.
+
 ### The dock QR lookup, part 2 (W3-G2.15-rest), built November 13, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, no migration, on part 1 (pull request 158). Synthetic data only; no provider call, no deploy.

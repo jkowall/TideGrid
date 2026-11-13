@@ -57,8 +57,11 @@ export interface ExtraView {
 }
 
 export interface PaymentStatusView {
-  /** complimentary: an owner booked it at no charge, so there is no payment (0039). */
-  state: PaymentState | "complimentary";
+  /**
+   * complimentary: an owner booked it at no charge, so there is no payment (0039).
+   * imported: saved by an import; any money was taken outside TideGrid (0044).
+   */
+  state: PaymentState | "complimentary" | "imported";
   refund: { state: RefundState; amount: number } | null;
 }
 
@@ -373,7 +376,7 @@ export function offsetDateTime(instant: Date | string, offsetMinutes: number): s
 }
 
 function paymentStatus(row: {
-  payment_state: PaymentState | "complimentary";
+  payment_state: PaymentState | "complimentary" | "imported";
   refund_state: RefundState | null;
   refund_amount: number | null;
 }): PaymentStatusView {
@@ -579,7 +582,7 @@ export async function listDayBookings(
     product_kind: ProductKind;
     order_id: string;
     total_amount: number;
-    payment_state: PaymentState;
+    payment_state: PaymentState | "complimentary" | "imported";
     refund_state: RefundState | null;
     refund_amount: number | null;
     booker_name?: string;
@@ -588,8 +591,9 @@ export async function listDayBookings(
            b.confirmed_at, p.kind as product_kind,
            o.id as order_id,
            -- Nothing to pay on a complimentary booking; its detail shows the waived value.
-           case when b.payment_id is null then 0 else o.total_amount end as total_amount,
-           coalesce(pay.state, 'complimentary') as payment_state,
+           case when b.source = 'complimentary' then 0 else o.total_amount end as total_amount,
+           coalesce(pay.state, case when b.source = 'imported' then 'imported'
+                                   else 'complimentary' end) as payment_state,
            r.state as refund_state, r.amount as refund_amount
            ${bookerColumn}
       from bookings b
@@ -983,12 +987,13 @@ export async function getTripRoster(
     party_size: number;
     order_id: string;
     booker_name: string;
-    payment_state: PaymentState;
+    payment_state: PaymentState | "complimentary" | "imported";
     refund_state: RefundState | null;
     refund_amount: number | null;
   }>`
     select b.id, b.reference, b.source, s.channel, b.party_size, b.order_id, s.booker_name,
-           coalesce(pay.state, 'complimentary') as payment_state,
+           coalesce(pay.state, case when b.source = 'imported' then 'imported'
+                                   else 'complimentary' end) as payment_state,
            r.state as refund_state, r.amount as refund_amount
       from bookings b
       join checkout_sessions s on s.tenant_id = b.tenant_id and s.id = b.checkout_session_id
