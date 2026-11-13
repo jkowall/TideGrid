@@ -93,6 +93,10 @@ jobs:
     env:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
+      # Below Linux's ephemeral range (32768-60999): the default 55432 is
+      # inside it, so an earlier step's outgoing connection could already hold
+      # it and docker fails with "address already in use" (run 43464837505).
+      TIDEGRID_LOCAL_DB_PORT: "25432"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -156,6 +160,10 @@ jobs:
     env:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
+      # Below Linux's ephemeral range (32768-60999): the default 55432 is
+      # inside it, so an earlier step's outgoing connection could already hold
+      # it and docker fails with "address already in use" (run 43464837505).
+      TIDEGRID_LOCAL_DB_PORT: "25432"
     steps:
       - uses: actions/checkout@v7
         with:
@@ -255,6 +263,10 @@ jobs:
     env:
       CI: "true"
       TIDEGRID_LOCAL_DB_ENGINE: docker
+      # Below Linux's ephemeral range (32768-60999): the default 55432 is
+      # inside it, so an earlier step's outgoing connection could already hold
+      # it and docker fails with "address already in use" (run 43464837505).
+      TIDEGRID_LOCAL_DB_PORT: "25432"
     steps:
       - uses: actions/checkout@v7
         with:
