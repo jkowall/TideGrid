@@ -203,6 +203,7 @@ describe("contract", () => {
         "/v1/public/quotes/{quoteId}",
         // The dock QR lookup (W3-G2.15-rest).
         "/v1/public/waiver-dock/lookups",
+        "/v1/public/waiver-dock/party",
         "/v1/public/waiver-dock/signings",
         "/v1/staff/tenants/{tenantId}/audit-events",
         "/v1/staff/tenants/{tenantId}/catalog",
@@ -283,6 +284,8 @@ describe("contract", () => {
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/resend",
         "/v1/staff/tenants/{tenantId}/waiver-evidence/{evidenceId}/document",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/assisted-signing",
+        // The printed dock QR code's address (W3-G2.15-rest).
+        "/v1/staff/tenants/{tenantId}/waiver-dock-code",
         // Waiver link renewal and the send-count reset (W1-WAIVER-RENEWAL).
         "/v1/public/waiver-links/renewal",
         "/v1/staff/tenants/{tenantId}/waiver-requests/{requestId}/send-count-reset",

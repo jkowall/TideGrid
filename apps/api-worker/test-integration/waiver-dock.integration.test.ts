@@ -76,6 +76,27 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup through the API", () =>
     };
   }
 
+  async function getParty(tenant: WaiverFixture, bearer?: string): Promise<Res> {
+    ip += 1;
+    const headers = new Headers({
+      origin: `https://${tenant.host}`,
+      "cf-connecting-ip": `203.0.113.${ip % 250}`,
+    });
+    if (bearer) headers.set("authorization", `Bearer ${bearer}`);
+    const res = await app.request(
+      "http://localhost/v1/public/waiver-dock/party",
+      { method: "GET", headers },
+      bindings(),
+      executionCtx,
+    );
+    const text = await res.text();
+    return {
+      status: res.status,
+      headers: res.headers,
+      json: text ? (JSON.parse(text) as Json) : {},
+    };
+  }
+
   /** A booking of one named adult whose trip departs a minute ago, on a boat of its own. */
   async function todaysBooking(t: WaiverFixture) {
     const tripId = t.trips.shared[tripIndex++];
@@ -132,6 +153,14 @@ describe.skipIf(!env)("W3-G2.15-rest: the dock QR lookup through the API", () =>
         { position: 1, name: "Dee D.", minor: false, status: "to_sign", signer: "participant" },
       ],
     });
+
+    // The party reads again with the secret, fresh, and only on this site.
+    const again = await getParty(A, secret);
+    expect(again.status).toBe(200);
+    expect(again.headers.get("cache-control")).toBe("no-store");
+    expect(again.json.party).toEqual(found.json.party);
+    expect((await getParty(A)).json.error?.code).toBe("dock_lookup_ended");
+    expect((await getParty(B, secret)).status).toBe(401);
 
     // No bearer, or another operator's site, starts nothing.
     expect(

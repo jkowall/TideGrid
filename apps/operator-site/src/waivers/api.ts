@@ -282,3 +282,33 @@ export async function startAssistedSigning(
     return { kind: "failed", reason: "unreachable" };
   }
 }
+
+export type DockCodeRead =
+  | { kind: "ok"; url: string }
+  /** The operator's guest site has no working address yet. */
+  | { kind: "no_site" }
+  | { kind: "failed"; reason: ReadFailure };
+
+/**
+ * The address the printed dock QR code opens (W3-G2.15-rest): the operator's
+ * guest site's /dock page. It carries no token or booking detail.
+ */
+export async function loadDockCode(tenantId: string, signal?: AbortSignal): Promise<DockCodeRead> {
+  try {
+    const res = await call(
+      `${tenantPath(tenantId)}/waiver-dock-code`,
+      { headers: { accept: "application/json" } },
+      signal,
+    );
+    if (res.status === 409 && (await errorCode(res.clone())) === "waiver_guest_site_unavailable") {
+      return { kind: "no_site" };
+    }
+    if (!res.ok) return { kind: "failed", reason: await failureOf(res) };
+    const url = ((await res.json().catch(() => null)) as { url?: unknown } | null)?.url;
+    return isString(url) && /^https?:\/\/[^/\s]+\/dock$/.test(url)
+      ? { kind: "ok", url }
+      : { kind: "failed", reason: "unreadable" };
+  } catch {
+    return { kind: "failed", reason: signal?.aborted ? "unavailable" : "unreachable" };
+  }
+}

@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useRef } from "react";
 import { tripIdOf } from "./booking/address.ts";
 import { BookingPage } from "./booking/BookingPage.tsx";
 import { formatPhone, type Tenant } from "./bootstrap.ts";
+import { DockPage, dockPath } from "./dock/DockPage.tsx";
 import { ManagePage } from "./manage/ManagePage.tsx";
 import { useLinkClick } from "./navigation.tsx";
 import { ParticipantPage } from "./participant/ParticipantPage.tsx";
@@ -38,6 +39,8 @@ type Page =
   | { kind: "legal"; title: string; placeholder: string }
   // Waiver signing (G2.15): the email link's page.
   | { kind: "waiver" }
+  // The dock QR code's page: find today's booking and sign (W3-G2.15-rest).
+  | { kind: "dock" }
   // A participant's own details, from an invitation (W3-G2.11-rest).
   | { kind: "participant" }
   // Help and support, and the offline explainer (G2.14b).
@@ -51,6 +54,7 @@ function pageFor(path: string): Page {
   if (clean === "/manage") return { kind: "manage" };
   if (clean === "/waiver") return { kind: "waiver" };
   if (clean === "/participant") return { kind: "participant" };
+  if (clean === dockPath) return { kind: "dock" };
   if (clean === "/support") return { kind: "support" };
   if (clean === "/offline") return { kind: "offline" };
   const tripId = tripIdOf(clean);
@@ -304,7 +308,8 @@ export function BrandedShell({
       page.kind !== "book" &&
       page.kind !== "manage" &&
       page.kind !== "waiver" &&
-      page.kind !== "participant"
+      page.kind !== "participant" &&
+      page.kind !== "dock"
     ) {
       (main.current ?? document).querySelector<HTMLElement>("h1")?.focus();
     }
@@ -347,12 +352,18 @@ export function BrandedShell({
         {page.kind === "participant" && (
           <ParticipantPage brand={brand} focusOnArrival={focusHeading} />
         )}
+        {page.kind === "dock" && <DockPage brand={brand} focusOnArrival={focusHeading} />}
         {page.kind === "support" && <SupportPage brand={brand} />}
         {page.kind === "not-found" && <NotFoundPage brand={brand} />}
       </main>
       <Footer
         brand={brand}
-        inCheckout={page.kind === "book" || page.kind === "waiver" || page.kind === "participant"}
+        inCheckout={
+          page.kind === "book" ||
+          page.kind === "waiver" ||
+          page.kind === "participant" ||
+          page.kind === "dock"
+        }
       />
     </div>
   );

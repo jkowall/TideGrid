@@ -793,6 +793,18 @@ describe.skipIf(!env)("G2.15 waivers through the API", () => {
     ]);
   });
 
+  it("gives owners and booking staff the dock QR code's address, which carries nothing else", async () => {
+    const get = (as: string, tenantId = A.id) =>
+      request("GET", `${staffBase(tenantId)}/waiver-dock-code`, { origin: CONSOLE, as });
+    for (const as of [A.owner, A.staff]) {
+      const res = await get(as);
+      expect(res.status).toBe(200);
+      expect(res.json).toEqual({ url: `${guestOf(A)}/dock` });
+    }
+    expect((await get(A.finance)).status).toBe(403);
+    expect((await get(B.owner, A.id)).status).not.toBe(200);
+  });
+
   it("starts a dock signing for staff only, once per code, and ends the session on request", async () => {
     const p = await party(A);
     const start = (as: string, requestId: string, body: unknown, tenantId = A.id) =>

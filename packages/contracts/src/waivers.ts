@@ -531,6 +531,11 @@ export const DockLookupResponse = z.object({
 });
 export type DockLookupResponse = z.infer<typeof DockLookupResponse>;
 
+export const DockPartyResponse = z.object({
+  party: DockParty.describe("The matched lookup's party as it stands now"),
+});
+export type DockPartyResponse = z.infer<typeof DockPartyResponse>;
+
 export const DockSigningRequest = z.object({
   position: z.number().int().min(1).max(500).describe("The person's position from the party"),
 });
@@ -546,3 +551,12 @@ export const DockSigningResponse = z.object({
   expiresAt: Instant,
 });
 export type DockSigningResponse = z.infer<typeof DockSigningResponse>;
+
+export const DockCodeResponse = z.object({
+  url: z
+    .url()
+    .describe(
+      "The operator's guest site dock page, for the printed dock QR code. It carries no token, name, or booking detail, so the same code serves every trip",
+    ),
+});
+export type DockCodeResponse = z.infer<typeof DockCodeResponse>;

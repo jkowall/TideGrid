@@ -8,6 +8,14 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-13: W3-G2.15-rest, the dock QR lookup, part 2 (coordinator defaults pending owner confirmation)
+
+The pages for part 1's lookup: the guest site's `/dock` page and the console's printable code at `/dock-code` ([guest site](../../apps/guest-site/README.md), [console](../../apps/operator-site/README.md)). No migration. Coordinator defaults, pending owner confirmation:
+
+- **D1: who prints the code.** Owners and booking staff, who run the dock (`bookings.read`); finance does not see the page.
+- **D2: one code for every trip.** The code opens the guest site's `/dock` address and holds nothing else, so one print serves every trip and never needs changing.
+- **D3: the guest's own phone.** A signing started at the dock behaves like one from an email (no idle clear, the session kept for the tab), not like the crew's shared device. After signing, "Back to your party" ends that signer's session (so the next person handed the phone cannot go Back to the signed waiver or its copy) and returns to the list without typing again for the rest of the lookup's 15 minutes, read fresh with the lookup's secret (`GET /v1/public/waiver-dock/party`, rate limited like the other public commands, changing nothing). The lookup lives in the tab's memory only, and the phone counts its 15 minutes from receipt, so a phone with a wrong clock is not shut out.
+
 ### 2026-11-13: W3-G2.15-rest, the dock QR lookup, part 1 (coordinator defaults pending owner confirmation)
 
 Builds the owner's choice in the entry below: one QR code at the dock, the booking code and the booker's last name, only that booking's party, only on the day of the trip, tries limited. Part 1 is the database, the service, and the public API (migration `0043`, [waiver contract](../../packages/domain-waivers/README.md#the-dock-qr-lookup-w3-g215-rest)); part 2 is the guest site's dock page and the printable code in the console. Under the owner's go of 2026-11-10 on the rest of Wave 3, synthetic data only, no provider call, account, new Worker binding, or deploy. The owner set the shape; these details are coordinator defaults, pending owner confirmation:

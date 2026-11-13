@@ -66,7 +66,13 @@ type Phase =
       renewal?: { token: string; state: "idle" | "sending" | "failed" };
     };
 
-const sharedAccess = (waiver: WaiverSigning) => waiver.access !== "email_link";
+/**
+ * A crew-started session may be on a shared device: memory only, a Done
+ * screen, and an idle clear. An emailed link, or a dock lookup the guest made
+ * on their own phone, is the guest's own.
+ */
+const sharedAccess = (waiver: WaiverSigning) =>
+  waiver.access === "staff_device" || waiver.access === "participant_qr";
 
 interface Stop {
   icon: IconName;
@@ -663,6 +669,22 @@ function SignedView({
             <Button variant="primary" icon="check" onClick={onDone}>
               Done
             </Button>
+          ) : waiver.access === "dock_lookup" ? (
+            // Back to the party, for the next person, while the lookup lasts.
+            // This phone may go to the next person: end this signer's session
+            // first, so Back no longer shows their signed waiver.
+            <ButtonLink
+              variant="ghost"
+              icon="arrow-left"
+              href="/dock"
+              onClick={(e) => {
+                clearStoredSession();
+                void endSession(secret);
+                linkClick(e);
+              }}
+            >
+              Back to your party
+            </ButtonLink>
           ) : (
             <ButtonLink variant="ghost" icon="arrow-left" href="/" onClick={linkClick}>
               Back to {brand.name}

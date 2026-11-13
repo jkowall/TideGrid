@@ -78,3 +78,11 @@ export function canResolveExceptions(role: StaffRole): boolean {
 export function canManageLinks(role: StaffRole): boolean {
   return role === "owner";
 }
+
+/**
+ * Who prints the dock QR code (W3-G2.15-rest): owners and booking staff, who
+ * run the dock. This mirrors the API's `bookings.read` for display only.
+ */
+export function canPrintDockCode(role: StaffRole): boolean {
+  return role === "owner" || role === "booking_staff";
+}
