@@ -687,6 +687,12 @@ async function writePlan(
     }
     const email = emailOf(credit.sourceCustomerId);
     if (!email) throw new Error("a planned credit's customer has no email");
+    // The email's turn first, before this commit writes anything for it, so
+    // a batch never waits on an account while holding a ledger row another
+    // batch needs.
+    await sql`select pg_advisory_xact_lock(hashtext(${`import_credit:${tenantId}:${email}`}))`.execute(
+      trx,
+    );
     const recordId = await record("opening_balances.csv", credit);
     await sql`
       insert into credit_accounts (tenant_id, customer_email) values (${tenantId}, ${email})
