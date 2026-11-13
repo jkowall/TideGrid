@@ -297,7 +297,10 @@ describe.skipIf(!env)("waiver email for imported bookings", () => {
   it("stops at the run's email budget for an operator", async () => {
     const one = await save(B, ownerB, { batchId: "CAP1", notify: "send_at_cutover" });
     const two = await save(B, ownerB, { batchId: "CAP2", notify: "send_at_cutover" });
-    await sweep(1);
+    const capped = await sweep(1);
+    // Stopped with a booking waiting: the run says so.
+    expect(capped.cappedTenants).toBeGreaterThanOrEqual(1);
+    expect(capped.complete).toBe(false);
     const sent = async () =>
       (await waiverMail(one.bookingId)).length + (await waiverMail(two.bookingId)).length;
     expect(await sent()).toBe(2);

@@ -47,7 +47,7 @@ function errorAttributes(error: unknown): Record<string, unknown> {
  * 3. The waiver reminder sweep (W1-G215-REMINDERS) queues the reminders
  *    unsigned waivers are due, before the email sweep sends them. Skipped
  *    when email is off. Then the import waiver email sweep (W3-G2.13, part
- *    D2) queues the waiver emails saved import batches owe, at most 100 per
+ *    D2) queues the waiver emails saved import batches owe, about 100 per
  *    operator a run. Skipped when email is off. Then the email sweep (lane 1, the G2.16 shim) sends due messages, retries
  *    temporary failures, and finishes attempts whose lease lapsed. Skipped
  *    when email is off.
@@ -264,7 +264,7 @@ export async function runScheduled(
     // 3b. Import waiver email (W3-G2.13, part D2): for saved import batches
     //     whose waiver email is due (sent at cutover, or released by an
     //     owner), create the guests' waiver requests and queue their emails,
-    //     a few bookings at a time and at most 100 emails per operator a run.
+    //     a few bookings at a time and about 100 emails per operator a run.
     //     Skipped when email is off.
     const importLog = createLogger(
       { ...base, "event.name": "import_waiver_email_sweep" },
@@ -285,6 +285,11 @@ export async function runScheduled(
               "tidegrid.tenant_id": tenantId,
               ...errorAttributes(error),
             }),
+          onBookingError: (tenantId, error) =>
+            importLog.error("import_waiver_email_sweep_booking_failed", {
+              "tidegrid.tenant_id": tenantId,
+              ...errorAttributes(error),
+            }),
           onStampError: (tenantId, error) =>
             importLog.error("import_waiver_email_sweep_stamp_failed", {
               "tidegrid.tenant_id": tenantId,
@@ -295,6 +300,8 @@ export async function runScheduled(
           "tidegrid.import_waiver_email_sweep.tenant_count": report.tenants,
           "tidegrid.import_waiver_email_sweep.booking_count": report.bookings,
           "tidegrid.import_waiver_email_sweep.queued_count": report.queued,
+          "tidegrid.import_waiver_email_sweep.failed_booking_count": report.failedBookings,
+          "tidegrid.import_waiver_email_sweep.capped_tenant_count": report.cappedTenants,
           "tidegrid.import_waiver_email_sweep.failed_tenant_count": report.failedTenants,
           "tidegrid.import_waiver_email_sweep.turn_count": report.turns,
           "tidegrid.import_waiver_email_sweep.pass_count": report.passes,

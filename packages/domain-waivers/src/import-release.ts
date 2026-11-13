@@ -6,9 +6,11 @@
  * afterwards for every saved batch whose email is due: one saved with
  * `send_at_cutover` right away, one saved with `hold_until_staff_release` once
  * an owner releases it here. The sweep takes a few bookings at a time, each in
- * its own transaction, and queues at most IMPORT_EMAILS_PER_TENANT_RUN emails
- * per operator a run, so an import never uses up the sending limit ordinary
- * bookings need.
+ * its own transaction, and stops starting bookings for an operator once
+ * IMPORT_EMAILS_PER_TENANT_RUN emails are queued (one booking's party may go
+ * over), so an import never uses up the sending limit ordinary bookings need.
+ * A booking that fails is logged and left for a later run; it never holds up
+ * the operator's others.
  *
  * For each booking it creates the waiver requests a guest lacks and emails the
  * pending ones that never had an email. A booking is finished for its batch
@@ -135,12 +137,14 @@ export async function sendImportedBookingWaivers(
   ctx: TenantContext,
   deps: WaiverDeps,
   input: { runId: string; bookingId: string },
-): Promise<{ queued: number; finished: boolean }> {
+): Promise<{ queued: number; finished: boolean; operatorLimited: boolean }> {
   let queued = 0;
   let retry = false;
+  let operatorLimited = false;
   const note = (result: SendResult) => {
     if (result.kind === "sent") queued += 1;
     else if (retryable(result)) retry = true;
+    if (result.kind === "rate_limited" && result.scope === "tenant") operatorLimited = true;
   };
   // Locks the booking for waivers first, as every waiver command does.
   const assigned = await assignBookingWaivers(trx, ctx, deps, { bookingId: input.bookingId });
@@ -170,7 +174,7 @@ export async function sendImportedBookingWaivers(
       values (${ctx.tenantId}, ${input.runId}, ${input.bookingId})
       on conflict do nothing`.execute(trx);
   }
-  return { queued, finished: !retry };
+  return { queued, finished: !retry, operatorLimited };
 }
 
 export interface ImportWaiverSweepOptions {
@@ -183,12 +187,18 @@ export interface ImportWaiverSweepOptions {
   clock?: () => number;
   onTenantError?: (tenantId: string, error: unknown) => void;
   onStampError?: (tenantId: string, error: unknown) => void;
+  /** One booking failed; the sweep goes on with the next. */
+  onBookingError?: (tenantId: string, error: unknown) => void;
 }
 
 export interface ImportWaiverSweepReport {
   tenants: number;
   bookings: number;
   queued: number;
+  /** Bookings that threw; each is logged and left for a later run. */
+  failedBookings: number;
+  /** Operators left with bookings waiting: the run's email cap, or the operator's sending limit. */
+  cappedTenants: number;
   failedTenants: number;
   turns: number;
   passes: number;
@@ -208,7 +218,8 @@ export async function sweepImportWaiverEmail(
     throw new RangeError("emailsPerTenant is a whole number from 1 to 1000");
   }
   const tenantLimit = options.tenantLimit ?? 100;
-  const report = { bookings: 0, queued: 0 };
+  const report = { bookings: 0, queued: 0, failedBookings: 0 };
+  const capped = new Set<string>();
   const contextOf = (tenantId: string): TenantContext => ({
     tenantId,
     actorType: "system",
@@ -243,18 +254,41 @@ export async function sweepImportWaiverEmail(
       });
       const batch = candidates.slice(0, BOOKINGS_PER_TURN);
       let units = 0;
+      // The cap is checked before each booking, so a run may go over it by
+      // one booking's party.
+      const atCap = () => (spent.get(tenantId) ?? 0) >= emailsPerTenant;
       for (const { run_id: runId, booking_id: bookingId } of batch) {
-        if ((spent.get(tenantId) ?? 0) >= emailsPerTenant) return { units, more: false };
+        if (atCap()) {
+          capped.add(tenantId);
+          return { units, more: false };
+        }
         seen.add(`${runId}:${bookingId}`);
-        const result = await inTenantTransaction(db, ctx, (trx) =>
-          sendImportedBookingWaivers(trx, ctx, options.deps, { runId, bookingId }),
-        );
         units += 1;
         report.bookings += 1;
+        let result: Awaited<ReturnType<typeof sendImportedBookingWaivers>>;
+        try {
+          result = await inTenantTransaction(db, ctx, (trx) =>
+            sendImportedBookingWaivers(trx, ctx, options.deps, { runId, bookingId }),
+          );
+        } catch (error) {
+          // One booking that fails never holds up the operator's others.
+          report.failedBookings += 1;
+          options.onBookingError?.(tenantId, error);
+          continue;
+        }
         report.queued += result.queued;
         spent.set(tenantId, (spent.get(tenantId) ?? 0) + result.queued);
+        if (result.operatorLimited) {
+          // The operator's own sending limit: nothing more goes out this run.
+          capped.add(tenantId);
+          return { units, more: false };
+        }
       }
-      const more = candidates.length > batch.length && (spent.get(tenantId) ?? 0) < emailsPerTenant;
+      const more = candidates.length > batch.length;
+      if (more && atCap()) {
+        capped.add(tenantId);
+        return { units, more: false };
+      }
       return { units, more };
     },
     onTenantError: (tenantId, error, during) => {
@@ -266,11 +300,14 @@ export async function sweepImportWaiverEmail(
     tenants: fair.tenants,
     bookings: report.bookings,
     queued: report.queued,
+    failedBookings: report.failedBookings,
+    cappedTenants: capped.size,
     failedTenants: fair.failedTenants,
     turns: fair.turns,
     passes: fair.passes,
     deferredTenants: fair.deferredTenants,
     stampFailures: fair.stampFailures,
-    complete: fair.complete,
+    // Not complete while an operator still has bookings waiting.
+    complete: fair.complete && capped.size === 0,
   };
 }

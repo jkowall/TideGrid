@@ -127,6 +127,8 @@ vi.mock("@tidegrid/domain-waivers", async (importOriginal) => ({
       tenants: 1,
       bookings: 3,
       queued: 4,
+      failedBookings: 1,
+      cappedTenants: 2,
       failedTenants: 0,
       complete: true,
       turns: 71,
@@ -254,6 +256,8 @@ describe("sweep logs (pre-pilot hardening, Part E)", () => {
     expect(line(logged, "import_waiver_email_sweep")).toMatchObject({
       "tidegrid.import_waiver_email_sweep.booking_count": 3,
       "tidegrid.import_waiver_email_sweep.queued_count": 4,
+      "tidegrid.import_waiver_email_sweep.failed_booking_count": 1,
+      "tidegrid.import_waiver_email_sweep.capped_tenant_count": 2,
       "tidegrid.import_waiver_email_sweep.turn_count": 71,
       "tidegrid.import_waiver_email_sweep.pass_count": 72,
       "tidegrid.import_waiver_email_sweep.deferred_tenant_count": 73,
