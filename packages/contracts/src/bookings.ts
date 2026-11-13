@@ -112,9 +112,9 @@ export type BookingExtra = z.infer<typeof BookingExtra>;
 export const BookingPaymentStatus = z
   .object({
     state: z
-      .enum(["pending", "succeeded", "failed", "complimentary"])
+      .enum(["pending", "succeeded", "failed", "complimentary", "imported"])
       .describe(
-        "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment",
+        "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment. imported: saved by an import of another system's bookings; any money was taken outside TideGrid, so there is no payment here",
       ),
     refund: z
       .object({ state: RefundState, amount: Cents })
@@ -151,7 +151,13 @@ const BookerName = z
   );
 
 const BookerContact = z
-  .object({ name: z.string(), email: z.string() })
+  .object({
+    name: z.string(),
+    email: z
+      .string()
+      .nullable()
+      .describe("Null only on an imported booking whose customer had no email (W3-G2.13)"),
+  })
   .optional()
   .describe(
     "Personal data. Present only for roles that hold bookings.read (owners and booking staff); absent otherwise",

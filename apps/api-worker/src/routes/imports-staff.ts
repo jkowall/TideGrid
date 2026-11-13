@@ -1,18 +1,26 @@
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
 import {
   IdempotencyKey,
+  ImportCommitRequest,
+  ImportCommitResponse,
   ImportDryRunRequest,
   ImportDryRunResponse,
   MAX_IMPORT_ISSUES_LISTED,
   StaffTenantParams,
 } from "@tidegrid/contracts";
-import { renderImportErrors, runImportDryRun } from "@tidegrid/domain-booking";
+import {
+  type ImportCommitResult,
+  renderImportErrors,
+  runImportCommit,
+  runImportDryRun,
+} from "@tidegrid/domain-booking";
 import type { AppDeps, AppEnv } from "../context.ts";
 import { ApiError } from "../errors.ts";
 import { withStaffTenant } from "../staff-tenant.ts";
 import { errorBody, staffSecurity } from "./responses.ts";
 
 export const importDryRunsPath = "/v1/staff/tenants/{tenantId}/import-dry-runs";
+export const importCommitsPath = "/v1/staff/tenants/{tenantId}/import-commits";
 
 /** JSON-safe copy: the result holds only strings, numbers, booleans, and nulls. */
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -24,11 +32,16 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
  * the same files.
  */
 export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDeps) {
-  app.use("/v1/staff/tenants/:tenantId/import-dry-runs", async (c, next) => {
-    c.header("Cache-Control", "no-store");
-    await next();
-    c.header("Cache-Control", "no-store");
-  });
+  for (const path of [
+    "/v1/staff/tenants/:tenantId/import-dry-runs",
+    "/v1/staff/tenants/:tenantId/import-commits",
+  ]) {
+    app.use(path, async (c, next) => {
+      c.header("Cache-Control", "no-store");
+      await next();
+      c.header("Cache-Control", "no-store");
+    });
+  }
 
   const dryRunRoute = createRoute({
     method: "post",
@@ -124,4 +137,144 @@ export function registerImportStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
     if (replayed) c.header("Idempotent-Replayed", "true");
     return c.json(body as ImportDryRunResponse, 200);
   });
+
+  const commitRoute = createRoute({
+    method: "post",
+    path: importCommitsPath,
+    tags: ["staff", "imports"],
+    summary: "Save a standard CSV import batch",
+    description: [
+      "Owners only (imports.run). The batch must follow its latest run, a clean dry run of the same files (the content hash leaves out the manifest's batch_mode and run_number), with batch_mode commit and the next run number. The files are checked again against TideGrid as it is now; a clean result is saved all or nothing: future trips (new departures in draft), customers, bookings with their participants, and legacy payments and refunds, labeled as imported and taken outside TideGrid. Rows imported before with the same values are left as they are; changed ones are refused. Charter balances, opening balances, and waiver status are refused for now. No email is sent and no provider is called.",
+      "A commit that no longer passes its checks, or meets a change in TideGrid while saving, saves nothing and answers 200 with committed false; it is recorded, so the next try needs a fresh dry run. Idempotent by key.",
+    ].join("\n\n"),
+    security: staffSecurity,
+    request: {
+      params: StaffTenantParams,
+      headers: z.object({ "idempotency-key": IdempotencyKey }),
+      body: {
+        required: true,
+        content: { "application/json": { schema: ImportCommitRequest } },
+      },
+    },
+    responses: {
+      200: {
+        content: { "application/json": { schema: ImportCommitResponse } },
+        description: "The commit's result: saved, or refused with the reason",
+      },
+      400: errorBody("Request did not match the contract"),
+      401: errorBody("Not signed in"),
+      403: errorBody("Role does not allow this"),
+      404: errorBody("No such tenant"),
+      409: errorBody(
+        "The run number is not the batch's next one (import_run_number_used); its earlier runs name another source system (import_source_changed); its latest run is not a clean dry run (import_no_clean_dry_run); the files differ from the dry run's (import_changed_since_dry_run); the batch was saved already (import_already_committed); or a booked product has no cancellation policy (import_product_missing_policy)",
+      ),
+      422: errorBody(
+        "More new rows than one commit writes (import_too_large); send the export as several batches. Or idempotency_key_reused",
+      ),
+    },
+  });
+
+  app.openapi(commitRoute, async (c) => {
+    const { tenantId } = c.req.valid("param");
+    const key = c.req.valid("header")["idempotency-key"];
+    const input = c.req.valid("json");
+    const { body, replayed } = await withStaffTenant(
+      c,
+      deps,
+      {
+        tenantId,
+        permission: "imports.run",
+        idempotency: {
+          scope: "staff.import_commits.create",
+          key,
+          route: importCommitsPath,
+          params: {},
+          body: input,
+          successStatus: 200,
+        },
+      },
+      async (trx, ctx) => plain(commitResponse(await runImportCommit(trx, ctx, input.files))),
+    );
+    if (replayed) c.header("Idempotent-Replayed", "true");
+    return c.json(body as ImportCommitResponse, 200);
+  });
+}
+
+function commitResponse(done: ImportCommitResult): ImportCommitResponse {
+  switch (done.kind) {
+    case "run_number_used":
+      throw new ApiError(
+        409,
+        "import_run_number_used",
+        `Batch ${done.batchId} cannot take run ${done.runNumber}; its next run number is ${done.expected}`,
+      );
+    case "source_changed":
+      throw new ApiError(
+        409,
+        "import_source_changed",
+        `Batch ${done.batchId} was run before from another source system`,
+      );
+    case "no_clean_dry_run":
+      throw new ApiError(
+        409,
+        "import_no_clean_dry_run",
+        `Batch ${done.batchId} needs a clean dry run, as its latest run, before it is saved`,
+      );
+    case "batch_changed_since_dry_run":
+      throw new ApiError(
+        409,
+        "import_changed_since_dry_run",
+        `The files differ from batch ${done.batchId}'s clean dry run; run a dry run of these files first`,
+      );
+    case "already_committed":
+      throw new ApiError(
+        409,
+        "import_already_committed",
+        `Batch ${done.batchId} was saved already; send later changes as a new batch`,
+      );
+    case "product_missing_policy":
+      throw new ApiError(
+        409,
+        "import_product_missing_policy",
+        `A product this batch books has no cancellation policy yet: ${done.productIds.join(", ")}`,
+      );
+    case "too_large":
+      throw new ApiError(
+        422,
+        "import_too_large",
+        `This batch writes ${done.rows} new rows; one commit writes at most ${done.limit}. Send the export as several batches.`,
+      );
+  }
+  const r = done.result;
+  const checkedAt = done.kind === "committed" ? done.committedAt : done.checkedAt;
+  // A run the database refused was recorded as not clean.
+  const clean = done.kind === "committed" ? r.clean : false;
+  return {
+    run: {
+      id: done.runId,
+      batchId: r.manifest?.batchId ?? null,
+      runNumber: r.manifest?.runNumber ?? null,
+      sourceSystem: r.manifest?.sourceSystem ?? null,
+      contentHash: done.contentHash,
+      checkedAt,
+      clean,
+      // The run the database refused was recorded with one error.
+      errorCount: done.kind === "write_refused" ? 1 : r.errorCount,
+      warningCount: r.warningCount,
+      files: r.files,
+      controls: r.controls,
+      issues: r.issues.slice(0, MAX_IMPORT_ISSUES_LISTED),
+      issuesTruncated: r.issuesCapped || r.issues.length > MAX_IMPORT_ISSUES_LISTED,
+    },
+    errorsCsv: renderImportErrors(r),
+    committed: done.kind === "committed",
+    refusal:
+      done.kind === "committed"
+        ? null
+        : done.kind === "write_refused"
+          ? "write_refused"
+          : "not_clean",
+    refusedBy: done.kind === "write_refused" ? done.constraint : null,
+    counts: done.kind === "committed" ? done.counts : null,
+  };
 }

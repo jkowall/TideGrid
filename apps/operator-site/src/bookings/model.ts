@@ -72,12 +72,15 @@ export function readTrip(search: string): string | undefined {
 }
 
 /** The sources the day list filters by (G2.12e): the API's own values. */
-export type ListSource = "direct" | "staff_assisted" | "complimentary";
+export type ListSource = "direct" | "staff_assisted" | "complimentary" | "imported";
 
 /** `?source=` from the address, when it is exactly one of the API's sources. */
 export function readSource(search: string): ListSource | undefined {
   const value = new URLSearchParams(search).get("source");
-  return value === "direct" || value === "staff_assisted" || value === "complimentary"
+  return value === "direct" ||
+    value === "staff_assisted" ||
+    value === "complimentary" ||
+    value === "imported"
     ? value
     : undefined;
 }
@@ -88,6 +91,7 @@ export const sourceFilterOptions: readonly { value: "" | ListSource; label: stri
   { value: "direct", label: "Online, by the guest" },
   { value: "staff_assisted", label: "Staff bookings" },
   { value: "complimentary", label: "Complimentary" },
+  { value: "imported", label: "Imported" },
 ];
 
 const bookingNouns: Record<ListSource | "all", [string, string]> = {
@@ -95,6 +99,7 @@ const bookingNouns: Record<ListSource | "all", [string, string]> = {
   direct: ["online booking", "online bookings"],
   staff_assisted: ["staff booking", "staff bookings"],
   complimentary: ["complimentary booking", "complimentary bookings"],
+  imported: ["imported booking", "imported bookings"],
 };
 
 /** The plural noun for a source's bookings: "bookings", "staff bookings", "online bookings". */
@@ -183,6 +188,9 @@ export function paymentCopy(payment: BookingPaymentStatus): StatusCopy {
     // An owner booked it at no charge (W3-G2.12-rest): there is no payment.
     case "complimentary":
       return { label: "Complimentary", tone: "info", icon: "tag" };
+    // Saved by a CSV import, W3-G2.13: any money was taken outside TideGrid.
+    case "imported":
+      return { label: "Imported", tone: "info", icon: "download" };
     case "succeeded":
       return { label: "Paid", tone: "ready", icon: "credit-card" };
     case "pending":

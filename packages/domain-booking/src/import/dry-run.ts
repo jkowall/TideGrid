@@ -12,6 +12,8 @@ import { IMPORT_FILES, type ImportFile } from "./spec.ts";
 import {
   type BoatInfo,
   type ImportDryRun,
+  type ImportedPayment,
+  type ImportedRecord,
   type ImportLookup,
   type ProductInfo,
   type TripInfo,
@@ -23,6 +25,62 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** The tenant's catalog, boats, and trips, read in its transaction. */
 export function importLookup(trx: TenantTransaction, tenantId: string): ImportLookup {
   return {
+    // Records earlier commits imported (0044), with the hash of each row as imported.
+    async imported(keys) {
+      const out = new Map<string, ImportedRecord>();
+      for (const [file, list] of keys) {
+        const wanted = [...new Set(list)];
+        if (wanted.length === 0) continue;
+        const { rows } = await sql<{ dedupe_key: string; row_hash: string }>`
+          select dedupe_key, row_hash from import_records
+           where tenant_id = ${tenantId} and file = ${file}
+             and dedupe_key = any(${wanted}::text[])`.execute(trx);
+        for (const r of rows) out.set(`${file}|${r.dedupe_key}`, { rowHash: r.row_hash });
+        if (file === "bookings.csv" && rows.length > 0) {
+          // Whether each imported booking is still confirmed in TideGrid.
+          const { rows: closed } = await sql<{ dedupe_key: string }>`
+            select r.dedupe_key from import_records r
+              join import_bookings ib on ib.tenant_id = r.tenant_id and ib.record_id = r.id
+              join bookings b
+                on b.tenant_id = ib.tenant_id and b.checkout_session_id = ib.checkout_session_id
+             where r.tenant_id = ${tenantId} and r.file = 'bookings.csv'
+               and r.dedupe_key = any(${wanted}::text[]) and b.state <> 'confirmed'`.execute(trx);
+          for (const r of closed) {
+            const found = out.get(`${file}|${r.dedupe_key}`);
+            if (found) found.closed = true;
+          }
+        }
+      }
+      return out;
+    },
+    // Payments and refunds earlier commits imported for these bookings.
+    async importedPayments(bookingKeys) {
+      const wanted = [...new Set(bookingKeys)];
+      if (wanted.length === 0) return [];
+      const { rows } = await sql<{
+        booking_key: string;
+        payment_key: string;
+        amount: number;
+        kind: "payment" | "refund";
+      }>`
+        select br.dedupe_key as booking_key, pr.dedupe_key as payment_key, x.amount, x.kind
+          from external_settlements x
+          join import_records pr on pr.tenant_id = x.tenant_id and pr.id = x.import_record_id
+          join bookings b on b.tenant_id = x.tenant_id and b.id = x.booking_id
+          join import_bookings ib
+            on ib.tenant_id = b.tenant_id and ib.checkout_session_id = b.checkout_session_id
+          join import_records br on br.tenant_id = ib.tenant_id and br.id = ib.record_id
+         where x.tenant_id = ${tenantId} and br.file = 'bookings.csv'
+           and br.dedupe_key = any(${wanted}::text[])`.execute(trx);
+      return rows.map(
+        (r): ImportedPayment => ({
+          bookingKey: r.booking_key,
+          paymentKey: r.payment_key,
+          amount: r.amount,
+          refund: r.kind === "refund",
+        }),
+      );
+    },
     async products(ids) {
       const wanted = [...new Set(ids.filter((id) => UUID.test(id)))];
       const out = new Map<string, ProductInfo>();

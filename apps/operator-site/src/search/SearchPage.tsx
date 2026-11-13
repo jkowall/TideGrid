@@ -457,7 +457,9 @@ function ResultItem({ result, seesGuests }: { result: BookingSearchResult; seesG
               {result.booker ? (
                 <>
                   {result.booker.name}
-                  <span className="bk-fact__detail bs-item__email">{result.booker.email}</span>
+                  <span className="bk-fact__detail bs-item__email">
+                    {result.booker.email ?? "No email on file"}
+                  </span>
                 </>
               ) : (
                 "Not given"
@@ -484,7 +486,9 @@ function ResultItem({ result, seesGuests }: { result: BookingSearchResult; seesG
             </StatusBadge>
             {/* Who took it, as the day list shows it. A guest's own booking, or a source this
                 console does not know yet, shows none. No channel: finance's search never joins it. */}
-            {(result.source === "staff_assisted" || result.source === "complimentary") && (
+            {(result.source === "staff_assisted" ||
+              result.source === "complimentary" ||
+              result.source === "imported") && (
               <StatusBadge tone="neutral" icon="user">
                 <VisuallyHidden>Source: </VisuallyHidden>
                 {sourceText(result.source, undefined)}

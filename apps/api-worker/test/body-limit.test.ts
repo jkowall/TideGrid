@@ -168,6 +168,8 @@ describe("request body cap", () => {
     const tenant = "11111111-1111-4111-8111-111111111111";
     expect(bodyLimitFor(`/v1/staff/tenants/${tenant}/import-dry-runs`)).toBe(4 * 1024 * 1024);
     expect(bodyLimitFor(`/v1/staff/tenants/${tenant}/import-dry-runs/x`)).toBe(16_384);
+    expect(bodyLimitFor(`/v1/staff/tenants/${tenant}/import-commits`)).toBe(4 * 1024 * 1024);
+    expect(bodyLimitFor(`/v1/staff/tenants/${tenant}/import-commits/x`)).toBe(16_384);
     expect(bodyLimitFor(`/v1/staff/tenants/${tenant}/quotes`)).toBe(16_384);
   });
 

@@ -10033,9 +10033,10 @@
                             "enum": [
                               "direct",
                               "staff_assisted",
-                              "complimentary"
+                              "complimentary",
+                              "imported"
                             ],
-                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest)"
+                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest). imported: saved by an owner's import of another system's bookings; any money was taken outside TideGrid and is listed as imported payments (W3-G2.13)"
                           },
                           "reacquired": {
                             "type": "boolean",
@@ -10052,7 +10053,11 @@
                                 "type": "string"
                               },
                               "email": {
-                                "type": "string"
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "Null only on an imported booking whose customer had no email (W3-G2.13)"
                               }
                             },
                             "required": [
@@ -10912,7 +10917,8 @@
               "enum": [
                 "direct",
                 "staff_assisted",
-                "complimentary"
+                "complimentary",
+                "imported"
               ],
               "description": "Only bookings of this source, and trip counts of this source (G2.12e). Every trip of the date still lists. Exactly direct or staff_assisted; any other value, an empty one, or a repeated source answers 400 validation_failed"
             },
@@ -11075,9 +11081,10 @@
                             "enum": [
                               "direct",
                               "staff_assisted",
-                              "complimentary"
+                              "complimentary",
+                              "imported"
                             ],
-                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest)"
+                            "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest). imported: saved by an owner's import of another system's bookings; any money was taken outside TideGrid and is listed as imported payments (W3-G2.13)"
                           },
                           "channel": {
                             "type": [
@@ -11228,9 +11235,10 @@
                                   "pending",
                                   "succeeded",
                                   "failed",
-                                  "complimentary"
+                                  "complimentary",
+                                  "imported"
                                 ],
-                                "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment"
+                                "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment. imported: saved by an import of another system's bookings; any money was taken outside TideGrid, so there is no payment here"
                               },
                               "refund": {
                                 "type": [
@@ -11300,6 +11308,7 @@
                         "direct",
                         "staff_assisted",
                         "complimentary",
+                        "imported",
                         null
                       ],
                       "description": "The source the page and the trip counts are filtered to; null for every source (G2.12e)"
@@ -11525,9 +11534,10 @@
                           "enum": [
                             "direct",
                             "staff_assisted",
-                            "complimentary"
+                            "complimentary",
+                            "imported"
                           ],
-                          "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest)"
+                          "description": "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest). imported: saved by an owner's import of another system's bookings; any money was taken outside TideGrid and is listed as imported payments (W3-G2.13)"
                         },
                         "channel": {
                           "type": [
@@ -11759,7 +11769,11 @@
                               "type": "string"
                             },
                             "email": {
-                              "type": "string"
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "description": "Null only on an imported booking whose customer had no email (W3-G2.13)"
                             }
                           },
                           "required": [
@@ -12935,7 +12949,8 @@
                                 "enum": [
                                   "direct",
                                   "staff_assisted",
-                                  "complimentary"
+                                  "complimentary",
+                                  "imported"
                                 ],
                                 "description": "Where the booking came from (G2.12d); always sent"
                               },
@@ -13074,9 +13089,10 @@
                                       "pending",
                                       "succeeded",
                                       "failed",
-                                      "complimentary"
+                                      "complimentary",
+                                      "imported"
                                     ],
-                                    "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment"
+                                    "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment. imported: saved by an import of another system's bookings; any money was taken outside TideGrid, so there is no payment here"
                                   },
                                   "refund": {
                                     "type": [
@@ -14161,7 +14177,7 @@
             }
           },
           "409": {
-            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), the participant has no email of their own (participant_no_email), or the booking was imported from an earlier system (booking_imported)",
             "content": {
               "application/json": {
                 "schema": {
@@ -18731,7 +18747,7 @@
             }
           },
           "409": {
-            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), or the participant has no email of their own (participant_no_email)",
+            "description": "The booking was canceled (booking_canceled), its trip has departed (trip_departed), the place was given up (place_removed), nobody is named there yet (participant_not_named), the participant has no email of their own (participant_no_email), or the booking was imported from an earlier system (booking_imported)",
             "content": {
               "application/json": {
                 "schema": {
@@ -24851,7 +24867,8 @@
                     "enum": [
                       "direct",
                       "staff_assisted",
-                      "complimentary"
+                      "complimentary",
+                      "imported"
                     ],
                     "description": "Only bookings of this source, as the day list's filter does: the results, the count, and the cursor. Exactly direct or staff_assisted; any other value, an empty one, or null answers 400 validation_failed. It narrows a search and is not a criterion on its own"
                   },
@@ -24907,7 +24924,8 @@
                             "enum": [
                               "direct",
                               "staff_assisted",
-                              "complimentary"
+                              "complimentary",
+                              "imported"
                             ],
                             "description": "Where the booking came from (G2.12d); always sent"
                           },
@@ -24983,7 +25001,11 @@
                                 "type": "string"
                               },
                               "email": {
-                                "type": "string"
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "Null only on an imported booking whose customer had no email (W3-G2.13)"
                               }
                             },
                             "required": [
@@ -25016,9 +25038,10 @@
                                   "pending",
                                   "succeeded",
                                   "failed",
-                                  "complimentary"
+                                  "complimentary",
+                                  "imported"
                                 ],
-                                "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment"
+                                "description": "The charge: succeeded once a verified provider event says so. complimentary: an owner booked it at no charge, so there is no payment. imported: saved by an import of another system's bookings; any money was taken outside TideGrid, so there is no payment here"
                               },
                               "refund": {
                                 "type": [
@@ -25103,6 +25126,7 @@
                         "direct",
                         "staff_assisted",
                         "complimentary",
+                        "imported",
                         null
                       ],
                       "description": "The source the results and the count are filtered to; null for every source"
@@ -32213,7 +32237,7 @@
             }
           },
           "409": {
-            "description": "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); or the email could not be built (waiver_email_invalid). A refusal is final for its Idempotency-Key: send again with a new key",
+            "description": "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the booking was imported from an earlier system (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
             "content": {
               "application/json": {
                 "schema": {
@@ -40400,8 +40424,11 @@
                             "enum": [
                               "cash",
                               "check",
-                              "other"
-                            ]
+                              "other",
+                              "card_outside_tidegrid",
+                              "bank_transfer"
+                            ],
+                            "description": "card_outside_tidegrid and bank_transfer appear only on money imported from an earlier system"
                           },
                           "amount": {
                             "type": "integer",
@@ -40706,8 +40733,11 @@
                           "enum": [
                             "cash",
                             "check",
-                            "other"
-                          ]
+                            "other",
+                            "card_outside_tidegrid",
+                            "bank_transfer"
+                          ],
+                          "description": "card_outside_tidegrid and bank_transfer appear only on money imported from an earlier system"
                         },
                         "amount": {
                           "type": "integer",
@@ -46346,6 +46376,686 @@
           },
           "422": {
             "description": "idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/import-commits": {
+      "post": {
+        "tags": [
+          "staff",
+          "imports"
+        ],
+        "summary": "Save a standard CSV import batch",
+        "description": "Owners only (imports.run). The batch must follow its latest run, a clean dry run of the same files (the content hash leaves out the manifest's batch_mode and run_number), with batch_mode commit and the next run number. The files are checked again against TideGrid as it is now; a clean result is saved all or nothing: future trips (new departures in draft), customers, bookings with their participants, and legacy payments and refunds, labeled as imported and taken outside TideGrid. Rows imported before with the same values are left as they are; changed ones are refused. Charter balances, opening balances, and waiver status are refused for now. No email is sent and no provider is called.\n\nA commit that no longer passes its checks, or meets a change in TideGrid while saving, saves nothing and answers 200 with committed false; it is recorded, so the next try needs a fresh dry run. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {
+                    "type": "object",
+                    "properties": {
+                      "manifest.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "products.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "trips.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "customers.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "bookings.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "participants.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "payments.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "opening_balances.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      },
+                      "waivers.csv": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000000,
+                        "description": "The file's text, UTF-8, as exported (RFC 4180 CSV)"
+                      }
+                    },
+                    "required": [
+                      "manifest.csv"
+                    ],
+                    "additionalProperties": false,
+                    "description": "One batch: the manifest and the files it declares totals for"
+                  }
+                },
+                "required": [
+                  "files"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The commit's result: saved, or refused with the reason",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uuid",
+                          "description": "The recorded run; null when the manifest could not be read"
+                        },
+                        "batchId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "runNumber": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        },
+                        "sourceSystem": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "contentHash": {
+                          "type": "string",
+                          "pattern": "^[0-9a-f]{64}$",
+                          "description": "SHA-256 of the files, without the manifest's batch_mode and run_number rows"
+                        },
+                        "checkedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "clean": {
+                          "type": "boolean",
+                          "description": "No error and every declared total matched"
+                        },
+                        "errorCount": {
+                          "type": "integer"
+                        },
+                        "warningCount": {
+                          "type": "integer"
+                        },
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "file": {
+                                "type": "string",
+                                "enum": [
+                                  "manifest.csv",
+                                  "products.csv",
+                                  "trips.csv",
+                                  "customers.csv",
+                                  "bookings.csv",
+                                  "participants.csv",
+                                  "payments.csv",
+                                  "opening_balances.csv",
+                                  "waivers.csv"
+                                ]
+                              },
+                              "rows": {
+                                "type": "integer"
+                              },
+                              "accepted": {
+                                "type": "integer"
+                              },
+                              "refused": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "file",
+                              "rows",
+                              "accepted",
+                              "refused"
+                            ]
+                          }
+                        },
+                        "controls": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "file": {
+                                "type": "string",
+                                "enum": [
+                                  "manifest.csv",
+                                  "products.csv",
+                                  "trips.csv",
+                                  "customers.csv",
+                                  "bookings.csv",
+                                  "participants.csv",
+                                  "payments.csv",
+                                  "opening_balances.csv",
+                                  "waivers.csv"
+                                ]
+                              },
+                              "metric": {
+                                "type": "string"
+                              },
+                              "declared": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ]
+                              },
+                              "computed": {
+                                "type": "integer"
+                              },
+                              "matches": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "file",
+                              "metric",
+                              "declared",
+                              "computed",
+                              "matches"
+                            ]
+                          }
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "file": {
+                                "type": "string",
+                                "enum": [
+                                  "manifest.csv",
+                                  "products.csv",
+                                  "trips.csv",
+                                  "customers.csv",
+                                  "bookings.csv",
+                                  "participants.csv",
+                                  "payments.csv",
+                                  "opening_balances.csv",
+                                  "waivers.csv"
+                                ]
+                              },
+                              "line": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "description": "The record number, the header being 1; null for the whole file"
+                              },
+                              "recordKey": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The row's deduplication key"
+                              },
+                              "column": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "code": {
+                                "type": "string",
+                                "description": "A stable code, as the draft lists them"
+                              },
+                              "severity": {
+                                "type": "string",
+                                "enum": [
+                                  "error",
+                                  "warning"
+                                ],
+                                "description": "error refuses the row; warning needs review"
+                              },
+                              "message": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "description": "The offending value, or \"[withheld]\" for a name, email, phone, or reference"
+                              }
+                            },
+                            "required": [
+                              "file",
+                              "line",
+                              "recordKey",
+                              "column",
+                              "code",
+                              "severity",
+                              "message",
+                              "value"
+                            ]
+                          },
+                          "maxItems": 500
+                        },
+                        "issuesTruncated": {
+                          "type": "boolean",
+                          "description": "More issues than listed; errors.csv has the first 5,000, and the counts cover them all"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "batchId",
+                        "runNumber",
+                        "sourceSystem",
+                        "contentHash",
+                        "checkedAt",
+                        "clean",
+                        "errorCount",
+                        "warningCount",
+                        "files",
+                        "controls",
+                        "issues",
+                        "issuesTruncated"
+                      ]
+                    },
+                    "errorsCsv": {
+                      "type": "string",
+                      "description": "errors.csv: the first 5,000 issues, each cell kept from running as a formula"
+                    },
+                    "committed": {
+                      "type": "boolean",
+                      "description": "True when the batch was saved, all of it"
+                    },
+                    "refusal": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "enum": [
+                        "not_clean",
+                        "write_refused",
+                        null
+                      ],
+                      "description": "Why nothing was saved: the files no longer pass their checks (not_clean, with the issues listed), or TideGrid changed while saving (write_refused). A refused commit is recorded, so the next try needs a fresh dry run"
+                    },
+                    "refusedBy": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 63,
+                      "description": "For write_refused: the name of the TideGrid rule that refused the save, when known, for support to look up. Null otherwise"
+                    },
+                    "counts": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "trips": {
+                          "type": "integer",
+                          "description": "Trips recorded, existing departures included"
+                        },
+                        "tripsCreated": {
+                          "type": "integer",
+                          "description": "New departures, created in draft"
+                        },
+                        "customers": {
+                          "type": "integer"
+                        },
+                        "bookings": {
+                          "type": "integer"
+                        },
+                        "participants": {
+                          "type": "integer"
+                        },
+                        "payments": {
+                          "type": "integer"
+                        },
+                        "refunds": {
+                          "type": "integer"
+                        },
+                        "unchanged": {
+                          "type": "integer",
+                          "description": "Rows imported before with the same values: nothing written for them"
+                        }
+                      },
+                      "required": [
+                        "trips",
+                        "tripsCreated",
+                        "customers",
+                        "bookings",
+                        "participants",
+                        "payments",
+                        "refunds",
+                        "unchanged"
+                      ],
+                      "description": "What the commit wrote"
+                    }
+                  },
+                  "required": [
+                    "run",
+                    "errorsCsv",
+                    "committed",
+                    "refusal",
+                    "refusedBy",
+                    "counts"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The run number is not the batch's next one (import_run_number_used); its earlier runs name another source system (import_source_changed); its latest run is not a clean dry run (import_no_clean_dry_run); the files differ from the dry run's (import_changed_since_dry_run); the batch was saved already (import_already_committed); or a booked product has no cancellation policy (import_product_missing_policy)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than this route accepts, 4096 KiB (payload_too_large)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "More new rows than one commit writes (import_too_large); send the export as several batches. Or idempotency_key_reused",
             "content": {
               "application/json": {
                 "schema": {

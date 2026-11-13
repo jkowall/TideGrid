@@ -256,9 +256,9 @@ export type FakePaymentControlResponse = z.infer<typeof FakePaymentControlRespon
 // Booking source (G2.12d) -------------------------------------------------------------
 
 export const BookingSource = z
-  .enum(["direct", "staff_assisted", "complimentary"])
+  .enum(["direct", "staff_assisted", "complimentary", "imported"])
   .describe(
-    "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest)",
+    "direct: booked by the guest online. staff_assisted: booked by an owner or booking staff member for a guest who phoned, emailed, or walked up, and paid through the same verified payment. complimentary: booked by an owner at no charge, with a reason, and no payment (W3-G2.12-rest). imported: saved by an owner's import of another system's bookings; any money was taken outside TideGrid and is listed as imported payments (W3-G2.13)",
   );
 export type BookingSource = z.infer<typeof BookingSource>;
 
@@ -282,7 +282,13 @@ export const StaffBooking = z.object({
     .boolean()
     .describe("Confirmed after its hold had expired, by taking the seats again"),
   confirmedAt: Instant,
-  booker: z.object({ name: z.string(), email: z.string() }),
+  booker: z.object({
+    name: z.string(),
+    email: z
+      .string()
+      .nullable()
+      .describe("Null only on an imported booking whose customer had no email (W3-G2.13)"),
+  }),
   order: z.object({
     id: Uuid,
     status: z.enum(["pending", "paid", "void"]),

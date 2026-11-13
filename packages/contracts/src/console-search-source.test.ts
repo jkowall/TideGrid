@@ -25,7 +25,7 @@ describe("the search request's source", () => {
   });
 
   it.each([
-    ["an unknown source", "imported"],
+    ["an unknown source", "ota"],
     ["an empty string", ""],
     ["a different case", "STAFF_ASSISTED"],
     ["an array", ["direct"]],
@@ -48,7 +48,7 @@ describe("the search response's source echo", () => {
   });
 
   it("refuses a source it does not know, and a missing one", () => {
-    expect(BookingSearchResponse.safeParse({ ...body, source: "imported" }).success).toBe(false);
+    expect(BookingSearchResponse.safeParse({ ...body, source: "ota" }).success).toBe(false);
     expect(BookingSearchResponse.safeParse(body).success).toBe(false);
   });
 });

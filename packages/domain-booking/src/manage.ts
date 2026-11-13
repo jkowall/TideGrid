@@ -233,6 +233,8 @@ export async function requestManageLink(
        and created_at > now() - interval '1 hour'`.execute(trx);
   if ((rows[0]?.n ?? 0) >= MAX_LINK_EMAILS_PER_HOUR) return { kind: "rate_limited" };
   const sent = await enqueueManageLinkEmail(trx, ctx, input.bookingId, input.requestKey);
+  // An imported booking's emails are held (W3-G2.13); the API answers alike.
+  if (!sent) return { kind: "not_found" };
   return { kind: "enqueued", messageId: sent.messageId };
 }
 

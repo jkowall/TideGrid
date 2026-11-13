@@ -562,9 +562,10 @@ export type BookingState = "confirmed" | "canceled";
  * transaction's actor on the checkout, and copies it to the booking; no
  * writer chooses it.
  */
-export type BookingSource = "direct" | "staff_assisted" | "complimentary";
+/** "imported": saved by a standard CSV import commit (0044), with no payment. */
+export type BookingSource = "direct" | "staff_assisted" | "complimentary" | "imported";
 /** A checkout's source: a complimentary booking's checkout is a staff one (0012, 0039). */
-export type CheckoutSource = "direct" | "staff_assisted";
+export type CheckoutSource = "direct" | "staff_assisted" | "imported";
 /** How a guest reached the staff member who opened a staff-assisted checkout (G2.12d). */
 export type BookingChannel = "phone" | "email" | "walk_up";
 export type ProviderEventType =
@@ -635,7 +636,8 @@ export interface CheckoutSessionsTable {
   /** Chosen by the service before the hold, whose owner is "checkout_session:<id>". */
   id: Fixed<string>;
   tenant_id: TenantColumn;
-  quote_id: Fixed<string>;
+  /** Null only on an imported checkout (0044). */
+  quote_id: Fixed<string | null>;
   trip_id: Fixed<string>;
   party_size: Fixed<number>;
   hold_id: Fixed<string>;
@@ -647,7 +649,8 @@ export interface CheckoutSessionsTable {
   client_key: FixedDefault<string | null>;
   /** Corrected only on a confirmed booking, in the shape 0037 checks. */
   booker_name: ColumnType<string, string, string>;
-  booker_email: ColumnType<string, string, string>;
+  /** Null only on an imported checkout whose customer had no email (0044). */
+  booker_email: ColumnType<string | null, string | null, string>;
   /** Stamped from the transaction's actor (0012); never chosen by a writer. */
   source: ColumnType<CheckoutSource, never, never>;
   /** Required on a staff-assisted checkout and null otherwise (0012). */
@@ -669,7 +672,8 @@ export interface OrdersTable {
   id: Generated<string>;
   tenant_id: TenantColumn;
   checkout_session_id: Fixed<string>;
-  quote_id: Fixed<string>;
+  /** Null only on an imported booking's order (0044): no lines, the legacy totals. */
+  quote_id: Fixed<string | null>;
   trip_id: Fixed<string>;
   product_id: Fixed<string>;
   party_size: Fixed<number>;
@@ -1489,6 +1493,9 @@ export interface Database
   capacity_overrides: CapacityOverridesTable;
   complimentary_grants: ComplimentaryGrantsTable;
   import_runs: ImportRunsTable;
+  import_records: ImportRecordsTable;
+  import_customers: ImportCustomersTable;
+  import_bookings: ImportBookingsTable;
   important_links: ImportantLinksTable;
 }
 
@@ -1634,7 +1641,7 @@ export interface PaymentDisputesTable {
 }
 
 export type ExternalSettlementKind = "payment" | "refund";
-export type ExternalTender = "cash" | "check" | "other";
+export type ExternalTender = "cash" | "check" | "other" | "card_outside_tidegrid" | "bank_transfer";
 
 /** Cash, check, or other tender staff record against a booking (0031). Append-only. */
 export interface ExternalSettlementsTable {
@@ -1653,6 +1660,10 @@ export interface ExternalSettlementsTable {
   eligible_amount: FixedDefault<number | null>;
   fee_bp: FixedDefault<number | null>;
   fee_amount: FixedDefault<number | null>;
+  /** The payments.csv ledger row of an imported settlement (0044). */
+  import_record_id: FixedDefault<string | null>;
+  /** When an imported settlement's money moved; only on one (0044). */
+  received_at: ColumnType<Date | null, Date | string | null | undefined, never>;
   created_at: Stamped;
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;
@@ -1848,17 +1859,82 @@ export interface ImportRunsTable {
   run_number: Fixed<number>;
   source_system: Fixed<string>;
   mapping_version: Fixed<"std-csv-v0">;
-  mode: Fixed<"dry_run">;
+  mode: Fixed<"dry_run" | "commit">;
   content_hash: Fixed<string>;
   clean: Fixed<boolean>;
   error_count: Fixed<number>;
   warning_count: Fixed<number>;
   files: Json;
   controls: Json;
+  /** A commit names the clean dry run it follows (0044). */
+  dry_run_id: FixedDefault<string | null>;
+  /** The writing transaction, stamped (0044): ledger rows must share it. */
+  created_txid: ColumnType<string, never, never>;
+  waiver_notifications: FixedDefault<"send_at_cutover" | "hold_until_staff_release" | null>;
   created_at: Stamped;
   actor_type: ColumnType<ActorType, never, never>;
   actor_id: ColumnType<string | null, never, never>;
   request_id: ColumnType<string | null, never, never>;
+}
+
+export type ImportFileName =
+  | "products.csv"
+  | "trips.csv"
+  | "customers.csv"
+  | "bookings.csv"
+  | "participants.csv"
+  | "payments.csv";
+
+/** One imported record of a commit (0044). Append-only; unique by source system, file, key. */
+export interface ImportRecordsTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  run_id: Fixed<string>;
+  source_system: Fixed<string>;
+  mapping_version: Fixed<"std-csv-v0">;
+  file: Fixed<ImportFileName>;
+  external_id: Fixed<string>;
+  dedupe_key: Fixed<string>;
+  row_hash: Fixed<string>;
+  product_id: FixedDefault<string | null>;
+  trip_id: FixedDefault<string | null>;
+  participant_id: FixedDefault<string | null>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** An imported customer (0044): personal data kept here and on the checkout only. */
+export interface ImportCustomersTable {
+  record_id: Fixed<string>;
+  tenant_id: TenantColumn;
+  full_name: Fixed<string>;
+  email: FixedDefault<string | null>;
+  phone: FixedDefault<string | null>;
+  created_at: Stamped;
+}
+
+/** An imported booking's legacy terms (0044). */
+export interface ImportBookingsTable {
+  record_id: Fixed<string>;
+  tenant_id: TenantColumn;
+  checkout_session_id: Fixed<string>;
+  customer_record_id: Fixed<string>;
+  trip_id: Fixed<string>;
+  party_size: Fixed<number>;
+  legacy_source: Fixed<"direct" | "staff_assisted" | "ota">;
+  staff_channel: FixedDefault<"phone" | "email" | "walk_up" | null>;
+  ota_channel: FixedDefault<string | null>;
+  subtotal_cents: FixedDefault<number | null>;
+  discount_cents: FixedDefault<number | null>;
+  fee_cents: FixedDefault<number | null>;
+  tax_cents: FixedDefault<number | null>;
+  included_tax_cents: FixedDefault<number | null>;
+  total_cents: FixedDefault<number | null>;
+  booked_at: ColumnType<Date | null, Date | string | null | undefined, never>;
+  in_fee_base: ColumnType<boolean, never, never>;
+  created_at: Stamped;
 }
 
 /** An operator's named HTTPS link for guests (0041, W3-G2.14b-rest). Edited in place, archived not deleted. */

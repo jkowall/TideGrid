@@ -155,14 +155,33 @@ describe("the standard CSV import's dry run (W3-G2.13)", () => {
       computed: 88400,
       matches: true,
     });
-    // An adult without an email is a warning, not a refusal.
+    // An adult without an email is a warning, not a refusal; so is what a
+    // commit cannot save yet (a charter balance, opening balances, waivers).
     expect(run.issues).toEqual([
+      expect.objectContaining({
+        file: "bookings.csv",
+        line: 4,
+        code: "import_not_supported_yet",
+        severity: "warning",
+      }),
       expect.objectContaining({
         file: "participants.csv",
         line: 5,
         code: "participant_email_missing",
         severity: "warning",
         recordKey: "legacy-booker|LB-5002|2027-04-12|2",
+      }),
+      expect.objectContaining({
+        file: "opening_balances.csv",
+        line: null,
+        code: "import_not_supported_yet",
+        severity: "warning",
+      }),
+      expect.objectContaining({
+        file: "waivers.csv",
+        line: null,
+        code: "import_not_supported_yet",
+        severity: "warning",
       }),
     ]);
     expect(run.files.find((f) => f.file === "bookings.csv")).toEqual({
@@ -280,6 +299,25 @@ PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
     // The booking goes too, and its other payment with it.
     expect(at("bookings.csv", 4)).toEqual(["refund_exceeds_payments"]);
     expect(at("payments.csv", 4)).toEqual(["parent_rejected"]);
+
+    // An overpayment returned before TideGrid nets to the total, but its
+    // refund exceeds what the booking cost, which TideGrid's ledger refuses.
+    const returned = sample();
+    returned["payments.csv"] = (returned["payments.csv"] as string).replace(
+      "PAY-9002,LB-5002,2027-04-12,payment,44835,cash,,2027-02-25T10:00:00-05:00",
+      [
+        "PAY-9002,LB-5002,2027-04-12,payment,44835,cash,,2027-02-25T10:00:00-05:00",
+        "PAY-9002X,LB-5002,2027-04-12,payment,50000,cash,,2027-02-25T11:00:00-05:00",
+        "PAY-9002R,LB-5002,2027-04-12,refund,50000,cash,,2027-02-26T10:00:00-05:00",
+      ].join("\n"),
+    );
+    run = await validateImport(returned, lookup(), NOW);
+    expect(run.issues.filter((i) => i.file === "payments.csv").map((i) => i.code)).toContain(
+      "refunds_exceed_total",
+    );
+    expect(run.issues.filter((i) => i.file === "bookings.csv").map((i) => i.code)).toContain(
+      "refunds_exceed_total",
+    );
   });
 
   it("refuses a trip the database's zone data reads differently, with its bookings", async () => {

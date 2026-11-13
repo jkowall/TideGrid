@@ -172,6 +172,7 @@ export async function resendWaiver(
       waiver_not_pending: "not_pending",
       waiver_trip_over: "trip_over",
       waiver_email_invalid: "email_invalid",
+      waiver_imported_booking: "imported_booking",
     };
     if (code && known[code]) {
       return { kind: "failed", reason: known[code] as string, final: true };

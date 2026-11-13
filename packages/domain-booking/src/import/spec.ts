@@ -59,6 +59,8 @@ export const IMPORT_ISSUE_CODES = [
   "payment_on_ota_booking",
   "overpaid",
   "refund_exceeds_payments",
+  "refunds_exceed_total",
+  "booking_closed",
   "unexpected_balance",
   "balance_due_date_missing",
   "position_out_of_range",
@@ -70,6 +72,9 @@ export const IMPORT_ISSUE_CODES = [
   "customer_match_candidate",
   "participant_email_missing",
   "control_total_mismatch",
+  // The commit step (W3-G2.13 part A, 2026-11-13).
+  "changed_since_import",
+  "import_not_supported_yet",
 ] as const;
 export type ImportIssueCode = (typeof IMPORT_ISSUE_CODES)[number];
 

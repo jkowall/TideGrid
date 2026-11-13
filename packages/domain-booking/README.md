@@ -534,6 +534,15 @@ Built on 2026-11-08 under coordinator defaults pending owner confirmation ([deci
 - **Bounded.** A run keeps its first 5,000 issues (`MAX_ISSUES_KEPT`) and counts all of them (`issuesCapped`); a message names at most 10 line numbers; a repeated value is cut at 64 characters. Duplicate groups and boat overlaps are found in near-linear time, so a 2-million-character file cannot exhaust the Worker.
 - **Money before seats.** Payments and refunds are totalled per booking, whatever their order, before capacity is counted: a booking that does not balance is refused first, frees its seats, and takes its participants, payments, and waivers with it.
 
+## Standard CSV import: the commit (W3-G2.13, part A)
+
+`src/import/commit.ts`. Coordinator defaults D1 to D8 are in the [decision register](../../docs/v2/06-decision-register.md#decision-log).
+
+- **`runImportCommit(trx, ctx, files)`** takes the batch's lock, requires the latest run to be a clean dry run of the same files and the run number to be the next, then runs `validateImport(..., "commit")` again at the database's time. A clean result is written under a savepoint: the commit run, ledger rows, new trips in draft, and for each booking its ledger row, a hold until departure, an imported checkout and order, the confirmed hold, the booking, its participants, and its payments (before its refunds) as external settlements. A refusal, or a database refusal while writing (class 23), rolls back to the savepoint and records a refused commit. The audit event `import.commit` holds counts only.
+- **Re-imports.** `importLookup` reads earlier commits' records and imported payments, so an unchanged row is skipped and a changed one is refused (`changed_since_import`); earlier imported money counts toward a booking's balance.
+- **Reads.** Lists, the roster, search, and the day report show payment state `imported` and the legacy total; the booking detail has `payment: null` and source `imported`. A booker may have no email.
+- **No email.** Every booking email function returns null for an imported booking (`importedBooking`), until the import's email rules arrive (part D). A management link request answers `not_found`.
+
 ## Deferred and known gaps
 
 - **Staff-assisted booking (G2.12d).** Staff cannot cancel a confirmed booking, refund, enter participants, correct the booker's address, override the cutoff, sales state, capacity, or price, or record cash, check, or complimentary bookings. A mistyped booker address sends the management link to whoever holds it; the read-back and its attestation reduce that, nothing removes it.

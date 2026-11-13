@@ -74,7 +74,7 @@ export interface DayReportRow extends DayReportMoney {
    * are zero, since nothing was sold for money; the waived value is on the
    * booking's own detail.
    */
-  paymentState: PaymentState | "complimentary";
+  paymentState: PaymentState | "complimentary" | "imported";
   /** The latest refund's state, or null when there is none. */
   refundState: RefundState | null;
   pendingRefund: { count: number; amount: number };
@@ -117,7 +117,7 @@ interface ReportRow {
   tax_amount: number;
   included_tax_amount: number;
   total_amount: number;
-  payment_state: PaymentState | "complimentary";
+  payment_state: PaymentState | "complimentary" | "imported";
   refund_state: RefundState | null;
   refunded: number;
   pending_count: number;
@@ -185,7 +185,8 @@ export async function buildDayReport(
            t.starts_at,
            o.subtotal_amount, o.discount_amount, o.fee_amount, o.tax_amount,
            o.included_tax_amount, o.total_amount,
-           coalesce(pay.state, 'complimentary') as payment_state,
+           coalesce(pay.state, case when b.source = 'imported' then 'imported'
+                                   else 'complimentary' end) as payment_state,
            rf.refund_state, rf.refunded, rf.pending_count, rf.pending_amount,
            statement_timestamp() as generated_at
            ${bookerColumns}

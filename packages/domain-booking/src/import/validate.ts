@@ -56,8 +56,32 @@ export interface TripInfo {
   heldSeats: number;
 }
 
+/** A record an earlier commit imported, found by its file and deduplication key. */
+export interface ImportedRecord {
+  rowHash: string;
+  /** For a booking: it is no longer confirmed in TideGrid (canceled since). */
+  closed?: boolean;
+}
+
+/** A payment or refund an earlier commit imported for a booking. */
+export interface ImportedPayment {
+  /** The booking's deduplication key. */
+  bookingKey: string;
+  /** The payment's own deduplication key. */
+  paymentKey: string;
+  amount: number;
+  refund: boolean;
+}
+
 /** What the dry run reads from the operator's data, in its tenant. */
 export interface ImportLookup {
+  /**
+   * Records earlier commits imported, by `${file}|${key}`, so a row that was
+   * imported unchanged is a no-op and a changed one is refused. Absent: none.
+   */
+  imported?(keys: ReadonlyMap<DataFile, readonly string[]>): Promise<Map<string, ImportedRecord>>;
+  /** Payments and refunds earlier commits imported for these bookings (by key). */
+  importedPayments?(bookingKeys: readonly string[]): Promise<ImportedPayment[]>;
   products(ids: readonly string[]): Promise<Map<string, ProductInfo>>;
   boats(ids: readonly string[]): Promise<Map<string, BoatInfo>>;
   /** Trips, canceled ones included, on these boats that end after `fromMs` and start before `toMs`. */
@@ -83,7 +107,7 @@ export interface ImportManifest {
   runNumber: number;
   sourceSystem: string;
   mappingVersion: string;
-  batchMode: "dry_run";
+  batchMode: "dry_run" | "commit";
   operatorTimeZone: string;
   exportedAt: string;
   waiverNotifications: "send_at_cutover" | "hold_until_staff_release" | null;
@@ -112,10 +136,88 @@ export interface ImportDryRun {
   issuesCapped: boolean;
   files: ImportFileSummary[];
   controls: ImportControl[];
-  /** No error, and every declared total matched: a commit may follow (a later goal). */
+  /** No error, and every declared total matched: a commit may follow. */
   clean: boolean;
   errorCount: number;
   warningCount: number;
+  /** What a commit writes, when clean. */
+  plan: ImportPlan | null;
+}
+
+interface PlannedRow {
+  /** The deduplication key. */
+  key: string;
+  /** The source system's own id for the record. */
+  externalId: string;
+  /** SHA-256 of the row's values, as the ledger keeps it. */
+  rowHash: string;
+  /** Imported before, unchanged: nothing to write. */
+  unchanged: boolean;
+}
+
+/** The accepted rows of a clean batch, in the shape the commit writes them. */
+export interface ImportPlan {
+  sourceSystem: string;
+  products: (PlannedRow & { productId: string })[];
+  trips: (PlannedRow & {
+    sourceTripId: string;
+    /** The TideGrid trip it maps onto, or null to create one in draft. */
+    existingTripId: string | null;
+    productId: string;
+    boatId: string;
+    startsAtMs: number;
+    endsAtMs: number;
+    timeZone: string;
+    localDate: string;
+    /** HH:MM, the operator's wall clock. */
+    localStartTime: string;
+    startOffsetMinutes: number;
+    endOffsetMinutes: number;
+    durationMinutes: number;
+    /** Shared seats, or the boat's capacity for a charter. */
+    seatCapacity: number;
+  })[];
+  customers: (PlannedRow & {
+    sourceCustomerId: string;
+    fullName: string;
+    email: string | null;
+    phone: string | null;
+  })[];
+  bookings: (PlannedRow & {
+    sourceTripId: string;
+    sourceCustomerId: string;
+    legacySource: "direct" | "staff_assisted" | "ota";
+    staffChannel: "phone" | "email" | "walk_up" | null;
+    otaChannel: string | null;
+    partySize: number;
+    /** Null for an OTA reservation. */
+    amounts: {
+      subtotal: number;
+      discount: number;
+      fee: number;
+      tax: number;
+      includedTax: number;
+      total: number;
+    } | null;
+    bookedAt: string | null;
+  })[];
+  participants: (PlannedRow & {
+    bookingKey: string;
+    position: number;
+    fullName: string;
+    isMinor: boolean;
+    email: string | null;
+    guardianName: string | null;
+    guardianEmail: string | null;
+  })[];
+  payments: (PlannedRow & {
+    bookingKey: string;
+    refund: boolean;
+    amount: number;
+    tender: "cash" | "check" | "card_outside_tidegrid" | "bank_transfer" | "other";
+    reference: string | null;
+    receivedAt: string;
+  })[];
 }
 
 interface Row {
@@ -124,6 +226,10 @@ interface Row {
   v: Map<string, Value>;
   key: string;
   refused: boolean;
+  /** SHA-256 of the row's values in column order (data files only). */
+  hash?: string;
+  /** Imported by an earlier commit with the same values. */
+  unchanged?: boolean;
 }
 
 interface FileRows {
@@ -376,6 +482,7 @@ function refuseDuplicates(report: Report, fr: FileRows): void {
 function readManifest(
   report: Report,
   text: string | undefined,
+  mode: "dry_run" | "commit",
 ): {
   manifest: ImportManifest | null;
   declared: Map<string, { value: number | null; line: number }>;
@@ -559,7 +666,9 @@ function readManifest(
   const sourceSystem = need("source_system", (v) => /^[A-Za-z0-9._-]{1,64}$/.test(v));
   const mappingVersion = need("mapping_version", (v) => v === MAPPING_VERSION, "invalid_enum");
   const batchMode = need("batch_mode", (v) => v === "dry_run" || v === "commit", "invalid_enum");
-  if (batchMode === "commit") {
+  // A dry run's manifest says dry_run, and a commit's says commit: the same
+  // files otherwise, since the content hash leaves this row out.
+  if (batchMode !== null && batchMode !== mode) {
     const entry = items.get("batch_mode");
     report.add(
       file,
@@ -568,8 +677,10 @@ function readManifest(
         : null,
       "batch_mode",
       "batch_mode_not_supported",
-      "Only dry runs are available so far; committing an import is a later step.",
-      "commit",
+      mode === "commit"
+        ? "This is a commit; the manifest's batch_mode must be commit."
+        : "This is a dry run; the manifest's batch_mode must be dry_run.",
+      batchMode,
     );
     fatal = true;
   }
@@ -605,7 +716,7 @@ function readManifest(
       runNumber: Number(runNumber),
       sourceSystem,
       mappingVersion,
-      batchMode: "dry_run",
+      batchMode: mode,
       operatorTimeZone: zone,
       exportedAt,
       waiverNotifications:
@@ -636,9 +747,13 @@ export async function validateImport(
   files: Partial<Record<ImportFile, string | undefined>>,
   lookup: ImportLookup,
   nowMs: number,
+  mode: "dry_run" | "commit" = "dry_run",
 ): Promise<ImportDryRun> {
   const report = new Report();
-  const { manifest, declared } = readManifest(report, files["manifest.csv"]);
+  const { manifest, declared } = readManifest(report, files["manifest.csv"], mode);
+  // What a commit cannot save yet (charter balances, opening balances, legacy
+  // waiver status) is a warning in a dry run and refuses the commit.
+  const notYet = mode === "commit" ? "error" : "warning";
   const present = IMPORT_FILES.filter(
     (f): f is DataFile => f !== "manifest.csv" && files[f] !== undefined,
   );
@@ -709,6 +824,43 @@ export async function validateImport(
     byFile.set(file, fr);
   }
   const rowsOf = (file: DataFile) => byFile.get(file)?.rows ?? [];
+
+  // Records earlier commits imported: the same values are a no-op, and other
+  // values are refused, since a re-import never overwrites.
+  for (const [file, fr] of byFile) {
+    for (const row of fr.rows) {
+      if (row.raw.size > 0) row.hash = await rowHash(file, row);
+    }
+  }
+  // Imported bookings canceled in TideGrid since: nothing new is added to them.
+  const closedBookings = new Set<string>();
+  if (lookup.imported) {
+    const wanted = new Map<DataFile, string[]>();
+    for (const [file, fr] of byFile) {
+      const keysOf = fr.rows.filter((r) => !r.refused && r.key !== "").map((r) => r.key);
+      if (keysOf.length > 0) wanted.set(file, keysOf);
+    }
+    const earlier = wanted.size > 0 ? await lookup.imported(wanted) : new Map();
+    for (const [file, fr] of byFile) {
+      for (const row of fr.rows) {
+        if (row.refused || row.key === "") continue;
+        const found = earlier.get(`${file}|${row.key}`);
+        if (!found) continue;
+        if (found.rowHash === row.hash) {
+          row.unchanged = true;
+          if (file === "bookings.csv" && found.closed) closedBookings.add(row.key);
+        } else {
+          report.add(
+            file,
+            row,
+            null,
+            "changed_since_import",
+            "This record was imported before with other values; an import never overwrites. Correct it in TideGrid.",
+          );
+        }
+      }
+    }
+  }
   const parentRejected = (file: DataFile, row: Row, column: string, what: string) =>
     report.add(file, row, column, "parent_rejected", `The ${what} this row refers to was refused.`);
   const unknownRef = (file: DataFile, row: Row, column: string, where: string) =>
@@ -1399,6 +1551,16 @@ export async function validateImport(
       bookingFor("payments.csv", row);
       continue;
     }
+    if (!row.unchanged && closedBookings.has(booking.row.key)) {
+      report.add(
+        "payments.csv",
+        row,
+        "source_booking_ref",
+        "booking_closed",
+        "The booking this row adds to was canceled in TideGrid since it was imported.",
+      );
+      continue;
+    }
     if (booking.ota) {
       report.add(
         "payments.csv",
@@ -1431,10 +1593,27 @@ export async function validateImport(
     if (list) list.push(entry);
     else entries.set(booking, [entry]);
   }
+  // Payments earlier commits imported for these bookings count too, once: a
+  // row this batch repeats is counted from the batch.
+  const earlierPaid = new Map<BookingPlan, { in: number; out: number }>();
+  if (lookup.importedPayments && bookingPlans.size > 0) {
+    const inBatch = new Set(rowsOf("payments.csv").map((r) => r.key));
+    const byKey = new Map([...bookingPlans.values()].map((p) => [p.row.key, p]));
+    for (const p of await lookup.importedPayments([...byKey.keys()])) {
+      if (inBatch.has(p.paymentKey)) continue;
+      const plan = byKey.get(p.bookingKey);
+      if (!plan) continue;
+      const sums = earlierPaid.get(plan) ?? { in: 0, out: 0 };
+      if (p.refund) sums.out += p.amount;
+      else sums.in += p.amount;
+      earlierPaid.set(plan, sums);
+    }
+  }
   const paid = new Map<BookingPlan, { in: number; out: number }>();
-  for (const [booking, list] of entries) {
-    let sumIn = 0;
-    let sumOut = 0;
+  for (const booking of new Set([...entries.keys(), ...earlierPaid.keys()])) {
+    const list = entries.get(booking) ?? [];
+    let sumIn = earlierPaid.get(booking)?.in ?? 0;
+    let sumOut = earlierPaid.get(booking)?.out ?? 0;
     for (const e of list) {
       if (e.refund) sumOut += e.amount;
       else sumIn += e.amount;
@@ -1456,6 +1635,28 @@ export async function validateImport(
         "total_cents",
         "refund_exceeds_payments",
         "The booking's refunds exceed its payments, so its money cannot be taken over.",
+      );
+      continue;
+    }
+    // TideGrid's ledger caps a booking's refunds at what it cost, so an
+    // overpayment returned before TideGrid cannot be taken over as such.
+    if (sumOut > booking.total) {
+      for (const e of list.filter((x) => x.refund)) {
+        report.add(
+          "payments.csv",
+          e.row,
+          "amount_cents",
+          "refunds_exceed_total",
+          `The booking's refunds (${sumOut}) exceed its total of ${booking.total}.`,
+          String(e.amount),
+        );
+      }
+      report.add(
+        "bookings.csv",
+        booking.row,
+        "total_cents",
+        "refunds_exceed_total",
+        "The booking's refunds exceed its total, so its money cannot be taken over. Net the overpayment and its refund out of the export.",
       );
       continue;
     }
@@ -1510,12 +1711,22 @@ export async function validateImport(
       continue;
     }
     owing.set(plan, left);
+    report.add(
+      "bookings.csv",
+      plan.row,
+      "balance_due_date",
+      "import_not_supported_yet",
+      "A charter balance is checked, but saving it comes with a later part of the import.",
+      null,
+      notYet,
+    );
   }
 
   // Capacity, in file order: rows that would overbook are refused.
   const taken = new Map<TripPlan, { seats: number; bookings: number }>();
   for (const [, plan] of bookingPlans) {
-    if (plan.row.refused) continue;
+    // A booking imported before already holds its seats.
+    if (plan.row.refused || plan.row.unchanged) continue;
     const t = taken.get(plan.trip) ?? {
       seats: plan.trip.existing?.heldSeats ?? 0,
       bookings: plan.trip.existing && plan.trip.existing.heldSeats > 0 ? 1 : 0,
@@ -1570,6 +1781,16 @@ export async function validateImport(
     if (row.refused) continue;
     const booking = bookingFor("participants.csv", row);
     if (!booking) continue;
+    if (!row.unchanged && closedBookings.has(booking.row.key)) {
+      report.add(
+        "participants.csv",
+        row,
+        "source_booking_ref",
+        "booking_closed",
+        "The booking this row adds to was canceled in TideGrid since it was imported.",
+      );
+      continue;
+    }
     const position = n(row, "position") as number;
     const party = n(booking.row, "party_size") as number;
     if (position > party) {
@@ -1623,6 +1844,21 @@ export async function validateImport(
   }
 
   // Opening balances -----------------------------------------------------------------
+  for (const file of ["opening_balances.csv", "waivers.csv"] as const) {
+    if (rowsOf(file).length > 0) {
+      report.add(
+        file,
+        null,
+        null,
+        "import_not_supported_yet",
+        file === "waivers.csv"
+          ? "Legacy waiver status is checked, but saving it comes with a later part of the import."
+          : "Opening balances are checked, but saving them comes with a later part of the import.",
+        null,
+        notYet,
+      );
+    }
+  }
   const today = localDateAt(manifest.operatorTimeZone, nowMs);
   for (const row of rowsOf("opening_balances.csv")) {
     if (row.refused) continue;
@@ -1842,7 +2078,100 @@ export async function validateImport(
       );
     }
   }
-  return finish(report, manifest, summaries(byFile), controls);
+  const result = finish(report, manifest, summaries(byFile), controls);
+  if (!result.clean) return result;
+
+  // The plan a commit writes: every accepted row, in file order.
+  const planned = (_file: DataFile, row: Row, externalId: string): PlannedRow => ({
+    key: row.key,
+    externalId,
+    rowHash: row.hash as string,
+    unchanged: row.unchanged === true,
+  });
+  const opt = (row: Row, col: string) => s(row, col) ?? null;
+  const plan: ImportPlan = {
+    sourceSystem: manifest.sourceSystem,
+    products: accepted("products.csv").map((row) => ({
+      ...planned("products.csv", row, s(row, "source_product_id") as string),
+      productId: s(row, "tidegrid_product_id") as string,
+    })),
+    trips: plans
+      .filter((p) => !p.row.refused)
+      .map((p) => ({
+        ...planned("trips.csv", p.row, s(p.row, "source_trip_id") as string),
+        sourceTripId: s(p.row, "source_trip_id") as string,
+        existingTripId: p.existing?.id ?? null,
+        productId: p.product.id,
+        boatId: p.boat.id,
+        startsAtMs: p.startMs,
+        endsAtMs: p.startMs + p.product.durationMinutes * MINUTE_MS,
+        timeZone: manifest.operatorTimeZone,
+        localDate: p.localDate,
+        localStartTime: p.localTime,
+        startOffsetMinutes: offsetAt(manifest.operatorTimeZone, p.startMs),
+        endOffsetMinutes: offsetAt(
+          manifest.operatorTimeZone,
+          p.startMs + p.product.durationMinutes * MINUTE_MS,
+        ),
+        durationMinutes: p.product.durationMinutes,
+        seatCapacity: p.capacity,
+      })),
+    customers: accepted("customers.csv").map((row) => ({
+      ...planned("customers.csv", row, s(row, "source_customer_id") as string),
+      sourceCustomerId: s(row, "source_customer_id") as string,
+      fullName: s(row, "full_name") as string,
+      email: opt(row, "email"),
+      phone: opt(row, "phone"),
+    })),
+    bookings: accepted("bookings.csv").map((row) => {
+      const source = s(row, "booking_source") as "direct" | "staff_assisted" | "ota";
+      return {
+        ...planned("bookings.csv", row, s(row, "source_booking_ref") as string),
+        sourceTripId: s(row, "source_trip_id") as string,
+        sourceCustomerId: s(row, "source_customer_id") as string,
+        legacySource: source,
+        staffChannel: (s(row, "staff_channel") ?? null) as "phone" | "email" | "walk_up" | null,
+        otaChannel: opt(row, "ota_channel"),
+        partySize: n(row, "party_size") as number,
+        amounts:
+          source === "ota"
+            ? null
+            : {
+                subtotal: n(row, "subtotal_cents") as number,
+                discount: n(row, "discount_cents") as number,
+                fee: n(row, "fee_cents") as number,
+                tax: n(row, "tax_cents") as number,
+                includedTax: n(row, "included_tax_cents") as number,
+                total: n(row, "total_cents") as number,
+              },
+        bookedAt: opt(row, "booked_at"),
+      };
+    }),
+    participants: accepted("participants.csv").map((row) => ({
+      ...planned(
+        "participants.csv",
+        row,
+        `${s(row, "source_booking_ref")}|${s(row, "trip_date")}|${n(row, "position")}`,
+      ),
+      bookingKey: join(src, s(row, "source_booking_ref"), s(row, "trip_date")),
+      position: n(row, "position") as number,
+      fullName: s(row, "full_name") as string,
+      isMinor: b(row, "is_minor") === true,
+      email: opt(row, "email"),
+      guardianName: opt(row, "guardian_name"),
+      guardianEmail: opt(row, "guardian_email"),
+    })),
+    payments: accepted("payments.csv").map((row) => ({
+      ...planned("payments.csv", row, s(row, "source_payment_id") as string),
+      bookingKey: join(src, s(row, "source_booking_ref"), s(row, "trip_date")),
+      refund: s(row, "entry_kind") === "refund",
+      amount: n(row, "amount_cents") as number,
+      tender: s(row, "tender") as ImportPlan["payments"][number]["tender"],
+      reference: opt(row, "reference"),
+      receivedAt: s(row, "received_at") as string,
+    })),
+  };
+  return { ...result, plan };
 }
 
 function finish(
@@ -1861,7 +2190,18 @@ function finish(
     clean: manifest !== null && errorCount === 0 && controls.every((c) => c.matches),
     errorCount,
     warningCount,
+    plan: null,
   };
+}
+
+/** SHA-256 of a row's values, in its file's column order. */
+async function rowHash(file: DataFile, row: Row): Promise<string> {
+  const values = COLUMNS[file].map((c) => row.raw.get(c.name) ?? "");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode([file, ...values].join("\u0000")),
+  );
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function join(...parts: (string | number | undefined)[]): string {

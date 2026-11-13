@@ -296,6 +296,8 @@ export async function buildMoneyReport(
              0, coalesce(x.fee_amount, 0)
         from external_settlements x, bounds
        where x.tenant_id = ${tenantId} and x.created_at >= bounds.f and x.created_at < bounds.u
+         -- Imported money (0044) is an opening record, not money of the period.
+         and x.import_record_id is null
       union all
       select r.id, 'card_refund', r.settled_at, b.id, null, r.provider_refund_id,
              0, r.amount, 0, 0
@@ -348,7 +350,7 @@ export async function buildMoneyReport(
       union all
       select 'external_payment', count(*)::int, coalesce(sum(x.amount), 0), 0, 0, 0
         from external_settlements x, bounds
-       where x.tenant_id = ${tenantId} and x.kind = 'payment'
+       where x.tenant_id = ${tenantId} and x.kind = 'payment' and x.import_record_id is null
          and x.created_at >= bounds.f and x.created_at < bounds.u
       union all
       select 'card_refund', count(*)::int, 0, coalesce(sum(r.amount), 0), 0, 0
@@ -359,7 +361,7 @@ export async function buildMoneyReport(
       select 'external_refund', count(*)::int, 0, coalesce(sum(x.amount), 0), 0,
              coalesce(sum(x.fee_amount), 0)
         from external_settlements x, bounds
-       where x.tenant_id = ${tenantId} and x.kind = 'refund'
+       where x.tenant_id = ${tenantId} and x.kind = 'refund' and x.import_record_id is null
          and x.created_at >= bounds.f and x.created_at < bounds.u
       union all
       select 'dispute_lost', count(*)::int, 0, coalesce(sum(d.amount), 0), 0, 0

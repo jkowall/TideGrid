@@ -54,10 +54,16 @@ describe("staff-assisted booking contracts (G2.12d)", () => {
   });
 
   it("widens the source and names the channels", () => {
-    expect(BookingSource.options).toEqual(["direct", "staff_assisted", "complimentary"]);
+    expect(BookingSource.options).toEqual([
+      "direct",
+      "staff_assisted",
+      "complimentary",
+      "imported",
+    ]);
     expect(BookingChannel.options).toEqual(["phone", "email", "walk_up"]);
     expect(StaffBooking.shape.source.safeParse("staff_assisted").success).toBe(true);
-    expect(StaffBooking.shape.source.safeParse("imported").success).toBe(false);
+    expect(StaffBooking.shape.source.safeParse("imported").success).toBe(true);
+    expect(StaffBooking.shape.source.safeParse("ota").success).toBe(false);
   });
 
   it("takes an owner's complimentary grant with a reason, and a note for other", () => {

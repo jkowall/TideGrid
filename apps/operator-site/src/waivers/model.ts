@@ -139,6 +139,8 @@ export function resendFailureText(reason: string): string {
       return "TideGrid couldn't build this email from the booking's details.";
     case "no_address":
       return "The booking has no email address for this person yet.";
+    case "imported_booking":
+      return "This booking was imported from an earlier system. TideGrid doesn't email its waivers yet.";
     case "not_pending":
       return "This waiver no longer needs a signature.";
     case "trip_over":
