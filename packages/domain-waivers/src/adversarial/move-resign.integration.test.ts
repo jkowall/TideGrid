@@ -239,8 +239,12 @@ describe.skipIf(!env)("W3-G2.15-rest: waiver signatures on a moved booking", () 
   it("a move never ends a signature on the version still in effect", async () => {
     const { booked, pid, from, to } = await signedBooking("current.signer");
     const forcing: BookingHooks = {
-      bookingRescheduled: (trx, ctx, event) =>
-        revokeStaleSignatures(trx, ctx, { bookingId: event.bookingId, participantIds: [pid] }),
+      async bookingRescheduled(trx, ctx, event) {
+        await revokeStaleSignatures(trx, ctx, {
+          bookingId: event.bookingId,
+          participantIds: [pid],
+        });
+      },
     };
     expect(await refusal(move(booked.bookingId, from, to, forcing))).toBe(
       "23514:waiver_requests_version_changed",
