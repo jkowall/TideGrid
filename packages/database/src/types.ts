@@ -1116,7 +1116,9 @@ export type WaiverRequestState = "pending" | "signed" | "revoked" | "superseded"
 export type WaiverRevokedReason =
   | "participant_removed"
   | "participant_changed"
-  | "booking_canceled";
+  | "booking_canceled"
+  /** The booking moved, and the version this signature was on no longer applies (0042). */
+  | "version_changed";
 export type WaiverSessionRevokedReason =
   | WaiverRevokedReason
   | "superseded"

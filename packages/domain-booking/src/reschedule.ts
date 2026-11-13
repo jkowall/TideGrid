@@ -21,7 +21,9 @@
  *
  * After the move: the old trip reminder is canceled and a new one written
  * for the new trip, the guest is emailed the new time, and the booking's
- * audit and `booking.rescheduled` event are written.
+ * audit and `booking.rescheduled` event are written. Then the hooks'
+ * `bookingRescheduled` runs: the waiver module keeps each signature only
+ * while the version it signed still applies (owner decision 2026-11-13).
  */
 import { randomUUID } from "node:crypto";
 import { isUuid, type TenantContext, type TenantTransaction } from "@tidegrid/database";
@@ -40,6 +42,7 @@ import {
   REMINDER_TEMPLATE,
   RESCHEDULED_TEMPLATE,
 } from "./emails.ts";
+import { type BookingHooks, noBookingHooks } from "./hooks.ts";
 import { iso, record } from "./views.ts";
 
 /** At most this many trips are offered to move to, soonest first. */
@@ -320,6 +323,8 @@ export interface RescheduleInput {
   toTripId: string;
   /** Staff only: why the policy is set aside. The caller checks the permission. */
   overrideReason?: string | null;
+  /** Run after the move's own writes, in its transaction (waivers re-check their version). */
+  hooks?: BookingHooks | undefined;
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the pattern exists to reject them.
@@ -491,6 +496,12 @@ export async function rescheduleBooking(
   await enqueueRescheduledEmail(trx, ctx, input.bookingId, {
     rescheduleId,
     fromStartsAt: iso(row.starts_at),
+  });
+  await (input.hooks ?? noBookingHooks).bookingRescheduled?.(trx, ctx, {
+    bookingId: input.bookingId,
+    rescheduleId,
+    fromTripId: row.trip_id,
+    toTripId: target.id,
   });
 
   return {

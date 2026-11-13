@@ -13,17 +13,32 @@
  *   by the old name; a corrected address on a pending request sends it there
  *   at once.
  * - bookingCanceled: end every request on the booking.
+ * - bookingRescheduled: a signature carries over to the new trip only while
+ *   the version it signed still applies (owner decision 2026-11-13); one
+ *   signed on an older version ends, and the person is asked to sign the
+ *   version in effect now.
  *
  * None of them refuses: confirmation and party changes never wait on waivers.
  */
 import type { TenantContext, TenantTransaction } from "@tidegrid/database";
-import type { BookingHooks, ParticipantUpdatedEvent } from "@tidegrid/domain-booking";
+import type {
+  BookingHooks,
+  BookingRescheduledEvent,
+  ParticipantUpdatedEvent,
+} from "@tidegrid/domain-booking";
 import { sql } from "kysely";
-import { assignBookingWaivers, lockBookingForWaivers, requiredSignerFor } from "./assign.ts";
+import {
+  assignBookingWaivers,
+  assignmentLockKey,
+  lockBookingForWaivers,
+  requiredSignerFor,
+} from "./assign.ts";
 import { endAssistedAccess } from "./assisted.ts";
+import { loadBookingContext } from "./booking.ts";
 import { sendWaiverRequest } from "./delivery.ts";
 import type { WaiverDeps } from "./ports.ts";
-import { revokeBookingWaivers, revokeParticipantWaivers } from "./revoke.ts";
+import { revokeBookingWaivers, revokeParticipantWaivers, revokeStaleSignatures } from "./revoke.ts";
+import { findApplicableVersion } from "./templates.ts";
 
 export const CORRECTED_ADDRESS_REASON = "The address on the booking was corrected";
 
@@ -100,6 +115,42 @@ export async function onParticipantUpdated(
   }
 }
 
+/**
+ * After a move: each signature on a version that no longer applies ends, and
+ * its person gets a request for the version in effect now. A signature on the
+ * version that still applies carries over untouched. Pending requests are left
+ * to the version move (supersede.ts), which already replaces them.
+ */
+export async function onBookingRescheduled(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  deps: WaiverDeps,
+  event: BookingRescheduledEvent,
+): Promise<{ resigned: number }> {
+  const locked = await lockBookingForWaivers(trx, ctx.tenantId, event.bookingId);
+  if (locked?.state !== "confirmed") return { resigned: 0 };
+  const booking = await loadBookingContext(trx, ctx.tenantId, event.bookingId);
+  if (!booking) return { resigned: 0 };
+  // As an assignment does: the version read here is the one assigned below.
+  await sql`select pg_advisory_xact_lock_shared(hashtextextended(${assignmentLockKey(ctx.tenantId)}, 0))`.execute(
+    trx,
+  );
+  const version = await findApplicableVersion(trx, ctx.tenantId, booking.productId);
+  // No waiver applies now: nothing to sign again, and signatures stay.
+  if (!version) return { resigned: 0 };
+  const { rows } = await sql<{ participant_id: string }>`
+    select participant_id from waiver_requests
+     where tenant_id = ${ctx.tenantId} and booking_id = ${event.bookingId}
+       and state = 'signed'
+       and (template_id <> ${version.templateId} or template_version <> ${version.version})
+     order by participant_id`.execute(trx);
+  if (rows.length === 0) return { resigned: 0 };
+  const participantIds = rows.map((r) => r.participant_id);
+  await revokeStaleSignatures(trx, ctx, { bookingId: event.bookingId, participantIds });
+  await assignBookingWaivers(trx, ctx, deps, { bookingId: event.bookingId, participantIds });
+  return { resigned: participantIds.length };
+}
+
 /** The hooks the API passes on every path that confirms a booking or changes its party. */
 export function createWaiverHooks(deps: WaiverDeps): BookingHooks {
   return {
@@ -124,6 +175,9 @@ export function createWaiverHooks(deps: WaiverDeps): BookingHooks {
     },
     async bookingCanceled(trx, ctx, event) {
       await revokeBookingWaivers(trx, ctx, { bookingId: event.bookingId });
+    },
+    async bookingRescheduled(trx, ctx, event) {
+      await onBookingRescheduled(trx, ctx, deps, event);
     },
   };
 }

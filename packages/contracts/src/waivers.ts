@@ -208,7 +208,7 @@ export const ParticipantWaiver = z.object({
       id: Uuid,
       state: WaiverRequestState,
       revokedReason: z
-        .enum(["participant_removed", "participant_changed", "booking_canceled"])
+        .enum(["participant_removed", "participant_changed", "booking_canceled", "version_changed"])
         .nullable(),
       requiredSigner: WaiverSignerRole,
       templateName: z.string(),

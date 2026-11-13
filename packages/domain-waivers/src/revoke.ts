@@ -26,10 +26,11 @@ async function revoke(
   trx: TenantTransaction,
   ctx: TenantContext,
   bookingId: string,
-  participantId: string | null,
+  participantIds: readonly string[] | null,
   reason: WaiverRevokedReason,
+  states: readonly ("pending" | "signed")[] = ["pending", "signed"],
 ): Promise<RevokeResult> {
-  if (!isUuid(bookingId) || (participantId !== null && !isUuid(participantId))) {
+  if (!isUuid(bookingId) || (participantIds !== null && !participantIds.every(isUuid))) {
     throw new TypeError("booking and participant ids must be UUIDs");
   }
   await lockBookingForWaivers(trx, ctx.tenantId, bookingId);
@@ -41,8 +42,8 @@ async function revoke(
   }>`
     select id, booking_id, participant_id, state from waiver_requests
      where tenant_id = ${ctx.tenantId} and booking_id = ${bookingId}
-       ${participantId === null ? sql`` : sql`and participant_id = ${participantId}`}
-       and state in ('pending', 'signed')
+       ${participantIds === null ? sql`` : sql`and participant_id = any(${participantIds}::uuid[])`}
+       and state = any(${states}::text[])
      order by id
        for no key update`.execute(trx);
   for (const request of rows) {
@@ -87,9 +88,22 @@ export function revokeParticipantWaivers(
     trx,
     ctx,
     input.bookingId,
-    input.participantId,
+    [input.participantId],
     input.reason ?? "participant_removed",
   );
+}
+
+/**
+ * After a move, these people's signatures were on a version that no longer
+ * applies: each signed request ends, so a new one can be assigned. Only signed
+ * requests; the database checks the booking moved in this transaction.
+ */
+export function revokeStaleSignatures(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  input: { bookingId: string; participantIds: readonly string[] },
+): Promise<RevokeResult> {
+  return revoke(trx, ctx, input.bookingId, input.participantIds, "version_changed", ["signed"]);
 }
 
 /** The booking was canceled: every request on it ends. */

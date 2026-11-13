@@ -443,6 +443,10 @@ W3-G2.14b-rest, part 1. `important_links` holds an operator's named HTTPS links 
 - **Archived is final.** An archived link changes no more, and a link starts active (`important_links_archived`). Its id, tenant, and creation stay as they were (`important_links_identity`). The trigger stamps who changed it and when.
 - **At most 25 active a tenant, and 500 in all with archived ones**, counted under a per-tenant advisory lock (`important_links_limit`, `important_links_total`).
 
+## Waiver version on a move (0042)
+
+W3-G2.15-rest, owner decision 2026-11-13. A waiver request (and a signing session) may be revoked for a new reason, `version_changed`: when a booking moves to another trip and the version a person signed no longer applies, the waiver module ends that signature and assigns the current version. A trigger beside 0010's request rules (`waiver_requests_version_changed`, 23514) allows the reason only from `signed`, and only when a move of the same booking was written since the transaction began (`booking_reschedules.created_at >= now()`).
+
 ## Indexes built concurrently (no-transaction files)
 
 The runner has a second mode for `CREATE INDEX CONCURRENTLY`, which PostgreSQL refuses inside a transaction. It is the D6 A standing rule of the pre-pilot hardening goal, confirmed by the owner on 2026-11-08 ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-owner-confirmation-of-the-coordinator-defaults-owner-decisions)): the mode lands before any pilot-volume table gets a new index. The marker, the one-statement rule, the repair rule, and leaving the 0005 constraints alone (D1 to D4) are coordinator defaults, pending owner confirmation ([decision register](../../docs/v2/06-decision-register.md#2026-11-08-w1-mig-conc-a-no-transaction-runner-mode-for-create-index-concurrently-owner-go-coordinator-defaults-pending-owner-confirmation)). Update, 2026-11-08: `0022_email_events_index.sql` (W1-EMAIL-EVENTS) is the first file that uses the mode, `0030_refunds_pending_index.sql` (W3-G2.9) the second, and `0032_payments_check_index.sql` (W3-G2.10) the third.

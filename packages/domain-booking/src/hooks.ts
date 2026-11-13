@@ -77,6 +77,13 @@ export interface BookingCanceledEvent {
   refundId: string | null;
 }
 
+export interface BookingRescheduledEvent {
+  bookingId: string;
+  rescheduleId: string;
+  fromTripId: string;
+  toTripId: string;
+}
+
 export interface BookingHooks {
   bookingConfirmed?(
     trx: TenantTransaction,
@@ -102,6 +109,12 @@ export interface BookingHooks {
     trx: TenantTransaction,
     ctx: TenantContext,
     event: BookingCanceledEvent,
+  ): Promise<void>;
+  /** The booking moved to another trip, in the move's transaction, after its own writes. */
+  bookingRescheduled?(
+    trx: TenantTransaction,
+    ctx: TenantContext,
+    event: BookingRescheduledEvent,
   ): Promise<void>;
 }
 

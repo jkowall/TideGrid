@@ -2,6 +2,15 @@
 
 This log records each dated verification pass over the throwaway guest workflow and operator concept prototype in [prototypes/guest-flow](../prototypes/guest-flow/README.md): the automated checks that ran, the browser paths exercised, the widths inspected, and what the independent reviewer found. Entries are newest first and are written by the verification pass after each slice lands, so a reader can see what was proven, by which method, and what was not (browser emulation is not a physical-device test, and none of these passes establish demand, price acceptance, or migration feasibility). Per-document change history is in git; ownership and review rules are in [the build execution and agent plan](v2/10-build-execution-and-agent-plan.md).
 
+## 2026-11-13
+
+### A moved booking keeps its waiver signatures only while the version is unchanged (W3-G2.15-rest), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, migration `0042`, under the owner's decision of 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)). Synthetic data only; no provider call, no deploy.
+
+- **Built.** The booking module's move runs a new `bookingRescheduled` hook in its transaction; the guest's and staff's move routes pass the waiver hooks. The waiver module revokes a signature whose version no longer applies (`version_changed`) and assigns the version in effect now. `0042` adds the reason and holds it to signed requests right after a move.
+- **Proof.** On the local PostgreSQL 17 container (`TIDEGRID_EPHEMERAL_DB=1`): `move-resign.integration.test.ts` (4 cases: a signature on the current version carries over; one on an older version is revoked, the new version is assigned and emailed, and the evidence stays; the database refuses the reason outside a move and on a pending request). The reschedule, party-change, waiver, and API reschedule suites pass unchanged.
+
 ## 2026-11-11
 
 ### Names and typed signatures in other alphabets in the signed PDF (W3-G2.15-rest, part 2), built November 11, 2026
