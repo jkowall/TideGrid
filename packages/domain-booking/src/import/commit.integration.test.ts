@@ -79,6 +79,8 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
     charterRefund?: number;
     /** An opening booking credit for C-1, in cents. */
     credit?: number;
+    /** What the legacy waiver tool said about R-1's first guest. */
+    waiver?: "signed" | "unsigned" | "unknown";
   }
 
   /**
@@ -169,6 +171,14 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
               "sum_trip_count_units,opening_balances.csv,0",
             ]
           : []),
+        ...(o.waiver
+          ? [
+              "row_count,waivers.csv,1",
+              `rows_signed,waivers.csv,${o.waiver === "signed" ? 1 : 0}`,
+              `rows_unsigned,waivers.csv,${o.waiver === "unsigned" ? 1 : 0}`,
+              `rows_unknown,waivers.csv,${o.waiver === "unknown" ? 1 : 0}`,
+            ]
+          : []),
       ].join("\n"),
       "products.csv": [
         "source_product_id,source_product_name,tidegrid_product_id,tidegrid_product_name,product_kind",
@@ -203,6 +213,14 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
             "opening_balances.csv": [
               "source_balance_id,source_customer_id,balance_kind,lot_kind,amount_cents,units,eligible_source_product_ids,expires_on,source_card_ref",
               `OB-1,C-1,booking_credit,,${o.credit},,,,`,
+            ].join("\n"),
+          }
+        : {}),
+      ...(o.waiver
+        ? {
+            "waivers.csv": [
+              "source_booking_ref,trip_date,position,legacy_status,legacy_signed_on,legacy_system",
+              `R-1,${day},1,${o.waiver},${o.waiver === "signed" ? exportedAt.slice(0, 10) : ""},Example Waiver Tool`,
             ].join("\n"),
           }
         : {}),
@@ -274,6 +292,7 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
       payments: 3,
       refunds: 1,
       credits: 0,
+      waivers: 0,
       unchanged: 0,
     });
 
@@ -806,6 +825,68 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, parts A and B)", 
               idempotency_key)
             values (${D.id}, ${account?.id ?? ""}, 'import', 100, ${ledger?.id ?? ""},
                     ${`test:${randomUUID()}`})`.execute(trx),
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("keeps what an earlier waiver tool said, for staff to read, once", async () => {
+    // Tenant D's records are in; this batch repeats them with a waiver status.
+    await dryRun(D, ownerD, { batchId: "WAIV-1", charterPaid: 0, waiver: "signed" });
+    const saved = await commit(D, ownerD, {
+      batchId: "WAIV-1",
+      run: 2,
+      charterPaid: 0,
+      waiver: "signed",
+    });
+    if (saved.kind !== "committed") throw new Error(JSON.stringify(saved));
+    expect(saved.counts).toMatchObject({ waivers: 1, participants: 0, bookings: 0 });
+    const rows = await admin<{ status: string; name: string; system: string; signed: string }[]>`
+      select w.legacy_status as status, p.full_name as name, w.legacy_system as system,
+             to_char(w.legacy_signed_on, 'YYYY-MM-DD') as signed
+        from public.import_waiver_statuses w
+        join public.booking_participants p on p.id = w.participant_id
+       where w.tenant_id = ${D.id}`;
+    expect(rows).toEqual([
+      {
+        status: "signed",
+        name: "Ima Sample",
+        system: "Example Waiver Tool",
+        signed: exportedAt.slice(0, 10),
+      },
+    ]);
+    // It is information only: no TideGrid signature appears for it.
+    const [signed] = await admin<{ n: number }[]>`
+      select count(*)::int as n from public.waiver_evidence where tenant_id = ${D.id}`;
+    expect(signed?.n).toBe(0);
+    // The same row again is a no-op; a changed one is refused.
+    await dryRun(D, ownerD, { batchId: "WAIV-2", charterPaid: 0, waiver: "signed" });
+    const again = await commit(D, ownerD, {
+      batchId: "WAIV-2",
+      run: 2,
+      charterPaid: 0,
+      waiver: "signed",
+    });
+    if (again.kind !== "committed") throw new Error(JSON.stringify(again));
+    expect(again.counts.waivers).toBe(0);
+    const changed = await dryRun(D, ownerD, {
+      batchId: "WAIV-3",
+      charterPaid: 0,
+      waiver: "unknown",
+    });
+    expect(changed.result.issues).toContainEqual(
+      expect.objectContaining({ file: "waivers.csv", code: "changed_since_import" }),
+    );
+    // No other writer adds a legacy status.
+    const ctx = staffCtx(D.id, ownerD);
+    const [ledger] = await admin<{ id: string }[]>`
+      select id from public.import_records where tenant_id = ${D.id} and file = 'waivers.csv'`;
+    const [guest] = await admin<{ id: string }[]>`
+      select participant_id as id from public.import_records
+       where tenant_id = ${D.id} and file = 'participants.csv' limit 1`;
+    await expect(
+      inTenantTransaction(runtime.db, ctx, (trx) =>
+        sql`insert into import_waiver_statuses (record_id, tenant_id, participant_id, legacy_status)
+            values (${ledger?.id ?? ""}, ${D.id}, ${guest?.id ?? ""}, 'unknown')`.execute(trx),
       ),
     ).rejects.toMatchObject({ code: "23514" });
   });

@@ -1364,7 +1364,8 @@ export type SweepName =
   | "hostname"
   | "outbox"
   | "waiver_reminder"
-  | "reconciliation";
+  | "reconciliation"
+  | "import_waiver_email";
 
 /**
  * When a sweep last started a turn for a tenant (0013, pre-pilot hardening).
@@ -1499,6 +1500,9 @@ export interface Database
   import_records: ImportRecordsTable;
   import_customers: ImportCustomersTable;
   import_bookings: ImportBookingsTable;
+  import_waiver_statuses: ImportWaiverStatusesTable;
+  import_email_releases: ImportEmailReleasesTable;
+  import_waiver_email_done: ImportWaiverEmailDoneTable;
   important_links: ImportantLinksTable;
 }
 
@@ -1891,7 +1895,9 @@ export type ImportFileName =
   | "participants.csv"
   | "payments.csv"
   /** Opening booking credit (0046). */
-  | "opening_balances.csv";
+  | "opening_balances.csv"
+  /** Legacy waiver status (0047). */
+  | "waivers.csv";
 
 /** One imported record of a commit (0044). Append-only; unique by source system, file, key. */
 export interface ImportRecordsTable {
@@ -1920,6 +1926,36 @@ export interface ImportCustomersTable {
   full_name: Fixed<string>;
   email: FixedDefault<string | null>;
   phone: FixedDefault<string | null>;
+  created_at: Stamped;
+}
+
+/** What the legacy waiver tool said about an imported participant (0047): information only. */
+export interface ImportWaiverStatusesTable {
+  record_id: Fixed<string>;
+  tenant_id: TenantColumn;
+  participant_id: Fixed<string>;
+  legacy_status: Fixed<"signed" | "unsigned" | "unknown">;
+  legacy_signed_on: FixedDefault<string | null>;
+  legacy_system: FixedDefault<string | null>;
+  created_at: Stamped;
+}
+
+/** An owner's release of a batch's held waiver email (0048). Append-only, once a batch. */
+export interface ImportEmailReleasesTable {
+  id: Generated<string>;
+  tenant_id: TenantColumn;
+  run_id: Fixed<string>;
+  created_at: Stamped;
+  actor_type: ColumnType<ActorType, never, never>;
+  actor_id: ColumnType<string | null, never, never>;
+  request_id: ColumnType<string | null, never, never>;
+}
+
+/** A booking the import waiver sweep finished for a batch (0048). Append-only. */
+export interface ImportWaiverEmailDoneTable {
+  tenant_id: TenantColumn;
+  run_id: Fixed<string>;
+  booking_id: Fixed<string>;
   created_at: Stamped;
 }
 

@@ -31093,6 +31093,42 @@
                                   "sharedAddress",
                                   "reminders"
                                 ]
+                              },
+                              "legacy": {
+                                "type": [
+                                  "object",
+                                  "null"
+                                ],
+                                "properties": {
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "signed",
+                                      "unsigned",
+                                      "unknown"
+                                    ]
+                                  },
+                                  "signedOn": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "YYYY-MM-DD, only with signed"
+                                  },
+                                  "system": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ],
+                                    "description": "The legacy waiver tool's name"
+                                  }
+                                },
+                                "required": [
+                                  "status",
+                                  "signedOn",
+                                  "system"
+                                ],
+                                "description": "What the legacy waiver tool said about an imported participant: information only, never a TideGrid signature; null when the import brought none"
                               }
                             },
                             "required": [
@@ -31101,7 +31137,8 @@
                               "name",
                               "minor",
                               "status",
-                              "request"
+                              "request",
+                              "legacy"
                             ]
                           },
                           "description": "By place in the party"
@@ -31819,6 +31856,42 @@
                                     "sharedAddress",
                                     "reminders"
                                   ]
+                                },
+                                "legacy": {
+                                  "type": [
+                                    "object",
+                                    "null"
+                                  ],
+                                  "properties": {
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "signed",
+                                        "unsigned",
+                                        "unknown"
+                                      ]
+                                    },
+                                    "signedOn": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "YYYY-MM-DD, only with signed"
+                                    },
+                                    "system": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ],
+                                      "description": "The legacy waiver tool's name"
+                                    }
+                                  },
+                                  "required": [
+                                    "status",
+                                    "signedOn",
+                                    "system"
+                                  ],
+                                  "description": "What the legacy waiver tool said about an imported participant: information only, never a TideGrid signature; null when the import brought none"
                                 }
                               },
                               "required": [
@@ -31827,7 +31900,8 @@
                                 "name",
                                 "minor",
                                 "status",
-                                "request"
+                                "request",
+                                "legacy"
                               ]
                             },
                             "description": "By place in the party"
@@ -32237,7 +32311,7 @@
             }
           },
           "409": {
-            "description": "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the booking was imported from an earlier system (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
+            "description": "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the guest was imported in a batch whose waiver email is held until an owner releases it (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
             "content": {
               "application/json": {
                 "schema": {
@@ -46420,7 +46494,7 @@
           "imports"
         ],
         "summary": "Save a standard CSV import batch",
-        "description": "Owners only (imports.run). The batch must follow its latest run, a clean dry run of the same files (the content hash leaves out the manifest's batch_mode and run_number), with batch_mode commit and the next run number. The files are checked again against TideGrid as it is now; a clean result is saved all or nothing: future trips (new departures in draft), customers, bookings with their participants, and legacy payments and refunds, labeled as imported and taken outside TideGrid. Rows imported before with the same values are left as they are; changed ones are refused. Charter balances, opening balances, and waiver status are refused for now. No email is sent and no provider is called.\n\nA commit that no longer passes its checks, or meets a change in TideGrid while saving, saves nothing and answers 200 with committed false; it is recorded, so the next try needs a fresh dry run. Idempotent by key.",
+        "description": "Owners only (imports.run). The batch must follow its latest run, a clean dry run of the same files (the content hash leaves out the manifest's batch_mode and run_number), with batch_mode commit and the next run number. The files are checked again against TideGrid as it is now; a clean result is saved all or nothing: future trips (new departures in draft), customers, bookings with their participants, and legacy payments and refunds, labeled as imported and taken outside TideGrid. Rows imported before with the same values are left as they are; changed ones are refused. Private charters may carry a balance due before their trip; booking credit goes on the customer's credit account; legacy waiver status is kept for staff to read, as information only. Saving sends no email and calls no provider. Waiver email follows afterwards: the cron sends the batch's guests their waiver requests a few bookings at a time, under an hourly cap per operator, right away for a batch saved with waiver_notifications send_at_cutover, and once an owner releases it (POST .../import-runs/{runId}/waiver-email) for one saved with hold_until_staff_release. The booking's own emails are not sent for imported bookings.\n\nA commit that no longer passes its checks, or meets a change in TideGrid while saving, saves nothing and answers 200 with committed false; it is recorded, so the next try needs a fresh dry run. Idempotent by key.",
         "security": [
           {
             "accessJwt": []
@@ -46826,6 +46900,10 @@
                           "type": "integer",
                           "description": "Opening booking credits carried over"
                         },
+                        "waivers": {
+                          "type": "integer",
+                          "description": "Legacy waiver statuses saved for staff to read"
+                        },
                         "unchanged": {
                           "type": "integer",
                           "description": "Rows imported before with the same values: nothing written for them"
@@ -46840,6 +46918,7 @@
                         "payments",
                         "refunds",
                         "credits",
+                        "waivers",
                         "unchanged"
                       ],
                       "description": "What the commit wrote"
@@ -47063,6 +47142,259 @@
           },
           "422": {
             "description": "More new rows than one commit writes (import_too_large); send the export as several batches. Or idempotency_key_reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/staff/tenants/{tenantId}/import-runs/{runId}/waiver-email": {
+      "post": {
+        "tags": [
+          "staff",
+          "imports",
+          "waivers"
+        ],
+        "summary": "Release a saved batch's waiver email",
+        "description": "Owners only (imports.run). A batch saved with waiver_notifications hold_until_staff_release emails its guests nothing until an owner releases it here, once; the cron then sends their waiver requests a few bookings at a time, under an hourly cap per operator, for confirmed bookings whose trip has not left. A batch saved with send_at_cutover needs no release. Safe to repeat: a later call records nothing and reports how many of the batch's bookings the cron has still to email.\n\nOnly waiver email: the booking's own emails (confirmation, reminders, balance, cancellation) stay held for imported bookings. Idempotent by key.",
+        "security": [
+          {
+            "accessJwt": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Tenant UUID; anything else answers 404"
+            },
+            "required": true,
+            "description": "Tenant UUID; anything else answers 404",
+            "name": "tenantId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "A saved batch's run UUID (the commit's run.id); anything else answers 404"
+            },
+            "required": true,
+            "description": "A saved batch's run UUID (the commit's run.id); anything else answers 404",
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{8,255}$",
+              "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal."
+            },
+            "required": true,
+            "description": "Client-generated; a UUID is recommended. Scoped by tenant, operation, and principal.",
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether this call released the batch, and what is still waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "releasedNow": {
+                      "type": "boolean",
+                      "description": "True when this call released a batch saved with hold_until_staff_release; false when it was released before or never held"
+                    },
+                    "waitingBookings": {
+                      "type": "integer",
+                      "description": "The batch's confirmed bookings, trip not yet left, that the cron has still to email; it sends a few at a time"
+                    }
+                  },
+                  "required": [
+                    "runId",
+                    "releasedNow",
+                    "waitingBookings"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request did not match the contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Role does not allow this",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such tenant, or no saved batch with this id (import_run_not_found)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "idempotency_key_reused",
             "content": {
               "application/json": {
                 "schema": {

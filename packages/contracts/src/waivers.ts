@@ -284,6 +284,16 @@ export const ParticipantWaiver = z.object({
         .describe("Reminder emails before departure: 72 and 24 hours before, none within 2 hours"),
     })
     .nullable(),
+  legacy: z
+    .object({
+      status: z.enum(["signed", "unsigned", "unknown"]),
+      signedOn: z.string().nullable().describe("YYYY-MM-DD, only with signed"),
+      system: z.string().nullable().describe("The legacy waiver tool's name"),
+    })
+    .nullable()
+    .describe(
+      "What the legacy waiver tool said about an imported participant: information only, never a TideGrid signature; null when the import brought none",
+    ),
 });
 export type ParticipantWaiver = z.infer<typeof ParticipantWaiver>;
 

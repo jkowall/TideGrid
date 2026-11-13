@@ -130,6 +130,7 @@ export const ImportCommitCounts = z
     payments: z.number().int(),
     refunds: z.number().int(),
     credits: z.number().int().describe("Opening booking credits carried over"),
+    waivers: z.number().int().describe("Legacy waiver statuses saved for staff to read"),
     unchanged: z
       .number()
       .int()
@@ -156,3 +157,26 @@ export const ImportCommitResponse = ImportDryRunResponse.extend({
   counts: ImportCommitCounts.nullable(),
 });
 export type ImportCommitResponse = z.infer<typeof ImportCommitResponse>;
+
+export const ImportRunParams = z.object({
+  tenantId: z.string().describe("Tenant UUID; anything else answers 404"),
+  runId: z
+    .string()
+    .describe("A saved batch's run UUID (the commit's run.id); anything else answers 404"),
+});
+
+export const ImportWaiverEmailResponse = z.object({
+  runId: z.uuid(),
+  releasedNow: z
+    .boolean()
+    .describe(
+      "True when this call released a batch saved with hold_until_staff_release; false when it was released before or never held",
+    ),
+  waitingBookings: z
+    .number()
+    .int()
+    .describe(
+      "The batch's confirmed bookings, trip not yet left, that the cron has still to email; it sends a few at a time",
+    ),
+});
+export type ImportWaiverEmailResponse = z.infer<typeof ImportWaiverEmailResponse>;

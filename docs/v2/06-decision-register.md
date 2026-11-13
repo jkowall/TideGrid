@@ -8,6 +8,27 @@ Use this register when V2 conflicts with the V1 specification, schema, API, diag
 
 Dated decisions that changed scope, wording, or process. Each entry records the reason and points to the canonical document.
 
+### 2026-11-13: W3-G2.13, saving a standard CSV import, part D2, waiver email for imported guests (coordinator defaults pending owner confirmation)
+
+Part D, second half, under the owner's answer to the draft's question 9 (waiver email for imported bookings is on by default, set once per batch). Migration `0048` and the [database README](../../packages/database/README.md#import-waiver-email-0048); API `POST /v1/staff/tenants/{tenantId}/import-runs/{runId}/waiver-email`. Coordinator defaults, pending owner confirmation:
+
+- **D1: the cron sends, the save does not.** Saving a batch sends no email and creates no waiver request, so a large batch's save stays short. The cron's import waiver sweep then gives each booking the batch imported or added guests to its waiver requests and emails them: at once for `send_at_cutover`, and after an owner's release for `hold_until_staff_release`. Until then staff "send again" answers `waiver_imported_booking` for a held guest.
+- **D2: an owner releases, once.** Releasing a held batch is owners only, as importing is, recorded once a batch and audited. Repeating the call is safe; it reports how many of the batch's bookings the cron still has to email.
+- **D3: the batch that imported a guest decides.** A later batch that adds guests to an earlier booking holds or sends their email by its own manifest, whatever the earlier batch said. A guest added in TideGrid follows the batch that imported the booking.
+- **D4: an hourly cap.** The sweep stops starting bookings for an operator once about 100 imported waiver emails are queued in a cron run (one booking's party may go over; about 400 an hour), and stops at once if the operator's own sending limit is reached, so an import never uses up the operator's 1,000 an hour that ordinary bookings need. An email a sending limit holds is tried again on a later run; a guest with no address, a booking that needs no waiver, or a booking that fails never holds up the rest (a failed booking is logged and tried again on a later run). A booking that needed no waiver when the sweep reached it is not revisited if a waiver is published later. Confirmed bookings whose trip has not left only.
+- **D5: only waiver email.** The booking's own emails (confirmation, management link, reminders, balance, cancellation, move notices) and participant invitations stay held for every imported booking, as part A's D4 and D11 say; they need wording for a booking paid before TideGrid, which is a later step. Guests do not pay an imported charter's balance through TideGrid yet.
+
+### 2026-11-13: W3-G2.13, saving a standard CSV import, part D1, legacy waiver status (coordinator defaults pending owner confirmation)
+
+Part D, first half. What the legacy waiver tool said about each imported participant (`waivers.csv`) is saved for staff to read. Migration `0047` and the [database README](../../packages/database/README.md#import-waiver-status-0047). Coordinator defaults, pending owner confirmation:
+
+- **D1: information only.** A legacy status never marks a TideGrid waiver signed, creates evidence, skips a request, or changes a waiver status code, as the draft says. Each imported booking whose trip needs a waiver still gets the normal TideGrid requests.
+- **D2: staff see it, guests do not.** Owners and booking staff see it on the booking's Waivers card, under the TideGrid status, as "Earlier system (tool): signed on date. For reference only; it is not a TideGrid signature." The booker's and the signer's pages do not show it, and the dock lookup does not use it.
+- **D3: one status a participant, set once.** A later batch repeating the row is a no-op; a changed row is refused (`changed_since_import`), as for every imported record. A participant's status is never edited in TideGrid.
+- **D4: the date as given.** The legacy signing date is kept as a date with no time zone, and only with `signed`. No legacy document or signature is imported.
+
+With parts B to D1 built, part A's D8 no longer applies: nothing is refused as not supported yet, and the code `import_not_supported_yet` is retired. A later batch adds no waiver status to an imported booking canceled in TideGrid since (`booking_closed`), as part A's D10 says for participants and payments.
+
 ### 2026-11-13: W3-G2.13, saving a standard CSV import, part C, opening booking credit (coordinator defaults pending owner confirmation)
 
 Part C of the commit step. A customer's booking credit from the legacy system is carried over. Migration `0046` and the [database README](../../packages/database/README.md#import-opening-credit-0046). Coordinator defaults, pending owner confirmation:

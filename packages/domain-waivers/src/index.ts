@@ -74,6 +74,15 @@ export {
   onParticipantUpdated,
 } from "./hooks.ts";
 export {
+  IMPORT_EMAILS_PER_TENANT_RUN,
+  type ImportWaiverReleaseResult,
+  type ImportWaiverSweepOptions,
+  type ImportWaiverSweepReport,
+  releaseImportWaiverEmail,
+  sendImportedBookingWaivers,
+  sweepImportWaiverEmail,
+} from "./import-release.ts";
+export {
   closeRequestAccess,
   requestIdOf,
   WAIVER_LINK_PATH,

@@ -338,7 +338,7 @@ OB-0003,C-1004,trip_count_card,,,5,P-REEF2,2027-12-31,TC-LEG-0207
 
 ## waivers.csv
 
-Legacy waiver status, for information only. A status row never marks a TideGrid waiver signed, creates evidence, or skips a request. Each imported booking whose product requires a waiver gets the normal TideGrid waiver requests, as every booking source does. The manifest's `waiver_notifications` decides whether those requests are emailed at cutover or held until staff release them. The legacy status shows to staff beside the TideGrid status, labeled as legacy.
+Legacy waiver status, for information only. A status row never marks a TideGrid waiver signed, creates evidence, or skips a request. Each imported booking whose product requires a waiver gets the normal TideGrid waiver requests, as every booking source does. The manifest's `waiver_notifications` decides whether those requests are emailed at cutover or held until staff release them. (Built in part D2: the cron sends that email after the save, about 100 per operator a run, and an owner releases a held batch through `POST /v1/staff/tenants/{tenantId}/import-runs/{runId}/waiver-email`.) The legacy status shows to staff beside the TideGrid status, labeled as legacy (built in part D1: owners and booking staff see it on the booking's Waivers card; guests never do).
 
 | Column | Type | Required | Rule |
 |---|---|---|---|

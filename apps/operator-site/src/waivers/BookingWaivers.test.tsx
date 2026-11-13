@@ -48,6 +48,7 @@ function participant(
       reminders: { sent: [], next: null },
       ...overrides,
     },
+    legacy: null,
   };
 }
 
@@ -168,6 +169,69 @@ describe("a booking's waivers", () => {
     );
     expect(ben).toBeTruthy();
     expect(screen.getAllByText(/Reminder/)).toHaveLength(1);
+  });
+
+  it("shows what an earlier waiver tool said, labeled as reference only", async () => {
+    const imported: BookingWaivers = {
+      ...waivers,
+      participants: [
+        {
+          ...participant("Cal Imported", "waiting", {}, 1),
+          legacy: { status: "signed", signedOn: "2027-01-06", system: "Example Waiver Tool" },
+        },
+        {
+          ...participant("Dee Imported", "waiting", {}, 2),
+          legacy: { status: "unknown", signedOn: null, system: null },
+        },
+      ],
+    };
+    stubApi(() => json(200, { waivers: imported }));
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={bookingStaff}
+        timeZone="America/New_York"
+      />,
+    );
+    expect(
+      await screen.findByText(
+        "Earlier system (Example Waiver Tool): signed on 2027-01-06. For reference only; it is not a TideGrid signature.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Earlier system: status unknown. For reference only; it is not a TideGrid signature.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("shows an earlier tool's status even when no TideGrid waiver applies", async () => {
+    const noWaiver: BookingWaivers = {
+      ...waivers,
+      required: false,
+      participants: [
+        {
+          ...participant("Eve Imported", "waiting", {}, 1),
+          request: null,
+          legacy: { status: "unsigned", signedOn: null, system: null },
+        },
+      ],
+    };
+    stubApi(() => json(200, { waivers: noWaiver }));
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={bookingStaff}
+        timeZone="America/New_York"
+      />,
+    );
+    expect(
+      await screen.findByText(
+        "Earlier system: not signed. For reference only; it is not a TideGrid signature.",
+      ),
+    ).toBeTruthy();
   });
 
   it("says no more reminders only once no email is on its way", async () => {

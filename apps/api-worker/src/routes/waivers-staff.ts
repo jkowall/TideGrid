@@ -114,6 +114,7 @@ export function bookingWaiversJson(b: BookingWaivers): BookingWaiversJson {
             },
           }
         : null,
+      legacy: p.legacy,
     })),
   };
 }
@@ -299,7 +300,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
       403: errorBody("Role does not allow this"),
       404: errorBody("No such tenant or waiver request (waiver_request_not_found)"),
       409: errorBody(
-        "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the booking was imported from an earlier system (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
+        "The waiver is not waiting for a signature (waiver_not_pending); the participant has no address (waiver_no_address); this participant's waiver went to this address under 10 minutes ago (waiver_resend_too_soon); it was sent 5 times already (waiver_resend_limit); a sending limit across requests for the participant, the address, the booking, or the operator is reached (waiver_resend_rate_limited); the trip has ended (waiver_trip_over); the email could not be built (waiver_email_invalid); or the guest was imported in a batch whose waiver email is held until an owner releases it (waiver_imported_booking). A refusal is final for its Idempotency-Key: send again with a new key",
       ),
       422: errorBody("idempotency_key_reused"),
     },
@@ -390,7 +391,7 @@ export function registerWaiverStaffRoutes(app: OpenAPIHono<AppEnv>, deps: AppDep
           case "imported_booking":
             return refuse(
               "waiver_imported_booking",
-              "This booking was imported from an earlier system, and TideGrid does not email its waivers yet",
+              "This guest was imported in a batch whose waiver email is held until an owner releases it",
             );
         }
       },
