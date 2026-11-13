@@ -42752,7 +42752,7 @@
             }
           },
           "409": {
-            "description": "Nothing is owed (nothing_owed), or email is off here (booking_email_off)",
+            "description": "Nothing is owed (nothing_owed), email is off here (booking_email_off), or the booking was imported from an earlier system (booking_imported)",
             "content": {
               "application/json": {
                 "schema": {

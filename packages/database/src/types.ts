@@ -685,7 +685,10 @@ export interface OrdersTable {
   tax_amount: Fixed<number>;
   included_tax_amount: Fixed<number>;
   total_amount: Fixed<number>;
-  /** The quote's deposit and balance due instant (0033); null paid in full. */
+  /**
+   * The quote's deposit and balance due instant (0033); null paid in full. On
+   * an imported charter's order, what came in before TideGrid, which may be 0 (0045).
+   */
   deposit_amount: FixedDefault<number | null>;
   balance_due_at: ColumnType<Date | null, Date | string | null | undefined, never>;
   status: ColumnType<OrderStatus, "pending" | undefined, OrderStatus>;

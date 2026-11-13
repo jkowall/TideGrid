@@ -200,6 +200,12 @@ export interface ImportPlan {
       total: number;
     } | null;
     bookedAt: string | null;
+    /**
+     * A private charter's outstanding balance: what came in before TideGrid
+     * (its deposit, which may be 0) and the local date it falls due, before
+     * the trip. Null when it is paid in full.
+     */
+    balance: { paidBefore: number; dueDate: string } | null;
   })[];
   participants: (PlannedRow & {
     bookingKey: string;
@@ -1684,6 +1690,8 @@ export async function validateImport(
   }
   let outstanding = 0;
   const owing = new Map<BookingPlan, number>();
+  /** A charter's balance, by its bookings.csv row: what came in, and the due date. */
+  const balances = new Map<Row, { paidBefore: number; dueDate: string }>();
   for (const [, plan] of bookingPlans) {
     if (plan.ota || plan.row.refused) continue;
     const sums = paid.get(plan) ?? { in: 0, out: 0 };
@@ -1710,16 +1718,32 @@ export async function validateImport(
       );
       continue;
     }
+    const dueDate = s(plan.row, "balance_due_date") as string;
+    if (dueDate >= plan.trip.localDate) {
+      report.add(
+        "bookings.csv",
+        plan.row,
+        "balance_due_date",
+        "balance_due_after_trip",
+        `A balance falls due before the trip; the trip is on ${plan.trip.localDate}.`,
+        dueDate,
+      );
+      continue;
+    }
+    // TideGrid reads a charter's balance from the money that came in, so a
+    // refund on a booking that still owes cannot be taken over as such.
+    if (sums.out > 0) {
+      report.add(
+        "bookings.csv",
+        plan.row,
+        "balance_due_date",
+        "refund_with_balance",
+        "A charter that still owes a balance has a refund; net the refund out of its payments in the export.",
+      );
+      continue;
+    }
     owing.set(plan, left);
-    report.add(
-      "bookings.csv",
-      plan.row,
-      "balance_due_date",
-      "import_not_supported_yet",
-      "A charter balance is checked, but saving it comes with a later part of the import.",
-      null,
-      notYet,
-    );
+    balances.set(plan.row, { paidBefore: sums.in - sums.out, dueDate });
   }
 
   // Capacity, in file order: rows that would overbook are refused.
@@ -2145,6 +2169,7 @@ export async function validateImport(
                 total: n(row, "total_cents") as number,
               },
         bookedAt: opt(row, "booked_at"),
+        balance: balances.get(row) ?? null,
       };
     }),
     participants: accepted("participants.csv").map((row) => ({

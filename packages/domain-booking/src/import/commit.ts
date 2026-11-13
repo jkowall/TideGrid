@@ -550,10 +550,16 @@ async function writePlan(
       insert into orders (tenant_id, checkout_session_id, quote_id, trip_id, product_id,
         party_size, policy_version, currency, subtotal_amount, discount_amount, fee_amount,
         tax_amount, included_tax_amount, total_amount, deposit_amount, balance_due_at)
-      values (${tenantId}, ${checkoutId}, null, ${trip.id}, ${trip.productId}, ${b.partySize},
-              ${policyVersion}, 'USD', ${amounts?.subtotal ?? 0}, ${amounts?.discount ?? 0},
-              ${amounts?.fee ?? 0}, ${amounts?.tax ?? 0}, ${amounts?.includedTax ?? 0},
-              ${amounts?.total ?? 0}, null, null)
+      select ${tenantId}, ${checkoutId}, null, t.id, ${trip.productId}, ${b.partySize},
+             ${policyVersion}, 'USD', ${amounts?.subtotal ?? 0}, ${amounts?.discount ?? 0},
+             ${amounts?.fee ?? 0}, ${amounts?.tax ?? 0}, ${amounts?.includedTax ?? 0},
+             ${amounts?.total ?? 0}, ${b.balance?.paidBefore ?? null}::int,
+             -- A balance falls due at the end of its local due date.
+             case when ${b.balance?.dueDate ?? null}::date is null then null
+                  else ((${b.balance?.dueDate ?? null}::date + 1)::timestamp
+                        at time zone t.time_zone) end
+        from scheduled_trips t
+       where t.tenant_id = ${tenantId} and t.id = ${trip.id}
       returning id`.execute(trx);
     const orderId = orders[0]?.id;
     if (!orderId) throw new Error("an imported order insert returned no row");

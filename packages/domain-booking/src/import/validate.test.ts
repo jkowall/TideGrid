@@ -159,12 +159,6 @@ describe("the standard CSV import's dry run (W3-G2.13)", () => {
     // commit cannot save yet (a charter balance, opening balances, waivers).
     expect(run.issues).toEqual([
       expect.objectContaining({
-        file: "bookings.csv",
-        line: 4,
-        code: "import_not_supported_yet",
-        severity: "warning",
-      }),
-      expect.objectContaining({
         file: "participants.csv",
         line: 5,
         code: "participant_email_missing",
@@ -318,6 +312,28 @@ PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
     expect(run.issues.filter((i) => i.file === "bookings.csv").map((i) => i.code)).toContain(
       "refunds_exceed_total",
     );
+  });
+
+  it("plans a charter's balance, due before its trip and with no refund", async () => {
+    let run = await validateImport(sample(), lookup(), NOW);
+    const charter = run.plan?.bookings.find((b) => b.key.includes("LB-5003"));
+    expect(charter?.balance).toEqual({ paidBefore: 40000, dueDate: "2027-04-05" });
+    expect(run.plan?.bookings.filter((b) => b.balance !== null)).toHaveLength(1);
+    const codes = (file: string) => run.issues.filter((i) => i.file === file).map((i) => i.code);
+
+    const late = sample();
+    late["bookings.csv"] = (late["bookings.csv"] as string).replace(
+      "128400,2027-04-05,",
+      "128400,2027-04-12,",
+    );
+    run = await validateImport(late, lookup(), NOW);
+    expect(codes("bookings.csv")).toContain("balance_due_after_trip");
+
+    const refunded = sample();
+    refunded["payments.csv"] =
+      `${refunded["payments.csv"]}PAY-9005,LB-5003,2027-04-12,refund,1000,check,,2027-02-11T09:05:00-05:00\n`;
+    run = await validateImport(refunded, lookup(), NOW);
+    expect(codes("bookings.csv")).toContain("refund_with_balance");
   });
 
   it("refuses a trip the database's zone data reads differently, with its bookings", async () => {

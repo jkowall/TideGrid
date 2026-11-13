@@ -197,7 +197,9 @@ export type SendBalanceLinkResult =
   | { kind: "not_found" }
   /** Nothing is owed, or the booking was canceled or its trip has left. */
   | { kind: "nothing_owed" }
-  | { kind: "rate_limited"; limit: number };
+  | { kind: "rate_limited"; limit: number }
+  /** An imported booking: its email is held until the import releases it. */
+  | { kind: "imported_booking" };
 
 /**
  * Email the booker the balance link now, at staff's request: at most three an
@@ -232,8 +234,8 @@ export async function sendBalanceLink(
     kind: "link",
     dedupeKey: `booking.balance_link:${bookingId}:${crypto.randomUUID()}`,
   });
-  // An imported booking (W3-G2.13) carries no balance yet, so never gets here.
-  if (!done) throw new Error("an imported booking has no balance link");
+  // An imported booking's email is held (W3-G2.13).
+  if (!done) return { kind: "imported_booking" };
   await record(trx, ctx, {
     action: "booking.balance_link_sent",
     subjectType: "booking",

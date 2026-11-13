@@ -63,6 +63,8 @@ export const IMPORT_ISSUE_CODES = [
   "booking_closed",
   "unexpected_balance",
   "balance_due_date_missing",
+  "balance_due_after_trip",
+  "refund_with_balance",
   "position_out_of_range",
   "guardian_required",
   "guardian_not_allowed",

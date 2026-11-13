@@ -9,6 +9,8 @@ import { createDb, inTenantTransaction, type TenantContext } from "@tidegrid/dat
 import type {} from "@tidegrid/database/global-setup";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { sendBalanceLink } from "../balance.ts";
+import { getBookingBalance } from "../balance-read.ts";
 import { cancelBooking, staffCancelBooking } from "../cancel.ts";
 import { inviteParticipant } from "../invitations.ts";
 import { type CheckoutFixture, createCheckoutFixture, guestContext } from "../test-fixtures.ts";
@@ -29,6 +31,12 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
   let ownerB: string;
   let day: string;
   let exportedAt: string;
+  /** The day before the trips, when a charter's balance falls due. */
+  let dueDay: string;
+  let C: CheckoutFixture;
+  let D: CheckoutFixture;
+  let ownerC: string;
+  let ownerD: string;
 
   async function member(tenantId: string, role: "owner" | "booking_staff"): Promise<string> {
     const id = randomUUID();
@@ -59,6 +67,8 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     renameC1?: string;
     /** A further cash payment on R-2. */
     extraPayment?: boolean;
+    /** What came in on the R-3 charter, when less than its total: it then owes a balance. */
+    charterPaid?: number;
   }
 
   /**
@@ -72,7 +82,10 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     const bookings = [
       ["R-1", `R-1,${day},T-AM,C-1,direct,,,${party},10000,0,0,0,0,10000,,${exportedAt}`],
       ["R-2", `R-2,${day},T-PM,C-2,staff_assisted,phone,,2,8000,0,0,0,0,8000,,`],
-      ["R-3", `R-3,${day},T-CH,C-2,direct,,,3,50000,0,0,0,0,50000,,`],
+      [
+        "R-3",
+        `R-3,${day},T-CH,C-2,direct,,,3,50000,0,0,0,0,50000,${o.charterPaid === undefined ? "" : dueDay},`,
+      ],
     ].filter(([ref]) => !skip.has(ref as string));
     const participants = [
       ["R-1", `R-1,${day},1,Ima Sample,false,ima.sample@example.test,,`],
@@ -82,7 +95,14 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
     const payments = [
       ["R-1", `PAY-1,R-1,${day},payment,12500,cash,,${exportedAt}`],
       ["R-1", `PAY-2,R-1,${day},refund,2500,cash,,${exportedAt}`],
-      ["R-3", `PAY-3,R-3,${day},payment,50000,check,CHK-77,${exportedAt}`],
+      ...(o.charterPaid === 0
+        ? []
+        : [
+            [
+              "R-3",
+              `PAY-3,R-3,${day},payment,${o.charterPaid ?? 50000},check,CHK-77,${exportedAt}`,
+            ],
+          ]),
       ["R-2", `PAY-4,R-2,${day},payment,8000,bank_transfer,,${exportedAt}`],
       ...(o.extraPayment ? [["R-2", `PAY-5,R-2,${day},payment,100,cash,,${exportedAt}`]] : []),
     ].filter(([ref]) => !skip.has(ref as string));
@@ -181,14 +201,22 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
       createCheckoutFixture(admin, runtime.db, "imc-a", { days: 6 }),
       createCheckoutFixture(admin, runtime.db, "imc-b", { days: 6 }),
     ]);
+    [C, D] = await Promise.all([
+      createCheckoutFixture(admin, runtime.db, "imc-c", { days: 6 }),
+      createCheckoutFixture(admin, runtime.db, "imc-d", { days: 6 }),
+    ]);
+    ownerC = await member(C.id, "owner");
+    ownerD = await member(D.id, "owner");
     ownerA = await member(A.id, "owner");
     deskA = await member(A.id, "booking_staff");
     ownerB = await member(B.id, "owner");
-    const [clock] = await admin<{ day: string; exported: string }[]>`
+    const [clock] = await admin<{ day: string; due: string; exported: string }[]>`
       select ((now() at time zone 'UTC')::date + 3)::text as day,
+             ((now() at time zone 'UTC')::date + 2)::text as due,
              to_char((now() - interval '1 hour') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as exported`;
     day = clock?.day ?? "";
     exportedAt = clock?.exported ?? "";
+    dueDay = clock?.due ?? "";
   }, 180_000);
 
   afterAll(async () => {
@@ -540,5 +568,42 @@ describe.skipIf(!env)("saving a standard CSV import (W3-G2.13, part A)", () => {
         inviteParticipant(trx, ctx, { bookingId: booking.id, position: 1 }),
       ),
     ).toEqual({ kind: "imported_booking" });
+  });
+
+  it("takes over a charter's balance: what came in, and what is owed by when", async () => {
+    for (const [t, owner, paid] of [
+      [C, ownerC, 20000],
+      [D, ownerD, 0],
+    ] as const) {
+      await dryRun(t, owner, { batchId: "BAL-1", charterPaid: paid });
+      const saved = await commit(t, owner, { batchId: "BAL-1", run: 2, charterPaid: paid });
+      if (saved.kind !== "committed") throw new Error(JSON.stringify(saved));
+      expect(saved.counts.payments).toBe(paid === 0 ? 2 : 3);
+      const [row] = await admin<{ id: string; due: string }[]>`
+        select b.id, to_char(o.balance_due_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI') as due
+          from public.bookings b
+          join public.orders o on o.id = b.order_id
+          join public.import_bookings ib on ib.checkout_session_id = b.checkout_session_id
+          join public.import_records r on r.id = ib.record_id
+         where b.tenant_id = ${t.id} and r.external_id = 'R-3'`;
+      if (!row) throw new Error("no imported charter");
+      // Due at the end of its local due date (the batch's zone is UTC).
+      expect(row.due).toBe(`${day}T00:00`);
+      const ctx = staffCtx(t.id, owner);
+      const balance = await inTenantTransaction(runtime.db, ctx, (trx) =>
+        getBookingBalance(trx, t.id, row.id),
+      );
+      expect(balance).toMatchObject({
+        state: "due",
+        total: 50000,
+        deposit: paid,
+        paidIn: paid,
+        owed: 50000 - paid,
+      });
+      // Its email is held: no balance link goes out.
+      expect(
+        await inTenantTransaction(runtime.db, ctx, (trx) => sendBalanceLink(trx, ctx, row.id)),
+      ).toEqual({ kind: "imported_booking" });
+    }
   });
 });

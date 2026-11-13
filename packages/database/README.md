@@ -435,6 +435,10 @@ W3-G2.13, part 1. `import_runs` records each dry run of the standard CSV import:
 - **Owners only.** The insert trigger stamps the actor and time and requires a staff actor who is an active `owner` member (`import_runs_owner`, 42501).
 - **One batch, one source.** `(tenant_id, batch_id, run_number)` is unique (`import_runs_run`), and a run whose batch was run before from another source system is refused (`import_runs_source`).
 
+## Import charter balances (0045)
+
+W3-G2.13, part B of the commit step. An imported private charter may carry an outstanding balance: its order's `deposit_amount` is what came in before TideGrid (0 allowed only on an order with no quote, `orders_deposit_amount_check`), and `balance_due_at` falls at or before the trip's start. `app.check_order_deposit` takes such an order only for a private charter's trip, from an import commit in this transaction (`orders_deposit`). `app.booking_balance` (0033) then reads it unchanged: the imported payments count as money in.
+
 ## Import commits (0044)
 
 W3-G2.13, part A of the commit step. A clean dry run of a standard CSV import batch is saved all or nothing.
