@@ -2007,7 +2007,9 @@ export async function validateImport(
         );
       }
     }
-    const expires = s(row, "expires_on");
+    // A credit imported before is a no-op, so its dropped legacy date no
+    // longer matters once it passes.
+    const expires = row.unchanged ? null : s(row, "expires_on");
     if (expires && expires < today) {
       report.add(
         "opening_balances.csv",

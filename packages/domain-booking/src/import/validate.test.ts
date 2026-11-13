@@ -354,6 +354,20 @@ PAY-9012,LB-5012,2027-04-12,payment,1000,cash,,2027-02-01T10:00:00-05:00
     expect(at(4)).toEqual(["credit_restriction_unsupported"]);
   });
 
+  it("lets a credit imported before stand once its dropped legacy expiry passes", async () => {
+    const first = await validateImport(sample(), lookup(), NOW);
+    const credit = first.plan?.credits[0];
+    if (!credit) throw new Error("no planned credit");
+    const again: ImportLookup = {
+      ...lookup(),
+      async imported() {
+        return new Map([[`opening_balances.csv|${credit.key}`, { rowHash: credit.rowHash }]]);
+      },
+    };
+    const later = await validateImport(sample(), again, Date.parse("2028-01-05T12:00:00Z"));
+    expect(later.issues.filter((i) => i.file === "opening_balances.csv")).toEqual([]);
+  });
+
   it("refuses a trip the database's zone data reads differently, with its bookings", async () => {
     const disagreeing: ImportLookup = {
       ...lookup(),
