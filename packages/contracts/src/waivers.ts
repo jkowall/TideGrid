@@ -546,3 +546,12 @@ export const DockSigningResponse = z.object({
   expiresAt: Instant,
 });
 export type DockSigningResponse = z.infer<typeof DockSigningResponse>;
+
+export const DockCodeResponse = z.object({
+  url: z
+    .url()
+    .describe(
+      "The operator's guest site dock page, for the printed dock QR code. It carries no token, name, or booking detail, so the same code serves every trip",
+    ),
+});
+export type DockCodeResponse = z.infer<typeof DockCodeResponse>;

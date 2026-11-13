@@ -250,7 +250,8 @@ describe("the navigation", () => {
       Exceptions: "page",
     });
     // The nav lists the sections, in order; the owner also sees Email
-    // exceptions (W1-EMAIL-EXC). Every role sees Important links (W3-G2.14b-rest).
+    // exceptions (W1-EMAIL-EXC). Every role sees Important links (W3-G2.14b-rest);
+    // owners and booking staff see the Dock QR code (W3-G2.15-rest).
     expect(
       within(nav())
         .getAllByRole("link")
@@ -262,6 +263,7 @@ describe("the navigation", () => {
       "Exceptions",
       "Email exceptions",
       "Important links",
+      "Dock QR code",
     ]);
   });
 

@@ -4,6 +4,13 @@ This log records each dated verification pass over the throwaway guest workflow 
 
 ## 2026-11-13
 
+### The dock QR lookup, part 2 (W3-G2.15-rest), built November 13, 2026
+
+Goal branch `claude/project-thread-g7e2w1`, no migration, on part 1 (pull request 158). Synthetic data only; no provider call, no deploy.
+
+- **Built.** The guest site's `/dock` page (find the booking, list the party, start a signing on this phone); `GET /v1/staff/tenants/{tenantId}/waiver-dock-code` for owners and booking staff; the console's `/dock-code` page that draws and prints the code. A dock session on the waiver page keeps the guest's own-phone behavior and offers "Back to your party".
+- **Proof.** `DockPage.test.tsx` (5 cases: a match lists the party and starts a signing with the secret only as a bearer, never in a URL or storage; the list comes back without typing again; every miss says the same and a held guest is sent to the crew; both fields are asked for before any call; a crew signing in progress and an ended lookup each say what to do). `DockCodePage.test.tsx` (3 cases: the route and roles; one QR code with the address in words; a site with no address, and an answer that is not the dock page, draw nothing). The waiver API integration suite adds the dock code for owners and booking staff, finance refused. Guest site 1033, console 1196, API unit 295 pass.
+
 ### The dock QR lookup, part 1 (W3-G2.15-rest), built November 13, 2026
 
 Goal branch `claude/project-thread-g7e2w1`, migration `0043`, under the owner's decision of 2026-11-13 ([decision register](v2/06-decision-register.md#decision-log)), defaults D1 to D5 pending. Synthetic data only; no provider call, no deploy.
