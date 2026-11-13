@@ -206,6 +206,34 @@ describe("a booking's waivers", () => {
     ).toBeTruthy();
   });
 
+  it("shows an earlier tool's status even when no TideGrid waiver applies", async () => {
+    const noWaiver: BookingWaivers = {
+      ...waivers,
+      required: false,
+      participants: [
+        {
+          ...participant("Eve Imported", "waiting", {}, 1),
+          request: null,
+          legacy: { status: "unsigned", signedOn: null, system: null },
+        },
+      ],
+    };
+    stubApi(() => json(200, { waivers: noWaiver }));
+    render(
+      <BookingWaiversCard
+        tenantId={tenantId}
+        bookingId={bookingId}
+        role={bookingStaff}
+        timeZone="America/New_York"
+      />,
+    );
+    expect(
+      await screen.findByText(
+        "Earlier system: not signed. For reference only; it is not a TideGrid signature.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("says no more reminders only once no email is on its way", async () => {
     const lastSent = {
       sent: [

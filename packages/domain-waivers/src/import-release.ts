@@ -150,21 +150,30 @@ export async function sendImportedBookingWaivers(
   const assigned = await assignBookingWaivers(trx, ctx, deps, { bookingId: input.bookingId });
   const created = new Set(assigned.created.map((c) => c.requestId));
   for (const c of assigned.created) note(c.delivery);
-  const { rows: unsent } = await sql<{ id: string }>`
-    select w.id from waiver_requests w
+  const { rows: unsent } = await sql<{ id: string; participant_id: string }>`
+    select w.id, w.participant_id from waiver_requests w
      where w.tenant_id = ${ctx.tenantId} and w.booking_id = ${input.bookingId}
        and w.state = 'pending'
        and not exists (select 1 from waiver_deliveries d
                         where d.tenant_id = w.tenant_id and d.request_id = w.id)
      order by w.created_at, w.id`.execute(trx);
-  for (const { id: requestId } of unsent) {
-    if (created.has(requestId)) continue;
+  const left = unsent.filter((r) => !created.has(r.id));
+  // The party once for the booking, not once a request.
+  const party =
+    left.length > 0
+      ? new Map(
+          (await deps.participants.list(trx, ctx.tenantId, input.bookingId)).map((p) => [p.id, p]),
+        )
+      : new Map();
+  for (const { id: requestId, participant_id: participantId } of left) {
+    const participant = party.get(participantId);
     note(
       await sendWaiverRequest(trx, ctx, deps, {
         requestId,
         kind: "initial",
         reason: null,
         whenAllowed: true,
+        ...(participant ? { participant } : {}),
       }),
     );
   }

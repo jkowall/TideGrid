@@ -236,7 +236,7 @@ function WaiverList({
 }) {
   const signed = waivers.participants.filter((p) => p.status === "signed").length;
   const now = Date.now();
-  if (!waivers.required && waivers.participants.every((p) => !p.request)) {
+  if (!waivers.required && waivers.participants.every((p) => !p.request && !p.legacy)) {
     return <p className="wv-muted">No waiver applies to this trip.</p>;
   }
   return (
