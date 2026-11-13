@@ -445,7 +445,7 @@ W3-G2.14b-rest, part 1. `important_links` holds an operator's named HTTPS links 
 
 ## Waiver version on a move (0042)
 
-W3-G2.15-rest, owner decision 2026-11-13. A waiver request (and a signing session) may be revoked for a new reason, `version_changed`: when a booking moves to another trip and the version a person signed no longer applies, the waiver module ends that signature and assigns the current version. A trigger beside 0010's request rules (`waiver_requests_version_changed`, 23514) allows the reason only from `signed`, and only when a move of the same booking was written since the transaction began (`booking_reschedules.created_at >= now()`).
+W3-G2.15-rest, owner decision 2026-11-13. A waiver request (and a signing session) may be revoked for a new reason, `version_changed`: when a booking moves to another trip and the version a person signed no longer applies, the waiver module ends that signature and assigns the current version. A trigger beside 0010's request rules (`waiver_requests_version_changed`, 23514) allows the reason only from `signed`, only in the transaction that wrote a move of the same booking (the move row's `xmin` is this transaction, so a move committed by another transaction meanwhile does not count), and only when the version signed is no longer the one in effect for the booking's product (product template before operator template, highest version in effect on the database clock, as `findApplicableVersion` chooses; the two must change together). A move written under a savepoint would carry the savepoint's id, so the check fails closed and the move rolls back; `rescheduleBooking` uses none.
 
 ## Indexes built concurrently (no-transaction files)
 

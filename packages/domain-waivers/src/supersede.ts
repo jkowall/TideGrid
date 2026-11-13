@@ -120,56 +120,77 @@ async function supersedeUnsignedRequests(
     const old = rows[0];
     // Signed or ended since the list was read: it keeps what it has.
     if (!old) continue;
-    const participant = (await deps.participants.list(trx, ctx.tenantId, old.booking_id)).find(
-      (p) => p.id === old.participant_id,
-    );
-    if (!participant) continue;
-    const replacementId = crypto.randomUUID();
-    await sql`
-      update waiver_requests set state = 'superseded', superseded_by = ${replacementId}
-       where tenant_id = ${ctx.tenantId} and id = ${old.id}`.execute(trx);
-    await sql`
-      insert into waiver_requests (id, tenant_id, booking_id, participant_id, template_id,
-        template_version, content_sha256, required_signer)
-      values (${replacementId}, ${ctx.tenantId}, ${old.booking_id}, ${old.participant_id},
-              ${input.templateId}, ${input.version}, ${target.content_sha256},
-              ${requiredSignerFor(participant)})`.execute(trx);
-    await closeRequestAccess(trx, ctx, old, { link: "withdrawn", session: "superseded" });
-    await recordAudit(trx, ctx, {
-      action: "waiver_request.superseded",
-      subjectType: "waiver_request",
-      subjectId: old.id,
-      before: { state: "pending" },
-      after: { state: "superseded", supersededBy: replacementId, templateVersion: input.version },
+    const replaced = await supersedeRequest(trx, ctx, deps, old, {
+      templateId: input.templateId,
+      version: input.version,
+      contentSha256: target.content_sha256,
     });
-    await enqueueOutbox(trx, ctx, {
-      topic: "waiver.request.superseded",
-      aggregateType: "waiver_request",
-      aggregateId: old.id,
-      payload: { requestId: old.id, supersededBy: replacementId, bookingId: old.booking_id },
-    });
-    await recordAudit(trx, ctx, {
-      action: "waiver_request.assigned",
-      subjectType: "waiver_request",
-      subjectId: replacementId,
-      after: {
-        bookingId: old.booking_id,
-        participantId: old.participant_id,
-        templateId: input.templateId,
-        templateVersion: input.version,
-        contentSha256: target.content_sha256,
-        requiredSigner: requiredSignerFor(participant),
-        replaces: old.id,
-      },
-    });
-    await sendWaiverRequest(trx, ctx, deps, {
-      requestId: replacementId,
-      kind: "initial",
-      reason: null,
-      participant,
-      whenAllowed: true,
-    });
-    moved++;
+    if (replaced) moved++;
   }
   return moved;
+}
+
+/**
+ * Supersede one pending request, already locked by the caller under its
+ * booking's lock, with a request for `target`, which goes out at once; the
+ * old request's links and sessions stop working. False when its participant
+ * is gone.
+ */
+export async function supersedeRequest(
+  trx: TenantTransaction,
+  ctx: TenantContext,
+  deps: WaiverDeps,
+  old: { id: string; booking_id: string; participant_id: string },
+  target: { templateId: string; version: number; contentSha256: string },
+): Promise<boolean> {
+  const participant = (await deps.participants.list(trx, ctx.tenantId, old.booking_id)).find(
+    (p) => p.id === old.participant_id,
+  );
+  if (!participant) return false;
+  const replacementId = crypto.randomUUID();
+  await sql`
+    update waiver_requests set state = 'superseded', superseded_by = ${replacementId}
+     where tenant_id = ${ctx.tenantId} and id = ${old.id}`.execute(trx);
+  await sql`
+    insert into waiver_requests (id, tenant_id, booking_id, participant_id, template_id,
+      template_version, content_sha256, required_signer)
+    values (${replacementId}, ${ctx.tenantId}, ${old.booking_id}, ${old.participant_id},
+            ${target.templateId}, ${target.version}, ${target.contentSha256},
+            ${requiredSignerFor(participant)})`.execute(trx);
+  await closeRequestAccess(trx, ctx, old, { link: "withdrawn", session: "superseded" });
+  await recordAudit(trx, ctx, {
+    action: "waiver_request.superseded",
+    subjectType: "waiver_request",
+    subjectId: old.id,
+    before: { state: "pending" },
+    after: { state: "superseded", supersededBy: replacementId, templateVersion: target.version },
+  });
+  await enqueueOutbox(trx, ctx, {
+    topic: "waiver.request.superseded",
+    aggregateType: "waiver_request",
+    aggregateId: old.id,
+    payload: { requestId: old.id, supersededBy: replacementId, bookingId: old.booking_id },
+  });
+  await recordAudit(trx, ctx, {
+    action: "waiver_request.assigned",
+    subjectType: "waiver_request",
+    subjectId: replacementId,
+    after: {
+      bookingId: old.booking_id,
+      participantId: old.participant_id,
+      templateId: target.templateId,
+      templateVersion: target.version,
+      contentSha256: target.contentSha256,
+      requiredSigner: requiredSignerFor(participant),
+      replaces: old.id,
+    },
+  });
+  await sendWaiverRequest(trx, ctx, deps, {
+    requestId: replacementId,
+    kind: "initial",
+    reason: null,
+    participant,
+    whenAllowed: true,
+  });
+  return true;
 }

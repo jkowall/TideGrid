@@ -38,6 +38,7 @@ import { loadBookingContext } from "./booking.ts";
 import { sendWaiverRequest } from "./delivery.ts";
 import type { WaiverDeps } from "./ports.ts";
 import { revokeBookingWaivers, revokeParticipantWaivers, revokeStaleSignatures } from "./revoke.ts";
+import { supersedeRequest } from "./supersede.ts";
 import { findApplicableVersion } from "./templates.ts";
 
 export const CORRECTED_ADDRESS_REASON = "The address on the booking was corrected";
@@ -116,10 +117,16 @@ export async function onParticipantUpdated(
 }
 
 /**
- * After a move: each signature on a version that no longer applies ends, and
- * its person gets a request for the version in effect now. A signature on the
- * version that still applies carries over untouched. Pending requests are left
- * to the version move (supersede.ts), which already replaces them.
+ * After a move, every live request on a version that no longer applies is
+ * brought to the version in effect now: a signature ends (`version_changed`)
+ * and its person gets a new request; an unsigned request is superseded by one
+ * for the current version, so nobody can sign the old text afterwards. A
+ * request on the version that still applies carries over untouched.
+ *
+ * The requests are locked before their state is read, so a signature in
+ * flight is waited for and then handled as signed. Locks: the booking first
+ * (already held by the move), then the shared assignment key, then each
+ * request and its messages, the order supersede.ts uses.
  */
 export async function onBookingRescheduled(
   trx: TenantTransaction,
@@ -138,17 +145,34 @@ export async function onBookingRescheduled(
   const version = await findApplicableVersion(trx, ctx.tenantId, booking.productId);
   // No waiver applies now: nothing to sign again, and signatures stay.
   if (!version) return { resigned: 0 };
-  const { rows } = await sql<{ participant_id: string }>`
-    select participant_id from waiver_requests
+  const { rows } = await sql<{
+    id: string;
+    booking_id: string;
+    participant_id: string;
+    state: "pending" | "signed";
+  }>`
+    select id, booking_id, participant_id, state from waiver_requests
      where tenant_id = ${ctx.tenantId} and booking_id = ${event.bookingId}
-       and state = 'signed'
+       and state in ('pending', 'signed')
        and (template_id <> ${version.templateId} or template_version <> ${version.version})
-     order by participant_id`.execute(trx);
-  if (rows.length === 0) return { resigned: 0 };
-  const participantIds = rows.map((r) => r.participant_id);
-  await revokeStaleSignatures(trx, ctx, { bookingId: event.bookingId, participantIds });
-  await assignBookingWaivers(trx, ctx, deps, { bookingId: event.bookingId, participantIds });
-  return { resigned: participantIds.length };
+     order by id
+       for no key update`.execute(trx);
+  let resigned = 0;
+  for (const old of rows.filter((r) => r.state === "pending")) {
+    const replaced = await supersedeRequest(trx, ctx, deps, old, {
+      templateId: version.templateId,
+      version: version.version,
+      contentSha256: version.contentSha256,
+    });
+    if (replaced) resigned++;
+  }
+  const participantIds = rows.filter((r) => r.state === "signed").map((r) => r.participant_id);
+  if (participantIds.length > 0) {
+    await revokeStaleSignatures(trx, ctx, { bookingId: event.bookingId, participantIds });
+    await assignBookingWaivers(trx, ctx, deps, { bookingId: event.bookingId, participantIds });
+    resigned += participantIds.length;
+  }
+  return { resigned };
 }
 
 /** The hooks the API passes on every path that confirms a booking or changes its party. */

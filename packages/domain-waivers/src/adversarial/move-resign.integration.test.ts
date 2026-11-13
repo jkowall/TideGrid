@@ -105,7 +105,7 @@ describe.skipIf(!env)("W3-G2.15-rest: waiver signatures on a moved booking", () 
     world = openWorld(env, 8);
     deps = fixtureDeps();
     hooks = fixtureHooks();
-    A = await createWaiverFixture(world.admin, world.db, "wvmv", { days: 12 });
+    A = await createWaiverFixture(world.admin, world.db, "wvmv", { days: 16 });
     nextTrip = trips(A);
   });
 
@@ -146,6 +146,51 @@ describe.skipIf(!env)("W3-G2.15-rest: waiver signatures on a moved booking", () 
     expect(evidence?.n).toBe(1);
   });
 
+  it("replaces an unsigned request on an old version, so the old text can no longer be signed", async () => {
+    const from = nextTrip();
+    const to = nextTrip();
+    const booked = await book(world, A, from, 2, hooks);
+    const signer = await name(
+      world,
+      A.id,
+      booked.bookingId,
+      1,
+      adult("pair.signed", "pair.signed@example.test"),
+      hooks,
+    );
+    const waiting = await name(
+      world,
+      A.id,
+      booked.bookingId,
+      2,
+      adult("pair.pending", "pair.pending@example.test"),
+      hooks,
+    );
+    const signedReq = (await liveRequest(world.admin, booked.bookingId, signer)).id;
+    const signedOpen = await openFor(world, A.id, signedReq);
+    expect((await sign(world, A.id, deps, signedOpen.session)).kind).toBe("signed");
+    const pendingReq = (await liveRequest(world.admin, booked.bookingId, waiting)).id;
+    // The second person has the old text open on their phone during the move.
+    const pendingOpen = await openFor(world, A.id, pendingReq);
+    const version = await publishRevision();
+    expect((await move(booked.bookingId, from, to)).kind).toBe("moved");
+    const rows = await requests(booked.bookingId);
+    expect(rows.find((r) => r.id === signedReq)).toMatchObject({
+      state: "revoked",
+      revoked_reason: "version_changed",
+    });
+    expect(rows.find((r) => r.id === pendingReq)).toMatchObject({ state: "superseded" });
+    const live = rows.filter((r) => r.state === "pending");
+    expect(live.map((r) => r.participant_id).sort()).toEqual([signer, waiting].sort());
+    expect(live.every((r) => r.template_version === version)).toBe(true);
+    expect((await sign(world, A.id, deps, pendingOpen.session)).kind).not.toBe("signed");
+    expect((await requests(booked.bookingId)).filter((r) => r.state === "signed")).toHaveLength(0);
+    const [queued] = await world.admin<{ n: number }[]>`
+      select count(*)::int as n from public.waiver_deliveries
+       where request_id in ${world.admin(live.map((r) => r.id))}`;
+    expect(queued?.n).toBe(2);
+  });
+
   it("moves without the waiver hooks leave signatures alone, and nothing ends one without a move", async () => {
     const { booked, pid, req, from, to } = await signedBooking("nohook.signer");
     await publishRevision();
@@ -160,6 +205,46 @@ describe.skipIf(!env)("W3-G2.15-rest: waiver signatures on a moved booking", () 
     ).toBe("23514:waiver_requests_version_changed");
     expect((await move(booked.bookingId, from, to, {})).kind).toBe("moved");
     expect(await requests(booked.bookingId)).toMatchObject([{ id: req, state: "signed" }]);
+  });
+
+  it("a move committed by another transaction meanwhile does not let this one end a signature", async () => {
+    const { booked, pid, from, to } = await signedBooking("other.tx.signer");
+    await publishRevision();
+    const ctx = staff(A.id);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const begun = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const outcome = refusal(
+      inTenantTransaction(world.db, ctx, async (trx) => {
+        await listBookingWaivers(trx, ctx.tenantId, booked.bookingId);
+        started();
+        await gate;
+        return revokeStaleSignatures(trx, ctx, {
+          bookingId: booked.bookingId,
+          participantIds: [pid],
+        });
+      }),
+    );
+    await begun;
+    expect((await move(booked.bookingId, from, to, {})).kind).toBe("moved");
+    release();
+    expect(await outcome).toBe("23514:waiver_requests_version_changed");
+  });
+
+  it("a move never ends a signature on the version still in effect", async () => {
+    const { booked, pid, from, to } = await signedBooking("current.signer");
+    const forcing: BookingHooks = {
+      bookingRescheduled: (trx, ctx, event) =>
+        revokeStaleSignatures(trx, ctx, { bookingId: event.bookingId, participantIds: [pid] }),
+    };
+    expect(await refusal(move(booked.bookingId, from, to, forcing))).toBe(
+      "23514:waiver_requests_version_changed",
+    );
   });
 
   it("never ends a pending request as a changed version", async () => {

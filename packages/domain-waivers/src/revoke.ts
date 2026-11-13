@@ -96,7 +96,8 @@ export function revokeParticipantWaivers(
 /**
  * After a move, these people's signatures were on a version that no longer
  * applies: each signed request ends, so a new one can be assigned. Only signed
- * requests; the database checks the booking moved in this transaction.
+ * requests; the database checks the booking moved in this transaction and
+ * that the version signed is no longer the one in effect.
  */
 export function revokeStaleSignatures(
   trx: TenantTransaction,
